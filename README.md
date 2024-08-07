@@ -25,7 +25,7 @@ func main() {
 	// OR with authURL specified 
     e.Use(samnamw.AuthMiddleware('https://auth.samna.io'))
 	
-	// OR directly on a handler
+	// OR directly on a handler 
 	auth.GET("/login", samnamw.AuthMiddleware())
     
     // Your routes here
