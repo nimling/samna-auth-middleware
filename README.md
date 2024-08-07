@@ -19,8 +19,14 @@ import (
 func main() {
     e := echo.New()
     
-    // Use the middleware
+    // Use the middleware, here the authURL is expected to come via the env variable SAMNA_AUTH_SERVER 
     e.Use(samnamw.AuthMiddleware())
+	
+	// OR with authURL specified 
+    e.Use(samnamw.AuthMiddleware('https://auth.samna.io'))
+	
+	// OR directly on a handler
+	auth.GET("/login", samnamw.AuthMiddleware())
     
     // Your routes here
     
