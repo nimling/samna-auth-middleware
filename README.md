@@ -6,7 +6,7 @@ service
 ## Installation
 
 ```
-go get github.com/yourusername/echo-middleware-example
+go get github.com/nimling/samna-auth-middleware
 ```
 
 ## Usage
