@@ -13,25 +13,25 @@ go get github.com/yourusername/echo-middleware-example
 
 ```go
 import (
-"github.com/labstack/echo/v4"
-samnamw "github.com/nimling/samna-auth-middleware"
+    "github.com/labstack/echo/v4"
+    samnamw "github.com/nimling/samna-auth-middleware"
 )
 
 func main() {
-e := echo.New()
-
-// Use the middleware, here the authURL is expected to come via the env variable SAMNA_AUTH_SERVER 
-e.Use(samnamw.AuthMiddleware())
-
-// OR with authURL specified 
-e.Use(samnamw.AuthMiddleware('https://auth.samna.io'))
-
-// OR directly on a handler 
-auth.GET("/login", samnamw.AuthMiddleware())
+    e := echo.New()
     
-// Your routes here
-
-e.Start(":8080")
+    // Use the middleware, here the authURL is expected to come via the env variable SAMNA_AUTH_SERVER 
+    e.Use(samnamw.AuthMiddleware())
+    
+    // OR with authURL specified 
+    e.Use(samnamw.AuthMiddleware('https://auth.samna.io'))
+    
+    // OR directly on a handler 
+    auth.GET("/login", samnamw.AuthMiddleware())
+        
+    // Your routes here
+    
+    e.Start(":8080")
 }
 ```
 
