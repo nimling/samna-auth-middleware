@@ -1,4 +1,4 @@
-# Echo Middleware
+# Auth Middleware
 
 This package provides a simple middleware for the Echo web framework that validates requests against the Samna Auth service
 
