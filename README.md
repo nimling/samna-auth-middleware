@@ -20,19 +20,25 @@ import (
 func main() {
     e := echo.New()
     
-    // Use the middleware, here the authURL is expected to come via the env variable SAMNA_AUTH_SERVER 
-    e.Use(samnamw.AuthMiddleware())
+    // Use the middleware, here values is expected to come from env, this is the same as calling samnamw.AuthMiddlewareFromEnv()
+    e.Use(samnamw.AuthMiddleware(nil, nil, nil))
     
-    // OR with authURL specified 
-    e.Use(samnamw.AuthMiddleware('https://auth.samna.io'))
+    // OR with inline  
+    e.Use(samnamw.AuthMiddleware('https://auth.samna.io', '00000000-0000-0000-0000-000000000000', 'your-client-secret'))
     
     // OR directly on a handler 
-    auth.GET("/login", samnamw.AuthMiddleware())
+    auth.GET("/login", samnamw.AuthMiddlewareFromEnv())
         
     // Your routes here
     
     e.Start(":8080")
 }
+```
+Example of a `.env` file with required env variables to run the AuthMiddleware without inline configurations
+```env
+SAMNA_AUTH_SERVER=http://localhost:3200
+SAMNA_AUTH_CLIENT_ID=00000000-0000-0000-0000-000000000000
+SAMNA_AUTH_CLIENT_SECRET=your-client-secret
 ```
 
 ## Testing

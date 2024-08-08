@@ -1,30 +1,58 @@
 package samnamw
 
 import (
-	"encoding/base64"
-	"encoding/json"
+	"fmt"
+	"github.com/golang-jwt/jwt"
+	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
 	"os"
 	"strings"
+	"time"
 )
 
+func AuthMiddlewareFromEnv() echo.MiddlewareFunc {
+	return AuthMiddleware(nil, nil, nil)
+}
+
 // AuthMiddleware returns a middleware that validates requests against the Samna Auth
-func AuthMiddleware(authURL *url.URL) echo.MiddlewareFunc {
+func AuthMiddleware(authURL *url.URL, clientID *uuid.UUID, clientSecret *string) echo.MiddlewareFunc {
 
 	if authURL == nil {
-		authURLString, ok := os.LookupEnv("SAMNA_AUTH_SERVER")
+		envVal, ok := os.LookupEnv("SAMNA_AUTH_SERVER")
 		if !ok {
 			panic("No authURL specified for AuthMiddleware")
 		}
 
-		parsedURL, err := url.Parse(authURLString)
+		parsedVal, err := url.Parse(envVal)
 		if err != nil {
 			panic("The authURL sat from env via SAMNA_AUTH_SERVER is malformed")
 		}
-		authURL = parsedURL
+		authURL = parsedVal
+	}
+
+	if clientID == nil {
+		envVal, ok := os.LookupEnv("SAMNA_AUTH_CLIENT_ID")
+		if !ok {
+			panic("No clientID specified for AuthMiddleware")
+		}
+
+		parsedVal, err := uuid.Parse(envVal)
+		if err != nil {
+			panic("The clientID sat from env via SAMNA_AUTH_CLIENT_ID is malformed")
+		}
+		clientID = &parsedVal
+	}
+
+	if clientSecret == nil {
+		envVal, ok := os.LookupEnv("SAMNA_AUTH_CLIENT_SECRET")
+		if !ok {
+			panic("No clientSecret specified for AuthMiddleware")
+		}
+
+		clientSecret = &envVal
 	}
 
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
@@ -37,6 +65,10 @@ func AuthMiddleware(authURL *url.URL) echo.MiddlewareFunc {
 
 			// Modify the request to preserve the original Host header
 			req.Host = authURL.Host
+
+			req.Header.Set("Samna-Auth-Internal-Time", fmt.Sprintf("%d", time.Now().Unix()))
+			req.Header.Set("Samna-Auth-Original-IP", ctx.RealIP())
+			req.Header.Set("Samna-Auth-Client-ID", clientID.String())
 
 			// Create a custom response writer to capture the status code and headers
 			crw := &customResponseWriter{ResponseWriter: res.Writer}
@@ -62,26 +94,27 @@ func AuthMiddleware(authURL *url.URL) echo.MiddlewareFunc {
 				return echo.NewHTTPError(http.StatusUnauthorized, "Invalid Authorization header format")
 			}
 
-			// Extract the 'sub' claim from the JWT payload
-			parts := strings.Split(tokenString, ".")
-			if len(parts) != 3 {
-				return echo.NewHTTPError(http.StatusUnauthorized, "Invalid token format")
-			}
+			// Parse the JWT token
+			token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
+				// Note: In a production environment, you should validate the signing method
+				// and use the appropriate key (symmetric or asymmetric)
+				// TODO:: Add some validation here
+				return []byte(*clientSecret), nil
+			})
 
-			payload, err := base64.RawURLEncoding.DecodeString(parts[1])
 			if err != nil {
-				return echo.NewHTTPError(http.StatusUnauthorized, "Invalid token payload")
+				return echo.NewHTTPError(http.StatusUnauthorized, "Invalid token")
 			}
 
-			var claims map[string]interface{}
-			if err := json.Unmarshal(payload, &claims); err != nil {
-				return echo.NewHTTPError(http.StatusUnauthorized, "Invalid token claims")
-			}
-
-			if sub, ok := claims["sub"].(string); ok {
-				ctx.Set("user_id", sub)
+			// Extract the 'sub' claim and set it as user_id in the context
+			if claims, ok := token.Claims.(jwt.MapClaims); ok && token.Valid {
+				if sub, ok := claims["sub"].(string); ok {
+					ctx.Set("user_id", sub)
+				} else {
+					return echo.NewHTTPError(http.StatusUnauthorized, "Invalid token: missing or invalid 'sub' claim")
+				}
 			} else {
-				return echo.NewHTTPError(http.StatusUnauthorized, "Invalid token: missing or invalid 'sub' claim")
+				return echo.NewHTTPError(http.StatusUnauthorized, "Invalid token claims")
 			}
 
 			// If we've made it this far, the request is authenticated

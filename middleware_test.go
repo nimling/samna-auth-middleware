@@ -1,11 +1,9 @@
 package samnamw
 
 import (
-	"github.com/labstack/echo/v4"
-)
-
-import (
 	"bytes"
+	"github.com/joho/godotenv"
+	"github.com/labstack/echo/v4"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -15,6 +13,9 @@ import (
 )
 
 func TestLoggerMiddleware(t *testing.T) {
+
+	_ = godotenv.Load(".env")
+
 	// Setup
 	e := echo.New()
 	req := httptest.NewRequest(http.MethodGet, "/test", nil)
@@ -32,7 +33,7 @@ func TestLoggerMiddleware(t *testing.T) {
 	}
 
 	// Wrap the test handler with our middleware
-	h := AuthMiddleware(nil)(handler)
+	h := AuthMiddleware(nil, nil, nil)(handler)
 
 	// Perform the request
 	err := h(c)
