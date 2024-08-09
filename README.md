@@ -41,6 +41,9 @@ SAMNA_AUTH_CLIENT_ID=00000000-0000-0000-0000-000000000000
 SAMNA_AUTH_CLIENT_SECRET=your-client-secret
 ```
 
+There is also an included mini demo server as an example at [/example](./example), this runs live-testing against a 
+running SamnaAuth server when configured with a valid `.env` file in the same directory. 
+
 ## Testing
 
 Run the one and only test in the package with
