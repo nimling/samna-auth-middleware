@@ -10,7 +10,7 @@ import (
 )
 
 func main() {
-	_ = godotenv.Load("../.env")
+	_ = godotenv.Load(".env")
 
 	// Configure echo
 	e := echo.New()
