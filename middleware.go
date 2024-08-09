@@ -1,6 +1,7 @@
 package samnamw
 
 import (
+	"bytes"
 	"fmt"
 	"github.com/golang-jwt/jwt"
 	"github.com/google/uuid"
@@ -71,11 +72,13 @@ func AuthMiddleware(authURL *url.URL, clientID *uuid.UUID, clientSecret *string)
 			req.Header.Set("Samna-Auth-Client-ID", clientID.String())
 
 			// Create a custom response writer to capture the status code and headers
-			crw := &customResponseWriter{ResponseWriter: res.Writer}
-			res.Writer = crw
+			crw := &customResponseWriter{
+				headers: make(http.Header),
+				body:    new(bytes.Buffer),
+			}
 
 			// Serve the request to the auth service
-			proxy.ServeHTTP(res.Writer, req)
+			proxy.ServeHTTP(crw, req)
 
 			// Check if the status code is exactly 200
 			if crw.status != http.StatusOK {
@@ -117,6 +120,18 @@ func AuthMiddleware(authURL *url.URL, clientID *uuid.UUID, clientSecret *string)
 				return echo.NewHTTPError(http.StatusUnauthorized, "Invalid token claims")
 			}
 
+			for k, v := range crw.Header() {
+				res.Header().Set(k, v[0])
+			}
+
+			// Write the status code
+			res.WriteHeader(crw.status)
+
+			// Write the body
+			if _, err := res.Write(crw.body.Bytes()); err != nil {
+				return err
+			}
+
 			// If we've made it this far, the request is authenticated
 			return next(ctx)
 		}
@@ -124,11 +139,19 @@ func AuthMiddleware(authURL *url.URL, clientID *uuid.UUID, clientSecret *string)
 }
 
 type customResponseWriter struct {
-	http.ResponseWriter
-	status int
+	headers http.Header
+	body    *bytes.Buffer
+	status  int
 }
 
-func (crw *customResponseWriter) WriteHeader(status int) {
-	crw.status = status
-	crw.ResponseWriter.WriteHeader(status)
+func (c *customResponseWriter) Header() http.Header {
+	return c.headers
+}
+
+func (c *customResponseWriter) Write(b []byte) (int, error) {
+	return c.body.Write(b)
+}
+
+func (c *customResponseWriter) WriteHeader(statusCode int) {
+	c.status = statusCode
 }

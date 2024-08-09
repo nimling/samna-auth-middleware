@@ -12,7 +12,7 @@ import (
 	"testing"
 )
 
-func TestLoggerMiddleware(t *testing.T) {
+func TestMiddleware(t *testing.T) {
 
 	_ = godotenv.Load(".env")
 
