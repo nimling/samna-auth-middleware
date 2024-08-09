@@ -59,7 +59,6 @@ func AuthMiddleware(authURL *url.URL, clientID *uuid.UUID, clientSecret *string)
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(ctx echo.Context) error {
 			req := ctx.Request()
-			res := ctx.Response()
 
 			// Create a reverse proxy
 			proxy := httputil.NewSingleHostReverseProxy(authURL)
@@ -71,18 +70,17 @@ func AuthMiddleware(authURL *url.URL, clientID *uuid.UUID, clientSecret *string)
 			req.Header.Set("Samna-Auth-Original-IP", ctx.RealIP())
 			req.Header.Set("Samna-Auth-Client-ID", clientID.String())
 
-			// Create a custom response writer to capture the status code and headers
+			// Create a custom response writer to capture the auth response
 			crw := &customResponseWriter{
-				headers: make(http.Header),
-				body:    new(bytes.Buffer),
+				header: make(http.Header),
 			}
 
 			// Serve the request to the auth service
 			proxy.ServeHTTP(crw, req)
 
 			// Check if the status code is exactly 200
-			if crw.status != http.StatusOK {
-				return echo.NewHTTPError(crw.status, "Authentication failed")
+			if crw.statusCode != http.StatusOK {
+				return echo.NewHTTPError(crw.statusCode, "Authentication failed")
 			}
 
 			// Extract JWT from Authorization header
@@ -120,18 +118,6 @@ func AuthMiddleware(authURL *url.URL, clientID *uuid.UUID, clientSecret *string)
 				return echo.NewHTTPError(http.StatusUnauthorized, "Invalid token claims")
 			}
 
-			for k, v := range crw.Header() {
-				res.Header().Set(k, v[0])
-			}
-
-			// Write the status code
-			res.WriteHeader(crw.status)
-
-			// Write the body
-			if _, err := res.Write(crw.body.Bytes()); err != nil {
-				return err
-			}
-
 			// If we've made it this far, the request is authenticated
 			return next(ctx)
 		}
@@ -139,13 +125,13 @@ func AuthMiddleware(authURL *url.URL, clientID *uuid.UUID, clientSecret *string)
 }
 
 type customResponseWriter struct {
-	headers http.Header
-	body    *bytes.Buffer
-	status  int
+	header     http.Header
+	statusCode int
+	body       bytes.Buffer
 }
 
 func (c *customResponseWriter) Header() http.Header {
-	return c.headers
+	return c.header
 }
 
 func (c *customResponseWriter) Write(b []byte) (int, error) {
@@ -153,5 +139,5 @@ func (c *customResponseWriter) Write(b []byte) (int, error) {
 }
 
 func (c *customResponseWriter) WriteHeader(statusCode int) {
-	c.status = statusCode
+	c.statusCode = statusCode
 }
