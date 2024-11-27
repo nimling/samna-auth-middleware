@@ -89,6 +89,20 @@ func AuthMiddleware(authURL *url.URL, clientID *uuid.UUID, clientSecretKey *stri
 
 			// Serve the request to the auth service
 			proxy.ServeHTTP(crw, req)
+			if crw.statusCode >= 300 && crw.statusCode < 400 {
+				//TODO:: This weird redirect has to be fixed
+				location := crw.Header().Get("Location")
+				if !strings.HasPrefix(location, "/auth") {
+					return echo.NewHTTPError(http.StatusInternalServerError, "Internal server error")
+				}
+
+				redirectLocation, err := authURL.Parse(location)
+				if err != nil {
+					return echo.NewHTTPError(http.StatusInternalServerError, "Internal server error")
+				}
+
+				return ctx.Redirect(http.StatusTemporaryRedirect, redirectLocation.String())
+			}
 
 			// Check if the status code is exactly 200
 			if crw.statusCode != http.StatusOK {

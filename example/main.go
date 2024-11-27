@@ -32,5 +32,7 @@ func main() {
 	}, samnamw.AuthMiddlewareFromEnv())
 
 	// Start server
-	e.Logger.Fatal(e.Start(":3201"))
+	if err := e.Start(":3201"); err != nil {
+		e.Logger.Fatal(err)
+	}
 }
