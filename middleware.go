@@ -70,6 +70,15 @@ func AuthMiddleware(authURL *url.URL, clientID *uuid.UUID, clientSecretKey *stri
 		return func(ctx echo.Context) error {
 			req := ctx.Request()
 
+			// Temporary bypass for direct tokens
+			authHeader := req.Header.Get("Authorization")
+			if len(authHeader) > 0 {
+				tokenString := strings.TrimPrefix(authHeader, "Bearer ")
+				if tokenString != authHeader && len(tokenString) > 0 { //TODO:: What is this?
+					return validateToken(ctx, next, *clientSecret, tokenString)
+				}
+			}
+
 			// Build redirect url
 			redirectURI := fmt.Sprintf("%s://%s%s",
 				ctx.Scheme(),
@@ -117,59 +126,64 @@ func AuthMiddleware(authURL *url.URL, clientID *uuid.UUID, clientSecretKey *stri
 			}
 
 			// Extract JWT from Authorization header
-			authHeader := crw.Header().Get("Authorization")
+			authHeader = crw.Header().Get("Authorization")
 			if authHeader == "" {
 				// TODO:: Change these?
 				return echo.NewHTTPError(http.StatusUnauthorized, "Missing Authorization header")
 			}
 
 			tokenString := strings.TrimPrefix(authHeader, "Bearer ")
-			if tokenString == authHeader {
+			if tokenString == authHeader { //TODO:: What is this?
 				return echo.NewHTTPError(http.StatusUnauthorized, "Invalid Authorization header format")
 			}
 
-			// Parse the JWT token
-			token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
-				// Note: In a production environment, you should validate the signing method
-				// and use the appropriate key (symmetric or asymmetric)
-				// TODO:: Add some validation here
-				// TODO:: Validate origin here
-				return []byte(*clientSecret), nil
-			})
-
-			if err != nil {
-				return echo.NewHTTPError(http.StatusUnauthorized, "Invalid token")
-			}
-
-			// Extract the 'sub' claim and set it as user_id in the context
-			if claims, ok := token.Claims.(jwt.MapClaims); ok && token.Valid {
-				if sub, ok := claims["sub"].(string); ok {
-					userID, err := uuid.Parse(sub)
-					if err != nil {
-						return echo.NewHTTPError(http.StatusUnauthorized, "Invalid token: missing or invalid 'sub' claim")
-					}
-					ctx.Set("user_id", userID)
-				} else {
-					return echo.NewHTTPError(http.StatusUnauthorized, "Invalid token: missing or invalid 'sub' claim")
-				}
-
-				if userStr, ok := claims["user"].(string); ok {
-					var user ClaimUser
-					if err := json.Unmarshal([]byte(userStr), &user); err != nil {
-						return echo.NewHTTPError(http.StatusUnauthorized, "Invalid token: missing or invalid 'user' claim")
-					}
-					ctx.Set("user", user)
-				} else {
-					return echo.NewHTTPError(http.StatusUnauthorized, "Invalid token: missing or invalid 'user' claim")
-				}
-			} else {
-				return echo.NewHTTPError(http.StatusUnauthorized, "Invalid token claims")
-			}
-
-			// If we've made it this far, the request is authenticated
-			return next(ctx)
+			return validateToken(ctx, next, *clientSecret, tokenString)
 		}
 	}
+}
+
+func validateToken(ctx echo.Context, next echo.HandlerFunc, clientSecret string, tokenString string) error {
+
+	// Parse the JWT token
+	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
+		// Note: In a production environment, you should validate the signing method
+		// and use the appropriate key (symmetric or asymmetric)
+		// TODO:: Add some validation here
+		// TODO:: Validate origin here
+		return []byte(clientSecret), nil
+	})
+
+	if err != nil {
+		return echo.NewHTTPError(http.StatusUnauthorized, "Invalid token")
+	}
+
+	// Extract the 'sub' claim and set it as user_id in the context
+	if claims, ok := token.Claims.(jwt.MapClaims); ok && token.Valid {
+		if sub, ok := claims["sub"].(string); ok {
+			userID, err := uuid.Parse(sub)
+			if err != nil {
+				return echo.NewHTTPError(http.StatusUnauthorized, "Invalid token: missing or invalid 'sub' claim")
+			}
+			ctx.Set("user_id", userID)
+		} else {
+			return echo.NewHTTPError(http.StatusUnauthorized, "Invalid token: missing or invalid 'sub' claim")
+		}
+
+		if userStr, ok := claims["user"].(string); ok {
+			var user ClaimUser
+			if err := json.Unmarshal([]byte(userStr), &user); err != nil {
+				return echo.NewHTTPError(http.StatusUnauthorized, "Invalid token: missing or invalid 'user' claim")
+			}
+			ctx.Set("user", user)
+		} else {
+			return echo.NewHTTPError(http.StatusUnauthorized, "Invalid token: missing or invalid 'user' claim")
+		}
+	} else {
+		return echo.NewHTTPError(http.StatusUnauthorized, "Invalid token claims")
+	}
+
+	// If we've made it this far, the request is authenticated
+	return next(ctx)
 }
 
 type customResponseWriter struct {
