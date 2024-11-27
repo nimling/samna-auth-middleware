@@ -71,6 +71,7 @@ func AuthMiddleware(authURL *url.URL, clientID *uuid.UUID, clientSecretKey *stri
 			req := ctx.Request()
 
 			// Temporary bypass for direct tokens
+
 			authHeader := req.Header.Get("Authorization")
 			if len(authHeader) > 0 {
 				tokenString := strings.TrimPrefix(authHeader, "Bearer ")
