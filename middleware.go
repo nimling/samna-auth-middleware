@@ -144,7 +144,11 @@ func AuthMiddleware(authURL *url.URL, clientID *uuid.UUID, clientSecretKey *stri
 			// Extract the 'sub' claim and set it as user_id in the context
 			if claims, ok := token.Claims.(jwt.MapClaims); ok && token.Valid {
 				if sub, ok := claims["sub"].(string); ok {
-					ctx.Set("user_id", sub)
+					userID, err := uuid.Parse(sub)
+					if err != nil {
+						return echo.NewHTTPError(http.StatusUnauthorized, "Invalid token: missing or invalid 'sub' claim")
+					}
+					ctx.Set("user_id", userID)
 				} else {
 					return echo.NewHTTPError(http.StatusUnauthorized, "Invalid token: missing or invalid 'sub' claim")
 				}
