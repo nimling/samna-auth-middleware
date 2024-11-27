@@ -2,6 +2,7 @@ package samnamw
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"github.com/golang-jwt/jwt"
 	"github.com/google/uuid"
@@ -15,11 +16,11 @@ import (
 )
 
 func AuthMiddlewareFromEnv() echo.MiddlewareFunc {
-	return AuthMiddleware(nil, nil, nil)
+	return AuthMiddleware(nil, nil, nil, nil)
 }
 
 // AuthMiddleware returns a middleware that validates requests against the Samna Auth
-func AuthMiddleware(authURL *url.URL, clientID *uuid.UUID, clientSecret *string) echo.MiddlewareFunc {
+func AuthMiddleware(authURL *url.URL, clientID *uuid.UUID, clientSecretKey *string, clientSecret *string) echo.MiddlewareFunc {
 
 	if authURL == nil {
 		envVal, ok := os.LookupEnv("SAMNA_AUTH_SERVER")
@@ -47,6 +48,15 @@ func AuthMiddleware(authURL *url.URL, clientID *uuid.UUID, clientSecret *string)
 		clientID = &parsedVal
 	}
 
+	if clientSecretKey == nil {
+		envVal, ok := os.LookupEnv("SAMNA_AUTH_CLIENT_SECRET_KEY")
+		if !ok {
+			panic("No clientSecretKey specified for AuthMiddleware")
+		}
+
+		clientSecretKey = &envVal
+	}
+
 	if clientSecret == nil {
 		envVal, ok := os.LookupEnv("SAMNA_AUTH_CLIENT_SECRET")
 		if !ok {
@@ -66,9 +76,11 @@ func AuthMiddleware(authURL *url.URL, clientID *uuid.UUID, clientSecret *string)
 			// Modify the request to preserve the original Host header
 			req.Host = authURL.Host
 
+			// TODO:: Move all of these over to be configured
 			req.Header.Set("Samna-Auth-Internal-Time", fmt.Sprintf("%d", time.Now().Unix()))
 			req.Header.Set("Samna-Auth-Original-IP", ctx.RealIP())
 			req.Header.Set("Samna-Auth-Client-ID", clientID.String())
+			req.Header.Set("Samna-Auth-Secret-Key", *clientSecretKey)
 
 			// Create a custom response writer to capture the auth response
 			crw := &customResponseWriter{
@@ -100,6 +112,7 @@ func AuthMiddleware(authURL *url.URL, clientID *uuid.UUID, clientSecret *string)
 				// Note: In a production environment, you should validate the signing method
 				// and use the appropriate key (symmetric or asymmetric)
 				// TODO:: Add some validation here
+				// TODO:: Validate origin here
 				return []byte(*clientSecret), nil
 			})
 
@@ -113,6 +126,16 @@ func AuthMiddleware(authURL *url.URL, clientID *uuid.UUID, clientSecret *string)
 					ctx.Set("user_id", sub)
 				} else {
 					return echo.NewHTTPError(http.StatusUnauthorized, "Invalid token: missing or invalid 'sub' claim")
+				}
+
+				if userStr, ok := claims["user"].(string); ok {
+					var user ClaimUser
+					if err := json.Unmarshal([]byte(userStr), &user); err != nil {
+						return echo.NewHTTPError(http.StatusUnauthorized, "Invalid token: missing or invalid 'user' claim")
+					}
+					ctx.Set("user", user)
+				} else {
+					return echo.NewHTTPError(http.StatusUnauthorized, "Invalid token: missing or invalid 'user' claim")
 				}
 			} else {
 				return echo.NewHTTPError(http.StatusUnauthorized, "Invalid token claims")

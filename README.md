@@ -38,11 +38,18 @@ Example of a `.env` file with required env variables to run the AuthMiddleware w
 ```env
 SAMNA_AUTH_SERVER=http://localhost:3200
 SAMNA_AUTH_CLIENT_ID=00000000-0000-0000-0000-000000000000
+SAMNA_AUTH_CLIENT_SECRET_KEY=your-client-secret-key
 SAMNA_AUTH_CLIENT_SECRET=your-client-secret
 ```
 
 There is also an included mini demo server as an example at [/example](./example), this runs live-testing against a 
 running SamnaAuth server when configured with a valid `.env` file in the same directory. 
+
+### Echo Context
+On a successful Authorization the echo context will be populated with the `sub` which is the UserID as a `uuid.UUID` 
+`user_id`, and the `ClaimUser` as `user`.
+- `user_id`: `uuid.UUID`
+- `user`: `ClaimUser`
 
 ## Testing
 
