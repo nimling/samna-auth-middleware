@@ -70,6 +70,12 @@ func AuthMiddleware(authURL *url.URL, clientID *uuid.UUID, clientSecretKey *stri
 		return func(ctx echo.Context) error {
 			req := ctx.Request()
 
+			// Build redirect url
+			redirectURI := fmt.Sprintf("%s://%s%s",
+				ctx.Scheme(),
+				ctx.Request().Host,
+				ctx.Request().URL.String())
+
 			// Create a reverse proxy
 			proxy := httputil.NewSingleHostReverseProxy(authURL)
 
@@ -81,13 +87,6 @@ func AuthMiddleware(authURL *url.URL, clientID *uuid.UUID, clientSecretKey *stri
 			req.Header.Set("Samna-Auth-Original-IP", ctx.RealIP())
 			req.Header.Set("Samna-Auth-Client-ID", clientID.String())
 			req.Header.Set("Samna-Auth-Secret-Key", *clientSecretKey)
-
-			// Build redirect url
-			redirectURI := fmt.Sprintf("%s://%s%s",
-				ctx.Scheme(),
-				ctx.Request().Host,
-				ctx.Request().URL.String())
-
 			req.Header.Set("Samna-Auth-Redirect", redirectURI)
 
 			// Create a custom response writer to capture the auth response
