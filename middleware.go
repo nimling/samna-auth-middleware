@@ -76,6 +76,7 @@ func AuthMiddleware(authURL *url.URL, clientID *uuid.UUID, clientSecretKey *stri
 			if len(authHeader) > 0 {
 				tokenString := strings.TrimPrefix(authHeader, "Bearer ")
 				if tokenString != authHeader && len(tokenString) > 0 { //TODO:: What is this?
+					ctx.Logger().Info("test: Found existing auth header")
 					return validateToken(ctx, next, *clientSecret, tokenString)
 				}
 			}
@@ -85,6 +86,8 @@ func AuthMiddleware(authURL *url.URL, clientID *uuid.UUID, clientSecretKey *stri
 				ctx.Scheme(),
 				ctx.Request().Host,
 				ctx.Request().URL.String())
+
+			ctx.Logger().Info("test: built redirect uri " + redirectURI)
 
 			// Create a reverse proxy
 			proxy := httputil.NewSingleHostReverseProxy(authURL)
@@ -107,8 +110,11 @@ func AuthMiddleware(authURL *url.URL, clientID *uuid.UUID, clientSecretKey *stri
 			// Serve the request to the auth service
 			proxy.ServeHTTP(crw, req)
 			if crw.statusCode >= 300 && crw.statusCode < 400 {
+
 				//TODO:: This weird redirect has to be fixed
 				location := crw.Header().Get("Location")
+
+				ctx.Logger().Info("test: received code 300-400 with" + location)
 				if !strings.HasPrefix(location, "/auth") {
 					return echo.NewHTTPError(http.StatusInternalServerError, "Internal server error")
 				}
@@ -118,23 +124,29 @@ func AuthMiddleware(authURL *url.URL, clientID *uuid.UUID, clientSecretKey *stri
 					return echo.NewHTTPError(http.StatusInternalServerError, "Internal server error")
 				}
 
+				ctx.Logger().Info("test: redirecting to" + redirectLocation.String())
+
 				return ctx.Redirect(http.StatusTemporaryRedirect, redirectLocation.String())
 			}
 
 			// Check if the status code is exactly 200
 			if crw.statusCode != http.StatusOK {
+				ctx.Logger().Info("test: response not ok")
+				//TODO:: Add proper returns here, maybe expose the respond package for echo in golang
 				return echo.NewHTTPError(crw.statusCode, "Authentication failed")
 			}
 
 			// Extract JWT from Authorization header
 			authHeader = crw.Header().Get("Authorization")
 			if authHeader == "" {
+				ctx.Logger().Info("test: Missing auth header in auth response")
 				// TODO:: Change these?
 				return echo.NewHTTPError(http.StatusUnauthorized, "Missing Authorization header")
 			}
 
 			tokenString := strings.TrimPrefix(authHeader, "Bearer ")
 			if tokenString == authHeader { //TODO:: What is this?
+				ctx.Logger().Info("test: Invalid Authorization header format")
 				return echo.NewHTTPError(http.StatusUnauthorized, "Invalid Authorization header format")
 			}
 
@@ -145,16 +157,19 @@ func AuthMiddleware(authURL *url.URL, clientID *uuid.UUID, clientSecretKey *stri
 
 func validateToken(ctx echo.Context, next echo.HandlerFunc, clientSecret string, tokenString string) error {
 
+	ctx.Logger().Info("test: Validating token")
 	// Parse the JWT token
 	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
 		// Note: In a production environment, you should validate the signing method
 		// and use the appropriate key (symmetric or asymmetric)
 		// TODO:: Add some validation here
 		// TODO:: Validate origin here
+		ctx.Logger().Info("test: Validating token")
 		return []byte(clientSecret), nil
 	})
 
 	if err != nil {
+		ctx.Logger().Info("test: Validating token") // TODO:: WE need request id to do proepr logging here
 		return echo.NewHTTPError(http.StatusUnauthorized, "Invalid token")
 	}
 
@@ -166,7 +181,9 @@ func validateToken(ctx echo.Context, next echo.HandlerFunc, clientSecret string,
 				return echo.NewHTTPError(http.StatusUnauthorized, "Invalid token: missing or invalid 'sub' claim")
 			}
 			ctx.Set("user_id", userID)
+			ctx.Logger().Info("test: UserID sat from token: " + sub)
 		} else {
+			ctx.Logger().Info("test: Failed to set UserID from token")
 			return echo.NewHTTPError(http.StatusUnauthorized, "Invalid token: missing or invalid 'sub' claim")
 		}
 
@@ -176,10 +193,13 @@ func validateToken(ctx echo.Context, next echo.HandlerFunc, clientSecret string,
 				return echo.NewHTTPError(http.StatusUnauthorized, "Invalid token: missing or invalid 'user' claim")
 			}
 			ctx.Set("user", user)
+			ctx.Logger().Info("test: User sat from token: " + userStr)
 		} else {
+			ctx.Logger().Info("test: Failed to set user from token")
 			return echo.NewHTTPError(http.StatusUnauthorized, "Invalid token: missing or invalid 'user' claim")
 		}
 	} else {
+		ctx.Logger().Info("test: Failed to parse claims")
 		return echo.NewHTTPError(http.StatusUnauthorized, "Invalid token claims")
 	}
 
