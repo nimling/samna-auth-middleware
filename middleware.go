@@ -92,13 +92,15 @@ func AuthMiddleware(authURL *url.URL, clientID *uuid.UUID, clientSecretKey *stri
 
 			// Modify the request to preserve the original Host header
 			req.Host = authURL.Host
-
+			req.URL.Scheme = authURL.Scheme
 			// TODO:: Move all of these over to be configured
 			req.Header.Set("Samna-Auth-Internal-Time", fmt.Sprintf("%d", time.Now().Unix()))
 			req.Header.Set("Samna-Auth-Original-IP", ctx.RealIP())
 			req.Header.Set("Samna-Auth-Client-ID", clientID.String())
 			req.Header.Set("Samna-Auth-Secret-Key", *clientSecretKey)
 			req.Header.Set("Samna-Auth-Redirect", redirectURI)
+			req.Header.Set("Host", authURL.Host)
+			req.URL.Path = "/validate/bookable"
 
 			// Create a custom response writer to capture the auth response
 			crw := &customResponseWriter{
@@ -129,7 +131,7 @@ func AuthMiddleware(authURL *url.URL, clientID *uuid.UUID, clientSecretKey *stri
 
 			// Check if the status code is exactly 200
 			if crw.statusCode != http.StatusOK {
-				ctx.Logger().Info("test: response not ok")
+				ctx.Logger().Infof("test: response not ok, code %d", crw.statusCode)
 				//TODO:: Add proper returns here, maybe expose the respond package for echo in golang
 				return echo.NewHTTPError(crw.statusCode, "Authentication failed")
 			}
@@ -170,6 +172,8 @@ func validateToken(ctx echo.Context, next echo.HandlerFunc, clientSecret string,
 		ctx.Logger().Info("test: Validating token") // TODO:: WE need request id to do proepr logging here
 		return echo.NewHTTPError(http.StatusUnauthorized, "Invalid token")
 	}
+
+	//TODO:: We need to wait for expiration to not overload the server
 
 	// Extract the 'sub' claim and set it as user_id in the context
 	if claims, ok := token.Claims.(jwt.MapClaims); ok && token.Valid {
