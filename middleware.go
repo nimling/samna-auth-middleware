@@ -70,17 +70,6 @@ func AuthMiddleware(authURL *url.URL, clientID *uuid.UUID, clientSecretKey *stri
 		return func(ctx echo.Context) error {
 			req := ctx.Request()
 
-			// Temporary bypass for direct tokens
-
-			authHeader := req.Header.Get("Authorization")
-			if len(authHeader) > 0 {
-				tokenString := strings.TrimPrefix(authHeader, "Bearer ")
-				if tokenString != authHeader && len(tokenString) > 0 { //TODO:: What is this?
-					ctx.Logger().Info("test: Found existing auth header")
-					return validateToken(ctx, next, *clientSecret, tokenString)
-				}
-			}
-
 			// Build redirect url
 			redirectURI := fmt.Sprintf("%s://%s%s",
 				ctx.Scheme(),
@@ -91,6 +80,15 @@ func AuthMiddleware(authURL *url.URL, clientID *uuid.UUID, clientSecretKey *stri
 
 			// Create a reverse proxy
 			proxy := httputil.NewSingleHostReverseProxy(authURL)
+
+			proxy.Director = func(req *http.Request) {
+				req.URL.Scheme = authURL.Scheme
+				req.URL.Host = authURL.Host
+				req.Header.Set("X-Forwarded-For", req.Header.Get("X-Forwarded-For"))
+				req.Header.Set("X-Forwarded-Proto", req.Header.Get("X-Forwarded-Proto"))
+				req.Header.Set("X-Forwarded-Host", req.Header.Get("X-Forwarded-Host"))
+				req.Header.Set("Host", authURL.Host)
+			}
 
 			// Modify the request to preserve the original Host header
 			req.Host = authURL.Host
@@ -110,7 +108,7 @@ func AuthMiddleware(authURL *url.URL, clientID *uuid.UUID, clientSecretKey *stri
 			// Serve the request to the auth service
 			proxy.ServeHTTP(crw, req)
 			if crw.statusCode >= 300 && crw.statusCode < 400 {
-
+				// TODO:: Geting favicon as an extra redirect here ??
 				//TODO:: This weird redirect has to be fixed
 				location := crw.Header().Get("Location")
 
@@ -137,7 +135,7 @@ func AuthMiddleware(authURL *url.URL, clientID *uuid.UUID, clientSecretKey *stri
 			}
 
 			// Extract JWT from Authorization header
-			authHeader = crw.Header().Get("Authorization")
+			authHeader := crw.Header().Get("Authorization")
 			if authHeader == "" {
 				ctx.Logger().Info("test: Missing auth header in auth response")
 				// TODO:: Change these?
