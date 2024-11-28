@@ -106,15 +106,21 @@ func AuthMiddleware(authURL *url.URL, clientID *uuid.UUID, clientSecretKey *stri
 			crw := &customResponseWriter{
 				header: make(http.Header),
 			}
-
 			// Serve the request to the auth service
 			proxy.ServeHTTP(crw, req)
-			if crw.statusCode >= 300 && crw.statusCode < 400 {
+
+			// Extract JWT from Authorization header
+			authHeader := crw.Header().Get("Authorization")
+
+			if authHeader != "" {
+				ctx.Logger().Info("test: auth header: " + authHeader)
+			} else if crw.statusCode >= 300 && crw.statusCode < 400 {
 				// TODO:: Geting favicon as an extra redirect here ??
 				//TODO:: This weird redirect has to be fixed
 				location := crw.Header().Get("Location")
 
 				ctx.Logger().Info("test: received code 300-400 with location: " + location)
+
 				if !strings.HasPrefix(location, "/auth") {
 					return echo.NewHTTPError(http.StatusInternalServerError, "Internal server error")
 				}
@@ -127,17 +133,12 @@ func AuthMiddleware(authURL *url.URL, clientID *uuid.UUID, clientSecretKey *stri
 				ctx.Logger().Info("test: redirecting to: " + redirectLocation.String())
 
 				return ctx.Redirect(http.StatusTemporaryRedirect, redirectLocation.String())
-			}
-
-			// Check if the status code is exactly 200
-			if crw.statusCode != http.StatusOK {
+			} else if crw.statusCode != http.StatusOK {
 				ctx.Logger().Infof("test: response not ok, code %d", crw.statusCode)
 				//TODO:: Add proper returns here, maybe expose the respond package for echo in golang
 				return echo.NewHTTPError(crw.statusCode, "Authentication failed")
 			}
 
-			// Extract JWT from Authorization header
-			authHeader := crw.Header().Get("Authorization")
 			if authHeader == "" {
 				ctx.Logger().Info("test: Missing auth header in auth response")
 				// TODO:: Change these?
