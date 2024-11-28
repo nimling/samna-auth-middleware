@@ -124,7 +124,7 @@ func AuthMiddleware(authURL *url.URL, clientID *uuid.UUID, clientSecretKey *stri
 					return echo.NewHTTPError(http.StatusInternalServerError, "Internal server error")
 				}
 
-				ctx.Logger().Info("test: redirecting to" + redirectLocation.String())
+				ctx.Logger().Info("test: redirecting to: " + redirectLocation.String())
 
 				return ctx.Redirect(http.StatusTemporaryRedirect, redirectLocation.String())
 			}
