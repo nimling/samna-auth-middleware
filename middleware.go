@@ -114,7 +114,7 @@ func AuthMiddleware(authURL *url.URL, clientID *uuid.UUID, clientSecretKey *stri
 				//TODO:: This weird redirect has to be fixed
 				location := crw.Header().Get("Location")
 
-				ctx.Logger().Info("test: received code 300-400 with" + location)
+				ctx.Logger().Info("test: received code 300-400 with location: " + location)
 				if !strings.HasPrefix(location, "/auth") {
 					return echo.NewHTTPError(http.StatusInternalServerError, "Internal server error")
 				}
@@ -164,7 +164,7 @@ func validateToken(ctx echo.Context, next echo.HandlerFunc, clientSecret string,
 		// and use the appropriate key (symmetric or asymmetric)
 		// TODO:: Add some validation here
 		// TODO:: Validate origin here
-		ctx.Logger().Info("test: Validating token")
+		ctx.Logger().Info("test: Validating token with secret")
 		return []byte(clientSecret), nil
 	})
 
