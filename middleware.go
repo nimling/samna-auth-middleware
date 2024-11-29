@@ -102,10 +102,18 @@ func AuthMiddleware(authURL *url.URL, clientID *uuid.UUID, clientSecretKey *stri
 				req.Header.Set("X-Forwarded-Host", req.Header.Get("X-Forwarded-Host"))
 				req.Header.Set("Host", authURL.Host)
 
+				// Explicitly preserve and forward all cookies, including access_token
+				if originalCookie := ctx.Request().Header.Get("Cookie"); originalCookie != "" {
+					req.Header.Set("Cookie", originalCookie)
+					ctx.Logger().Infof("Forwarding cookies: %s", originalCookie)
+				} else {
+					ctx.Logger().Info("No cookies found to forward")
+				}
+
 				// Important: Copy ALL original cookies
 				if cookies := req.Cookies(); len(cookies) > 0 {
 					for _, cookie := range cookies {
-						req.AddCookie(cookie)
+						ctx.Logger().Infof("Cookie being forwarded: %s", cookie.Name)
 					}
 				}
 
