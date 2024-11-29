@@ -1,4 +1,4 @@
-package samnamw
+package sauth
 
 import (
 	"encoding/json"
@@ -161,7 +161,7 @@ func AuthMiddleware(authURL *url.URL, clientID *uuid.UUID, clientSecretKey *stri
 			}
 
 			// Create an enhanced response writer
-			crw := writer.NewCustomResponseWriter(ctx.Response().Writer)
+			crw := swriter.NewCustomResponseWriter(ctx.Response().Writer)
 
 			// Serve the request to the auth service
 			proxy.ServeHTTP(crw, req)

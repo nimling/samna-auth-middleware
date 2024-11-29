@@ -1,4 +1,4 @@
-package samnamw
+package sauth
 
 import "github.com/google/uuid"
 
