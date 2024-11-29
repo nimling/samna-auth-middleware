@@ -89,9 +89,7 @@ func AuthMiddleware(authURL *url.URL, clientID *uuid.UUID, clientSecretKey *stri
 
 			// Create a reverse proxy
 			proxy := httputil.NewSingleHostReverseProxy(authURL)
-			originalDirector := proxy.Director
 			proxy.Director = func(req *http.Request) {
-				originalDirector(req)
 
 				req.URL.Scheme = authURL.Scheme
 				req.URL.Host = authURL.Host
@@ -105,15 +103,15 @@ func AuthMiddleware(authURL *url.URL, clientID *uuid.UUID, clientSecretKey *stri
 				// Explicitly preserve and forward all cookies, including access_token
 				if originalCookie := ctx.Request().Header.Get("Cookie"); originalCookie != "" {
 					req.Header.Set("Cookie", originalCookie)
-					ctx.Logger().Infof("Forwarding cookies: %s", originalCookie)
+					ctx.Logger().Infof("director: Forwarding cookies: %s", originalCookie)
 				} else {
-					ctx.Logger().Info("No cookies found to forward")
+					ctx.Logger().Info("director: No cookies found to forward")
 				}
 
 				// Important: Copy ALL original cookies
 				if cookies := req.Cookies(); len(cookies) > 0 {
 					for _, cookie := range cookies {
-						ctx.Logger().Infof("Cookie being forwarded: %s", cookie.Name)
+						ctx.Logger().Infof("director: Cookie being forwarded: %s", cookie.Name)
 					}
 				}
 
@@ -123,6 +121,9 @@ func AuthMiddleware(authURL *url.URL, clientID *uuid.UUID, clientSecretKey *stri
 				req.Header.Set("Samna-Auth-Client-ID", clientID.String())
 				req.Header.Set("Samna-Auth-Secret-Key", *clientSecretKey)
 				req.Header.Set("Samna-Auth-Redirect", redirectURI)
+
+				// Nice logging for redirect tracing
+				ctx.Logger().Infof("director: Final URL being requested: %s", req.URL.String())
 			}
 
 			// Enhanced response modification
@@ -151,6 +152,8 @@ func AuthMiddleware(authURL *url.URL, clientID *uuid.UUID, clientSecretKey *stri
 			crw := writer.NewCustomResponseWriter(ctx.Response().Writer)
 
 			// Set the validate path
+			req.URL.Scheme = authURL.Scheme
+			req.URL.Host = authURL.Host
 			req.URL.Path = "/validate/bookable"
 
 			// Serve the request to the auth service
