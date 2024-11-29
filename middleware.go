@@ -67,8 +67,16 @@ func AuthMiddleware(authURL *url.URL, clientID *uuid.UUID, clientSecretKey *stri
 		clientSecret = &envVal
 	}
 
+	// Create CORS middleware specifically for auth endpoints
+	corsMiddleware := middleware.CORSWithConfig(middleware.CORSConfig{
+		AllowCredentials: true,
+		AllowOrigins:     []string{"https://yourdomain.com"},
+		AllowHeaders:     []string{"Cookie", "Set-Cookie"},
+		ExposeHeaders:    []string{"Set-Cookie"},
+	})
+
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
-		return func(ctx echo.Context) error {
+		return corsMiddleware(func(ctx echo.Context) error {
 			req := ctx.Request()
 
 			// Build redirect url
@@ -81,54 +89,70 @@ func AuthMiddleware(authURL *url.URL, clientID *uuid.UUID, clientSecretKey *stri
 
 			// Create a reverse proxy
 			proxy := httputil.NewSingleHostReverseProxy(authURL)
+			originalDirector := proxy.Director
 			proxy.Director = func(req *http.Request) {
+				originalDirector(req)
+
 				req.URL.Scheme = authURL.Scheme
 				req.URL.Host = authURL.Host
+
+				// Properly forward all required headers
 				req.Header.Set("X-Forwarded-For", req.Header.Get("X-Forwarded-For"))
 				req.Header.Set("X-Forwarded-Proto", req.Header.Get("X-Forwarded-Proto"))
 				req.Header.Set("X-Forwarded-Host", req.Header.Get("X-Forwarded-Host"))
 				req.Header.Set("Host", authURL.Host)
 
-				if cookies := req.Header.Get("Cookie"); cookies != "" {
-					req.Header.Set("Cookie", cookies)
+				// Important: Copy ALL original cookies
+				if cookies := req.Cookies(); len(cookies) > 0 {
+					for _, cookie := range cookies {
+						req.AddCookie(cookie)
+					}
 				}
+
+				// Add required auth headers TODO:: Are these really needed?
+				req.Header.Set("Samna-Auth-Internal-Time", fmt.Sprintf("%d", time.Now().Unix()))
+				req.Header.Set("Samna-Auth-Original-IP", ctx.RealIP())
+				req.Header.Set("Samna-Auth-Client-ID", clientID.String())
+				req.Header.Set("Samna-Auth-Secret-Key", *clientSecretKey)
+				req.Header.Set("Samna-Auth-Redirect", redirectURI)
 			}
 
+			// Enhanced response modification
 			proxy.ModifyResponse = func(resp *http.Response) error {
+				// Ensure CORS headers for cookie handling
+				resp.Header.Set("Access-Control-Allow-Credentials", "true")
 				resp.Header.Add("Access-Control-Expose-Headers", "Set-Cookie")
+
+				// Properly handle Set-Cookie headers
+				if cookies := resp.Header.Values("Set-Cookie"); len(cookies) > 0 {
+					// Clear existing Set-Cookie headers to prevent duplicates
+					resp.Header.Del("Set-Cookie")
+					for _, cookie := range cookies {
+						resp.Header.Add("Set-Cookie", cookie)
+					}
+				}
 				return nil
 			}
 
 			proxy.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
-				ctx.Logger().Infof("Proxy error: %v", err)
+				ctx.Logger().Errorf("Proxy error: %v", err)
 				w.WriteHeader(http.StatusBadGateway)
 			}
 
-			middleware.ProxyWithConfig(middleware.DefaultProxyConfig)
+			// Create an enhanced response writer
+			crw := &customResponseWriter{
+				header:         make(http.Header),
+				ResponseWriter: ctx.Response().Writer, // Add this field
+			}
 
-			// Modify the request to preserve the original Host header
-			req.Host = authURL.Host
-			req.URL.Scheme = authURL.Scheme
-			// TODO:: Move all of these over to be configured
-			req.Header.Set("Samna-Auth-Internal-Time", fmt.Sprintf("%d", time.Now().Unix()))
-			req.Header.Set("Samna-Auth-Original-IP", ctx.RealIP())
-			req.Header.Set("Samna-Auth-Client-ID", clientID.String())
-			req.Header.Set("Samna-Auth-Secret-Key", *clientSecretKey)
-			req.Header.Set("Samna-Auth-Redirect", redirectURI)
-			req.Header.Add("Access-Control-Expose-Headers", "Set-Cookie")
-			req.Header.Set("Host", authURL.Host)
+			// Set the validate path
 			req.URL.Path = "/validate/bookable"
 
-			// Create a custom response writer to capture the auth response
-			crw := &customResponseWriter{
-				header: make(http.Header),
-			}
 			// Serve the request to the auth service
 			proxy.ServeHTTP(crw, req)
 
 			// Extract JWT from Authorization header
 			authHeader := crw.Header().Get("Authorization")
-
 			if authHeader != "" {
 				ctx.Logger().Info("test: auth header: " + authHeader)
 			} else if crw.statusCode >= 300 && crw.statusCode < 400 {
@@ -169,7 +193,7 @@ func AuthMiddleware(authURL *url.URL, clientID *uuid.UUID, clientSecretKey *stri
 			}
 
 			return validateToken(ctx, next, *clientSecret, tokenString)
-		}
+		})
 	}
 }
 
@@ -228,6 +252,7 @@ func validateToken(ctx echo.Context, next echo.HandlerFunc, clientSecret string,
 }
 
 type customResponseWriter struct {
+	http.ResponseWriter
 	header     http.Header
 	statusCode int
 	body       bytes.Buffer
@@ -238,9 +263,18 @@ func (c *customResponseWriter) Header() http.Header {
 }
 
 func (c *customResponseWriter) Write(b []byte) (int, error) {
-	return c.body.Write(b)
+	// Write to both buffer and underlying ResponseWriter
+	c.body.Write(b)
+	return c.ResponseWriter.Write(b)
 }
 
 func (c *customResponseWriter) WriteHeader(statusCode int) {
 	c.statusCode = statusCode
+
+	// Copy our custom headers to the underlying ResponseWriter
+	for k, v := range c.header {
+		c.ResponseWriter.Header()[k] = v
+	}
+
+	c.ResponseWriter.WriteHeader(statusCode)
 }
