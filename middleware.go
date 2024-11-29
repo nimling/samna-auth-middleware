@@ -89,6 +89,17 @@ func AuthMiddleware(authURL *url.URL, clientID *uuid.UUID, clientSecretKey *stri
 				req.Header.Set("X-Forwarded-Host", req.Header.Get("X-Forwarded-Host"))
 				req.Header.Set("Host", authURL.Host)
 			}
+			
+			proxy.ModifyResponse = func(resp *http.Response) error {
+				// Legg til Access-Control-Expose-Headers for å tillate Set-Cookie
+				resp.Header.Add("Access-Control-Expose-Headers", "Set-Cookie")
+				return nil
+			}
+
+			proxy.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
+				ctx.Logger().Infof("Proxy error: %v", err)
+				w.WriteHeader(http.StatusBadGateway)
+			}
 
 			// Modify the request to preserve the original Host header
 			req.Host = authURL.Host
@@ -99,6 +110,7 @@ func AuthMiddleware(authURL *url.URL, clientID *uuid.UUID, clientSecretKey *stri
 			req.Header.Set("Samna-Auth-Client-ID", clientID.String())
 			req.Header.Set("Samna-Auth-Secret-Key", *clientSecretKey)
 			req.Header.Set("Samna-Auth-Redirect", redirectURI)
+			req.Header.Add("Access-Control-Expose-Headers", "Set-Cookie")
 			req.Header.Set("Host", authURL.Host)
 			req.URL.Path = "/validate/bookable"
 
