@@ -7,6 +7,7 @@ import (
 	"github.com/golang-jwt/jwt"
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v4/middleware"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
@@ -80,7 +81,6 @@ func AuthMiddleware(authURL *url.URL, clientID *uuid.UUID, clientSecretKey *stri
 
 			// Create a reverse proxy
 			proxy := httputil.NewSingleHostReverseProxy(authURL)
-
 			proxy.Director = func(req *http.Request) {
 				req.URL.Scheme = authURL.Scheme
 				req.URL.Host = authURL.Host
@@ -88,10 +88,13 @@ func AuthMiddleware(authURL *url.URL, clientID *uuid.UUID, clientSecretKey *stri
 				req.Header.Set("X-Forwarded-Proto", req.Header.Get("X-Forwarded-Proto"))
 				req.Header.Set("X-Forwarded-Host", req.Header.Get("X-Forwarded-Host"))
 				req.Header.Set("Host", authURL.Host)
+
+				if cookies := req.Header.Get("Cookie"); cookies != "" {
+					req.Header.Set("Cookie", cookies)
+				}
 			}
-			
+
 			proxy.ModifyResponse = func(resp *http.Response) error {
-				// Legg til Access-Control-Expose-Headers for å tillate Set-Cookie
 				resp.Header.Add("Access-Control-Expose-Headers", "Set-Cookie")
 				return nil
 			}
@@ -100,6 +103,8 @@ func AuthMiddleware(authURL *url.URL, clientID *uuid.UUID, clientSecretKey *stri
 				ctx.Logger().Infof("Proxy error: %v", err)
 				w.WriteHeader(http.StatusBadGateway)
 			}
+
+			middleware.ProxyWithConfig(middleware.DefaultProxyConfig)
 
 			// Modify the request to preserve the original Host header
 			req.Host = authURL.Host
