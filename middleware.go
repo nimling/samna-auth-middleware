@@ -70,7 +70,7 @@ func AuthMiddleware(authURL *url.URL, clientID *uuid.UUID, clientSecretKey *stri
 	// Create CORS middleware specifically for auth endpoints
 	corsMiddleware := middleware.CORSWithConfig(middleware.CORSConfig{
 		AllowCredentials: true,
-		AllowOrigins:     []string{"https://yourdomain.com"},
+		AllowOrigins:     []string{"https://<auth-host>", "https://<bookable-host>"},
 		AllowHeaders:     []string{"Cookie", "Set-Cookie"},
 		ExposeHeaders:    []string{"Set-Cookie"},
 	})
