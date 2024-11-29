@@ -90,8 +90,9 @@ func AuthMiddleware(authURL *url.URL, clientID *uuid.UUID, clientSecretKey *stri
 				// Set the validate path
 				req.URL.Scheme = authURL.Scheme
 				req.URL.Host = authURL.Host
-				req.URL.Path = "/validate/bookable"
-				ctx.Logger().Info("test: Initial request, rewriting path to /validate/bookable")
+				req.URL.Path = authURL.Path
+				req.Host = authURL.Host
+				ctx.Logger().Infof("test: Initial request, reverse proxy to: %s", req.URL.String())
 			} else {
 				ctx.Logger().Infof("test: Redirect request, keeping original path: %s", req.URL.Path)
 			}
