@@ -24,16 +24,7 @@ func AuthMiddlewareFromEnv() echo.MiddlewareFunc {
 func AuthMiddleware(authURL *url.URL, clientID *uuid.UUID, clientSecretKey *string, clientSecret *string) echo.MiddlewareFunc {
 
 	if authURL == nil {
-		envVal, ok := os.LookupEnv("SAMNA_AUTH_SERVER")
-		if !ok {
-			panic("No authURL specified for AuthMiddleware")
-		}
-
-		parsedVal, err := url.Parse(envVal)
-		if err != nil {
-			panic("The authURL sat from env via SAMNA_AUTH_SERVER is malformed")
-		}
-		authURL = parsedVal
+		authURL = getEnvURL("SAMNA_AUTH_SERVER")
 	}
 
 	if clientID == nil {
