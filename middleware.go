@@ -83,7 +83,18 @@ func AuthMiddleware(authURL *url.URL, clientID *uuid.UUID, clientSecretKey *stri
 			redirectURI := fmt.Sprintf("%s://%s%s",
 				ctx.Scheme(),
 				ctx.Request().Host,
-				ctx.Request().URL.String())
+				ctx.Request().URL.String()) //TODO:: How to build this for the proper return?
+
+			// Only rewrite path for initial requests to our API
+			if req.Host != authURL.Host {
+				// Set the validate path
+				req.URL.Scheme = authURL.Scheme
+				req.URL.Host = authURL.Host
+				req.URL.Path = "/validate/bookable"
+				ctx.Logger().Info("test: Initial request, rewriting path to /validate/bookable")
+			} else {
+				ctx.Logger().Infof("test: Redirect request, keeping original path: %s", req.URL.Path)
+			}
 
 			ctx.Logger().Info("test: built redirect uri " + redirectURI)
 
@@ -150,11 +161,6 @@ func AuthMiddleware(authURL *url.URL, clientID *uuid.UUID, clientSecretKey *stri
 
 			// Create an enhanced response writer
 			crw := writer.NewCustomResponseWriter(ctx.Response().Writer)
-
-			// Set the validate path
-			req.URL.Scheme = authURL.Scheme
-			req.URL.Host = authURL.Host
-			req.URL.Path = "/validate/bookable"
 
 			// Serve the request to the auth service
 			proxy.ServeHTTP(crw, req)
