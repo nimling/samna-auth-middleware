@@ -1,13 +1,13 @@
 package samnamw
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"github.com/golang-jwt/jwt"
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
+	"github.com/nimling/samna-auth-middleware/writer"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
@@ -140,10 +140,7 @@ func AuthMiddleware(authURL *url.URL, clientID *uuid.UUID, clientSecretKey *stri
 			}
 
 			// Create an enhanced response writer
-			crw := &customResponseWriter{
-				header:         make(http.Header),
-				ResponseWriter: ctx.Response().Writer, // Add this field
-			}
+			crw := writer.NewCustomResponseWriter(ctx.Response().Writer)
 
 			// Set the validate path
 			req.URL.Path = "/validate/bookable"
@@ -155,7 +152,7 @@ func AuthMiddleware(authURL *url.URL, clientID *uuid.UUID, clientSecretKey *stri
 			authHeader := crw.Header().Get("Authorization")
 			if authHeader != "" {
 				ctx.Logger().Info("test: auth header: " + authHeader)
-			} else if crw.statusCode >= 300 && crw.statusCode < 400 {
+			} else if crw.StatusCode >= 300 && crw.StatusCode < 400 {
 				// TODO:: Geting favicon as an extra redirect here ??
 				//TODO:: This weird redirect has to be fixed
 				location := crw.Header().Get("Location")
@@ -174,10 +171,10 @@ func AuthMiddleware(authURL *url.URL, clientID *uuid.UUID, clientSecretKey *stri
 				ctx.Logger().Info("test: redirecting to: " + redirectLocation.String())
 
 				return ctx.Redirect(http.StatusTemporaryRedirect, redirectLocation.String())
-			} else if crw.statusCode != http.StatusOK {
-				ctx.Logger().Infof("test: response not ok, code %d", crw.statusCode)
+			} else if crw.StatusCode != http.StatusOK {
+				ctx.Logger().Infof("test: response not ok, code %d", crw.StatusCode)
 				//TODO:: Add proper returns here, maybe expose the respond package for echo in golang
-				return echo.NewHTTPError(crw.statusCode, "Authentication failed")
+				return echo.NewHTTPError(crw.StatusCode, "Authentication failed")
 			}
 
 			if authHeader == "" {
@@ -249,32 +246,4 @@ func validateToken(ctx echo.Context, next echo.HandlerFunc, clientSecret string,
 
 	// If we've made it this far, the request is authenticated
 	return next(ctx)
-}
-
-type customResponseWriter struct {
-	http.ResponseWriter
-	header     http.Header
-	statusCode int
-	body       bytes.Buffer
-}
-
-func (c *customResponseWriter) Header() http.Header {
-	return c.header
-}
-
-func (c *customResponseWriter) Write(b []byte) (int, error) {
-	// Write to both buffer and underlying ResponseWriter
-	c.body.Write(b)
-	return c.ResponseWriter.Write(b)
-}
-
-func (c *customResponseWriter) WriteHeader(statusCode int) {
-	c.statusCode = statusCode
-
-	// Copy our custom headers to the underlying ResponseWriter
-	for k, v := range c.header {
-		c.ResponseWriter.Header()[k] = v
-	}
-
-	c.ResponseWriter.WriteHeader(statusCode)
 }
