@@ -227,7 +227,7 @@ func validateToken(ctx echo.Context, next echo.HandlerFunc, clientSecret string,
 
 	if err != nil {
 		ctx.Logger().Info("test: Validating token") // TODO:: WE need request id to do proepr logging here
-		return echo.NewHTTPError(http.StatusUnauthorized, "Invalid token")
+		return ctx.NoContent(http.StatusUnauthorized)
 	}
 
 	//TODO:: We need to wait for expiration to not overload the server
@@ -237,29 +237,30 @@ func validateToken(ctx echo.Context, next echo.HandlerFunc, clientSecret string,
 		if sub, ok := claims["sub"].(string); ok {
 			userID, err := uuid.Parse(sub)
 			if err != nil {
-				return echo.NewHTTPError(http.StatusUnauthorized, "Invalid token: missing or invalid 'sub' claim")
+				ctx.Logger().Error("test: Invalid user ID: %s", err)
+				return ctx.NoContent(http.StatusUnauthorized)
 			}
 			ctx.Set("user_id", userID)
 			ctx.Logger().Info("test: UserID sat from token: " + sub)
 		} else {
 			ctx.Logger().Info("test: Failed to set UserID from token")
-			return echo.NewHTTPError(http.StatusUnauthorized, "Invalid token: missing or invalid 'sub' claim")
+			return ctx.NoContent(http.StatusUnauthorized)
 		}
 
 		if userStr, ok := claims["user"].(string); ok {
 			var user ClaimUser
 			if err := json.Unmarshal([]byte(userStr), &user); err != nil {
-				return echo.NewHTTPError(http.StatusUnauthorized, "Invalid token: missing or invalid 'user' claim")
+				return ctx.NoContent(http.StatusUnauthorized)
 			}
 			ctx.Set("user", user)
 			ctx.Logger().Info("test: User sat from token: " + userStr)
 		} else {
 			ctx.Logger().Info("test: Failed to set user from token")
-			return echo.NewHTTPError(http.StatusUnauthorized, "Invalid token: missing or invalid 'user' claim")
+			return ctx.NoContent(http.StatusUnauthorized)
 		}
 	} else {
 		ctx.Logger().Info("test: Failed to parse claims")
-		return echo.NewHTTPError(http.StatusUnauthorized, "Invalid token claims")
+		return ctx.NoContent(http.StatusUnauthorized)
 	}
 
 	// If we've made it this far, the request is authenticated
