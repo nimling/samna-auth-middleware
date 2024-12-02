@@ -5,7 +5,7 @@ import (
 	"github.com/labstack/echo/v4"
 	em "github.com/labstack/echo/v4/middleware"
 	"github.com/labstack/gommon/log"
-	samnamw "github.com/nimling/samna-auth-middleware"
+	"github.com/nimling/samna-auth-middleware/sauth"
 	"net/http"
 )
 
@@ -29,7 +29,7 @@ func main() {
 	// Reverse Proxy for all other routes
 	e.Any("/*", func(ctx echo.Context) error {
 		return ctx.String(http.StatusOK, "All good in the hood, fine, sublime")
-	}, samnamw.AuthMiddlewareFromEnv())
+	}, sauth.AuthMiddlewareFromEnv())
 
 	// Start server
 	if err := e.Start(":3201"); err != nil {

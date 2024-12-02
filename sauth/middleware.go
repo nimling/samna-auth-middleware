@@ -6,7 +6,6 @@ import (
 	"github.com/golang-jwt/jwt"
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
-	"github.com/labstack/echo/v4/middleware"
 	"github.com/nimling/samna-auth-middleware/writer"
 	"net/http"
 	"net/http/httputil"
@@ -58,16 +57,8 @@ func AuthMiddleware(authURL *url.URL, clientID *uuid.UUID, clientSecretKey *stri
 		clientSecret = &envVal
 	}
 
-	// Create CORS middleware specifically for auth endpoints
-	corsMiddleware := middleware.CORSWithConfig(middleware.CORSConfig{
-		AllowCredentials: true,
-		AllowOrigins:     []string{"https://<auth-host>", "https://<bookable-host>", "http://localhost:5173"},
-		AllowHeaders:     []string{"Cookie", "Set-Cookie"},
-		ExposeHeaders:    []string{"Set-Cookie"},
-	})
-
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
-		return corsMiddleware(func(ctx echo.Context) error {
+		return func(ctx echo.Context) error {
 			req := ctx.Request()
 
 			// Build redirect url
@@ -199,7 +190,7 @@ func AuthMiddleware(authURL *url.URL, clientID *uuid.UUID, clientSecretKey *stri
 			}
 
 			return validateToken(ctx, next, *clientSecret, tokenString)
-		})
+		}
 	}
 }
 
