@@ -149,6 +149,7 @@ func RedirectLogin(ctx echo.Context, cookieDomain url.URL, authURL url.URL, clie
 	err = writeCookie(ctx, &http.Cookie{
 		Name:   "access_token",
 		Value:  respBody.AccessToken,
+		Domain: cookieDomain.String(),
 		Path:   "/",
 		MaxAge: 3600, // TODO:: We need to get this from the server
 	})
@@ -156,7 +157,8 @@ func RedirectLogin(ctx echo.Context, cookieDomain url.URL, authURL url.URL, clie
 	err = writeCookie(ctx, &http.Cookie{
 		Name:   "refresh_token",
 		Value:  respBody.RefreshToken,
-		Path:   "/",
+		Domain: cookieDomain.String(),
+		Path:   "/",     // TODO:: Set this to another specific path?
 		MaxAge: 2592000, // TODO:: We need to get this from the server
 	})
 

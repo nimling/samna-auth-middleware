@@ -2,12 +2,10 @@ package sauth
 
 import (
 	"encoding/json"
-	"errors"
 	"github.com/golang-jwt/jwt"
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 	"net/http"
-	"os"
 )
 
 func validateToken(ctx echo.Context, next echo.HandlerFunc, clientSecret string, tokenString string) error {
@@ -66,24 +64,14 @@ func validateToken(ctx echo.Context, next echo.HandlerFunc, clientSecret string,
 }
 
 func writeCookie(ctx echo.Context, cookie *http.Cookie) error {
-
-	cookieDomain, ok := os.LookupEnv("SAMNA_AUTH_DOMAIN")
-	if !ok {
-		err := errors.New("Error locating AUTH_COOKIE_DOMAIN in env")
-		ctx.Logger().Error(err)
-		return err
-	}
-
 	ctx.SetCookie(&http.Cookie{
 		Name:     cookie.Name,
 		Value:    cookie.Value,
 		HttpOnly: true,
-		Domain:   cookieDomain,
 		Secure:   cookie.Secure,
 		SameSite: http.SameSiteStrictMode,
 		Path:     cookie.Path,
 		MaxAge:   cookie.MaxAge,
 	})
-
 	return nil
 }
