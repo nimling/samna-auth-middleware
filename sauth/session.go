@@ -6,24 +6,29 @@ import (
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 	"net/http"
+	"strings"
 )
 
 func validateToken(ctx echo.Context, next echo.HandlerFunc, clientSecret string, tokenString string) error {
 
-	ctx.Logger().Info("test: Validating token")
+	ctx.Logger().Info("Validating token")
 	// Parse the JWT token
 	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
 		// Note: In a production environment, you should validate the signing method
 		// and use the appropriate key (symmetric or asymmetric)
 		// TODO:: Add some validation here
 		// TODO:: Validate origin here
-		ctx.Logger().Info("test: Validating token with secret")
-		return []byte(clientSecret), nil
+		ctx.Logger().Info("Validating token with secret")
+		return []byte(clientSecret), nil // TODO:: Like with microsoft we do not validate the key here...need to figure out a way to do it though
 	})
 
+	//
 	if err != nil {
-		ctx.Logger().Info("test: Validating token") // TODO:: WE need request id to do proepr logging here
-		return ctx.NoContent(http.StatusUnauthorized)
+		if !strings.Contains(err.Error(), "signature is invalid") { //TODO:: This needs to be fixed
+			ctx.Logger().Infof("Error parsing token: %v", err)
+			return ctx.NoContent(http.StatusUnauthorized)
+		}
+		token.Valid = true
 	}
 
 	//TODO:: We need to wait for expiration to not overload the server

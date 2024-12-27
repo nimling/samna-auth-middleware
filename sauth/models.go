@@ -21,9 +21,8 @@ type Claims struct {
 	jwt.StandardClaims
 }
 
-type BodyValidate struct {
-	ClientID     uuid.UUID `json:"client_id"`
-	ClientSecret string    `json:"client_secret"`
+type BodyCode struct {
+	Code *string `json:"code"`
 }
 
 type ResponseToken struct {

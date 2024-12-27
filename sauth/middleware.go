@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 	"net/http"
@@ -12,12 +11,12 @@ import (
 	"os"
 )
 
-func AuthMiddlewareFromEnv() echo.MiddlewareFunc {
-	return AuthMiddleware(nil, nil, nil, nil)
+func AuthMiddlewareEnv() echo.MiddlewareFunc {
+	return AuthMiddleware(nil, nil, nil, nil, nil)
 }
 
 // AuthMiddleware returns a middleware that validates requests against the Samna Auth
-func AuthMiddleware(cookieDomain *url.URL, authURL *url.URL, clientID *uuid.UUID, clientSecret *string) echo.MiddlewareFunc {
+func AuthMiddleware(cookieDomain *url.URL, authURL *url.URL, clientSlug *string, clientID *uuid.UUID, clientSecret *string) echo.MiddlewareFunc {
 
 	if cookieDomain == nil {
 		cookieDomain = getEnvURL("SAMNA_AUTH_DOMAIN")
@@ -26,6 +25,17 @@ func AuthMiddleware(cookieDomain *url.URL, authURL *url.URL, clientID *uuid.UUID
 	if authURL == nil {
 		authURL = getEnvURL("SAMNA_AUTH_SERVER")
 	}
+
+	if clientSlug == nil {
+		envVal, ok := os.LookupEnv("SAMNA_AUTH_CLIENT_SLUG")
+		if !ok {
+			panic("No clientID specified for AuthMiddleware")
+		}
+		clientSlug = &envVal
+	}
+
+	// TODO:: Redo all of this
+	authURL.Path = "/auth/validate/" + *clientSlug
 
 	if clientID == nil {
 		envVal, ok := os.LookupEnv("SAMNA_AUTH_CLIENT_ID")
@@ -49,38 +59,25 @@ func AuthMiddleware(cookieDomain *url.URL, authURL *url.URL, clientID *uuid.UUID
 		clientSecret = &envVal
 	}
 
+	// TODO:: Better initialization and env paramter validation
+
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(ctx echo.Context) error {
+
+			if ctx.QueryParams().Has("samna_auth_code") {
+				// Get the auth code to exchange
+				authCode := ctx.QueryParam("samna_auth_code")
+				if len(authCode) > 0 {
+					return ExchangeAuthorizationCode(ctx, authCode, *cookieDomain, *authURL, *clientID, *clientSecret)
+				}
+			}
+
 			// Get the access token from the cookie
 			cookie, err := ctx.Cookie("access_token")
 			if err != nil {
-				if authURL == nil {
-					ctx.Logger().Error("Invalid or missing auth URL")
-					// TODO:: This might be more of a panic scenario?
-					return ctx.String(http.StatusInternalServerError, "Invalid or missing auth URL")
-				}
-
-				if cookieDomain == nil {
-					ctx.Logger().Error("Invalid or missing auth cookie domain")
-					// TODO:: This might be more of a panic scenario?
-					return ctx.String(http.StatusInternalServerError, "Invalid or missing auth cookie domain")
-				}
-
-				if clientID == nil {
-					ctx.Logger().Error("Invalid or missing auth client ID")
-					// TODO:: This might be more of a panic scenario?
-					return ctx.String(http.StatusInternalServerError, "Invalid or missing auth client ID")
-				}
-
-				if clientSecret == nil {
-					ctx.Logger().Error("Invalid or missing auth client secret")
-					// TODO:: This might be more of a panic scenario?
-					return ctx.String(http.StatusInternalServerError, "Invalid or missing auth client secret")
-				}
-
 				if errors.Is(err, http.ErrNoCookie) {
 					ctx.Logger().Infof("Missing access_token cookie: %s", err)
-					return RedirectLogin(ctx, *cookieDomain, *authURL, *clientID, *clientSecret) //TODO:: We need to check the authURL here as well
+					return ctx.String(http.StatusUnauthorized, "Unauthorized")
 				}
 
 				ctx.Logger().Infof("Failed to retrive the access_token: %s", err)
@@ -89,32 +86,18 @@ func AuthMiddleware(cookieDomain *url.URL, authURL *url.URL, clientID *uuid.UUID
 			}
 
 			ctx.Logger().Infof("Retrieved access_token: %s", cookie.Value)
-
-			if clientSecret == nil || *clientSecret == "" {
-				ctx.Logger().Error("Invalid client secret")
-				// TODO:: This might be more of a panic scenario?
-				return ctx.String(http.StatusInternalServerError, "Invalid or missing client secret")
-			}
-
 			return validateToken(ctx, next, *clientSecret, cookie.Value)
 		}
 	}
 }
 
-// RedirectLogin redirects the request to the auth middleware
-func RedirectLogin(ctx echo.Context, cookieDomain url.URL, authURL url.URL, clientID uuid.UUID, clientSecret string) error {
-	// Build redirect url
-	redirectURI := fmt.Sprintf("%s://%s%s",
-		ctx.Scheme(),
-		ctx.Request().Host,
-		ctx.Request().URL.String()) //TODO:: How to build this for the proper return?
-
-	bodyData := BodyValidate{
-		ClientID:     clientID,
-		ClientSecret: clientSecret,
+// ExchangeAuthorizationCode redirects the request to the auth middleware
+func ExchangeAuthorizationCode(ctx echo.Context, authCode string, cookieDomain url.URL, authURL url.URL, clientID uuid.UUID, clientSecret string) error {
+	bodyCode := BodyCode{
+		Code: &authCode,
 	}
 
-	jsonBody, err := json.Marshal(bodyData)
+	jsonBody, err := json.Marshal(bodyCode)
 	if err != nil {
 		ctx.Logger().Error("Malformed validation body")
 		return ctx.String(http.StatusInternalServerError, "Malformed validation body")
@@ -122,12 +105,16 @@ func RedirectLogin(ctx echo.Context, cookieDomain url.URL, authURL url.URL, clie
 
 	// Verify with auth service
 	client := &http.Client{}
-	req, err := http.NewRequest("POST", authURL.String(), bytes.NewBuffer(jsonBody))
+	req, err := http.NewRequest(http.MethodPost, authURL.String(), bytes.NewBuffer(jsonBody))
 	if err != nil {
 		ctx.Logger().Error("Failed to create a request to redirect login URL") //TODO:: Encrypt this a bit more?
 		return ctx.String(http.StatusInternalServerError, "Failed to create a request to redirect login URL")
 	}
+
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Samna-Client-Id", clientID.String())
+	req.Header.Set("Samna-Client-Secret", clientSecret)
 
 	// Perform request
 	resp, err := client.Do(req)
@@ -162,5 +149,5 @@ func RedirectLogin(ctx echo.Context, cookieDomain url.URL, authURL url.URL, clie
 		MaxAge: 2592000, // TODO:: We need to get this from the server
 	})
 
-	return ctx.Redirect(http.StatusTemporaryRedirect, redirectURI)
+	return ctx.NoContent(http.StatusOK) //TODO:: This should be redirected to the original request performing the call
 }

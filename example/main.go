@@ -26,10 +26,12 @@ func main() {
 	e.Use(em.Logger())
 	e.Use(em.Recover())
 
+	e.GET("/login", sauth.RedirectLogin)
+
 	// Reverse Proxy for all other routes
 	e.Any("/*", func(ctx echo.Context) error {
 		return ctx.String(http.StatusOK, "All good in the hood, fine, sublime")
-	}, sauth.AuthMiddlewareFromEnv())
+	}, sauth.AuthMiddlewareEnv())
 
 	// Start server
 	if err := e.Start(":3201"); err != nil {
