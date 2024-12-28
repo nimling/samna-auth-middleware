@@ -85,7 +85,7 @@ func AuthMiddleware(cookieDomain *url.URL, authURL *url.URL, clientSlug *string,
 				return ctx.String(http.StatusInternalServerError, "Error retrieving access token")
 			}
 
-			ctx.Logger().Infof("Retrieved access_token: %s", cookie.Value)
+			ctx.Logger().Info("Retrieved access_token")
 			return validateToken(ctx, next, *clientSecret, cookie.Value)
 		}
 	}
