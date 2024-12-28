@@ -63,7 +63,7 @@ func AuthMiddleware(cookieDomain *url.URL, authURL *url.URL, clientSlug *string,
 
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(ctx echo.Context) error {
-
+			// TODO:: Move this into the cooke check instead
 			if ctx.QueryParams().Has("samna_auth_code") {
 				// Get the auth code to exchange
 				authCode := ctx.QueryParam("samna_auth_code")

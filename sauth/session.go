@@ -31,6 +31,11 @@ func validateToken(ctx echo.Context, next echo.HandlerFunc, clientSecret string,
 		token.Valid = true
 	}
 
+	if token == nil {
+		ctx.Logger().Infof("Error parsing token: %v", err)
+		return ctx.NoContent(http.StatusUnauthorized)
+	}
+
 	//TODO:: We need to wait for expiration to not overload the server
 
 	// Extract the 'sub' claim and set it as user_id in the context
@@ -38,13 +43,13 @@ func validateToken(ctx echo.Context, next echo.HandlerFunc, clientSecret string,
 		if sub, ok := claims["sub"].(string); ok {
 			userID, err := uuid.Parse(sub)
 			if err != nil {
-				ctx.Logger().Error("test: Invalid user ID: %s", err)
+				ctx.Logger().Infof("Invalid user ID: %s", err)
 				return ctx.NoContent(http.StatusUnauthorized)
 			}
 			ctx.Set("user_id", userID)
-			ctx.Logger().Info("test: UserID sat from token: " + sub)
+			ctx.Logger().Info("UserID sat from token: " + sub)
 		} else {
-			ctx.Logger().Info("test: Failed to set UserID from token")
+			ctx.Logger().Info("Failed to set UserID from token")
 			return ctx.NoContent(http.StatusUnauthorized)
 		}
 
@@ -54,13 +59,13 @@ func validateToken(ctx echo.Context, next echo.HandlerFunc, clientSecret string,
 				return ctx.NoContent(http.StatusUnauthorized)
 			}
 			ctx.Set("user", user)
-			ctx.Logger().Info("test: User sat from token: " + userStr)
+			ctx.Logger().Infof("User sat from token")
 		} else {
-			ctx.Logger().Info("test: Failed to set user from token")
+			ctx.Logger().Info("Failed to set user from token")
 			return ctx.NoContent(http.StatusUnauthorized)
 		}
 	} else {
-		ctx.Logger().Info("test: Failed to parse claims")
+		ctx.Logger().Info("Failed to parse claims")
 		return ctx.NoContent(http.StatusUnauthorized)
 	}
 
