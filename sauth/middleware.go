@@ -149,5 +149,5 @@ func ExchangeAuthorizationCode(ctx echo.Context, authCode string, cookieDomain u
 		MaxAge: 2592000, // TODO:: We need to get this from the server
 	})
 
-	return ctx.NoContent(http.StatusOK) //TODO:: This should be redirected to the original request performing the call
+	return ctx.Redirect(http.StatusTemporaryRedirect, "/") //TODO:: This should be redirected to the original request performing the call
 }
