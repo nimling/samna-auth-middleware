@@ -29,7 +29,7 @@ func main() {
 	e.GET("/login", sauth.RedirectLogin)
 
 	// Reverse Proxy for all other routes
-	e.Any("/*", func(ctx echo.Context) error {
+	e.Any("*", func(ctx echo.Context) error {
 		return ctx.String(http.StatusOK, "All good in the hood, fine, sublime")
 	}, sauth.AuthMiddlewareEnv())
 

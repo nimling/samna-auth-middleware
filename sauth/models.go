@@ -5,6 +5,11 @@ import (
 	"github.com/google/uuid"
 )
 
+const (
+	ErrorTokenExpired AuthError = "Token is expired"
+	ErrorUnauthorized AuthError = "Unauthorized"
+)
+
 type ClaimUser struct {
 	ID        uuid.UUID `json:"id"`
 	FirstName string    `json:"first_name"`
@@ -29,3 +34,5 @@ type ResponseToken struct {
 	AccessToken  string `json:"access_token"`
 	RefreshToken string `json:"refresh_token"`
 }
+
+type AuthError string

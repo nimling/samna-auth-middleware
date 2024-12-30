@@ -1,8 +1,6 @@
 package sauth
 
 import (
-	"bytes"
-	"encoding/json"
 	"errors"
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
@@ -63,12 +61,13 @@ func AuthMiddleware(cookieDomain *url.URL, authURL *url.URL, clientSlug *string,
 
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(ctx echo.Context) error {
+
 			// TODO:: Move this into the cooke check instead
 			if ctx.QueryParams().Has("samna_auth_code") {
 				// Get the auth code to exchange
 				authCode := ctx.QueryParam("samna_auth_code")
 				if len(authCode) > 0 {
-					return ExchangeAuthorizationCode(ctx, authCode, *cookieDomain, *authURL, *clientID, *clientSecret)
+					return exchangeAuthorizationCode(ctx, authCode, *cookieDomain, *authURL, *clientID, *clientSecret)
 				}
 			}
 
@@ -86,68 +85,35 @@ func AuthMiddleware(cookieDomain *url.URL, authURL *url.URL, clientSlug *string,
 			}
 
 			ctx.Logger().Info("Retrieved access_token")
-			return validateToken(ctx, next, *clientSecret, cookie.Value)
+			claimUser, err := validateToken(ctx, *clientSecret, cookie.Value)
+			if err == nil {
+				ctx.Set("user_id", claimUser.ID) // TODO:: Excessive??
+				ctx.Set("user", claimUser)
+				return next(ctx)
+			}
+
+			if !errors.Is(err, ErrorTokenExpired) {
+				ctx.Logger().Infof("Failed to validate the access_token: %s", err)
+				return ctx.String(http.StatusUnauthorized, "Unauthorized")
+			}
+
+			// TODO:: Better safer way to set this?
+			authURL.Path = "/auth/refresh/" + *clientSlug
+
+			claimUser, err = refreshTokens(ctx, *authURL, *cookieDomain, *clientID, *clientSecret)
+			if err != nil {
+				// TODO:: This might get a token expired error which is strange
+				ctx.Logger().Infof("Failed to refresh tokens: %s", err)
+				if errors.Is(err, ErrorUnauthorized) {
+					return ctx.String(http.StatusUnauthorized, "Unauthorized")
+				}
+				return ctx.String(http.StatusInternalServerError, "Error refreshing the access token")
+			}
+
+			ctx.Set("user_id", claimUser.ID)
+			ctx.Set("user", claimUser)
+
+			return next(ctx)
 		}
 	}
-}
-
-// ExchangeAuthorizationCode redirects the request to the auth middleware
-func ExchangeAuthorizationCode(ctx echo.Context, authCode string, cookieDomain url.URL, authURL url.URL, clientID uuid.UUID, clientSecret string) error {
-	bodyCode := BodyCode{
-		Code: &authCode,
-	}
-
-	jsonBody, err := json.Marshal(bodyCode)
-	if err != nil {
-		ctx.Logger().Error("Malformed validation body")
-		return ctx.String(http.StatusInternalServerError, "Malformed validation body")
-	}
-
-	// Verify with auth service
-	client := &http.Client{}
-	req, err := http.NewRequest(http.MethodPost, authURL.String(), bytes.NewBuffer(jsonBody))
-	if err != nil {
-		ctx.Logger().Error("Failed to create a request to redirect login URL") //TODO:: Encrypt this a bit more?
-		return ctx.String(http.StatusInternalServerError, "Failed to create a request to redirect login URL")
-	}
-
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "application/json")
-	req.Header.Set("Samna-Client-Id", clientID.String())
-	req.Header.Set("Samna-Client-Secret", clientSecret)
-
-	// Perform request
-	resp, err := client.Do(req)
-	if err != nil || resp.StatusCode != http.StatusOK {
-		ctx.Logger().Info("Unauthorized") //TODO:: Encrypt this a bit more?
-		return ctx.String(http.StatusUnauthorized, "Unauthorized")
-	}
-
-	defer resp.Body.Close()
-
-	// Parse response body
-	var respBody ResponseToken
-	if err = json.NewDecoder(resp.Body).Decode(&respBody); err != nil {
-		ctx.Logger().Error("Failed to parse auth response body") //TODO:: Encrypt this a bit more?
-		return ctx.String(http.StatusUnauthorized, "Invalid session")
-	}
-
-	// Write cookies
-	err = writeCookie(ctx, &http.Cookie{
-		Name:   "access_token",
-		Value:  respBody.AccessToken,
-		Domain: cookieDomain.String(),
-		Path:   "/",
-		MaxAge: 3600, // TODO:: We need to get this from the server
-	})
-
-	err = writeCookie(ctx, &http.Cookie{
-		Name:   "refresh_token",
-		Value:  respBody.RefreshToken,
-		Domain: cookieDomain.String(),
-		Path:   "/",     // TODO:: Set this to another specific path?
-		MaxAge: 2592000, // TODO:: We need to get this from the server
-	})
-
-	return ctx.Redirect(http.StatusTemporaryRedirect, "/") //TODO:: This should be redirected to the original request performing the call
 }
