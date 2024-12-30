@@ -88,7 +88,7 @@ func AuthMiddleware(cookieDomain *url.URL, authURL *url.URL, clientSlug *string,
 			claimUser, err := validateToken(ctx, *clientSecret, cookie.Value)
 			if err == nil {
 				ctx.Set("user_id", claimUser.ID) // TODO:: Excessive??
-				ctx.Set("user", claimUser)
+				ctx.Set("user", *claimUser)
 				return next(ctx)
 			}
 
