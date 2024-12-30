@@ -65,7 +65,6 @@ func validateToken(ctx echo.Context, clientSecret string, tokenString string) (*
 				return nil, err
 			}
 			ctx.Set("user_id", userID) // TODO:: remove and only keep the user object?
-			ctx.Logger().Info("UserID sat from token: " + sub)
 		} else {
 			ctx.Logger().Info("Failed to set UserID from token")
 			return nil, err
@@ -76,8 +75,8 @@ func validateToken(ctx echo.Context, clientSecret string, tokenString string) (*
 			if err := json.Unmarshal([]byte(userStr), &user); err != nil {
 				return nil, err
 			}
+
 			ctx.Set("user", user)
-			ctx.Logger().Infof("User sat from token")
 			return &user, nil
 		} else {
 			ctx.Logger().Info("Failed to set user from token")
