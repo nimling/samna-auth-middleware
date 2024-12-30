@@ -9,6 +9,7 @@ import (
 	"os"
 )
 
+// AuthMiddlewareEnv returns a auth middleware configured from env
 func AuthMiddlewareEnv() echo.MiddlewareFunc {
 	return AuthMiddleware(nil, nil, nil, nil, nil)
 }

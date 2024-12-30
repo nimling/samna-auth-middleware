@@ -176,8 +176,13 @@ func performTokenRequest(ctx echo.Context, authURL url.URL, clientID uuid.UUID, 
 
 	// Perform request
 	resp, err := client.Do(req)
-	if err != nil || resp.StatusCode != http.StatusOK {
-		ctx.Logger().Infof("Unauthorized: %s", err) //TODO:: Encrypt this a bit more?
+	if err != nil {
+		ctx.Logger().Infof("Failed to perform request : %s", err) //TODO:: Encrypt this a bit more?
+		return nil, err
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		ctx.Logger().Infof("Unauthorized: %d", resp.StatusCode) //TODO:: Encrypt this a bit more?
 		return nil, ErrorUnauthorized
 	}
 
@@ -186,7 +191,7 @@ func performTokenRequest(ctx echo.Context, authURL url.URL, clientID uuid.UUID, 
 	// Parse response body
 	var respBody ResponseToken
 	if err = json.NewDecoder(resp.Body).Decode(&respBody); err != nil {
-		ctx.Logger().Error("Failed to parse auth response body") //TODO:: Encrypt this a bit more?
+		ctx.Logger().Info("Failed to parse auth response body") //TODO:: Encrypt this a bit more?
 		return nil, ErrorUnauthorized
 	}
 
