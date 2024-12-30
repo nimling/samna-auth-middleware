@@ -208,7 +208,7 @@ func exchangeAuthorizationCode(ctx echo.Context, authCode string, cookieDomain u
 
 	tokens, err := performTokenRequest(ctx, authURL, clientID, clientSecret, bytes.NewBuffer(jsonBody), nil)
 	if err != nil {
-		ctx.Logger().Error("Error performing token request")
+		ctx.Logger().Infof("Error performing token request: %s", err)
 		if errors.Is(err, ErrorUnauthorized) {
 			return ctx.String(http.StatusUnauthorized, "Unauthorized")
 		}
