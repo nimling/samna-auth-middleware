@@ -198,7 +198,7 @@ func performTokenRequest(ctx echo.Context, authURL url.URL, clientID uuid.UUID, 
 }
 
 // exchangeAuthorizationCode redirects the request to the auth middleware
-func exchangeAuthorizationCode(ctx echo.Context, authCode string, authURL url.URL, clientID uuid.UUID, clientSecret string) error {
+func exchangeAuthorizationCode(ctx echo.Context, next echo.HandlerFunc, authCode string, authURL url.URL, clientID uuid.UUID, clientSecret string) error {
 	bodyCode := BodyCode{
 		Code: &authCode,
 	}
@@ -243,5 +243,5 @@ func exchangeAuthorizationCode(ctx echo.Context, authCode string, authURL url.UR
 		return ctx.NoContent(http.StatusInternalServerError)
 	}
 
-	return ctx.Redirect(http.StatusTemporaryRedirect, "/") //TODO:: This should be redirected to the original request performing the call
+	return next(ctx) //TODO:: This should be redirected to the original request performing the call
 }

@@ -64,7 +64,7 @@ func AuthMiddleware(authURL *url.URL, clientSlug *string, clientID *uuid.UUID, c
 				// Get the auth code to exchange
 				authCode := ctx.QueryParam("samna_auth_code")
 				if len(authCode) > 0 {
-					return exchangeAuthorizationCode(ctx, authCode, *authURL, *clientID, *clientSecret)
+					return exchangeAuthorizationCode(ctx, next, authCode, *authURL, *clientID, *clientSecret)
 				}
 			}
 
