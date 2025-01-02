@@ -142,7 +142,7 @@ func writeCookie(ctx echo.Context, cookie *http.Cookie) error {
 		Value:    cookie.Value,
 		HttpOnly: true,
 		Secure:   cookie.Secure,
-		SameSite: http.SameSiteStrictMode,
+		SameSite: http.SameSiteLaxMode,
 		Path:     cookie.Path,
 		MaxAge:   cookie.MaxAge,
 	})
