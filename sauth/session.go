@@ -89,7 +89,7 @@ func validateToken(ctx echo.Context, clientSecret string, tokenString string) (*
 }
 
 // refreshTokens refreshes the access and refresh token
-func refreshTokens(ctx echo.Context, authURL url.URL, cookieDomain url.URL, clientID uuid.UUID, clientSecret string) (*ClaimUser, error) {
+func refreshTokens(ctx echo.Context, authURL url.URL, clientID uuid.UUID, clientSecret string) (*ClaimUser, error) {
 	// Try to get refresh token from cookie
 	refreshToken, err := ctx.Cookie("refresh_token")
 	if err != nil {
@@ -111,7 +111,6 @@ func refreshTokens(ctx echo.Context, authURL url.URL, cookieDomain url.URL, clie
 	err = writeCookie(ctx, &http.Cookie{
 		Name:   "access_token",
 		Value:  tokens.AccessToken,
-		Domain: cookieDomain.String(),
 		Path:   "/",
 		MaxAge: 3600, // TODO:: We need to get this from the server
 	})
@@ -124,7 +123,6 @@ func refreshTokens(ctx echo.Context, authURL url.URL, cookieDomain url.URL, clie
 	err = writeCookie(ctx, &http.Cookie{
 		Name:   "refresh_token",
 		Value:  tokens.RefreshToken,
-		Domain: cookieDomain.String(),
 		Path:   "/",     // TODO:: Set this to another specific path?
 		MaxAge: 2592000, // TODO:: We need to get this from the server
 	})

@@ -11,15 +11,11 @@ import (
 
 // AuthMiddlewareEnv returns a auth middleware configured from env
 func AuthMiddlewareEnv() echo.MiddlewareFunc {
-	return AuthMiddleware(nil, nil, nil, nil, nil)
+	return AuthMiddleware(nil, nil, nil, nil)
 }
 
 // AuthMiddleware returns a middleware that validates requests against the Samna Auth
-func AuthMiddleware(cookieDomain *url.URL, authURL *url.URL, clientSlug *string, clientID *uuid.UUID, clientSecret *string) echo.MiddlewareFunc {
-
-	if cookieDomain == nil {
-		cookieDomain = getEnvURL("SAMNA_AUTH_DOMAIN")
-	}
+func AuthMiddleware(authURL *url.URL, clientSlug *string, clientID *uuid.UUID, clientSecret *string) echo.MiddlewareFunc {
 
 	if authURL == nil {
 		authURL = getEnvURL("SAMNA_AUTH_SERVER")
@@ -101,7 +97,7 @@ func AuthMiddleware(cookieDomain *url.URL, authURL *url.URL, clientSlug *string,
 			// TODO:: Better safer way to set this?
 			authURL.Path = "/api/refresh/" + *clientSlug
 
-			claimUser, err = refreshTokens(ctx, *authURL, *cookieDomain, *clientID, *clientSecret)
+			claimUser, err = refreshTokens(ctx, *authURL, *clientID, *clientSecret)
 			if err != nil {
 				// TODO:: This might get a token expired error which is strange
 				ctx.Logger().Infof("Failed to refresh tokens: %s", err)
