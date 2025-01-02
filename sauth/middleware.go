@@ -95,7 +95,7 @@ func AuthMiddleware(authURL *url.URL, clientSlug *string, clientID *uuid.UUID, c
 			}
 
 			// TODO:: Better safer way to set this?
-			authURL.Path = "/api/refresh/" + *clientSlug
+			authURL.Path = "/api/token/" + *clientSlug
 
 			claimUser, err = refreshTokens(ctx, *authURL, *clientID, *clientSecret)
 			if err != nil {
