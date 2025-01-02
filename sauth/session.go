@@ -170,8 +170,7 @@ func clearCookie(ctx echo.Context, name string) {
 		Path:     "/",
 		MaxAge:   -1,
 		HttpOnly: true,
-		Secure:   ctx.Scheme() == "https",
-		SameSite: http.SameSiteStrictMode,
+		SameSite: http.SameSiteLaxMode,
 	}
 
 	cookieDomain, ok := os.LookupEnv("SAMNA_AUTH_COOKIE_DOMAIN")
