@@ -162,6 +162,30 @@ func writeCookie(ctx echo.Context, cookie *http.Cookie) error {
 	return nil
 }
 
+func clearCookie(ctx echo.Context, name string) {
+
+	cookie := &http.Cookie{
+		Name:     name,
+		Value:    "",
+		Path:     "/",
+		MaxAge:   -1,
+		HttpOnly: true,
+		Secure:   ctx.Scheme() == "https",
+		SameSite: http.SameSiteStrictMode,
+	}
+
+	cookieDomain, ok := os.LookupEnv("SAMNA_AUTH_COOKIE_DOMAIN")
+	if ok {
+		if strings.Contains(cookieDomain, "localhost") {
+			cookie.Secure = false
+		} else {
+			cookie.Domain = cookieDomain
+		}
+	}
+
+	ctx.SetCookie(cookie)
+}
+
 // performTokenRequest performs a token refresh or initial request
 func performTokenRequest(ctx echo.Context, authURL url.URL, clientID uuid.UUID, clientSecret string, body io.Reader, onRequest func(req *http.Request) error) (*ResponseToken, error) {
 

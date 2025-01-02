@@ -27,5 +27,9 @@ func RedirectLogout(ctx echo.Context) error {
 	authURL := getEnvURL("SAMNA_AUTH_SERVER")
 	authURL.Path = "/revoke/" + clientSlug
 
+	clearCookie(ctx, "csrf_token")
+	clearCookie(ctx, "refresh_token")
+	clearCookie(ctx, "access_token")
+
 	return ctx.Redirect(http.StatusTemporaryRedirect, authURL.String())
 }
