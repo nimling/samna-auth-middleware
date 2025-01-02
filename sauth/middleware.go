@@ -34,7 +34,7 @@ func AuthMiddleware(cookieDomain *url.URL, authURL *url.URL, clientSlug *string,
 	}
 
 	// TODO:: Redo all of this
-	authURL.Path = "/auth/validate/" + *clientSlug
+	authURL.Path = "/api/authorize/" + *clientSlug
 
 	if clientID == nil {
 		envVal, ok := os.LookupEnv("SAMNA_AUTH_CLIENT_ID")
@@ -68,7 +68,7 @@ func AuthMiddleware(cookieDomain *url.URL, authURL *url.URL, clientSlug *string,
 				// Get the auth code to exchange
 				authCode := ctx.QueryParam("samna_auth_code")
 				if len(authCode) > 0 {
-					return exchangeAuthorizationCode(ctx, authCode, *cookieDomain, *authURL, *clientID, *clientSecret)
+					return exchangeAuthorizationCode(ctx, authCode, *authURL, *clientID, *clientSecret)
 				}
 			}
 
@@ -99,7 +99,7 @@ func AuthMiddleware(cookieDomain *url.URL, authURL *url.URL, clientSlug *string,
 			}
 
 			// TODO:: Better safer way to set this?
-			authURL.Path = "/auth/refresh/" + *clientSlug
+			authURL.Path = "/api/refresh/" + *clientSlug
 
 			claimUser, err = refreshTokens(ctx, *authURL, *cookieDomain, *clientID, *clientSecret)
 			if err != nil {

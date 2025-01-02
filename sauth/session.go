@@ -200,7 +200,7 @@ func performTokenRequest(ctx echo.Context, authURL url.URL, clientID uuid.UUID, 
 }
 
 // exchangeAuthorizationCode redirects the request to the auth middleware
-func exchangeAuthorizationCode(ctx echo.Context, authCode string, cookieDomain url.URL, authURL url.URL, clientID uuid.UUID, clientSecret string) error {
+func exchangeAuthorizationCode(ctx echo.Context, authCode string, authURL url.URL, clientID uuid.UUID, clientSecret string) error {
 	bodyCode := BodyCode{
 		Code: &authCode,
 	}
@@ -224,7 +224,6 @@ func exchangeAuthorizationCode(ctx echo.Context, authCode string, cookieDomain u
 	err = writeCookie(ctx, &http.Cookie{
 		Name:   "access_token",
 		Value:  tokens.AccessToken,
-		Domain: cookieDomain.String(),
 		Path:   "/",
 		MaxAge: 3600, // TODO:: We need to get this from the server
 	})
@@ -237,7 +236,6 @@ func exchangeAuthorizationCode(ctx echo.Context, authCode string, cookieDomain u
 	err = writeCookie(ctx, &http.Cookie{
 		Name:   "refresh_token",
 		Value:  tokens.RefreshToken,
-		Domain: cookieDomain.String(),
 		Path:   "/",     // TODO:: Set this to another specific path?
 		MaxAge: 2592000, // TODO:: We need to get this from the server
 	})
