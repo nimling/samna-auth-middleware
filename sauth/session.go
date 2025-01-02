@@ -153,9 +153,8 @@ func writeCookie(ctx echo.Context, cookie *http.Cookie) error {
 	if ok {
 		if strings.Contains(cookieDomain, "localhost") {
 			cookie.Secure = false
-		} else {
-			cookie.Domain = cookieDomain
 		}
+		cookie.Domain = cookieDomain
 	}
 
 	ctx.SetCookie(cookie)
@@ -177,9 +176,8 @@ func clearCookie(ctx echo.Context, name string) {
 	if ok {
 		if strings.Contains(cookieDomain, "localhost") {
 			cookie.Secure = false
-		} else {
-			cookie.Domain = cookieDomain
 		}
+		cookie.Domain = cookieDomain
 	}
 
 	ctx.SetCookie(cookie)
