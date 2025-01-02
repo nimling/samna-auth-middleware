@@ -11,6 +11,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 )
 
@@ -137,15 +138,26 @@ func refreshTokens(ctx echo.Context, authURL url.URL, clientID uuid.UUID, client
 
 // writeCookie writes a user client cookie
 func writeCookie(ctx echo.Context, cookie *http.Cookie) error {
-	ctx.SetCookie(&http.Cookie{
+
+	cookie = &http.Cookie{
 		Name:     cookie.Name,
 		Value:    cookie.Value,
 		HttpOnly: true,
-		Secure:   cookie.Secure,
+		Secure:   true,
 		SameSite: http.SameSiteLaxMode,
 		Path:     cookie.Path,
 		MaxAge:   cookie.MaxAge,
-	})
+	}
+
+	cookieDomain, ok := os.LookupEnv("SAMNA_AUTH_COOKIE_DOMAIN")
+	if ok {
+		if strings.Contains(cookieDomain, "localhost") {
+			cookie.Secure = false
+		}
+		cookie.Domain = cookieDomain
+	}
+
+	ctx.SetCookie(cookie)
 	return nil
 }
 
