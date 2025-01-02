@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strings"
 )
 
 // AuthMiddlewareEnv returns a auth middleware configured from env
@@ -68,21 +69,16 @@ func AuthMiddleware(authURL *url.URL, clientSlug *string, clientID *uuid.UUID, c
 				}
 			}
 
-			// Get the access token from the cookie
-			cookie, err := ctx.Cookie("access_token")
+			accessToken, err := getAccessToken(ctx)
 			if err != nil {
-				if errors.Is(err, http.ErrNoCookie) {
-					ctx.Logger().Infof("Missing access_token cookie: %s", err)
+				if errors.Is(err, ErrorUnauthorized) {
 					return ctx.String(http.StatusUnauthorized, "Unauthorized")
 				}
-
-				ctx.Logger().Infof("Failed to retrive the access_token: %s", err)
-				//TODO:: Remove all other code except unauthorized? THis could also be expired
-				return ctx.String(http.StatusInternalServerError, "Error retrieving access token")
+				return ctx.String(http.StatusInternalServerError, "Internal server error")
 			}
 
 			ctx.Logger().Info("Retrieved access_token")
-			claimUser, err := validateToken(ctx, *clientSecret, cookie.Value)
+			claimUser, err := validateToken(ctx, *clientSecret, accessToken)
 			if err == nil {
 				ctx.Set("user_id", claimUser.ID) // TODO:: Excessive??
 				ctx.Set("user", *claimUser)
@@ -113,4 +109,30 @@ func AuthMiddleware(authURL *url.URL, clientSlug *string, clientID *uuid.UUID, c
 			return next(ctx)
 		}
 	}
+}
+
+// getAccessToken retrieves the token either from Authorization header or cookie
+func getAccessToken(ctx echo.Context) (string, error) {
+	// Check if auth header is present
+	authHeader := ctx.Request().Header.Get(echo.HeaderAuthorization)
+	if len(authHeader) > 0 {
+		if strings.HasPrefix(authHeader, "Bearer ") {
+			return strings.TrimPrefix(authHeader, "Bearer "), nil
+		}
+	}
+
+	// Get the access token from the cookie
+	cookie, err := ctx.Cookie("access_token")
+	if err != nil {
+		if errors.Is(err, http.ErrNoCookie) {
+			ctx.Logger().Infof("Missing access_token cookie: %s", err)
+			return "", ErrorUnauthorized
+		}
+
+		ctx.Logger().Infof("Failed to retrive the access_token: %s", err)
+		//TODO:: Remove all other code except unauthorized? THis could also be expired
+		return "", err
+	}
+
+	return cookie.Value, nil
 }
