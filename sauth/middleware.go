@@ -109,7 +109,7 @@ func AuthMiddleware(authURL *url.URL, clientSlug *string, clientID *uuid.UUID, c
 			}
 
 			ctx.Set("user_id", claimUser.ID)
-			ctx.Set("user", claimUser)
+			ctx.Set("user", *claimUser)
 
 			return next(ctx)
 		}
