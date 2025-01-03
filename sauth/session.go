@@ -91,12 +91,16 @@ func validateToken(ctx echo.Context, clientSecret string, tokenString string) (*
 
 // refreshTokens refreshes the access and refresh token
 func refreshTokens(ctx echo.Context, authURL url.URL, clientID uuid.UUID, clientSecret string) (*ClaimUser, error) {
+
+	ctx.Logger().Debug("Refreshing tokens")
 	// Try to get refresh token from cookie
 	refreshToken, err := ctx.Cookie("refresh_token")
 	if err != nil {
 		ctx.Logger().Info("No refresh token found")
 		return nil, err
 	}
+
+	ctx.Logger().Debug("Performing token refresh request")
 
 	tokens, err := performTokenRequest(ctx, authURL, clientID, clientSecret, nil, func(req *http.Request) error {
 		req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", refreshToken.Value))
@@ -132,6 +136,8 @@ func refreshTokens(ctx echo.Context, authURL url.URL, clientID uuid.UUID, client
 		ctx.Logger().Info("Error creating cookie")
 		return nil, err
 	}
+
+	ctx.Logger().Debug("Tokens refreshed")
 
 	return validateToken(ctx, clientSecret, tokens.AccessToken)
 }
