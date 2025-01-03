@@ -70,30 +70,35 @@ func AuthMiddleware(authURL *url.URL, clientSlug *string, clientID *uuid.UUID, c
 			}
 
 			accessToken, err := getAccessToken(ctx)
-			if err != nil {
-				if errors.Is(err, ErrorUnauthorized) {
+			if err == nil {
+				ctx.Logger().Info("Retrieved access_token")
+				claimUser, err := validateToken(ctx, *clientSecret, accessToken)
+				if err == nil {
+					ctx.Set("user_id", claimUser.ID) // TODO:: Excessive??
+					ctx.Set("user", *claimUser)
+					return next(ctx)
+				}
+
+				if !errors.Is(err, ErrorTokenExpired) {
+					ctx.Logger().Infof("Failed to validate the access_token: %s", err)
 					return ctx.String(http.StatusUnauthorized, "Unauthorized")
 				}
+			}
+
+			if !errors.Is(err, ErrorNoCookie) {
+				ctx.Logger().Infof("Failed to retrieve the access_token: %s", err)
 				return ctx.String(http.StatusInternalServerError, "Internal server error")
 			}
 
-			ctx.Logger().Info("Retrieved access_token")
-			claimUser, err := validateToken(ctx, *clientSecret, accessToken)
-			if err == nil {
-				ctx.Set("user_id", claimUser.ID) // TODO:: Excessive??
-				ctx.Set("user", *claimUser)
-				return next(ctx)
-			}
-
-			if !errors.Is(err, ErrorTokenExpired) {
-				ctx.Logger().Infof("Failed to validate the access_token: %s", err)
+			_, err = ctx.Cookie("refresh_token")
+			if err != nil && errors.Is(err, http.ErrNoCookie) {
+				ctx.Logger().Info("No refresh token found")
 				return ctx.String(http.StatusUnauthorized, "Unauthorized")
 			}
 
 			// TODO:: Better safer way to set this?
 			authURL.Path = "/api/token/" + *clientSlug
-
-			claimUser, err = refreshTokens(ctx, *authURL, *clientID, *clientSecret)
+			claimUser, err := refreshTokens(ctx, *authURL, *clientID, *clientSecret)
 			if err != nil {
 				// TODO:: This might get a token expired error which is strange
 				ctx.Logger().Infof("Failed to refresh tokens: %s", err)
@@ -126,7 +131,7 @@ func getAccessToken(ctx echo.Context) (string, error) {
 	if err != nil {
 		if errors.Is(err, http.ErrNoCookie) {
 			ctx.Logger().Infof("Missing access_token cookie: %s", err)
-			return "", ErrorUnauthorized
+			return "", ErrorNoCookie
 		}
 
 		ctx.Logger().Infof("Failed to retrive the access_token: %s", err)

@@ -8,6 +8,7 @@ import (
 const (
 	ErrorTokenExpired AuthError = "Token is expired"
 	ErrorUnauthorized AuthError = "Unauthorized"
+	ErrorNoCookie     AuthError = "No cookie"
 )
 
 type ClaimUser struct {
