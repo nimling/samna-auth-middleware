@@ -32,7 +32,7 @@ func AuthMiddleware(authURL *url.URL, clientSlug *string, clientID *uuid.UUID, c
 
 	// TODO:: Redo all of this, /api should be included in the env url?
 	authURL.Path = "/api/authorize/" + *clientSlug
-	refreshURL := authURL
+	refreshURL := *authURL
 	refreshURL.Path = "/api/token/" + *clientSlug
 
 	if clientID == nil {
@@ -100,7 +100,7 @@ func AuthMiddleware(authURL *url.URL, clientSlug *string, clientID *uuid.UUID, c
 
 			// TODO:: Better safer way to set this?
 
-			claimUser, err := refreshTokens(ctx, *authURL, *clientID, *clientSecret)
+			claimUser, err := refreshTokens(ctx, refreshURL, *clientID, *clientSecret)
 			if err != nil {
 				// TODO:: This might get a token expired error which is strange
 				ctx.Logger().Infof("Failed to refresh tokens: %s", err)
