@@ -22,8 +22,7 @@ type ClaimUser struct {
 }
 
 type Claims struct {
-	UserID uuid.UUID `json:"sub"`
-	Email  string    `json:"email"`
+	Subject uuid.UUID `json:"sub"`
 	jwt.StandardClaims
 }
 

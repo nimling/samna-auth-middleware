@@ -30,8 +30,10 @@ func AuthMiddleware(authURL *url.URL, clientSlug *string, clientID *uuid.UUID, c
 		clientSlug = &envVal
 	}
 
-	// TODO:: Redo all of this
+	// TODO:: Redo all of this, /api should be included in the env url?
 	authURL.Path = "/api/authorize/" + *clientSlug
+	refreshURL := authURL
+	refreshURL.Path = "/api/token/" + *clientSlug
 
 	if clientID == nil {
 		envVal, ok := os.LookupEnv("SAMNA_AUTH_CLIENT_ID")
@@ -85,7 +87,7 @@ func AuthMiddleware(authURL *url.URL, clientSlug *string, clientID *uuid.UUID, c
 				}
 			}
 
-			if !errors.Is(err, ErrorNoCookie) {
+			if err != nil && !errors.Is(err, ErrorNoCookie) {
 				ctx.Logger().Infof("Failed to retrieve the access_token: %s", err)
 				return ctx.String(http.StatusInternalServerError, "Internal server error")
 			}
@@ -97,7 +99,7 @@ func AuthMiddleware(authURL *url.URL, clientSlug *string, clientID *uuid.UUID, c
 			}
 
 			// TODO:: Better safer way to set this?
-			authURL.Path = "/api/token/" + *clientSlug
+
 			claimUser, err := refreshTokens(ctx, *authURL, *clientID, *clientSecret)
 			if err != nil {
 				// TODO:: This might get a token expired error which is strange
