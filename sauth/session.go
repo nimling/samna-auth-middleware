@@ -23,8 +23,10 @@ func (e AuthError) Error() string {
 func validateToken(ctx echo.Context, clientSecret string, tokenString string) (*ClaimUser, error) {
 
 	ctx.Logger().Info("Validating token")
+
 	// Parse the JWT token
-	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
+	var tokenClaims TokenClaims
+	token, err := jwt.ParseWithClaims(tokenString, &tokenClaims, func(token *jwt.Token) (interface{}, error) {
 		ctx.Logger().Info("Validating token with secret")
 		// Note: In a production environment, you should validate the signing method
 		// and use the appropriate key (symmetric or asymmetric)
@@ -32,6 +34,11 @@ func validateToken(ctx echo.Context, clientSecret string, tokenString string) (*
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
 		}
+
+		if err := token.Claims.Valid(); err != nil {
+			return nil, fmt.Errorf("invalid token: %v", err)
+		}
+
 		return []byte(clientSecret), nil // TODO:: Like with microsoft we do not validate the key here...need to figure out a way to do it though
 	})
 
@@ -55,38 +62,7 @@ func validateToken(ctx echo.Context, clientSecret string, tokenString string) (*
 		return nil, err
 	}
 
-	//TODO:: We need to wait for expiration to not overload the server
-
-	// Extract the 'sub' claim and set it as user_id in the context
-	if claims, ok := token.Claims.(jwt.MapClaims); ok && token.Valid {
-		if sub, ok := claims["sub"].(string); ok {
-			userID, err := uuid.Parse(sub)
-			if err != nil {
-				ctx.Logger().Infof("Invalid user ID: %s", err)
-				return nil, err
-			}
-			ctx.Set("user_id", userID) // TODO:: remove and only keep the user object?
-		} else {
-			ctx.Logger().Info("Failed to set UserID from token")
-			return nil, err
-		}
-
-		if userStr, ok := claims["user"].(string); ok {
-			var user ClaimUser
-			if err := json.Unmarshal([]byte(userStr), &user); err != nil {
-				return nil, err
-			}
-
-			ctx.Set("user", user)
-			return &user, nil
-		} else {
-			ctx.Logger().Info("Failed to set user from token")
-			return nil, err
-		}
-	}
-
-	ctx.Logger().Info("Failed to parse claims")
-	return nil, err
+	return tokenClaims.User, nil
 }
 
 // refreshTokens refreshes the access and refresh token
