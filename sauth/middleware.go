@@ -73,7 +73,7 @@ func AuthMiddleware(authURL *url.URL, clientSlug *string, clientID *uuid.UUID, c
 
 			accessToken, err := getAccessToken(ctx)
 			if err == nil {
-				ctx.Logger().Info("Retrieved access_token")
+				ctx.Logger().Debug("Retrieved access_token")
 				claimUser, err := validateToken(ctx, *clientSecret, accessToken)
 				if err == nil {
 					ctx.Set("user_id", claimUser.ID) // TODO:: Excessive??
@@ -99,11 +99,10 @@ func AuthMiddleware(authURL *url.URL, clientSlug *string, clientID *uuid.UUID, c
 			}
 
 			// TODO:: Better safer way to set this?
-
 			claimUser, err := refreshTokens(ctx, refreshURL, *clientID, *clientSecret)
 			if err != nil {
 				// TODO:: This might get a token expired error which is strange
-				ctx.Logger().Infof("Failed to refresh tokens: %s", err)
+				ctx.Logger().Debugf("Failed to refresh tokens: %s", err)
 				if errors.Is(err, ErrorUnauthorized) {
 					return ctx.String(http.StatusUnauthorized, "Unauthorized")
 				}

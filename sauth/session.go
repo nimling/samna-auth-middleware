@@ -22,12 +22,12 @@ func (e AuthError) Error() string {
 // validateToken validates an access token
 func validateToken(ctx echo.Context, clientSecret string, tokenString string) (*ClaimUser, error) {
 
-	ctx.Logger().Info("Validating token")
+	ctx.Logger().Debug("Validating token")
 
 	// Parse the JWT token
 	var tokenClaims TokenClaims
 	token, err := jwt.ParseWithClaims(tokenString, &tokenClaims, func(token *jwt.Token) (interface{}, error) {
-		ctx.Logger().Info("Validating token with secret")
+		ctx.Logger().Debug("Validating token with secret")
 		// Note: In a production environment, you should validate the signing method
 		// and use the appropriate key (symmetric or asymmetric)
 		// TODO:: Validate origin here
