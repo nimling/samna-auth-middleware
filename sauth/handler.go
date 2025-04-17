@@ -47,9 +47,9 @@ func GetLogout(ctx echo.Context) error {
 	authURL := getEnvURL("SAMNA_AUTH_SERVER")
 	authURL.Path = "/revoke/" + clientSlug
 
-	clearCookie(ctx, "csrf_token")
-	clearCookie(ctx, "refresh_token")
-	clearCookie(ctx, "access_token")
+	clearCookie(ctx, "sauth_csrf_token")
+	clearCookie(ctx, "sauth_refresh_token")
+	clearCookie(ctx, "sauth_access_token")
 
 	// Verify with auth service
 	client := &http.Client{}

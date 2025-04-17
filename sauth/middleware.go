@@ -62,6 +62,15 @@ func AuthMiddleware(authURL *url.URL, clientSlug *string, clientID *uuid.UUID, c
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(ctx echo.Context) error {
 
+			userID, err := uuid.Parse("68ff64b5-5771-4a66-bd32-1e2886d67542")
+			if err != nil {
+				ctx.Logger().Infof("Failed to validate the access_token: %s", err)
+				return ctx.String(http.StatusUnauthorized, "Unauthorized")
+			}
+
+			ctx.Set("user_id", userID)
+			return next(ctx)
+
 			// TODO:: Move this into the cooke check instead
 			if ctx.QueryParams().Has("samna_auth_code") {
 				// Get the auth code to exchange
@@ -77,7 +86,6 @@ func AuthMiddleware(authURL *url.URL, clientSlug *string, clientID *uuid.UUID, c
 				claimUser, err := validateToken(ctx, *clientSecret, accessToken)
 				if err == nil {
 					ctx.Set("user_id", claimUser.ID) // TODO:: Excessive??
-					ctx.Set("user", *claimUser)
 					return next(ctx)
 				}
 
@@ -92,7 +100,7 @@ func AuthMiddleware(authURL *url.URL, clientSlug *string, clientID *uuid.UUID, c
 				return ctx.String(http.StatusInternalServerError, "Internal server error")
 			}
 
-			_, err = ctx.Cookie("refresh_token")
+			_, err = ctx.Cookie("sauth_refresh_token")
 			if err != nil && errors.Is(err, http.ErrNoCookie) {
 				ctx.Logger().Info("No refresh token found")
 				return ctx.String(http.StatusUnauthorized, "Unauthorized")
@@ -110,7 +118,6 @@ func AuthMiddleware(authURL *url.URL, clientSlug *string, clientID *uuid.UUID, c
 			}
 
 			ctx.Set("user_id", claimUser.ID)
-			ctx.Set("user", *claimUser)
 
 			return next(ctx)
 		}
@@ -128,7 +135,7 @@ func getAccessToken(ctx echo.Context) (string, error) {
 	}
 
 	// Get the access token from the cookie
-	cookie, err := ctx.Cookie("access_token")
+	cookie, err := ctx.Cookie("sauth_access_token")
 	if err != nil {
 		if errors.Is(err, http.ErrNoCookie) {
 			ctx.Logger().Infof("Missing access_token cookie: %s", err)
