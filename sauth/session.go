@@ -1,125 +1,64 @@
 package sauth
 
 import (
-	"bytes"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"github.com/golang-jwt/jwt"
-	"github.com/google/uuid"
-	"github.com/labstack/echo/v4"
-	"io"
 	"net/http"
 	"net/url"
 	"os"
 	"strings"
+	"time"
+
+	"github.com/labstack/echo/v4"
 )
 
-func (e AuthError) Error() string {
-	return string(e)
-}
-
-// validateToken validates an access token
-func validateToken(ctx echo.Context, clientSecret string, tokenString string) (*ClaimUser, error) {
-
-	ctx.Logger().Debug("Validating token")
-
-	// Parse the JWT token
-	var tokenClaims TokenClaims
-	token, err := jwt.ParseWithClaims(tokenString, &tokenClaims, func(token *jwt.Token) (interface{}, error) {
-		ctx.Logger().Debug("Validating token with secret")
-		// Note: In a production environment, you should validate the signing method
-		// and use the appropriate key (symmetric or asymmetric)
-		// TODO:: Validate origin here
-		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
-			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
-		}
-
-		if err := token.Claims.Valid(); err != nil {
-			return nil, fmt.Errorf("invalid token: %v", err)
-		}
-
-		return []byte(clientSecret), nil // TODO:: Like with microsoft we do not validate the key here...need to figure out a way to do it though
-	})
-
-	// Check for errors other than signature
-	if err != nil {
-		if ve, ok := err.(*jwt.ValidationError); ok {
-			if ve.Errors&jwt.ValidationErrorExpired != 0 {
-				ctx.Logger().Info("Token is expired")
-				return nil, ErrorTokenExpired
-			}
-		}
-		if !strings.Contains(err.Error(), "signature is invalid") { //TODO:: This needs to be fixed
-			ctx.Logger().Infof("Error parsing token: %v", err)
-			return nil, err
-		}
-		token.Valid = true
-	}
-
-	if token == nil {
-		ctx.Logger().Infof("Error parsing token: %v", err)
-		return nil, err
-	}
-
-	return tokenClaims.User, nil
-}
+const (
+	accessTokenCookieKey  = "sauth_access_token"
+	refreshTokenCookieKey = "sauth_refresh_token"
+)
 
 // refreshTokens refreshes the access and refresh token
-func refreshTokens(ctx echo.Context, authURL url.URL, clientID uuid.UUID, clientSecret string) (*ClaimUser, error) {
-
-	ctx.Logger().Debug("Refreshing tokens")
-	// Try to get refresh token from cookie
-	refreshToken, err := ctx.Cookie("refresh_token")
+func refreshTokens(ctx echo.Context, config AuthMiddlewareConfig) (*ResponseToken, error) {
+	cookie, err := ctx.Cookie(refreshTokenCookieKey)
 	if err != nil {
-		ctx.Logger().Info("No refresh token found")
-		return nil, err
+		return nil, fmt.Errorf("obtain refresh_token from cookie: %w: %w", err, ErrorUnauthorized)
 	}
 
-	ctx.Logger().Debug("Performing token refresh request")
+	if cookie.Value == "" {
+		return nil, fmt.Errorf("refresh token from cookie is empty: %w", ErrorUnauthorized)
+	}
 
-	tokens, err := performTokenRequest(ctx, authURL, clientID, clientSecret, nil, func(req *http.Request) error {
-		req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", refreshToken.Value))
-		return nil
-	})
+	form := url.Values{}
+	form.Set("grant_type", "refresh_token")
+	form.Set("refresh_token", cookie.Value)
 
+	tokenResp, err := performTokenRequest(ctx, form, config)
 	if err != nil {
-		ctx.Logger().Info("Error performing token request")
-		return nil, err
+		return nil, fmt.Errorf("perform token request: %w", err)
 	}
 
 	// Write cookies
-	err = writeCookie(ctx, &http.Cookie{
-		Name:   "access_token",
-		Value:  tokens.AccessToken,
+	writeCookie(ctx, config, &http.Cookie{
+		Name:   accessTokenCookieKey,
+		Value:  tokenResp.AccessToken,
 		Path:   "/",
-		MaxAge: 3600, // TODO:: We need to get this from the server
+		MaxAge: int(tokenResp.ExpiresIn),
 	})
 
-	if err != nil {
-		ctx.Logger().Info("Error creating cookie")
-		return nil, err
+	if tokenResp.RefreshToken != "" { // if auth server returned new refresh_token
+		writeCookie(ctx, config, &http.Cookie{
+			Name:   refreshTokenCookieKey,
+			Value:  tokenResp.RefreshToken,
+			Path:   "/",            // TODO:: Set this to another specific path?
+			MaxAge: 30 * 24 * 3600, // TODO:: idk, from OAuth standard, refresh_token exp in tokenResp is not required. Maybe we want to add this
+		})
 	}
 
-	err = writeCookie(ctx, &http.Cookie{
-		Name:   "refresh_token",
-		Value:  tokens.RefreshToken,
-		Path:   "/",     // TODO:: Set this to another specific path?
-		MaxAge: 2592000, // TODO:: We need to get this from the server
-	})
-
-	if err != nil {
-		ctx.Logger().Info("Error creating cookie")
-		return nil, err
-	}
-
-	ctx.Logger().Debug("Tokens refreshed")
-
-	return validateToken(ctx, clientSecret, tokens.AccessToken)
+	return tokenResp, nil
 }
 
 // writeCookie writes a user client cookie
-func writeCookie(ctx echo.Context, cookie *http.Cookie) error {
+func writeCookie(ctx echo.Context, config AuthMiddlewareConfig, cookie *http.Cookie) {
 
 	cookie = &http.Cookie{
 		Name:     cookie.Name,
@@ -131,16 +70,15 @@ func writeCookie(ctx echo.Context, cookie *http.Cookie) error {
 		MaxAge:   cookie.MaxAge,
 	}
 
-	cookieDomain, ok := os.LookupEnv("SAMNA_AUTH_COOKIE_DOMAIN")
-	if ok {
-		if strings.Contains(cookieDomain, "localhost") {
+	if config.CookieDomain != "" {
+		cookie.Domain = config.CookieDomain
+
+		if strings.Contains(config.CookieDomain, "localhost") {
 			cookie.Secure = false
 		}
-		cookie.Domain = cookieDomain
 	}
 
 	ctx.SetCookie(cookie)
-	return nil
 }
 
 func clearCookie(ctx echo.Context, name string) {
@@ -166,98 +104,73 @@ func clearCookie(ctx echo.Context, name string) {
 }
 
 // performTokenRequest performs a token refresh or initial request
-func performTokenRequest(ctx echo.Context, authURL url.URL, clientID uuid.UUID, clientSecret string, body io.Reader, onRequest func(req *http.Request) error) (*ResponseToken, error) {
+func performTokenRequest(ctx echo.Context, params url.Values, config AuthMiddlewareConfig) (*ResponseToken, error) {
+	encodedData := params.Encode()
 
-	// Verify with auth service
-	client := &http.Client{}
-	req, err := http.NewRequest(http.MethodPost, authURL.String(), body)
+	targetURL := config.TokenURL.String()
+
+	req, err := http.NewRequestWithContext(ctx.Request().Context(), http.MethodPost, targetURL, strings.NewReader(encodedData))
 	if err != nil {
-		ctx.Logger().Error("Failed to create a request to redirect login URL") //TODO:: Encrypt this a bit more?
-		return nil, err
+		return nil, fmt.Errorf("create request: %w", err)
 	}
 
-	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("Accept", "application/json")
-	req.Header.Set("Samna-Client-Id", clientID.String())
-	req.Header.Set("Samna-Client-Secret", clientSecret)
 
-	if onRequest != nil {
-		if err = onRequest(req); err != nil {
-			ctx.Logger().Error("Failed to execute onRequest function")
-			return nil, err
-		}
-	}
+	req.SetBasicAuth(config.ClientID.String(), config.ClientSecret)
+
+	client := &http.Client{Timeout: 3 * time.Second}
 
 	// Perform request
 	resp, err := client.Do(req)
 	if err != nil {
-		ctx.Logger().Infof("Failed to perform request : %s", err) //TODO:: Encrypt this a bit more?
-		return nil, err
+		return nil, fmt.Errorf("send request: %w", err)
 	}
+	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		ctx.Logger().Infof("Unauthorized: %d", resp.StatusCode) //TODO:: Encrypt this a bit more?
-		return nil, ErrorUnauthorized
-	}
+		if resp.StatusCode == http.StatusUnauthorized {
+			return nil, fmt.Errorf("auth server retuned status unauthorized: %w", ErrorUnauthorized)
+		}
 
-	defer resp.Body.Close()
+		return nil, fmt.Errorf("auth server returned status %d", resp.StatusCode)
+	}
 
 	// Parse response body
 	var respBody ResponseToken
 	if err = json.NewDecoder(resp.Body).Decode(&respBody); err != nil {
-		ctx.Logger().Info("Failed to parse auth response body") //TODO:: Encrypt this a bit more?
-		return nil, ErrorUnauthorized
+		return nil, fmt.Errorf("decode response: %w", err)
 	}
 
-	//TODO:: This should be redirected to the original request performing the call
 	return &respBody, nil
 }
 
 // exchangeAuthorizationCode redirects the request to the auth middleware
-func exchangeAuthorizationCode(ctx echo.Context, next echo.HandlerFunc, authCode string, authURL url.URL, clientID uuid.UUID, clientSecret string) error {
-	bodyCode := BodyCode{
-		Code: &authCode,
-	}
+func exchangeAuthorizationCode(ctx echo.Context, authCode string, config AuthMiddlewareConfig) error {
+	form := url.Values{}
+	form.Set("grant_type", "authorization_code")
+	form.Set("code", authCode)
+	form.Set("redirect_uri", config.RedirectURI)
 
-	jsonBody, err := json.Marshal(bodyCode)
+	tokenResp, err := performTokenRequest(ctx, form, config)
 	if err != nil {
-		ctx.Logger().Error("Malformed validation body")
-		return ctx.String(http.StatusInternalServerError, "Malformed validation body")
-	}
-
-	tokens, err := performTokenRequest(ctx, authURL, clientID, clientSecret, bytes.NewBuffer(jsonBody), nil)
-	if err != nil {
-		ctx.Logger().Infof("Error performing token request: %s", err)
-		if errors.Is(err, ErrorUnauthorized) {
-			return ctx.String(http.StatusUnauthorized, "Unauthorized")
-		}
-		return ctx.String(http.StatusInternalServerError, "Malformed validation body")
+		return fmt.Errorf("perform token request: %w", err)
 	}
 
 	// Write cookies
-	err = writeCookie(ctx, &http.Cookie{
-		Name:   "access_token",
-		Value:  tokens.AccessToken,
+	writeCookie(ctx, config, &http.Cookie{
+		Name:   accessTokenCookieKey,
+		Value:  tokenResp.AccessToken,
 		Path:   "/",
-		MaxAge: 3600, // TODO:: We need to get this from the server
+		MaxAge: int(tokenResp.ExpiresIn),
 	})
 
-	if err != nil {
-		ctx.Logger().Info("Error creating cookie")
-		return ctx.NoContent(http.StatusInternalServerError)
-	}
-
-	err = writeCookie(ctx, &http.Cookie{
-		Name:   "refresh_token",
-		Value:  tokens.RefreshToken,
-		Path:   "/",     // TODO:: Set this to another specific path?
-		MaxAge: 2592000, // TODO:: We need to get this from the server
+	writeCookie(ctx, config, &http.Cookie{
+		Name:   refreshTokenCookieKey,
+		Value:  tokenResp.RefreshToken,
+		Path:   "/",            // TODO:: Set this to another specific path?
+		MaxAge: 30 * 24 * 3600, // TODO:: idk, from OAuth standard, refresh_token exp in tokenResp is not required. Maybe we want to add this
 	})
 
-	if err != nil {
-		ctx.Logger().Info("Error creating cookie")
-		return ctx.NoContent(http.StatusInternalServerError)
-	}
-
-	return next(ctx) //TODO:: This should be redirected to the original request performing the call
+	return nil
 }

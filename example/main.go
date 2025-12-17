@@ -1,12 +1,13 @@
 package main
 
 import (
+	"net/http"
+
 	"github.com/joho/godotenv"
 	"github.com/labstack/echo/v4"
 	em "github.com/labstack/echo/v4/middleware"
 	"github.com/labstack/gommon/log"
 	"github.com/nimling/samna-auth-middleware/sauth"
-	"net/http"
 )
 
 func main() {
@@ -34,7 +35,7 @@ func main() {
 	}, sauth.AuthMiddlewareEnv())
 
 	// Start server
-	if err := e.Start(":3201"); err != nil {
+	if err := e.Start(":3202"); err != nil {
 		e.Logger.Fatal(err)
 	}
 }
