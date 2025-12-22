@@ -46,7 +46,7 @@ func AuthMiddleware(config *AuthMiddlewareConfig) echo.MiddlewareFunc {
 	if config.AuthorizedUserID != nil {
 		return func(next echo.HandlerFunc) echo.HandlerFunc {
 			return func(ctx echo.Context) error {
-				ctx.Set(UserIDKey, config.AuthorizedUserID)
+				ctx.Set(UserIDKey, *config.AuthorizedUserID)
 				return next(ctx)
 			}
 		}
