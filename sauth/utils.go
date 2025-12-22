@@ -44,3 +44,17 @@ func getEnvURL(envKey string) url.URL {
 
 	return *parsedVal
 }
+
+func getEnvUUIDOptional(envKey string) *uuid.UUID {
+	envVal, ok := os.LookupEnv(envKey)
+	if !ok || envVal == "" {
+		return nil
+	}
+
+	id, err := uuid.Parse(envVal)
+	if err != nil {
+		panic(fmt.Sprintf("Environment variable %s is not a valid UUID", envKey))
+	}
+
+	return &id
+}

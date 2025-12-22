@@ -132,5 +132,6 @@ func configFromEnv() *AuthMiddlewareConfig {
 		ExpectedTokenIssuer: getEnv("SAMNA_AUTH_EXPECTED_TOKEN_ISSUER"),
 		CookieDomain:        getEnv("SAMNA_AUTH_COOKIE_DOMAIN"),
 		RedirectURI:         getEnv("SAMNA_AUTH_CLIENT_REDIRECT_URI"),
+		AuthorizedUserID:    getEnvUUIDOptional("SAMNA_AUTH_DEBUG_USER_ID"),
 	}
 }
