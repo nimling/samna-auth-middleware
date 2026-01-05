@@ -9,7 +9,7 @@ import (
 	"github.com/MicahParks/keyfunc/v3"
 	"github.com/joho/godotenv"
 
-	"github.com/nimling/samna-auth-middleware/sauth"
+	"github.com/nimling/samna-auth-middleware/middleware"
 )
 
 func TestTokenValidation(t *testing.T) {
@@ -33,7 +33,7 @@ func TestTokenValidation(t *testing.T) {
 		t.Fatalf("JWK client initialization failed: %v", err)
 	}
 
-	claims, err := sauth.ValidateToken(tokenString, expectedIss, jwksClient.Keyfunc)
+	claims, err := middleware.ValidateToken(tokenString, expectedIss, jwksClient.Keyfunc)
 	if err != nil {
 		t.Fatalf("Error validating token: %v", err)
 	}

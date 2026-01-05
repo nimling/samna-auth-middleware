@@ -1,4 +1,4 @@
-package sauth
+package middleware
 
 import (
 	"fmt"

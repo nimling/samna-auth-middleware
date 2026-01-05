@@ -1,4 +1,4 @@
-package sauth
+package middleware
 
 import (
 	"encoding/json"
@@ -130,7 +130,7 @@ func performTokenRequest(ctx echo.Context, params url.Values, config AuthMiddlew
 
 	if resp.StatusCode != http.StatusOK {
 		if resp.StatusCode == http.StatusUnauthorized {
-			return nil, fmt.Errorf("auth server retuned status unauthorized: %w", ErrorUnauthorized)
+			return nil, fmt.Errorf("auth server returned status unauthorized: %w", ErrorUnauthorized)
 		}
 
 		return nil, fmt.Errorf("auth server returned status %d", resp.StatusCode)

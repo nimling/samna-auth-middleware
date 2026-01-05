@@ -1,4 +1,4 @@
-package sauth
+package middleware
 
 import (
 	"errors"
@@ -11,7 +11,10 @@ import (
 	"github.com/labstack/echo/v4"
 )
 
-const UserIDKey = "user_id"
+const (
+	UserIDKey      = "user_id"
+	AccessTokenKey = "access_token"
+)
 
 const authCodeParamKey = "sauth_auth_code"
 
@@ -65,6 +68,7 @@ func AuthMiddleware(config *AuthMiddlewareConfig) echo.MiddlewareFunc {
 				claimUser, vldErr := ValidateToken(accessToken, config.ExpectedTokenIssuer, jwksClient.Keyfunc)
 				if vldErr == nil { // If access token is valid
 					ctx.Set(UserIDKey, claimUser.ID)
+					ctx.Set(AccessTokenKey, accessToken)
 					return next(ctx)
 				}
 
@@ -116,6 +120,7 @@ func AuthMiddleware(config *AuthMiddlewareConfig) echo.MiddlewareFunc {
 			}
 
 			ctx.Set(UserIDKey, claims.ID)
+			ctx.Set(AccessTokenKey, tokens.AccessToken)
 
 			return next(ctx)
 		}
