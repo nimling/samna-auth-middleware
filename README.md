@@ -61,13 +61,15 @@ The middleware follows this step-by-step authentication flow:
 ### Step 5: Refresh Tokens
 - If no authorization code is present, attempts to refresh tokens
 - Reads `sauth_refresh_token` from cookies
-- Calls OAuth token endpoint with `grant_type=refresh_token`
+- Calls OAuth token endpoint with:
+    - `grant_type=sauth_refresh_token` (instead of standard `refresh_token`)
+    - Basic authentication using `clientSlug` as username and `clientSecret` as password
 - If successful:
     - Extracts user claims from token claims
     - Sets them in Echo context
     - Allows request to proceed
 - If refresh fails (e.g., refresh token expired):
-  - Returns `401 Unauthorized`
+    - Returns `401 Unauthorized`
 
 ### Step 6: Extract User Information
 - After successful authentication (via valid token or refresh/exchange)
@@ -120,15 +122,6 @@ SAMNA_AUTH_CLIENT_SLUG=myapp
 # Client secret for authenticating requests to auth server
 SAMNA_AUTH_CLIENT_SECRET=your-client-secret
 
-# OAuth token endpoint URL (for token exchange and refresh)
-SAMNA_AUTH_TOKEN_URL=https://auth.example.com/oauth/token
-
-# JWKS endpoint URL (for fetching public keys to validate JWT signatures)
-SAMNA_AUTH_JWKS_URL=https://auth.example.com/api/client/myapp/jwks
-
-# Expected token issuer (must match the issuer claim in JWT tokens)
-SAMNA_AUTH_EXPECTED_TOKEN_ISSUER=https://auth.example.com
-
 # Cookie domain (optional, for cross-subdomain cookies)
 # If not set, cookies are set for the current domain only
 SAMNA_AUTH_COOKIE_DOMAIN=.example.com
@@ -136,6 +129,9 @@ SAMNA_AUTH_COOKIE_DOMAIN=.example.com
 # Redirect URI (used during authorization code exchange)
 # Must match the redirect URI registered in the auth server
 SAMNA_AUTH_CLIENT_REDIRECT_URI=https://myapp.example.com/callback
+
+# OpenID configuration URL
+SAMNA_AUTH_OPENID_CONFIG_URL=http://localhost:3200/api/client/bookable/.well-known/openid-configuration
 ```
 
 **Example `.env` file:**
@@ -144,11 +140,9 @@ SAMNA_AUTH_CLIENT_REDIRECT_URI=https://myapp.example.com/callback
 SAMNA_AUTH_CLIENT_ID=00000000-0000-0000-0000-000000000000
 SAMNA_AUTH_CLIENT_SLUG=myapp
 SAMNA_AUTH_CLIENT_SECRET=your-client-secret
-SAMNA_AUTH_TOKEN_URL=http://localhost:3200/oauth/token
-SAMNA_AUTH_JWKS_URL=http://localhost:3200/api/client/myapp/jwks
-SAMNA_AUTH_EXPECTED_TOKEN_ISSUER=http://localhost:3200
 SAMNA_AUTH_COOKIE_DOMAIN=localhost
 SAMNA_AUTH_CLIENT_REDIRECT_URI=http://localhost:8080/callback
+SAMNA_AUTH_OPENID_CONFIG_URL=http://localhost:3200/api/client/bookable/.well-known/openid-configuration
 ```
 
 ### Option 2: Manual Configuration
@@ -159,35 +153,32 @@ For programmatic configuration or when you need to set values at runtime:
 package main
 
 import (
-    "net/url"
-    
-    "github.com/google/uuid"
-    "github.com/labstack/echo/v4"
-    samnamw "github.com/nimling/samna-auth-middleware/middleware"
+	"net/url"
+	"os"
+
+	"github.com/google/uuid"
+	"github.com/labstack/echo/v4"
+	samnamw "github.com/nimling/samna-auth-middleware/middleware"
 )
 
 func main() {
-    e := echo.New()
-    
-    // Build configuration manually
-    tokenURL, _ := url.Parse("https://auth.example.com/oauth/token")
-    jwksURL, _ := url.Parse("https://auth.example.com/api/client/myapp/jwks")
-    
-    config := &samnamw.AuthMiddlewareConfig{
-        ClientID:            uuid.MustParse("00000000-0000-0000-0000-000000000000"),
-        ClientSlug:          "myapp",
-        ClientSecret:        "your-client-secret",
-        TokenURL:            *tokenURL,
-        JWKSURL:             *jwksURL,
-        ExpectedTokenIssuer: "https://auth.example.com",
-        CookieDomain:        ".example.com",
-        RedirectURI:         "https://myapp.example.com/callback",
-    }
-    
-    // Apply middleware with manual config
-    e.Use(samnamw.AuthMiddleware(config))
-    
-    e.Start(":8080")
+	e := echo.New()
+
+	// Build configuration manually
+	openIDUrl, _ := url.Parse("http://localhost:3200/api/client/sauth/.well-known/openid-configuration")
+
+	config := &samnamw.AuthMiddlewareConfig{
+		ClientSlug:   "myapp",
+		ClientSecret: "your-client-secret",
+		OpenIDConfigURL: openIDUrl,
+		CookieDomain: ".example.com",
+		RedirectURI:  "https://myapp.example.com/callback",
+	}
+
+	// Apply middleware with manual config
+	e.Use(samnamw.AuthMiddleware(config))
+
+	e.Start(":8080")
 }
 ```
 
@@ -253,9 +244,7 @@ SAMNA_AUTH_SERVER=http://localhost:3200
 SAMNA_AUTH_CLIENT_ID=your-client-id
 SAMNA_AUTH_CLIENT_SLUG=your-client-slug
 SAMNA_AUTH_CLIENT_SECRET=your-client-secret
-SAMNA_AUTH_TOKEN_URL=http://localhost:3200/oauth/token
-SAMNA_AUTH_JWKS_URL=http://localhost:3200/api/client/your-client-slug/jwks
-SAMNA_AUTH_EXPECTED_TOKEN_ISSUER=http://localhost:3200
+SAMNA_AUTH_OPENID_CONFIG_URL=http://localhost:3200/api/client/bookable/.well-known/openid-configuration
 SAMNA_AUTH_CLIENT_REDIRECT_URI=http://localhost:8080/callback
 ```
 

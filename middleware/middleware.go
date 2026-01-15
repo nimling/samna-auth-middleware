@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -19,7 +20,6 @@ const (
 const authCodeParamKey = "sauth_auth_code"
 
 type AuthMiddlewareConfig struct {
-	ClientID            uuid.UUID
 	ClientSlug          string
 	ClientSecret        string
 	TokenURL            url.URL
@@ -27,6 +27,7 @@ type AuthMiddlewareConfig struct {
 	ExpectedTokenIssuer string
 	CookieDomain        string
 	RedirectURI         string
+	OpenIDConfigURL     url.URL
 
 	// No auth for easy development/testing
 	// TODO:: remove in future versions
@@ -53,6 +54,10 @@ func AuthMiddleware(config *AuthMiddlewareConfig) echo.MiddlewareFunc {
 				return next(ctx)
 			}
 		}
+	}
+
+	if err := getOpenIDConfiguration(context.Background(), config); err != nil {
+		panic(fmt.Errorf("getting OpenID configuration failed: %v", err))
 	}
 
 	jwksClient, err := keyfunc.NewDefault([]string{config.JWKSURL.String()})
@@ -129,14 +134,11 @@ func AuthMiddleware(config *AuthMiddlewareConfig) echo.MiddlewareFunc {
 
 func configFromEnv() *AuthMiddlewareConfig {
 	return &AuthMiddlewareConfig{
-		ClientID:            getEnvUUID("SAMNA_AUTH_CLIENT_ID"),
-		ClientSlug:          getEnv("SAMNA_AUTH_CLIENT_SLUG"),
-		ClientSecret:        getEnv("SAMNA_AUTH_CLIENT_SECRET"),
-		TokenURL:            getEnvURL("SAMNA_AUTH_TOKEN_URL"),
-		JWKSURL:             getEnvURL("SAMNA_AUTH_JWKS_URL"),
-		ExpectedTokenIssuer: getEnv("SAMNA_AUTH_EXPECTED_TOKEN_ISSUER"),
-		CookieDomain:        getEnv("SAMNA_AUTH_COOKIE_DOMAIN"),
-		RedirectURI:         getEnv("SAMNA_AUTH_CLIENT_REDIRECT_URI"),
-		AuthorizedUserID:    getEnvUUIDOptional("SAMNA_AUTH_DEBUG_USER_ID"),
+		ClientSlug:       getEnv("SAMNA_AUTH_CLIENT_SLUG"),
+		ClientSecret:     getEnv("SAMNA_AUTH_CLIENT_SECRET"),
+		CookieDomain:     getEnv("SAMNA_AUTH_COOKIE_DOMAIN"),
+		RedirectURI:      getEnv("SAMNA_AUTH_CLIENT_REDIRECT_URI"),
+		AuthorizedUserID: getEnvUUIDOptional("SAMNA_AUTH_DEBUG_USER_ID"),
+		OpenIDConfigURL:  getEnvURL("SAMNA_AUTH_OPENID_CONFIG_URL"),
 	}
 }

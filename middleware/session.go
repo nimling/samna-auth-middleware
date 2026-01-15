@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -29,7 +30,7 @@ func refreshTokens(ctx echo.Context, config AuthMiddlewareConfig) (*ResponseToke
 	}
 
 	form := url.Values{}
-	form.Set("grant_type", "refresh_token")
+	form.Set("grant_type", "sauth_refresh_token")
 	form.Set("refresh_token", cookie.Value)
 
 	tokenResp, err := performTokenRequest(ctx, form, config)
@@ -117,7 +118,7 @@ func performTokenRequest(ctx echo.Context, params url.Values, config AuthMiddlew
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("Accept", "application/json")
 
-	req.SetBasicAuth(config.ClientID.String(), config.ClientSecret)
+	req.SetBasicAuth(config.ClientSlug, config.ClientSecret)
 
 	client := &http.Client{Timeout: 3 * time.Second}
 
@@ -171,6 +172,51 @@ func exchangeAuthorizationCode(ctx echo.Context, authCode string, config AuthMid
 		Path:   "/",            // TODO:: Set this to another specific path?
 		MaxAge: 30 * 24 * 3600, // TODO:: idk, from OAuth standard, refresh_token exp in tokenResp is not required. Maybe we want to add this
 	})
+
+	return nil
+}
+
+type openIDConfiguration struct {
+	Issuer        string `json:"issuer"`
+	TokenEndpoint string `json:"token_endpoint"`
+	JwksUri       string `json:"jwks_uri"`
+}
+
+func getOpenIDConfiguration(ctx context.Context, config *AuthMiddlewareConfig) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, config.OpenIDConfigURL.String(), nil)
+	if err != nil {
+		return fmt.Errorf("create request: %w", err)
+	}
+
+	client := &http.Client{Timeout: 3 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("auth server returned status %d", resp.StatusCode)
+	}
+
+	var respBody openIDConfiguration
+	if err = json.NewDecoder(resp.Body).Decode(&respBody); err != nil {
+		return fmt.Errorf("decode response: %w", err)
+	}
+
+	jwksUrl, err := url.Parse(respBody.JwksUri)
+	if err != nil {
+		return fmt.Errorf("parse jwks uri: %w", err)
+	}
+
+	tokenUrl, err := url.Parse(respBody.TokenEndpoint)
+	if err != nil {
+		return fmt.Errorf("parse token endpoint: %w", err)
+	}
+
+	config.ExpectedTokenIssuer = respBody.Issuer
+	config.JWKSURL = *jwksUrl
+	config.TokenURL = *tokenUrl
 
 	return nil
 }
