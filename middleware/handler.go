@@ -1,38 +1,35 @@
 package middleware
 
 import (
-	"github.com/google/uuid"
-	"github.com/labstack/echo/v4"
+	"fmt"
 	"net/http"
 	"os"
+
+	"github.com/labstack/echo/v4"
 )
 
 func RedirectLogin(ctx echo.Context) error {
+	providerName := ctx.Param("provider")
+	if len(providerName) == 0 {
+		return echo.NewHTTPError(http.StatusForbidden, "Unknown provider")
+	}
+
 	clientSlug, ok := os.LookupEnv("SAMNA_AUTH_CLIENT_SLUG")
 	if !ok {
 		panic("Invalid SAMNA_AUTH_CLIENT_SLUG")
 	}
 
-	authURL := getEnvURL("SAMNA_AUTH_SERVER")
-	authURL.Path = "/login/" + clientSlug
+	authURL := getEnvURL("SAMNA_AUTH_ENDPOINT")
+	authURL.Path = fmt.Sprintf("/api/p/%s/login", providerName)
+
+	q := authURL.Query()
+	q.Set("client_slug", clientSlug)
+	authURL.RawQuery = q.Encode()
 
 	return ctx.Redirect(http.StatusTemporaryRedirect, authURL.String())
 }
 
 func GetLogout(ctx echo.Context) error {
-
-	clientIDStr, ok := os.LookupEnv("SAMNA_AUTH_CLIENT_ID")
-	if !ok {
-		ctx.Logger().Error("Failed to locate SAMNA_AUTH_CLIENT_ID in environment")
-		return ctx.NoContent(http.StatusInternalServerError)
-	}
-
-	clientID, err := uuid.Parse(clientIDStr)
-	if err != nil {
-		ctx.Logger().Error("The clientID sat from env via SAMNA_AUTH_CLIENT_ID is malformed")
-		return ctx.NoContent(http.StatusInternalServerError)
-	}
-
 	clientSecret, ok := os.LookupEnv("SAMNA_AUTH_CLIENT_SECRET")
 	if !ok {
 		ctx.Logger().Error("No clientSecret specified for AuthMiddleware")
@@ -44,8 +41,8 @@ func GetLogout(ctx echo.Context) error {
 		ctx.Logger().Error("Invalid SAMNA_AUTH_CLIENT_SLUG")
 	}
 
-	authURL := getEnvURL("SAMNA_AUTH_SERVER")
-	authURL.Path = "/revoke/" + clientSlug
+	authURL := getEnvURL("SAMNA_AUTH_ENDPOINT")
+	authURL.Path = "/api/logout"
 
 	clearCookie(ctx, "sauth_csrf_token")
 	clearCookie(ctx, "sauth_refresh_token")
@@ -61,8 +58,13 @@ func GetLogout(ctx echo.Context) error {
 
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
-	req.Header.Set("Samna-Client-Id", clientID.String())
-	req.Header.Set("Samna-Client-Secret", clientSecret)
+	req.Header.Set("SAuth-Client-Slug", clientSlug)
+	req.Header.Set("SAuth-Client-Secret", clientSecret)
+	req.Header.Set("Authorization", ctx.Request().Header.Get("Authorization"))
+
+	if sessionCookie, err := ctx.Cookie("sauth_session"); err == nil {
+		req.AddCookie(sessionCookie)
+	}
 
 	// Perform request
 	resp, err := client.Do(req)
@@ -71,10 +73,5 @@ func GetLogout(ctx echo.Context) error {
 		return ctx.NoContent(http.StatusInternalServerError)
 	}
 
-	if resp.StatusCode != http.StatusOK {
-		ctx.Logger().Infof("Unauthorized: %d", resp.StatusCode) //TODO:: Encrypt this a bit more?
-		return ctx.NoContent(http.StatusInternalServerError)
-	}
-
-	return ctx.NoContent(http.StatusOK)
+	return ctx.NoContent(resp.StatusCode)
 }

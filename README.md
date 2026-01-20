@@ -128,7 +128,7 @@ SAMNA_AUTH_COOKIE_DOMAIN=.example.com
 
 # Redirect URI (used during authorization code exchange)
 # Must match the redirect URI registered in the auth server
-SAMNA_AUTH_CLIENT_REDIRECT_URI=https://myapp.example.com/callback
+SAMNA_AUTH_REDIRECT_URI=https://myapp.example.com/callback
 
 # OpenID configuration URL
 SAMNA_AUTH_OPENID_CONFIG_URL=http://localhost:3200/api/client/bookable/.well-known/openid-configuration
@@ -141,7 +141,7 @@ SAMNA_AUTH_CLIENT_ID=00000000-0000-0000-0000-000000000000
 SAMNA_AUTH_CLIENT_SLUG=myapp
 SAMNA_AUTH_CLIENT_SECRET=your-client-secret
 SAMNA_AUTH_COOKIE_DOMAIN=localhost
-SAMNA_AUTH_CLIENT_REDIRECT_URI=http://localhost:8080/callback
+SAMNA_AUTH_REDIRECT_URI=http://localhost:8080/callback
 SAMNA_AUTH_OPENID_CONFIG_URL=http://localhost:3200/api/client/bookable/.well-known/openid-configuration
 ```
 
@@ -209,6 +209,52 @@ func protectedHandler(ctx echo.Context) error {
 
 **Note:** The access token is automatically set in the Echo context by the middleware and can be used for making authenticated API calls to the samna-auth service (e.g., using the client library).
 
+## Login and Logout
+
+The middleware package provides helper functions for handling user login and logout flows.
+
+### RedirectLogin
+
+Redirects users to the OAuth provider login page. The provider name should be specified as a URL parameter.
+
+```go
+e.GET("/login/:provider", middleware.RedirectLogin)
+```
+
+**Required Environment Variables:**
+- `SAMNA_AUTH_CLIENT_SLUG` - Client slug for constructing the login URL
+- `SAMNA_AUTH_ENDPOINT` - Auth server endpoint URL
+
+**Usage Example:**
+```go
+// Redirect to Google login
+// GET /login/google -> redirects to auth server's Google login page
+e.GET("/login/:provider", middleware.RedirectLogin)
+```
+
+### GetLogout
+
+Handles user logout by clearing authentication cookies and notifying the auth server.
+
+```go
+e.GET("/logout", middleware.GetLogout)
+```
+
+**Required Environment Variables:**
+- `SAMNA_AUTH_CLIENT_SLUG` - Client slug for authentication
+- `SAMNA_AUTH_CLIENT_SECRET` - Client secret for authentication
+- `SAMNA_AUTH_ENDPOINT` - Auth server endpoint URL
+
+**Usage Example:**
+```go
+e.GET("/logout", middleware.GetLogout)
+```
+
+This function:
+- Clears `sauth_csrf_token`, `sauth_refresh_token`, and `sauth_access_token` cookies
+- Sends a logout request to the auth server with client credentials and session cookie
+- Returns the status code from the auth server response
+
 ## Cookie Configuration
 
 The middleware automatically manages authentication cookies:
@@ -240,13 +286,12 @@ A complete example is provided in the `/example/middleware` directory. To run it
 
 1. Create a `.env` file with your configuration:
 ```env
-SAMNA_AUTH_SERVER=http://localhost:3200
+SAMNA_AUTH_ENDPOINT=http://localhost:3200
 SAMNA_AUTH_CLIENT_ID=your-client-id
 SAMNA_AUTH_CLIENT_SLUG=your-client-slug
 SAMNA_AUTH_CLIENT_SECRET=your-client-secret
 SAMNA_AUTH_OPENID_CONFIG_URL=http://localhost:3200/api/client/bookable/.well-known/openid-configuration
-SAMNA_AUTH_CLIENT_REDIRECT_URI=http://localhost:8080/callback
-```
+SAMNA_AUTH_REDIRECT_URI=http://localhost:8080/callback
 
 2. Run the example:
 ```bash

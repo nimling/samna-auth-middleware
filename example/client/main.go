@@ -19,12 +19,12 @@ func main() {
 	_ = godotenv.Load(".env")
 
 	// Initialize the client
-	apiURL := os.Getenv("SAMNA_AUTH_SERVER_API_URL")
+	apiURL := os.Getenv("SAMNA_AUTH_ENDPOINT") + "/api"
 	clientSlug := os.Getenv("SAMNA_AUTH_CLIENT_SLUG")
 	clientSecret := os.Getenv("SAMNA_AUTH_CLIENT_SECRET")
 
 	if apiURL == "" || clientSlug == "" || clientSecret == "" {
-		panic("Missing required environment variables: SAMNA_AUTH_SERVER_API_URL, SAMNA_AUTH_CLIENT_SLUG, SAMNA_AUTH_CLIENT_SECRET")
+		panic("Missing required environment variables: SAMNA_AUTH_ENDPOINT, SAMNA_AUTH_CLIENT_SLUG, SAMNA_AUTH_CLIENT_SECRET")
 	}
 
 	sauthClient := client.NewSAuthClient(apiURL, clientSlug, clientSecret)
@@ -423,4 +423,3 @@ func handleClientError(ctx echo.Context, err error) error {
 func stringPtr(s string) *string {
 	return &s
 }
-

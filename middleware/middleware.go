@@ -133,12 +133,18 @@ func AuthMiddleware(config *AuthMiddlewareConfig) echo.MiddlewareFunc {
 }
 
 func configFromEnv() *AuthMiddlewareConfig {
+	openIDUrlStr := getEnv("SAMNA_AUTH_SERVER") + "/api/client/" + getEnv("SAMNA_AUTH_CLIENT_SLUG") + "/.well-known/openid-configuration"
+	openIDUrl, err := url.Parse(openIDUrlStr)
+	if err != nil {
+		panic(fmt.Errorf("failed to parse openid configuration URL: %v", err))
+	}
+
 	return &AuthMiddlewareConfig{
 		ClientSlug:       getEnv("SAMNA_AUTH_CLIENT_SLUG"),
 		ClientSecret:     getEnv("SAMNA_AUTH_CLIENT_SECRET"),
 		CookieDomain:     getEnv("SAMNA_AUTH_COOKIE_DOMAIN"),
-		RedirectURI:      getEnv("SAMNA_AUTH_CLIENT_REDIRECT_URI"),
+		RedirectURI:      getEnv("SAMNA_AUTH_REDIRECT_URI"),
+		OpenIDConfigURL:  *openIDUrl,
 		AuthorizedUserID: getEnvUUIDOptional("SAMNA_AUTH_DEBUG_USER_ID"),
-		OpenIDConfigURL:  getEnvURL("SAMNA_AUTH_OPENID_CONFIG_URL"),
 	}
 }

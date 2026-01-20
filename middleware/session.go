@@ -218,5 +218,7 @@ func getOpenIDConfiguration(ctx context.Context, config *AuthMiddlewareConfig) e
 	config.JWKSURL = *jwksUrl
 	config.TokenURL = *tokenUrl
 
+	fmt.Printf("\n\nGot OpenID Configuration: %+v\n", respBody)
+
 	return nil
 }
