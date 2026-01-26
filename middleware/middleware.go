@@ -2,10 +2,13 @@ package middleware
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
+	"os"
 
 	"github.com/MicahParks/keyfunc/v3"
 	"github.com/google/uuid"
@@ -129,6 +132,64 @@ func AuthMiddleware(config *AuthMiddlewareConfig) echo.MiddlewareFunc {
 
 			return next(ctx)
 		}
+	}
+}
+
+func ClientMiddleware(next echo.HandlerFunc) echo.HandlerFunc {
+	return func(ctx echo.Context) error {
+		clientSecret, ok := os.LookupEnv("SAMNA_AUTH_CLIENT_SECRET")
+		if !ok {
+			ctx.Logger().Error("No clientSecret specified for AuthMiddleware")
+			return ctx.NoContent(http.StatusInternalServerError)
+		}
+
+		clientSlug, ok := os.LookupEnv("SAMNA_AUTH_CLIENT_SLUG")
+		if !ok {
+			ctx.Logger().Error("Invalid SAMNA_AUTH_CLIENT_SLUG")
+			return ctx.NoContent(http.StatusInternalServerError)
+		}
+
+		authURL := getEnvURL("SAMNA_AUTH_ENDPOINT")
+		authURL.Path = "/api/client/validate"
+
+		// Validating slug and secret
+		client := &http.Client{}
+		req, err := http.NewRequest(http.MethodGet, authURL.String(), nil)
+		if err != nil {
+			ctx.Logger().Error("Failed to create a request to redirect revoke URL")
+			return ctx.NoContent(http.StatusInternalServerError)
+		}
+
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Accept", "application/json")
+		req.Header.Set("SAuth-Client-Slug", clientSlug)
+		req.Header.Set("SAuth-Client-Secret", clientSecret)
+
+		resp, err := client.Do(req)
+		if err != nil {
+			ctx.Logger().Infof("Failed to perform request : %s", err)
+			return ctx.NoContent(http.StatusInternalServerError)
+		}
+
+		if resp.StatusCode != http.StatusOK {
+			return ctx.NoContent(http.StatusUnauthorized)
+		}
+
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			ctx.Logger().Error("Failed to read response body: %s", err)
+			return ctx.NoContent(http.StatusInternalServerError)
+		}
+
+		var responseClient ResponseClient
+		if err = json.Unmarshal(body, &responseClient); err != nil {
+			ctx.Logger().Error("Failed to unmarshal response body: %s", err)
+			return ctx.NoContent(http.StatusInternalServerError)
+		}
+
+		ctx.Set("client_id", responseClient.ClientID)
+
+		return next(ctx)
 	}
 }
 

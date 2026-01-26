@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/url"
 	"path"
 
@@ -26,10 +27,19 @@ func NewSAuthClient(apiURL string, clientSlug, clientSecret string) *SAuthClient
 	}
 }
 
-func (c *SAuthClient) PutUser(ctx context.Context, meta RequestMetadata, userID uuid.UUID, body UpdateUserBody) error {
+func (c *SAuthClient) GetUser(ctx context.Context, meta RequestMetadata, userID uuid.UUID) (io.ReadCloser, error) {
 	url, err := joinURL(c.apiURL, "user", userID.String())
 	if err != nil {
-		return fmt.Errorf("build url: %w", err)
+		return nil, fmt.Errorf("build url: %w", err)
+	}
+
+	return c.requestExecutor.Get(ctx, meta, url)
+}
+
+func (c *SAuthClient) PutUser(ctx context.Context, meta RequestMetadata, userID uuid.UUID, body UpdateUserBody) (io.ReadCloser, error) {
+	url, err := joinURL(c.apiURL, "user", userID.String())
+	if err != nil {
+		return nil, fmt.Errorf("build url: %w", err)
 	}
 
 	return c.requestExecutor.Put(ctx, meta, body, url)
@@ -41,7 +51,8 @@ func (c *SAuthClient) PostOrganization(ctx context.Context, meta RequestMetadata
 		return fmt.Errorf("build url: %w", err)
 	}
 
-	return c.requestExecutor.Post(ctx, meta, body, url)
+	_, err = c.requestExecutor.Post(ctx, meta, body, url)
+	return err
 }
 
 func (c *SAuthClient) PutOrganization(ctx context.Context, meta RequestMetadata, orgID uuid.UUID, body UpdateOrganizationBody) error {
@@ -50,7 +61,8 @@ func (c *SAuthClient) PutOrganization(ctx context.Context, meta RequestMetadata,
 		return fmt.Errorf("build url: %w", err)
 	}
 
-	return c.requestExecutor.Put(ctx, meta, body, url)
+	_, err = c.requestExecutor.Put(ctx, meta, body, url)
+	return err
 }
 
 func (c *SAuthClient) DeleteOrganization(ctx context.Context, meta RequestMetadata, orgID uuid.UUID) error {
@@ -59,7 +71,8 @@ func (c *SAuthClient) DeleteOrganization(ctx context.Context, meta RequestMetada
 		return fmt.Errorf("build url: %w", err)
 	}
 
-	return c.requestExecutor.Delete(ctx, meta, url)
+	_, err = c.requestExecutor.Delete(ctx, meta, url)
+	return err
 }
 
 func (c *SAuthClient) PostLocation(ctx context.Context, meta RequestMetadata, body CreateLocationBody) error {
@@ -68,7 +81,8 @@ func (c *SAuthClient) PostLocation(ctx context.Context, meta RequestMetadata, bo
 		return fmt.Errorf("build url: %w", err)
 	}
 
-	return c.requestExecutor.Post(ctx, meta, body, url)
+	_, err = c.requestExecutor.Post(ctx, meta, body, url)
+	return err
 }
 
 func (c *SAuthClient) PutLocation(ctx context.Context, meta RequestMetadata, locID uuid.UUID, body UpdateLocationBody) error {
@@ -77,7 +91,8 @@ func (c *SAuthClient) PutLocation(ctx context.Context, meta RequestMetadata, loc
 		return fmt.Errorf("build url: %w", err)
 	}
 
-	return c.requestExecutor.Put(ctx, meta, body, url)
+	_, err = c.requestExecutor.Put(ctx, meta, body, url)
+	return err
 }
 
 func (c *SAuthClient) DeleteLocation(ctx context.Context, meta RequestMetadata, locID uuid.UUID) error {
@@ -86,7 +101,8 @@ func (c *SAuthClient) DeleteLocation(ctx context.Context, meta RequestMetadata, 
 		return fmt.Errorf("build url: %w", err)
 	}
 
-	return c.requestExecutor.Delete(ctx, meta, url)
+	_, err = c.requestExecutor.Delete(ctx, meta, url)
+	return err
 }
 
 func (c *SAuthClient) PostClaim(ctx context.Context, meta RequestMetadata, body CreateClaimBody) error {
@@ -95,7 +111,8 @@ func (c *SAuthClient) PostClaim(ctx context.Context, meta RequestMetadata, body 
 		return fmt.Errorf("build url: %w", err)
 	}
 
-	return c.requestExecutor.Post(ctx, meta, body, url)
+	_, err = c.requestExecutor.Post(ctx, meta, body, url)
+	return err
 }
 
 func (c *SAuthClient) PutClaim(ctx context.Context, meta RequestMetadata, claimID uuid.UUID, body UpdateClaimBody) error {
@@ -104,7 +121,8 @@ func (c *SAuthClient) PutClaim(ctx context.Context, meta RequestMetadata, claimI
 		return fmt.Errorf("build url: %w", err)
 	}
 
-	return c.requestExecutor.Put(ctx, meta, body, url)
+	_, err = c.requestExecutor.Put(ctx, meta, body, url)
+	return err
 }
 
 func (c *SAuthClient) DeleteClaim(ctx context.Context, meta RequestMetadata, claimID uuid.UUID) error {
@@ -113,7 +131,8 @@ func (c *SAuthClient) DeleteClaim(ctx context.Context, meta RequestMetadata, cla
 		return fmt.Errorf("build url: %w", err)
 	}
 
-	return c.requestExecutor.Delete(ctx, meta, url)
+	_, err = c.requestExecutor.Delete(ctx, meta, url)
+	return err
 }
 
 func (c *SAuthClient) PostClaimObject(ctx context.Context, meta RequestMetadata, claimID uuid.UUID, body CreateClaimObjectBody) error {
@@ -122,7 +141,8 @@ func (c *SAuthClient) PostClaimObject(ctx context.Context, meta RequestMetadata,
 		return fmt.Errorf("build url: %w", err)
 	}
 
-	return c.requestExecutor.Post(ctx, meta, body, url)
+	_, err = c.requestExecutor.Post(ctx, meta, body, url)
+	return err
 }
 
 func (c *SAuthClient) DeleteClaimObject(ctx context.Context, meta RequestMetadata, claimObjectID uuid.UUID) error {
@@ -131,7 +151,8 @@ func (c *SAuthClient) DeleteClaimObject(ctx context.Context, meta RequestMetadat
 		return fmt.Errorf("build url: %w", err)
 	}
 
-	return c.requestExecutor.Delete(ctx, meta, url)
+	_, err = c.requestExecutor.Delete(ctx, meta, url)
+	return err
 }
 
 func (c *SAuthClient) PostClaimUser(ctx context.Context, meta RequestMetadata, claimID uuid.UUID, body CreateClaimUserBody) error {
@@ -140,7 +161,8 @@ func (c *SAuthClient) PostClaimUser(ctx context.Context, meta RequestMetadata, c
 		return fmt.Errorf("build url: %w", err)
 	}
 
-	return c.requestExecutor.Post(ctx, meta, body, url)
+	_, err = c.requestExecutor.Post(ctx, meta, body, url)
+	return err
 }
 
 func (c *SAuthClient) DeleteClaimUser(ctx context.Context, meta RequestMetadata, claimUserID uuid.UUID) error {
@@ -149,7 +171,8 @@ func (c *SAuthClient) DeleteClaimUser(ctx context.Context, meta RequestMetadata,
 		return fmt.Errorf("build url: %w", err)
 	}
 
-	return c.requestExecutor.Delete(ctx, meta, url)
+	_, err = c.requestExecutor.Delete(ctx, meta, url)
+	return err
 }
 
 func joinURL(baseURL string, segments ...string) (string, error) {

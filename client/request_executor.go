@@ -25,31 +25,35 @@ func newHTTPRequestExecutor(clientSlug, clientSecret string) *httpRequestExecuto
 	}
 }
 
-func (e *httpRequestExecutor) Post(ctx context.Context, meta RequestMetadata, body any, url string) error {
+func (e *httpRequestExecutor) Get(ctx context.Context, meta RequestMetadata, url string) (io.ReadCloser, error) {
+	return e.execute(ctx, http.MethodGet, http.StatusOK, meta, nil, url)
+}
+
+func (e *httpRequestExecutor) Post(ctx context.Context, meta RequestMetadata, body any, url string) (io.ReadCloser, error) {
 	return e.execute(ctx, http.MethodPost, http.StatusCreated, meta, body, url)
 }
 
-func (e *httpRequestExecutor) Put(ctx context.Context, meta RequestMetadata, body any, url string) error {
+func (e *httpRequestExecutor) Put(ctx context.Context, meta RequestMetadata, body any, url string) (io.ReadCloser, error) {
 	return e.execute(ctx, http.MethodPut, http.StatusOK, meta, body, url)
 }
 
-func (e *httpRequestExecutor) Delete(ctx context.Context, meta RequestMetadata, url string) error {
+func (e *httpRequestExecutor) Delete(ctx context.Context, meta RequestMetadata, url string) (io.ReadCloser, error) {
 	return e.execute(ctx, http.MethodDelete, http.StatusOK, meta, nil, url)
 }
 
-func (e *httpRequestExecutor) execute(ctx context.Context, method string, expectedStatus int, meta RequestMetadata, reqBody any, url string) error {
+func (e *httpRequestExecutor) execute(ctx context.Context, method string, expectedStatus int, meta RequestMetadata, reqBody any, url string) (io.ReadCloser, error) {
 	var body io.Reader
 	if reqBody != nil {
 		payloadBytes, err := json.Marshal(reqBody)
 		if err != nil {
-			return fmt.Errorf("marshal request body: %w", err)
+			return nil, fmt.Errorf("marshal request body: %w", err)
 		}
 		body = bytes.NewReader(payloadBytes)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, method, url, body)
 	if err != nil {
-		return fmt.Errorf("create request: %w", err)
+		return nil, fmt.Errorf("create request: %w", err)
 	}
 
 	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", meta.AccessToken))
@@ -64,27 +68,26 @@ func (e *httpRequestExecutor) execute(ctx context.Context, method string, expect
 
 	resp, err := e.httpClient.Do(req)
 	if err != nil {
-		return fmt.Errorf("send request: %w", err)
+		return nil, fmt.Errorf("send request: %w", err)
 	}
-	defer resp.Body.Close()
 
 	switch {
 	case resp.StatusCode == expectedStatus:
-		return nil
+		return resp.Body, nil
 
 	case resp.StatusCode == http.StatusUnauthorized:
-		return errors.New("unauthorized")
+		return nil, errors.New("unauthorized")
 
 	case resp.StatusCode == http.StatusForbidden:
-		return ErrForbidden
+		return nil, ErrForbidden
 
 	case resp.StatusCode == http.StatusNotFound:
-		return ErrNotFound
+		return nil, ErrNotFound
 
 	case resp.StatusCode == http.StatusBadRequest || resp.StatusCode == http.StatusConflict:
-		return ErrBadRequest
+		return nil, ErrBadRequest
 
 	default:
-		return fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+		return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
 	}
 }

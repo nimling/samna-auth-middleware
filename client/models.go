@@ -137,3 +137,8 @@ type CreateClaimUserBody struct {
 	StartsAt *time.Time `json:"starts_at"`
 	EndsAt   *time.Time `json:"ends_at"`
 }
+
+type Asset struct {
+	AssetID  uuid.UUID `json:"id"`
+	AssetURL string    `json:"url"`
+}

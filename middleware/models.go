@@ -47,3 +47,8 @@ type ResponseToken struct {
 	RefreshToken string `json:"refresh_token"`
 	ExpiresIn    int64  `json:"expires_in"`
 }
+
+type ResponseClient struct {
+	ClientID uuid.UUID `json:"client_id"`
+	Valid    bool      `json:"valid"`
+}
