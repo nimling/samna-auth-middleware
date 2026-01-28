@@ -116,3 +116,24 @@ func (c *SAuthClient) GetAsset(ctx echo.Context, meta RequestMetadata) error {
 
 	return ctx.Stream(resp.StatusCode, resp.Header.Get("Content-Type"), resp.Body)
 }
+
+func (c *SAuthClient) DeleteAsset(ctx echo.Context, meta RequestMetadata) error {
+	imageURL, err := joinURL(c.apiURL, "user", ctx.Param("id"), "image", ctx.Param("asset_id"))
+
+	req, err := http.NewRequest(http.MethodDelete, imageURL, nil)
+	if err != nil {
+		return ctx.String(http.StatusInternalServerError, "internal server error")
+	}
+
+	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", meta.AccessToken))
+	req.Header.Set("SAuth-Client-Slug", c.requestExecutor.clientSlug)
+	req.Header.Set("SAuth-Client-Secret", c.requestExecutor.clientSecret)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return ctx.String(http.StatusInternalServerError, "Failed to fetch image")
+	}
+	defer resp.Body.Close()
+
+	return ctx.NoContent(resp.StatusCode)
+}
