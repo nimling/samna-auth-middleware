@@ -16,7 +16,7 @@ type RequestMetadata struct {
 type UpdateUserBody struct {
 	FirstName *string    `json:"first_name"`
 	LastName  *string    `json:"last_name"`
-	UserName  *string    `json:"username"`
+	UserName  *string    `json:"user_name"`
 	Phone     *string    `json:"phone"`
 	Email     *string    `json:"email"`
 	Location  *string    `json:"location"`
