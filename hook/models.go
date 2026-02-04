@@ -34,20 +34,21 @@ type Payload struct {
 }
 
 type User struct {
-	ID        uuid.UUID  `json:"id"`
-	FirstName string     `json:"first_name"`
-	LastName  string     `json:"last_name"`
-	UserName  string     `json:"user_name"`
-	Phone     string     `json:"phone"`
-	Email     string     `json:"email"`
-	Location  string     `json:"location"`
-	Status    string     `json:"status"`
-	Type      string     `json:"type"`
-	AssetID   *uuid.UUID `json:"asset_id,omitempty"`
-	AssetURL  *string    `json:"asset_url,omitempty"`
-	DeletedAt *time.Time `json:"deleted_at,omitempty"`
-	CreatedAt time.Time  `json:"created_at"`
-	UpdatedAt time.Time  `json:"updated_at"`
+	ID         uuid.UUID  `json:"id"`
+	FirstName  string     `json:"first_name"`
+	LastName   string     `json:"last_name"`
+	UserName   string     `json:"user_name"`
+	Phone      string     `json:"phone"`
+	Email      string     `json:"email"`
+	Location   string     `json:"location"`
+	Status     string     `json:"status"`
+	Type       string     `json:"type"`
+	GuestToken string     `json:"guest_token"`
+	AssetID    *uuid.UUID `json:"asset_id,omitempty"`
+	AssetURL   *string    `json:"asset_url,omitempty"`
+	DeletedAt  *time.Time `json:"deleted_at,omitempty"`
+	CreatedAt  time.Time  `json:"created_at"`
+	UpdatedAt  time.Time  `json:"updated_at"`
 }
 
 type Organization struct {
