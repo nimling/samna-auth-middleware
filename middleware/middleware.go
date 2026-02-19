@@ -194,7 +194,7 @@ func ClientMiddleware(next echo.HandlerFunc) echo.HandlerFunc {
 }
 
 func configFromEnv() *AuthMiddlewareConfig {
-	openIDUrlStr := getEnv("SAMNA_AUTH_SERVER") + "/api/client/" + getEnv("SAMNA_AUTH_CLIENT_SLUG") + "/.well-known/openid-configuration"
+	openIDUrlStr := getEnv("SAMNA_AUTH_ENDPOINT") + "/api/client/" + getEnv("SAMNA_AUTH_CLIENT_SLUG") + "/.well-known/openid-configuration"
 	openIDUrl, err := url.Parse(openIDUrlStr)
 	if err != nil {
 		panic(fmt.Errorf("failed to parse openid configuration URL: %v", err))
