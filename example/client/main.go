@@ -70,7 +70,7 @@ func main() {
 			Email:     stringPtr("john.doe@example.com"),
 		}
 
-		err = sauthClient.PutUser(ctx.Request().Context(), meta, userID, body)
+		_, err = sauthClient.PutUser(ctx.Request().Context(), meta, userID, body)
 		if err != nil {
 			return handleClientError(ctx, err)
 		}

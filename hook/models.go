@@ -95,23 +95,23 @@ type Claim struct {
 	AccessLevel int        `json:"access_level"`
 	Inherits    bool       `json:"inherits"`
 	Type        string     `json:"type"`
-	CreatedBy   *uuid.UUID `json:"created_by,omitempty"`
-	OwnerID     uuid.UUID  `json:"owner_id"`
-	RootID      uuid.UUID  `json:"root_id"`
+	SaCreatedBy *uuid.UUID `json:"sa_created_by,omitempty"`
+	SaOwnerID   uuid.UUID  `json:"sa_owner_id"`
+	SaRootID    uuid.UUID  `json:"sa_root_id"`
 	DeletedAt   *time.Time `json:"deleted_at"`
 	CreatedAt   time.Time  `json:"created_at"`
 	UpdatedAt   time.Time  `json:"updated_at"`
 }
 
 type UserClaim struct {
-	ID        uuid.UUID  `json:"id"`
-	ClaimID   uuid.UUID  `json:"claim_id"`
-	UserID    uuid.UUID  `json:"user_id"`
-	Reason    *string    `json:"reason,omitempty"`
-	StartsAt  *time.Time `json:"starts_at"`
-	EndsAt    *time.Time `json:"ends_at"`
-	CreatedBy *uuid.UUID `json:"created_by"`
-	OwnerID   uuid.UUID  `json:"owner_id"`
+	ID          uuid.UUID  `json:"id"`
+	ClaimID     uuid.UUID  `json:"claim_id"`
+	UserID      uuid.UUID  `json:"user_id"`
+	Reason      *string    `json:"reason,omitempty"`
+	StartsAt    *time.Time `json:"starts_at"`
+	EndsAt      *time.Time `json:"ends_at"`
+	SaCreatedBy *uuid.UUID `json:"sa_created_by"`
+	SaOwnerID   uuid.UUID  `json:"sa_owner_id"`
 	DeletedAt *time.Time `json:"deleted_at"`
 	CreatedAt time.Time  `json:"created_at"`
 	UpdatedAt time.Time  `json:"updated_at"`
@@ -126,9 +126,9 @@ type ClaimObject struct {
 	Level      int        `json:"level"`
 	Inherits   bool       `json:"inherits"`
 	RefID      *uuid.UUID `json:"ref_id,omitempty"`
-	RootID     uuid.UUID  `json:"root_id"`
-	CreatedBy  *uuid.UUID `json:"created_by"`
-	OwnerID    uuid.UUID  `json:"owner_id"`
+	SaRootID    uuid.UUID  `json:"sa_root_id"`
+	SaCreatedBy *uuid.UUID `json:"sa_created_by"`
+	SaOwnerID   uuid.UUID  `json:"sa_owner_id"`
 	DeletedAt  *time.Time `json:"deleted_at"`
 	CreatedAt  time.Time  `json:"created_at"`
 	UpdatedAt  time.Time  `json:"updated_at"`

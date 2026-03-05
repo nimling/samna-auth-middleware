@@ -105,7 +105,7 @@ type CreateClaimBody struct {
 	Description *string           `json:"description"`
 	AccessLevel *ClaimAccessLevel `json:"access_level"`
 	Type        *ClaimType        `json:"type"`
-	OwnerID     *uuid.UUID        `json:"owner_id"`
+	SaOwnerID   *uuid.UUID        `json:"sa_owner_id"`
 }
 
 type UpdateClaimBody struct {
