@@ -106,9 +106,9 @@ type Claim struct {
 	SaAccessLevel int        `bun:"sa_access_level" json:"sa_access_level"`
 	Inherits      bool       `bun:"inherits" json:"inherits"`
 	Type          ClaimType  `bun:"type" json:"type"`
-	CreatedBy     *uuid.UUID `bun:"created_by" json:"created_by"`
-	OwnerID       uuid.UUID  `bun:"owner_id" json:"owner_id"`
-	RootID        uuid.UUID  `bun:"root_id" json:"root_id"`
+	SaCreatedBy   *uuid.UUID `bun:"sa_created_by" json:"sa_created_by"`
+	SaOwnerID     uuid.UUID  `bun:"sa_owner_id" json:"sa_owner_id"`
+	SaRootID      uuid.UUID  `bun:"sa_root_id" json:"sa_root_id"`
 	SaDeletedAt   *time.Time `bun:"sa_deleted_at" json:"sa_deleted_at"`
 	SaCreatedAt   time.Time  `bun:"sa_created_at" json:"sa_created_at"`
 	SaUpdatedAt   time.Time  `bun:"sa_updated_at" json:"sa_updated_at"`
@@ -123,8 +123,8 @@ type UserClaim struct {
 	Reason      *string    `bun:"reason" json:"reason"`
 	StartsAt    *time.Time `bun:"starts_at" json:"starts_at"`
 	EndsAt      *time.Time `bun:"ends_at" json:"ends_at"`
-	CreatedBy   *uuid.UUID `bun:"created_by" json:"created_by"`
-	OwnerID     uuid.UUID  `bun:"owner_id" json:"owner_id"`
+	SaCreatedBy *uuid.UUID `bun:"sa_created_by" json:"sa_created_by"`
+	SaOwnerID   uuid.UUID  `bun:"sa_owner_id" json:"sa_owner_id"`
 	SaDeletedAt *time.Time `bun:"sa_deleted_at" json:"sa_deleted_at"`
 	SaCreatedAt time.Time  `bun:"sa_created_at" json:"sa_created_at"`
 	SaUpdatedAt time.Time  `bun:"sa_updated_at" json:"sa_updated_at"`
@@ -141,9 +141,9 @@ type ClaimObject struct {
 	SaLevel     int        `bun:"sa_level" json:"sa_level"`
 	Inherits    bool       `bun:"inherits" json:"inherits"`
 	RefID       *uuid.UUID `bun:"ref_id" json:"ref_id"`
-	RootID      uuid.UUID  `bun:"root_id" json:"root_id"`
-	CreatedBy   *uuid.UUID `bun:"created_by" json:"created_by"`
-	OwnerID     uuid.UUID  `bun:"owner_id" json:"owner_id"`
+	SaRootID    uuid.UUID  `bun:"sa_root_id" json:"sa_root_id"`
+	SaCreatedBy *uuid.UUID `bun:"sa_created_by" json:"sa_created_by"`
+	SaOwnerID   uuid.UUID  `bun:"sa_owner_id" json:"sa_owner_id"`
 	SaDeletedAt *time.Time `bun:"sa_deleted_at" json:"sa_deleted_at"`
 	SaCreatedAt time.Time  `bun:"sa_created_at" json:"sa_created_at"`
 	SaUpdatedAt time.Time  `bun:"sa_updated_at" json:"sa_updated_at"`
@@ -157,11 +157,11 @@ type ActiveClaim struct {
 	ClaimDescription *string    `bun:"claim_description" json:"claim_description"`
 	SaAccessLevel    int        `bun:"sa_access_level" json:"sa_access_level"`
 	ClaimType        string     `bun:"claim_type" json:"claim_type"`
-	CreatedBy        *uuid.UUID `bun:"created_by" json:"created_by"`
-	ClaimCreatedBy   *uuid.UUID `bun:"claim_created_by" json:"claim_created_by"`
-	ClaimOwnerID     uuid.UUID  `bun:"claim_owner_id" json:"claim_owner_id"`
-	UserOwnerID      uuid.UUID  `bun:"user_owner_id" json:"user_owner_id"`
-	RootID           uuid.UUID  `bun:"root_id" json:"root_id"`
+	SaCreatedBy      *uuid.UUID `bun:"sa_created_by" json:"sa_created_by"`
+	ClaimSaCreatedBy *uuid.UUID `bun:"claim_sa_created_by" json:"claim_sa_created_by"`
+	ClaimSaOwnerID   uuid.UUID  `bun:"claim_sa_owner_id" json:"claim_sa_owner_id"`
+	UserSaOwnerID    uuid.UUID  `bun:"user_sa_owner_id" json:"user_sa_owner_id"`
+	SaRootID         uuid.UUID  `bun:"sa_root_id" json:"sa_root_id"`
 }
 
 type ActiveObject struct {
@@ -170,8 +170,8 @@ type ActiveObject struct {
 	ClaimID     uuid.UUID  `bun:"claim_id" json:"claim_id"`
 	SaLevel     int        `bun:"sa_level" json:"sa_level"`
 	Inherits    bool       `bun:"inherits" json:"inherits"`
-	RootID      uuid.UUID  `bun:"root_id" json:"root_id"`
-	OwnerID     uuid.UUID  `bun:"owner_id" json:"owner_id"`
+	SaRootID    uuid.UUID  `bun:"sa_root_id" json:"sa_root_id"`
+	SaOwnerID   uuid.UUID  `bun:"sa_owner_id" json:"sa_owner_id"`
 	RefID       *uuid.UUID `bun:"ref_id" json:"ref_id"`
 	Reason      *string    `bun:"reason" json:"reason"`
 	SaCreatedAt time.Time  `bun:"sa_created_at" json:"sa_created_at"`
@@ -183,7 +183,7 @@ type ActiveUser struct {
 	TargetUserID  uuid.UUID  `bun:"target_user_id" json:"target_user_id"`
 	UserID        uuid.UUID  `bun:"user_id" json:"user_id"`
 	ClaimID       uuid.UUID  `bun:"claim_id" json:"claim_id"`
-	OwnerID       uuid.UUID  `bun:"owner_id" json:"owner_id"`
+	SaOwnerID     uuid.UUID  `bun:"sa_owner_id" json:"sa_owner_id"`
 	SaAccessLevel int        `bun:"sa_access_level" json:"sa_access_level"`
 	SaCreatedAt   time.Time  `bun:"sa_created_at" json:"sa_created_at"`
 	SaUpdatedAt   time.Time  `bun:"sa_updated_at" json:"sa_updated_at"`

@@ -40,7 +40,7 @@ func (qa *QueryAccess) UserWhere(accessLevel models.ClaimAccessLevel) string {
 
 func (qa *QueryAccess) ClaimWhere(accessLevel models.ClaimAccessLevel) string {
 	return fmt.Sprintf(
-		`c.id IN (SELECT claim_id FROM samna_auth.active_claim WHERE user_id = '%[1]s' AND sa_access_level <= %[2]d) OR c.owner_id IN (SELECT object_id FROM samna_auth.active_object WHERE object_type = 'organization' AND claim_id IN (SELECT claim_id FROM samna_auth.active_claim WHERE user_id = '%[1]s' AND sa_access_level <= %[2]d))`,
+		`c.id IN (SELECT claim_id FROM samna_auth.active_claim WHERE user_id = '%[1]s' AND sa_access_level <= %[2]d) OR c.sa_owner_id IN (SELECT object_id FROM samna_auth.active_object WHERE object_type = 'organization' AND claim_id IN (SELECT claim_id FROM samna_auth.active_claim WHERE user_id = '%[1]s' AND sa_access_level <= %[2]d))`,
 		qa.UserID, accessLevel,
 	)
 }
