@@ -8,40 +8,50 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	neturl "net/url"
 	"time"
 )
 
-type httpRequestExecutor struct {
-	clientSlug   string
-	clientSecret string
-	httpClient   *http.Client
-}
-
-func newHTTPRequestExecutor(clientSlug, clientSecret string) *httpRequestExecutor {
-	return &httpRequestExecutor{
+func newHTTPClient(clientSlug, clientSecret string) *httpClient {
+	return &httpClient{
 		clientSlug:   clientSlug,
 		clientSecret: clientSecret,
 		httpClient:   &http.Client{Timeout: time.Second * 5},
 	}
 }
 
-func (e *httpRequestExecutor) Get(ctx context.Context, meta RequestMetadata, url string) (io.ReadCloser, error) {
+func (e *httpClient) Get(ctx context.Context, meta RequestMetadata, url string) (io.ReadCloser, error) {
 	return e.execute(ctx, http.MethodGet, http.StatusOK, meta, nil, url)
 }
 
-func (e *httpRequestExecutor) Post(ctx context.Context, meta RequestMetadata, body any, url string) (io.ReadCloser, error) {
+func (e *httpClient) Post(ctx context.Context, meta RequestMetadata, body any, url string) (io.ReadCloser, error) {
 	return e.execute(ctx, http.MethodPost, http.StatusCreated, meta, body, url)
 }
 
-func (e *httpRequestExecutor) Put(ctx context.Context, meta RequestMetadata, body any, url string) (io.ReadCloser, error) {
+func (e *httpClient) Put(ctx context.Context, meta RequestMetadata, body any, url string) (io.ReadCloser, error) {
 	return e.execute(ctx, http.MethodPut, http.StatusOK, meta, body, url)
 }
 
-func (e *httpRequestExecutor) Delete(ctx context.Context, meta RequestMetadata, url string) (io.ReadCloser, error) {
+func (e *httpClient) Delete(ctx context.Context, meta RequestMetadata, url string) (io.ReadCloser, error) {
 	return e.execute(ctx, http.MethodDelete, http.StatusOK, meta, nil, url)
 }
 
-func (e *httpRequestExecutor) execute(ctx context.Context, method string, expectedStatus int, meta RequestMetadata, reqBody any, url string) (io.ReadCloser, error) {
+func (e *httpClient) execute(ctx context.Context, method string, expectedStatus int, meta RequestMetadata, reqBody any, targetURL string) (io.ReadCloser, error) {
+	if len(meta.QueryParams) > 0 {
+		parsed, err := neturl.Parse(targetURL)
+		if err != nil {
+			return nil, fmt.Errorf("parse url for query params: %w", err)
+		}
+		existing := parsed.Query()
+		for k, vs := range meta.QueryParams {
+			for _, v := range vs {
+				existing.Add(k, v)
+			}
+		}
+		parsed.RawQuery = existing.Encode()
+		targetURL = parsed.String()
+	}
+
 	var body io.Reader
 	if reqBody != nil {
 		payloadBytes, err := json.Marshal(reqBody)
@@ -51,7 +61,7 @@ func (e *httpRequestExecutor) execute(ctx context.Context, method string, expect
 		body = bytes.NewReader(payloadBytes)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, method, url, body)
+	req, err := http.NewRequestWithContext(ctx, method, targetURL, body)
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
 	}

@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/nimling/samna-auth-middleware/models"
 )
 
 func (d *DB) CreateClaim(ctx context.Context, name string, description string, accessLevel int, ownerID uuid.UUID, rootID uuid.UUID, createdBy uuid.UUID) (uuid.UUID, error) {
@@ -30,7 +29,7 @@ func (d *DB) CreateSystemClaim(ctx context.Context, name string, description str
 func (d *DB) AssignClaimToUser(ctx context.Context, claimID uuid.UUID, userID uuid.UUID, ownerID uuid.UUID, createdBy uuid.UUID, reason *string, startsAt *time.Time, endsAt *time.Time) (uuid.UUID, error) {
 	var id uuid.UUID
 	err := d.NewRaw(
-		"SELECT samna_auth.assign_claim_to_user(?, ?, ?, ?, ?, ?, ?)",
+		"SELECT samna_auth.assign_claim_user(?, ?, ?, ?, ?, ?, ?)",
 		claimID, userID, ownerID, createdBy, reason, startsAt, endsAt,
 	).Scan(ctx, &id)
 	return id, err
@@ -39,7 +38,7 @@ func (d *DB) AssignClaimToUser(ctx context.Context, claimID uuid.UUID, userID uu
 func (d *DB) AssignClaimToObject(ctx context.Context, claimID uuid.UUID, objectID uuid.UUID, objectType string, ownerID uuid.UUID, rootID uuid.UUID, createdBy uuid.UUID, level *int, inherits *bool, reason *string, refID *uuid.UUID) (uuid.UUID, error) {
 	var id uuid.UUID
 	err := d.NewRaw(
-		"SELECT samna_auth.assign_claim_to_object(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+		"SELECT samna_auth.assign_claim_object(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
 		claimID, objectID, objectType, ownerID, rootID, createdBy, level, inherits, reason, refID,
 	).Scan(ctx, &id)
 	return id, err
@@ -72,8 +71,8 @@ func (d *DB) RemoveClaim(ctx context.Context, claimID uuid.UUID, deletedBy uuid.
 	return result, err
 }
 
-func (d *DB) ClaimAccess(ctx context.Context, userID uuid.UUID, objectID *uuid.UUID, minAccessLevel int) ([]models.ActiveClaim, error) {
-	var claims []models.ActiveClaim
+func (d *DB) ClaimAccess(ctx context.Context, userID uuid.UUID, objectID *uuid.UUID, minAccessLevel int) ([]ActiveClaim, error) {
+	var claims []ActiveClaim
 	err := d.NewSelect().
 		TableExpr("samna_auth.claim_access(?, ?, ?) AS claim", userID, objectID, minAccessLevel).
 		Column("claim.*").
