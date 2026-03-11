@@ -1,0 +1,40 @@
+package echo
+
+import (
+	"net/http"
+
+	"github.com/labstack/echo/v4"
+	"github.com/nimling/samna-auth-middleware/client"
+	"github.com/nimling/samna-auth-middleware/utils"
+)
+
+func GetLogin(ctx echo.Context) error {
+	meta := metaFromContext(ctx)
+
+	var provider *string
+	if p := ctx.Param("provider"); len(p) > 0 {
+		provider = &p
+	}
+
+	redirectURL, err := client.GetLogin(ctx.Request().Context(), meta, provider)
+	if err != nil {
+		ctx.Logger().Errorf("GetLogin: %v", err)
+		return RespondError(ctx, http.StatusForbidden, "Forbidden")
+	}
+	return ctx.Redirect(http.StatusTemporaryRedirect, redirectURL)
+}
+
+func GetLogout(ctx echo.Context) error {
+	meta := metaFromContext(ctx)
+
+	for _, name := range []string{"sauth_csrf_token", "sauth_refresh_token", "sauth_access_token"} {
+		utils.ClearCookie(ctx, name)
+	}
+
+	statusCode, err := client.GetLogout(ctx.Request().Context(), meta)
+	if err != nil {
+		ctx.Logger().Errorf("GetLogout: %v", err)
+		return ctx.NoContent(http.StatusInternalServerError)
+	}
+	return ctx.NoContent(statusCode)
+}

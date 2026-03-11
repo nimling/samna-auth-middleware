@@ -1,4 +1,4 @@
-package swriter
+package utils
 
 import (
 	"bytes"
@@ -10,14 +10,14 @@ type CustomResponseWriter struct {
 	header      http.Header
 	StatusCode  int
 	body        bytes.Buffer
-	wroteHeader bool // Track if headers were written
+	wroteHeader bool
 }
 
 func NewCustomResponseWriter(w http.ResponseWriter) *CustomResponseWriter {
 	return &CustomResponseWriter{
 		ResponseWriter: w,
 		header:         make(http.Header),
-		StatusCode:     http.StatusOK, // Default status code
+		StatusCode:     http.StatusOK,
 	}
 }
 
@@ -26,24 +26,20 @@ func (c *CustomResponseWriter) Header() http.Header {
 }
 
 func (c *CustomResponseWriter) Write(b []byte) (int, error) {
-	// If headers haven't been written yet, write them
 	if !c.wroteHeader {
 		c.WriteHeader(c.StatusCode)
 	}
-
-	// Only write to our buffer
 	return c.body.Write(b)
 }
 
 func (c *CustomResponseWriter) WriteHeader(statusCode int) {
 	if c.wroteHeader {
-		return // Prevent multiple header writes
+		return
 	}
 
 	c.StatusCode = statusCode
 	c.wroteHeader = true
 
-	// Copy our custom headers to the underlying ResponseWriter
 	for k, v := range c.header {
 		c.ResponseWriter.Header()[k] = v
 	}

@@ -11,13 +11,11 @@ import (
 )
 
 func getAccessToken(ctx echo.Context) (string, error) {
-	// Check if auth header is present
 	authHeader := ctx.Request().Header.Get(echo.HeaderAuthorization)
 	if authHeader != "" && strings.HasPrefix(authHeader, "Bearer ") {
 		return strings.TrimPrefix(authHeader, "Bearer "), nil
 	}
 
-	// Get the access token from the cookie
 	cookie, err := ctx.Cookie(accessTokenCookieKey)
 	if err != nil {
 		return "", err
@@ -31,7 +29,6 @@ func getAccessToken(ctx echo.Context) (string, error) {
 }
 
 func ValidateToken(tokenString, expectedIss string, keyFunc jwt.Keyfunc) (*ClaimUser, error) {
-
 	var claims TokenClaims
 	token, err := jwt.ParseWithClaims(tokenString, &claims, keyFunc)
 
