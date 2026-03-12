@@ -17,6 +17,15 @@ func GetClaimGraph(ctx context.Context, meta RequestMetadata) (io.ReadCloser, er
 	return c.client.Get(ctx, meta, u)
 }
 
+func GetClaims(ctx context.Context, meta RequestMetadata) (io.ReadCloser, error) {
+	c := newClient()
+	u, err := joinURL(c.apiURL, "claim")
+	if err != nil {
+		return nil, fmt.Errorf("build url: %w", err)
+	}
+	return c.client.Get(ctx, meta, u)
+}
+
 func GetClaim(ctx context.Context, meta RequestMetadata, claimID uuid.UUID) (io.ReadCloser, error) {
 	c := newClient()
 	u, err := joinURL(c.apiURL, "claim", claimID.String())
