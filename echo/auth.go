@@ -12,7 +12,7 @@ func GetLogin(ctx echo.Context) error {
 	meta := metaFromContext(ctx)
 
 	var provider *string
-	if p := ctx.Param("provider"); len(p) > 0 {
+	if p := ctx.QueryParam("provider"); len(p) > 0 {
 		provider = &p
 	}
 

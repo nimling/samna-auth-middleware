@@ -71,6 +71,48 @@ func GetClaim(ctx echo.Context) error {
 	return ctx.Stream(http.StatusOK, "application/json", body)
 }
 
+func GetClaimAudit(ctx echo.Context) error {
+	claimID, err := uuid.Parse(ctx.Param("id"))
+	if err != nil {
+		return RespondError(ctx, http.StatusBadRequest, "Bad request")
+	}
+
+	if utils.GetDebugUserID() != nil {
+		ctx.Logger().Errorf("GetClaimAudit: not available in debug mode")
+		return RespondError(ctx, http.StatusNotImplemented, "Not implemented")
+	}
+
+	meta := metaFromContext(ctx)
+	body, err := client.GetClaimAudit(ctx.Request().Context(), meta, claimID)
+	if err != nil {
+		ctx.Logger().Errorf("GetClaimAudit: %v", err)
+		return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
+	}
+	defer body.Close()
+	return ctx.Stream(http.StatusOK, "application/json", body)
+}
+
+func GetClaimSearch(ctx echo.Context) error {
+	claimID, err := uuid.Parse(ctx.Param("id"))
+	if err != nil {
+		return RespondError(ctx, http.StatusBadRequest, "Bad request")
+	}
+
+	if utils.GetDebugUserID() != nil {
+		ctx.Logger().Errorf("GetClaimSearch: not available in debug mode")
+		return RespondError(ctx, http.StatusNotImplemented, "Not implemented")
+	}
+
+	meta := metaFromContext(ctx)
+	body, err := client.GetClaimSearch(ctx.Request().Context(), meta, claimID)
+	if err != nil {
+		ctx.Logger().Errorf("GetClaimSearch: %v", err)
+		return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
+	}
+	defer body.Close()
+	return ctx.Stream(http.StatusOK, "application/json", body)
+}
+
 func PostClaim(ctx echo.Context) error {
 	if debugUserID := utils.GetDebugUserID(); debugUserID != nil {
 		var reqBody struct {
@@ -186,22 +228,23 @@ func PostClaimObject(ctx echo.Context) error {
 }
 
 func DeleteClaimObject(ctx echo.Context) error {
-	claimObjectID, err := uuid.Parse(ctx.Param("id"))
+	claimID, err := uuid.Parse(ctx.Param("id"))
 	if err != nil {
 		return RespondError(ctx, http.StatusBadRequest, "Bad request")
 	}
 
-	if debugUserID := utils.GetDebugUserID(); debugUserID != nil {
-		_, err := db.Instance().RemoveClaimObject(ctx.Request().Context(), claimObjectID, *debugUserID)
-		if err != nil {
-			ctx.Logger().Errorf("DeleteClaimObject: %v", err)
-			return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
-		}
-		return ctx.NoContent(http.StatusOK)
+	objectID, err := uuid.Parse(ctx.Param("object_id"))
+	if err != nil {
+		return RespondError(ctx, http.StatusBadRequest, "Bad request")
+	}
+
+	if utils.GetDebugUserID() != nil {
+		ctx.Logger().Errorf("DeleteClaimObject: not available in debug mode")
+		return RespondError(ctx, http.StatusNotImplemented, "Not implemented")
 	}
 
 	meta := metaFromContext(ctx)
-	body, err := client.DeleteClaimObject(ctx.Request().Context(), meta, claimObjectID)
+	body, err := client.DeleteClaimObject(ctx.Request().Context(), meta, claimID, objectID)
 	if err != nil {
 		ctx.Logger().Errorf("DeleteClaimObject: %v", err)
 		return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
@@ -244,22 +287,23 @@ func PostClaimUser(ctx echo.Context) error {
 }
 
 func DeleteClaimUser(ctx echo.Context) error {
-	userClaimID, err := uuid.Parse(ctx.Param("id"))
+	claimID, err := uuid.Parse(ctx.Param("id"))
 	if err != nil {
 		return RespondError(ctx, http.StatusBadRequest, "Bad request")
 	}
 
-	if debugUserID := utils.GetDebugUserID(); debugUserID != nil {
-		_, err := db.Instance().RemoveUserClaim(ctx.Request().Context(), userClaimID, *debugUserID)
-		if err != nil {
-			ctx.Logger().Errorf("DeleteClaimUser: %v", err)
-			return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
-		}
-		return ctx.NoContent(http.StatusOK)
+	userID, err := uuid.Parse(ctx.Param("user_id"))
+	if err != nil {
+		return RespondError(ctx, http.StatusBadRequest, "Bad request")
+	}
+
+	if utils.GetDebugUserID() != nil {
+		ctx.Logger().Errorf("DeleteClaimUser: not available in debug mode")
+		return RespondError(ctx, http.StatusNotImplemented, "Not implemented")
 	}
 
 	meta := metaFromContext(ctx)
-	body, err := client.DeleteClaimUser(ctx.Request().Context(), meta, userClaimID)
+	body, err := client.DeleteClaimUser(ctx.Request().Context(), meta, claimID, userID)
 	if err != nil {
 		ctx.Logger().Errorf("DeleteClaimUser: %v", err)
 		return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
