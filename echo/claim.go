@@ -26,6 +26,26 @@ func GetClaimGraph(ctx echo.Context) error {
 	return ctx.Stream(http.StatusOK, "application/json", body)
 }
 
+func GetClaims(ctx echo.Context) error {
+	if debugUserID := utils.GetDebugUserID(); debugUserID != nil {
+		claims, err := db.Instance().ClaimAccess(ctx.Request().Context(), *debugUserID, nil, 0)
+		if err != nil {
+			ctx.Logger().Errorf("GetClaims: %v", err)
+			return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
+		}
+		return RespondJSON(ctx, http.StatusOK, claims, nil)
+	}
+
+	meta := metaFromContext(ctx)
+	body, err := client.GetClaims(ctx.Request().Context(), meta)
+	if err != nil {
+		ctx.Logger().Errorf("GetClaims: %v", err)
+		return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
+	}
+	defer body.Close()
+	return ctx.Stream(http.StatusOK, "application/json", body)
+}
+
 func GetClaim(ctx echo.Context) error {
 	claimID, err := uuid.Parse(ctx.Param("id"))
 	if err != nil {
