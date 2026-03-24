@@ -12,5 +12,6 @@ func metaFromContext(ctx echo.Context) client.RequestMetadata {
 		RequestID:   ctx.Response().Header().Get(echo.HeaderXRequestID),
 		UserIP:      ctx.RealIP(),
 		QueryParams: ctx.QueryParams(),
+		DryRun:      ctx.Request().Header.Get("X-Is-Dry-Run") == "true",
 	}
 }

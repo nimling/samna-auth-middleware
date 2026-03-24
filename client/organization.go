@@ -8,6 +8,15 @@ import (
 	"github.com/google/uuid"
 )
 
+func GetOrganizationAssets(ctx context.Context, meta RequestMetadata, orgID uuid.UUID) (io.ReadCloser, error) {
+	c := newClient()
+	u, err := joinURL(c.apiURL, "organization", orgID.String(), "assets")
+	if err != nil {
+		return nil, fmt.Errorf("build url: %w", err)
+	}
+	return c.client.Get(ctx, meta, u)
+}
+
 func GetOrganizations(ctx context.Context, meta RequestMetadata) (io.ReadCloser, error) {
 	c := newClient()
 	u, err := joinURL(c.apiURL, "organization")

@@ -94,6 +94,22 @@ func GetOrganizationClaims(ctx echo.Context) error {
 	return ctx.Stream(http.StatusOK, "application/json", body)
 }
 
+func GetOrganizationAssets(ctx echo.Context) error {
+	orgID, err := uuid.Parse(ctx.Param("id"))
+	if err != nil {
+		return RespondError(ctx, http.StatusBadRequest, "Bad request")
+	}
+
+	meta := metaFromContext(ctx)
+	body, err := client.GetOrganizationAssets(ctx.Request().Context(), meta, orgID)
+	if err != nil {
+		ctx.Logger().Errorf("GetOrganizationAssets: %v", err)
+		return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
+	}
+	defer body.Close()
+	return ctx.Stream(http.StatusOK, "application/json", body)
+}
+
 func PostOrganization(ctx echo.Context) error {
 	if utils.GetDebugUserID() != nil {
 		var org db.Organization

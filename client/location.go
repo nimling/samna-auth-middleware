@@ -8,6 +8,15 @@ import (
 	"github.com/google/uuid"
 )
 
+func GetLocationAssets(ctx context.Context, meta RequestMetadata, locationID uuid.UUID) (io.ReadCloser, error) {
+	c := newClient()
+	u, err := joinURL(c.apiURL, "location", locationID.String(), "assets")
+	if err != nil {
+		return nil, fmt.Errorf("build url: %w", err)
+	}
+	return c.client.Get(ctx, meta, u)
+}
+
 func GetLocations(ctx context.Context, meta RequestMetadata) (io.ReadCloser, error) {
 	c := newClient()
 	u, err := joinURL(c.apiURL, "location")

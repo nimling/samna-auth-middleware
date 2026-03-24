@@ -195,6 +195,23 @@ type ActiveUser struct {
 	DeletedAt    *time.Time `bun:"sa_deleted_at" json:"deleted_at"`
 }
 
+type Asset struct {
+	bun.BaseModel `bun:"table:Asset,alias:asset" json:"-"`
+
+	ID          uuid.UUID  `bun:"id,pk" json:"id"`
+	Name        string     `bun:"column:name" json:"name"`
+	Description *string    `bun:"column:description" json:"description"`
+	MimeType    string     `bun:"column:mime_type" json:"mime_type"`
+	UserID      uuid.UUID  `bun:"column:user_id" json:"user_id"`
+	Status      string     `bun:"column:status" json:"status"`
+	Index       int        `bun:"column:index" json:"index"`
+	BlobURL     *string    `bun:"blob_url,default:null" json:"-"`
+	AssetURL    string     `bun:"-" json:"asset_url,omitempty"`
+	DeletedAt   *time.Time `bun:"sa_deleted_at" json:"deleted_at"`
+	CreatedAt   time.Time  `bun:"sa_created_at" json:"created_at"`
+	UpdatedAt   time.Time  `bun:"sa_updated_at" json:"updated_at"`
+}
+
 type QueryAccess struct {
 	UserID uuid.UUID
 }

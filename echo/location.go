@@ -78,6 +78,22 @@ func GetLocationClaims(ctx echo.Context) error {
 	return ctx.Stream(http.StatusOK, "application/json", body)
 }
 
+func GetLocationAssets(ctx echo.Context) error {
+	locationID, err := uuid.Parse(ctx.Param("id"))
+	if err != nil {
+		return RespondError(ctx, http.StatusBadRequest, "Bad request")
+	}
+
+	meta := metaFromContext(ctx)
+	body, err := client.GetLocationAssets(ctx.Request().Context(), meta, locationID)
+	if err != nil {
+		ctx.Logger().Errorf("GetLocationAssets: %v", err)
+		return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
+	}
+	defer body.Close()
+	return ctx.Stream(http.StatusOK, "application/json", body)
+}
+
 func PostLocation(ctx echo.Context) error {
 	if utils.GetDebugUserID() != nil {
 		var loc db.Location

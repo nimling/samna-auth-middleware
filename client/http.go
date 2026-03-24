@@ -12,6 +12,19 @@ import (
 	"time"
 )
 
+func DecodeJSON[T any](body io.ReadCloser, err error) (T, error) {
+	var zero T
+	if err != nil {
+		return zero, err
+	}
+	defer body.Close()
+	var result T
+	if err := json.NewDecoder(body).Decode(&result); err != nil {
+		return zero, fmt.Errorf("decode response: %w", err)
+	}
+	return result, nil
+}
+
 func newHTTPClient(clientSlug, clientSecret string) *httpClient {
 	return &httpClient{
 		clientSlug:   clientSlug,
@@ -71,6 +84,9 @@ func (e *httpClient) execute(ctx context.Context, method string, expectedStatus 
 	req.Header.Set("X-User-IP", meta.UserIP)
 	req.Header.Set("SAuth-Client-Slug", e.clientSlug)
 	req.Header.Set("SAuth-Client-Secret", e.clientSecret)
+	if meta.DryRun {
+		req.Header.Set("X-Is-Dry-Run", "true")
+	}
 
 	if reqBody != nil {
 		req.Header.Set("Content-Type", "application/json")

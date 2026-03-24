@@ -215,6 +215,22 @@ func GetUserClient(ctx echo.Context) error {
 	return ctx.Stream(http.StatusOK, "application/json", body)
 }
 
+func GetUserAssets(ctx echo.Context) error {
+	userID, err := uuid.Parse(ctx.Param("id"))
+	if err != nil {
+		return RespondError(ctx, http.StatusBadRequest, "Bad request")
+	}
+
+	meta := metaFromContext(ctx)
+	body, err := client.GetUserAssets(ctx.Request().Context(), meta, userID)
+	if err != nil {
+		ctx.Logger().Errorf("GetUserAssets: %v", err)
+		return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
+	}
+	defer body.Close()
+	return ctx.Stream(http.StatusOK, "application/json", body)
+}
+
 func PutUserClient(ctx echo.Context) error {
 	userID, err := uuid.Parse(ctx.Param("id"))
 	if err != nil {

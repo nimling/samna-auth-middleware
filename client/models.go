@@ -20,6 +20,7 @@ type RequestMetadata struct {
 	RequestID   string
 	UserIP      string
 	QueryParams url.Values
+	DryRun      bool
 }
 
 type httpClient struct {
@@ -27,3 +28,4 @@ type httpClient struct {
 	clientSecret string
 	httpClient   *http.Client
 }
+
