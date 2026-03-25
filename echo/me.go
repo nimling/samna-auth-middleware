@@ -144,8 +144,9 @@ func GetMeModules(ctx echo.Context) error {
 
 func GetMeOrganizations(ctx echo.Context) error {
 	if debugUserID := utils.GetDebugUserID(); debugUserID != nil {
+		qa := db.NewQueryAccess(*debugUserID)
 		relations := db.ParseWithRelations(ctx.QueryParam("with"), db.OrganizationRelations())
-		orgs, err := db.Instance().GetOrganizations(ctx.Request().Context(), relations...)
+		orgs, err := db.Instance().GetOrganizations(ctx.Request().Context(), qa.OrganizationWhere(db.ACCESS_LEVEL_GUEST), relations...)
 		if err != nil {
 			ctx.Logger().Errorf("GetMeOrganizations: %v", err)
 			return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
@@ -165,8 +166,9 @@ func GetMeOrganizations(ctx echo.Context) error {
 
 func GetMeLocations(ctx echo.Context) error {
 	if debugUserID := utils.GetDebugUserID(); debugUserID != nil {
+		qa := db.NewQueryAccess(*debugUserID)
 		relations := db.ParseWithRelations(ctx.QueryParam("with"), db.LocationRelations())
-		locs, err := db.Instance().GetLocations(ctx.Request().Context(), relations...)
+		locs, err := db.Instance().GetLocations(ctx.Request().Context(), qa.LocationWhere(db.ACCESS_LEVEL_MEMBER), relations...)
 		if err != nil {
 			ctx.Logger().Errorf("GetMeLocations: %v", err)
 			return RespondError(ctx, http.StatusInternalServerError, "Internal server error")

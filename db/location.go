@@ -21,11 +21,14 @@ func (d *DB) GetLocationByID(ctx context.Context, locationID uuid.UUID, relation
 	return &loc, nil
 }
 
-func (d *DB) GetLocations(ctx context.Context, relations ...RelationFunc) ([]Location, error) {
+func (d *DB) GetLocations(ctx context.Context, where string, relations ...RelationFunc) ([]Location, error) {
 	var locs []Location
 	q := d.NewSelect().
 		Model(&locs).
 		Where("sa_deleted_at IS NULL")
+	if where != "" {
+		q = q.Where(where)
+	}
 	q = ApplyRelations(q, relations)
 	err := q.Scan(ctx)
 	if err != nil {
@@ -37,6 +40,7 @@ func (d *DB) GetLocations(ctx context.Context, relations ...RelationFunc) ([]Loc
 func (d *DB) CreateLocation(ctx context.Context, loc *Location) error {
 	_, err := d.NewInsert().
 		Model(loc).
+		Returning("*").
 		Exec(ctx)
 	return err
 }

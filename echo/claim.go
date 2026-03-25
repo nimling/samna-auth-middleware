@@ -28,7 +28,7 @@ func GetClaimGraph(ctx echo.Context) error {
 
 func GetClaims(ctx echo.Context) error {
 	if debugUserID := utils.GetDebugUserID(); debugUserID != nil {
-		claims, err := db.Instance().ClaimAccess(ctx.Request().Context(), *debugUserID, nil, 0)
+		claims, err := db.Instance().ClaimAccess(ctx.Request().Context(), *debugUserID, nil, int(db.ACCESS_LEVEL_GUEST))
 		if err != nil {
 			ctx.Logger().Errorf("GetClaims: %v", err)
 			return RespondError(ctx, http.StatusInternalServerError, "Internal server error")

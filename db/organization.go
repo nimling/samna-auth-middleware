@@ -21,11 +21,14 @@ func (d *DB) GetOrganizationByID(ctx context.Context, orgID uuid.UUID, relations
 	return &org, nil
 }
 
-func (d *DB) GetOrganizations(ctx context.Context, relations ...RelationFunc) ([]Organization, error) {
+func (d *DB) GetOrganizations(ctx context.Context, where string, relations ...RelationFunc) ([]Organization, error) {
 	var orgs []Organization
 	q := d.NewSelect().
 		Model(&orgs).
 		Where("sa_deleted_at IS NULL")
+	if where != "" {
+		q = q.Where(where)
+	}
 	q = ApplyRelations(q, relations)
 	err := q.Scan(ctx)
 	if err != nil {
@@ -37,6 +40,7 @@ func (d *DB) GetOrganizations(ctx context.Context, relations ...RelationFunc) ([
 func (d *DB) CreateOrganization(ctx context.Context, org *Organization) error {
 	_, err := d.NewInsert().
 		Model(org).
+		Returning("*").
 		Exec(ctx)
 	return err
 }

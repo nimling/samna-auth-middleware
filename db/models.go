@@ -56,7 +56,7 @@ type SamnaUser struct {
 }
 
 type Organization struct {
-	bun.BaseModel `bun:"table:samna_auth.organization"`
+	bun.BaseModel `bun:"table:samna_auth.organization,alias:o"`
 
 	ID          uuid.UUID  `bun:"id,pk" json:"id"`
 	Name        string     `bun:"name" json:"name"`
@@ -75,7 +75,7 @@ type Organization struct {
 }
 
 type Location struct {
-	bun.BaseModel `bun:"table:samna_auth.location"`
+	bun.BaseModel `bun:"table:samna_auth.location,alias:l"`
 
 	ID          uuid.UUID  `bun:"id,pk" json:"id"`
 	OwnerID     uuid.UUID  `bun:"sa_owner_id" json:"owner_id"`

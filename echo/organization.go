@@ -11,9 +11,10 @@ import (
 )
 
 func GetOrganizations(ctx echo.Context) error {
-	if utils.GetDebugUserID() != nil {
+	if debugUserID := utils.GetDebugUserID(); debugUserID != nil {
+		qa := db.NewQueryAccess(*debugUserID)
 		relations := db.ParseWithRelations(ctx.QueryParam("with"), db.OrganizationRelations())
-		orgs, err := db.Instance().GetOrganizations(ctx.Request().Context(), relations...)
+		orgs, err := db.Instance().GetOrganizations(ctx.Request().Context(), qa.OrganizationWhere(db.ACCESS_LEVEL_GUEST), relations...)
 		if err != nil {
 			ctx.Logger().Errorf("GetOrganizations: %v", err)
 			return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
@@ -37,7 +38,11 @@ func GetOrganization(ctx echo.Context) error {
 		return RespondError(ctx, http.StatusBadRequest, "Bad request")
 	}
 
-	if utils.GetDebugUserID() != nil {
+	if debugUserID := utils.GetDebugUserID(); debugUserID != nil {
+		claims, err := db.Instance().ClaimAccess(ctx.Request().Context(), *debugUserID, &orgID, int(db.ACCESS_LEVEL_GUEST))
+		if err != nil || len(claims) == 0 {
+			return RespondError(ctx, http.StatusNotFound, "Not found")
+		}
 		relations := db.ParseWithRelations(ctx.QueryParam("with"), db.OrganizationRelations())
 		org, err := db.Instance().GetOrganizationByID(ctx.Request().Context(), orgID, relations...)
 		if err != nil {
@@ -111,11 +116,20 @@ func GetOrganizationAssets(ctx echo.Context) error {
 }
 
 func PostOrganization(ctx echo.Context) error {
-	if utils.GetDebugUserID() != nil {
+	if debugUserID := utils.GetDebugUserID(); debugUserID != nil {
 		var org db.Organization
 		if err := ctx.Bind(&org); err != nil {
 			return RespondError(ctx, http.StatusBadRequest, "Bad request")
 		}
+		if org.ParentID == nil {
+			return RespondError(ctx, http.StatusBadRequest, "parent_id is required")
+		}
+		claims, err := db.Instance().ClaimAccess(ctx.Request().Context(), *debugUserID, org.ParentID, int(db.ACCESS_LEVEL_WRITE))
+		if err != nil || len(claims) == 0 {
+			return RespondError(ctx, http.StatusForbidden, "Forbidden")
+		}
+		org.CreatedBy = claims[0].ID
+		org.RootID = &claims[0].RootID
 		if err := db.Instance().CreateOrganization(ctx.Request().Context(), &org); err != nil {
 			ctx.Logger().Errorf("PostOrganization: %v", err)
 			return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
@@ -139,7 +153,19 @@ func PutOrganization(ctx echo.Context) error {
 		return RespondError(ctx, http.StatusBadRequest, "Bad request")
 	}
 
-	if utils.GetDebugUserID() != nil {
+	if debugUserID := utils.GetDebugUserID(); debugUserID != nil {
+		existing, err := db.Instance().GetOrganizationByID(ctx.Request().Context(), orgID)
+		if err != nil {
+			return RespondError(ctx, http.StatusNotFound, "Not found")
+		}
+		accessCheckID := orgID
+		if existing.ParentID != nil {
+			accessCheckID = *existing.ParentID
+		}
+		claims, err := db.Instance().ClaimAccess(ctx.Request().Context(), *debugUserID, &accessCheckID, int(db.ACCESS_LEVEL_WRITE))
+		if err != nil || len(claims) == 0 {
+			return RespondError(ctx, http.StatusForbidden, "Forbidden")
+		}
 		var org db.Organization
 		if err := ctx.Bind(&org); err != nil {
 			return RespondError(ctx, http.StatusBadRequest, "Bad request")
@@ -167,7 +193,19 @@ func DeleteOrganization(ctx echo.Context) error {
 		return RespondError(ctx, http.StatusBadRequest, "Bad request")
 	}
 
-	if utils.GetDebugUserID() != nil {
+	if debugUserID := utils.GetDebugUserID(); debugUserID != nil {
+		existing, err := db.Instance().GetOrganizationByID(ctx.Request().Context(), orgID)
+		if err != nil {
+			return RespondError(ctx, http.StatusNotFound, "Not found")
+		}
+		accessCheckID := orgID
+		if existing.ParentID != nil {
+			accessCheckID = *existing.ParentID
+		}
+		claims, err := db.Instance().ClaimAccess(ctx.Request().Context(), *debugUserID, &accessCheckID, int(db.ACCESS_LEVEL_WRITE))
+		if err != nil || len(claims) == 0 {
+			return RespondError(ctx, http.StatusForbidden, "Forbidden")
+		}
 		if err := db.Instance().DeleteOrganization(ctx.Request().Context(), orgID); err != nil {
 			ctx.Logger().Errorf("DeleteOrganization: %v", err)
 			return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
