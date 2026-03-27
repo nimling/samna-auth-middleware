@@ -19,14 +19,17 @@ var userRelations = map[string]RelationFunc{
 var claimRelations = map[string]RelationFunc{
 	"claim_objects": RelationClaimObjects,
 	"claim_users":   RelationClaimUsers,
+	"owner":         RelationOwner,
 }
 
 var organizationRelations = map[string]RelationFunc{
 	"assets": RelationAssets,
+	"parent": RelationParent,
 }
 
 var locationRelations = map[string]RelationFunc{
 	"assets": RelationAssets,
+	"owner":  RelationOwner,
 }
 
 func ParseWithRelations(withParam string, allowed map[string]RelationFunc) []RelationFunc {
@@ -106,6 +109,24 @@ func RelationClaimObjects() (string, func(q *bun.SelectQuery) *bun.SelectQuery) 
 
 func RelationClaimUsers() (string, func(q *bun.SelectQuery) *bun.SelectQuery) {
 	return "ClaimUsers", func(q *bun.SelectQuery) *bun.SelectQuery {
+		return q.Where("sa_deleted_at IS NULL")
+	}
+}
+
+func RelationParent() (string, func(q *bun.SelectQuery) *bun.SelectQuery) {
+	return "Parent", func(q *bun.SelectQuery) *bun.SelectQuery {
+		return q.Where("sa_deleted_at IS NULL")
+	}
+}
+
+func RelationOwner() (string, func(q *bun.SelectQuery) *bun.SelectQuery) {
+	return "Owner", func(q *bun.SelectQuery) *bun.SelectQuery {
+		return q.Where("sa_deleted_at IS NULL")
+	}
+}
+
+func RelationUser() (string, func(q *bun.SelectQuery) *bun.SelectQuery) {
+	return "User", func(q *bun.SelectQuery) *bun.SelectQuery {
 		return q.Where("sa_deleted_at IS NULL")
 	}
 }

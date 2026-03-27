@@ -28,6 +28,7 @@ const (
 	CLAIM_TYPE_SYSTEM  ClaimType = "system"
 	CLAIM_TYPE_USER    ClaimType = "user"
 	CLAIM_TYPE_SERVICE ClaimType = "service"
+	CLAIM_TYPE_VIRTUAL ClaimType = "virtual"
 )
 
 type ObjectType string
@@ -36,6 +37,22 @@ const (
 	OBJECT_TYPE_USER         ObjectType = "user"
 	OBJECT_TYPE_ORGANIZATION ObjectType = "organization"
 	OBJECT_TYPE_LOCATION     ObjectType = "location"
+)
+
+type OrganizationType string
+
+const (
+	ORGANIZATION_TYPE_SYSTEM  OrganizationType = "system"
+	ORGANIZATION_TYPE_COMPANY OrganizationType = "company"
+	ORGANIZATION_TYPE_CHILD   OrganizationType = "child"
+)
+
+type LocationType string
+
+const (
+	LOCATION_TYPE_USER     LocationType = "user"
+	LOCATION_TYPE_LOCATION LocationType = "location"
+	LOCATION_TYPE_BOOKABLE LocationType = "bookable"
 )
 
 type SamnaUser struct {
@@ -58,20 +75,20 @@ type SamnaUser struct {
 type Organization struct {
 	bun.BaseModel `bun:"table:samna_auth.organization,alias:o"`
 
-	ID          uuid.UUID  `bun:"id,pk" json:"id"`
-	Name        string     `bun:"name" json:"name"`
-	Description *string    `bun:"description" json:"description"`
-	ParentID    *uuid.UUID `bun:"sa_parent_id" json:"parent_id"`
-	RootID      *uuid.UUID `bun:"sa_root_id" json:"root_id"`
-	OwnerID     *uuid.UUID `bun:"sa_owner_id" json:"owner_id"`
-	Type        *string    `bun:"type" json:"type"`
+	ID          uuid.UUID        `bun:"id,pk" json:"id"`
+	Name        string           `bun:"name" json:"name"`
+	Description *string          `bun:"description" json:"description"`
+	RootID      *uuid.UUID       `bun:"sa_root_id" json:"root_id"`
+	OwnerID     *uuid.UUID       `bun:"sa_owner_id" json:"owner_id"`
+	Type        OrganizationType `bun:"type" json:"type"`
 	Level       int        `bun:"sa_level" json:"level"`
 	ExternalID  *string    `bun:"external_id" json:"external_id"`
 	ProviderID  *uuid.UUID `bun:"provider_id" json:"provider_id"`
 	DeletedAt   *time.Time `bun:"sa_deleted_at" json:"deleted_at"`
-	CreatedBy   uuid.UUID  `bun:"sa_created_by" json:"created_by"`
-	CreatedAt   time.Time  `bun:"sa_created_at" json:"created_at"`
-	UpdatedAt   time.Time  `bun:"sa_updated_at" json:"updated_at"`
+	CreatedBy   uuid.UUID     `bun:"sa_created_by" json:"created_by"`
+	CreatedAt   time.Time     `bun:"sa_created_at" json:"created_at"`
+	UpdatedAt   time.Time     `bun:"sa_updated_at" json:"updated_at"`
+	Parent      *Organization `bun:"rel:belongs-to,join:sa_owner_id=id" json:"parent,omitempty"`
 }
 
 type Location struct {
@@ -82,8 +99,8 @@ type Location struct {
 	RootID      uuid.UUID  `bun:"sa_root_id" json:"root_id"`
 	Name        *string    `bun:"name" json:"name"`
 	Description *string    `bun:"description" json:"description"`
-	ParentID    *uuid.UUID `bun:"sa_parent_id" json:"parent_id"`
-	Type        string     `bun:"type" json:"type"`
+	ParentID    *uuid.UUID   `bun:"sa_parent_id" json:"parent_id"`
+	Type        LocationType `bun:"type" json:"type"`
 	Longitude   *float64   `bun:"longitude" json:"longitude"`
 	Latitude    *float64   `bun:"latitude" json:"latitude"`
 	Level       int        `bun:"sa_level" json:"level"`
@@ -91,10 +108,11 @@ type Location struct {
 	Code        *string    `bun:"code" json:"code"`
 	ExternalID  *string    `bun:"external_id" json:"external_id"`
 	ProviderID  *uuid.UUID `bun:"provider_id" json:"provider_id"`
-	CreatedBy   uuid.UUID  `bun:"sa_created_by" json:"created_by"`
-	DeletedAt   *time.Time `bun:"sa_deleted_at" json:"deleted_at"`
-	CreatedAt   time.Time  `bun:"sa_created_at" json:"created_at"`
-	UpdatedAt   time.Time  `bun:"sa_updated_at" json:"updated_at"`
+	CreatedBy   uuid.UUID     `bun:"sa_created_by" json:"created_by"`
+	DeletedAt   *time.Time    `bun:"sa_deleted_at" json:"deleted_at"`
+	CreatedAt   time.Time     `bun:"sa_created_at" json:"created_at"`
+	UpdatedAt   time.Time     `bun:"sa_updated_at" json:"updated_at"`
+	Owner       *Organization `bun:"rel:belongs-to,join:sa_owner_id=id" json:"owner,omitempty"`
 }
 
 type Claim struct {
@@ -109,9 +127,12 @@ type Claim struct {
 	CreatedBy   *uuid.UUID `bun:"sa_created_by" json:"created_by"`
 	OwnerID     uuid.UUID  `bun:"sa_owner_id" json:"owner_id"`
 	RootID      uuid.UUID  `bun:"sa_root_id" json:"root_id"`
-	DeletedAt   *time.Time `bun:"sa_deleted_at" json:"deleted_at"`
-	CreatedAt   time.Time  `bun:"sa_created_at" json:"created_at"`
-	UpdatedAt   time.Time  `bun:"sa_updated_at" json:"updated_at"`
+	DeletedAt    *time.Time    `bun:"sa_deleted_at" json:"deleted_at"`
+	CreatedAt    time.Time     `bun:"sa_created_at" json:"created_at"`
+	UpdatedAt    time.Time     `bun:"sa_updated_at" json:"updated_at"`
+	ClaimObjects []ClaimObject `bun:"rel:has-many,join:id=claim_id" json:"claim_objects,omitempty"`
+	ClaimUsers   []UserClaim   `bun:"rel:has-many,join:id=claim_id" json:"claim_users,omitempty"`
+	Owner        *Organization `bun:"rel:belongs-to,join:sa_owner_id=id" json:"owner,omitempty"`
 }
 
 type UserClaim struct {
@@ -123,11 +144,13 @@ type UserClaim struct {
 	Reason    *string    `bun:"reason" json:"reason"`
 	StartsAt  *time.Time `bun:"starts_at" json:"starts_at"`
 	EndsAt    *time.Time `bun:"ends_at" json:"ends_at"`
-	CreatedBy *uuid.UUID `bun:"sa_created_by" json:"created_by"`
-	OwnerID   uuid.UUID  `bun:"sa_owner_id" json:"owner_id"`
-	DeletedAt *time.Time `bun:"sa_deleted_at" json:"deleted_at"`
-	CreatedAt time.Time  `bun:"sa_created_at" json:"created_at"`
-	UpdatedAt time.Time  `bun:"sa_updated_at" json:"updated_at"`
+	CreatedBy *uuid.UUID    `bun:"sa_created_by" json:"created_by"`
+	OwnerID   uuid.UUID     `bun:"sa_owner_id" json:"owner_id"`
+	DeletedAt *time.Time    `bun:"sa_deleted_at" json:"deleted_at"`
+	CreatedAt time.Time     `bun:"sa_created_at" json:"created_at"`
+	UpdatedAt time.Time     `bun:"sa_updated_at" json:"updated_at"`
+	Owner     *Organization `bun:"rel:belongs-to,join:sa_owner_id=id" json:"owner,omitempty"`
+	User      *SamnaUser    `bun:"rel:belongs-to,join:user_id=user_id" json:"user,omitempty"`
 }
 
 type ClaimObject struct {
@@ -143,11 +166,12 @@ type ClaimObject struct {
 	Inherits   bool       `bun:"inherits" json:"inherits"`
 	RefID      *uuid.UUID `bun:"ref_id" json:"ref_id"`
 	RootID     uuid.UUID  `bun:"sa_root_id" json:"root_id"`
-	CreatedBy  *uuid.UUID `bun:"sa_created_by" json:"created_by"`
-	OwnerID    uuid.UUID  `bun:"sa_owner_id" json:"owner_id"`
-	DeletedAt  *time.Time `bun:"sa_deleted_at" json:"deleted_at"`
-	CreatedAt  time.Time  `bun:"sa_created_at" json:"created_at"`
-	UpdatedAt  time.Time  `bun:"sa_updated_at" json:"updated_at"`
+	CreatedBy  *uuid.UUID    `bun:"sa_created_by" json:"created_by"`
+	OwnerID    uuid.UUID     `bun:"sa_owner_id" json:"owner_id"`
+	DeletedAt  *time.Time    `bun:"sa_deleted_at" json:"deleted_at"`
+	CreatedAt  time.Time     `bun:"sa_created_at" json:"created_at"`
+	UpdatedAt  time.Time     `bun:"sa_updated_at" json:"updated_at"`
+	Owner      *Organization `bun:"rel:belongs-to,join:sa_owner_id=id" json:"owner,omitempty"`
 }
 
 type ActiveClaim struct {

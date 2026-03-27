@@ -21,14 +21,11 @@ func (d *DB) GetLocationByID(ctx context.Context, locationID uuid.UUID, relation
 	return &loc, nil
 }
 
-func (d *DB) GetLocations(ctx context.Context, where string, relations ...RelationFunc) ([]Location, error) {
+func (d *DB) GetLocations(ctx context.Context, userID uuid.UUID, accessLevel ClaimAccessLevel, relations ...RelationFunc) ([]Location, error) {
 	var locs []Location
 	q := d.NewSelect().
 		Model(&locs).
-		Where("sa_deleted_at IS NULL")
-	if where != "" {
-		q = q.Where(where)
-	}
+		Where("l.id IN (SELECT id FROM samna_auth.get_locations(?, ?))", userID, accessLevel)
 	q = ApplyRelations(q, relations)
 	err := q.Scan(ctx)
 	if err != nil {

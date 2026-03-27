@@ -22,6 +22,18 @@ func (d *DB) GetUserByID(ctx context.Context, userID uuid.UUID, relations ...Rel
 	return &user, nil
 }
 
+func (d *DB) GetUsers(ctx context.Context, userID uuid.UUID, accessLevel ClaimAccessLevel) ([]SamnaUser, error) {
+	var users []SamnaUser
+	err := d.NewSelect().
+		Model(&users).
+		Where("u.id IN (SELECT id FROM samna_auth.get_users(?, ?))", userID, accessLevel).
+		Scan(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return users, nil
+}
+
 func (d *DB) GetUserClaims(ctx context.Context, userID uuid.UUID) ([]ActiveClaim, error) {
 	var claims []ActiveClaim
 	err := d.NewSelect().

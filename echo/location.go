@@ -12,9 +12,8 @@ import (
 
 func GetLocations(ctx echo.Context) error {
 	if debugUserID := utils.GetDebugUserID(); debugUserID != nil {
-		qa := db.NewQueryAccess(*debugUserID)
 		relations := db.ParseWithRelations(ctx.QueryParam("with"), db.LocationRelations())
-		locs, err := db.Instance().GetLocations(ctx.Request().Context(), qa.LocationWhere(db.ACCESS_LEVEL_MEMBER), relations...)
+		locs, err := db.Instance().GetLocations(ctx.Request().Context(), *debugUserID, db.ACCESS_LEVEL_MEMBER, relations...)
 		if err != nil {
 			ctx.Logger().Errorf("GetLocations: %v", err)
 			return RespondError(ctx, http.StatusInternalServerError, "Internal server error")

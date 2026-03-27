@@ -21,14 +21,11 @@ func (d *DB) GetOrganizationByID(ctx context.Context, orgID uuid.UUID, relations
 	return &org, nil
 }
 
-func (d *DB) GetOrganizations(ctx context.Context, where string, relations ...RelationFunc) ([]Organization, error) {
+func (d *DB) GetOrganizations(ctx context.Context, userID uuid.UUID, accessLevel ClaimAccessLevel, relations ...RelationFunc) ([]Organization, error) {
 	var orgs []Organization
 	q := d.NewSelect().
 		Model(&orgs).
-		Where("sa_deleted_at IS NULL")
-	if where != "" {
-		q = q.Where(where)
-	}
+		Where("o.id IN (SELECT id FROM samna_auth.get_organizations(?, ?))", userID, accessLevel)
 	q = ApplyRelations(q, relations)
 	err := q.Scan(ctx)
 	if err != nil {

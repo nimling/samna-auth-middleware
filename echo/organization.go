@@ -12,9 +12,8 @@ import (
 
 func GetOrganizations(ctx echo.Context) error {
 	if debugUserID := utils.GetDebugUserID(); debugUserID != nil {
-		qa := db.NewQueryAccess(*debugUserID)
 		relations := db.ParseWithRelations(ctx.QueryParam("with"), db.OrganizationRelations())
-		orgs, err := db.Instance().GetOrganizations(ctx.Request().Context(), qa.OrganizationWhere(db.ACCESS_LEVEL_GUEST), relations...)
+		orgs, err := db.Instance().GetOrganizations(ctx.Request().Context(), *debugUserID, db.ACCESS_LEVEL_GUEST, relations...)
 		if err != nil {
 			ctx.Logger().Errorf("GetOrganizations: %v", err)
 			return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
@@ -121,10 +120,10 @@ func PostOrganization(ctx echo.Context) error {
 		if err := ctx.Bind(&org); err != nil {
 			return RespondError(ctx, http.StatusBadRequest, "Bad request")
 		}
-		if org.ParentID == nil {
-			return RespondError(ctx, http.StatusBadRequest, "parent_id is required")
+		if org.OwnerID == nil {
+			return RespondError(ctx, http.StatusBadRequest, "owner_id is required")
 		}
-		claims, err := db.Instance().ClaimAccess(ctx.Request().Context(), *debugUserID, org.ParentID, int(db.ACCESS_LEVEL_WRITE))
+		claims, err := db.Instance().ClaimAccess(ctx.Request().Context(), *debugUserID, org.OwnerID, int(db.ACCESS_LEVEL_WRITE))
 		if err != nil || len(claims) == 0 {
 			return RespondError(ctx, http.StatusForbidden, "Forbidden")
 		}
@@ -159,8 +158,8 @@ func PutOrganization(ctx echo.Context) error {
 			return RespondError(ctx, http.StatusNotFound, "Not found")
 		}
 		accessCheckID := orgID
-		if existing.ParentID != nil {
-			accessCheckID = *existing.ParentID
+		if existing.OwnerID != nil {
+			accessCheckID = *existing.OwnerID
 		}
 		claims, err := db.Instance().ClaimAccess(ctx.Request().Context(), *debugUserID, &accessCheckID, int(db.ACCESS_LEVEL_WRITE))
 		if err != nil || len(claims) == 0 {
@@ -199,8 +198,8 @@ func DeleteOrganization(ctx echo.Context) error {
 			return RespondError(ctx, http.StatusNotFound, "Not found")
 		}
 		accessCheckID := orgID
-		if existing.ParentID != nil {
-			accessCheckID = *existing.ParentID
+		if existing.OwnerID != nil {
+			accessCheckID = *existing.OwnerID
 		}
 		claims, err := db.Instance().ClaimAccess(ctx.Request().Context(), *debugUserID, &accessCheckID, int(db.ACCESS_LEVEL_WRITE))
 		if err != nil || len(claims) == 0 {

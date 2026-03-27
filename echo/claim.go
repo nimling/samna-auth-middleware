@@ -209,6 +209,10 @@ func PostClaimObject(ctx echo.Context) error {
 		if err := ctx.Bind(&reqBody); err != nil {
 			return RespondError(ctx, http.StatusBadRequest, "Bad request")
 		}
+		if reqBody.Level == nil {
+			defaultLevel := 0
+			reqBody.Level = &defaultLevel
+		}
 		id, err := db.Instance().AssignClaimToObject(ctx.Request().Context(), claimID, reqBody.ObjectID, reqBody.ObjectType, reqBody.OwnerID, reqBody.RootID, *debugUserID, reqBody.Level, reqBody.Inherits, reqBody.Reason, reqBody.RefID)
 		if err != nil {
 			ctx.Logger().Errorf("PostClaimObject: %v", err)

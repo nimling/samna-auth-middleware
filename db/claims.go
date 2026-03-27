@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"time"
 
@@ -78,6 +79,22 @@ func (d *DB) ClaimAccess(ctx context.Context, userID uuid.UUID, objectID *uuid.U
 		Column("claim.*").
 		Scan(ctx, &claims)
 	return claims, err
+}
+
+func (d *DB) UserObjectAccess(ctx context.Context, userID uuid.UUID, objectID *uuid.UUID, accessLevel ClaimAccessLevel) (*ActiveClaim, error) {
+	claims, err := d.ClaimAccess(ctx, userID, objectID, int(accessLevel))
+	if err != nil {
+		return nil, err
+	}
+	if len(claims) == 0 {
+		return nil, errors.New("no access found")
+	}
+	return &claims[0], nil
+}
+
+func (d *DB) UserObjectHasLevel(ctx context.Context, userID uuid.UUID, objectID *uuid.UUID, accessLevel ClaimAccessLevel) bool {
+	uc, err := d.UserObjectAccess(ctx, userID, objectID, accessLevel)
+	return err == nil && uc != nil
 }
 
 func (d *DB) InitAuthViews(ctx context.Context, tableNames ...string) error {
