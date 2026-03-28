@@ -60,7 +60,7 @@ func PostUser(ctx context.Context, userID uuid.UUID, user db.SamnaUser) (db.Samn
 	if err != nil {
 		return db.SamnaUser{}, fmt.Errorf("build url: %w", err)
 	}
-	return syncResponse[db.SamnaUser](ctx, c.client.Post(ctx, user, u))
+	return syncResponse[db.SamnaUser](ctx, c.client.Post(ctx, requestBody(user, true), u))
 }
 
 func PutUser(ctx context.Context, userID uuid.UUID, user db.SamnaUser) (db.SamnaUser, error) {
@@ -69,7 +69,7 @@ func PutUser(ctx context.Context, userID uuid.UUID, user db.SamnaUser) (db.Samna
 	if err != nil {
 		return db.SamnaUser{}, fmt.Errorf("build url: %w", err)
 	}
-	return syncResponse[db.SamnaUser](ctx, c.client.Put(ctx, user, u))
+	return syncResponse[db.SamnaUser](ctx, c.client.Put(ctx, requestBody(user, false), u))
 }
 
 func DeleteUser(ctx context.Context, userID uuid.UUID) (db.SamnaUser, error) {

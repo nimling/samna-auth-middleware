@@ -60,7 +60,7 @@ func PostOrganization(ctx context.Context, org db.Organization) (db.Organization
 	if err != nil {
 		return db.Organization{}, fmt.Errorf("build url: %w", err)
 	}
-	return syncResponse[db.Organization](ctx, c.client.Post(ctx, org, u))
+	return syncResponse[db.Organization](ctx, c.client.Post(ctx, requestBody(org, true), u))
 }
 
 func PutOrganization(ctx context.Context, orgID uuid.UUID, org db.Organization) (db.Organization, error) {
@@ -69,7 +69,7 @@ func PutOrganization(ctx context.Context, orgID uuid.UUID, org db.Organization) 
 	if err != nil {
 		return db.Organization{}, fmt.Errorf("build url: %w", err)
 	}
-	return syncResponse[db.Organization](ctx, c.client.Put(ctx, org, u))
+	return syncResponse[db.Organization](ctx, c.client.Put(ctx, requestBody(org, false), u))
 }
 
 func DeleteOrganization(ctx context.Context, orgID uuid.UUID) (db.Organization, error) {

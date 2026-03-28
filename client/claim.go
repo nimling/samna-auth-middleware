@@ -60,7 +60,7 @@ func PostClaim(ctx context.Context, claim db.Claim) (db.Claim, error) {
 	if err != nil {
 		return db.Claim{}, fmt.Errorf("build url: %w", err)
 	}
-	return syncResponse[db.Claim](ctx, c.client.Post(ctx, claim, u))
+	return syncResponse[db.Claim](ctx, c.client.Post(ctx, requestBody(claim, true), u))
 }
 
 func PutClaim(ctx context.Context, claimID uuid.UUID, claim db.Claim) (db.Claim, error) {
@@ -69,7 +69,7 @@ func PutClaim(ctx context.Context, claimID uuid.UUID, claim db.Claim) (db.Claim,
 	if err != nil {
 		return db.Claim{}, fmt.Errorf("build url: %w", err)
 	}
-	return syncResponse[db.Claim](ctx, c.client.Put(ctx, claim, u))
+	return syncResponse[db.Claim](ctx, c.client.Put(ctx, requestBody(claim, false), u))
 }
 
 func DeleteClaim(ctx context.Context, claimID uuid.UUID) (db.Claim, error) {
@@ -87,7 +87,7 @@ func PostClaimObject(ctx context.Context, claimID uuid.UUID, co db.ClaimObject) 
 	if err != nil {
 		return db.ClaimObject{}, fmt.Errorf("build url: %w", err)
 	}
-	return syncResponse[db.ClaimObject](ctx, c.client.Post(ctx, co, u))
+	return syncResponse[db.ClaimObject](ctx, c.client.Post(ctx, requestBody(co, true), u))
 }
 
 func DeleteClaimObject(ctx context.Context, claimID uuid.UUID, objectID uuid.UUID) (db.ClaimObject, error) {
@@ -105,7 +105,7 @@ func PostUserClaim(ctx context.Context, claimID uuid.UUID, uc db.UserClaim) (db.
 	if err != nil {
 		return db.UserClaim{}, fmt.Errorf("build url: %w", err)
 	}
-	return syncResponse[db.UserClaim](ctx, c.client.Post(ctx, uc, u))
+	return syncResponse[db.UserClaim](ctx, c.client.Post(ctx, requestBody(uc, true), u))
 }
 
 func DeleteUserClaim(ctx context.Context, claimID uuid.UUID, userID uuid.UUID) (db.UserClaim, error) {

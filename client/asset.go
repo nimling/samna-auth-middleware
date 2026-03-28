@@ -43,7 +43,7 @@ func PostAsset(ctx context.Context, asset db.Asset) (db.Asset, error) {
 	if err != nil {
 		return db.Asset{}, fmt.Errorf("build url: %w", err)
 	}
-	return syncResponse[db.Asset](ctx, c.client.Post(ctx, asset, u))
+	return syncResponse[db.Asset](ctx, c.client.Post(ctx, requestBody(asset, true), u))
 }
 
 func PostAssetUpload(ctx context.Context, assetID uuid.UUID, contentType string, body io.Reader) (io.ReadCloser, error) {
@@ -83,7 +83,7 @@ func PutAsset(ctx context.Context, assetID uuid.UUID, asset db.Asset) (db.Asset,
 	if err != nil {
 		return db.Asset{}, fmt.Errorf("build url: %w", err)
 	}
-	return syncResponse[db.Asset](ctx, c.client.Put(ctx, asset, u))
+	return syncResponse[db.Asset](ctx, c.client.Put(ctx, requestBody(asset, false), u))
 }
 
 func DeleteAsset(ctx context.Context, assetID uuid.UUID) (db.Asset, error) {

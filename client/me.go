@@ -25,7 +25,7 @@ func PutMe(ctx context.Context, user db.SamnaUser) (db.SamnaUser, error) {
 	if err != nil {
 		return db.SamnaUser{}, fmt.Errorf("build url: %w", err)
 	}
-	return syncResponse[db.SamnaUser](ctx, c.client.Put(ctx, user, u))
+	return syncResponse[db.SamnaUser](ctx, c.client.Put(ctx, requestBody(user, false), u))
 }
 
 func GetMeClaims(ctx context.Context) (io.ReadCloser, error) {

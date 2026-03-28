@@ -51,7 +51,7 @@ func PostLocation(ctx context.Context, loc db.Location) (db.Location, error) {
 	if err != nil {
 		return db.Location{}, fmt.Errorf("build url: %w", err)
 	}
-	return syncResponse[db.Location](ctx, c.client.Post(ctx, loc, u))
+	return syncResponse[db.Location](ctx, c.client.Post(ctx, requestBody(loc, true), u))
 }
 
 func PutLocation(ctx context.Context, locationID uuid.UUID, loc db.Location) (db.Location, error) {
@@ -60,7 +60,7 @@ func PutLocation(ctx context.Context, locationID uuid.UUID, loc db.Location) (db
 	if err != nil {
 		return db.Location{}, fmt.Errorf("build url: %w", err)
 	}
-	return syncResponse[db.Location](ctx, c.client.Put(ctx, loc, u))
+	return syncResponse[db.Location](ctx, c.client.Put(ctx, requestBody(loc, false), u))
 }
 
 func DeleteLocation(ctx context.Context, locationID uuid.UUID) (db.Location, error) {

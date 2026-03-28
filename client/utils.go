@@ -2,6 +2,7 @@ package client
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net"
@@ -29,6 +30,19 @@ func localIP() string {
 	return "unknown"
 }
 
+func requestBody(model any, excludeID bool) map[string]any {
+	data, _ := json.Marshal(model)
+	var m map[string]any
+	json.Unmarshal(data, &m)
+	delete(m, "created_at")
+	delete(m, "updated_at")
+	delete(m, "deleted_at")
+	if excludeID {
+		delete(m, "id")
+	}
+	return m
+}
+
 func syncResponse[T any](ctx context.Context, body io.ReadCloser, err error) (T, error) {
 	result, err := DecodeJSON[T](body, err)
 	if err != nil {
@@ -51,7 +65,7 @@ func syncResponse[T any](ctx context.Context, body io.ReadCloser, err error) (T,
 func joinURL(baseURL string, segments ...string) (string, error) {
 	base, err := url.Parse(baseURL)
 	if err != nil {
-		return "", err
+		return "unknown", err
 	}
 
 	allSegments := append([]string{base.Path}, segments...)
