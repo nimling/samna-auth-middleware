@@ -7,6 +7,7 @@ import (
 	"net/http"
 
 	"github.com/google/uuid"
+	"github.com/nimling/samna-auth-middleware/db"
 )
 
 func GetMe(ctx context.Context) (io.ReadCloser, error) {
@@ -18,13 +19,13 @@ func GetMe(ctx context.Context) (io.ReadCloser, error) {
 	return c.client.Get(ctx, u)
 }
 
-func PutMe(ctx context.Context, body any) (io.ReadCloser, error) {
+func PutMe(ctx context.Context, user db.SamnaUser) (db.SamnaUser, error) {
 	c := newClient()
 	u, err := joinURL(c.apiURL, "me")
 	if err != nil {
-		return nil, fmt.Errorf("build url: %w", err)
+		return db.SamnaUser{}, fmt.Errorf("build url: %w", err)
 	}
-	return c.client.Put(ctx, body, u)
+	return syncResponse[db.SamnaUser](ctx, c.client.Put(ctx, user, u))
 }
 
 func GetMeClaims(ctx context.Context) (io.ReadCloser, error) {

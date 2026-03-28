@@ -105,13 +105,16 @@ func PostUser(ctx echo.Context) error {
 		return RespondError(ctx, http.StatusNotImplemented, "Not implemented")
 	}
 
-	body, err := client.PostUser(ctx.Request().Context(), userID, nil)
+	var user db.SamnaUser
+	if err := ctx.Bind(&user); err != nil {
+		return RespondError(ctx, http.StatusBadRequest, "Bad request")
+	}
+	result, err := client.PostUser(ctx.Request().Context(), userID, user)
 	if err != nil {
 		ctx.Logger().Errorf("PostUser: %v", err)
 		return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
 	}
-	defer body.Close()
-	return ctx.Stream(http.StatusCreated, "application/json", body)
+	return RespondJSON(ctx, http.StatusCreated, result, nil)
 }
 
 func PutUser(ctx echo.Context) error {
@@ -132,13 +135,16 @@ func PutUser(ctx echo.Context) error {
 		return RespondJSON(ctx, http.StatusOK, user, nil)
 	}
 
-	body, err := client.PutUser(ctx.Request().Context(), userID, nil)
+	var user db.SamnaUser
+	if err := ctx.Bind(&user); err != nil {
+		return RespondError(ctx, http.StatusBadRequest, "Bad request")
+	}
+	result, err := client.PutUser(ctx.Request().Context(), userID, user)
 	if err != nil {
 		ctx.Logger().Errorf("PutUser: %v", err)
 		return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
 	}
-	defer body.Close()
-	return ctx.Stream(http.StatusOK, "application/json", body)
+	return RespondJSON(ctx, http.StatusOK, result, nil)
 }
 
 func DeleteUser(ctx echo.Context) error {
@@ -152,13 +158,12 @@ func DeleteUser(ctx echo.Context) error {
 		return RespondError(ctx, http.StatusNotImplemented, "Not implemented")
 	}
 
-	body, err := client.DeleteUser(ctx.Request().Context(), userID)
+	result, err := client.DeleteUser(ctx.Request().Context(), userID)
 	if err != nil {
 		ctx.Logger().Errorf("DeleteUser: %v", err)
 		return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
 	}
-	defer body.Close()
-	return ctx.Stream(http.StatusOK, "application/json", body)
+	return RespondJSON(ctx, http.StatusOK, result, nil)
 }
 
 func GetUserClients(ctx echo.Context) error {

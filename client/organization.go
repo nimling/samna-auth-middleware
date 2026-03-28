@@ -6,6 +6,7 @@ import (
 	"io"
 
 	"github.com/google/uuid"
+	"github.com/nimling/samna-auth-middleware/db"
 )
 
 func GetOrganizationAssets(ctx context.Context, orgID uuid.UUID) (io.ReadCloser, error) {
@@ -53,29 +54,29 @@ func GetOrganizationClaims(ctx context.Context, orgID uuid.UUID) (io.ReadCloser,
 	return c.client.Get(ctx, u)
 }
 
-func PostOrganization(ctx context.Context, body any) (io.ReadCloser, error) {
+func PostOrganization(ctx context.Context, org db.Organization) (db.Organization, error) {
 	c := newClient()
 	u, err := joinURL(c.apiURL, "organization")
 	if err != nil {
-		return nil, fmt.Errorf("build url: %w", err)
+		return db.Organization{}, fmt.Errorf("build url: %w", err)
 	}
-	return c.client.Post(ctx, body, u)
+	return syncResponse[db.Organization](ctx, c.client.Post(ctx, org, u))
 }
 
-func PutOrganization(ctx context.Context, orgID uuid.UUID, body any) (io.ReadCloser, error) {
+func PutOrganization(ctx context.Context, orgID uuid.UUID, org db.Organization) (db.Organization, error) {
 	c := newClient()
 	u, err := joinURL(c.apiURL, "organization", orgID.String())
 	if err != nil {
-		return nil, fmt.Errorf("build url: %w", err)
+		return db.Organization{}, fmt.Errorf("build url: %w", err)
 	}
-	return c.client.Put(ctx, body, u)
+	return syncResponse[db.Organization](ctx, c.client.Put(ctx, org, u))
 }
 
-func DeleteOrganization(ctx context.Context, orgID uuid.UUID) (io.ReadCloser, error) {
+func DeleteOrganization(ctx context.Context, orgID uuid.UUID) (db.Organization, error) {
 	c := newClient()
 	u, err := joinURL(c.apiURL, "organization", orgID.String())
 	if err != nil {
-		return nil, fmt.Errorf("build url: %w", err)
+		return db.Organization{}, fmt.Errorf("build url: %w", err)
 	}
-	return c.client.Delete(ctx, u)
+	return syncResponse[db.Organization](ctx, c.client.Delete(ctx, u))
 }

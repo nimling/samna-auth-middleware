@@ -43,13 +43,16 @@ func PutMe(ctx echo.Context) error {
 		return RespondJSON(ctx, http.StatusOK, user, nil)
 	}
 
-	body, err := client.PutMe(ctx.Request().Context(), nil)
+	var user db.SamnaUser
+	if err := ctx.Bind(&user); err != nil {
+		return RespondError(ctx, http.StatusBadRequest, "Bad request")
+	}
+	result, err := client.PutMe(ctx.Request().Context(), user)
 	if err != nil {
 		ctx.Logger().Errorf("PutMe: %v", err)
 		return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
 	}
-	defer body.Close()
-	return ctx.Stream(http.StatusOK, "application/json", body)
+	return RespondJSON(ctx, http.StatusOK, result, nil)
 }
 
 func GetMeClaims(ctx echo.Context) error {

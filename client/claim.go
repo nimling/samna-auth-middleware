@@ -6,6 +6,7 @@ import (
 	"io"
 
 	"github.com/google/uuid"
+	"github.com/nimling/samna-auth-middleware/db"
 )
 
 func GetClaimGraph(ctx context.Context) (io.ReadCloser, error) {
@@ -53,65 +54,65 @@ func GetClaimSearch(ctx context.Context, claimID uuid.UUID) (io.ReadCloser, erro
 	return c.client.Get(ctx, u)
 }
 
-func PostClaim(ctx context.Context, body any) (io.ReadCloser, error) {
+func PostClaim(ctx context.Context, claim db.Claim) (db.Claim, error) {
 	c := newClient()
 	u, err := joinURL(c.apiURL, "claim")
 	if err != nil {
-		return nil, fmt.Errorf("build url: %w", err)
+		return db.Claim{}, fmt.Errorf("build url: %w", err)
 	}
-	return c.client.Post(ctx, body, u)
+	return syncResponse[db.Claim](ctx, c.client.Post(ctx, claim, u))
 }
 
-func PutClaim(ctx context.Context, claimID uuid.UUID, body any) (io.ReadCloser, error) {
+func PutClaim(ctx context.Context, claimID uuid.UUID, claim db.Claim) (db.Claim, error) {
 	c := newClient()
 	u, err := joinURL(c.apiURL, "claim", claimID.String())
 	if err != nil {
-		return nil, fmt.Errorf("build url: %w", err)
+		return db.Claim{}, fmt.Errorf("build url: %w", err)
 	}
-	return c.client.Put(ctx, body, u)
+	return syncResponse[db.Claim](ctx, c.client.Put(ctx, claim, u))
 }
 
-func DeleteClaim(ctx context.Context, claimID uuid.UUID) (io.ReadCloser, error) {
+func DeleteClaim(ctx context.Context, claimID uuid.UUID) (db.Claim, error) {
 	c := newClient()
 	u, err := joinURL(c.apiURL, "claim", claimID.String())
 	if err != nil {
-		return nil, fmt.Errorf("build url: %w", err)
+		return db.Claim{}, fmt.Errorf("build url: %w", err)
 	}
-	return c.client.Delete(ctx, u)
+	return syncResponse[db.Claim](ctx, c.client.Delete(ctx, u))
 }
 
-func PostClaimObject(ctx context.Context, claimID uuid.UUID, body any) (io.ReadCloser, error) {
+func PostClaimObject(ctx context.Context, claimID uuid.UUID, co db.ClaimObject) (db.ClaimObject, error) {
 	c := newClient()
 	u, err := joinURL(c.apiURL, "claim", claimID.String(), "object")
 	if err != nil {
-		return nil, fmt.Errorf("build url: %w", err)
+		return db.ClaimObject{}, fmt.Errorf("build url: %w", err)
 	}
-	return c.client.Post(ctx, body, u)
+	return syncResponse[db.ClaimObject](ctx, c.client.Post(ctx, co, u))
 }
 
-func DeleteClaimObject(ctx context.Context, claimID uuid.UUID, objectID uuid.UUID) (io.ReadCloser, error) {
+func DeleteClaimObject(ctx context.Context, claimID uuid.UUID, objectID uuid.UUID) (db.ClaimObject, error) {
 	c := newClient()
 	u, err := joinURL(c.apiURL, "claim", claimID.String(), "object", objectID.String())
 	if err != nil {
-		return nil, fmt.Errorf("build url: %w", err)
+		return db.ClaimObject{}, fmt.Errorf("build url: %w", err)
 	}
-	return c.client.Delete(ctx, u)
+	return syncResponse[db.ClaimObject](ctx, c.client.Delete(ctx, u))
 }
 
-func PostClaimUser(ctx context.Context, claimID uuid.UUID, body any) (io.ReadCloser, error) {
+func PostUserClaim(ctx context.Context, claimID uuid.UUID, uc db.UserClaim) (db.UserClaim, error) {
 	c := newClient()
 	u, err := joinURL(c.apiURL, "claim", claimID.String(), "user")
 	if err != nil {
-		return nil, fmt.Errorf("build url: %w", err)
+		return db.UserClaim{}, fmt.Errorf("build url: %w", err)
 	}
-	return c.client.Post(ctx, body, u)
+	return syncResponse[db.UserClaim](ctx, c.client.Post(ctx, uc, u))
 }
 
-func DeleteClaimUser(ctx context.Context, claimID uuid.UUID, userID uuid.UUID) (io.ReadCloser, error) {
+func DeleteUserClaim(ctx context.Context, claimID uuid.UUID, userID uuid.UUID) (db.UserClaim, error) {
 	c := newClient()
 	u, err := joinURL(c.apiURL, "claim", claimID.String(), "user", userID.String())
 	if err != nil {
-		return nil, fmt.Errorf("build url: %w", err)
+		return db.UserClaim{}, fmt.Errorf("build url: %w", err)
 	}
-	return c.client.Delete(ctx, u)
+	return syncResponse[db.UserClaim](ctx, c.client.Delete(ctx, u))
 }

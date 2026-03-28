@@ -131,13 +131,16 @@ func PostOrganization(ctx echo.Context) error {
 		return RespondJSON(ctx, http.StatusCreated, org, nil)
 	}
 
-	body, err := client.PostOrganization(ctx.Request().Context(), nil)
+	var org db.Organization
+	if err := ctx.Bind(&org); err != nil {
+		return RespondError(ctx, http.StatusBadRequest, "Bad request")
+	}
+	result, err := client.PostOrganization(ctx.Request().Context(), org)
 	if err != nil {
 		ctx.Logger().Errorf("PostOrganization: %v", err)
 		return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
 	}
-	defer body.Close()
-	return ctx.Stream(http.StatusCreated, "application/json", body)
+	return RespondJSON(ctx, http.StatusCreated, result, nil)
 }
 
 func PutOrganization(ctx echo.Context) error {
@@ -170,13 +173,16 @@ func PutOrganization(ctx echo.Context) error {
 		return RespondJSON(ctx, http.StatusOK, org, nil)
 	}
 
-	body, err := client.PutOrganization(ctx.Request().Context(), orgID, nil)
+	var org db.Organization
+	if err := ctx.Bind(&org); err != nil {
+		return RespondError(ctx, http.StatusBadRequest, "Bad request")
+	}
+	result, err := client.PutOrganization(ctx.Request().Context(), orgID, org)
 	if err != nil {
 		ctx.Logger().Errorf("PutOrganization: %v", err)
 		return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
 	}
-	defer body.Close()
-	return ctx.Stream(http.StatusOK, "application/json", body)
+	return RespondJSON(ctx, http.StatusOK, result, nil)
 }
 
 func DeleteOrganization(ctx echo.Context) error {
@@ -205,11 +211,10 @@ func DeleteOrganization(ctx echo.Context) error {
 		return ctx.NoContent(http.StatusOK)
 	}
 
-	body, err := client.DeleteOrganization(ctx.Request().Context(), orgID)
+	result, err := client.DeleteOrganization(ctx.Request().Context(), orgID)
 	if err != nil {
 		ctx.Logger().Errorf("DeleteOrganization: %v", err)
 		return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
 	}
-	defer body.Close()
-	return ctx.Stream(http.StatusOK, "application/json", body)
+	return RespondJSON(ctx, http.StatusOK, result, nil)
 }

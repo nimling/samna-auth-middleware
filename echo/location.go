@@ -114,13 +114,16 @@ func PostLocation(ctx echo.Context) error {
 		return RespondJSON(ctx, http.StatusCreated, loc, nil)
 	}
 
-	body, err := client.PostLocation(ctx.Request().Context(), nil)
+	var loc db.Location
+	if err := ctx.Bind(&loc); err != nil {
+		return RespondError(ctx, http.StatusBadRequest, "Bad request")
+	}
+	result, err := client.PostLocation(ctx.Request().Context(), loc)
 	if err != nil {
 		ctx.Logger().Errorf("PostLocation: %v", err)
 		return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
 	}
-	defer body.Close()
-	return ctx.Stream(http.StatusCreated, "application/json", body)
+	return RespondJSON(ctx, http.StatusCreated, result, nil)
 }
 
 func PutLocation(ctx echo.Context) error {
@@ -145,13 +148,16 @@ func PutLocation(ctx echo.Context) error {
 		return RespondJSON(ctx, http.StatusOK, loc, nil)
 	}
 
-	body, err := client.PutLocation(ctx.Request().Context(), locationID, nil)
+	var loc db.Location
+	if err := ctx.Bind(&loc); err != nil {
+		return RespondError(ctx, http.StatusBadRequest, "Bad request")
+	}
+	result, err := client.PutLocation(ctx.Request().Context(), locationID, loc)
 	if err != nil {
 		ctx.Logger().Errorf("PutLocation: %v", err)
 		return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
 	}
-	defer body.Close()
-	return ctx.Stream(http.StatusOK, "application/json", body)
+	return RespondJSON(ctx, http.StatusOK, result, nil)
 }
 
 func DeleteLocation(ctx echo.Context) error {
@@ -172,11 +178,10 @@ func DeleteLocation(ctx echo.Context) error {
 		return ctx.NoContent(http.StatusOK)
 	}
 
-	body, err := client.DeleteLocation(ctx.Request().Context(), locationID)
+	result, err := client.DeleteLocation(ctx.Request().Context(), locationID)
 	if err != nil {
 		ctx.Logger().Errorf("DeleteLocation: %v", err)
 		return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
 	}
-	defer body.Close()
-	return ctx.Stream(http.StatusOK, "application/json", body)
+	return RespondJSON(ctx, http.StatusOK, result, nil)
 }

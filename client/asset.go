@@ -7,6 +7,7 @@ import (
 	"net/http"
 
 	"github.com/google/uuid"
+	"github.com/nimling/samna-auth-middleware/db"
 )
 
 func GetAssets(ctx context.Context) (io.ReadCloser, error) {
@@ -36,13 +37,13 @@ func GetAssetData(ctx context.Context, assetID uuid.UUID) (io.ReadCloser, error)
 	return c.client.Get(ctx, u)
 }
 
-func PostAsset(ctx context.Context, body any) (io.ReadCloser, error) {
+func PostAsset(ctx context.Context, asset db.Asset) (db.Asset, error) {
 	c := newClient()
 	u, err := joinURL(c.apiURL, "asset")
 	if err != nil {
-		return nil, fmt.Errorf("build url: %w", err)
+		return db.Asset{}, fmt.Errorf("build url: %w", err)
 	}
-	return c.client.Post(ctx, body, u)
+	return syncResponse[db.Asset](ctx, c.client.Post(ctx, asset, u))
 }
 
 func PostAssetUpload(ctx context.Context, assetID uuid.UUID, contentType string, body io.Reader) (io.ReadCloser, error) {
@@ -76,20 +77,20 @@ func PostAssetUpload(ctx context.Context, assetID uuid.UUID, contentType string,
 	return resp.Body, nil
 }
 
-func PutAsset(ctx context.Context, assetID uuid.UUID, body any) (io.ReadCloser, error) {
+func PutAsset(ctx context.Context, assetID uuid.UUID, asset db.Asset) (db.Asset, error) {
 	c := newClient()
 	u, err := joinURL(c.apiURL, "asset", assetID.String())
 	if err != nil {
-		return nil, fmt.Errorf("build url: %w", err)
+		return db.Asset{}, fmt.Errorf("build url: %w", err)
 	}
-	return c.client.Put(ctx, body, u)
+	return syncResponse[db.Asset](ctx, c.client.Put(ctx, asset, u))
 }
 
-func DeleteAsset(ctx context.Context, assetID uuid.UUID) (io.ReadCloser, error) {
+func DeleteAsset(ctx context.Context, assetID uuid.UUID) (db.Asset, error) {
 	c := newClient()
 	u, err := joinURL(c.apiURL, "asset", assetID.String())
 	if err != nil {
-		return nil, fmt.Errorf("build url: %w", err)
+		return db.Asset{}, fmt.Errorf("build url: %w", err)
 	}
-	return c.client.Delete(ctx, u)
+	return syncResponse[db.Asset](ctx, c.client.Delete(ctx, u))
 }

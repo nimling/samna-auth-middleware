@@ -6,6 +6,7 @@ import (
 	"io"
 
 	"github.com/google/uuid"
+	"github.com/nimling/samna-auth-middleware/db"
 )
 
 func GetUserAssets(ctx context.Context, userID uuid.UUID) (io.ReadCloser, error) {
@@ -53,31 +54,31 @@ func GetUserConnections(ctx context.Context, userID uuid.UUID) (io.ReadCloser, e
 	return c.client.Get(ctx, u)
 }
 
-func PostUser(ctx context.Context, userID uuid.UUID, body any) (io.ReadCloser, error) {
+func PostUser(ctx context.Context, userID uuid.UUID, user db.SamnaUser) (db.SamnaUser, error) {
 	c := newClient()
 	u, err := joinURL(c.apiURL, "user", userID.String())
 	if err != nil {
-		return nil, fmt.Errorf("build url: %w", err)
+		return db.SamnaUser{}, fmt.Errorf("build url: %w", err)
 	}
-	return c.client.Post(ctx, body, u)
+	return syncResponse[db.SamnaUser](ctx, c.client.Post(ctx, user, u))
 }
 
-func PutUser(ctx context.Context, userID uuid.UUID, body any) (io.ReadCloser, error) {
+func PutUser(ctx context.Context, userID uuid.UUID, user db.SamnaUser) (db.SamnaUser, error) {
 	c := newClient()
 	u, err := joinURL(c.apiURL, "user", userID.String())
 	if err != nil {
-		return nil, fmt.Errorf("build url: %w", err)
+		return db.SamnaUser{}, fmt.Errorf("build url: %w", err)
 	}
-	return c.client.Put(ctx, body, u)
+	return syncResponse[db.SamnaUser](ctx, c.client.Put(ctx, user, u))
 }
 
-func DeleteUser(ctx context.Context, userID uuid.UUID) (io.ReadCloser, error) {
+func DeleteUser(ctx context.Context, userID uuid.UUID) (db.SamnaUser, error) {
 	c := newClient()
 	u, err := joinURL(c.apiURL, "user", userID.String())
 	if err != nil {
-		return nil, fmt.Errorf("build url: %w", err)
+		return db.SamnaUser{}, fmt.Errorf("build url: %w", err)
 	}
-	return c.client.Delete(ctx, u)
+	return syncResponse[db.SamnaUser](ctx, c.client.Delete(ctx, u))
 }
 
 func GetUserClients(ctx context.Context, userID uuid.UUID) (io.ReadCloser, error) {

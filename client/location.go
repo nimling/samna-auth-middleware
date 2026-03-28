@@ -6,6 +6,7 @@ import (
 	"io"
 
 	"github.com/google/uuid"
+	"github.com/nimling/samna-auth-middleware/db"
 )
 
 func GetLocationAssets(ctx context.Context, locationID uuid.UUID) (io.ReadCloser, error) {
@@ -44,29 +45,29 @@ func GetLocationClaims(ctx context.Context, locationID uuid.UUID) (io.ReadCloser
 	return c.client.Get(ctx, u)
 }
 
-func PostLocation(ctx context.Context, body any) (io.ReadCloser, error) {
+func PostLocation(ctx context.Context, loc db.Location) (db.Location, error) {
 	c := newClient()
 	u, err := joinURL(c.apiURL, "location")
 	if err != nil {
-		return nil, fmt.Errorf("build url: %w", err)
+		return db.Location{}, fmt.Errorf("build url: %w", err)
 	}
-	return c.client.Post(ctx, body, u)
+	return syncResponse[db.Location](ctx, c.client.Post(ctx, loc, u))
 }
 
-func PutLocation(ctx context.Context, locationID uuid.UUID, body any) (io.ReadCloser, error) {
+func PutLocation(ctx context.Context, locationID uuid.UUID, loc db.Location) (db.Location, error) {
 	c := newClient()
 	u, err := joinURL(c.apiURL, "location", locationID.String())
 	if err != nil {
-		return nil, fmt.Errorf("build url: %w", err)
+		return db.Location{}, fmt.Errorf("build url: %w", err)
 	}
-	return c.client.Put(ctx, body, u)
+	return syncResponse[db.Location](ctx, c.client.Put(ctx, loc, u))
 }
 
-func DeleteLocation(ctx context.Context, locationID uuid.UUID) (io.ReadCloser, error) {
+func DeleteLocation(ctx context.Context, locationID uuid.UUID) (db.Location, error) {
 	c := newClient()
 	u, err := joinURL(c.apiURL, "location", locationID.String())
 	if err != nil {
-		return nil, fmt.Errorf("build url: %w", err)
+		return db.Location{}, fmt.Errorf("build url: %w", err)
 	}
-	return c.client.Delete(ctx, u)
+	return syncResponse[db.Location](ctx, c.client.Delete(ctx, u))
 }
