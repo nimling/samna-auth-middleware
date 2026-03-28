@@ -109,25 +109,6 @@ func GetClaimSearch(ctx echo.Context) error {
 }
 
 func PostClaim(ctx echo.Context) error {
-	if debugUserID := utils.GetDebugUserID(); debugUserID != nil {
-		var reqBody struct {
-			Name        string    `json:"name"`
-			Description string    `json:"description"`
-			AccessLevel int       `json:"access_level"`
-			OwnerID     uuid.UUID `json:"owner_id"`
-			RootID      uuid.UUID `json:"root_id"`
-		}
-		if err := ctx.Bind(&reqBody); err != nil {
-			return RespondError(ctx, http.StatusBadRequest, "Bad request")
-		}
-		id, err := db.Instance().CreateClaim(ctx.Request().Context(), reqBody.Name, reqBody.Description, reqBody.AccessLevel, reqBody.OwnerID, reqBody.RootID, *debugUserID)
-		if err != nil {
-			ctx.Logger().Errorf("PostClaim: %v", err)
-			return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
-		}
-		return RespondJSON(ctx, http.StatusCreated, map[string]uuid.UUID{"id": id}, nil)
-	}
-
 	var claim db.Claim
 	if err := ctx.Bind(&claim); err != nil {
 		return RespondError(ctx, http.StatusBadRequest, "Bad request")
@@ -169,15 +150,6 @@ func DeleteClaim(ctx echo.Context) error {
 		return RespondError(ctx, http.StatusBadRequest, "Bad request")
 	}
 
-	if debugUserID := utils.GetDebugUserID(); debugUserID != nil {
-		_, err := db.Instance().RemoveClaim(ctx.Request().Context(), claimID, *debugUserID)
-		if err != nil {
-			ctx.Logger().Errorf("DeleteClaim: %v", err)
-			return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
-		}
-		return ctx.NoContent(http.StatusOK)
-	}
-
 	result, err := client.DeleteClaim(ctx.Request().Context(), claimID)
 	if err != nil {
 		ctx.Logger().Errorf("DeleteClaim: %v", err)
@@ -190,32 +162,6 @@ func PostClaimObject(ctx echo.Context) error {
 	claimID, err := uuid.Parse(ctx.Param("id"))
 	if err != nil {
 		return RespondError(ctx, http.StatusBadRequest, "Bad request")
-	}
-
-	if debugUserID := utils.GetDebugUserID(); debugUserID != nil {
-		var reqBody struct {
-			ObjectID   uuid.UUID  `json:"object_id"`
-			ObjectType string     `json:"object_type"`
-			OwnerID    uuid.UUID  `json:"owner_id"`
-			RootID     uuid.UUID  `json:"root_id"`
-			Level      *int       `json:"level"`
-			Inherits   *bool      `json:"inherits"`
-			Reason     *string    `json:"reason"`
-			RefID      *uuid.UUID `json:"ref_id"`
-		}
-		if err := ctx.Bind(&reqBody); err != nil {
-			return RespondError(ctx, http.StatusBadRequest, "Bad request")
-		}
-		if reqBody.Level == nil {
-			defaultLevel := 0
-			reqBody.Level = &defaultLevel
-		}
-		id, err := db.Instance().AssignClaimToObject(ctx.Request().Context(), claimID, reqBody.ObjectID, reqBody.ObjectType, reqBody.OwnerID, reqBody.RootID, *debugUserID, reqBody.Level, reqBody.Inherits, reqBody.Reason, reqBody.RefID)
-		if err != nil {
-			ctx.Logger().Errorf("PostClaimObject: %v", err)
-			return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
-		}
-		return RespondJSON(ctx, http.StatusCreated, map[string]uuid.UUID{"id": id}, nil)
 	}
 
 	var co db.ClaimObject
@@ -258,23 +204,6 @@ func PostClaimUser(ctx echo.Context) error {
 	claimID, err := uuid.Parse(ctx.Param("id"))
 	if err != nil {
 		return RespondError(ctx, http.StatusBadRequest, "Bad request")
-	}
-
-	if debugUserID := utils.GetDebugUserID(); debugUserID != nil {
-		var reqBody struct {
-			UserID  uuid.UUID `json:"user_id"`
-			OwnerID uuid.UUID `json:"owner_id"`
-			Reason  *string   `json:"reason"`
-		}
-		if err := ctx.Bind(&reqBody); err != nil {
-			return RespondError(ctx, http.StatusBadRequest, "Bad request")
-		}
-		id, err := db.Instance().AssignClaimToUser(ctx.Request().Context(), claimID, reqBody.UserID, reqBody.OwnerID, *debugUserID, reqBody.Reason, nil, nil)
-		if err != nil {
-			ctx.Logger().Errorf("PostClaimUser: %v", err)
-			return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
-		}
-		return RespondJSON(ctx, http.StatusCreated, map[string]uuid.UUID{"id": id}, nil)
 	}
 
 	var uc db.UserClaim

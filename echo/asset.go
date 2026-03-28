@@ -6,6 +6,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 	"github.com/nimling/samna-auth-middleware/client"
+	"github.com/nimling/samna-auth-middleware/db"
 	"github.com/nimling/samna-auth-middleware/utils"
 )
 
@@ -70,13 +71,16 @@ func PostAsset(ctx echo.Context) error {
 		return RespondError(ctx, http.StatusNotImplemented, "Not implemented")
 	}
 
-	body, err := client.PostAsset(ctx.Request().Context(), nil)
+	var asset db.Asset
+	if err := ctx.Bind(&asset); err != nil {
+		return RespondError(ctx, http.StatusBadRequest, "Bad request")
+	}
+	result, err := client.PostAsset(ctx.Request().Context(), asset)
 	if err != nil {
 		ctx.Logger().Errorf("PostAsset: %v", err)
 		return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
 	}
-	defer body.Close()
-	return ctx.Stream(http.StatusCreated, "application/json", body)
+	return RespondJSON(ctx, http.StatusCreated, result, nil)
 }
 
 func PostAssetUpload(ctx echo.Context) error {
@@ -110,13 +114,16 @@ func PutAsset(ctx echo.Context) error {
 		return RespondError(ctx, http.StatusNotImplemented, "Not implemented")
 	}
 
-	body, err := client.PutAsset(ctx.Request().Context(), assetID, nil)
+	var asset db.Asset
+	if err := ctx.Bind(&asset); err != nil {
+		return RespondError(ctx, http.StatusBadRequest, "Bad request")
+	}
+	result, err := client.PutAsset(ctx.Request().Context(), assetID, asset)
 	if err != nil {
 		ctx.Logger().Errorf("PutAsset: %v", err)
 		return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
 	}
-	defer body.Close()
-	return ctx.Stream(http.StatusOK, "application/json", body)
+	return RespondJSON(ctx, http.StatusOK, result, nil)
 }
 
 func DeleteAsset(ctx echo.Context) error {
@@ -130,11 +137,10 @@ func DeleteAsset(ctx echo.Context) error {
 		return RespondError(ctx, http.StatusNotImplemented, "Not implemented")
 	}
 
-	body, err := client.DeleteAsset(ctx.Request().Context(), assetID)
+	result, err := client.DeleteAsset(ctx.Request().Context(), assetID)
 	if err != nil {
 		ctx.Logger().Errorf("DeleteAsset: %v", err)
 		return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
 	}
-	defer body.Close()
-	return ctx.Stream(http.StatusOK, "application/json", body)
+	return RespondJSON(ctx, http.StatusOK, result, nil)
 }
