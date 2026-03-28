@@ -60,7 +60,15 @@ func PostClaim(ctx context.Context, claim db.Claim) (db.Claim, error) {
 	if err != nil {
 		return db.Claim{}, fmt.Errorf("build url: %w", err)
 	}
-	return syncResponse[db.Claim](ctx, c.client.Post(ctx, requestBody(claim, true), u))
+	result, err := DecodeJSON[db.Claim](c.client.Post(ctx, requestBody(claim, true), u))
+	if err != nil {
+		return result, err
+	}
+	_, err = db.Instance().NewInsert().Model(&result).On("CONFLICT (id) DO UPDATE").Set("sa_updated_at = EXCLUDED.sa_updated_at").Set("sa_deleted_at = EXCLUDED.sa_deleted_at").Exec(ctx)
+	if err != nil {
+		return result, err
+	}
+	return result, nil
 }
 
 func PutClaim(ctx context.Context, claimID uuid.UUID, claim db.Claim) (db.Claim, error) {
@@ -69,7 +77,15 @@ func PutClaim(ctx context.Context, claimID uuid.UUID, claim db.Claim) (db.Claim,
 	if err != nil {
 		return db.Claim{}, fmt.Errorf("build url: %w", err)
 	}
-	return syncResponse[db.Claim](ctx, c.client.Put(ctx, requestBody(claim, false), u))
+	result, err := DecodeJSON[db.Claim](c.client.Put(ctx, requestBody(claim, false), u))
+	if err != nil {
+		return result, err
+	}
+	_, err = db.Instance().NewInsert().Model(&result).On("CONFLICT (id) DO UPDATE").Set("sa_updated_at = EXCLUDED.sa_updated_at").Set("sa_deleted_at = EXCLUDED.sa_deleted_at").Exec(ctx)
+	if err != nil {
+		return result, err
+	}
+	return result, nil
 }
 
 func DeleteClaim(ctx context.Context, claimID uuid.UUID) (db.Claim, error) {
@@ -78,7 +94,15 @@ func DeleteClaim(ctx context.Context, claimID uuid.UUID) (db.Claim, error) {
 	if err != nil {
 		return db.Claim{}, fmt.Errorf("build url: %w", err)
 	}
-	return syncResponse[db.Claim](ctx, c.client.Delete(ctx, u))
+	result, err := DecodeJSON[db.Claim](c.client.Delete(ctx, u))
+	if err != nil {
+		return result, err
+	}
+	_, err = db.Instance().NewInsert().Model(&result).On("CONFLICT (id) DO UPDATE").Set("sa_updated_at = EXCLUDED.sa_updated_at").Set("sa_deleted_at = EXCLUDED.sa_deleted_at").Exec(ctx)
+	if err != nil {
+		return result, err
+	}
+	return result, nil
 }
 
 func PostClaimObject(ctx context.Context, claimID uuid.UUID, co db.ClaimObject) (db.ClaimObject, error) {
@@ -87,7 +111,15 @@ func PostClaimObject(ctx context.Context, claimID uuid.UUID, co db.ClaimObject) 
 	if err != nil {
 		return db.ClaimObject{}, fmt.Errorf("build url: %w", err)
 	}
-	return syncResponse[db.ClaimObject](ctx, c.client.Post(ctx, requestBody(co, true), u))
+	result, err := DecodeJSON[db.ClaimObject](c.client.Post(ctx, requestBody(co, true), u))
+	if err != nil {
+		return result, err
+	}
+	_, err = db.Instance().NewInsert().Model(&result).On("CONFLICT (id) DO UPDATE").Set("sa_updated_at = EXCLUDED.sa_updated_at").Set("sa_deleted_at = EXCLUDED.sa_deleted_at").Exec(ctx)
+	if err != nil {
+		return result, err
+	}
+	return result, nil
 }
 
 func DeleteClaimObject(ctx context.Context, claimID uuid.UUID, objectID uuid.UUID) (db.ClaimObject, error) {
@@ -96,7 +128,15 @@ func DeleteClaimObject(ctx context.Context, claimID uuid.UUID, objectID uuid.UUI
 	if err != nil {
 		return db.ClaimObject{}, fmt.Errorf("build url: %w", err)
 	}
-	return syncResponse[db.ClaimObject](ctx, c.client.Delete(ctx, u))
+	result, err := DecodeJSON[db.ClaimObject](c.client.Delete(ctx, u))
+	if err != nil {
+		return result, err
+	}
+	_, err = db.Instance().NewInsert().Model(&result).On("CONFLICT (id) DO UPDATE").Set("sa_updated_at = EXCLUDED.sa_updated_at").Set("sa_deleted_at = EXCLUDED.sa_deleted_at").Exec(ctx)
+	if err != nil {
+		return result, err
+	}
+	return result, nil
 }
 
 func PostUserClaim(ctx context.Context, claimID uuid.UUID, uc db.UserClaim) (db.UserClaim, error) {
@@ -105,7 +145,15 @@ func PostUserClaim(ctx context.Context, claimID uuid.UUID, uc db.UserClaim) (db.
 	if err != nil {
 		return db.UserClaim{}, fmt.Errorf("build url: %w", err)
 	}
-	return syncResponse[db.UserClaim](ctx, c.client.Post(ctx, requestBody(uc, true), u))
+	result, err := DecodeJSON[db.UserClaim](c.client.Post(ctx, requestBody(uc, true), u))
+	if err != nil {
+		return result, err
+	}
+	_, err = db.Instance().NewInsert().Model(&result).On("CONFLICT (id) DO UPDATE").Set("sa_updated_at = EXCLUDED.sa_updated_at").Set("sa_deleted_at = EXCLUDED.sa_deleted_at").Exec(ctx)
+	if err != nil {
+		return result, err
+	}
+	return result, nil
 }
 
 func DeleteUserClaim(ctx context.Context, claimID uuid.UUID, userID uuid.UUID) (db.UserClaim, error) {
@@ -114,5 +162,13 @@ func DeleteUserClaim(ctx context.Context, claimID uuid.UUID, userID uuid.UUID) (
 	if err != nil {
 		return db.UserClaim{}, fmt.Errorf("build url: %w", err)
 	}
-	return syncResponse[db.UserClaim](ctx, c.client.Delete(ctx, u))
+	result, err := DecodeJSON[db.UserClaim](c.client.Delete(ctx, u))
+	if err != nil {
+		return result, err
+	}
+	_, err = db.Instance().NewInsert().Model(&result).On("CONFLICT (id) DO UPDATE").Set("sa_updated_at = EXCLUDED.sa_updated_at").Set("sa_deleted_at = EXCLUDED.sa_deleted_at").Exec(ctx)
+	if err != nil {
+		return result, err
+	}
+	return result, nil
 }

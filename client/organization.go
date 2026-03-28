@@ -60,7 +60,15 @@ func PostOrganization(ctx context.Context, org db.Organization) (db.Organization
 	if err != nil {
 		return db.Organization{}, fmt.Errorf("build url: %w", err)
 	}
-	return syncResponse[db.Organization](ctx, c.client.Post(ctx, requestBody(org, true), u))
+	result, err := DecodeJSON[db.Organization](c.client.Post(ctx, requestBody(org, true), u))
+	if err != nil {
+		return result, err
+	}
+	_, err = db.Instance().NewInsert().Model(&result).On("CONFLICT (id) DO UPDATE").Set("sa_updated_at = EXCLUDED.sa_updated_at").Set("sa_deleted_at = EXCLUDED.sa_deleted_at").Exec(ctx)
+	if err != nil {
+		return result, err
+	}
+	return result, nil
 }
 
 func PutOrganization(ctx context.Context, orgID uuid.UUID, org db.Organization) (db.Organization, error) {
@@ -69,7 +77,15 @@ func PutOrganization(ctx context.Context, orgID uuid.UUID, org db.Organization) 
 	if err != nil {
 		return db.Organization{}, fmt.Errorf("build url: %w", err)
 	}
-	return syncResponse[db.Organization](ctx, c.client.Put(ctx, requestBody(org, false), u))
+	result, err := DecodeJSON[db.Organization](c.client.Put(ctx, requestBody(org, false), u))
+	if err != nil {
+		return result, err
+	}
+	_, err = db.Instance().NewInsert().Model(&result).On("CONFLICT (id) DO UPDATE").Set("sa_updated_at = EXCLUDED.sa_updated_at").Set("sa_deleted_at = EXCLUDED.sa_deleted_at").Exec(ctx)
+	if err != nil {
+		return result, err
+	}
+	return result, nil
 }
 
 func DeleteOrganization(ctx context.Context, orgID uuid.UUID) (db.Organization, error) {
@@ -78,5 +94,13 @@ func DeleteOrganization(ctx context.Context, orgID uuid.UUID) (db.Organization, 
 	if err != nil {
 		return db.Organization{}, fmt.Errorf("build url: %w", err)
 	}
-	return syncResponse[db.Organization](ctx, c.client.Delete(ctx, u))
+	result, err := DecodeJSON[db.Organization](c.client.Delete(ctx, u))
+	if err != nil {
+		return result, err
+	}
+	_, err = db.Instance().NewInsert().Model(&result).On("CONFLICT (id) DO UPDATE").Set("sa_updated_at = EXCLUDED.sa_updated_at").Set("sa_deleted_at = EXCLUDED.sa_deleted_at").Exec(ctx)
+	if err != nil {
+		return result, err
+	}
+	return result, nil
 }

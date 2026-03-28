@@ -51,7 +51,15 @@ func PostLocation(ctx context.Context, loc db.Location) (db.Location, error) {
 	if err != nil {
 		return db.Location{}, fmt.Errorf("build url: %w", err)
 	}
-	return syncResponse[db.Location](ctx, c.client.Post(ctx, requestBody(loc, true), u))
+	result, err := DecodeJSON[db.Location](c.client.Post(ctx, requestBody(loc, true), u))
+	if err != nil {
+		return result, err
+	}
+	_, err = db.Instance().NewInsert().Model(&result).On("CONFLICT (id) DO UPDATE").Set("sa_updated_at = EXCLUDED.sa_updated_at").Set("sa_deleted_at = EXCLUDED.sa_deleted_at").Exec(ctx)
+	if err != nil {
+		return result, err
+	}
+	return result, nil
 }
 
 func PutLocation(ctx context.Context, locationID uuid.UUID, loc db.Location) (db.Location, error) {
@@ -60,7 +68,15 @@ func PutLocation(ctx context.Context, locationID uuid.UUID, loc db.Location) (db
 	if err != nil {
 		return db.Location{}, fmt.Errorf("build url: %w", err)
 	}
-	return syncResponse[db.Location](ctx, c.client.Put(ctx, requestBody(loc, false), u))
+	result, err := DecodeJSON[db.Location](c.client.Put(ctx, requestBody(loc, false), u))
+	if err != nil {
+		return result, err
+	}
+	_, err = db.Instance().NewInsert().Model(&result).On("CONFLICT (id) DO UPDATE").Set("sa_updated_at = EXCLUDED.sa_updated_at").Set("sa_deleted_at = EXCLUDED.sa_deleted_at").Exec(ctx)
+	if err != nil {
+		return result, err
+	}
+	return result, nil
 }
 
 func DeleteLocation(ctx context.Context, locationID uuid.UUID) (db.Location, error) {
@@ -69,5 +85,13 @@ func DeleteLocation(ctx context.Context, locationID uuid.UUID) (db.Location, err
 	if err != nil {
 		return db.Location{}, fmt.Errorf("build url: %w", err)
 	}
-	return syncResponse[db.Location](ctx, c.client.Delete(ctx, u))
+	result, err := DecodeJSON[db.Location](c.client.Delete(ctx, u))
+	if err != nil {
+		return result, err
+	}
+	_, err = db.Instance().NewInsert().Model(&result).On("CONFLICT (id) DO UPDATE").Set("sa_updated_at = EXCLUDED.sa_updated_at").Set("sa_deleted_at = EXCLUDED.sa_deleted_at").Exec(ctx)
+	if err != nil {
+		return result, err
+	}
+	return result, nil
 }

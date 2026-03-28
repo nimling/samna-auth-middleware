@@ -25,7 +25,15 @@ func PutMe(ctx context.Context, user db.SamnaUser) (db.SamnaUser, error) {
 	if err != nil {
 		return db.SamnaUser{}, fmt.Errorf("build url: %w", err)
 	}
-	return syncResponse[db.SamnaUser](ctx, c.client.Put(ctx, requestBody(user, false), u))
+	result, err := DecodeJSON[db.SamnaUser](c.client.Put(ctx, requestBody(user, false), u))
+	if err != nil {
+		return result, err
+	}
+	_, err = db.Instance().NewInsert().Model(&result).On("CONFLICT (id) DO UPDATE").Set("sa_updated_at = EXCLUDED.sa_updated_at").Set("sa_deleted_at = EXCLUDED.sa_deleted_at").Exec(ctx)
+	if err != nil {
+		return result, err
+	}
+	return result, nil
 }
 
 func GetMeClaims(ctx context.Context) (io.ReadCloser, error) {

@@ -60,7 +60,15 @@ func PostUser(ctx context.Context, userID uuid.UUID, user db.SamnaUser) (db.Samn
 	if err != nil {
 		return db.SamnaUser{}, fmt.Errorf("build url: %w", err)
 	}
-	return syncResponse[db.SamnaUser](ctx, c.client.Post(ctx, requestBody(user, true), u))
+	result, err := DecodeJSON[db.SamnaUser](c.client.Post(ctx, requestBody(user, true), u))
+	if err != nil {
+		return result, err
+	}
+	_, err = db.Instance().NewInsert().Model(&result).On("CONFLICT (id) DO UPDATE").Set("sa_updated_at = EXCLUDED.sa_updated_at").Set("sa_deleted_at = EXCLUDED.sa_deleted_at").Exec(ctx)
+	if err != nil {
+		return result, err
+	}
+	return result, nil
 }
 
 func PutUser(ctx context.Context, userID uuid.UUID, user db.SamnaUser) (db.SamnaUser, error) {
@@ -69,7 +77,15 @@ func PutUser(ctx context.Context, userID uuid.UUID, user db.SamnaUser) (db.Samna
 	if err != nil {
 		return db.SamnaUser{}, fmt.Errorf("build url: %w", err)
 	}
-	return syncResponse[db.SamnaUser](ctx, c.client.Put(ctx, requestBody(user, false), u))
+	result, err := DecodeJSON[db.SamnaUser](c.client.Put(ctx, requestBody(user, false), u))
+	if err != nil {
+		return result, err
+	}
+	_, err = db.Instance().NewInsert().Model(&result).On("CONFLICT (id) DO UPDATE").Set("sa_updated_at = EXCLUDED.sa_updated_at").Set("sa_deleted_at = EXCLUDED.sa_deleted_at").Exec(ctx)
+	if err != nil {
+		return result, err
+	}
+	return result, nil
 }
 
 func DeleteUser(ctx context.Context, userID uuid.UUID) (db.SamnaUser, error) {
@@ -78,7 +94,15 @@ func DeleteUser(ctx context.Context, userID uuid.UUID) (db.SamnaUser, error) {
 	if err != nil {
 		return db.SamnaUser{}, fmt.Errorf("build url: %w", err)
 	}
-	return syncResponse[db.SamnaUser](ctx, c.client.Delete(ctx, u))
+	result, err := DecodeJSON[db.SamnaUser](c.client.Delete(ctx, u))
+	if err != nil {
+		return result, err
+	}
+	_, err = db.Instance().NewInsert().Model(&result).On("CONFLICT (id) DO UPDATE").Set("sa_updated_at = EXCLUDED.sa_updated_at").Set("sa_deleted_at = EXCLUDED.sa_deleted_at").Exec(ctx)
+	if err != nil {
+		return result, err
+	}
+	return result, nil
 }
 
 func GetUserClients(ctx context.Context, userID uuid.UUID) (io.ReadCloser, error) {

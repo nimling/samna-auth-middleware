@@ -43,7 +43,15 @@ func PostAsset(ctx context.Context, asset db.Asset) (db.Asset, error) {
 	if err != nil {
 		return db.Asset{}, fmt.Errorf("build url: %w", err)
 	}
-	return syncResponse[db.Asset](ctx, c.client.Post(ctx, requestBody(asset, true), u))
+	result, err := DecodeJSON[db.Asset](c.client.Post(ctx, requestBody(asset, true), u))
+	if err != nil {
+		return result, err
+	}
+	_, err = db.Instance().NewInsert().Model(&result).On("CONFLICT (id) DO UPDATE").Set("sa_updated_at = EXCLUDED.sa_updated_at").Set("sa_deleted_at = EXCLUDED.sa_deleted_at").Exec(ctx)
+	if err != nil {
+		return result, err
+	}
+	return result, nil
 }
 
 func PostAssetUpload(ctx context.Context, assetID uuid.UUID, contentType string, body io.Reader) (io.ReadCloser, error) {
@@ -83,7 +91,15 @@ func PutAsset(ctx context.Context, assetID uuid.UUID, asset db.Asset) (db.Asset,
 	if err != nil {
 		return db.Asset{}, fmt.Errorf("build url: %w", err)
 	}
-	return syncResponse[db.Asset](ctx, c.client.Put(ctx, requestBody(asset, false), u))
+	result, err := DecodeJSON[db.Asset](c.client.Put(ctx, requestBody(asset, false), u))
+	if err != nil {
+		return result, err
+	}
+	_, err = db.Instance().NewInsert().Model(&result).On("CONFLICT (id) DO UPDATE").Set("sa_updated_at = EXCLUDED.sa_updated_at").Set("sa_deleted_at = EXCLUDED.sa_deleted_at").Exec(ctx)
+	if err != nil {
+		return result, err
+	}
+	return result, nil
 }
 
 func DeleteAsset(ctx context.Context, assetID uuid.UUID) (db.Asset, error) {
@@ -92,5 +108,13 @@ func DeleteAsset(ctx context.Context, assetID uuid.UUID) (db.Asset, error) {
 	if err != nil {
 		return db.Asset{}, fmt.Errorf("build url: %w", err)
 	}
-	return syncResponse[db.Asset](ctx, c.client.Delete(ctx, u))
+	result, err := DecodeJSON[db.Asset](c.client.Delete(ctx, u))
+	if err != nil {
+		return result, err
+	}
+	_, err = db.Instance().NewInsert().Model(&result).On("CONFLICT (id) DO UPDATE").Set("sa_updated_at = EXCLUDED.sa_updated_at").Set("sa_deleted_at = EXCLUDED.sa_deleted_at").Exec(ctx)
+	if err != nil {
+		return result, err
+	}
+	return result, nil
 }
