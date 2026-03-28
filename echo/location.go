@@ -21,8 +21,7 @@ func GetLocations(ctx echo.Context) error {
 		return RespondJSON(ctx, http.StatusOK, locs, nil)
 	}
 
-	meta := metaFromContext(ctx)
-	body, err := client.GetLocations(ctx.Request().Context(), meta)
+	body, err := client.GetLocations(ctx)
 	if err != nil {
 		ctx.Logger().Errorf("GetLocations: %v", err)
 		return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
@@ -51,8 +50,7 @@ func GetLocation(ctx echo.Context) error {
 		return RespondJSON(ctx, http.StatusOK, loc, nil)
 	}
 
-	meta := metaFromContext(ctx)
-	body, err := client.GetLocation(ctx.Request().Context(), meta, locationID)
+	body, err := client.GetLocation(ctx, locationID)
 	if err != nil {
 		ctx.Logger().Errorf("GetLocation: %v", err)
 		return RespondError(ctx, http.StatusNotFound, "Not found")
@@ -72,8 +70,7 @@ func GetLocationClaims(ctx echo.Context) error {
 		return RespondError(ctx, http.StatusNotImplemented, "Not implemented")
 	}
 
-	meta := metaFromContext(ctx)
-	body, err := client.GetLocationClaims(ctx.Request().Context(), meta, locationID)
+	body, err := client.GetLocationClaims(ctx, locationID)
 	if err != nil {
 		ctx.Logger().Errorf("GetLocationClaims: %v", err)
 		return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
@@ -88,8 +85,7 @@ func GetLocationAssets(ctx echo.Context) error {
 		return RespondError(ctx, http.StatusBadRequest, "Bad request")
 	}
 
-	meta := metaFromContext(ctx)
-	body, err := client.GetLocationAssets(ctx.Request().Context(), meta, locationID)
+	body, err := client.GetLocationAssets(ctx, locationID)
 	if err != nil {
 		ctx.Logger().Errorf("GetLocationAssets: %v", err)
 		return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
@@ -118,8 +114,7 @@ func PostLocation(ctx echo.Context) error {
 		return RespondJSON(ctx, http.StatusCreated, loc, nil)
 	}
 
-	meta := metaFromContext(ctx)
-	body, err := client.PostLocation(ctx.Request().Context(), meta, nil)
+	body, err := client.PostLocation(ctx, nil)
 	if err != nil {
 		ctx.Logger().Errorf("PostLocation: %v", err)
 		return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
@@ -150,8 +145,7 @@ func PutLocation(ctx echo.Context) error {
 		return RespondJSON(ctx, http.StatusOK, loc, nil)
 	}
 
-	meta := metaFromContext(ctx)
-	body, err := client.PutLocation(ctx.Request().Context(), meta, locationID, nil)
+	body, err := client.PutLocation(ctx, locationID, nil)
 	if err != nil {
 		ctx.Logger().Errorf("PutLocation: %v", err)
 		return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
@@ -178,8 +172,7 @@ func DeleteLocation(ctx echo.Context) error {
 		return ctx.NoContent(http.StatusOK)
 	}
 
-	meta := metaFromContext(ctx)
-	body, err := client.DeleteLocation(ctx.Request().Context(), meta, locationID)
+	body, err := client.DeleteLocation(ctx, locationID)
 	if err != nil {
 		ctx.Logger().Errorf("DeleteLocation: %v", err)
 		return RespondError(ctx, http.StatusInternalServerError, "Internal server error")

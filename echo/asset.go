@@ -15,8 +15,7 @@ func GetAssets(ctx echo.Context) error {
 		return RespondError(ctx, http.StatusNotImplemented, "Not implemented")
 	}
 
-	meta := metaFromContext(ctx)
-	body, err := client.GetAssets(ctx.Request().Context(), meta)
+	body, err := client.GetAssets(ctx)
 	if err != nil {
 		ctx.Logger().Errorf("GetAssets: %v", err)
 		return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
@@ -36,8 +35,7 @@ func GetAsset(ctx echo.Context) error {
 		return RespondError(ctx, http.StatusNotImplemented, "Not implemented")
 	}
 
-	meta := metaFromContext(ctx)
-	body, err := client.GetAsset(ctx.Request().Context(), meta, assetID)
+	body, err := client.GetAsset(ctx, assetID)
 	if err != nil {
 		ctx.Logger().Errorf("GetAsset: %v", err)
 		return RespondError(ctx, http.StatusNotFound, "Not found")
@@ -57,8 +55,7 @@ func GetAssetData(ctx echo.Context) error {
 		return RespondError(ctx, http.StatusNotImplemented, "Not implemented")
 	}
 
-	meta := metaFromContext(ctx)
-	body, err := client.GetAssetData(ctx.Request().Context(), meta, assetID)
+	body, err := client.GetAssetData(ctx, assetID)
 	if err != nil {
 		ctx.Logger().Errorf("GetAssetData: %v", err)
 		return RespondError(ctx, http.StatusNotFound, "Not found")
@@ -73,8 +70,7 @@ func PostAsset(ctx echo.Context) error {
 		return RespondError(ctx, http.StatusNotImplemented, "Not implemented")
 	}
 
-	meta := metaFromContext(ctx)
-	body, err := client.PostAsset(ctx.Request().Context(), meta, nil)
+	body, err := client.PostAsset(ctx, nil)
 	if err != nil {
 		ctx.Logger().Errorf("PostAsset: %v", err)
 		return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
@@ -94,8 +90,7 @@ func PostAssetUpload(ctx echo.Context) error {
 		return RespondError(ctx, http.StatusNotImplemented, "Not implemented")
 	}
 
-	meta := metaFromContext(ctx)
-	body, err := client.PostAssetUpload(ctx.Request().Context(), meta, assetID, ctx.Request().Header.Get("Content-Type"), ctx.Request().Body)
+	body, err := client.PostAssetUpload(ctx, assetID, ctx.Request().Header.Get("Content-Type"), ctx.Request().Body)
 	if err != nil {
 		ctx.Logger().Errorf("PostAssetUpload: %v", err)
 		return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
@@ -115,8 +110,7 @@ func PutAsset(ctx echo.Context) error {
 		return RespondError(ctx, http.StatusNotImplemented, "Not implemented")
 	}
 
-	meta := metaFromContext(ctx)
-	body, err := client.PutAsset(ctx.Request().Context(), meta, assetID, nil)
+	body, err := client.PutAsset(ctx, assetID, nil)
 	if err != nil {
 		ctx.Logger().Errorf("PutAsset: %v", err)
 		return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
@@ -136,8 +130,7 @@ func DeleteAsset(ctx echo.Context) error {
 		return RespondError(ctx, http.StatusNotImplemented, "Not implemented")
 	}
 
-	meta := metaFromContext(ctx)
-	body, err := client.DeleteAsset(ctx.Request().Context(), meta, assetID)
+	body, err := client.DeleteAsset(ctx, assetID)
 	if err != nil {
 		ctx.Logger().Errorf("DeleteAsset: %v", err)
 		return RespondError(ctx, http.StatusInternalServerError, "Internal server error")

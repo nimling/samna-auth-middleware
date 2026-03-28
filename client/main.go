@@ -7,9 +7,9 @@ import (
 )
 
 func newClient() *SAuthClient {
-	endpoint := os.Getenv("SAMNA_AUTH_ENDPOINT")
-	slug := os.Getenv("SAMNA_AUTH_CLIENT_SLUG")
-	secret := os.Getenv("SAMNA_AUTH_CLIENT_SECRET")
+	endpoint := os.Getenv("SAUTH_ENDPOINT")
+	slug := os.Getenv("SAUTH_CLIENT_SLUG")
+	secret := os.Getenv("SAUTH_CLIENT_SECRET")
 
 	return &SAuthClient{
 		apiURL: endpoint + "/sam",

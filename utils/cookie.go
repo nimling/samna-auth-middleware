@@ -19,7 +19,7 @@ func WriteCookie(ctx echo.Context, cookie *http.Cookie) {
 		MaxAge:   cookie.MaxAge,
 	}
 
-	cookieDomain := os.Getenv("SAMNA_AUTH_COOKIE_DOMAIN") // TODO:: WE need to streamline and slim this down, should be the domain of the redirect domain always
+	cookieDomain := os.Getenv("SAUTH_COOKIE_DOMAIN")
 	if cookieDomain != "" {
 		cookie.Domain = cookieDomain
 		if strings.Contains(cookieDomain, "localhost") {

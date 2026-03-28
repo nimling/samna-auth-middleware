@@ -15,7 +15,7 @@ import (
 func TestTokenValidation(t *testing.T) {
 	_ = godotenv.Load("../.env")
 
-	jwksURL, ok := os.LookupEnv("SAMNA_AUTH_JWKS_URL")
+	jwksURL, ok := os.LookupEnv("SAUTH_JWKS_URL")
 	if !ok {
 		t.Fatal("No jwksURL specified for AuthMiddleware")
 	}

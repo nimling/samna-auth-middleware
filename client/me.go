@@ -1,57 +1,58 @@
 package client
 
 import (
-	"context"
 	"fmt"
 	"io"
 	"net/http"
 
 	"github.com/google/uuid"
+	"github.com/labstack/echo/v4"
 )
 
-func GetMe(ctx context.Context, meta RequestMetadata) (io.ReadCloser, error) {
+func GetMe(ctx echo.Context) (io.ReadCloser, error) {
 	c := newClient()
 	u, err := joinURL(c.apiURL, "me")
 	if err != nil {
 		return nil, fmt.Errorf("build url: %w", err)
 	}
-	return c.client.Get(ctx, meta, u)
+	return c.client.Get(ctx, u)
 }
 
-func PutMe(ctx context.Context, meta RequestMetadata, body any) (io.ReadCloser, error) {
+func PutMe(ctx echo.Context, body any) (io.ReadCloser, error) {
 	c := newClient()
 	u, err := joinURL(c.apiURL, "me")
 	if err != nil {
 		return nil, fmt.Errorf("build url: %w", err)
 	}
-	return c.client.Put(ctx, meta, body, u)
+	return c.client.Put(ctx, body, u)
 }
 
-func GetMeClaims(ctx context.Context, meta RequestMetadata) (io.ReadCloser, error) {
+func GetMeClaims(ctx echo.Context) (io.ReadCloser, error) {
 	c := newClient()
 	u, err := joinURL(c.apiURL, "me", "claim")
 	if err != nil {
 		return nil, fmt.Errorf("build url: %w", err)
 	}
-	return c.client.Get(ctx, meta, u)
+	return c.client.Get(ctx, u)
 }
 
-func PostMeAsset(ctx context.Context, meta RequestMetadata, contentType string, body io.Reader) (io.ReadCloser, error) {
+func PostMeAsset(ctx echo.Context, contentType string, body io.Reader) (io.ReadCloser, error) {
 	c := newClient()
 	meAssetURL, err := joinURL(c.apiURL, "me", "asset")
 	if err != nil {
 		return nil, fmt.Errorf("build url: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, meAssetURL, body)
+	req, err := http.NewRequestWithContext(ctx.Request().Context(), http.MethodPost, meAssetURL, body)
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
 	}
 
+	accessToken, _ := ctx.Get("access_token").(string)
 	req.Header.Set("Content-Type", contentType)
-	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", meta.AccessToken))
-	req.Header.Set("X-Request-ID", meta.RequestID)
-	req.Header.Set("X-User-IP", meta.UserIP)
+	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", accessToken))
+	req.Header.Set("X-Request-ID", ctx.Response().Header().Get(echo.HeaderXRequestID))
+	req.Header.Set("X-User-IP", ctx.RealIP())
 	req.Header.Set("SAuth-Client-Slug", c.client.clientSlug)
 	req.Header.Set("SAuth-Client-Secret", c.client.clientSecret)
 
@@ -68,67 +69,67 @@ func PostMeAsset(ctx context.Context, meta RequestMetadata, contentType string, 
 	return resp.Body, nil
 }
 
-func DeleteMeAsset(ctx context.Context, meta RequestMetadata, assetID uuid.UUID) error {
+func DeleteMeAsset(ctx echo.Context, assetID uuid.UUID) error {
 	c := newClient()
 	u, err := joinURL(c.apiURL, "me", "asset", assetID.String())
 	if err != nil {
 		return fmt.Errorf("build url: %w", err)
 	}
 
-	_, err = c.client.Delete(ctx, meta, u)
+	_, err = c.client.Delete(ctx, u)
 	return err
 }
 
-func GetMeConnections(ctx context.Context, meta RequestMetadata) (io.ReadCloser, error) {
+func GetMeConnections(ctx echo.Context) (io.ReadCloser, error) {
 	c := newClient()
 	u, err := joinURL(c.apiURL, "me", "user")
 	if err != nil {
 		return nil, fmt.Errorf("build url: %w", err)
 	}
-	return c.client.Get(ctx, meta, u)
+	return c.client.Get(ctx, u)
 }
 
-func GetMeModules(ctx context.Context, meta RequestMetadata) (io.ReadCloser, error) {
+func GetMeModules(ctx echo.Context) (io.ReadCloser, error) {
 	c := newClient()
 	u, err := joinURL(c.apiURL, "me", "modules")
 	if err != nil {
 		return nil, fmt.Errorf("build url: %w", err)
 	}
-	return c.client.Get(ctx, meta, u)
+	return c.client.Get(ctx, u)
 }
 
-func GetMeOrganizations(ctx context.Context, meta RequestMetadata) (io.ReadCloser, error) {
+func GetMeOrganizations(ctx echo.Context) (io.ReadCloser, error) {
 	c := newClient()
 	u, err := joinURL(c.apiURL, "me", "organizations")
 	if err != nil {
 		return nil, fmt.Errorf("build url: %w", err)
 	}
-	return c.client.Get(ctx, meta, u)
+	return c.client.Get(ctx, u)
 }
 
-func GetMeLocations(ctx context.Context, meta RequestMetadata) (io.ReadCloser, error) {
+func GetMeLocations(ctx echo.Context) (io.ReadCloser, error) {
 	c := newClient()
 	u, err := joinURL(c.apiURL, "me", "locations")
 	if err != nil {
 		return nil, fmt.Errorf("build url: %w", err)
 	}
-	return c.client.Get(ctx, meta, u)
+	return c.client.Get(ctx, u)
 }
 
-func GetMeClients(ctx context.Context, meta RequestMetadata) (io.ReadCloser, error) {
+func GetMeClients(ctx echo.Context) (io.ReadCloser, error) {
 	c := newClient()
 	u, err := joinURL(c.apiURL, "me", "clients")
 	if err != nil {
 		return nil, fmt.Errorf("build url: %w", err)
 	}
-	return c.client.Get(ctx, meta, u)
+	return c.client.Get(ctx, u)
 }
 
-func GetMeClient(ctx context.Context, meta RequestMetadata, clientID uuid.UUID) (io.ReadCloser, error) {
+func GetMeClient(ctx echo.Context, clientID uuid.UUID) (io.ReadCloser, error) {
 	c := newClient()
 	u, err := joinURL(c.apiURL, "me", "clients", clientID.String())
 	if err != nil {
 		return nil, fmt.Errorf("build url: %w", err)
 	}
-	return c.client.Get(ctx, meta, u)
+	return c.client.Get(ctx, u)
 }

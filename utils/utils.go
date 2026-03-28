@@ -7,7 +7,7 @@ import (
 )
 
 func GetDebugUserID() *uuid.UUID {
-	val, ok := os.LookupEnv("SAMNA_AUTH_DEBUG_USER_ID")
+	val, ok := os.LookupEnv("SAUTH_DEBUG_USER_ID")
 	if !ok || val == "" {
 		return nil
 	}

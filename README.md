@@ -99,7 +99,7 @@ e.POST("/api/internal", handler, middleware.ClientMiddleware)
 
 The `echo` package provides ready to use HTTP handlers that bridge the `client` and `db` packages. Each handler extracts request metadata from the Echo context and delegates to the appropriate client function or database query.
 
-When `SAMNA_AUTH_DEBUG_USER_ID` is set, handlers that support it will query the database directly instead of calling the auth API.
+When `SAUTH_DEBUG_USER_ID` is set, handlers that support it will query the database directly instead of calling the auth API.
 
 ### Login and Logout
 
@@ -151,7 +151,7 @@ if err != nil {
 defer body.Close()
 ```
 
-The client reads `SAMNA_AUTH_ENDPOINT`, `SAMNA_AUTH_CLIENT_SLUG`, and `SAMNA_AUTH_CLIENT_SECRET` from environment variables internally.
+The client reads `SAUTH_ENDPOINT`, `SAUTH_CLIENT_SLUG`, and `SAUTH_CLIENT_SECRET` from environment variables internally.
 
 ### Error Handling
 
@@ -243,17 +243,17 @@ Webhook events may arrive out of order. Use upsert patterns and compare `updated
 
 | Variable | Used by | Description |
 |----------|---------|-------------|
-| `SAMNA_AUTH_ENDPOINT` | client, middleware | Base URL of the Samna Auth server (e.g. `https://auth.example.com`) |
-| `SAMNA_AUTH_CLIENT_SLUG` | client, middleware | Client identifier slug |
-| `SAMNA_AUTH_CLIENT_SECRET` | client, middleware | Client secret for authentication |
-| `SAMNA_AUTH_REDIRECT_URI` | middleware | OAuth redirect URI for auth code exchange |
+| `SAUTH_ENDPOINT` | client, middleware | Base URL of the Samna Auth server (e.g. `https://auth.example.com`) |
+| `SAUTH_CLIENT_SLUG` | client, middleware | Client identifier slug |
+| `SAUTH_CLIENT_SECRET` | client, middleware | Client secret for authentication |
+| `SAUTH_REDIRECT_URI` | middleware | OAuth redirect URI for auth code exchange |
 
 ### Optional
 
 | Variable | Used by | Description |
 |----------|---------|-------------|
-| `SAMNA_AUTH_COOKIE_DOMAIN` | utils | Cookie domain for cross subdomain cookies. Automatically disables `Secure` flag for localhost |
-| `SAMNA_AUTH_DEBUG_USER_ID` | middleware, echo | UUID to bypass authentication entirely (see [Debug User Bypass](#debug-user-bypass)) |
+| `SAUTH_COOKIE_DOMAIN` | utils | Cookie domain for cross subdomain cookies. Automatically disables `Secure` flag for localhost |
+| `SAUTH_DEBUG_USER_ID` | middleware, echo | UUID to bypass authentication entirely (see [Debug User Bypass](#debug-user-bypass)) |
 
 ### Database (only needed when using `db` package)
 
@@ -274,14 +274,14 @@ Webhook events may arrive out of order. Use upsert patterns and compare `updated
 
 ## Debug User Bypass
 
-Setting `SAMNA_AUTH_DEBUG_USER_ID` to a valid UUID enables two levels of bypass:
+Setting `SAUTH_DEBUG_USER_ID` to a valid UUID enables two levels of bypass:
 
 ### Middleware Bypass
 
 The auth middleware skips all authentication checks (no token validation, no refresh, no code exchange) and sets the specified user ID directly in the Echo context. All requests proceed as if authenticated by that user.
 
 ```env
-SAMNA_AUTH_DEBUG_USER_ID=123e4567-e89b-12d3-a456-426614174000
+SAUTH_DEBUG_USER_ID=123e4567-e89b-12d3-a456-426614174000
 ```
 
 ### Echo Handler Bypass
@@ -338,7 +338,7 @@ go test ./...
 The token validation test requires environment variables:
 
 ```env
-SAMNA_AUTH_JWKS_URL=http://localhost:3201/api/client/sauth/jwks
+SAUTH_JWKS_URL=http://localhost:3201/api/client/sauth/jwks
 TEST_TOKEN_STRING=<valid JWT token>
 TEST_TOKEN_ISS=http://localhost:3201
 ```

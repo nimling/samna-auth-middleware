@@ -1,14 +1,15 @@
 package client
 
 import (
-	"context"
 	"fmt"
 	"net/url"
 	"os"
+
+	"github.com/labstack/echo/v4"
 )
 
-func GetLogin(ctx context.Context, meta RequestMetadata, provider *string) (string, error) {
-	endpoint := os.Getenv("SAMNA_AUTH_ENDPOINT")
+func GetLogin(ctx echo.Context, provider *string) (string, error) {
+	endpoint := os.Getenv("SAUTH_ENDPOINT")
 
 	var path string
 	if provider != nil && len(*provider) > 0 {
@@ -28,13 +29,13 @@ func GetLogin(ctx context.Context, meta RequestMetadata, provider *string) (stri
 	}
 
 	q := parsed.Query()
-	q.Set("client_slug", os.Getenv("SAMNA_AUTH_CLIENT_SLUG"))
+	q.Set("client_slug", os.Getenv("SAUTH_CLIENT_SLUG"))
 	parsed.RawQuery = q.Encode()
 
 	return parsed.String(), nil
 }
 
-func GetLogout(ctx context.Context, meta RequestMetadata) (int, error) {
+func GetLogout(ctx echo.Context) (int, error) {
 	c := newClient()
 
 	u, err := joinURL(c.apiURL, "logout")
@@ -42,7 +43,7 @@ func GetLogout(ctx context.Context, meta RequestMetadata) (int, error) {
 		return 0, fmt.Errorf("build url: %w", err)
 	}
 
-	body, err := c.client.Get(ctx, meta, u)
+	body, err := c.client.Get(ctx, u)
 	if err != nil {
 		return 0, err
 	}

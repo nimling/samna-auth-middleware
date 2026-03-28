@@ -1,9 +1,11 @@
 package db
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"os"
+	"reflect"
 	"time"
 
 	"github.com/labstack/echo/v4"
@@ -17,6 +19,11 @@ type DB struct {
 }
 
 var instance *DB
+var syncFunc func(ctx context.Context) error
+
+func RegisterSyncFunc(fn func(ctx context.Context) error) {
+	syncFunc = fn
+}
 
 func Init(logger echo.Logger) {
 	pgHost, exists := os.LookupEnv("PGHOST")
@@ -77,8 +84,6 @@ func Init(logger echo.Logger) {
 		return
 	}
 
-	logger.Info("Database initialized")
-
 	instance.RegisterModel(
 		(*SamnaUser)(nil),
 		(*Organization)(nil),
@@ -86,9 +91,35 @@ func Init(logger echo.Logger) {
 		(*Claim)(nil),
 		(*UserClaim)(nil),
 		(*ClaimObject)(nil),
+		(*SamnaClient)(nil),
 	)
+
+	if IsDebugMode() {
+		logger.Info("Debug mode active, skipping initial sync")
+		return
+	}
+
+	if syncFunc == nil {
+		logger.Warn("No sync function registered, skipping initial sync")
+		return
+	}
+
+	logger.Info("Starting initial sync")
+	if err := syncFunc(context.Background()); err != nil {
+		logger.Errorf("Initial sync failed: %v", err)
+	} else {
+		logger.Info("Initial sync completed")
+	}
+}
+
+func IsDebugMode() bool {
+	return os.Getenv("SAUTH_DEBUG_USER_ID") != ""
 }
 
 func Instance() *DB {
 	return instance
+}
+
+func ModelType[T any]() reflect.Type {
+	return reflect.TypeOf((*T)(nil)).Elem()
 }

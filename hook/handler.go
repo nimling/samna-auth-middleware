@@ -2,88 +2,40 @@ package hook
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
+
+	"github.com/nimling/samna-auth-middleware/db"
 )
 
-type ActionHandler[T any] struct {
-	OnCreate func(context.Context, T) error
-	OnUpdate func(context.Context, T) error
-	OnDelete func(context.Context, T) error
+func SyncOrganization(ctx context.Context, org *db.Organization) error {
+	return upsert(ctx, org, string(db.OBJECT_TYPE_ORGANIZATION))
 }
 
-type Handlers struct {
-	User         ActionHandler[User]
-	Organization ActionHandler[Organization]
-	Location     ActionHandler[Location]
-	Claim        ActionHandler[Claim]
-	UserClaim    ActionHandler[UserClaim]
-	ObjectClaim  ActionHandler[ClaimObject]
+func SyncLocation(ctx context.Context, loc *db.Location) error {
+	return upsert(ctx, loc, string(db.OBJECT_TYPE_LOCATION))
 }
 
-func (p *Payload) UnmarshalAndHandle(ctx context.Context, h Handlers) error {
-	switch p.EntityType {
-	case EntityTypeUser:
-		var u User
-		if err := json.Unmarshal(p.Data, &u); err != nil {
-			return fmt.Errorf("unmarshal user: %w", err)
-		}
-		return callAction(ctx, p.EventType, u, h.User)
-
-	case EntityTypeOrganization:
-		var o Organization
-		if err := json.Unmarshal(p.Data, &o); err != nil {
-			return fmt.Errorf("unmarshal organization: %w", err)
-		}
-		return callAction(ctx, p.EventType, o, h.Organization)
-
-	case EntityTypeLocation:
-		var l Location
-		if err := json.Unmarshal(p.Data, &l); err != nil {
-			return fmt.Errorf("unmarshal location: %w", err)
-		}
-		return callAction(ctx, p.EventType, l, h.Location)
-
-	case EntityTypeClaim:
-		var c Claim
-		if err := json.Unmarshal(p.Data, &c); err != nil {
-			return fmt.Errorf("unmarshal claim: %w", err)
-		}
-		return callAction(ctx, p.EventType, c, h.Claim)
-
-	case EntityTypeObjectClaim:
-		var oc ClaimObject
-		if err := json.Unmarshal(p.Data, &oc); err != nil {
-			return fmt.Errorf("unmarshal object claim: %w", err)
-		}
-		return callAction(ctx, p.EventType, oc, h.ObjectClaim)
-
-	case EntityTypeUserClaim:
-		var uc UserClaim
-		if err := json.Unmarshal(p.Data, &uc); err != nil {
-			return fmt.Errorf("unmarshal user claim: %w", err)
-		}
-		return callAction(ctx, p.EventType, uc, h.UserClaim)
-
-	default:
-		return fmt.Errorf("unknown entity type: %s", p.EntityType)
-	}
+func SyncSamnaUser(ctx context.Context, user *db.SamnaUser) error {
+	return upsert(ctx, user, string(db.OBJECT_TYPE_USER))
 }
 
-func callAction[T any](ctx context.Context, et EventType, val T, h ActionHandler[T]) error {
-	switch et {
-	case EventTypeCreate:
-		if h.OnCreate != nil {
-			return h.OnCreate(ctx, val)
-		}
-	case EventTypeUpdate:
-		if h.OnUpdate != nil {
-			return h.OnUpdate(ctx, val)
-		}
-	case EventTypeDelete:
-		if h.OnDelete != nil {
-			return h.OnDelete(ctx, val)
-		}
-	}
-	return nil
+func SyncClaim(ctx context.Context, claim *db.Claim) error {
+	return upsert(ctx, claim, string(db.OBJECT_TYPE_CLAIM))
+}
+
+func SyncUserClaim(ctx context.Context, uc *db.UserClaim) error {
+	return upsert(ctx, uc, string(db.OBJECT_TYPE_USER_CLAIM))
+}
+
+func SyncClaimObject(ctx context.Context, co *db.ClaimObject) error {
+	return upsert(ctx, co, string(db.OBJECT_TYPE_CLAIM_OBJECT))
+}
+
+func upsert[T any](ctx context.Context, entity *T, objectType string) error {
+	_, err := db.Instance().NewInsert().
+		Model(entity).
+		On("CONFLICT (id) DO UPDATE").
+		Set("sa_updated_at = EXCLUDED.sa_updated_at").
+		Set("sa_deleted_at = EXCLUDED.sa_deleted_at").
+		Exec(ctx)
+	return err
 }

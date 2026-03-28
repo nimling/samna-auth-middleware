@@ -1,81 +1,81 @@
 package client
 
 import (
-	"context"
 	"fmt"
 	"io"
 
 	"github.com/google/uuid"
+	"github.com/labstack/echo/v4"
 )
 
-func GetOrganizationAssets(ctx context.Context, meta RequestMetadata, orgID uuid.UUID) (io.ReadCloser, error) {
+func GetOrganizationAssets(ctx echo.Context, orgID uuid.UUID) (io.ReadCloser, error) {
 	c := newClient()
 	u, err := joinURL(c.apiURL, "organization", orgID.String(), "assets")
 	if err != nil {
 		return nil, fmt.Errorf("build url: %w", err)
 	}
-	return c.client.Get(ctx, meta, u)
+	return c.client.Get(ctx, u)
 }
 
-func GetOrganizations(ctx context.Context, meta RequestMetadata) (io.ReadCloser, error) {
+func GetOrganizations(ctx echo.Context) (io.ReadCloser, error) {
 	c := newClient()
 	u, err := joinURL(c.apiURL, "organization")
 	if err != nil {
 		return nil, fmt.Errorf("build url: %w", err)
 	}
-	return c.client.Get(ctx, meta, u)
+	return c.client.Get(ctx, u)
 }
 
-func GetOrganization(ctx context.Context, meta RequestMetadata, orgID uuid.UUID) (io.ReadCloser, error) {
+func GetOrganization(ctx echo.Context, orgID uuid.UUID) (io.ReadCloser, error) {
 	c := newClient()
 	u, err := joinURL(c.apiURL, "organization", orgID.String())
 	if err != nil {
 		return nil, fmt.Errorf("build url: %w", err)
 	}
-	return c.client.Get(ctx, meta, u)
+	return c.client.Get(ctx, u)
 }
 
-func GetOrganizationGraph(ctx context.Context, meta RequestMetadata) (io.ReadCloser, error) {
+func GetOrganizationGraph(ctx echo.Context) (io.ReadCloser, error) {
 	c := newClient()
 	u, err := joinURL(c.apiURL, "organization", "graph")
 	if err != nil {
 		return nil, fmt.Errorf("build url: %w", err)
 	}
-	return c.client.Get(ctx, meta, u)
+	return c.client.Get(ctx, u)
 }
 
-func GetOrganizationClaims(ctx context.Context, meta RequestMetadata, orgID uuid.UUID) (io.ReadCloser, error) {
+func GetOrganizationClaims(ctx echo.Context, orgID uuid.UUID) (io.ReadCloser, error) {
 	c := newClient()
 	u, err := joinURL(c.apiURL, "organization", orgID.String(), "claim")
 	if err != nil {
 		return nil, fmt.Errorf("build url: %w", err)
 	}
-	return c.client.Get(ctx, meta, u)
+	return c.client.Get(ctx, u)
 }
 
-func PostOrganization(ctx context.Context, meta RequestMetadata, body any) (io.ReadCloser, error) {
+func PostOrganization(ctx echo.Context, body any) (io.ReadCloser, error) {
 	c := newClient()
 	u, err := joinURL(c.apiURL, "organization")
 	if err != nil {
 		return nil, fmt.Errorf("build url: %w", err)
 	}
-	return c.client.Post(ctx, meta, body, u)
+	return c.client.Post(ctx, body, u)
 }
 
-func PutOrganization(ctx context.Context, meta RequestMetadata, orgID uuid.UUID, body any) (io.ReadCloser, error) {
+func PutOrganization(ctx echo.Context, orgID uuid.UUID, body any) (io.ReadCloser, error) {
 	c := newClient()
 	u, err := joinURL(c.apiURL, "organization", orgID.String())
 	if err != nil {
 		return nil, fmt.Errorf("build url: %w", err)
 	}
-	return c.client.Put(ctx, meta, body, u)
+	return c.client.Put(ctx, body, u)
 }
 
-func DeleteOrganization(ctx context.Context, meta RequestMetadata, orgID uuid.UUID) (io.ReadCloser, error) {
+func DeleteOrganization(ctx echo.Context, orgID uuid.UUID) (io.ReadCloser, error) {
 	c := newClient()
 	u, err := joinURL(c.apiURL, "organization", orgID.String())
 	if err != nil {
 		return nil, fmt.Errorf("build url: %w", err)
 	}
-	return c.client.Delete(ctx, meta, u)
+	return c.client.Delete(ctx, u)
 }

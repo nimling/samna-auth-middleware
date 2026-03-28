@@ -16,8 +16,7 @@ func GetClaimGraph(ctx echo.Context) error {
 		return RespondError(ctx, http.StatusNotImplemented, "Not implemented")
 	}
 
-	meta := metaFromContext(ctx)
-	body, err := client.GetClaimGraph(ctx.Request().Context(), meta)
+	body, err := client.GetClaimGraph(ctx)
 	if err != nil {
 		ctx.Logger().Errorf("GetClaimGraph: %v", err)
 		return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
@@ -36,8 +35,7 @@ func GetClaims(ctx echo.Context) error {
 		return RespondJSON(ctx, http.StatusOK, claims, nil)
 	}
 
-	meta := metaFromContext(ctx)
-	body, err := client.GetClaims(ctx.Request().Context(), meta)
+	body, err := client.GetClaims(ctx)
 	if err != nil {
 		ctx.Logger().Errorf("GetClaims: %v", err)
 		return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
@@ -61,8 +59,7 @@ func GetClaim(ctx echo.Context) error {
 		return RespondJSON(ctx, http.StatusOK, claims[0], nil)
 	}
 
-	meta := metaFromContext(ctx)
-	body, err := client.GetClaim(ctx.Request().Context(), meta, claimID)
+	body, err := client.GetClaim(ctx, claimID)
 	if err != nil {
 		ctx.Logger().Errorf("GetClaim: %v", err)
 		return RespondError(ctx, http.StatusNotFound, "Not found")
@@ -82,8 +79,7 @@ func GetClaimAudit(ctx echo.Context) error {
 		return RespondError(ctx, http.StatusNotImplemented, "Not implemented")
 	}
 
-	meta := metaFromContext(ctx)
-	body, err := client.GetClaimAudit(ctx.Request().Context(), meta, claimID)
+	body, err := client.GetClaimAudit(ctx, claimID)
 	if err != nil {
 		ctx.Logger().Errorf("GetClaimAudit: %v", err)
 		return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
@@ -103,8 +99,7 @@ func GetClaimSearch(ctx echo.Context) error {
 		return RespondError(ctx, http.StatusNotImplemented, "Not implemented")
 	}
 
-	meta := metaFromContext(ctx)
-	body, err := client.GetClaimSearch(ctx.Request().Context(), meta, claimID)
+	body, err := client.GetClaimSearch(ctx, claimID)
 	if err != nil {
 		ctx.Logger().Errorf("GetClaimSearch: %v", err)
 		return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
@@ -133,8 +128,7 @@ func PostClaim(ctx echo.Context) error {
 		return RespondJSON(ctx, http.StatusCreated, map[string]uuid.UUID{"id": id}, nil)
 	}
 
-	meta := metaFromContext(ctx)
-	body, err := client.PostClaim(ctx.Request().Context(), meta, nil)
+	body, err := client.PostClaim(ctx, nil)
 	if err != nil {
 		ctx.Logger().Errorf("PostClaim: %v", err)
 		return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
@@ -154,8 +148,7 @@ func PutClaim(ctx echo.Context) error {
 		return RespondError(ctx, http.StatusNotImplemented, "Not implemented")
 	}
 
-	meta := metaFromContext(ctx)
-	body, err := client.PutClaim(ctx.Request().Context(), meta, claimID, nil)
+	body, err := client.PutClaim(ctx, claimID, nil)
 	if err != nil {
 		ctx.Logger().Errorf("PutClaim: %v", err)
 		return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
@@ -179,8 +172,7 @@ func DeleteClaim(ctx echo.Context) error {
 		return ctx.NoContent(http.StatusOK)
 	}
 
-	meta := metaFromContext(ctx)
-	body, err := client.DeleteClaim(ctx.Request().Context(), meta, claimID)
+	body, err := client.DeleteClaim(ctx, claimID)
 	if err != nil {
 		ctx.Logger().Errorf("DeleteClaim: %v", err)
 		return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
@@ -221,8 +213,7 @@ func PostClaimObject(ctx echo.Context) error {
 		return RespondJSON(ctx, http.StatusCreated, map[string]uuid.UUID{"id": id}, nil)
 	}
 
-	meta := metaFromContext(ctx)
-	body, err := client.PostClaimObject(ctx.Request().Context(), meta, claimID, nil)
+	body, err := client.PostClaimObject(ctx, claimID, nil)
 	if err != nil {
 		ctx.Logger().Errorf("PostClaimObject: %v", err)
 		return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
@@ -247,8 +238,7 @@ func DeleteClaimObject(ctx echo.Context) error {
 		return RespondError(ctx, http.StatusNotImplemented, "Not implemented")
 	}
 
-	meta := metaFromContext(ctx)
-	body, err := client.DeleteClaimObject(ctx.Request().Context(), meta, claimID, objectID)
+	body, err := client.DeleteClaimObject(ctx, claimID, objectID)
 	if err != nil {
 		ctx.Logger().Errorf("DeleteClaimObject: %v", err)
 		return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
@@ -280,8 +270,7 @@ func PostClaimUser(ctx echo.Context) error {
 		return RespondJSON(ctx, http.StatusCreated, map[string]uuid.UUID{"id": id}, nil)
 	}
 
-	meta := metaFromContext(ctx)
-	body, err := client.PostClaimUser(ctx.Request().Context(), meta, claimID, nil)
+	body, err := client.PostClaimUser(ctx, claimID, nil)
 	if err != nil {
 		ctx.Logger().Errorf("PostClaimUser: %v", err)
 		return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
@@ -306,8 +295,7 @@ func DeleteClaimUser(ctx echo.Context) error {
 		return RespondError(ctx, http.StatusNotImplemented, "Not implemented")
 	}
 
-	meta := metaFromContext(ctx)
-	body, err := client.DeleteClaimUser(ctx.Request().Context(), meta, claimID, userID)
+	body, err := client.DeleteClaimUser(ctx, claimID, userID)
 	if err != nil {
 		ctx.Logger().Errorf("DeleteClaimUser: %v", err)
 		return RespondError(ctx, http.StatusInternalServerError, "Internal server error")

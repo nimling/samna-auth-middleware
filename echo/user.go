@@ -16,8 +16,7 @@ func GetUsers(ctx echo.Context) error {
 		return RespondError(ctx, http.StatusNotImplemented, "Not implemented")
 	}
 
-	meta := metaFromContext(ctx)
-	body, err := client.GetUsers(ctx.Request().Context(), meta)
+	body, err := client.GetUsers(ctx)
 	if err != nil {
 		ctx.Logger().Errorf("GetUsers: %v", err)
 		return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
@@ -42,8 +41,7 @@ func GetUser(ctx echo.Context) error {
 		return RespondJSON(ctx, http.StatusOK, user, nil)
 	}
 
-	meta := metaFromContext(ctx)
-	body, err := client.GetUser(ctx.Request().Context(), meta, userID)
+	body, err := client.GetUser(ctx, userID)
 	if err != nil {
 		ctx.Logger().Errorf("GetUser: %v", err)
 		return RespondError(ctx, http.StatusNotFound, "Not found")
@@ -67,8 +65,7 @@ func GetUserClaims(ctx echo.Context) error {
 		return RespondJSON(ctx, http.StatusOK, claims, nil)
 	}
 
-	meta := metaFromContext(ctx)
-	body, err := client.GetUserClaims(ctx.Request().Context(), meta, userID)
+	body, err := client.GetUserClaims(ctx, userID)
 	if err != nil {
 		ctx.Logger().Errorf("GetUserClaims: %v", err)
 		return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
@@ -88,8 +85,7 @@ func GetUserConnections(ctx echo.Context) error {
 		return RespondError(ctx, http.StatusNotImplemented, "Not implemented")
 	}
 
-	meta := metaFromContext(ctx)
-	body, err := client.GetUserConnections(ctx.Request().Context(), meta, userID)
+	body, err := client.GetUserConnections(ctx, userID)
 	if err != nil {
 		ctx.Logger().Errorf("GetUserConnections: %v", err)
 		return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
@@ -109,8 +105,7 @@ func PostUser(ctx echo.Context) error {
 		return RespondError(ctx, http.StatusNotImplemented, "Not implemented")
 	}
 
-	meta := metaFromContext(ctx)
-	body, err := client.PostUser(ctx.Request().Context(), meta, userID, nil)
+	body, err := client.PostUser(ctx, userID, nil)
 	if err != nil {
 		ctx.Logger().Errorf("PostUser: %v", err)
 		return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
@@ -137,8 +132,7 @@ func PutUser(ctx echo.Context) error {
 		return RespondJSON(ctx, http.StatusOK, user, nil)
 	}
 
-	meta := metaFromContext(ctx)
-	body, err := client.PutUser(ctx.Request().Context(), meta, userID, nil)
+	body, err := client.PutUser(ctx, userID, nil)
 	if err != nil {
 		ctx.Logger().Errorf("PutUser: %v", err)
 		return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
@@ -158,8 +152,7 @@ func DeleteUser(ctx echo.Context) error {
 		return RespondError(ctx, http.StatusNotImplemented, "Not implemented")
 	}
 
-	meta := metaFromContext(ctx)
-	body, err := client.DeleteUser(ctx.Request().Context(), meta, userID)
+	body, err := client.DeleteUser(ctx, userID)
 	if err != nil {
 		ctx.Logger().Errorf("DeleteUser: %v", err)
 		return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
@@ -179,8 +172,7 @@ func GetUserClients(ctx echo.Context) error {
 		return RespondError(ctx, http.StatusNotImplemented, "Not implemented")
 	}
 
-	meta := metaFromContext(ctx)
-	body, err := client.GetUserClients(ctx.Request().Context(), meta, userID)
+	body, err := client.GetUserClients(ctx, userID)
 	if err != nil {
 		ctx.Logger().Errorf("GetUserClients: %v", err)
 		return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
@@ -205,8 +197,7 @@ func GetUserClient(ctx echo.Context) error {
 		return RespondError(ctx, http.StatusNotImplemented, "Not implemented")
 	}
 
-	meta := metaFromContext(ctx)
-	body, err := client.GetUserClient(ctx.Request().Context(), meta, userID, clientID)
+	body, err := client.GetUserClient(ctx, userID, clientID)
 	if err != nil {
 		ctx.Logger().Errorf("GetUserClient: %v", err)
 		return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
@@ -221,8 +212,7 @@ func GetUserAssets(ctx echo.Context) error {
 		return RespondError(ctx, http.StatusBadRequest, "Bad request")
 	}
 
-	meta := metaFromContext(ctx)
-	body, err := client.GetUserAssets(ctx.Request().Context(), meta, userID)
+	body, err := client.GetUserAssets(ctx, userID)
 	if err != nil {
 		ctx.Logger().Errorf("GetUserAssets: %v", err)
 		return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
@@ -247,8 +237,7 @@ func PutUserClient(ctx echo.Context) error {
 		return RespondError(ctx, http.StatusNotImplemented, "Not implemented")
 	}
 
-	meta := metaFromContext(ctx)
-	body, err := client.PutUserClient(ctx.Request().Context(), meta, userID, clientID, nil)
+	body, err := client.PutUserClient(ctx, userID, clientID, nil)
 	if err != nil {
 		ctx.Logger().Errorf("PutUserClient: %v", err)
 		return RespondError(ctx, http.StatusInternalServerError, "Internal server error")

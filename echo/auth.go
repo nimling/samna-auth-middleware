@@ -9,14 +9,12 @@ import (
 )
 
 func GetLogin(ctx echo.Context) error {
-	meta := metaFromContext(ctx)
-
 	var provider *string
 	if p := ctx.QueryParam("provider"); len(p) > 0 {
 		provider = &p
 	}
 
-	redirectURL, err := client.GetLogin(ctx.Request().Context(), meta, provider)
+	redirectURL, err := client.GetLogin(ctx, provider)
 	if err != nil {
 		ctx.Logger().Errorf("GetLogin: %v", err)
 		return RespondError(ctx, http.StatusForbidden, "Forbidden")
@@ -25,13 +23,11 @@ func GetLogin(ctx echo.Context) error {
 }
 
 func GetLogout(ctx echo.Context) error {
-	meta := metaFromContext(ctx)
-
 	for _, name := range []string{"sauth_csrf_token", "sauth_refresh_token", "sauth_access_token"} {
 		utils.ClearCookie(ctx, name)
 	}
 
-	statusCode, err := client.GetLogout(ctx.Request().Context(), meta)
+	statusCode, err := client.GetLogout(ctx)
 	if err != nil {
 		ctx.Logger().Errorf("GetLogout: %v", err)
 		return ctx.NoContent(http.StatusInternalServerError)

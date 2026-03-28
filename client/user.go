@@ -1,108 +1,108 @@
 package client
 
 import (
-	"context"
 	"fmt"
 	"io"
 
 	"github.com/google/uuid"
+	"github.com/labstack/echo/v4"
 )
 
-func GetUserAssets(ctx context.Context, meta RequestMetadata, userID uuid.UUID) (io.ReadCloser, error) {
+func GetUserAssets(ctx echo.Context, userID uuid.UUID) (io.ReadCloser, error) {
 	c := newClient()
 	u, err := joinURL(c.apiURL, "user", userID.String(), "assets")
 	if err != nil {
 		return nil, fmt.Errorf("build url: %w", err)
 	}
-	return c.client.Get(ctx, meta, u)
+	return c.client.Get(ctx, u)
 }
 
-func GetUsers(ctx context.Context, meta RequestMetadata) (io.ReadCloser, error) {
+func GetUsers(ctx echo.Context) (io.ReadCloser, error) {
 	c := newClient()
 	u, err := joinURL(c.apiURL, "user")
 	if err != nil {
 		return nil, fmt.Errorf("build url: %w", err)
 	}
-	return c.client.Get(ctx, meta, u)
+	return c.client.Get(ctx, u)
 }
 
-func GetUser(ctx context.Context, meta RequestMetadata, userID uuid.UUID) (io.ReadCloser, error) {
+func GetUser(ctx echo.Context, userID uuid.UUID) (io.ReadCloser, error) {
 	c := newClient()
 	u, err := joinURL(c.apiURL, "user", userID.String())
 	if err != nil {
 		return nil, fmt.Errorf("build url: %w", err)
 	}
-	return c.client.Get(ctx, meta, u)
+	return c.client.Get(ctx, u)
 }
 
-func GetUserClaims(ctx context.Context, meta RequestMetadata, userID uuid.UUID) (io.ReadCloser, error) {
+func GetUserClaims(ctx echo.Context, userID uuid.UUID) (io.ReadCloser, error) {
 	c := newClient()
 	u, err := joinURL(c.apiURL, "user", userID.String(), "claim")
 	if err != nil {
 		return nil, fmt.Errorf("build url: %w", err)
 	}
-	return c.client.Get(ctx, meta, u)
+	return c.client.Get(ctx, u)
 }
 
-func GetUserConnections(ctx context.Context, meta RequestMetadata, userID uuid.UUID) (io.ReadCloser, error) {
+func GetUserConnections(ctx echo.Context, userID uuid.UUID) (io.ReadCloser, error) {
 	c := newClient()
 	u, err := joinURL(c.apiURL, "user", userID.String(), "user")
 	if err != nil {
 		return nil, fmt.Errorf("build url: %w", err)
 	}
-	return c.client.Get(ctx, meta, u)
+	return c.client.Get(ctx, u)
 }
 
-func PostUser(ctx context.Context, meta RequestMetadata, userID uuid.UUID, body any) (io.ReadCloser, error) {
+func PostUser(ctx echo.Context, userID uuid.UUID, body any) (io.ReadCloser, error) {
 	c := newClient()
 	u, err := joinURL(c.apiURL, "user", userID.String())
 	if err != nil {
 		return nil, fmt.Errorf("build url: %w", err)
 	}
-	return c.client.Post(ctx, meta, body, u)
+	return c.client.Post(ctx, body, u)
 }
 
-func PutUser(ctx context.Context, meta RequestMetadata, userID uuid.UUID, body any) (io.ReadCloser, error) {
+func PutUser(ctx echo.Context, userID uuid.UUID, body any) (io.ReadCloser, error) {
 	c := newClient()
 	u, err := joinURL(c.apiURL, "user", userID.String())
 	if err != nil {
 		return nil, fmt.Errorf("build url: %w", err)
 	}
-	return c.client.Put(ctx, meta, body, u)
+	return c.client.Put(ctx, body, u)
 }
 
-func DeleteUser(ctx context.Context, meta RequestMetadata, userID uuid.UUID) (io.ReadCloser, error) {
+func DeleteUser(ctx echo.Context, userID uuid.UUID) (io.ReadCloser, error) {
 	c := newClient()
 	u, err := joinURL(c.apiURL, "user", userID.String())
 	if err != nil {
 		return nil, fmt.Errorf("build url: %w", err)
 	}
-	return c.client.Delete(ctx, meta, u)
+	return c.client.Delete(ctx, u)
 }
 
-func GetUserClients(ctx context.Context, meta RequestMetadata, userID uuid.UUID) (io.ReadCloser, error) {
+func GetUserClients(ctx echo.Context, userID uuid.UUID) (io.ReadCloser, error) {
 	c := newClient()
 	u, err := joinURL(c.apiURL, "user", userID.String(), "clients")
 	if err != nil {
 		return nil, fmt.Errorf("build url: %w", err)
 	}
-	return c.client.Get(ctx, meta, u)
+	return c.client.Get(ctx, u)
 }
 
-func GetUserClient(ctx context.Context, meta RequestMetadata, userID uuid.UUID, clientID uuid.UUID) (io.ReadCloser, error) {
+func GetUserClient(ctx echo.Context, userID uuid.UUID, clientID uuid.UUID) (io.ReadCloser, error) {
 	c := newClient()
 	u, err := joinURL(c.apiURL, "user", userID.String(), "clients", clientID.String())
 	if err != nil {
 		return nil, fmt.Errorf("build url: %w", err)
 	}
-	return c.client.Get(ctx, meta, u)
+	return c.client.Get(ctx, u)
 }
 
-func PutUserClient(ctx context.Context, meta RequestMetadata, userID uuid.UUID, clientID uuid.UUID, body any) (io.ReadCloser, error) {
+func PutUserClient(ctx echo.Context, userID uuid.UUID, clientID uuid.UUID, body any) (io.ReadCloser, error) {
 	c := newClient()
 	u, err := joinURL(c.apiURL, "user", userID.String(), "clients", clientID.String())
 	if err != nil {
 		return nil, fmt.Errorf("build url: %w", err)
 	}
-	return c.client.Put(ctx, meta, body, u)
+	return c.client.Put(ctx, body, u)
 }

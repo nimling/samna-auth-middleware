@@ -3,7 +3,6 @@ package client
 import (
 	"errors"
 	"net/http"
-	"net/url"
 )
 
 var ErrBadRequest = errors.New("bad request")
@@ -15,17 +14,8 @@ type SAuthClient struct {
 	client *httpClient
 }
 
-type RequestMetadata struct {
-	AccessToken string
-	RequestID   string
-	UserIP      string
-	QueryParams url.Values
-	DryRun      bool
-}
-
 type httpClient struct {
 	clientSlug   string
 	clientSecret string
 	httpClient   *http.Client
 }
-

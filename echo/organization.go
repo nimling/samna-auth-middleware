@@ -21,8 +21,7 @@ func GetOrganizations(ctx echo.Context) error {
 		return RespondJSON(ctx, http.StatusOK, orgs, nil)
 	}
 
-	meta := metaFromContext(ctx)
-	body, err := client.GetOrganizations(ctx.Request().Context(), meta)
+	body, err := client.GetOrganizations(ctx)
 	if err != nil {
 		ctx.Logger().Errorf("GetOrganizations: %v", err)
 		return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
@@ -51,8 +50,7 @@ func GetOrganization(ctx echo.Context) error {
 		return RespondJSON(ctx, http.StatusOK, org, nil)
 	}
 
-	meta := metaFromContext(ctx)
-	body, err := client.GetOrganization(ctx.Request().Context(), meta, orgID)
+	body, err := client.GetOrganization(ctx, orgID)
 	if err != nil {
 		ctx.Logger().Errorf("GetOrganization: %v", err)
 		return RespondError(ctx, http.StatusNotFound, "Not found")
@@ -67,8 +65,7 @@ func GetOrganizationGraph(ctx echo.Context) error {
 		return RespondError(ctx, http.StatusNotImplemented, "Not implemented")
 	}
 
-	meta := metaFromContext(ctx)
-	body, err := client.GetOrganizationGraph(ctx.Request().Context(), meta)
+	body, err := client.GetOrganizationGraph(ctx)
 	if err != nil {
 		ctx.Logger().Errorf("GetOrganizationGraph: %v", err)
 		return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
@@ -88,8 +85,7 @@ func GetOrganizationClaims(ctx echo.Context) error {
 		return RespondError(ctx, http.StatusNotImplemented, "Not implemented")
 	}
 
-	meta := metaFromContext(ctx)
-	body, err := client.GetOrganizationClaims(ctx.Request().Context(), meta, orgID)
+	body, err := client.GetOrganizationClaims(ctx, orgID)
 	if err != nil {
 		ctx.Logger().Errorf("GetOrganizationClaims: %v", err)
 		return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
@@ -104,8 +100,7 @@ func GetOrganizationAssets(ctx echo.Context) error {
 		return RespondError(ctx, http.StatusBadRequest, "Bad request")
 	}
 
-	meta := metaFromContext(ctx)
-	body, err := client.GetOrganizationAssets(ctx.Request().Context(), meta, orgID)
+	body, err := client.GetOrganizationAssets(ctx, orgID)
 	if err != nil {
 		ctx.Logger().Errorf("GetOrganizationAssets: %v", err)
 		return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
@@ -136,8 +131,7 @@ func PostOrganization(ctx echo.Context) error {
 		return RespondJSON(ctx, http.StatusCreated, org, nil)
 	}
 
-	meta := metaFromContext(ctx)
-	body, err := client.PostOrganization(ctx.Request().Context(), meta, nil)
+	body, err := client.PostOrganization(ctx, nil)
 	if err != nil {
 		ctx.Logger().Errorf("PostOrganization: %v", err)
 		return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
@@ -176,8 +170,7 @@ func PutOrganization(ctx echo.Context) error {
 		return RespondJSON(ctx, http.StatusOK, org, nil)
 	}
 
-	meta := metaFromContext(ctx)
-	body, err := client.PutOrganization(ctx.Request().Context(), meta, orgID, nil)
+	body, err := client.PutOrganization(ctx, orgID, nil)
 	if err != nil {
 		ctx.Logger().Errorf("PutOrganization: %v", err)
 		return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
@@ -212,8 +205,7 @@ func DeleteOrganization(ctx echo.Context) error {
 		return ctx.NoContent(http.StatusOK)
 	}
 
-	meta := metaFromContext(ctx)
-	body, err := client.DeleteOrganization(ctx.Request().Context(), meta, orgID)
+	body, err := client.DeleteOrganization(ctx, orgID)
 	if err != nil {
 		ctx.Logger().Errorf("DeleteOrganization: %v", err)
 		return RespondError(ctx, http.StatusInternalServerError, "Internal server error")

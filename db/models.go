@@ -37,6 +37,9 @@ const (
 	OBJECT_TYPE_USER         ObjectType = "user"
 	OBJECT_TYPE_ORGANIZATION ObjectType = "organization"
 	OBJECT_TYPE_LOCATION     ObjectType = "location"
+	OBJECT_TYPE_CLAIM        ObjectType = "claim"
+	OBJECT_TYPE_USER_CLAIM   ObjectType = "user_claim"
+	OBJECT_TYPE_CLAIM_OBJECT ObjectType = "claim_object"
 )
 
 type OrganizationType string
@@ -234,6 +237,27 @@ type Asset struct {
 	DeletedAt   *time.Time `bun:"sa_deleted_at" json:"deleted_at"`
 	CreatedAt   time.Time  `bun:"sa_created_at" json:"created_at"`
 	UpdatedAt   time.Time  `bun:"sa_updated_at" json:"updated_at"`
+}
+
+type SamnaClient struct {
+	bun.BaseModel `bun:"table:samna_auth.samna_client"`
+
+	ID         uuid.UUID  `bun:"id,pk" json:"id"`
+	ObjectType string     `bun:"object_type" json:"object_type"`
+	UpdatedAt  time.Time  `bun:"updated_at" json:"updated_at"`
+	UpdatedID  *uuid.UUID `bun:"updated_id" json:"updated_id"`
+	DeletedAt  time.Time  `bun:"deleted_at" json:"deleted_at"`
+	DeletedID  *uuid.UUID `bun:"deleted_id" json:"deleted_id"`
+	CreatedAt  time.Time  `bun:"created_at" json:"created_at"`
+	ModifiedAt time.Time  `bun:"modified_at" json:"modified_at"`
+	RemovedAt  *time.Time `bun:"removed_at" json:"removed_at"`
+}
+
+type SyncCursor struct {
+	UpdatedAt time.Time  `json:"updated_at"`
+	UpdatedID *uuid.UUID `json:"updated_id"`
+	DeletedAt time.Time  `json:"deleted_at"`
+	DeletedID *uuid.UUID `json:"deleted_id"`
 }
 
 type QueryAccess struct {
