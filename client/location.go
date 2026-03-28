@@ -1,14 +1,14 @@
 package client
 
 import (
+	"context"
 	"fmt"
 	"io"
 
 	"github.com/google/uuid"
-	"github.com/labstack/echo/v4"
 )
 
-func GetLocationAssets(ctx echo.Context, locationID uuid.UUID) (io.ReadCloser, error) {
+func GetLocationAssets(ctx context.Context, locationID uuid.UUID) (io.ReadCloser, error) {
 	c := newClient()
 	u, err := joinURL(c.apiURL, "location", locationID.String(), "assets")
 	if err != nil {
@@ -17,7 +17,7 @@ func GetLocationAssets(ctx echo.Context, locationID uuid.UUID) (io.ReadCloser, e
 	return c.client.Get(ctx, u)
 }
 
-func GetLocations(ctx echo.Context) (io.ReadCloser, error) {
+func GetLocations(ctx context.Context) (io.ReadCloser, error) {
 	c := newClient()
 	u, err := joinURL(c.apiURL, "location")
 	if err != nil {
@@ -26,7 +26,7 @@ func GetLocations(ctx echo.Context) (io.ReadCloser, error) {
 	return c.client.Get(ctx, u)
 }
 
-func GetLocation(ctx echo.Context, locationID uuid.UUID) (io.ReadCloser, error) {
+func GetLocation(ctx context.Context, locationID uuid.UUID) (io.ReadCloser, error) {
 	c := newClient()
 	u, err := joinURL(c.apiURL, "location", locationID.String())
 	if err != nil {
@@ -35,7 +35,7 @@ func GetLocation(ctx echo.Context, locationID uuid.UUID) (io.ReadCloser, error) 
 	return c.client.Get(ctx, u)
 }
 
-func GetLocationClaims(ctx echo.Context, locationID uuid.UUID) (io.ReadCloser, error) {
+func GetLocationClaims(ctx context.Context, locationID uuid.UUID) (io.ReadCloser, error) {
 	c := newClient()
 	u, err := joinURL(c.apiURL, "location", locationID.String(), "claim")
 	if err != nil {
@@ -44,7 +44,7 @@ func GetLocationClaims(ctx echo.Context, locationID uuid.UUID) (io.ReadCloser, e
 	return c.client.Get(ctx, u)
 }
 
-func PostLocation(ctx echo.Context, body any) (io.ReadCloser, error) {
+func PostLocation(ctx context.Context, body any) (io.ReadCloser, error) {
 	c := newClient()
 	u, err := joinURL(c.apiURL, "location")
 	if err != nil {
@@ -53,7 +53,7 @@ func PostLocation(ctx echo.Context, body any) (io.ReadCloser, error) {
 	return c.client.Post(ctx, body, u)
 }
 
-func PutLocation(ctx echo.Context, locationID uuid.UUID, body any) (io.ReadCloser, error) {
+func PutLocation(ctx context.Context, locationID uuid.UUID, body any) (io.ReadCloser, error) {
 	c := newClient()
 	u, err := joinURL(c.apiURL, "location", locationID.String())
 	if err != nil {
@@ -62,7 +62,7 @@ func PutLocation(ctx echo.Context, locationID uuid.UUID, body any) (io.ReadClose
 	return c.client.Put(ctx, body, u)
 }
 
-func DeleteLocation(ctx echo.Context, locationID uuid.UUID) (io.ReadCloser, error) {
+func DeleteLocation(ctx context.Context, locationID uuid.UUID) (io.ReadCloser, error) {
 	c := newClient()
 	u, err := joinURL(c.apiURL, "location", locationID.String())
 	if err != nil {

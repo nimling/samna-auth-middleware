@@ -14,7 +14,7 @@ func GetLogin(ctx echo.Context) error {
 		provider = &p
 	}
 
-	redirectURL, err := client.GetLogin(ctx, provider)
+	redirectURL, err := client.GetLogin(ctx.Request().Context(), provider)
 	if err != nil {
 		ctx.Logger().Errorf("GetLogin: %v", err)
 		return RespondError(ctx, http.StatusForbidden, "Forbidden")
@@ -27,7 +27,7 @@ func GetLogout(ctx echo.Context) error {
 		utils.ClearCookie(ctx, name)
 	}
 
-	statusCode, err := client.GetLogout(ctx)
+	statusCode, err := client.GetLogout(ctx.Request().Context())
 	if err != nil {
 		ctx.Logger().Errorf("GetLogout: %v", err)
 		return ctx.NoContent(http.StatusInternalServerError)

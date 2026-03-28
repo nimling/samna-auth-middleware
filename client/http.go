@@ -2,15 +2,13 @@ package client
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
-	neturl "net/url"
 	"time"
-
-	"github.com/labstack/echo/v4"
 )
 
 func DecodeJSON[T any](body io.ReadCloser, err error) (T, error) {
@@ -34,39 +32,23 @@ func newHTTPClient(clientSlug, clientSecret string) *httpClient {
 	}
 }
 
-func (e *httpClient) Get(ctx echo.Context, url string) (io.ReadCloser, error) {
+func (e *httpClient) Get(ctx context.Context, url string) (io.ReadCloser, error) {
 	return e.execute(ctx, http.MethodGet, http.StatusOK, nil, url)
 }
 
-func (e *httpClient) Post(ctx echo.Context, body any, url string) (io.ReadCloser, error) {
+func (e *httpClient) Post(ctx context.Context, body any, url string) (io.ReadCloser, error) {
 	return e.execute(ctx, http.MethodPost, http.StatusCreated, body, url)
 }
 
-func (e *httpClient) Put(ctx echo.Context, body any, url string) (io.ReadCloser, error) {
+func (e *httpClient) Put(ctx context.Context, body any, url string) (io.ReadCloser, error) {
 	return e.execute(ctx, http.MethodPut, http.StatusOK, body, url)
 }
 
-func (e *httpClient) Delete(ctx echo.Context, url string) (io.ReadCloser, error) {
+func (e *httpClient) Delete(ctx context.Context, url string) (io.ReadCloser, error) {
 	return e.execute(ctx, http.MethodDelete, http.StatusOK, nil, url)
 }
 
-func (e *httpClient) execute(ctx echo.Context, method string, expectedStatus int, reqBody any, targetURL string) (io.ReadCloser, error) {
-	queryParams := ctx.QueryParams()
-	if len(queryParams) > 0 {
-		parsed, err := neturl.Parse(targetURL)
-		if err != nil {
-			return nil, fmt.Errorf("parse url for query params: %w", err)
-		}
-		existing := parsed.Query()
-		for k, vs := range queryParams {
-			for _, v := range vs {
-				existing.Add(k, v)
-			}
-		}
-		parsed.RawQuery = existing.Encode()
-		targetURL = parsed.String()
-	}
-
+func (e *httpClient) execute(ctx context.Context, method string, expectedStatus int, reqBody any, targetURL string) (io.ReadCloser, error) {
 	var body io.Reader
 	if reqBody != nil {
 		payloadBytes, err := json.Marshal(reqBody)
@@ -76,15 +58,13 @@ func (e *httpClient) execute(ctx echo.Context, method string, expectedStatus int
 		body = bytes.NewReader(payloadBytes)
 	}
 
-	req, err := http.NewRequestWithContext(ctx.Request().Context(), method, targetURL, body)
+	req, err := http.NewRequestWithContext(ctx, method, targetURL, body)
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
 	}
 
-	accessToken, _ := ctx.Get("access_token").(string)
-	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", accessToken))
-	req.Header.Set("X-Request-ID", ctx.Response().Header().Get(echo.HeaderXRequestID))
-	req.Header.Set("X-User-IP", ctx.RealIP())
+	req.Header.Set("X-Request-ID", generateRequestID())
+	req.Header.Set("X-Client-IP", localIP())
 	req.Header.Set("SAuth-Client-Slug", e.clientSlug)
 	req.Header.Set("SAuth-Client-Secret", e.clientSecret)
 

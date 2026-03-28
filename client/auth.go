@@ -1,14 +1,13 @@
 package client
 
 import (
+	"context"
 	"fmt"
 	"net/url"
 	"os"
-
-	"github.com/labstack/echo/v4"
 )
 
-func GetLogin(ctx echo.Context, provider *string) (string, error) {
+func GetLogin(ctx context.Context, provider *string) (string, error) {
 	endpoint := os.Getenv("SAUTH_ENDPOINT")
 
 	var path string
@@ -35,7 +34,7 @@ func GetLogin(ctx echo.Context, provider *string) (string, error) {
 	return parsed.String(), nil
 }
 
-func GetLogout(ctx echo.Context) (int, error) {
+func GetLogout(ctx context.Context) (int, error) {
 	c := newClient()
 
 	u, err := joinURL(c.apiURL, "logout")

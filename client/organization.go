@@ -1,14 +1,14 @@
 package client
 
 import (
+	"context"
 	"fmt"
 	"io"
 
 	"github.com/google/uuid"
-	"github.com/labstack/echo/v4"
 )
 
-func GetOrganizationAssets(ctx echo.Context, orgID uuid.UUID) (io.ReadCloser, error) {
+func GetOrganizationAssets(ctx context.Context, orgID uuid.UUID) (io.ReadCloser, error) {
 	c := newClient()
 	u, err := joinURL(c.apiURL, "organization", orgID.String(), "assets")
 	if err != nil {
@@ -17,7 +17,7 @@ func GetOrganizationAssets(ctx echo.Context, orgID uuid.UUID) (io.ReadCloser, er
 	return c.client.Get(ctx, u)
 }
 
-func GetOrganizations(ctx echo.Context) (io.ReadCloser, error) {
+func GetOrganizations(ctx context.Context) (io.ReadCloser, error) {
 	c := newClient()
 	u, err := joinURL(c.apiURL, "organization")
 	if err != nil {
@@ -26,7 +26,7 @@ func GetOrganizations(ctx echo.Context) (io.ReadCloser, error) {
 	return c.client.Get(ctx, u)
 }
 
-func GetOrganization(ctx echo.Context, orgID uuid.UUID) (io.ReadCloser, error) {
+func GetOrganization(ctx context.Context, orgID uuid.UUID) (io.ReadCloser, error) {
 	c := newClient()
 	u, err := joinURL(c.apiURL, "organization", orgID.String())
 	if err != nil {
@@ -35,7 +35,7 @@ func GetOrganization(ctx echo.Context, orgID uuid.UUID) (io.ReadCloser, error) {
 	return c.client.Get(ctx, u)
 }
 
-func GetOrganizationGraph(ctx echo.Context) (io.ReadCloser, error) {
+func GetOrganizationGraph(ctx context.Context) (io.ReadCloser, error) {
 	c := newClient()
 	u, err := joinURL(c.apiURL, "organization", "graph")
 	if err != nil {
@@ -44,7 +44,7 @@ func GetOrganizationGraph(ctx echo.Context) (io.ReadCloser, error) {
 	return c.client.Get(ctx, u)
 }
 
-func GetOrganizationClaims(ctx echo.Context, orgID uuid.UUID) (io.ReadCloser, error) {
+func GetOrganizationClaims(ctx context.Context, orgID uuid.UUID) (io.ReadCloser, error) {
 	c := newClient()
 	u, err := joinURL(c.apiURL, "organization", orgID.String(), "claim")
 	if err != nil {
@@ -53,7 +53,7 @@ func GetOrganizationClaims(ctx echo.Context, orgID uuid.UUID) (io.ReadCloser, er
 	return c.client.Get(ctx, u)
 }
 
-func PostOrganization(ctx echo.Context, body any) (io.ReadCloser, error) {
+func PostOrganization(ctx context.Context, body any) (io.ReadCloser, error) {
 	c := newClient()
 	u, err := joinURL(c.apiURL, "organization")
 	if err != nil {
@@ -62,7 +62,7 @@ func PostOrganization(ctx echo.Context, body any) (io.ReadCloser, error) {
 	return c.client.Post(ctx, body, u)
 }
 
-func PutOrganization(ctx echo.Context, orgID uuid.UUID, body any) (io.ReadCloser, error) {
+func PutOrganization(ctx context.Context, orgID uuid.UUID, body any) (io.ReadCloser, error) {
 	c := newClient()
 	u, err := joinURL(c.apiURL, "organization", orgID.String())
 	if err != nil {
@@ -71,7 +71,7 @@ func PutOrganization(ctx echo.Context, orgID uuid.UUID, body any) (io.ReadCloser
 	return c.client.Put(ctx, body, u)
 }
 
-func DeleteOrganization(ctx echo.Context, orgID uuid.UUID) (io.ReadCloser, error) {
+func DeleteOrganization(ctx context.Context, orgID uuid.UUID) (io.ReadCloser, error) {
 	c := newClient()
 	u, err := joinURL(c.apiURL, "organization", orgID.String())
 	if err != nil {

@@ -21,7 +21,7 @@ func GetMe(ctx echo.Context) error {
 		return RespondJSON(ctx, http.StatusOK, user, nil)
 	}
 
-	body, err := client.GetMe(ctx)
+	body, err := client.GetMe(ctx.Request().Context())
 	if err != nil {
 		ctx.Logger().Errorf("GetMe: %v", err)
 		return RespondError(ctx, http.StatusNotFound, "Not found")
@@ -43,7 +43,7 @@ func PutMe(ctx echo.Context) error {
 		return RespondJSON(ctx, http.StatusOK, user, nil)
 	}
 
-	body, err := client.PutMe(ctx, nil)
+	body, err := client.PutMe(ctx.Request().Context(), nil)
 	if err != nil {
 		ctx.Logger().Errorf("PutMe: %v", err)
 		return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
@@ -62,7 +62,7 @@ func GetMeClaims(ctx echo.Context) error {
 		return RespondJSON(ctx, http.StatusOK, claims, nil)
 	}
 
-	body, err := client.GetMeClaims(ctx)
+	body, err := client.GetMeClaims(ctx.Request().Context())
 	if err != nil {
 		ctx.Logger().Errorf("GetMeClaims: %v", err)
 		return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
@@ -77,7 +77,7 @@ func PostMeAsset(ctx echo.Context) error {
 		return RespondError(ctx, http.StatusNotImplemented, "Not implemented")
 	}
 
-	body, err := client.PostMeAsset(ctx, ctx.Request().Header.Get("Content-Type"), ctx.Request().Body)
+	body, err := client.PostMeAsset(ctx.Request().Context(), ctx.Request().Header.Get("Content-Type"), ctx.Request().Body)
 	if err != nil {
 		ctx.Logger().Errorf("PostMeAsset: %v", err)
 		return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
@@ -97,7 +97,7 @@ func DeleteMeAsset(ctx echo.Context) error {
 		return RespondError(ctx, http.StatusBadRequest, "Bad request")
 	}
 
-	err = client.DeleteMeAsset(ctx, assetID)
+	err = client.DeleteMeAsset(ctx.Request().Context(), assetID)
 	if err != nil {
 		ctx.Logger().Errorf("DeleteMeAsset: %v", err)
 		return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
@@ -111,7 +111,7 @@ func GetMeConnections(ctx echo.Context) error {
 		return RespondError(ctx, http.StatusNotImplemented, "Not implemented")
 	}
 
-	body, err := client.GetMeConnections(ctx)
+	body, err := client.GetMeConnections(ctx.Request().Context())
 	if err != nil {
 		ctx.Logger().Errorf("GetMeConnections: %v", err)
 		return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
@@ -126,7 +126,7 @@ func GetMeModules(ctx echo.Context) error {
 		return RespondError(ctx, http.StatusNotImplemented, "Not implemented")
 	}
 
-	body, err := client.GetMeModules(ctx)
+	body, err := client.GetMeModules(ctx.Request().Context())
 	if err != nil {
 		ctx.Logger().Errorf("GetMeModules: %v", err)
 		return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
@@ -146,7 +146,7 @@ func GetMeOrganizations(ctx echo.Context) error {
 		return RespondJSON(ctx, http.StatusOK, orgs, nil)
 	}
 
-	body, err := client.GetMeOrganizations(ctx)
+	body, err := client.GetMeOrganizations(ctx.Request().Context())
 	if err != nil {
 		ctx.Logger().Errorf("GetMeOrganizations: %v", err)
 		return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
@@ -166,7 +166,7 @@ func GetMeLocations(ctx echo.Context) error {
 		return RespondJSON(ctx, http.StatusOK, locs, nil)
 	}
 
-	body, err := client.GetMeLocations(ctx)
+	body, err := client.GetMeLocations(ctx.Request().Context())
 	if err != nil {
 		ctx.Logger().Errorf("GetMeLocations: %v", err)
 		return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
@@ -181,7 +181,7 @@ func GetMeClients(ctx echo.Context) error {
 		return RespondError(ctx, http.StatusNotImplemented, "Not implemented")
 	}
 
-	body, err := client.GetMeClients(ctx)
+	body, err := client.GetMeClients(ctx.Request().Context())
 	if err != nil {
 		ctx.Logger().Errorf("GetMeClients: %v", err)
 		return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
@@ -201,7 +201,7 @@ func GetMeClient(ctx echo.Context) error {
 		return RespondError(ctx, http.StatusBadRequest, "Bad request")
 	}
 
-	body, err := client.GetMeClient(ctx, clientID)
+	body, err := client.GetMeClient(ctx.Request().Context(), clientID)
 	if err != nil {
 		ctx.Logger().Errorf("GetMeClient: %v", err)
 		return RespondError(ctx, http.StatusInternalServerError, "Internal server error")

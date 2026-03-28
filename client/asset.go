@@ -1,15 +1,15 @@
 package client
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"net/http"
 
 	"github.com/google/uuid"
-	"github.com/labstack/echo/v4"
 )
 
-func GetAssets(ctx echo.Context) (io.ReadCloser, error) {
+func GetAssets(ctx context.Context) (io.ReadCloser, error) {
 	c := newClient()
 	u, err := joinURL(c.apiURL, "asset")
 	if err != nil {
@@ -18,7 +18,7 @@ func GetAssets(ctx echo.Context) (io.ReadCloser, error) {
 	return c.client.Get(ctx, u)
 }
 
-func GetAsset(ctx echo.Context, assetID uuid.UUID) (io.ReadCloser, error) {
+func GetAsset(ctx context.Context, assetID uuid.UUID) (io.ReadCloser, error) {
 	c := newClient()
 	u, err := joinURL(c.apiURL, "asset", assetID.String())
 	if err != nil {
@@ -27,7 +27,7 @@ func GetAsset(ctx echo.Context, assetID uuid.UUID) (io.ReadCloser, error) {
 	return c.client.Get(ctx, u)
 }
 
-func GetAssetData(ctx echo.Context, assetID uuid.UUID) (io.ReadCloser, error) {
+func GetAssetData(ctx context.Context, assetID uuid.UUID) (io.ReadCloser, error) {
 	c := newClient()
 	u, err := joinURL(c.apiURL, "asset", assetID.String(), "data")
 	if err != nil {
@@ -36,7 +36,7 @@ func GetAssetData(ctx echo.Context, assetID uuid.UUID) (io.ReadCloser, error) {
 	return c.client.Get(ctx, u)
 }
 
-func PostAsset(ctx echo.Context, body any) (io.ReadCloser, error) {
+func PostAsset(ctx context.Context, body any) (io.ReadCloser, error) {
 	c := newClient()
 	u, err := joinURL(c.apiURL, "asset")
 	if err != nil {
@@ -45,23 +45,21 @@ func PostAsset(ctx echo.Context, body any) (io.ReadCloser, error) {
 	return c.client.Post(ctx, body, u)
 }
 
-func PostAssetUpload(ctx echo.Context, assetID uuid.UUID, contentType string, body io.Reader) (io.ReadCloser, error) {
+func PostAssetUpload(ctx context.Context, assetID uuid.UUID, contentType string, body io.Reader) (io.ReadCloser, error) {
 	c := newClient()
 	u, err := joinURL(c.apiURL, "asset", assetID.String())
 	if err != nil {
 		return nil, fmt.Errorf("build url: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx.Request().Context(), http.MethodPost, u, body)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u, body)
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
 	}
 
-	accessToken, _ := ctx.Get("access_token").(string)
 	req.Header.Set("Content-Type", contentType)
-	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", accessToken))
-	req.Header.Set("X-Request-ID", ctx.Response().Header().Get(echo.HeaderXRequestID))
-	req.Header.Set("X-User-IP", ctx.RealIP())
+	req.Header.Set("X-Request-ID", generateRequestID())
+	req.Header.Set("X-Client-IP", localIP())
 	req.Header.Set("SAuth-Client-Slug", c.client.clientSlug)
 	req.Header.Set("SAuth-Client-Secret", c.client.clientSecret)
 
@@ -78,7 +76,7 @@ func PostAssetUpload(ctx echo.Context, assetID uuid.UUID, contentType string, bo
 	return resp.Body, nil
 }
 
-func PutAsset(ctx echo.Context, assetID uuid.UUID, body any) (io.ReadCloser, error) {
+func PutAsset(ctx context.Context, assetID uuid.UUID, body any) (io.ReadCloser, error) {
 	c := newClient()
 	u, err := joinURL(c.apiURL, "asset", assetID.String())
 	if err != nil {
@@ -87,7 +85,7 @@ func PutAsset(ctx echo.Context, assetID uuid.UUID, body any) (io.ReadCloser, err
 	return c.client.Put(ctx, body, u)
 }
 
-func DeleteAsset(ctx echo.Context, assetID uuid.UUID) (io.ReadCloser, error) {
+func DeleteAsset(ctx context.Context, assetID uuid.UUID) (io.ReadCloser, error) {
 	c := newClient()
 	u, err := joinURL(c.apiURL, "asset", assetID.String())
 	if err != nil {

@@ -1,9 +1,7 @@
 package client
 
 import (
-	"net/url"
 	"os"
-	"path"
 )
 
 func newClient() *SAuthClient {
@@ -16,16 +14,3 @@ func newClient() *SAuthClient {
 		client: newHTTPClient(slug, secret),
 	}
 }
-
-func joinURL(baseURL string, segments ...string) (string, error) {
-	base, err := url.Parse(baseURL)
-	if err != nil {
-		return "", err
-	}
-
-	allSegments := append([]string{base.Path}, segments...)
-	base.Path = path.Join(allSegments...)
-
-	return base.String(), nil
-}
-
