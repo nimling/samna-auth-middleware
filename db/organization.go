@@ -25,7 +25,7 @@ func (d *DB) GetOrganizations(ctx context.Context, userID uuid.UUID, accessLevel
 	var orgs []Organization
 	q := d.NewSelect().
 		Model(&orgs).
-		Where("o.id IN (SELECT id FROM samna_auth.get_organizations(?, ?))", userID, accessLevel)
+		Where("organization.id IN (SELECT id FROM samna_auth.get_organizations(?, ?))", userID, accessLevel)
 	q = ApplyRelations(q, relations)
 	err := q.Scan(ctx)
 	if err != nil {

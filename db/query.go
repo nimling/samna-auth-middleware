@@ -6,56 +6,23 @@ import (
 	"github.com/google/uuid"
 )
 
-func NewQueryAccess(userID uuid.UUID) QueryAccess {
-	return QueryAccess{UserID: userID}
-}
-
-func (qa *QueryAccess) UserWhere(accessLevel ClaimAccessLevel) string {
+func UserWhere(userID uuid.UUID, accessLevel ClaimAccessLevel) string {
 	return fmt.Sprintf(
-		`u.user_id = '%[1]s' OR u.user_id IN (SELECT user_id FROM samna_auth.get_users('%[1]s', %[2]d))`,
-		qa.UserID, accessLevel,
+		`user_id = '%[1]s' OR user_id IN (SELECT user_id FROM samna_auth.get_users('%[1]s', %[2]d))`,
+		userID, accessLevel,
 	)
 }
 
-func (qa *QueryAccess) ClaimWhere(accessLevel ClaimAccessLevel) string {
+func ClaimWhere(userID uuid.UUID, accessLevel ClaimAccessLevel) string {
 	return fmt.Sprintf(
-		`c.id IN (SELECT claim_id FROM samna_auth.claim_access('%[1]s', NULL, %[2]d))`,
-		qa.UserID, accessLevel,
+		`id IN (SELECT claim_id FROM samna_auth.claim_access('%[1]s', NULL, %[2]d))`,
+		userID, accessLevel,
 	)
 }
 
-var objectAliases = map[string]string{
-	"organization":  "o",
-	"location":      "l",
-	"bookable":      "bo",
-	"bookable-type": "bt",
-	"bookable_type": "bt",
-	"booking":       "b",
-	"timeslot":      "t",
-	"checkin":       "c",
-	"map":           "m",
-	"registration":  "r",
-	"asset":         "a",
-	"audit":         "a",
-	"activity":      "a",
-	"action":        "ac",
-	"action_object": "ao",
-	"ai_request":    "air",
-	"code":          "c",
-	"capability":    "c",
-}
-
-func (qa *QueryAccess) ObjectWhere(objectType string, accessLevel ClaimAccessLevel) string {
-	if objectType == "organization" || objectType == "location" || objectType == "user" {
-		panic(fmt.Sprintf("use dedicated query functions for %s", objectType))
-	}
-
-	alias, ok := objectAliases[objectType]
-	if !ok {
-		alias = objectType[:1]
-	}
+func ObjectWhere(userID uuid.UUID, objectType string, accessLevel ClaimAccessLevel) string {
 	return fmt.Sprintf(
-		`%[3]s.id IN (SELECT object_id FROM samna_auth.get_objects('%[1]s', '%[4]s', %[2]d))`,
-		qa.UserID, accessLevel, alias, objectType,
+		`id IN (SELECT object_id FROM samna_auth.get_objects('%[1]s', '%[3]s', %[2]d))`,
+		userID, accessLevel, objectType,
 	)
 }

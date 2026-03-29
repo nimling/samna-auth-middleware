@@ -26,7 +26,7 @@ func (d *DB) GetUsers(ctx context.Context, userID uuid.UUID, accessLevel ClaimAc
 	var users []SamnaUser
 	err := d.NewSelect().
 		Model(&users).
-		Where("u.id IN (SELECT id FROM samna_auth.get_users(?, ?))", userID, accessLevel).
+		Where("samna_user.id IN (SELECT id FROM samna_auth.get_users(?, ?))", userID, accessLevel).
 		Scan(ctx)
 	if err != nil {
 		return nil, err

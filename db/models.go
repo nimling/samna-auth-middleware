@@ -76,7 +76,7 @@ type SamnaUser struct {
 }
 
 type Organization struct {
-	bun.BaseModel `bun:"table:samna_auth.organization,alias:o"`
+	bun.BaseModel `bun:"table:samna_auth.organization"`
 
 	ID          uuid.UUID        `bun:"id,pk" json:"id"`
 	Name        string           `bun:"name" json:"name"`
@@ -95,7 +95,7 @@ type Organization struct {
 }
 
 type Location struct {
-	bun.BaseModel `bun:"table:samna_auth.location,alias:l"`
+	bun.BaseModel `bun:"table:samna_auth.location"`
 
 	ID          uuid.UUID  `bun:"id,pk" json:"id"`
 	OwnerID     uuid.UUID  `bun:"sa_owner_id" json:"owner_id"`
@@ -223,7 +223,7 @@ type ActiveUser struct {
 }
 
 type Asset struct {
-	bun.BaseModel `bun:"table:Asset,alias:asset" json:"-"`
+	bun.BaseModel `bun:"table:asset" json:"-"`
 
 	ID          uuid.UUID  `bun:"id,pk" json:"id"`
 	Name        string     `bun:"column:name" json:"name"`
@@ -258,8 +258,4 @@ type SyncCursor struct {
 	UpdatedID *uuid.UUID `json:"updated_id"`
 	DeletedAt time.Time  `json:"deleted_at"`
 	DeletedID *uuid.UUID `json:"deleted_id"`
-}
-
-type QueryAccess struct {
-	UserID uuid.UUID
 }

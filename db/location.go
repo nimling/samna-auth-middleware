@@ -25,7 +25,7 @@ func (d *DB) GetLocations(ctx context.Context, userID uuid.UUID, accessLevel Cla
 	var locs []Location
 	q := d.NewSelect().
 		Model(&locs).
-		Where("l.id IN (SELECT id FROM samna_auth.get_locations(?, ?))", userID, accessLevel)
+		Where("location.id IN (SELECT id FROM samna_auth.get_locations(?, ?))", userID, accessLevel)
 	q = ApplyRelations(q, relations)
 	err := q.Scan(ctx)
 	if err != nil {
