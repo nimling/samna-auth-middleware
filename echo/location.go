@@ -59,26 +59,6 @@ func GetLocation(ctx echo.Context) error {
 	return ctx.Stream(http.StatusOK, "application/json", body)
 }
 
-func GetLocationClaims(ctx echo.Context) error {
-	locationID, err := uuid.Parse(ctx.Param("id"))
-	if err != nil {
-		return RespondError(ctx, http.StatusBadRequest, "Bad request")
-	}
-
-	if utils.GetDebugUserID() != nil {
-		ctx.Logger().Errorf("GetLocationClaims: not available in debug mode")
-		return RespondError(ctx, http.StatusNotImplemented, "Not implemented")
-	}
-
-	body, err := client.GetLocationClaims(ctx.Request().Context(), locationID)
-	if err != nil {
-		ctx.Logger().Errorf("GetLocationClaims: %v", err)
-		return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
-	}
-	defer body.Close()
-	return ctx.Stream(http.StatusOK, "application/json", body)
-}
-
 func GetLocationAssets(ctx echo.Context) error {
 	locationID, err := uuid.Parse(ctx.Param("id"))
 	if err != nil {

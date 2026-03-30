@@ -27,7 +27,8 @@ func GetClaimGraph(ctx echo.Context) error {
 
 func GetClaims(ctx echo.Context) error {
 	if debugUserID := utils.GetDebugUserID(); debugUserID != nil {
-		claims, err := db.Instance().ClaimAccess(ctx.Request().Context(), *debugUserID, nil, int(db.ACCESS_LEVEL_GUEST))
+		relations := db.ParseWithRelations(ctx.QueryParam("with"), db.ClaimRelations())
+		claims, err := db.Instance().GetClaims(ctx.Request().Context(), *debugUserID, db.ACCESS_LEVEL_GUEST, relations...)
 		if err != nil {
 			ctx.Logger().Errorf("GetClaims: %v", err)
 			return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
@@ -51,12 +52,13 @@ func GetClaim(ctx echo.Context) error {
 	}
 
 	if debugUserID := utils.GetDebugUserID(); debugUserID != nil {
-		claims, err := db.Instance().ClaimAccess(ctx.Request().Context(), *debugUserID, &claimID, 0)
-		if err != nil || len(claims) == 0 {
+		relations := db.ParseWithRelations(ctx.QueryParam("with"), db.ClaimRelations())
+		claim, err := db.Instance().GetClaim(ctx.Request().Context(), *debugUserID, claimID, db.ACCESS_LEVEL_GUEST, relations...)
+		if err != nil {
 			ctx.Logger().Errorf("GetClaim: %v", err)
 			return RespondError(ctx, http.StatusNotFound, "Not found")
 		}
-		return RespondJSON(ctx, http.StatusOK, claims[0], nil)
+		return RespondJSON(ctx, http.StatusOK, claim, nil)
 	}
 
 	body, err := client.GetClaim(ctx.Request().Context(), claimID)

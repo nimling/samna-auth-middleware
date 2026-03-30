@@ -15,7 +15,7 @@ func UserWhere(userID uuid.UUID, accessLevel ClaimAccessLevel) string {
 
 func ClaimWhere(userID uuid.UUID, accessLevel ClaimAccessLevel) string {
 	return fmt.Sprintf(
-		`id IN (SELECT claim_id FROM samna_auth.claim_access('%[1]s', NULL, %[2]d))`,
+		`id IN (SELECT id FROM samna_auth.get_claims('%[1]s', %[2]d))`,
 		userID, accessLevel,
 	)
 }

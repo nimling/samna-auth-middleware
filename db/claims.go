@@ -17,6 +17,34 @@ func (d *DB) ClaimAccess(ctx context.Context, userID uuid.UUID, objectID *uuid.U
 	return claims, err
 }
 
+func (d *DB) GetClaim(ctx context.Context, userID uuid.UUID, claimID uuid.UUID, accessLevel ClaimAccessLevel, relations ...RelationFunc) (*Claim, error) {
+	var claim Claim
+	q := d.NewSelect().
+		Model(&claim).
+		Where("claim.id = ?", claimID).
+		Where("claim.id IN (SELECT id FROM samna_auth.get_claims(?, ?))", userID, accessLevel).
+		Limit(1)
+	q = ApplyRelations(q, relations)
+	err := q.Scan(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return &claim, nil
+}
+
+func (d *DB) GetClaims(ctx context.Context, userID uuid.UUID, accessLevel ClaimAccessLevel, relations ...RelationFunc) ([]Claim, error) {
+	var claims []Claim
+	q := d.NewSelect().
+		Model(&claims).
+		Where("claim.id IN (SELECT id FROM samna_auth.get_claims(?, ?))", userID, accessLevel)
+	q = ApplyRelations(q, relations)
+	err := q.Scan(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return claims, nil
+}
+
 func (d *DB) UserObjectAccess(ctx context.Context, userID uuid.UUID, objectID *uuid.UUID, accessLevel ClaimAccessLevel) (*ActiveClaim, error) {
 	claims, err := d.ClaimAccess(ctx, userID, objectID, int(accessLevel))
 	if err != nil {

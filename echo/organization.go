@@ -74,26 +74,6 @@ func GetOrganizationGraph(ctx echo.Context) error {
 	return ctx.Stream(http.StatusOK, "application/json", body)
 }
 
-func GetOrganizationClaims(ctx echo.Context) error {
-	orgID, err := uuid.Parse(ctx.Param("id"))
-	if err != nil {
-		return RespondError(ctx, http.StatusBadRequest, "Bad request")
-	}
-
-	if utils.GetDebugUserID() != nil {
-		ctx.Logger().Errorf("GetOrganizationClaims: not available in debug mode")
-		return RespondError(ctx, http.StatusNotImplemented, "Not implemented")
-	}
-
-	body, err := client.GetOrganizationClaims(ctx.Request().Context(), orgID)
-	if err != nil {
-		ctx.Logger().Errorf("GetOrganizationClaims: %v", err)
-		return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
-	}
-	defer body.Close()
-	return ctx.Stream(http.StatusOK, "application/json", body)
-}
-
 func GetOrganizationAssets(ctx echo.Context) error {
 	orgID, err := uuid.Parse(ctx.Param("id"))
 	if err != nil {
