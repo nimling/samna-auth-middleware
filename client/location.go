@@ -4,9 +4,11 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/nimling/samna-auth-middleware/db"
+	"github.com/nimling/samna-auth-middleware/utils"
 )
 
 func GetLocationAssets(ctx context.Context, locationID uuid.UUID) (io.ReadCloser, error) {
@@ -46,6 +48,16 @@ func GetLocationClaims(ctx context.Context, locationID uuid.UUID) (io.ReadCloser
 }
 
 func PostLocation(ctx context.Context, loc db.Location) (db.Location, error) {
+	if utils.GetDebugUserID() != nil {
+		loc.ID = uuid.New()
+		loc.CreatedAt = time.Now()
+		loc.UpdatedAt = time.Now()
+		_, err := db.Instance().NewInsert().Model(&loc).Exec(ctx)
+		if err != nil {
+			return loc, fmt.Errorf("debug insert location: %w", err)
+		}
+		return loc, nil
+	}
 	c := newClient()
 	u, err := joinURL(c.apiURL, "location")
 	if err != nil {
@@ -63,6 +75,15 @@ func PostLocation(ctx context.Context, loc db.Location) (db.Location, error) {
 }
 
 func PutLocation(ctx context.Context, locationID uuid.UUID, loc db.Location) (db.Location, error) {
+	if utils.GetDebugUserID() != nil {
+		loc.ID = locationID
+		loc.UpdatedAt = time.Now()
+		_, err := db.Instance().NewUpdate().Model(&loc).Where("id = ?", locationID).OmitZero().Exec(ctx)
+		if err != nil {
+			return loc, fmt.Errorf("debug update location: %w", err)
+		}
+		return loc, nil
+	}
 	c := newClient()
 	u, err := joinURL(c.apiURL, "location", locationID.String())
 	if err != nil {
@@ -80,6 +101,14 @@ func PutLocation(ctx context.Context, locationID uuid.UUID, loc db.Location) (db
 }
 
 func DeleteLocation(ctx context.Context, locationID uuid.UUID) (db.Location, error) {
+	if utils.GetDebugUserID() != nil {
+		var result db.Location
+		_, err := db.Instance().NewUpdate().Model(&result).Set("sa_deleted_at = NOW()").Where("id = ?", locationID).Where("sa_deleted_at IS NULL").Returning("*").Exec(ctx)
+		if err != nil {
+			return result, fmt.Errorf("debug delete location: %w", err)
+		}
+		return result, nil
+	}
 	c := newClient()
 	u, err := joinURL(c.apiURL, "location", locationID.String())
 	if err != nil {

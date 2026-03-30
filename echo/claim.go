@@ -127,11 +127,6 @@ func PutClaim(ctx echo.Context) error {
 		return RespondError(ctx, http.StatusBadRequest, "Bad request")
 	}
 
-	if utils.GetDebugUserID() != nil {
-		ctx.Logger().Errorf("PutClaim: not available in debug mode")
-		return RespondError(ctx, http.StatusNotImplemented, "Not implemented")
-	}
-
 	var claim db.Claim
 	if err := ctx.Bind(&claim); err != nil {
 		return RespondError(ctx, http.StatusBadRequest, "Bad request")
@@ -187,11 +182,6 @@ func DeleteClaimObject(ctx echo.Context) error {
 		return RespondError(ctx, http.StatusBadRequest, "Bad request")
 	}
 
-	if utils.GetDebugUserID() != nil {
-		ctx.Logger().Errorf("DeleteClaimObject: not available in debug mode")
-		return RespondError(ctx, http.StatusNotImplemented, "Not implemented")
-	}
-
 	result, err := client.DeleteClaimObject(ctx.Request().Context(), claimID, objectID)
 	if err != nil {
 		ctx.Logger().Errorf("DeleteClaimObject: %v", err)
@@ -227,11 +217,6 @@ func DeleteClaimUser(ctx echo.Context) error {
 	userID, err := uuid.Parse(ctx.Param("user_id"))
 	if err != nil {
 		return RespondError(ctx, http.StatusBadRequest, "Bad request")
-	}
-
-	if utils.GetDebugUserID() != nil {
-		ctx.Logger().Errorf("DeleteClaimUser: not available in debug mode")
-		return RespondError(ctx, http.StatusNotImplemented, "Not implemented")
 	}
 
 	result, err := client.DeleteUserClaim(ctx.Request().Context(), claimID, userID)

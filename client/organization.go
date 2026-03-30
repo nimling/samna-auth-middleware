@@ -4,9 +4,11 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/nimling/samna-auth-middleware/db"
+	"github.com/nimling/samna-auth-middleware/utils"
 )
 
 func GetOrganizationAssets(ctx context.Context, orgID uuid.UUID) (io.ReadCloser, error) {
@@ -55,6 +57,16 @@ func GetOrganizationClaims(ctx context.Context, orgID uuid.UUID) (io.ReadCloser,
 }
 
 func PostOrganization(ctx context.Context, org db.Organization) (db.Organization, error) {
+	if utils.GetDebugUserID() != nil {
+		org.ID = uuid.New()
+		org.CreatedAt = time.Now()
+		org.UpdatedAt = time.Now()
+		_, err := db.Instance().NewInsert().Model(&org).Exec(ctx)
+		if err != nil {
+			return org, fmt.Errorf("debug insert organization: %w", err)
+		}
+		return org, nil
+	}
 	c := newClient()
 	u, err := joinURL(c.apiURL, "organization")
 	if err != nil {
@@ -72,6 +84,15 @@ func PostOrganization(ctx context.Context, org db.Organization) (db.Organization
 }
 
 func PutOrganization(ctx context.Context, orgID uuid.UUID, org db.Organization) (db.Organization, error) {
+	if utils.GetDebugUserID() != nil {
+		org.ID = orgID
+		org.UpdatedAt = time.Now()
+		_, err := db.Instance().NewUpdate().Model(&org).Where("id = ?", orgID).OmitZero().Exec(ctx)
+		if err != nil {
+			return org, fmt.Errorf("debug update organization: %w", err)
+		}
+		return org, nil
+	}
 	c := newClient()
 	u, err := joinURL(c.apiURL, "organization", orgID.String())
 	if err != nil {
@@ -89,6 +110,14 @@ func PutOrganization(ctx context.Context, orgID uuid.UUID, org db.Organization) 
 }
 
 func DeleteOrganization(ctx context.Context, orgID uuid.UUID) (db.Organization, error) {
+	if utils.GetDebugUserID() != nil {
+		var result db.Organization
+		_, err := db.Instance().NewUpdate().Model(&result).Set("sa_deleted_at = NOW()").Where("id = ?", orgID).Where("sa_deleted_at IS NULL").Returning("*").Exec(ctx)
+		if err != nil {
+			return result, fmt.Errorf("debug delete organization: %w", err)
+		}
+		return result, nil
+	}
 	c := newClient()
 	u, err := joinURL(c.apiURL, "organization", orgID.String())
 	if err != nil {
