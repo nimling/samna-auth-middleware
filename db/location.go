@@ -34,6 +34,20 @@ func (d *DB) GetLocations(ctx context.Context, userID uuid.UUID, accessLevel Cla
 	return locs, nil
 }
 
+func (d *DB) GetChildLocations(ctx context.Context, startID uuid.UUID) ([]uuid.UUID, error) {
+	var ids []uuid.UUID
+	err := d.NewRaw("SELECT id FROM samna_auth.get_child_locations(?::uuid)", startID).
+		Scan(ctx, &ids)
+	return ids, err
+}
+
+func (d *DB) GetParentLocations(ctx context.Context, startID uuid.UUID) ([]uuid.UUID, error) {
+	var ids []uuid.UUID
+	err := d.NewRaw("SELECT id FROM samna_auth.get_parent_locations(?::uuid)", startID).
+		Scan(ctx, &ids)
+	return ids, err
+}
+
 func (d *DB) CreateLocation(ctx context.Context, loc *Location) error {
 	_, err := d.NewInsert().
 		Model(loc).

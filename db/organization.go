@@ -34,6 +34,20 @@ func (d *DB) GetOrganizations(ctx context.Context, userID uuid.UUID, accessLevel
 	return orgs, nil
 }
 
+func (d *DB) GetChildOrganizations(ctx context.Context, startID uuid.UUID) ([]uuid.UUID, error) {
+	var ids []uuid.UUID
+	err := d.NewRaw("SELECT id FROM samna_auth.get_child_organizations(?::uuid)", startID).
+		Scan(ctx, &ids)
+	return ids, err
+}
+
+func (d *DB) GetParentOrganizations(ctx context.Context, startID uuid.UUID) ([]uuid.UUID, error) {
+	var ids []uuid.UUID
+	err := d.NewRaw("SELECT id FROM samna_auth.get_parent_organizations(?::uuid)", startID).
+		Scan(ctx, &ids)
+	return ids, err
+}
+
 func (d *DB) CreateOrganization(ctx context.Context, org *Organization) error {
 	_, err := d.NewInsert().
 		Model(org).
