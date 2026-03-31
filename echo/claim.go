@@ -10,10 +10,16 @@ import (
 	"github.com/nimling/samna-auth-middleware/utils"
 )
 
+// GetClaimGraph returns the claim graph containing claims, user claims,
+// users, organizations, and typed object references for the authenticated user.
 func GetClaimGraph(ctx echo.Context) error {
-	if utils.GetDebugUserID() != nil {
-		ctx.Logger().Errorf("GetClaimGraph: not available in debug mode")
-		return RespondError(ctx, http.StatusNotImplemented, "Not implemented")
+	if debugUserID := utils.GetDebugUserID(); debugUserID != nil {
+		nodes, err := db.Instance().GetClaimGraph(ctx.Request().Context(), *debugUserID, db.ACCESS_LEVEL_GUEST)
+		if err != nil {
+			ctx.Logger().Errorf("GetClaimGraph: %v", err)
+			return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
+		}
+		return RespondJSON(ctx, http.StatusOK, nodes, nil)
 	}
 
 	body, err := client.GetClaimGraph(ctx.Request().Context())
@@ -77,8 +83,12 @@ func GetClaimAudit(ctx echo.Context) error {
 	}
 
 	if utils.GetDebugUserID() != nil {
-		ctx.Logger().Errorf("GetClaimAudit: not available in debug mode")
-		return RespondError(ctx, http.StatusNotImplemented, "Not implemented")
+		results, err := db.Instance().GetClaimAudit(ctx.Request().Context(), claimID)
+		if err != nil {
+			ctx.Logger().Errorf("GetClaimAudit: %v", err)
+			return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
+		}
+		return RespondJSON(ctx, http.StatusOK, results, nil)
 	}
 
 	body, err := client.GetClaimAudit(ctx.Request().Context(), claimID)
@@ -96,9 +106,13 @@ func GetClaimSearch(ctx echo.Context) error {
 		return RespondError(ctx, http.StatusBadRequest, "Bad request")
 	}
 
-	if utils.GetDebugUserID() != nil {
-		ctx.Logger().Errorf("GetClaimSearch: not available in debug mode")
-		return RespondError(ctx, http.StatusNotImplemented, "Not implemented")
+	if debugUserID := utils.GetDebugUserID(); debugUserID != nil {
+		claim, err := db.Instance().GetClaimSearch(ctx.Request().Context(), *debugUserID, claimID, db.ACCESS_LEVEL_GUEST)
+		if err != nil {
+			ctx.Logger().Errorf("GetClaimSearch: %v", err)
+			return RespondError(ctx, http.StatusNotFound, "Not found")
+		}
+		return RespondJSON(ctx, http.StatusOK, claim, nil)
 	}
 
 	body, err := client.GetClaimSearch(ctx.Request().Context(), claimID)

@@ -49,6 +49,33 @@ func (d *DB) GetUserClaims(ctx context.Context, userID uuid.UUID) ([]ActiveClaim
 	return claims, nil
 }
 
+func (d *DB) GetUserRelations(ctx context.Context, userID uuid.UUID) ([]UserRelation, error) {
+	var relations []UserRelation
+	err := d.NewSelect().
+		Model(&relations).
+		Where("user_id = ?", userID).
+		Where("sa_deleted_at IS NULL").
+		Scan(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return relations, nil
+}
+
+func (d *DB) GetRelationByUserAndObject(ctx context.Context, userID uuid.UUID, objectID uuid.UUID) ([]UserRelation, error) {
+	var relations []UserRelation
+	err := d.NewSelect().
+		Model(&relations).
+		Where("user_id = ?", userID).
+		Where("object_id = ?", objectID).
+		Where("sa_deleted_at IS NULL").
+		Scan(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return relations, nil
+}
+
 func (d *DB) UpdateUser(ctx context.Context, userID uuid.UUID, user *SamnaUser) error {
 	_, err := d.NewUpdate().
 		Model(user).

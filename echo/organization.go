@@ -59,10 +59,16 @@ func GetOrganization(ctx echo.Context) error {
 	return ctx.Stream(http.StatusOK, "application/json", body)
 }
 
+// GetOrganizationGraph returns the ownership graph containing organizations
+// and locations accessible to the authenticated user.
 func GetOrganizationGraph(ctx echo.Context) error {
-	if utils.GetDebugUserID() != nil {
-		ctx.Logger().Errorf("GetOrganizationGraph: not available in debug mode")
-		return RespondError(ctx, http.StatusNotImplemented, "Not implemented")
+	if debugUserID := utils.GetDebugUserID(); debugUserID != nil {
+		nodes, err := db.Instance().GetOwnerGraph(ctx.Request().Context(), *debugUserID, db.ACCESS_LEVEL_MEMBER)
+		if err != nil {
+			ctx.Logger().Errorf("GetOrganizationGraph: %v", err)
+			return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
+		}
+		return RespondJSON(ctx, http.StatusOK, nodes, nil)
 	}
 
 	body, err := client.GetOrganizationGraph(ctx.Request().Context())

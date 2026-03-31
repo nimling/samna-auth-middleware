@@ -11,9 +11,13 @@ import (
 )
 
 func GetUsers(ctx echo.Context) error {
-	if utils.GetDebugUserID() != nil {
-		ctx.Logger().Errorf("GetUsers: not available in debug mode")
-		return RespondError(ctx, http.StatusNotImplemented, "Not implemented")
+	if debugUserID := utils.GetDebugUserID(); debugUserID != nil {
+		users, err := db.Instance().GetUsers(ctx.Request().Context(), *debugUserID, db.ACCESS_LEVEL_GUEST)
+		if err != nil {
+			ctx.Logger().Errorf("GetUsers: %v", err)
+			return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
+		}
+		return RespondJSON(ctx, http.StatusOK, users, nil)
 	}
 
 	body, err := client.GetUsers(ctx.Request().Context())
@@ -74,20 +78,24 @@ func GetUserClaims(ctx echo.Context) error {
 	return ctx.Stream(http.StatusOK, "application/json", body)
 }
 
-func GetUserConnections(ctx echo.Context) error {
+func GetUserRelations(ctx echo.Context) error {
 	userID, err := uuid.Parse(ctx.Param("id"))
 	if err != nil {
 		return RespondError(ctx, http.StatusBadRequest, "Bad request")
 	}
 
 	if utils.GetDebugUserID() != nil {
-		ctx.Logger().Errorf("GetUserConnections: not available in debug mode")
-		return RespondError(ctx, http.StatusNotImplemented, "Not implemented")
+		relations, err := db.Instance().GetUserRelations(ctx.Request().Context(), userID)
+		if err != nil {
+			ctx.Logger().Errorf("GetUserRelations: %v", err)
+			return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
+		}
+		return RespondJSON(ctx, http.StatusOK, relations, nil)
 	}
 
 	body, err := client.GetUserConnections(ctx.Request().Context(), userID)
 	if err != nil {
-		ctx.Logger().Errorf("GetUserConnections: %v", err)
+		ctx.Logger().Errorf("GetUserRelations: %v", err)
 		return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
 	}
 	defer body.Close()
@@ -98,11 +106,6 @@ func PostUser(ctx echo.Context) error {
 	userID, err := uuid.Parse(ctx.Param("id"))
 	if err != nil {
 		return RespondError(ctx, http.StatusBadRequest, "Bad request")
-	}
-
-	if utils.GetDebugUserID() != nil {
-		ctx.Logger().Errorf("PostUser: not available in debug mode")
-		return RespondError(ctx, http.StatusNotImplemented, "Not implemented")
 	}
 
 	var user db.SamnaUser
@@ -151,11 +154,6 @@ func DeleteUser(ctx echo.Context) error {
 	userID, err := uuid.Parse(ctx.Param("id"))
 	if err != nil {
 		return RespondError(ctx, http.StatusBadRequest, "Bad request")
-	}
-
-	if utils.GetDebugUserID() != nil {
-		ctx.Logger().Errorf("DeleteUser: not available in debug mode")
-		return RespondError(ctx, http.StatusNotImplemented, "Not implemented")
 	}
 
 	result, err := client.DeleteUser(ctx.Request().Context(), userID)
@@ -215,6 +213,11 @@ func GetUserAssets(ctx echo.Context) error {
 	userID, err := uuid.Parse(ctx.Param("id"))
 	if err != nil {
 		return RespondError(ctx, http.StatusBadRequest, "Bad request")
+	}
+
+	if utils.GetDebugUserID() != nil {
+		ctx.Logger().Errorf("GetUserAssets: not available in debug mode")
+		return RespondError(ctx, http.StatusNotImplemented, "Not implemented")
 	}
 
 	body, err := client.GetUserAssets(ctx.Request().Context(), userID)

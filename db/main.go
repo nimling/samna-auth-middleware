@@ -92,6 +92,7 @@ func Init(logger echo.Logger) {
 		(*UserClaim)(nil),
 		(*ClaimObject)(nil),
 		(*SamnaClient)(nil),
+		(*UserRelation)(nil),
 	)
 
 	if IsDebugMode() {

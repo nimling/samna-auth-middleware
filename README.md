@@ -1,6 +1,6 @@
 # Samna Auth Middleware
 
-Libraries for integrating with the Samna Auth service. Provides middleware for request authentication, a client library for API calls, echo handlers for building authenticated APIs, a database layer for direct access, and a hook library for consuming webhooks.
+Libraries for integrating with the Samna Auth service. Provides middleware for request authentication, a client library for API calls, echo handlers for building authenticated APIs, a database layer for direct access, a hook library for consuming webhooks, and the canonical SQL schema for the `samna_auth` database.
 
 ## Table of Contents
 
@@ -10,6 +10,7 @@ Libraries for integrating with the Samna Auth service. Provides middleware for r
 - [Echo Handlers](#echo-handlers)
 - [Client](#client)
 - [Database](#database)
+- [SQL Schema](#sql-schema)
 - [Hook](#hook)
 - [Environment Variables](#environment-variables)
 - [Debug User Bypass](#debug-user-bypass)
@@ -30,6 +31,7 @@ go get github.com/nimling/samna-auth-middleware
 | `echo` | Echo HTTP handlers that bridge the client and database layers |
 | `client` | HTTP client for calling the Samna Auth API (framework agnostic) |
 | `db` | Database layer for direct PostgreSQL access via Bun ORM |
+| `database` | Canonical SQL schema, functions, views, and triggers for the `samna_auth` PostgreSQL schema |
 | `hook` | Webhook consumer with RSA signature verification |
 | `utils` | Cookie management, environment helpers, and debug utilities |
 
@@ -123,7 +125,7 @@ e.GET("/logout", saecho.GetLogout)
 
 **Location**: `GetLocations`, `GetLocation`, `GetLocationClaims`, `PostLocation`, `PutLocation`, `DeleteLocation`
 
-**Claim**: `GetClaimGraph`, `GetClaim`, `PostClaim`, `PutClaim`, `DeleteClaim`, `PostClaimObject`, `DeleteClaimObject`, `PostClaimUser`, `DeleteClaimUser`
+**Claim**: `GetClaimGraph`, `GetClaims`, `GetClaim`, `GetClaimAudit`, `GetClaimSearch`, `PostClaim`, `PutClaim`, `DeleteClaim`, `PostClaimObject`, `DeleteClaimObject`, `PostClaimUser`, `DeleteClaimUser`
 
 **Me**: `GetMe`, `PutMe`, `GetMeClaims`, `PostMeAsset`, `DeleteMeAsset`, `GetMeConnections`, `GetMeModules`, `GetMeOrganizations`, `GetMeLocations`, `GetMeClients`, `GetMeClient`
 
@@ -174,7 +176,7 @@ The `db` package provides direct PostgreSQL access via the Bun ORM. It uses a si
 
 ### Models
 
-`SamnaUser`, `Organization`, `Location`, `Claim`, `UserClaim`, `ClaimObject`, `ActiveClaim`, `ActiveObject`, `ActiveUser`
+`SamnaUser`, `Organization`, `Location`, `Claim`, `UserClaim`, `ClaimObject`, `ActiveClaim`, `ActiveObject`, `ActiveUser`, `GraphNode`
 
 ### Access Levels
 
@@ -190,6 +192,36 @@ PGUSER=postgres
 PGPASSWORD=password
 PGSSLMODE=disable
 ```
+
+### Graph Queries
+
+The `db` package provides two graph query methods that call the `samna_auth` schema functions directly:
+
+- `GetOwnerGraph` returns organizations and locations visible to a user at a given access level
+- `GetClaimGraph` returns claims, user claims, users, organizations, locations, and unresolved typed object references for domain objects not managed by the auth schema
+
+Both return `[]GraphNode` where each node carries an id, label, type, and JSONB data payload.
+
+## SQL Schema
+
+The `database/` directory contains the canonical SQL schema for the `samna_auth` PostgreSQL schema. These are Flyway style migration files that define all tables, functions, views, and triggers used by the auth system.
+
+| File | Description |
+|------|-------------|
+| `V1.0__baseline.sql` | Core tables: `samna_user`, `organization`, `location`, `claim`, `user_claim`, `claim_object`, `samna_client` |
+| `V1.1__functions.sql` | Claim management, recursive tree traversal, inheritance queries, access control, graph functions |
+| `V1.2__views.sql` | `active_claim`, `active_object`, and `active_users` views |
+| `V1.3__triggers.sql` | Timestamp update triggers on all auth tables |
+| `V1.4__init.sql` | Calls `init_auth_views` to register domain tables for claim inheritance |
+
+### Graph Functions
+
+Two graph functions are defined in `V1.1__functions.sql`:
+
+- `samna_auth.get_owner_graph(user_id, access_level)` returns organization and location nodes for the ownership hierarchy
+- `samna_auth.get_claim_graph(user_id, access_level)` returns claim, user_claim, user, organization, location nodes, and unresolved typed references for domain specific objects
+
+Consuming services extend these by joining their own domain tables onto the unresolved references. For example, the bookable server joins bookable, booking, asset, and code tables onto the graph results.
 
 ## Hook
 
@@ -286,7 +318,7 @@ SAUTH_DEBUG_USER_ID=123e4567-e89b-12d3-a456-426614174000
 
 ### Echo Handler Bypass
 
-When the debug user ID is set, echo handlers that support it will query the database directly instead of calling the Samna Auth API through the client. This allows running and testing handlers without a running auth server, as long as the database is available.
+When the debug user ID is set, echo handlers that support it will query the database directly instead of calling the Samna Auth API through the client. This allows running and testing handlers without a running auth server, as long as the database is available. This includes graph handlers (`GetOrganizationGraph`, `GetClaimGraph`) which query the `samna_auth` graph functions directly.
 
 Handlers that do not have a database equivalent (e.g. asset operations, connection lookups) return `501 Not Implemented` in debug mode.
 

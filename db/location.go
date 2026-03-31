@@ -53,9 +53,11 @@ func (d *DB) UpdateLocation(ctx context.Context, locationID uuid.UUID, loc *Loca
 }
 
 func (d *DB) DeleteLocation(ctx context.Context, locationID uuid.UUID) error {
-	_, err := d.NewRaw(
-		"UPDATE samna_auth.location SET sa_deleted_at = CURRENT_TIMESTAMP WHERE id = ? AND sa_deleted_at IS NULL",
-		locationID,
-	).Exec(ctx)
+	_, err := d.NewUpdate().
+		Model((*Location)(nil)).
+		Set("sa_deleted_at = NOW()").
+		Where("id = ?", locationID).
+		Where("sa_deleted_at IS NULL").
+		Exec(ctx)
 	return err
 }

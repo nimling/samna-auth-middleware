@@ -108,15 +108,19 @@ func DeleteMeAsset(ctx echo.Context) error {
 	return ctx.NoContent(http.StatusOK)
 }
 
-func GetMeConnections(ctx echo.Context) error {
-	if utils.GetDebugUserID() != nil {
-		ctx.Logger().Errorf("GetMeConnections: not available in debug mode")
-		return RespondError(ctx, http.StatusNotImplemented, "Not implemented")
+func GetMeRelations(ctx echo.Context) error {
+	if debugUserID := utils.GetDebugUserID(); debugUserID != nil {
+		relations, err := db.Instance().GetUserRelations(ctx.Request().Context(), *debugUserID)
+		if err != nil {
+			ctx.Logger().Errorf("GetMeRelations: %v", err)
+			return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
+		}
+		return RespondJSON(ctx, http.StatusOK, relations, nil)
 	}
 
 	body, err := client.GetMeConnections(ctx.Request().Context())
 	if err != nil {
-		ctx.Logger().Errorf("GetMeConnections: %v", err)
+		ctx.Logger().Errorf("GetMeRelations: %v", err)
 		return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
 	}
 	defer body.Close()

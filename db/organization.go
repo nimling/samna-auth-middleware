@@ -53,9 +53,11 @@ func (d *DB) UpdateOrganization(ctx context.Context, orgID uuid.UUID, org *Organ
 }
 
 func (d *DB) DeleteOrganization(ctx context.Context, orgID uuid.UUID) error {
-	_, err := d.NewRaw(
-		"UPDATE samna_auth.organization SET sa_deleted_at = CURRENT_TIMESTAMP WHERE id = ? AND sa_deleted_at IS NULL",
-		orgID,
-	).Exec(ctx)
+	_, err := d.NewUpdate().
+		Model((*Organization)(nil)).
+		Set("sa_deleted_at = NOW()").
+		Where("id = ?", orgID).
+		Where("sa_deleted_at IS NULL").
+		Exec(ctx)
 	return err
 }

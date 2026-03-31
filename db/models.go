@@ -239,6 +239,15 @@ type Asset struct {
 	UpdatedAt   time.Time  `bun:"sa_updated_at" json:"updated_at"`
 }
 
+// GraphNode represents a single node in an ownership or claim graph.
+// Each node carries a typed label and arbitrary JSONB data payload.
+type GraphNode struct {
+	ID    uuid.UUID        `bun:"id" json:"id"`
+	Label string           `bun:"label" json:"label"`
+	Type  string           `bun:"type" json:"type"`
+	Data  json.RawMessage  `bun:"data,type:jsonb" json:"data"`
+}
+
 type SamnaClient struct {
 	bun.BaseModel `bun:"table:samna_auth.samna_client"`
 
@@ -251,6 +260,25 @@ type SamnaClient struct {
 	CreatedAt  time.Time  `bun:"created_at" json:"created_at"`
 	ModifiedAt time.Time  `bun:"modified_at" json:"modified_at"`
 	RemovedAt  *time.Time `bun:"removed_at" json:"removed_at"`
+}
+
+type UserRelation struct {
+	bun.BaseModel `bun:"table:user_relation" json:"-"`
+
+	ID          uuid.UUID  `bun:"id,pk,notnull,type:uuid,default:gen_random_uuid()" json:"id"`
+	UserID      uuid.UUID  `bun:"user_id,notnull,type:uuid" json:"user_id"`
+	ClientID    *uuid.UUID `bun:"client_id,type:uuid" json:"client_id"`
+	Description *string    `bun:"description" json:"description"`
+	ObjectType  string     `bun:"column:object_type,type:string,notnull" json:"object_type"`
+	ObjectID    uuid.UUID  `bun:"object_id,notnull,type:uuid" json:"object_id"`
+	Pinned      int        `bun:"pinned" json:"pinned"`
+	Priority    int        `bun:"priority" json:"priority"`
+	ParentID    *uuid.UUID `bun:"sa_parent_id,type:uuid,default:null" json:"parent_id"`
+	SiblingID   *uuid.UUID `bun:"sibling_id,type:uuid,default:null" json:"sibling_id"`
+	UsedAt      *time.Time `bun:"used_at,default:current_timestamp" json:"used_at"`
+	DeletedAt   *time.Time `bun:"sa_deleted_at,default:null" json:"deleted_at,omitempty"`
+	CreatedAt   time.Time  `bun:"sa_created_at,notnull,default:current_timestamp" json:"created_at"`
+	UpdatedAt   time.Time  `bun:"sa_updated_at,notnull,default:current_timestamp" json:"updated_at"`
 }
 
 type SyncCursor struct {
