@@ -80,6 +80,30 @@ func GetOrganizationGraph(ctx echo.Context) error {
 	return ctx.Stream(http.StatusOK, "application/json", body)
 }
 
+func GetOrganizationAudit(ctx echo.Context) error {
+	orgID, err := uuid.Parse(ctx.Param("id"))
+	if err != nil {
+		return RespondError(ctx, http.StatusBadRequest, "Bad request")
+	}
+
+	if utils.GetDebugUserID() != nil {
+		audits, err := db.Instance().GetOrganizationAudit(ctx.Request().Context(), orgID)
+		if err != nil {
+			ctx.Logger().Errorf("GetOrganizationAudit: %v", err)
+			return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
+		}
+		return RespondJSON(ctx, http.StatusOK, audits, nil)
+	}
+
+	body, err := client.GetOrganizationAudit(ctx.Request().Context(), orgID)
+	if err != nil {
+		ctx.Logger().Errorf("GetOrganizationAudit: %v", err)
+		return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
+	}
+	defer body.Close()
+	return ctx.Stream(http.StatusOK, "application/json", body)
+}
+
 func GetOrganizationAssets(ctx echo.Context) error {
 	orgID, err := uuid.Parse(ctx.Param("id"))
 	if err != nil {
@@ -105,7 +129,12 @@ func PostOrganization(ctx echo.Context) error {
 			return RespondError(ctx, http.StatusBadRequest, "owner_id is required")
 		}
 		claims, err := db.Instance().ClaimAccess(ctx.Request().Context(), *debugUserID, org.OwnerID, int(db.ACCESS_LEVEL_WRITE))
-		if err != nil || len(claims) == 0 {
+		if err != nil {
+			ctx.Logger().Errorf("PostOrganization ClaimAccess: %v", err)
+			return RespondError(ctx, http.StatusForbidden, "Forbidden")
+		}
+		if len(claims) == 0 {
+			ctx.Logger().Infof("PostOrganization: no access for user %s on object %s", *debugUserID, *org.OwnerID)
 			return RespondError(ctx, http.StatusForbidden, "Forbidden")
 		}
 		org.CreatedBy = claims[0].ID

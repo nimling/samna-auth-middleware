@@ -49,10 +49,13 @@ func (d *DB) GetParentOrganizations(ctx context.Context, startID uuid.UUID) ([]u
 }
 
 func (d *DB) CreateOrganization(ctx context.Context, org *Organization) error {
-	_, err := d.NewInsert().
+	q := d.NewInsert().
 		Model(org).
-		Returning("*").
-		Exec(ctx)
+		Returning("*")
+	if org.ID == (uuid.UUID{}) {
+		q = q.ExcludeColumn("id")
+	}
+	_, err := q.Exec(ctx, org)
 	return err
 }
 
@@ -74,4 +77,18 @@ func (d *DB) DeleteOrganization(ctx context.Context, orgID uuid.UUID) error {
 		Where("sa_deleted_at IS NULL").
 		Exec(ctx)
 	return err
+}
+
+func (d *DB) GetOrganizationAudit(ctx context.Context, orgID uuid.UUID) ([]Audit, error) {
+	var audits []Audit
+	err := d.NewSelect().
+		Model(&audits).
+		Where("object_type = ?", "organization").
+		Where("object_id = ?", orgID).
+		OrderExpr("sa_created_at DESC").
+		Scan(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return audits, nil
 }

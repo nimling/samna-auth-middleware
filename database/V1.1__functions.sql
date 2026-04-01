@@ -602,6 +602,7 @@ BEGIN
             SELECT co.object_id
             FROM samna_auth.claim_object co
             WHERE co.object_type = %L
+              AND co.sa_deleted_at IS NULL
         ))',
             recursive_col,
             owner_id_col,
@@ -673,6 +674,7 @@ BEGIN
             SELECT co.object_id
             FROM samna_auth.claim_object co
             WHERE co.object_type = %L
+              AND co.sa_deleted_at IS NULL
         ))',
             recursive_col,
             owner_id_col,

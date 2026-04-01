@@ -281,6 +281,21 @@ type UserRelation struct {
 	UpdatedAt   time.Time  `bun:"sa_updated_at,notnull,default:current_timestamp" json:"updated_at"`
 }
 
+type Audit struct {
+	bun.BaseModel `bun:"table:samna_auth.audit"`
+
+	ID         uuid.UUID `bun:"id,pk" json:"id"`
+	Operation  string    `bun:"operation" json:"operation"`
+	Message    string    `bun:"message" json:"message"`
+	Type       string    `bun:"type" json:"type"`
+	ObjectType string    `bun:"object_type" json:"object_type"`
+	ObjectID   uuid.UUID `bun:"object_id" json:"object_id"`
+	CreatedBy  uuid.UUID `bun:"sa_created_by" json:"created_by"`
+	OwnerID    uuid.UUID `bun:"sa_owner_id" json:"owner_id"`
+	CreatedAt  time.Time `bun:"sa_created_at" json:"created_at"`
+	UpdatedAt  time.Time `bun:"sa_updated_at" json:"updated_at"`
+}
+
 type SyncCursor struct {
 	UpdatedAt time.Time  `json:"updated_at"`
 	UpdatedID *uuid.UUID `json:"updated_id"`

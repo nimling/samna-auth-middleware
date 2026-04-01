@@ -54,6 +54,30 @@ func GetUser(ctx echo.Context) error {
 	return ctx.Stream(http.StatusOK, "application/json", body)
 }
 
+func GetUserAudit(ctx echo.Context) error {
+	userID, err := uuid.Parse(ctx.Param("id"))
+	if err != nil {
+		return RespondError(ctx, http.StatusBadRequest, "Bad request")
+	}
+
+	if utils.GetDebugUserID() != nil {
+		audits, err := db.Instance().GetUserAudit(ctx.Request().Context(), userID)
+		if err != nil {
+			ctx.Logger().Errorf("GetUserAudit: %v", err)
+			return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
+		}
+		return RespondJSON(ctx, http.StatusOK, audits, nil)
+	}
+
+	body, err := client.GetUserAudit(ctx.Request().Context(), userID)
+	if err != nil {
+		ctx.Logger().Errorf("GetUserAudit: %v", err)
+		return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
+	}
+	defer body.Close()
+	return ctx.Stream(http.StatusOK, "application/json", body)
+}
+
 func GetUserClaims(ctx echo.Context) error {
 	userID, err := uuid.Parse(ctx.Param("id"))
 	if err != nil {

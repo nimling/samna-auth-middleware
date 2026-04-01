@@ -46,18 +46,18 @@ func (d *DB) GetClaims(ctx context.Context, userID uuid.UUID, accessLevel ClaimA
 	return claims, nil
 }
 
-func (d *DB) GetClaimAudit(ctx context.Context, claimID uuid.UUID) ([]map[string]any, error) {
-	var results []map[string]any
+func (d *DB) GetClaimAudit(ctx context.Context, claimID uuid.UUID) ([]Audit, error) {
+	var audits []Audit
 	err := d.NewSelect().
-		TableExpr("public.audit").
+		Model(&audits).
+		Where("object_type = ?", "claim").
 		Where("object_id = ?", claimID).
-		Where("sa_deleted_at IS NULL").
 		OrderExpr("sa_created_at DESC").
-		Scan(ctx, &results)
+		Scan(ctx)
 	if err != nil {
 		return nil, err
 	}
-	return results, nil
+	return audits, nil
 }
 
 func (d *DB) GetClaimSearch(ctx context.Context, userID uuid.UUID, claimID uuid.UUID, accessLevel ClaimAccessLevel) (*Claim, error) {
@@ -66,15 +66,14 @@ func (d *DB) GetClaimSearch(ctx context.Context, userID uuid.UUID, claimID uuid.
 		Model(&claim).
 		Where("claim.id = ?", claimID).
 		Where("claim.id IN (SELECT id FROM samna_auth.get_claims(?, ?))", userID, accessLevel).
+		Where("claim.sa_deleted_at IS NULL").
 		Relation("ClaimObjects", func(q *bun.SelectQuery) *bun.SelectQuery {
-			return q.Where("sa_deleted_at IS NULL")
+			return q.Where("claim_object.sa_deleted_at IS NULL")
 		}).
 		Relation("ClaimUsers", func(q *bun.SelectQuery) *bun.SelectQuery {
-			return q.Where("sa_deleted_at IS NULL")
+			return q.Where("user_claim.sa_deleted_at IS NULL")
 		}).
-		Relation("Owner", func(q *bun.SelectQuery) *bun.SelectQuery {
-			return q.Where("sa_deleted_at IS NULL")
-		}).
+		Relation("Owner").
 		Limit(1)
 	err := q.Scan(ctx)
 	if err != nil {

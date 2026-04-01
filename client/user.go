@@ -11,6 +11,15 @@ import (
 	"github.com/nimling/samna-auth-middleware/utils"
 )
 
+func GetUserAudit(ctx context.Context, userID uuid.UUID) (io.ReadCloser, error) {
+	c := newClient()
+	u, err := joinURL(c.apiURL, "user", userID.String(), "audit")
+	if err != nil {
+		return nil, fmt.Errorf("build url: %w", err)
+	}
+	return c.client.Get(ctx, u)
+}
+
 func GetUserAssets(ctx context.Context, userID uuid.UUID) (io.ReadCloser, error) {
 	c := newClient()
 	u, err := joinURL(c.apiURL, "user", userID.String(), "assets")

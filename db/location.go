@@ -49,10 +49,13 @@ func (d *DB) GetParentLocations(ctx context.Context, startID uuid.UUID) ([]uuid.
 }
 
 func (d *DB) CreateLocation(ctx context.Context, loc *Location) error {
-	_, err := d.NewInsert().
+	q := d.NewInsert().
 		Model(loc).
-		Returning("*").
-		Exec(ctx)
+		Returning("*")
+	if loc.ID == (uuid.UUID{}) {
+		q = q.ExcludeColumn("id")
+	}
+	_, err := q.Exec(ctx, loc)
 	return err
 }
 
@@ -74,4 +77,18 @@ func (d *DB) DeleteLocation(ctx context.Context, locationID uuid.UUID) error {
 		Where("sa_deleted_at IS NULL").
 		Exec(ctx)
 	return err
+}
+
+func (d *DB) GetLocationAudit(ctx context.Context, locationID uuid.UUID) ([]Audit, error) {
+	var audits []Audit
+	err := d.NewSelect().
+		Model(&audits).
+		Where("object_type = ?", "location").
+		Where("object_id = ?", locationID).
+		OrderExpr("sa_created_at DESC").
+		Scan(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return audits, nil
 }

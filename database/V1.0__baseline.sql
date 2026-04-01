@@ -157,6 +157,25 @@ CREATE INDEX idx_location_external_id ON samna_auth.location(external_id);
 DROP INDEX IF EXISTS samna_auth.idx_location_provider_id;
 CREATE INDEX idx_location_provider_id ON samna_auth.location(provider_id);
 
+CREATE TABLE IF NOT EXISTS samna_auth.audit
+(
+    id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    operation     varchar     NOT NULL,
+    message       text                 DEFAULT '',
+    type          varchar     NOT NULL,
+    object_type   varchar     NOT NULL,
+    object_id     uuid        NOT NULL,
+    sa_created_by uuid        NOT NULL,
+    sa_owner_id   uuid        NOT NULL,
+    sa_created_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    sa_updated_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_sa_audit_sa_owner_id ON samna_auth.audit (sa_owner_id);
+CREATE INDEX IF NOT EXISTS idx_sa_audit_sa_created_at ON samna_auth.audit (sa_created_at);
+CREATE INDEX IF NOT EXISTS idx_sa_audit_object_id ON samna_auth.audit (object_id);
+CREATE INDEX IF NOT EXISTS idx_sa_audit_object_type ON samna_auth.audit (object_type);
+
 CREATE TABLE IF NOT EXISTS samna_auth.samna_client (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     object_type TEXT NOT NULL UNIQUE,

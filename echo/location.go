@@ -59,6 +59,30 @@ func GetLocation(ctx echo.Context) error {
 	return ctx.Stream(http.StatusOK, "application/json", body)
 }
 
+func GetLocationAudit(ctx echo.Context) error {
+	locationID, err := uuid.Parse(ctx.Param("id"))
+	if err != nil {
+		return RespondError(ctx, http.StatusBadRequest, "Bad request")
+	}
+
+	if utils.GetDebugUserID() != nil {
+		audits, err := db.Instance().GetLocationAudit(ctx.Request().Context(), locationID)
+		if err != nil {
+			ctx.Logger().Errorf("GetLocationAudit: %v", err)
+			return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
+		}
+		return RespondJSON(ctx, http.StatusOK, audits, nil)
+	}
+
+	body, err := client.GetLocationAudit(ctx.Request().Context(), locationID)
+	if err != nil {
+		ctx.Logger().Errorf("GetLocationAudit: %v", err)
+		return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
+	}
+	defer body.Close()
+	return ctx.Stream(http.StatusOK, "application/json", body)
+}
+
 func GetLocationAssets(ctx echo.Context) error {
 	locationID, err := uuid.Parse(ctx.Param("id"))
 	if err != nil {
@@ -82,7 +106,12 @@ func PostLocation(ctx echo.Context) error {
 		}
 		ownerID := loc.OwnerID
 		claims, err := db.Instance().ClaimAccess(ctx.Request().Context(), *debugUserID, &ownerID, int(db.ACCESS_LEVEL_WRITE))
-		if err != nil || len(claims) == 0 {
+		if err != nil {
+			ctx.Logger().Errorf("PostLocation ClaimAccess: %v", err)
+			return RespondError(ctx, http.StatusForbidden, "Forbidden")
+		}
+		if len(claims) == 0 {
+			ctx.Logger().Infof("PostLocation: no access for user %s on object %s", *debugUserID, ownerID)
 			return RespondError(ctx, http.StatusForbidden, "Forbidden")
 		}
 		loc.CreatedBy = claims[0].ID

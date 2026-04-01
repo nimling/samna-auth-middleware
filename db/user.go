@@ -85,3 +85,17 @@ func (d *DB) UpdateUser(ctx context.Context, userID uuid.UUID, user *SamnaUser) 
 		Exec(ctx)
 	return err
 }
+
+func (d *DB) GetUserAudit(ctx context.Context, userID uuid.UUID) ([]Audit, error) {
+	var audits []Audit
+	err := d.NewSelect().
+		Model(&audits).
+		Where("object_type = ?", "samna_user").
+		Where("object_id = ?", userID).
+		OrderExpr("sa_created_at DESC").
+		Scan(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return audits, nil
+}
