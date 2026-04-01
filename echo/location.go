@@ -120,6 +120,40 @@ func PostLocation(ctx echo.Context) error {
 			ctx.Logger().Errorf("PostLocation: %v", err)
 			return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
 		}
+
+		claimName := "location - " + func() string { if loc.Name != nil { return *loc.Name }; return loc.ID.String() }()
+		ownerClaim, claimErr := client.PostClaim(ctx.Request().Context(), db.Claim{
+			Name:        claimName,
+			AccessLevel: int(db.ACCESS_LEVEL_OWNER),
+			OwnerID:     loc.OwnerID,
+			RootID:      loc.RootID,
+			Type:        db.CLAIM_TYPE_VIRTUAL,
+		})
+		if claimErr != nil {
+			ctx.Logger().Warnf("PostLocation: failed to create claim: %v", claimErr)
+		} else {
+			_, claimErr = client.PostClaimObject(ctx.Request().Context(), ownerClaim.ID, db.ClaimObject{
+				ClaimID:    ownerClaim.ID,
+				ObjectID:   loc.ID,
+				ObjectType: "location",
+				OwnerID:    loc.OwnerID,
+				RootID:     loc.RootID,
+				Reason:     strPtr("virtual - " + claimName),
+			})
+			if claimErr != nil {
+				ctx.Logger().Warnf("PostLocation: failed to create claim object: %v", claimErr)
+			}
+			_, claimErr = client.PostUserClaim(ctx.Request().Context(), ownerClaim.ID, db.UserClaim{
+				ClaimID: ownerClaim.ID,
+				UserID:  *debugUserID,
+				OwnerID: loc.OwnerID,
+				Reason:  strPtr("virtual"),
+			})
+			if claimErr != nil {
+				ctx.Logger().Warnf("PostLocation: failed to create user claim: %v", claimErr)
+			}
+		}
+
 		return RespondJSON(ctx, http.StatusCreated, loc, nil)
 	}
 

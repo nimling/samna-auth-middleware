@@ -31,15 +31,13 @@ const (
 	CLAIM_TYPE_VIRTUAL ClaimType = "virtual"
 )
 
-type ObjectType string
-
 const (
-	OBJECT_TYPE_USER         ObjectType = "user"
-	OBJECT_TYPE_ORGANIZATION ObjectType = "organization"
-	OBJECT_TYPE_LOCATION     ObjectType = "location"
-	OBJECT_TYPE_CLAIM        ObjectType = "claim"
-	OBJECT_TYPE_USER_CLAIM   ObjectType = "user_claim"
-	OBJECT_TYPE_CLAIM_OBJECT ObjectType = "claim_object"
+	OBJECT_TYPE_USER         = "user"
+	OBJECT_TYPE_ORGANIZATION = "organization"
+	OBJECT_TYPE_LOCATION     = "location"
+	OBJECT_TYPE_CLAIM        = "claim"
+	OBJECT_TYPE_USER_CLAIM   = "user_claim"
+	OBJECT_TYPE_CLAIM_OBJECT = "claim_object"
 )
 
 type OrganizationType string

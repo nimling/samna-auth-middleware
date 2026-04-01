@@ -109,8 +109,7 @@ func GetClaimSearch(ctx echo.Context) error {
 	if debugUserID := utils.GetDebugUserID(); debugUserID != nil {
 		claim, err := db.Instance().GetClaimSearch(ctx.Request().Context(), *debugUserID, claimID, db.ACCESS_LEVEL_GUEST)
 		if err != nil {
-			ctx.Logger().Errorf("GetClaimSearch: %v", err)
-			return RespondError(ctx, http.StatusNotFound, "Not found")
+			return RespondJSON(ctx, http.StatusOK, []interface{}{}, nil)
 		}
 		return RespondJSON(ctx, http.StatusOK, claim, nil)
 	}
