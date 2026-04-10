@@ -2,7 +2,6 @@ package db
 
 import (
 	"context"
-	"errors"
 	"strings"
 
 	"github.com/google/uuid"
