@@ -8,13 +8,19 @@ import (
 	"github.com/uptrace/bun"
 )
 
-func (d *DB) GetAccess(ctx context.Context, userID uuid.UUID, objectID *uuid.UUID, minAccessLevel int) ([]ActiveClaim, error) {
+func (d *DB) GetAccess(ctx context.Context, userID uuid.UUID, objectID *uuid.UUID, accessLevel ClaimAccessLevel) (*ActiveClaim, error) {
 	var claims []ActiveClaim
 	err := d.NewSelect().
-		TableExpr("samna_auth.get_access(?, ?, ?) AS claim", userID, objectID, minAccessLevel).
+		TableExpr("samna_auth.get_access(?, ?, ?) AS claim", userID, objectID, accessLevel).
 		Column("claim.*").
 		Scan(ctx, &claims)
-	return claims, err
+	if err != nil {
+		return nil, err
+	}
+	if len(claims) == 0 {
+		return nil, nil
+	}
+	return &claims[0], nil
 }
 
 func (d *DB) GetClaim(ctx context.Context, userID uuid.UUID, claimID uuid.UUID, accessLevel ClaimAccessLevel, relations ...RelationFunc) (*Claim, error) {
@@ -82,8 +88,8 @@ func (d *DB) GetClaimSearch(ctx context.Context, userID uuid.UUID, claimID uuid.
 }
 
 func (d *DB) HasAccess(ctx context.Context, userID uuid.UUID, objectID *uuid.UUID, accessLevel ClaimAccessLevel) bool {
-	claims, err := d.GetAccess(ctx, userID, objectID, int(accessLevel))
-	return err == nil && len(claims) > 0
+	ac, err := d.GetAccess(ctx, userID, objectID, accessLevel)
+	return err == nil && ac != nil
 }
 
 func (d *DB) GetObjectClaims(ctx context.Context, userID uuid.UUID, objectID uuid.UUID) ([]Claim, error) {

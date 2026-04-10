@@ -37,12 +37,12 @@ func GetOrganization(ctx echo.Context) error {
 	}
 
 	if debugUserID := utils.GetDebugUserID(); debugUserID != nil {
-		claims, err := db.Instance().ClaimAccess(ctx.Request().Context(), *debugUserID, &orgID, int(db.ACCESS_LEVEL_GUEST))
-		if err != nil || len(claims) == 0 {
+		claims, err := db.Instance().GetAccess(ctx.Request().Context(), *debugUserID, &orgID, db.ACCESS_LEVEL_GUEST)
+		if err != nil || claims == nil {
 			return RespondError(ctx, http.StatusNotFound, "Not found")
 		}
 		relations := db.ParseWithRelations(ctx.QueryParam("with"), db.OrganizationRelations())
-		org, err := db.Instance().GetOrganizationByID(ctx.Request().Context(), orgID, relations...)
+		org, err := db.Instance().GetOrganization(ctx.Request().Context(), orgID, relations...)
 		if err != nil {
 			ctx.Logger().Errorf("GetOrganization: %v", err)
 			return RespondError(ctx, http.StatusNotFound, "Not found")
@@ -128,17 +128,17 @@ func PostOrganization(ctx echo.Context) error {
 		if org.OwnerID == nil {
 			return RespondError(ctx, http.StatusBadRequest, "owner_id is required")
 		}
-		claims, err := db.Instance().ClaimAccess(ctx.Request().Context(), *debugUserID, org.OwnerID, int(db.ACCESS_LEVEL_WRITE))
+		claims, err := db.Instance().GetAccess(ctx.Request().Context(), *debugUserID, org.OwnerID, db.ACCESS_LEVEL_WRITE)
 		if err != nil {
 			ctx.Logger().Errorf("PostOrganization ClaimAccess: %v", err)
 			return RespondError(ctx, http.StatusForbidden, "Forbidden")
 		}
-		if len(claims) == 0 {
+		if claims == nil {
 			ctx.Logger().Infof("PostOrganization: no access for user %s on object %s", *debugUserID, *org.OwnerID)
 			return RespondError(ctx, http.StatusForbidden, "Forbidden")
 		}
-		org.CreatedBy = claims[0].ID
-		org.RootID = &claims[0].RootID
+		org.CreatedBy = claims.ID
+		org.RootID = &claims.RootID
 		if err := db.Instance().CreateOrganization(ctx.Request().Context(), &org); err != nil {
 			ctx.Logger().Errorf("PostOrganization: %v", err)
 			return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
@@ -165,7 +165,7 @@ func PutOrganization(ctx echo.Context) error {
 	}
 
 	if debugUserID := utils.GetDebugUserID(); debugUserID != nil {
-		existing, err := db.Instance().GetOrganizationByID(ctx.Request().Context(), orgID)
+		existing, err := db.Instance().GetOrganization(ctx.Request().Context(), orgID)
 		if err != nil {
 			return RespondError(ctx, http.StatusNotFound, "Not found")
 		}
@@ -173,8 +173,8 @@ func PutOrganization(ctx echo.Context) error {
 		if existing.OwnerID != nil {
 			accessCheckID = *existing.OwnerID
 		}
-		claims, err := db.Instance().ClaimAccess(ctx.Request().Context(), *debugUserID, &accessCheckID, int(db.ACCESS_LEVEL_WRITE))
-		if err != nil || len(claims) == 0 {
+		claims, err := db.Instance().GetAccess(ctx.Request().Context(), *debugUserID, &accessCheckID, db.ACCESS_LEVEL_WRITE)
+		if err != nil || claims == nil {
 			return RespondError(ctx, http.StatusForbidden, "Forbidden")
 		}
 		var org db.Organization
@@ -207,7 +207,7 @@ func DeleteOrganization(ctx echo.Context) error {
 	}
 
 	if debugUserID := utils.GetDebugUserID(); debugUserID != nil {
-		existing, err := db.Instance().GetOrganizationByID(ctx.Request().Context(), orgID)
+		existing, err := db.Instance().GetOrganization(ctx.Request().Context(), orgID)
 		if err != nil {
 			return RespondError(ctx, http.StatusNotFound, "Not found")
 		}
@@ -215,8 +215,8 @@ func DeleteOrganization(ctx echo.Context) error {
 		if existing.OwnerID != nil {
 			accessCheckID = *existing.OwnerID
 		}
-		claims, err := db.Instance().ClaimAccess(ctx.Request().Context(), *debugUserID, &accessCheckID, int(db.ACCESS_LEVEL_WRITE))
-		if err != nil || len(claims) == 0 {
+		claims, err := db.Instance().GetAccess(ctx.Request().Context(), *debugUserID, &accessCheckID, db.ACCESS_LEVEL_WRITE)
+		if err != nil || claims == nil {
 			return RespondError(ctx, http.StatusForbidden, "Forbidden")
 		}
 		if err := db.Instance().DeleteOrganization(ctx.Request().Context(), orgID); err != nil {

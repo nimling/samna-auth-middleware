@@ -13,7 +13,7 @@ import (
 func GetMe(ctx echo.Context) error {
 	if debugUserID := utils.GetDebugUserID(); debugUserID != nil {
 		relations := db.ParseWithRelations(ctx.QueryParam("with"), db.UserRelations())
-		user, err := db.Instance().GetUserByID(ctx.Request().Context(), *debugUserID, relations...)
+		user, err := db.Instance().GetUser(ctx.Request().Context(), *debugUserID, relations...)
 		if err != nil {
 			ctx.Logger().Errorf("GetMe: %v", err)
 			return RespondError(ctx, http.StatusNotFound, "Not found")
