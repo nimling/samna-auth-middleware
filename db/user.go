@@ -7,7 +7,7 @@ import (
 	"github.com/uptrace/bun"
 )
 
-func (d *DB) GetUserByID(ctx context.Context, userID uuid.UUID, relations ...RelationFunc) (*SamnaUser, error) {
+func (d *DB) GetUser(ctx context.Context, userID uuid.UUID, relations ...RelationFunc) (*SamnaUser, error) {
 	var user SamnaUser
 	q := d.NewSelect().
 		Model(&user).

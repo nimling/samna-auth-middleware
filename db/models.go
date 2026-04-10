@@ -300,3 +300,58 @@ type SyncCursor struct {
 	DeletedAt time.Time  `json:"deleted_at"`
 	DeletedID *uuid.UUID `json:"deleted_id"`
 }
+
+type UserObject struct {
+	bun.BaseModel `bun:"table:samna_auth.user_object"`
+
+	ID            string     `bun:"id,pk" json:"id"`
+	UserID        uuid.UUID  `bun:"user_id" json:"user_id"`
+	ObjectID      uuid.UUID  `bun:"object_id" json:"object_id"`
+	ObjectType    string     `bun:"object_type" json:"object_type"`
+	ClaimID       uuid.UUID  `bun:"claim_id" json:"claim_id"`
+	AccessLevel   int        `bun:"sa_access_level" json:"sa_access_level"`
+	OwnerID       *uuid.UUID `bun:"sa_owner_id" json:"sa_owner_id"`
+	LocationID    *uuid.UUID `bun:"sa_location_id" json:"sa_location_id"`
+	Name          *string    `bun:"sa_name" json:"sa_name"`
+	Description   *string    `bun:"sa_description" json:"sa_description"`
+	Link          *string    `bun:"sa_link" json:"sa_link"`
+	CreatedAt     time.Time  `bun:"sa_created_at" json:"created_at"`
+	UpdatedAt     time.Time  `bun:"sa_updated_at" json:"updated_at"`
+}
+
+type UserUsers struct {
+	bun.BaseModel    `bun:"table:samna_auth.user_users"`
+
+	ID               string    `bun:"id,pk" json:"id"`
+	ViewerID         uuid.UUID `bun:"viewer_id" json:"viewer_id"`
+	TargetUserID     uuid.UUID `bun:"target_user_id" json:"target_user_id"`
+	FirstSharedAt    time.Time `bun:"first_shared_at" json:"first_shared_at"`
+	LastSharedAt     time.Time `bun:"last_shared_at" json:"last_shared_at"`
+	SharingObjCount  int       `bun:"sharing_object_count" json:"sharing_object_count"`
+}
+
+type ObjectUsers struct {
+	bun.BaseModel `bun:"table:samna_auth.object_users"`
+
+	ID         string    `bun:"id,pk" json:"id"`
+	ObjectID   uuid.UUID `bun:"object_id" json:"object_id"`
+	ObjectType string    `bun:"object_type" json:"object_type"`
+	UserID     uuid.UUID `bun:"user_id" json:"user_id"`
+}
+
+type UserObjectEvent struct {
+	bun.BaseModel `bun:"table:samna_auth.user_object_event"`
+
+	Seq        int64           `bun:"seq,pk" json:"seq"`
+	ObjectType string          `bun:"object_type" json:"object_type"`
+	Obj        json.RawMessage `bun:"obj,type:jsonb" json:"obj"`
+	WrittenAt  time.Time       `bun:"written_at" json:"written_at"`
+}
+
+type ClientState struct {
+	bun.BaseModel  `bun:"table:samna_auth.client_state"`
+
+	ID             int       `bun:"id,pk" json:"id"`
+	LastAppliedSeq int64     `bun:"last_applied_seq" json:"last_applied_seq"`
+	UpdatedAt      time.Time `bun:"sa_updated_at" json:"updated_at"`
+}

@@ -9,10 +9,10 @@ import (
 	"github.com/uptrace/bun"
 )
 
-func (d *DB) ClaimAccess(ctx context.Context, userID uuid.UUID, objectID *uuid.UUID, minAccessLevel int) ([]ActiveClaim, error) {
+func (d *DB) GetAccess(ctx context.Context, userID uuid.UUID, objectID *uuid.UUID, minAccessLevel int) ([]ActiveClaim, error) {
 	var claims []ActiveClaim
 	err := d.NewSelect().
-		TableExpr("samna_auth.claim_access(?, ?, ?) AS claim", userID, objectID, minAccessLevel).
+		TableExpr("samna_auth.get_access(?, ?, ?) AS claim", userID, objectID, minAccessLevel).
 		Column("claim.*").
 		Scan(ctx, &claims)
 	return claims, err
@@ -82,30 +82,28 @@ func (d *DB) GetClaimSearch(ctx context.Context, userID uuid.UUID, claimID uuid.
 	return &claim, nil
 }
 
-func (d *DB) UserObjectAccess(ctx context.Context, userID uuid.UUID, objectID *uuid.UUID, accessLevel ClaimAccessLevel) (*ActiveClaim, error) {
-	claims, err := d.ClaimAccess(ctx, userID, objectID, int(accessLevel))
-	if err != nil {
-		return nil, err
-	}
-	if len(claims) == 0 {
-		return nil, errors.New("no access found")
-	}
-	return &claims[0], nil
+func (d *DB) HasAccess(ctx context.Context, userID uuid.UUID, objectID *uuid.UUID, accessLevel ClaimAccessLevel) bool {
+	claims, err := d.GetAccess(ctx, userID, objectID, int(accessLevel))
+	return err == nil && len(claims) > 0
 }
 
-func (d *DB) UserObjectHasLevel(ctx context.Context, userID uuid.UUID, objectID *uuid.UUID, accessLevel ClaimAccessLevel) bool {
-	uc, err := d.UserObjectAccess(ctx, userID, objectID, accessLevel)
-	return err == nil && uc != nil
+func (d *DB) GetObjectClaims(ctx context.Context, userID uuid.UUID, objectID uuid.UUID) ([]Claim, error) {
+	var claims []Claim
+	err := d.NewSelect().
+		Model(&claims).
+		Where("claim.id IN (SELECT id FROM samna_auth.get_claims(?, ?))", userID, objectID).
+		Scan(ctx)
+	return claims, err
 }
 
-func (d *DB) InitAuthViews(ctx context.Context, tableNames ...string) error {
+func (d *DB) InitAuthTables(ctx context.Context, tableNames ...string) error {
 	placeholders := make([]string, len(tableNames))
 	args := make([]interface{}, len(tableNames))
 	for i, name := range tableNames {
 		placeholders[i] = "?"
 		args[i] = name
 	}
-	query := "SELECT samna_auth.init_auth_views(" + strings.Join(placeholders, ", ") + ")"
+	query := "SELECT samna_auth.init_auth_tables(" + strings.Join(placeholders, ", ") + ")"
 	_, err := d.NewRaw(query, args...).Exec(ctx)
 	return err
 }

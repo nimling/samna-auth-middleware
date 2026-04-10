@@ -6,7 +6,7 @@ import (
 	"github.com/google/uuid"
 )
 
-func (d *DB) GetLocationByID(ctx context.Context, locationID uuid.UUID, relations ...RelationFunc) (*Location, error) {
+func (d *DB) GetLocation(ctx context.Context, locationID uuid.UUID, relations ...RelationFunc) (*Location, error) {
 	var loc Location
 	q := d.NewSelect().
 		Model(&loc).

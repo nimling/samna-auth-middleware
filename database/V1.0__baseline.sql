@@ -176,14 +176,105 @@ CREATE INDEX IF NOT EXISTS idx_sa_audit_sa_created_at ON samna_auth.audit (sa_cr
 CREATE INDEX IF NOT EXISTS idx_sa_audit_object_id ON samna_auth.audit (object_id);
 CREATE INDEX IF NOT EXISTS idx_sa_audit_object_type ON samna_auth.audit (object_type);
 
-CREATE TABLE IF NOT EXISTS samna_auth.samna_client (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    object_type TEXT NOT NULL UNIQUE,
-    updated_at TIMESTAMP NOT NULL DEFAULT '1970-01-01',
-    updated_id UUID,
-    deleted_at TIMESTAMP NOT NULL DEFAULT '1970-01-01',
-    deleted_id UUID,
-    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    modified_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    removed_at TIMESTAMP DEFAULT NULL
+CREATE TABLE IF NOT EXISTS samna_auth.user_relation
+(
+    id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id       uuid        NOT NULL REFERENCES samna_auth.samna_user (user_id),
+    client_id     uuid,
+    description   text,
+    object_type   varchar     NOT NULL,
+    object_id     uuid        NOT NULL,
+    pinned        integer,
+    priority      integer,
+    sa_parent_id  uuid,
+    sibling_id    uuid,
+    used_at       timestamptz          DEFAULT CURRENT_TIMESTAMP,
+    sa_deleted_at timestamptz,
+    sa_created_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    sa_updated_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_sa_user_relation_user_id ON samna_auth.user_relation (user_id);
+CREATE INDEX IF NOT EXISTS idx_sa_user_relation_object_id ON samna_auth.user_relation (object_id);
+CREATE INDEX IF NOT EXISTS idx_sa_user_relation_object_type ON samna_auth.user_relation (object_type);
+CREATE INDEX IF NOT EXISTS idx_sa_user_relation_client_id ON samna_auth.user_relation (client_id);
+CREATE INDEX IF NOT EXISTS idx_sa_user_relation_sa_deleted_at ON samna_auth.user_relation (sa_deleted_at);
+
+CREATE OR REPLACE FUNCTION samna_auth.composite_id(VARIADIC parts text[])
+RETURNS text AS $$
+    SELECT array_to_string(parts, ':');
+$$ LANGUAGE sql IMMUTABLE;
+
+CREATE OR REPLACE FUNCTION samna_auth.decompose_id(p_id text)
+RETURNS text[] AS $$
+    SELECT string_to_array(p_id, ':');
+$$ LANGUAGE sql IMMUTABLE;
+
+CREATE TABLE IF NOT EXISTS samna_auth.user_object (
+    id               text        NOT NULL PRIMARY KEY,
+    user_id          uuid        NOT NULL,
+    object_id        uuid        NOT NULL,
+    object_type      text        NOT NULL,
+    claim_id         uuid        NOT NULL,
+    sa_access_level  integer     NOT NULL,
+    sa_owner_id      uuid,
+    sa_location_id   uuid,
+    sa_name          text,
+    sa_description   text,
+    sa_link          text,
+    sa_created_at    timestamptz NOT NULL DEFAULT now(),
+    sa_updated_at    timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_object_user_type ON samna_auth.user_object (user_id, object_type, sa_access_level);
+CREATE INDEX IF NOT EXISTS idx_user_object_owner ON samna_auth.user_object (sa_owner_id);
+CREATE INDEX IF NOT EXISTS idx_user_object_location ON samna_auth.user_object (sa_location_id);
+CREATE INDEX IF NOT EXISTS idx_user_object_object ON samna_auth.user_object (object_id, object_type);
+CREATE INDEX IF NOT EXISTS idx_user_object_claim ON samna_auth.user_object (claim_id);
+
+CREATE TABLE IF NOT EXISTS samna_auth.user_users (
+    id                   text        NOT NULL PRIMARY KEY,
+    viewer_id            uuid        NOT NULL,
+    target_user_id       uuid        NOT NULL,
+    first_shared_at      timestamptz NOT NULL DEFAULT now(),
+    last_shared_at       timestamptz NOT NULL DEFAULT now(),
+    sharing_object_count integer     NOT NULL DEFAULT 1
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_users_viewer ON samna_auth.user_users (viewer_id);
+CREATE INDEX IF NOT EXISTS idx_user_users_target ON samna_auth.user_users (target_user_id);
+
+CREATE TABLE IF NOT EXISTS samna_auth.object_users (
+    id               text        NOT NULL PRIMARY KEY,
+    object_id        uuid        NOT NULL,
+    object_type      text        NOT NULL,
+    user_id          uuid        NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_object_users_object ON samna_auth.object_users (object_id, object_type);
+CREATE INDEX IF NOT EXISTS idx_object_users_user ON samna_auth.object_users (user_id);
+
+CREATE TABLE IF NOT EXISTS samna_auth.user_object_event (
+    seq              bigserial   PRIMARY KEY,
+    object_type      text        NOT NULL,
+    obj              jsonb       NOT NULL,
+    written_at       timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_object_event_written ON samna_auth.user_object_event (written_at);
+
+CREATE TABLE IF NOT EXISTS samna_auth.reconcile_queue (
+    id               text        NOT NULL PRIMARY KEY,
+    user_id          uuid        NOT NULL,
+    object_id        uuid        NOT NULL,
+    object_type      text        NOT NULL,
+    sa_created_at    timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_reconcile_queue_user ON samna_auth.reconcile_queue (user_id);
+
+CREATE TABLE IF NOT EXISTS samna_auth.client_state (
+    id               int PRIMARY KEY DEFAULT 1,
+    last_applied_seq bigint      NOT NULL DEFAULT 0,
+    sa_updated_at    timestamptz NOT NULL DEFAULT now()
 );

@@ -6,7 +6,7 @@ import (
 	"github.com/google/uuid"
 )
 
-func (d *DB) GetOrganizationByID(ctx context.Context, orgID uuid.UUID, relations ...RelationFunc) (*Organization, error) {
+func (d *DB) GetOrganization(ctx context.Context, orgID uuid.UUID, relations ...RelationFunc) (*Organization, error) {
 	var org Organization
 	q := d.NewSelect().
 		Model(&org).
