@@ -20,8 +20,8 @@ func RegisterWebhooks(group *echo.Group) {
 }
 
 func verifyWebhook(ctx echo.Context) bool {
-	slug := ctx.Request().Header.Get("SAuth-Client-Slug")
-	secret := ctx.Request().Header.Get("SAuth-Client-Secret")
+	slug := ctx.Request().Header.Get("SAuth-App-Slug")
+	secret := ctx.Request().Header.Get("SAuth-App-Secret")
 	return client.VerifyRequest(slug, secret)
 }
 

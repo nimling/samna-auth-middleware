@@ -250,14 +250,34 @@ type SamnaClient struct {
 	bun.BaseModel `bun:"table:samna_auth.samna_client"`
 
 	ID         uuid.UUID  `bun:"id,pk" json:"id"`
-	ObjectType string     `bun:"object_type" json:"object_type"`
-	UpdatedAt  time.Time  `bun:"updated_at" json:"updated_at"`
-	UpdatedID  *uuid.UUID `bun:"updated_id" json:"updated_id"`
-	DeletedAt  time.Time  `bun:"deleted_at" json:"deleted_at"`
-	DeletedID  *uuid.UUID `bun:"deleted_id" json:"deleted_id"`
-	CreatedAt  time.Time  `bun:"created_at" json:"created_at"`
-	ModifiedAt time.Time  `bun:"modified_at" json:"modified_at"`
-	RemovedAt  *time.Time `bun:"removed_at" json:"removed_at"`
+	Name       string     `bun:"name" json:"name"`
+	Description *string   `bun:"description" json:"description"`
+	AppID      uuid.UUID  `bun:"app_id" json:"app_id"`
+	ClientKey  uuid.UUID  `bun:"client_key" json:"client_key"`
+	SecretHash string     `bun:"secret_hash" json:"-"`
+	Status     string     `bun:"status" json:"status"`
+	ExpiresAt  *time.Time `bun:"expires_at" json:"expires_at"`
+	OwnerID    uuid.UUID  `bun:"sa_owner_id" json:"owner_id"`
+	CreatedBy  *uuid.UUID `bun:"sa_created_by" json:"created_by"`
+	DeletedAt  *time.Time `bun:"sa_deleted_at" json:"deleted_at"`
+	CreatedAt  time.Time  `bun:"sa_created_at" json:"created_at"`
+	UpdatedAt  time.Time  `bun:"sa_updated_at" json:"updated_at"`
+}
+
+type ClientClaim struct {
+	bun.BaseModel `bun:"table:samna_auth.client_claim"`
+
+	ID        uuid.UUID  `bun:"id,pk" json:"id"`
+	ClaimID   uuid.UUID  `bun:"claim_id" json:"claim_id"`
+	ClientID  uuid.UUID  `bun:"client_id" json:"client_id"`
+	Reason    *string    `bun:"reason" json:"reason"`
+	StartsAt  *time.Time `bun:"starts_at" json:"starts_at"`
+	EndsAt    *time.Time `bun:"ends_at" json:"ends_at"`
+	CreatedBy *uuid.UUID `bun:"sa_created_by" json:"created_by"`
+	OwnerID   uuid.UUID  `bun:"sa_owner_id" json:"owner_id"`
+	DeletedAt *time.Time `bun:"sa_deleted_at" json:"deleted_at"`
+	CreatedAt time.Time  `bun:"sa_created_at" json:"created_at"`
+	UpdatedAt time.Time  `bun:"sa_updated_at" json:"updated_at"`
 }
 
 type UserRelation struct {
@@ -265,7 +285,7 @@ type UserRelation struct {
 
 	ID          uuid.UUID  `bun:"id,pk,notnull,type:uuid,default:gen_random_uuid()" json:"id"`
 	UserID      uuid.UUID  `bun:"user_id,notnull,type:uuid" json:"user_id"`
-	ClientID    *uuid.UUID `bun:"client_id,type:uuid" json:"client_id"`
+	AppID       *uuid.UUID `bun:"app_id,type:uuid" json:"app_id"`
 	Description *string    `bun:"description" json:"description"`
 	ObjectType  string     `bun:"column:object_type,type:string,notnull" json:"object_type"`
 	ObjectID    uuid.UUID  `bun:"object_id,notnull,type:uuid" json:"object_id"`
@@ -292,13 +312,6 @@ type Audit struct {
 	OwnerID    uuid.UUID `bun:"sa_owner_id" json:"owner_id"`
 	CreatedAt  time.Time `bun:"sa_created_at" json:"created_at"`
 	UpdatedAt  time.Time `bun:"sa_updated_at" json:"updated_at"`
-}
-
-type SyncCursor struct {
-	UpdatedAt time.Time  `json:"updated_at"`
-	UpdatedID *uuid.UUID `json:"updated_id"`
-	DeletedAt time.Time  `json:"deleted_at"`
-	DeletedID *uuid.UUID `json:"deleted_id"`
 }
 
 type UserObject struct {

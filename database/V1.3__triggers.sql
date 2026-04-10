@@ -230,9 +230,13 @@ BEGIN
     END IF;
 
     BEGIN
-        IF TG_TABLE_NAME = 'user_claim' THEN
+        IF TG_TABLE_NAME IN ('user_claim', 'client_claim') THEN
             IF TG_OP = 'INSERT' OR (TG_OP = 'UPDATE' AND OLD.sa_deleted_at IS NULL AND NEW.sa_deleted_at IS NOT NULL) THEN
-                v_user_id := COALESCE(NEW.user_id, OLD.user_id);
+                IF TG_TABLE_NAME = 'user_claim' THEN
+                    v_user_id := COALESCE(NEW.user_id, OLD.user_id);
+                ELSE
+                    v_user_id := COALESCE(NEW.client_id, OLD.client_id);
+                END IF;
                 v_claim_id := COALESCE(NEW.claim_id, OLD.claim_id);
 
                 FOR v_reachable IN
@@ -282,6 +286,24 @@ CREATE OR REPLACE TRIGGER sa_claim_mutation_claim_object
 CREATE OR REPLACE TRIGGER sa_claim_mutation_user_claim
     AFTER INSERT OR UPDATE ON samna_auth.user_claim
     FOR EACH ROW EXECUTE FUNCTION samna_auth.tg_claim_mutation();
+
+CREATE OR REPLACE TRIGGER sa_claim_mutation_client_claim
+    AFTER INSERT OR UPDATE ON samna_auth.client_claim
+    FOR EACH ROW EXECUTE FUNCTION samna_auth.tg_claim_mutation();
+
+CREATE OR REPLACE TRIGGER update_samna_client_sa_updated_at
+    BEFORE UPDATE ON samna_auth.samna_client
+    FOR EACH ROW
+    EXECUTE FUNCTION samna_auth.update_current_timestamp();
+
+CREATE OR REPLACE TRIGGER update_client_claim_sa_updated_at
+    BEFORE UPDATE ON samna_auth.client_claim
+    FOR EACH ROW
+    EXECUTE FUNCTION samna_auth.update_current_timestamp();
+
+CREATE OR REPLACE TRIGGER sa_audit_client_claim
+    AFTER INSERT OR UPDATE ON samna_auth.client_claim
+    FOR EACH ROW EXECUTE FUNCTION samna_auth.audit_trigger_function();
 
 -- ============================================================================
 -- tg_hierarchy_mutation (INTERNAL)

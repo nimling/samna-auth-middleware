@@ -65,8 +65,8 @@ func (e *httpClient) execute(ctx context.Context, method string, expectedStatus 
 
 	req.Header.Set("X-Request-ID", generateRequestID())
 	req.Header.Set("X-Client-IP", localIP())
-	req.Header.Set("SAuth-Client-Slug", e.clientSlug)
-	req.Header.Set("SAuth-Client-Secret", e.clientSecret)
+	req.Header.Set("SAuth-App-Slug", e.clientSlug)
+	req.Header.Set("SAuth-App-Secret", e.clientSecret)
 
 	if reqBody != nil {
 		req.Header.Set("Content-Type", "application/json")

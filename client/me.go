@@ -60,8 +60,8 @@ func PostMeAsset(ctx context.Context, contentType string, body io.Reader) (io.Re
 	req.Header.Set("Content-Type", contentType)
 	req.Header.Set("X-Request-ID", generateRequestID())
 	req.Header.Set("X-Client-IP", localIP())
-	req.Header.Set("SAuth-Client-Slug", c.client.clientSlug)
-	req.Header.Set("SAuth-Client-Secret", c.client.clientSecret)
+	req.Header.Set("SAuth-App-Slug", c.client.clientSlug)
+	req.Header.Set("SAuth-App-Secret", c.client.clientSecret)
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {

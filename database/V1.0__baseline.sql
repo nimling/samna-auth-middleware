@@ -278,3 +278,43 @@ CREATE TABLE IF NOT EXISTS samna_auth.client_state (
     last_applied_seq bigint      NOT NULL DEFAULT 0,
     sa_updated_at    timestamptz NOT NULL DEFAULT now()
 );
+
+CREATE TABLE IF NOT EXISTS samna_auth.samna_client (
+    id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name          TEXT NOT NULL,
+    description   TEXT,
+    app_id        UUID NOT NULL,
+    client_key    UUID UNIQUE NOT NULL DEFAULT gen_random_uuid(),
+    secret_hash   TEXT NOT NULL,
+    status        VARCHAR(50) NOT NULL DEFAULT 'active',
+    expires_at    TIMESTAMPTZ,
+    sa_owner_id   UUID NOT NULL,
+    sa_created_by UUID,
+    sa_deleted_at TIMESTAMPTZ,
+    sa_created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    sa_updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_samna_client_client_key ON samna_auth.samna_client (client_key);
+CREATE INDEX IF NOT EXISTS idx_samna_client_app_id ON samna_auth.samna_client (app_id);
+CREATE INDEX IF NOT EXISTS idx_samna_client_sa_owner_id ON samna_auth.samna_client (sa_owner_id);
+CREATE INDEX IF NOT EXISTS idx_samna_client_sa_deleted_at ON samna_auth.samna_client (sa_deleted_at);
+
+CREATE TABLE IF NOT EXISTS samna_auth.client_claim (
+    id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    claim_id      UUID NOT NULL REFERENCES samna_auth.claim(id),
+    client_id     UUID NOT NULL,
+    reason        VARCHAR,
+    starts_at     TIMESTAMPTZ,
+    ends_at       TIMESTAMPTZ,
+    sa_created_by UUID,
+    sa_owner_id   UUID NOT NULL,
+    sa_deleted_at TIMESTAMPTZ,
+    sa_created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    sa_updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_client_claim_claim_id ON samna_auth.client_claim (claim_id);
+CREATE INDEX IF NOT EXISTS idx_client_claim_client_id ON samna_auth.client_claim (client_id);
+CREATE INDEX IF NOT EXISTS idx_client_claim_sa_owner_id ON samna_auth.client_claim (sa_owner_id);
+CREATE INDEX IF NOT EXISTS idx_client_claim_sa_deleted_at ON samna_auth.client_claim (sa_deleted_at);

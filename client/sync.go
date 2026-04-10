@@ -2,7 +2,6 @@ package client
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -19,8 +18,7 @@ func init() {
 }
 
 type syncResponse[T any] struct {
-	Records []T           `json:"data"`
-	Cursor  db.SyncCursor `json:"cursor"`
+	Records []T `json:"data"`
 }
 
 func Sync(ctx context.Context) error {
@@ -70,19 +68,6 @@ func SyncClaimObjects(ctx context.Context) error {
 }
 
 func syncResource[T any](ctx context.Context, objectType string, path string) error {
-	cursors, err := db.Instance().GetSyncCursors(ctx)
-	if err != nil {
-		return fmt.Errorf("get cursors: %w", err)
-	}
-
-	cursor := cursors[objectType]
-	cursorJSON, err := json.Marshal(cursor)
-	if err != nil {
-		return fmt.Errorf("marshal cursor: %w", err)
-	}
-
-	cursorParam := base64.StdEncoding.EncodeToString(cursorJSON)
-
 	endpoint := os.Getenv("SAUTH_ENDPOINT")
 	slug := os.Getenv("SAUTH_CLIENT_SLUG")
 	secret := os.Getenv("SAUTH_CLIENT_SECRET")
@@ -92,17 +77,13 @@ func syncResource[T any](ctx context.Context, objectType string, path string) er
 		return fmt.Errorf("build url: %w", err)
 	}
 
-	q := syncURL.Query()
-	q.Set("sync_cursor", cursorParam)
-	syncURL.RawQuery = q.Encode()
-
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, syncURL.String(), nil)
 	if err != nil {
 		return fmt.Errorf("create request: %w", err)
 	}
 
-	req.Header.Set("SAuth-Client-Slug", slug)
-	req.Header.Set("SAuth-Client-Secret", secret)
+	req.Header.Set("SAuth-App-Slug", slug)
+	req.Header.Set("SAuth-App-Secret", secret)
 
 	httpClient := &http.Client{Timeout: 30 * time.Second}
 	resp, err := httpClient.Do(req)
@@ -137,5 +118,5 @@ func syncResource[T any](ctx context.Context, objectType string, path string) er
 		}
 	}
 
-	return db.Instance().UpdateSyncCursor(ctx, objectType, syncResp.Cursor)
+	return nil
 }

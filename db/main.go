@@ -92,6 +92,7 @@ func Init(logger echo.Logger) {
 		(*UserClaim)(nil),
 		(*ClaimObject)(nil),
 		(*SamnaClient)(nil),
+		(*ClientClaim)(nil),
 		(*UserRelation)(nil),
 		(*UserObject)(nil),
 		(*UserUsers)(nil),
