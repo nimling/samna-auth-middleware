@@ -813,3 +813,40 @@ SELECT DISTINCT ON (l.id) l.id,
     'location'::TEXT as type, to_jsonb(l.*) as data
 FROM accessible_locs l;
 $$ LANGUAGE SQL STABLE;
+
+-- ============================================================================
+-- search_objects (PUBLIC)
+-- Full text search across user_object for a given user.
+-- ============================================================================
+CREATE OR REPLACE FUNCTION samna_auth.search_objects(
+    p_user_id UUID,
+    p_query TEXT,
+    p_object_types TEXT[] DEFAULT NULL,
+    p_access_level INTEGER DEFAULT 8,
+    p_limit INTEGER DEFAULT 20,
+    p_offset INTEGER DEFAULT 0
+) RETURNS TABLE (
+    object_id UUID,
+    object_type TEXT,
+    sa_name TEXT,
+    sa_description TEXT,
+    sa_link TEXT,
+    sa_access_level INTEGER,
+    sa_owner_id UUID,
+    sa_location_id UUID,
+    rank REAL
+) AS $$
+BEGIN
+    RETURN QUERY
+    SELECT uo.object_id, uo.object_type, uo.sa_name, uo.sa_description, uo.sa_link,
+           uo.sa_access_level, uo.sa_owner_id, uo.sa_location_id,
+           ts_rank(uo.search_vector, plainto_tsquery('english', p_query)) AS rank
+    FROM samna_auth.user_object uo
+    WHERE uo.user_id = p_user_id
+      AND uo.sa_access_level <= p_access_level
+      AND (p_object_types IS NULL OR uo.object_type = ANY(p_object_types))
+      AND uo.search_vector @@ plainto_tsquery('english', p_query)
+    ORDER BY rank DESC
+    LIMIT p_limit OFFSET p_offset;
+END;
+$$ LANGUAGE plpgsql STABLE;

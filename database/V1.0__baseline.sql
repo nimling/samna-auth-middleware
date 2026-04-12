@@ -223,7 +223,11 @@ CREATE TABLE IF NOT EXISTS samna_auth.user_object (
     sa_description   text,
     sa_link          text,
     sa_created_at    timestamptz NOT NULL DEFAULT now(),
-    sa_updated_at    timestamptz NOT NULL DEFAULT now()
+    sa_updated_at    timestamptz NOT NULL DEFAULT now(),
+    search_vector    tsvector GENERATED ALWAYS AS (
+        setweight(to_tsvector('english', COALESCE(sa_name, '')), 'A') ||
+        setweight(to_tsvector('english', COALESCE(sa_description, '')), 'B')
+    ) STORED
 );
 
 CREATE INDEX IF NOT EXISTS idx_user_object_user_type ON samna_auth.user_object (user_id, object_type, sa_access_level);
@@ -231,6 +235,7 @@ CREATE INDEX IF NOT EXISTS idx_user_object_owner ON samna_auth.user_object (sa_o
 CREATE INDEX IF NOT EXISTS idx_user_object_location ON samna_auth.user_object (sa_location_id);
 CREATE INDEX IF NOT EXISTS idx_user_object_object ON samna_auth.user_object (object_id, object_type);
 CREATE INDEX IF NOT EXISTS idx_user_object_claim ON samna_auth.user_object (claim_id);
+CREATE INDEX IF NOT EXISTS idx_user_object_search ON samna_auth.user_object USING gin (search_vector);
 
 CREATE TABLE IF NOT EXISTS samna_auth.user_users (
     id                   text        NOT NULL PRIMARY KEY,
