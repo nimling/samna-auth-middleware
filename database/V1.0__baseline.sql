@@ -6,6 +6,12 @@ EXCEPTION
     WHEN duplicate_object THEN null;
 END $$;
 
+DO $$ BEGIN
+    CREATE TYPE samna_auth.user_type AS ENUM ('user', 'client');
+EXCEPTION
+    WHEN duplicate_object THEN null;
+END $$;
+
 CREATE TABLE IF NOT EXISTS samna_auth.samna_user (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     first_name VARCHAR(255),
@@ -14,7 +20,7 @@ CREATE TABLE IF NOT EXISTS samna_auth.samna_user (
     email VARCHAR(255) UNIQUE NOT NULL,
     user_id UUID UNIQUE NOT NULL,
     status VARCHAR(50),
-    type VARCHAR(50),
+    type samna_auth.user_type NOT NULL DEFAULT 'user',
     config JSONB DEFAULT NULL,
     sa_deleted_at TIMESTAMP DEFAULT NULL,
     sa_created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,

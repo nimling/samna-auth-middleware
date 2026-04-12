@@ -41,7 +41,6 @@ func ClientAuthMiddleware(opts *ClientAuthOptions) echo.MiddlewareFunc {
 				return ctx.String(http.StatusUnauthorized, "Unauthorized")
 			}
 
-			ctx.Set(ClientIDKey, samnaClient.ID)
 			ctx.Set(UserIDKey, samnaClient.ID)
 
 			return next(ctx)

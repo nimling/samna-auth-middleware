@@ -33,8 +33,8 @@ const (
 type UserType string
 
 const (
-	USER_TYPE_ADMIN UserType = "admin"
-	USER_TYPE_USER  UserType = "user"
+	USER_TYPE_USER   UserType = "user"
+	USER_TYPE_CLIENT UserType = "client"
 )
 
 type AuthMiddlewareConfig struct {
