@@ -11,57 +11,35 @@
 - Echo package callers updated
 - Builds clean at v1.0.0-alpha30
 - samna_client + client_claim tables in schema, copied
+- SAuth-Client-Slug/Secret → SAuth-App-Slug/Secret in all client/ and echo/ files
+- UserRelation.ClientID → AppID in db/models.go
+- SamnaClient struct updated for M2M, ClientClaim struct added and registered
+- Auth refactored: Auth(opts), UserAuthMiddleware(opts), ClientAuthMiddleware(opts) with AuthOptions
+- ClientAuthMiddleware sets both client_id and user_id on context
+- db/client.go with GetClientByKey, GetClientClaims
+- Old SyncCursor type and methods removed
+- sync/ package created: ApplyPayload, PullSnapshot, PullSync, UpdateSeq, GetSeq, WaitForSeq
+- echo/sync.go created with PostSync handler
+- client/sync.go rewritten to use sync.PullSnapshot
+- db/main.go Init rewritten with retry and backoff (panics after 5 attempts)
 
-## Client → App Rename
+## Client → App Rename In Echo Handlers
 
-- `client/http.go`: `SAuth-Client-Slug` → `SAuth-App-Slug`, `SAuth-Client-Secret` → `SAuth-App-Secret`
-- `db/models.go`: `UserRelation.ClientID` → `AppID` (bun tag `client_id` → `app_id`)
+`echo/user.go` and `echo/me.go` still have old Client references:
+- `GetUserClients` → `GetUserApps`
+- `GetUserClient` → `GetUserApp`
+- `PutUserClient` → `PutUserApp`
+- `GetMeClients` → `GetMeApps`
+- `GetMeClient` → `GetMeApp`
 
-## samna_client Model Registration
+## Cleanup
 
-- `db/models.go`: add `SamnaClient` and `ClientClaim` Bun structs
-- `db/main.go`: register new models
-- `db/client.go`: `GetClient`, `GetClientClaims` query functions
-
-## M2M Client Auth Middleware
-
-- Check `SAuth-Client-Key` + `SAuth-Client-Secret` headers
-- If present AND no `Authorization` header: M2M client path
-- Validate against local `samna_auth.samna_client` table
-- Check `status = 'active'` and `expires_at > NOW()` (or NULL)
-- Set `ctx.Set("client_id", samnaClient.ID)`
-- Do NOT set `user_id`
-
-## Sync Package (sync/)
-
-- Payload types, apply logic, wait, pull, cascade
-- `sync.ApplyPayload`: apply sync messages in replay_mode transaction
-- `sync.CascadeAccess`: post apply recomputation of application table access
-- `sync.WaitForSeq`: poll client_state at 50ms, SAUTH_SEQ_TIMEOUT env var
-- `sync.PullSnapshot`: GET /sam/sync/snapshot
-- `sync.PullSync`: GET /sam/sync/:seq
-
-## Echo Handlers
-
-- `echo.RegisterSyncHandler`: POST handler for receiving sync payloads
-- `echo.WaitForRequestSeq`: read your own writes helper
-
-## Client Package Updates
-
-- `client/http.go`: inject SAuth-App-Slug, SAuth-App-Secret, SAuth-Seq headers
-- `client/callback.go`: RegisterSyncCallback + SyncItem/SyncObject types
-- All write wrappers return (result, seq, error)
-
-## db.Init Rewrite
-
-- Synchronous snapshot pull during init (not in debug mode)
-- Retry with backoff, panic after SAUTH_INIT_MAX_RETRIES
-- Delete RegisterSyncFunc
+- Remove `RegisterSyncHandler` and `GetSyncHealth` from `echo/sync.go` (consumer mounts PostSync directly)
+- Remove `echo/hook.go` entirely (RegisterWebhooks, all PostWebhook* handlers, GetWebhookHealth, verifyWebhook)
+- Remove `hook/handler.go` entirely (SyncOrganization, SyncLocation, etc replaced by sync.ApplyPayload)
 
 ## Files To Delete
 
 ```
-rm hook/handler.go
+rm /Users/slyotis/Projects/nimtech/samna/samna_auth_middleware/echo/hook.go; rm /Users/slyotis/Projects/nimtech/samna/samna_auth_middleware/hook/handler.go
 ```
-
-Then remove the `hook/` directory entirely. Replaced by sync/ package and echo.RegisterSyncHandler.

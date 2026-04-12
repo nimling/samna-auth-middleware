@@ -48,6 +48,21 @@ type AuthMiddlewareConfig struct {
 	AuthorizedUserID    *uuid.UUID
 }
 
+type AuthOptions struct {
+	UserAuth   *UserAuthOptions
+	ClientAuth *ClientAuthOptions
+}
+
+type UserAuthOptions struct {
+	ClientSlug   string
+	ClientSecret string
+	RedirectURI  string
+	DebugUserID  *uuid.UUID
+}
+
+type ClientAuthOptions struct {
+}
+
 type UserDetail struct {
 	Key   string `json:"key"`
 	Value string `json:"value"`

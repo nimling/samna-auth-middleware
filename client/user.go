@@ -142,27 +142,27 @@ func DeleteUser(ctx context.Context, userID uuid.UUID) (db.SamnaUser, error) {
 	return result, nil
 }
 
-func GetUserClients(ctx context.Context, userID uuid.UUID) (io.ReadCloser, error) {
+func GetUserApps(ctx context.Context, userID uuid.UUID) (io.ReadCloser, error) {
 	c := newClient()
-	u, err := joinURL(c.apiURL, "user", userID.String(), "clients")
+	u, err := joinURL(c.apiURL, "user", userID.String(), "apps")
 	if err != nil {
 		return nil, fmt.Errorf("build url: %w", err)
 	}
 	return c.client.Get(ctx, u)
 }
 
-func GetUserClient(ctx context.Context, userID uuid.UUID, clientID uuid.UUID) (io.ReadCloser, error) {
+func GetUserApp(ctx context.Context, userID uuid.UUID, appID uuid.UUID) (io.ReadCloser, error) {
 	c := newClient()
-	u, err := joinURL(c.apiURL, "user", userID.String(), "clients", clientID.String())
+	u, err := joinURL(c.apiURL, "user", userID.String(), "apps", appID.String())
 	if err != nil {
 		return nil, fmt.Errorf("build url: %w", err)
 	}
 	return c.client.Get(ctx, u)
 }
 
-func PutUserClient(ctx context.Context, userID uuid.UUID, clientID uuid.UUID, body any) (io.ReadCloser, error) {
+func PutUserApp(ctx context.Context, userID uuid.UUID, appID uuid.UUID, body any) (io.ReadCloser, error) {
 	c := newClient()
-	u, err := joinURL(c.apiURL, "user", userID.String(), "clients", clientID.String())
+	u, err := joinURL(c.apiURL, "user", userID.String(), "apps", appID.String())
 	if err != nil {
 		return nil, fmt.Errorf("build url: %w", err)
 	}

@@ -182,35 +182,35 @@ func GetMeLocations(ctx echo.Context) error {
 	return ctx.Stream(http.StatusOK, "application/json", body)
 }
 
-func GetMeClients(ctx echo.Context) error {
+func GetMeApps(ctx echo.Context) error {
 	if utils.GetDebugUserID() != nil {
-		ctx.Logger().Errorf("GetMeClients: not available in debug mode")
+		ctx.Logger().Errorf("GetMeApps: not available in debug mode")
 		return RespondError(ctx, http.StatusNotImplemented, "Not implemented")
 	}
 
-	body, err := client.GetMeClients(ctx.Request().Context())
+	body, err := client.GetMeApps(ctx.Request().Context())
 	if err != nil {
-		ctx.Logger().Errorf("GetMeClients: %v", err)
+		ctx.Logger().Errorf("GetMeApps: %v", err)
 		return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
 	}
 	defer body.Close()
 	return ctx.Stream(http.StatusOK, "application/json", body)
 }
 
-func GetMeClient(ctx echo.Context) error {
+func GetMeApp(ctx echo.Context) error {
 	if utils.GetDebugUserID() != nil {
-		ctx.Logger().Errorf("GetMeClient: not available in debug mode")
+		ctx.Logger().Errorf("GetMeApp: not available in debug mode")
 		return RespondError(ctx, http.StatusNotImplemented, "Not implemented")
 	}
 
-	clientID, err := uuid.Parse(ctx.Param("client_id"))
+	appID, err := uuid.Parse(ctx.Param("app_id"))
 	if err != nil {
 		return RespondError(ctx, http.StatusBadRequest, "Bad request")
 	}
 
-	body, err := client.GetMeClient(ctx.Request().Context(), clientID)
+	body, err := client.GetMeApp(ctx.Request().Context(), appID)
 	if err != nil {
-		ctx.Logger().Errorf("GetMeClient: %v", err)
+		ctx.Logger().Errorf("GetMeApp: %v", err)
 		return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
 	}
 	defer body.Close()

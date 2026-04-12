@@ -123,18 +123,18 @@ func GetMeLocations(ctx context.Context) (io.ReadCloser, error) {
 	return c.client.Get(ctx, u)
 }
 
-func GetMeClients(ctx context.Context) (io.ReadCloser, error) {
+func GetMeApps(ctx context.Context) (io.ReadCloser, error) {
 	c := newClient()
-	u, err := joinURL(c.apiURL, "me", "clients")
+	u, err := joinURL(c.apiURL, "me", "apps")
 	if err != nil {
 		return nil, fmt.Errorf("build url: %w", err)
 	}
 	return c.client.Get(ctx, u)
 }
 
-func GetMeClient(ctx context.Context, clientID uuid.UUID) (io.ReadCloser, error) {
+func GetMeApp(ctx context.Context, appID uuid.UUID) (io.ReadCloser, error) {
 	c := newClient()
-	u, err := joinURL(c.apiURL, "me", "clients", clientID.String())
+	u, err := joinURL(c.apiURL, "me", "apps", appID.String())
 	if err != nil {
 		return nil, fmt.Errorf("build url: %w", err)
 	}

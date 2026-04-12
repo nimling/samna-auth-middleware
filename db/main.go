@@ -111,11 +111,19 @@ func Init(logger echo.Logger) {
 		return
 	}
 
-	logger.Info("Starting initial sync")
-	if err := syncFunc(context.Background()); err != nil {
-		logger.Errorf("Initial sync failed: %v", err)
-	} else {
+	maxRetries := 5
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		logger.Infof("Starting initial sync (attempt %d/%d)", attempt, maxRetries)
+		if err := syncFunc(context.Background()); err != nil {
+			logger.Errorf("Initial sync attempt %d failed: %v", attempt, err)
+			if attempt == maxRetries {
+				panic(fmt.Sprintf("initial sync failed after %d attempts: %v", maxRetries, err))
+			}
+			time.Sleep(time.Duration(attempt) * 2 * time.Second)
+			continue
+		}
 		logger.Info("Initial sync completed")
+		break
 	}
 }
 

@@ -188,45 +188,45 @@ func DeleteUser(ctx echo.Context) error {
 	return RespondJSON(ctx, http.StatusOK, result, nil)
 }
 
-func GetUserClients(ctx echo.Context) error {
+func GetUserApps(ctx echo.Context) error {
 	userID, err := uuid.Parse(ctx.Param("id"))
 	if err != nil {
 		return RespondError(ctx, http.StatusBadRequest, "Bad request")
 	}
 
 	if utils.GetDebugUserID() != nil {
-		ctx.Logger().Errorf("GetUserClients: not available in debug mode")
+		ctx.Logger().Errorf("GetUserApps: not available in debug mode")
 		return RespondError(ctx, http.StatusNotImplemented, "Not implemented")
 	}
 
-	body, err := client.GetUserClients(ctx.Request().Context(), userID)
+	body, err := client.GetUserApps(ctx.Request().Context(), userID)
 	if err != nil {
-		ctx.Logger().Errorf("GetUserClients: %v", err)
+		ctx.Logger().Errorf("GetUserApps: %v", err)
 		return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
 	}
 	defer body.Close()
 	return ctx.Stream(http.StatusOK, "application/json", body)
 }
 
-func GetUserClient(ctx echo.Context) error {
+func GetUserApp(ctx echo.Context) error {
 	userID, err := uuid.Parse(ctx.Param("id"))
 	if err != nil {
 		return RespondError(ctx, http.StatusBadRequest, "Bad request")
 	}
 
-	clientID, err := uuid.Parse(ctx.Param("client_id"))
+	appID, err := uuid.Parse(ctx.Param("app_id"))
 	if err != nil {
 		return RespondError(ctx, http.StatusBadRequest, "Bad request")
 	}
 
 	if utils.GetDebugUserID() != nil {
-		ctx.Logger().Errorf("GetUserClient: not available in debug mode")
+		ctx.Logger().Errorf("GetUserApp: not available in debug mode")
 		return RespondError(ctx, http.StatusNotImplemented, "Not implemented")
 	}
 
-	body, err := client.GetUserClient(ctx.Request().Context(), userID, clientID)
+	body, err := client.GetUserApp(ctx.Request().Context(), userID, appID)
 	if err != nil {
-		ctx.Logger().Errorf("GetUserClient: %v", err)
+		ctx.Logger().Errorf("GetUserApp: %v", err)
 		return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
 	}
 	defer body.Close()
@@ -253,25 +253,25 @@ func GetUserAssets(ctx echo.Context) error {
 	return ctx.Stream(http.StatusOK, "application/json", body)
 }
 
-func PutUserClient(ctx echo.Context) error {
+func PutUserApp(ctx echo.Context) error {
 	userID, err := uuid.Parse(ctx.Param("id"))
 	if err != nil {
 		return RespondError(ctx, http.StatusBadRequest, "Bad request")
 	}
 
-	clientID, err := uuid.Parse(ctx.Param("client_id"))
+	appID, err := uuid.Parse(ctx.Param("app_id"))
 	if err != nil {
 		return RespondError(ctx, http.StatusBadRequest, "Bad request")
 	}
 
 	if utils.GetDebugUserID() != nil {
-		ctx.Logger().Errorf("PutUserClient: not available in debug mode")
+		ctx.Logger().Errorf("PutUserApp: not available in debug mode")
 		return RespondError(ctx, http.StatusNotImplemented, "Not implemented")
 	}
 
-	body, err := client.PutUserClient(ctx.Request().Context(), userID, clientID, nil)
+	body, err := client.PutUserApp(ctx.Request().Context(), userID, appID, nil)
 	if err != nil {
-		ctx.Logger().Errorf("PutUserClient: %v", err)
+		ctx.Logger().Errorf("PutUserApp: %v", err)
 		return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
 	}
 	defer body.Close()

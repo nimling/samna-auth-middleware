@@ -12,14 +12,45 @@ import (
 	"github.com/nimling/samna-auth-middleware/utils"
 )
 
+func Auth(opts *AuthOptions) echo.MiddlewareFunc {
+	if opts == nil {
+		opts = &AuthOptions{}
+	}
+
+	var userMW echo.MiddlewareFunc
+	var clientMW echo.MiddlewareFunc
+
+	if opts.UserAuth != nil {
+		userMW = UserAuthMiddleware(opts.UserAuth)
+	} else {
+		userMW = UserAuthMiddleware(nil)
+	}
+
+	if opts.ClientAuth != nil {
+		clientMW = ClientAuthMiddleware(opts.ClientAuth)
+	} else {
+		clientMW = ClientAuthMiddleware(nil)
+	}
+
+	return func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(ctx echo.Context) error {
+			withClient := clientMW(next)
+			withUser := userMW(withClient)
+			return withUser(ctx)
+		}
+	}
+}
+
 func AuthMiddlewareEnv() echo.MiddlewareFunc {
 	return AuthMiddleware(nil)
 }
 
 func AuthMiddleware(config *AuthMiddlewareConfig) echo.MiddlewareFunc {
-	if config == nil {
-		config = configFromEnv()
-	}
+	return UserAuthMiddleware(userAuthOptionsFromConfig(config))
+}
+
+func UserAuthMiddleware(opts *UserAuthOptions) echo.MiddlewareFunc {
+	config := configFromUserAuthOptions(opts)
 
 	if config.AuthorizedUserID != nil {
 		return func(next echo.HandlerFunc) echo.HandlerFunc {
@@ -101,8 +132,57 @@ func AuthMiddleware(config *AuthMiddlewareConfig) echo.MiddlewareFunc {
 	}
 }
 
+func userAuthOptionsFromConfig(config *AuthMiddlewareConfig) *UserAuthOptions {
+	if config == nil {
+		return nil
+	}
+	return &UserAuthOptions{
+		ClientSlug:   config.ClientSlug,
+		ClientSecret: config.ClientSecret,
+		RedirectURI:  config.RedirectURI,
+		DebugUserID:  config.AuthorizedUserID,
+	}
+}
+
+func configFromUserAuthOptions(opts *UserAuthOptions) *AuthMiddlewareConfig {
+	if opts == nil {
+		return configFromEnv()
+	}
+
+	slug := opts.ClientSlug
+	if slug == "" {
+		slug = utils.GetEnv("SAUTH_CLIENT_SLUG")
+	}
+	secret := opts.ClientSecret
+	if secret == "" {
+		secret = utils.GetEnv("SAUTH_CLIENT_SECRET")
+	}
+	redirectURI := opts.RedirectURI
+	if redirectURI == "" {
+		redirectURI = utils.GetEnv("SAUTH_REDIRECT_URI")
+	}
+	debugUserID := opts.DebugUserID
+	if debugUserID == nil {
+		debugUserID = utils.GetEnvUUIDOptional("SAUTH_DEBUG_USER_ID")
+	}
+
+	openIDUrlStr := utils.GetEnv("SAUTH_ENDPOINT") + "/api/app/" + slug + "/.well-known/openid-configuration"
+	openIDUrl, err := url.Parse(openIDUrlStr)
+	if err != nil {
+		panic(fmt.Errorf("failed to parse openid configuration URL: %v", err))
+	}
+
+	return &AuthMiddlewareConfig{
+		ClientSlug:       slug,
+		ClientSecret:     secret,
+		RedirectURI:      redirectURI,
+		OpenIDConfigURL:  *openIDUrl,
+		AuthorizedUserID: debugUserID,
+	}
+}
+
 func configFromEnv() *AuthMiddlewareConfig {
-	openIDUrlStr := utils.GetEnv("SAUTH_ENDPOINT") + "/api/client/" + utils.GetEnv("SAUTH_CLIENT_SLUG") + "/.well-known/openid-configuration"
+	openIDUrlStr := utils.GetEnv("SAUTH_ENDPOINT") + "/api/app/" + utils.GetEnv("SAUTH_CLIENT_SLUG") + "/.well-known/openid-configuration"
 	openIDUrl, err := url.Parse(openIDUrlStr)
 	if err != nil {
 		panic(fmt.Errorf("failed to parse openid configuration URL: %v", err))
