@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -132,12 +133,18 @@ func getOpenIDConfiguration(ctx context.Context, config *AuthMiddlewareConfig) e
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("auth server returned status %d", resp.StatusCode)
+		return fmt.Errorf("openid configuration request to %s returned status %d, check that the client slug exists", config.OpenIDConfigURL.String(), resp.StatusCode)
+	}
+
+	contentType := resp.Header.Get("Content-Type")
+	if !strings.Contains(contentType, "application/json") {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 200))
+		return fmt.Errorf("openid configuration at %s returned %s instead of JSON: %s", config.OpenIDConfigURL.String(), contentType, string(body))
 	}
 
 	var respBody openIDConfiguration
 	if err = json.NewDecoder(resp.Body).Decode(&respBody); err != nil {
-		return fmt.Errorf("decode response: %w", err)
+		return fmt.Errorf("openid configuration at %s returned invalid JSON: %w", config.OpenIDConfigURL.String(), err)
 	}
 
 	jwksUrl, err := url.Parse(respBody.JwksUri)
