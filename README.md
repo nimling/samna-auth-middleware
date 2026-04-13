@@ -1,21 +1,8 @@
 # Samna Auth Middleware
 
-Libraries for integrating with the Samna Auth service. Provides middleware for request authentication, a client library for API calls, echo handlers for building authenticated APIs, a database layer for direct access, a hook library for consuming webhooks, and the canonical SQL schema for the `samna_auth` database.
+Go libraries for integrating with the Samna Auth service. Provides JWT middleware, a sync engine for keeping a local copy of auth data, Echo HTTP handlers, a client library for API calls, direct database access, and the canonical SQL schema.
 
-## Table of Contents
-
-- [Installation](#installation)
-- [Packages](#packages)
-- [Middleware](#middleware)
-- [Echo Handlers](#echo-handlers)
-- [Client](#client)
-- [Database](#database)
-- [SQL Schema](#sql-schema)
-- [Hook](#hook)
-- [Environment Variables](#environment-variables)
-- [Debug User Bypass](#debug-user-bypass)
-- [Examples](#examples)
-- [Testing](#testing)
+All consuming services run a local PostgreSQL database with the `samna_auth` schema. On startup the sync engine pulls a full snapshot from the auth server, and incremental updates arrive via the sync endpoint. This local copy powers middleware decisions, graph queries, and claim resolution without round trips to the auth server.
 
 ## Installation
 
@@ -27,13 +14,48 @@ go get github.com/nimling/samna-auth-middleware
 
 | Package | Description |
 |---------|-------------|
-| `middleware` | Echo middleware for JWT validation, token refresh, and auth code exchange |
-| `echo` | Echo HTTP handlers that bridge the client and database layers |
-| `client` | HTTP client for calling the Samna Auth API (framework agnostic) |
+| `middleware` | Echo middleware for JWT validation, token refresh, and client authentication |
+| `sync` | Pull based sync engine that keeps the local auth database up to date |
+| `echo` | Echo HTTP handlers bridging the client and database layers |
+| `client` | HTTP client for the Samna Auth API (framework agnostic) |
 | `db` | Database layer for direct PostgreSQL access via Bun ORM |
-| `database` | Canonical SQL schema, functions, views, and triggers for the `samna_auth` PostgreSQL schema |
-| `hook` | Webhook consumer with RSA signature verification |
+| `database` | Canonical SQL schema, functions, views, and triggers for `samna_auth` |
 | `utils` | Cookie management, environment helpers, and debug utilities |
+
+## Examples
+
+| Example | Description | When to use |
+|---------|-------------|-------------|
+| [basic](example/basic) | Minimal setup with middleware, sync, and a single protected route | Starting a new service that needs user authentication |
+| [echo_handlers](example/echo_handlers) | Full API with all handler groups mounted | Building a service that proxies the full auth API |
+| [client_only](example/client_only) | Direct HTTP calls to the auth server without local database | Service to service calls where you already have a bearer token |
+
+Each example has a `.env.example` file. Copy it to `.env` and fill in your values before running.
+
+```bash
+cd example/basic
+cp .env.example .env
+go run main.go
+```
+
+## Startup Sequence
+
+Every service using this library follows the same pattern:
+
+1. Register `sync.PullSnapshot` as the sync function
+2. Call `db.Init()` which connects to PostgreSQL, runs the initial snapshot sync, and retries up to 5 times on failure
+3. Mount the middleware and handlers
+
+```go
+db.RegisterSyncFunc(sync.PullSnapshot)
+db.Init(e.Logger)
+```
+
+The sync endpoint (`saecho.PostSync`) receives incremental updates from the auth server. Mount it so your local database stays current:
+
+```go
+e.POST("/sync", saecho.PostSync)
+```
 
 ## Middleware
 
@@ -41,85 +63,95 @@ The middleware validates requests against the Samna Auth service. It handles JWT
 
 ### Authentication Flow
 
-1. **Check Authorization header** for a `Bearer` token
-2. **Check cookie** `sauth_access_token` if no header present
-3. **Validate the token** using JWKS from the auth server, verify issuer and expiration
-4. If valid, extract user claims, set `user_id` and `access_token` in Echo context
-5. If expired, check for `sauth_auth_code` query parameter and exchange it for tokens
+1. Check `Authorization` header for a `Bearer` token
+2. Check `sauth_access_token` cookie if no header present
+3. Validate the token using JWKS, verify issuer and expiration
+4. If valid, set `user_id` and `access_token` in the Echo context
+5. If expired, check for `sauth_auth_code` query parameter and exchange it
 6. If no auth code, attempt refresh using `sauth_refresh_token` cookie
 7. If all fail, return `401 Unauthorized`
 
-### Usage
+### User Authentication
 
 ```go
-import (
-    "github.com/labstack/echo/v4"
-    "github.com/nimling/samna-auth-middleware/middleware"
-)
-
-func main() {
-    e := echo.New()
-
-    e.Use(middleware.AuthMiddlewareEnv())
-
-    e.GET("/protected", func(ctx echo.Context) error {
-        userID := ctx.Get(middleware.UserIDKey).(uuid.UUID)
-        accessToken := ctx.Get(middleware.AccessTokenKey).(string)
-        return ctx.JSON(200, map[string]any{"user_id": userID})
-    })
-
-    e.Start(":8080")
-}
+e.Use(middleware.AuthMiddlewareEnv())
 ```
 
-### Manual Configuration
+Or with manual configuration:
 
 ```go
-import "github.com/nimling/samna-auth-middleware/middleware"
-
-openIDUrl, _ := url.Parse("https://auth.example.com/api/client/myapp/.well-known/openid-configuration")
-
 config := &middleware.AuthMiddlewareConfig{
-    ClientSlug:      "myapp",
-    ClientSecret:    "your-secret",
-    RedirectURI:     "https://myapp.example.com/callback",
-    OpenIDConfigURL: *openIDUrl,
+    ClientSlug:   "myapp",
+    ClientSecret: "your-secret",
+    RedirectURI:  "https://myapp.example.com/callback",
 }
-
 e.Use(middleware.AuthMiddleware(config))
 ```
 
-### Client Validation Middleware
+### Client Authentication
 
-`ClientMiddleware` validates requests using client slug and secret headers against the auth server:
+For service to service calls using client key and secret headers:
 
 ```go
-e.POST("/api/internal", handler, middleware.ClientMiddleware)
+e.Use(middleware.Auth(&middleware.AuthOptions{
+    ClientAuth: &middleware.ClientAuthOptions{},
+}))
 ```
+
+### Combined Authentication
+
+`Auth` chains user and client authentication. If client headers (`SAuth-Client-Key`, `SAuth-Client-Secret`) are present and no `Authorization` header exists, the request is authenticated as a client. Otherwise it falls through to user authentication.
+
+```go
+e.Use(middleware.Auth(nil))
+```
+
+### Context Values
+
+After successful authentication:
+
+```go
+userID := ctx.Get(middleware.UserIDKey).(uuid.UUID)
+accessToken := ctx.Get(middleware.AccessTokenKey).(string)
+```
+
+## Sync
+
+The sync package keeps the local `samna_auth` database in sync with the auth server.
+
+### Initial Snapshot
+
+`PullSnapshot` fetches all current auth data and applies it to the local database. This runs automatically during `db.Init()` when a sync function is registered.
+
+### Incremental Sync
+
+`PullSync` fetches events that occurred after the last applied sequence number. Use this for periodic catchup.
+
+### Sync Endpoint
+
+The `saecho.PostSync` handler receives push events from the auth server. It validates the request using app slug and secret headers, applies the payload, and updates the sequence number.
+
+### Supported Entity Types
+
+`organization`, `location`, `samna_user`, `claim`, `user_claim`, `claim_object`, `client_claim`, `samna_client`
 
 ## Echo Handlers
 
-The `echo` package provides ready to use HTTP handlers that bridge the `client` and `db` packages. Each handler extracts request metadata from the Echo context and delegates to the appropriate client function or database query.
+Ready to use HTTP handlers that bridge the `client` and `db` packages. Each handler extracts request metadata from the Echo context and delegates to the appropriate layer.
 
-When `SAUTH_DEBUG_USER_ID` is set, handlers that support it will query the database directly instead of calling the auth API.
+When `SAUTH_DEBUG_USER_ID` is set, handlers query the database directly instead of calling the auth API.
 
 ### Login and Logout
 
 ```go
-import saecho "github.com/nimling/samna-auth-middleware/echo"
-
 e.GET("/login", saecho.GetLogin)
 e.GET("/login/:provider", saecho.GetLogin)
 e.GET("/logout", saecho.GetLogout)
 ```
 
-`GetLogin` detects whether a provider parameter is present. Without a provider it redirects to the default login page. With a provider (e.g. `/login/google`) it redirects to that provider's login page.
-
-`GetLogout` clears authentication cookies and notifies the auth server.
-
 ### Available Handlers
 
-**User**: `GetUsers`, `GetUser`, `GetUserClaims`, `GetUserConnections`, `PostUser`, `PutUser`, `DeleteUser`, `GetUserClients`, `GetUserClient`, `PutUserClient`
+**User**: `GetUsers`, `GetUser`, `GetUserClaims`, `GetUserConnections`, `PostUser`, `PutUser`, `DeleteUser`, `GetUserApps`, `GetUserApp`, `PutUserApp`
 
 **Organization**: `GetOrganizations`, `GetOrganization`, `GetOrganizationGraph`, `GetOrganizationClaims`, `PostOrganization`, `PutOrganization`, `DeleteOrganization`
 
@@ -127,19 +159,17 @@ e.GET("/logout", saecho.GetLogout)
 
 **Claim**: `GetClaimGraph`, `GetClaims`, `GetClaim`, `GetClaimAudit`, `GetClaimSearch`, `PostClaim`, `PutClaim`, `DeleteClaim`, `PostClaimObject`, `DeleteClaimObject`, `PostClaimUser`, `DeleteClaimUser`
 
-**Me**: `GetMe`, `PutMe`, `GetMeClaims`, `PostMeAsset`, `DeleteMeAsset`, `GetMeConnections`, `GetMeModules`, `GetMeOrganizations`, `GetMeLocations`, `GetMeClients`, `GetMeClient`
+**Me**: `GetMe`, `PutMe`, `GetMeClaims`, `PostMeAsset`, `DeleteMeAsset`, `GetMeConnections`, `GetMeModules`, `GetMeOrganizations`, `GetMeLocations`, `GetMeApps`, `GetMeApp`
 
 **Asset**: `GetAssets`, `GetAsset`, `GetAssetData`, `PostAsset`, `PostAssetUpload`, `PutAsset`, `DeleteAsset`
 
+**Sync**: `PostSync`
+
 ## Client
 
-The client library makes HTTP calls to the Samna Auth API. It is framework agnostic and takes `context.Context` and `RequestMetadata` instead of any framework specific types.
-
-### Usage
+The client library makes HTTP calls to the Samna Auth API. It is framework agnostic and takes `context.Context` and `RequestMetadata`.
 
 ```go
-import "github.com/nimling/samna-auth-middleware/client"
-
 meta := client.RequestMetadata{
     AccessToken: "bearer-token",
     RequestID:   "req-123",
@@ -148,19 +178,16 @@ meta := client.RequestMetadata{
 
 body, err := client.GetUsers(ctx, meta)
 if err != nil {
-    // handle error
+    log.Fatal(err)
 }
 defer body.Close()
 ```
 
-The client reads `SAUTH_ENDPOINT`, `SAUTH_CLIENT_SLUG`, and `SAUTH_CLIENT_SECRET` from environment variables internally.
+The client reads `SAUTH_ENDPOINT`, `SAUTH_CLIENT_SLUG`, and `SAUTH_CLIENT_SECRET` from environment variables.
 
 ### Error Handling
 
 ```go
-import "github.com/nimling/samna-auth-middleware/client"
-
-body, err := client.GetUser(ctx, meta, userID)
 if errors.Is(err, client.ErrNotFound) {
     // 404
 } else if errors.Is(err, client.ErrForbidden) {
@@ -172,102 +199,46 @@ if errors.Is(err, client.ErrNotFound) {
 
 ## Database
 
-The `db` package provides direct PostgreSQL access via the Bun ORM. It uses a singleton pattern initialized with `db.Init()`.
+The `db` package provides direct PostgreSQL access via Bun ORM with a singleton pattern.
 
 ### Models
 
-`SamnaUser`, `Organization`, `Location`, `Claim`, `UserClaim`, `ClaimObject`, `ActiveClaim`, `ActiveObject`, `ActiveUser`, `GraphNode`
+`SamnaUser`, `Organization`, `Location`, `Claim`, `UserClaim`, `ClaimObject`, `SamnaClient`, `ClientClaim`, `ActiveClaim`, `ActiveObject`, `ActiveUser`, `GraphNode`
 
 ### Access Levels
 
-`SYSTEM` (0), `OWNER` (1), `ADMIN` (2), `WRITE` (3), `UPDATE` (4), `ACTION` (5), `READ` (6), `MEMBER` (7), `GUEST` (8)
-
-### Required Environment Variables
-
-```env
-PGHOST=localhost
-PGDATABASE=samna
-PGPORT=5432
-PGUSER=postgres
-PGPASSWORD=password
-PGSSLMODE=disable
-```
+| Level | Name | Value |
+|-------|------|-------|
+| System | `ACCESS_LEVEL_SYSTEM` | 0 |
+| Owner | `ACCESS_LEVEL_OWNER` | 1 |
+| Admin | `ACCESS_LEVEL_ADMIN` | 2 |
+| Write | `ACCESS_LEVEL_WRITE` | 3 |
+| Update | `ACCESS_LEVEL_UPDATE` | 4 |
+| Action | `ACCESS_LEVEL_ACTION` | 5 |
+| Read | `ACCESS_LEVEL_READ` | 6 |
+| Member | `ACCESS_LEVEL_MEMBER` | 7 |
+| Guest | `ACCESS_LEVEL_GUEST` | 8 |
 
 ### Graph Queries
 
-The `db` package provides two graph query methods that call the `samna_auth` schema functions directly:
+Two graph functions query the `samna_auth` schema directly:
 
 - `GetOwnerGraph` returns organizations and locations visible to a user at a given access level
-- `GetClaimGraph` returns claims, user claims, users, organizations, locations, and unresolved typed object references for domain objects not managed by the auth schema
+- `GetClaimGraph` returns claims, user claims, users, organizations, locations, and unresolved typed object references for domain objects
 
-Both return `[]GraphNode` where each node carries an id, label, type, and JSONB data payload.
+Both return `[]GraphNode` where each node carries an id, label, type, and JSONB data payload. Consuming services extend the graph by joining their own domain tables onto the unresolved references.
 
 ## SQL Schema
 
-The `database/` directory contains the canonical SQL schema for the `samna_auth` PostgreSQL schema. These are Flyway style migration files that define all tables, functions, views, and triggers used by the auth system.
+The `database/` directory contains Flyway style migrations for the `samna_auth` PostgreSQL schema.
 
 | File | Description |
 |------|-------------|
 | `V1.0__baseline.sql` | Core tables: `samna_user`, `organization`, `location`, `claim`, `user_claim`, `claim_object`, `samna_client` |
-| `V1.1__functions.sql` | Claim management, recursive tree traversal, inheritance queries, access control, graph functions |
-| `V1.2__views.sql` | `active_claim`, `active_object`, and `active_users` views |
-| `V1.3__triggers.sql` | Timestamp update triggers on all auth tables |
+| `V1.1__functions.sql` | Claim management, recursive tree traversal, inheritance, access control, graph functions |
+| `V1.2__views.sql` | `active_claim`, `active_object`, `active_users` views |
+| `V1.3__triggers.sql` | Timestamp update triggers |
 | `V1.4__init.sql` | Calls `init_auth_views` to register domain tables for claim inheritance |
-
-### Graph Functions
-
-Two graph functions are defined in `V1.1__functions.sql`:
-
-- `samna_auth.get_owner_graph(user_id, access_level)` returns organization and location nodes for the ownership hierarchy
-- `samna_auth.get_claim_graph(user_id, access_level)` returns claim, user_claim, user, organization, location nodes, and unresolved typed references for domain specific objects
-
-Consuming services extend these by joining their own domain tables onto the unresolved references. For example, the bookable server joins bookable, booking, asset, and code tables onto the graph results.
-
-## Hook
-
-The hook library consumes webhooks from the samna auth service with RSA signature verification and type safe event handlers.
-
-### Supported Entities
-
-User, Organization, Location, Claim, UserClaim, ClaimObject
-
-### Event Types
-
-Create, Update, Delete
-
-### Usage
-
-```go
-import "github.com/nimling/samna-auth-middleware/hook"
-
-handlers := hook.Handlers{
-    Organization: hook.ActionHandler[hook.Organization]{
-        OnCreate: repo.UpsertOrganization,
-        OnUpdate: repo.UpsertOrganization,
-        OnDelete: repo.DeleteOrganization,
-    },
-    Location: hook.ActionHandler[hook.Location]{
-        OnCreate: repo.CreateLocation,
-        OnUpdate: repo.UpdateLocation,
-    },
-}
-
-e.POST("/webhook", func(ctx echo.Context) error {
-    var p hook.Payload
-    if err := ctx.Bind(&p); err != nil {
-        return ctx.String(http.StatusBadRequest, "Malformed payload")
-    }
-
-    err := p.UnmarshalAndHandle(ctx.Request().Context(), handlers)
-    if err != nil {
-        return ctx.String(http.StatusInternalServerError, "Internal Server Error")
-    }
-
-    return ctx.String(http.StatusOK, "OK")
-}, hook.WebhookAuthMiddleware(publicKey))
-```
-
-Webhook events may arrive out of order. Use upsert patterns and compare `updated_at` timestamps to handle this correctly.
 
 ## Environment Variables
 
@@ -275,19 +246,12 @@ Webhook events may arrive out of order. Use upsert patterns and compare `updated
 
 | Variable | Used by | Description |
 |----------|---------|-------------|
-| `SAUTH_ENDPOINT` | client, middleware | Base URL of the Samna Auth server (e.g. `https://auth.example.com`) |
-| `SAUTH_CLIENT_SLUG` | client, middleware | Client identifier slug |
-| `SAUTH_CLIENT_SECRET` | client, middleware | Client secret for authentication |
+| `SAUTH_ENDPOINT` | middleware, client, sync | Base URL of the Samna Auth server |
+| `SAUTH_CLIENT_SLUG` | middleware, client, sync | App identifier slug |
+| `SAUTH_CLIENT_SECRET` | middleware, client, sync | App secret for authentication |
 | `SAUTH_REDIRECT_URI` | middleware | OAuth redirect URI for auth code exchange |
 
-### Optional
-
-| Variable | Used by | Description |
-|----------|---------|-------------|
-| `SAUTH_COOKIE_DOMAIN` | utils | Cookie domain for cross subdomain cookies. Automatically disables `Secure` flag for localhost |
-| `SAUTH_DEBUG_USER_ID` | middleware, echo | UUID to bypass authentication entirely (see [Debug User Bypass](#debug-user-bypass)) |
-
-### Database (only needed when using `db` package)
+### Database
 
 | Variable | Description |
 |----------|-------------|
@@ -298,67 +262,33 @@ Webhook events may arrive out of order. Use upsert patterns and compare `updated
 | `PGPASSWORD` | Database password |
 | `PGSSLMODE` | SSL mode (`disable`, `require`, etc.) |
 
-### Version
+### Optional
 
-| Variable | Description |
-|----------|-------------|
-| `APP_VERSION` | Application version, managed by sbump |
+| Variable | Used by | Description |
+|----------|---------|-------------|
+| `SAUTH_COOKIE_DOMAIN` | utils | Cookie domain for cross subdomain cookies |
+| `SAUTH_DEBUG_USER_ID` | middleware, echo | UUID to bypass authentication (see below) |
 
-## Debug User Bypass
+## Debug Mode
 
 Setting `SAUTH_DEBUG_USER_ID` to a valid UUID enables two levels of bypass:
 
-### Middleware Bypass
+**Middleware**: Skips all authentication checks and sets the specified user ID directly in the Echo context. No token validation, no refresh, no code exchange.
 
-The auth middleware skips all authentication checks (no token validation, no refresh, no code exchange) and sets the specified user ID directly in the Echo context. All requests proceed as if authenticated by that user.
+**Echo Handlers**: Query the database directly instead of calling the auth API. This allows running handlers without a running auth server as long as the database is available. Graph handlers (`GetOrganizationGraph`, `GetClaimGraph`) query the `samna_auth` graph functions directly. Handlers without a database equivalent return `501 Not Implemented`.
 
 ```env
 SAUTH_DEBUG_USER_ID=123e4567-e89b-12d3-a456-426614174000
 ```
 
-### Echo Handler Bypass
-
-When the debug user ID is set, echo handlers that support it will query the database directly instead of calling the Samna Auth API through the client. This allows running and testing handlers without a running auth server, as long as the database is available. This includes graph handlers (`GetOrganizationGraph`, `GetClaimGraph`) which query the `samna_auth` graph functions directly.
-
-Handlers that do not have a database equivalent (e.g. asset operations, connection lookups) return `501 Not Implemented` in debug mode.
-
-### Manual Configuration
-
-You can also set it programmatically:
+Or programmatically:
 
 ```go
 devUserID := uuid.MustParse("123e4567-e89b-12d3-a456-426614174000")
-
 config := &middleware.AuthMiddlewareConfig{
     AuthorizedUserID: &devUserID,
 }
-
 e.Use(middleware.AuthMiddleware(config))
-```
-
-## Examples
-
-### Middleware Example
-
-```bash
-cd example/middleware
-cp .env.example .env  # edit with your values
-go run main.go
-```
-
-### Client Example
-
-```bash
-cd example/client
-cp .env.example .env  # edit with your values
-go run main.go
-```
-
-### Hook Example
-
-```bash
-cd example/hook
-go run main.go
 ```
 
 ## Testing
@@ -367,7 +297,7 @@ go run main.go
 go test ./...
 ```
 
-The token validation test requires environment variables:
+The token validation test requires:
 
 ```env
 SAUTH_JWKS_URL=http://localhost:3201/api/client/sauth/jwks
