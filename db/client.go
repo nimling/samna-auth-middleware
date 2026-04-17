@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/uptrace/bun"
 )
 
 func (d *DB) GetClientByKey(ctx context.Context, clientKey uuid.UUID) (*SamnaClient, error) {
