@@ -192,33 +192,6 @@ type ActiveClaim struct {
 	Objects          []ClaimObject `bun:"rel:has-many,join:claim_id=claim_id" json:"claim_objects"`
 }
 
-type ActiveObject struct {
-	ObjectID   uuid.UUID  `bun:"object_id" json:"object_id"`
-	ObjectType string     `bun:"object_type" json:"object_type"`
-	ClaimID    uuid.UUID  `bun:"claim_id" json:"claim_id"`
-	Level      int        `bun:"sa_level" json:"level"`
-	Inherits   bool       `bun:"inherits" json:"inherits"`
-	RootID     uuid.UUID  `bun:"sa_root_id" json:"root_id"`
-	OwnerID    uuid.UUID  `bun:"sa_owner_id" json:"owner_id"`
-	RefID      *uuid.UUID `bun:"ref_id" json:"ref_id"`
-	Reason     *string    `bun:"reason" json:"reason"`
-	Function   *string    `bun:"function" json:"function"`
-	CreatedAt  time.Time  `bun:"sa_created_at" json:"created_at"`
-	UpdatedAt  time.Time  `bun:"sa_updated_at" json:"updated_at"`
-	DeletedAt  *time.Time `bun:"sa_deleted_at" json:"deleted_at"`
-}
-
-type ActiveUser struct {
-	TargetUserID uuid.UUID  `bun:"target_user_id" json:"target_user_id"`
-	UserID       uuid.UUID  `bun:"user_id" json:"user_id"`
-	ClaimID      uuid.UUID  `bun:"claim_id" json:"claim_id"`
-	OwnerID      uuid.UUID  `bun:"sa_owner_id" json:"owner_id"`
-	AccessLevel  int        `bun:"sa_access_level" json:"access_level"`
-	CreatedAt    time.Time  `bun:"sa_created_at" json:"created_at"`
-	UpdatedAt    time.Time  `bun:"sa_updated_at" json:"updated_at"`
-	DeletedAt    *time.Time `bun:"sa_deleted_at" json:"deleted_at"`
-}
-
 type Asset struct {
 	bun.BaseModel `bun:"table:asset" json:"-"`
 

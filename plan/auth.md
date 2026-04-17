@@ -1,33 +1,23 @@
-# Middleware Model Updates
+# Middleware Updates
 
-Align middleware models with samna_auth server V1 changes.
-
-## Renames
+## Model changes
 
 - `User` → `SamnaUser` (table: `samna_auth.samna_user`)
-- `AppField` → `ObjectField` (table: `ObjectField`, fields: app_id, object_type, name, description, json_schema, required, value)
-- `UserField` simplified (fields: field_id, user_id, value)
+- ObjectField added (table: `samna_auth.object_field`, synced)
+- UserField simplified (table: `samna_auth.user_field`, fields: field_id, user_id, value, synced)
+- ClientClaim removed (claims assigned via user_claim)
+- ActiveObject and ActiveUser removed (old view models)
+- ActiveClaim table binding removed (struct stays as scan target)
 
-## Removed from middleware
+## Sync
 
-- `UserApp`/`AppUser` is a prophet side concept. The middleware does not need it. Disciples work with SamnaUser only.
+- `client_claim` removed from ApplyPayload
+- `object_field` and `user_field` added to ApplyPayload
 
-## New models
+## Search
 
-- `OrganizationModule` (table: `OrganizationModule`, binds Module to Organization)
-
-## Column changes
-
-- `hook_uri` → `sync_uri` on App
-- `app_image` text replaces `asset_id`/`asset_url` on App
-- Provider: added `slug`, `type` (internal/external), `banner_url`, `logo`, `login_btn`. Removed `client_id`/`client_secret_blob`.
-- OrganizationProvider: binding table with `provider_id`, `organization_id`, `app_id`, `oauth_client_id`, `oauth_client_secret`
-- All tables have `sa_owner_id` and `sa_created_by`
+- `samna_auth.search` exposed via `db.Search(ctx, userID, query, objectTypes, accessLevel, limit, offset)`
 
 ## Client functions
 
-Update HTTP paths and request/response types to match renamed endpoints on samna_auth server.
-
-## Echo handlers
-
-Update exported handler functions to match renamed types and new endpoints (relation CRUD, access endpoints, search).
+- `GetClaimSearch` removed (search is now a standalone endpoint)
