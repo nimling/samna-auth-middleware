@@ -8,7 +8,7 @@ import (
 	"github.com/google/uuid"
 )
 
-func (d *DB) GetClientByKey(ctx context.Context, clientKey uuid.UUID) (*SamnaClient, error) {
+func (d *DB) GetClient(ctx context.Context, clientKey uuid.UUID) (*SamnaClient, error) {
 	var client SamnaClient
 	err := d.NewSelect().
 		Model(&client).

@@ -28,7 +28,7 @@ func GetRelation(ctx echo.Context) error {
 
 	userID := ctx.Get("user_id").(uuid.UUID)
 
-	relations, err := db.Instance().GetRelationByUserAndObject(ctx.Request().Context(), userID, relationID)
+	relations, err := db.Instance().GetRelation(ctx.Request().Context(), userID, relationID)
 	if err != nil {
 		ctx.Logger().Errorf("GetRelation: %v", err)
 		return RespondError(ctx, http.StatusInternalServerError, "Internal server error")

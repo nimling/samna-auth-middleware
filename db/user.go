@@ -62,7 +62,7 @@ func (d *DB) GetUserRelations(ctx context.Context, userID uuid.UUID) ([]UserRela
 	return relations, nil
 }
 
-func (d *DB) GetRelationByUserAndObject(ctx context.Context, userID uuid.UUID, objectID uuid.UUID) ([]UserRelation, error) {
+func (d *DB) GetRelation(ctx context.Context, userID uuid.UUID, objectID uuid.UUID) ([]UserRelation, error) {
 	var relations []UserRelation
 	err := d.NewSelect().
 		Model(&relations).
