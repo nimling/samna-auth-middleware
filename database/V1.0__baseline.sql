@@ -24,10 +24,15 @@ CREATE TABLE IF NOT EXISTS samna_auth.samna_user (
     config JSONB DEFAULT NULL,
     sa_deleted_at TIMESTAMP DEFAULT NULL,
     sa_created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    sa_updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    sa_updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    search_vector TSVECTOR GENERATED ALWAYS AS (
+        setweight(to_tsvector('english', COALESCE(first_name, '') || ' ' || COALESCE(last_name, '')), 'A') ||
+        setweight(to_tsvector('english', COALESCE(email, '')), 'B')
+    ) STORED
 );
 
 DROP INDEX IF EXISTS samna_auth.idx_samna_user_user_id;
+CREATE INDEX IF NOT EXISTS idx_samna_user_search ON samna_auth.samna_user USING GIN (search_vector);
 CREATE INDEX idx_samna_user_user_id ON samna_auth.samna_user(user_id);
 DROP INDEX IF EXISTS samna_auth.idx_samna_user_email;
 CREATE INDEX idx_samna_user_email ON samna_auth.samna_user(email);
@@ -46,10 +51,15 @@ CREATE TABLE IF NOT EXISTS samna_auth.claim (
     sa_root_id UUID NOT NULL,
     sa_deleted_at TIMESTAMP DEFAULT NULL,
     sa_created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    sa_updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    sa_updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    search_vector TSVECTOR GENERATED ALWAYS AS (
+        setweight(to_tsvector('english', COALESCE(name, '')), 'A') ||
+        setweight(to_tsvector('english', COALESCE(description, '')), 'B')
+    ) STORED
 );
 
 DROP INDEX IF EXISTS samna_auth.idx_claim_sa_owner_id;
+CREATE INDEX IF NOT EXISTS idx_claim_search ON samna_auth.claim USING GIN (search_vector);
 CREATE INDEX idx_claim_sa_owner_id ON samna_auth.claim(sa_owner_id);
 DROP INDEX IF EXISTS samna_auth.idx_claim_sa_root_id;
 CREATE INDEX idx_claim_sa_root_id ON samna_auth.claim(sa_root_id);
@@ -119,11 +129,16 @@ CREATE TABLE IF NOT EXISTS samna_auth.organization (
     sa_deleted_at TIMESTAMP DEFAULT NULL,
     sa_created_by UUID NOT NULL,
     sa_created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    sa_updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    sa_updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    search_vector TSVECTOR GENERATED ALWAYS AS (
+        setweight(to_tsvector('english', COALESCE(name, '')), 'A') ||
+        setweight(to_tsvector('english', COALESCE(description, '')), 'B')
+    ) STORED
 );
 
 DROP INDEX IF EXISTS samna_auth.idx_organization_sa_root_id;
 CREATE INDEX idx_organization_sa_root_id ON samna_auth.organization(sa_root_id);
+CREATE INDEX IF NOT EXISTS idx_organization_search ON samna_auth.organization USING GIN (search_vector);
 DROP INDEX IF EXISTS samna_auth.idx_organization_sa_owner_id;
 CREATE INDEX idx_organization_sa_owner_id ON samna_auth.organization(sa_owner_id);
 DROP INDEX IF EXISTS samna_auth.idx_organization_external_id;
@@ -149,10 +164,15 @@ CREATE TABLE IF NOT EXISTS samna_auth.location (
     sa_created_by UUID NOT NULL,
     sa_deleted_at TIMESTAMP DEFAULT NULL,
     sa_created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    sa_updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    sa_updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    search_vector TSVECTOR GENERATED ALWAYS AS (
+        setweight(to_tsvector('english', COALESCE(name, '')), 'A') ||
+        setweight(to_tsvector('english', COALESCE(description, '')), 'B')
+    ) STORED
 );
 
 DROP INDEX IF EXISTS samna_auth.idx_location_sa_owner_id;
+CREATE INDEX IF NOT EXISTS idx_location_search ON samna_auth.location USING GIN (search_vector);
 CREATE INDEX idx_location_sa_owner_id ON samna_auth.location(sa_owner_id);
 DROP INDEX IF EXISTS samna_auth.idx_location_sa_root_id;
 CREATE INDEX idx_location_sa_root_id ON samna_auth.location(sa_root_id);
@@ -311,21 +331,36 @@ CREATE INDEX IF NOT EXISTS idx_samna_client_app_id ON samna_auth.samna_client (a
 CREATE INDEX IF NOT EXISTS idx_samna_client_sa_owner_id ON samna_auth.samna_client (sa_owner_id);
 CREATE INDEX IF NOT EXISTS idx_samna_client_sa_deleted_at ON samna_auth.samna_client (sa_deleted_at);
 
-CREATE TABLE IF NOT EXISTS samna_auth.client_claim (
+CREATE TABLE IF NOT EXISTS samna_auth.object_field (
     id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    claim_id      UUID NOT NULL REFERENCES samna_auth.claim(id),
-    client_id     UUID NOT NULL,
-    reason        VARCHAR,
-    starts_at     TIMESTAMPTZ,
-    ends_at       TIMESTAMPTZ,
+    app_id        UUID NOT NULL,
+    object_type   TEXT NOT NULL,
+    name          TEXT NOT NULL,
+    description   TEXT,
+    json_schema   JSONB,
+    required      BOOLEAN NOT NULL DEFAULT FALSE,
+    value         TEXT,
+    sa_owner_id   UUID,
     sa_created_by UUID,
-    sa_owner_id   UUID NOT NULL,
     sa_deleted_at TIMESTAMPTZ,
     sa_created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     sa_updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE INDEX IF NOT EXISTS idx_client_claim_claim_id ON samna_auth.client_claim (claim_id);
-CREATE INDEX IF NOT EXISTS idx_client_claim_client_id ON samna_auth.client_claim (client_id);
-CREATE INDEX IF NOT EXISTS idx_client_claim_sa_owner_id ON samna_auth.client_claim (sa_owner_id);
-CREATE INDEX IF NOT EXISTS idx_client_claim_sa_deleted_at ON samna_auth.client_claim (sa_deleted_at);
+CREATE INDEX IF NOT EXISTS idx_object_field_app_id ON samna_auth.object_field (app_id);
+CREATE INDEX IF NOT EXISTS idx_object_field_object_type ON samna_auth.object_field (object_type);
+
+CREATE TABLE IF NOT EXISTS samna_auth.user_field (
+    id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    field_id      UUID NOT NULL REFERENCES samna_auth.object_field(id),
+    user_id       UUID NOT NULL,
+    value         TEXT,
+    sa_owner_id   UUID,
+    sa_created_by UUID,
+    sa_deleted_at TIMESTAMPTZ,
+    sa_created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    sa_updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_field_field_id ON samna_auth.user_field (field_id);
+CREATE INDEX IF NOT EXISTS idx_user_field_user_id ON samna_auth.user_field (user_id);

@@ -2,10 +2,8 @@ package db
 
 import (
 	"context"
-	"strings"
 
 	"github.com/google/uuid"
-	"github.com/uptrace/bun"
 )
 
 func (d *DB) GetAccess(ctx context.Context, userID uuid.UUID, objectID *uuid.UUID, accessLevel ClaimAccessLevel) (*ActiveClaim, error) {
@@ -65,26 +63,24 @@ func (d *DB) GetClaimAudit(ctx context.Context, claimID uuid.UUID) ([]Audit, err
 	return audits, nil
 }
 
-func (d *DB) GetClaimSearch(ctx context.Context, userID uuid.UUID, claimID uuid.UUID, accessLevel ClaimAccessLevel) (*Claim, error) {
-	var claim Claim
-	q := d.NewSelect().
-		Model(&claim).
-		Where("claim.id = ?", claimID).
-		Where("claim.id IN (SELECT id FROM samna_auth.get_claims(?, ?))", userID, accessLevel).
-		Where("claim.sa_deleted_at IS NULL").
-		Relation("ClaimObjects", func(q *bun.SelectQuery) *bun.SelectQuery {
-			return q.Where("claim_object.sa_deleted_at IS NULL")
-		}).
-		Relation("ClaimUsers", func(q *bun.SelectQuery) *bun.SelectQuery {
-			return q.Where("user_claim.sa_deleted_at IS NULL")
-		}).
-		Relation("Owner").
-		Limit(1)
-	err := q.Scan(ctx)
+type SearchResult struct {
+	ID          uuid.UUID `bun:"id" json:"id"`
+	ObjectType  string    `bun:"object_type" json:"object_type"`
+	Name        string    `bun:"name" json:"name"`
+	Description string    `bun:"description" json:"description"`
+	Rank        float32   `bun:"rank" json:"rank"`
+}
+
+func (d *DB) Search(ctx context.Context, userID uuid.UUID, query string, objectTypes []string, accessLevel ClaimAccessLevel, limit int, offset int) ([]SearchResult, error) {
+	var results []SearchResult
+	err := d.NewRaw(
+		`SELECT * FROM samna_auth.search(?, ?, ?::text[], ?, ?, ?)`,
+		userID, query, objectTypes, accessLevel, limit, offset,
+	).Scan(ctx, &results)
 	if err != nil {
 		return nil, err
 	}
-	return &claim, nil
+	return results, nil
 }
 
 func (d *DB) HasAccess(ctx context.Context, userID uuid.UUID, objectID *uuid.UUID, accessLevel ClaimAccessLevel) bool {
@@ -99,18 +95,6 @@ func (d *DB) GetObjectClaims(ctx context.Context, userID uuid.UUID, objectID uui
 		Where("claim.id IN (SELECT id FROM samna_auth.get_claims(?, ?))", userID, objectID).
 		Scan(ctx)
 	return claims, err
-}
-
-func (d *DB) InitAuthTables(ctx context.Context, tableNames ...string) error {
-	placeholders := make([]string, len(tableNames))
-	args := make([]interface{}, len(tableNames))
-	for i, name := range tableNames {
-		placeholders[i] = "?"
-		args[i] = name
-	}
-	query := "SELECT samna_auth.init_auth_tables(" + strings.Join(placeholders, ", ") + ")"
-	_, err := d.NewRaw(query, args...).Exec(ctx)
-	return err
 }
 
 // GetOwnerGraph returns the ownership graph for a user. The graph contains

@@ -176,7 +176,6 @@ type ClaimObject struct {
 }
 
 type ActiveClaim struct {
-	bun.BaseModel `bun:"table:samna_auth.active_claim"`
 
 	ID               uuid.UUID     `bun:"id,pk" json:"id"`
 	ClaimID          uuid.UUID     `bun:"claim_id" json:"claim_id"`
@@ -264,17 +263,33 @@ type SamnaClient struct {
 	UpdatedAt  time.Time  `bun:"sa_updated_at" json:"updated_at"`
 }
 
-type ClientClaim struct {
-	bun.BaseModel `bun:"table:samna_auth.client_claim"`
+type ObjectField struct {
+	bun.BaseModel `bun:"table:samna_auth.object_field"`
+
+	ID          uuid.UUID        `bun:"id,pk" json:"id"`
+	AppID       uuid.UUID        `bun:"app_id" json:"app_id"`
+	ObjectType  string           `bun:"object_type" json:"object_type"`
+	Name        string           `bun:"name" json:"name"`
+	Description *string          `bun:"description" json:"description"`
+	JsonSchema  *json.RawMessage `bun:"json_schema,type:jsonb" json:"json_schema"`
+	Required    bool             `bun:"required" json:"required"`
+	Value       *string          `bun:"value" json:"value"`
+	OwnerID     *uuid.UUID       `bun:"sa_owner_id" json:"owner_id"`
+	CreatedBy   *uuid.UUID       `bun:"sa_created_by" json:"created_by"`
+	DeletedAt   *time.Time       `bun:"sa_deleted_at" json:"deleted_at"`
+	CreatedAt   time.Time        `bun:"sa_created_at" json:"created_at"`
+	UpdatedAt   time.Time        `bun:"sa_updated_at" json:"updated_at"`
+}
+
+type UserField struct {
+	bun.BaseModel `bun:"table:samna_auth.user_field"`
 
 	ID        uuid.UUID  `bun:"id,pk" json:"id"`
-	ClaimID   uuid.UUID  `bun:"claim_id" json:"claim_id"`
-	ClientID  uuid.UUID  `bun:"client_id" json:"client_id"`
-	Reason    *string    `bun:"reason" json:"reason"`
-	StartsAt  *time.Time `bun:"starts_at" json:"starts_at"`
-	EndsAt    *time.Time `bun:"ends_at" json:"ends_at"`
+	FieldID   uuid.UUID  `bun:"field_id" json:"field_id"`
+	UserID    uuid.UUID  `bun:"user_id" json:"user_id"`
+	Value     *string    `bun:"value" json:"value"`
+	OwnerID   *uuid.UUID `bun:"sa_owner_id" json:"owner_id"`
 	CreatedBy *uuid.UUID `bun:"sa_created_by" json:"created_by"`
-	OwnerID   uuid.UUID  `bun:"sa_owner_id" json:"owner_id"`
 	DeletedAt *time.Time `bun:"sa_deleted_at" json:"deleted_at"`
 	CreatedAt time.Time  `bun:"sa_created_at" json:"created_at"`
 	UpdatedAt time.Time  `bun:"sa_updated_at" json:"updated_at"`

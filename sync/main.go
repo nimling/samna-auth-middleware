@@ -35,10 +35,12 @@ func ApplyPayload(ctx context.Context, payload SyncPayload) error {
 			return applyEntity[db.UserClaim](ctx, tx, payload.Obj)
 		case "claim_object":
 			return applyEntity[db.ClaimObject](ctx, tx, payload.Obj)
-		case "client_claim":
-			return applyEntity[db.ClientClaim](ctx, tx, payload.Obj)
 		case "samna_client":
 			return applyEntity[db.SamnaClient](ctx, tx, payload.Obj)
+		case "object_field":
+			return applyEntity[db.ObjectField](ctx, tx, payload.Obj)
+		case "user_field":
+			return applyEntity[db.UserField](ctx, tx, payload.Obj)
 		default:
 			return fmt.Errorf("unknown sync type: %s", payload.Type)
 		}

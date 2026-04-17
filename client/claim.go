@@ -47,15 +47,6 @@ func GetClaimAudit(ctx context.Context, claimID uuid.UUID) (io.ReadCloser, error
 	return c.client.Get(ctx, u)
 }
 
-func GetClaimSearch(ctx context.Context, claimID uuid.UUID) (io.ReadCloser, error) {
-	c := newClient()
-	u, err := joinURL(c.apiURL, "claim", claimID.String(), "search")
-	if err != nil {
-		return nil, fmt.Errorf("build url: %w", err)
-	}
-	return c.client.Get(ctx, u)
-}
-
 func PostClaim(ctx context.Context, claim db.Claim) (db.Claim, error) {
 	if utils.GetDebugUserID() != nil {
 		claim.ID = uuid.New()

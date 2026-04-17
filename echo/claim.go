@@ -100,28 +100,6 @@ func GetClaimAudit(ctx echo.Context) error {
 	return ctx.Stream(http.StatusOK, "application/json", body)
 }
 
-func GetClaimSearch(ctx echo.Context) error {
-	claimID, err := uuid.Parse(ctx.Param("id"))
-	if err != nil {
-		return RespondError(ctx, http.StatusBadRequest, "Bad request")
-	}
-
-	if debugUserID := utils.GetDebugUserID(); debugUserID != nil {
-		claim, err := db.Instance().GetClaimSearch(ctx.Request().Context(), *debugUserID, claimID, db.ACCESS_LEVEL_GUEST)
-		if err != nil {
-			return RespondJSON(ctx, http.StatusOK, []interface{}{}, nil)
-		}
-		return RespondJSON(ctx, http.StatusOK, claim, nil)
-	}
-
-	body, err := client.GetClaimSearch(ctx.Request().Context(), claimID)
-	if err != nil {
-		ctx.Logger().Errorf("GetClaimSearch: %v", err)
-		return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
-	}
-	defer body.Close()
-	return ctx.Stream(http.StatusOK, "application/json", body)
-}
 
 func PostClaim(ctx echo.Context) error {
 	var claim db.Claim

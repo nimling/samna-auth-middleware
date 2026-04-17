@@ -230,13 +230,9 @@ BEGIN
     END IF;
 
     BEGIN
-        IF TG_TABLE_NAME IN ('user_claim', 'client_claim') THEN
+        IF TG_TABLE_NAME = 'user_claim' THEN
             IF TG_OP = 'INSERT' OR (TG_OP = 'UPDATE' AND OLD.sa_deleted_at IS NULL AND NEW.sa_deleted_at IS NOT NULL) THEN
-                IF TG_TABLE_NAME = 'user_claim' THEN
-                    v_user_id := COALESCE(NEW.user_id, OLD.user_id);
-                ELSE
-                    v_user_id := COALESCE(NEW.client_id, OLD.client_id);
-                END IF;
+                v_user_id := COALESCE(NEW.user_id, OLD.user_id);
                 v_claim_id := COALESCE(NEW.claim_id, OLD.claim_id);
 
                 FOR v_reachable IN
@@ -257,7 +253,7 @@ BEGIN
         ELSIF TG_TABLE_NAME = 'claim_object' THEN
             IF TG_OP IN ('INSERT', 'UPDATE') THEN
                 FOR v_user_id IN
-                    SELECT ac.user_id FROM samna_auth.active_claim ac WHERE ac.claim_id = NEW.claim_id
+                    SELECT DISTINCT samna_auth.user_object.user_id FROM samna_auth.user_object WHERE samna_auth.user_object.claim_id = NEW.claim_id
                 LOOP
                     PERFORM samna_auth.reconcile_user_object(v_user_id, NEW.object_id, NEW.object_type);
                 END LOOP;
@@ -287,23 +283,10 @@ CREATE OR REPLACE TRIGGER sa_claim_mutation_user_claim
     AFTER INSERT OR UPDATE ON samna_auth.user_claim
     FOR EACH ROW EXECUTE FUNCTION samna_auth.tg_claim_mutation();
 
-CREATE OR REPLACE TRIGGER sa_claim_mutation_client_claim
-    AFTER INSERT OR UPDATE ON samna_auth.client_claim
-    FOR EACH ROW EXECUTE FUNCTION samna_auth.tg_claim_mutation();
-
 CREATE OR REPLACE TRIGGER update_samna_client_sa_updated_at
     BEFORE UPDATE ON samna_auth.samna_client
     FOR EACH ROW
     EXECUTE FUNCTION samna_auth.update_current_timestamp();
-
-CREATE OR REPLACE TRIGGER update_client_claim_sa_updated_at
-    BEFORE UPDATE ON samna_auth.client_claim
-    FOR EACH ROW
-    EXECUTE FUNCTION samna_auth.update_current_timestamp();
-
-CREATE OR REPLACE TRIGGER sa_audit_client_claim
-    AFTER INSERT OR UPDATE ON samna_auth.client_claim
-    FOR EACH ROW EXECUTE FUNCTION samna_auth.audit_trigger_function();
 
 -- ============================================================================
 -- tg_hierarchy_mutation (INTERNAL)
@@ -338,11 +321,9 @@ BEGIN
                 SELECT child.id FROM samna_auth.get_child_organizations(NEW.id) child
             LOOP
                 v_affected_users := ARRAY(
-                    SELECT DISTINCT ac.user_id
-                    FROM samna_auth.active_claim ac
-                    INNER JOIN samna_auth.claim_object co ON co.claim_id = ac.claim_id
-                    WHERE co.object_id = v_descendant.id AND co.object_type = 'organization'
-                      AND co.sa_deleted_at IS NULL
+                    SELECT DISTINCT samna_auth.user_object.user_id
+                    FROM samna_auth.user_object
+                    WHERE samna_auth.user_object.object_id = v_descendant.id AND samna_auth.user_object.object_type = 'organization'
                 );
                 IF v_affected_users IS NOT NULL THEN
                     FOREACH v_user_id IN ARRAY v_affected_users LOOP
@@ -356,11 +337,9 @@ BEGIN
                 SELECT child.id FROM samna_auth.get_child_locations(NEW.id) child
             LOOP
                 v_affected_users := ARRAY(
-                    SELECT DISTINCT ac.user_id
-                    FROM samna_auth.active_claim ac
-                    INNER JOIN samna_auth.claim_object co ON co.claim_id = ac.claim_id
-                    WHERE co.object_id = v_descendant.id AND co.object_type = 'location'
-                      AND co.sa_deleted_at IS NULL
+                    SELECT DISTINCT samna_auth.user_object.user_id
+                    FROM samna_auth.user_object
+                    WHERE samna_auth.user_object.object_id = v_descendant.id AND samna_auth.user_object.object_type = 'location'
                 );
                 IF v_affected_users IS NOT NULL THEN
                     FOREACH v_user_id IN ARRAY v_affected_users LOOP
