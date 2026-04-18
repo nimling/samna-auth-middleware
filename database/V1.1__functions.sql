@@ -120,6 +120,75 @@ END;
 $$ LANGUAGE plpgsql;
 
 -- ============================================================================
+-- update_claim (PUBLIC)
+-- ============================================================================
+CREATE OR REPLACE FUNCTION samna_auth.update_claim(
+    p_claim_id UUID,
+    p_name TEXT DEFAULT NULL,
+    p_description TEXT DEFAULT NULL,
+    p_sa_access_level INTEGER DEFAULT NULL,
+    p_inherits BOOLEAN DEFAULT NULL
+) RETURNS samna_auth.claim AS $$
+DECLARE
+    v_claim samna_auth.claim;
+BEGIN
+    UPDATE samna_auth.claim SET
+        name = COALESCE(p_name, name),
+        description = COALESCE(p_description, description),
+        sa_access_level = COALESCE(p_sa_access_level, sa_access_level),
+        inherits = COALESCE(p_inherits, inherits),
+        sa_updated_at = CURRENT_TIMESTAMP
+    WHERE id = p_claim_id AND sa_deleted_at IS NULL
+    RETURNING * INTO v_claim;
+    RETURN v_claim;
+END;
+$$ LANGUAGE plpgsql;
+
+-- ============================================================================
+-- update_claim_user (PUBLIC)
+-- ============================================================================
+CREATE OR REPLACE FUNCTION samna_auth.update_claim_user(
+    p_user_claim_id UUID,
+    p_reason TEXT DEFAULT NULL,
+    p_starts_at TIMESTAMPTZ DEFAULT NULL,
+    p_ends_at TIMESTAMPTZ DEFAULT NULL
+) RETURNS samna_auth.user_claim AS $$
+DECLARE
+    v_user_claim samna_auth.user_claim;
+BEGIN
+    UPDATE samna_auth.user_claim SET
+        reason = COALESCE(p_reason, reason),
+        starts_at = COALESCE(p_starts_at, starts_at),
+        ends_at = COALESCE(p_ends_at, ends_at),
+        sa_updated_at = CURRENT_TIMESTAMP
+    WHERE id = p_user_claim_id AND sa_deleted_at IS NULL
+    RETURNING * INTO v_user_claim;
+    RETURN v_user_claim;
+END;
+$$ LANGUAGE plpgsql;
+
+-- ============================================================================
+-- update_claim_object (PUBLIC)
+-- ============================================================================
+CREATE OR REPLACE FUNCTION samna_auth.update_claim_object(
+    p_claim_object_id UUID,
+    p_reason TEXT DEFAULT NULL,
+    p_inherits BOOLEAN DEFAULT NULL
+) RETURNS samna_auth.claim_object AS $$
+DECLARE
+    v_claim_object samna_auth.claim_object;
+BEGIN
+    UPDATE samna_auth.claim_object SET
+        reason = COALESCE(p_reason, reason),
+        inherits = COALESCE(p_inherits, inherits),
+        sa_updated_at = CURRENT_TIMESTAMP
+    WHERE id = p_claim_object_id AND sa_deleted_at IS NULL
+    RETURNING * INTO v_claim_object;
+    RETURN v_claim_object;
+END;
+$$ LANGUAGE plpgsql;
+
+-- ============================================================================
 -- remove_claim (PUBLIC)
 -- ============================================================================
 CREATE OR REPLACE FUNCTION samna_auth.remove_claim(

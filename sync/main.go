@@ -41,6 +41,10 @@ func ApplyPayload(ctx context.Context, payload SyncPayload) error {
 			return applyEntity[db.ObjectField](ctx, tx, payload.Obj)
 		case "user_field":
 			return applyEntity[db.UserField](ctx, tx, payload.Obj)
+		case "user_relation":
+			return applyEntity[db.UserRelation](ctx, tx, payload.Obj)
+		case "audit":
+			return applyEntity[db.Audit](ctx, tx, payload.Obj)
 		default:
 			return fmt.Errorf("unknown sync type: %s", payload.Type)
 		}

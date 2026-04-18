@@ -157,9 +157,9 @@ e.GET("/logout", saecho.GetLogout)
 
 **Location**: `GetLocations`, `GetLocation`, `GetLocationClaims`, `PostLocation`, `PutLocation`, `DeleteLocation`
 
-**Claim**: `GetClaimGraph`, `GetClaims`, `GetClaim`, `GetClaimAudit`, `GetClaimSearch`, `PostClaim`, `PutClaim`, `DeleteClaim`, `PostClaimObject`, `DeleteClaimObject`, `PostClaimUser`, `DeleteClaimUser`
+**Claim**: `GetClaimGraph`, `GetClaims`, `GetClaim`, `GetClaimAudit`, `PostClaim`, `PutClaim`, `DeleteClaim`, `PostClaimObject`, `DeleteClaimObject`, `PostClaimUser`, `DeleteClaimUser`
 
-**Me**: `GetMe`, `PutMe`, `GetMeClaims`, `PostMeAsset`, `DeleteMeAsset`, `GetMeConnections`, `GetMeModules`, `GetMeOrganizations`, `GetMeLocations`, `GetMeApps`, `GetMeApp`
+**Me**: `GetMe`, `PutMe`, `GetMeClaims`, `PostMeAsset`, `DeleteMeAsset`, `GetMeRelations`, `GetMeModules`, `GetMeOrganizations`, `GetMeLocations`, `GetMeApps`, `GetMeApp`
 
 **Asset**: `GetAssets`, `GetAsset`, `GetAssetData`, `PostAsset`, `PostAssetUpload`, `PutAsset`, `DeleteAsset`
 
@@ -203,7 +203,7 @@ The `db` package provides direct PostgreSQL access via Bun ORM with a singleton 
 
 ### Models
 
-`SamnaUser`, `Organization`, `Location`, `Claim`, `UserClaim`, `ClaimObject`, `SamnaClient`, `ClientClaim`, `ActiveClaim`, `ActiveObject`, `ActiveUser`, `GraphNode`
+`SamnaUser`, `Organization`, `Location`, `Claim`, `UserClaim`, `ClaimObject`, `SamnaClient`, `UserClaimAccess`, `ObjectField`, `UserField`, `UserRelation`, `Audit`, `UserObject`, `GraphNode`
 
 ### Access Levels
 

@@ -6,8 +6,8 @@ import (
 	"github.com/google/uuid"
 )
 
-func (d *DB) GetAccess(ctx context.Context, userID uuid.UUID, objectID *uuid.UUID, accessLevel ClaimAccessLevel) (*ActiveClaim, error) {
-	var claims []ActiveClaim
+func (d *DB) GetAccess(ctx context.Context, userID uuid.UUID, objectID *uuid.UUID, accessLevel ClaimAccessLevel) (*UserClaimAccess, error) {
+	var claims []UserClaimAccess
 	err := d.NewSelect().
 		TableExpr("samna_auth.get_access(?, ?, ?) AS claim", userID, objectID, accessLevel).
 		Column("claim.*").

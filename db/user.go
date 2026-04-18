@@ -34,8 +34,8 @@ func (d *DB) GetUsers(ctx context.Context, userID uuid.UUID, accessLevel ClaimAc
 	return users, nil
 }
 
-func (d *DB) GetUserClaims(ctx context.Context, userID uuid.UUID) ([]ActiveClaim, error) {
-	var claims []ActiveClaim
+func (d *DB) GetUserClaims(ctx context.Context, userID uuid.UUID) ([]UserClaimAccess, error) {
+	var claims []UserClaimAccess
 	err := d.NewSelect().
 		Model(&claims).
 		Relation("Objects", func(q *bun.SelectQuery) *bun.SelectQuery {
@@ -76,7 +76,7 @@ func (d *DB) GetRelation(ctx context.Context, userID uuid.UUID, objectID uuid.UU
 	return relations, nil
 }
 
-func (d *DB) UpdateUser(ctx context.Context, userID uuid.UUID, user *SamnaUser) error {
+func (d *DB) PutUser(ctx context.Context, userID uuid.UUID, user *SamnaUser) error {
 	_, err := d.NewUpdate().
 		Model(user).
 		Where("user_id = ?", userID).

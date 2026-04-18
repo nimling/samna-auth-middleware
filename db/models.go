@@ -175,7 +175,7 @@ type ClaimObject struct {
 	Owner      *Organization `bun:"rel:belongs-to,join:sa_owner_id=id" json:"owner,omitempty"`
 }
 
-type ActiveClaim struct {
+type UserClaimAccess struct {
 
 	ID               uuid.UUID     `bun:"id,pk" json:"id"`
 	ClaimID          uuid.UUID     `bun:"claim_id" json:"claim_id"`
@@ -352,7 +352,8 @@ type UserObjectEvent struct {
 type ClientState struct {
 	bun.BaseModel  `bun:"table:samna_auth.client_state"`
 
-	ID             int       `bun:"id,pk" json:"id"`
+	ID             uuid.UUID `bun:"id,pk,type:uuid,default:gen_random_uuid()" json:"id"`
+	AppID          uuid.UUID `bun:"app_id,type:uuid,notnull" json:"app_id"`
 	LastAppliedSeq int64     `bun:"last_applied_seq" json:"last_applied_seq"`
 	UpdatedAt      time.Time `bun:"sa_updated_at" json:"updated_at"`
 }

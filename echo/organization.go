@@ -139,7 +139,7 @@ func PostOrganization(ctx echo.Context) error {
 		}
 		org.CreatedBy = claims.ID
 		org.RootID = &claims.RootID
-		if err := db.Instance().CreateOrganization(ctx.Request().Context(), &org); err != nil {
+		if err := db.Instance().PostOrganization(ctx.Request().Context(), &org); err != nil {
 			ctx.Logger().Errorf("PostOrganization: %v", err)
 			return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
 		}
@@ -181,7 +181,7 @@ func PutOrganization(ctx echo.Context) error {
 		if err := ctx.Bind(&org); err != nil {
 			return RespondError(ctx, http.StatusBadRequest, "Bad request")
 		}
-		if err := db.Instance().UpdateOrganization(ctx.Request().Context(), orgID, &org); err != nil {
+		if err := db.Instance().PutOrganization(ctx.Request().Context(), orgID, &org); err != nil {
 			ctx.Logger().Errorf("PutOrganization: %v", err)
 			return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
 		}

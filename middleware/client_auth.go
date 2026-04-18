@@ -32,7 +32,7 @@ func ClientAuthMiddleware(opts *ClientAuthOptions) echo.MiddlewareFunc {
 				return ctx.String(http.StatusUnauthorized, "Unauthorized")
 			}
 
-			samnaClient, err := db.Instance().GetClientByKey(ctx.Request().Context(), clientKey)
+			samnaClient, err := db.Instance().GetClient(ctx.Request().Context(), clientKey)
 			if err != nil {
 				return ctx.String(http.StatusUnauthorized, "Unauthorized")
 			}

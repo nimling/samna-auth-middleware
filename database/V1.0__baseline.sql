@@ -7,7 +7,13 @@ EXCEPTION
 END $$;
 
 DO $$ BEGIN
-    CREATE TYPE samna_auth.user_type AS ENUM ('user', 'client');
+    CREATE TYPE samna_auth.user_type AS ENUM ('user', 'client', 'system', 'guest');
+EXCEPTION
+    WHEN duplicate_object THEN null;
+END $$;
+
+DO $$ BEGIN
+    CREATE TYPE samna_auth.user_status AS ENUM ('active', 'pending', 'suspended', 'inactive');
 EXCEPTION
     WHEN duplicate_object THEN null;
 END $$;
@@ -19,7 +25,7 @@ CREATE TABLE IF NOT EXISTS samna_auth.samna_user (
     phone VARCHAR(50),
     email VARCHAR(255) UNIQUE NOT NULL,
     user_id UUID UNIQUE NOT NULL,
-    status VARCHAR(50),
+    status samna_auth.user_status NOT NULL DEFAULT 'active',
     type samna_auth.user_type NOT NULL DEFAULT 'user',
     config JSONB DEFAULT NULL,
     sa_deleted_at TIMESTAMP DEFAULT NULL,
@@ -305,9 +311,11 @@ CREATE TABLE IF NOT EXISTS samna_auth.reconcile_queue (
 CREATE INDEX IF NOT EXISTS idx_reconcile_queue_user ON samna_auth.reconcile_queue (user_id);
 
 CREATE TABLE IF NOT EXISTS samna_auth.client_state (
-    id               int PRIMARY KEY DEFAULT 1,
+    id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    app_id           UUID NOT NULL,
     last_applied_seq bigint      NOT NULL DEFAULT 0,
-    sa_updated_at    timestamptz NOT NULL DEFAULT now()
+    sa_updated_at    timestamptz NOT NULL DEFAULT now(),
+    UNIQUE (app_id)
 );
 
 CREATE TABLE IF NOT EXISTS samna_auth.samna_client (

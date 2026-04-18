@@ -155,7 +155,7 @@ func PutUser(ctx echo.Context) error {
 		if err := ctx.Bind(&user); err != nil {
 			return RespondError(ctx, http.StatusBadRequest, "Bad request")
 		}
-		if err := db.Instance().UpdateUser(ctx.Request().Context(), userID, &user); err != nil {
+		if err := db.Instance().PutUser(ctx.Request().Context(), userID, &user); err != nil {
 			ctx.Logger().Errorf("PutUser: %v", err)
 			return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
 		}

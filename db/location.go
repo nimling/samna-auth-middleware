@@ -48,7 +48,7 @@ func (d *DB) GetParentLocations(ctx context.Context, startID uuid.UUID) ([]uuid.
 	return ids, err
 }
 
-func (d *DB) CreateLocation(ctx context.Context, loc *Location) error {
+func (d *DB) PostLocation(ctx context.Context, loc *Location) error {
 	q := d.NewInsert().
 		Model(loc).
 		Returning("*")
@@ -59,7 +59,7 @@ func (d *DB) CreateLocation(ctx context.Context, loc *Location) error {
 	return err
 }
 
-func (d *DB) UpdateLocation(ctx context.Context, locationID uuid.UUID, loc *Location) error {
+func (d *DB) PutLocation(ctx context.Context, locationID uuid.UUID, loc *Location) error {
 	_, err := d.NewUpdate().
 		Model(loc).
 		Where("id = ?", locationID).

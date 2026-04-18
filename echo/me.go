@@ -36,7 +36,7 @@ func PutMe(ctx echo.Context) error {
 		if err := ctx.Bind(&user); err != nil {
 			return RespondError(ctx, http.StatusBadRequest, "Bad request")
 		}
-		if err := db.Instance().UpdateUser(ctx.Request().Context(), *debugUserID, &user); err != nil {
+		if err := db.Instance().PutUser(ctx.Request().Context(), *debugUserID, &user); err != nil {
 			ctx.Logger().Errorf("PutMe: %v", err)
 			return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
 		}

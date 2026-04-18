@@ -48,7 +48,7 @@ func (d *DB) GetParentOrganizations(ctx context.Context, startID uuid.UUID) ([]u
 	return ids, err
 }
 
-func (d *DB) CreateOrganization(ctx context.Context, org *Organization) error {
+func (d *DB) PostOrganization(ctx context.Context, org *Organization) error {
 	q := d.NewInsert().
 		Model(org).
 		Returning("*")
@@ -59,7 +59,7 @@ func (d *DB) CreateOrganization(ctx context.Context, org *Organization) error {
 	return err
 }
 
-func (d *DB) UpdateOrganization(ctx context.Context, orgID uuid.UUID, org *Organization) error {
+func (d *DB) PutOrganization(ctx context.Context, orgID uuid.UUID, org *Organization) error {
 	_, err := d.NewUpdate().
 		Model(org).
 		Where("id = ?", orgID).

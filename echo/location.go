@@ -116,7 +116,7 @@ func PostLocation(ctx echo.Context) error {
 		}
 		loc.CreatedBy = claims.ID
 		loc.RootID = claims.RootID
-		if err := db.Instance().CreateLocation(ctx.Request().Context(), &loc); err != nil {
+		if err := db.Instance().PostLocation(ctx.Request().Context(), &loc); err != nil {
 			ctx.Logger().Errorf("PostLocation: %v", err)
 			return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
 		}
@@ -150,7 +150,7 @@ func PutLocation(ctx echo.Context) error {
 		if err := ctx.Bind(&loc); err != nil {
 			return RespondError(ctx, http.StatusBadRequest, "Bad request")
 		}
-		if err := db.Instance().UpdateLocation(ctx.Request().Context(), locationID, &loc); err != nil {
+		if err := db.Instance().PutLocation(ctx.Request().Context(), locationID, &loc); err != nil {
 			ctx.Logger().Errorf("PutLocation: %v", err)
 			return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
 		}
