@@ -6,8 +6,8 @@ import (
 
 func newClient() *SAuthClient {
 	endpoint := os.Getenv("SAUTH_ENDPOINT")
-	slug := os.Getenv("SAUTH_CLIENT_SLUG")
-	secret := os.Getenv("SAUTH_CLIENT_SECRET")
+	slug := os.Getenv("SAUTH_APP_SLUG")
+	secret := os.Getenv("SAUTH_APP_SECRET")
 
 	return &SAuthClient{
 		apiURL: endpoint + "/sam",

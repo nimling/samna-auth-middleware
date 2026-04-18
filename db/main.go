@@ -99,7 +99,7 @@ func Init(logger echo.Logger) {
 		(*UserUsers)(nil),
 		(*ObjectUsers)(nil),
 		(*UserObjectEvent)(nil),
-		(*ClientState)(nil),
+		(*DiscipleState)(nil),
 	)
 
 	if IsDebugMode() {

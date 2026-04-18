@@ -151,11 +151,11 @@ func configFromUserAuthOptions(opts *UserAuthOptions) *AuthMiddlewareConfig {
 
 	slug := opts.ClientSlug
 	if slug == "" {
-		slug = utils.GetEnv("SAUTH_CLIENT_SLUG")
+		slug = utils.GetEnv("SAUTH_APP_SLUG")
 	}
 	secret := opts.ClientSecret
 	if secret == "" {
-		secret = utils.GetEnv("SAUTH_CLIENT_SECRET")
+		secret = utils.GetEnv("SAUTH_APP_SECRET")
 	}
 	redirectURI := opts.RedirectURI
 	if redirectURI == "" {
@@ -182,15 +182,15 @@ func configFromUserAuthOptions(opts *UserAuthOptions) *AuthMiddlewareConfig {
 }
 
 func configFromEnv() *AuthMiddlewareConfig {
-	openIDUrlStr := utils.GetEnv("SAUTH_ENDPOINT") + "/api/app/" + utils.GetEnv("SAUTH_CLIENT_SLUG") + "/.well-known/openid-configuration"
+	openIDUrlStr := utils.GetEnv("SAUTH_ENDPOINT") + "/api/app/" + utils.GetEnv("SAUTH_APP_SLUG") + "/.well-known/openid-configuration"
 	openIDUrl, err := url.Parse(openIDUrlStr)
 	if err != nil {
 		panic(fmt.Errorf("failed to parse openid configuration URL: %v", err))
 	}
 
 	return &AuthMiddlewareConfig{
-		ClientSlug:       utils.GetEnv("SAUTH_CLIENT_SLUG"),
-		ClientSecret:     utils.GetEnv("SAUTH_CLIENT_SECRET"),
+		ClientSlug:       utils.GetEnv("SAUTH_APP_SLUG"),
+		ClientSecret:     utils.GetEnv("SAUTH_APP_SECRET"),
 		RedirectURI:      utils.GetEnv("SAUTH_REDIRECT_URI"),
 		OpenIDConfigURL:  *openIDUrl,
 		AuthorizedUserID: utils.GetEnvUUIDOptional("SAUTH_DEBUG_USER_ID"),

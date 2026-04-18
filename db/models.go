@@ -349,11 +349,10 @@ type UserObjectEvent struct {
 	WrittenAt  time.Time       `bun:"written_at" json:"written_at"`
 }
 
-type ClientState struct {
-	bun.BaseModel  `bun:"table:samna_auth.client_state"`
+type DiscipleState struct {
+	bun.BaseModel  `bun:"table:samna_auth.disciple_state"`
 
 	ID             uuid.UUID `bun:"id,pk,type:uuid,default:gen_random_uuid()" json:"id"`
-	AppID          uuid.UUID `bun:"app_id,type:uuid,notnull" json:"app_id"`
 	LastAppliedSeq int64     `bun:"last_applied_seq" json:"last_applied_seq"`
 	UpdatedAt      time.Time `bun:"sa_updated_at" json:"updated_at"`
 }

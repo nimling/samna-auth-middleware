@@ -310,12 +310,18 @@ CREATE TABLE IF NOT EXISTS samna_auth.reconcile_queue (
 
 CREATE INDEX IF NOT EXISTS idx_reconcile_queue_user ON samna_auth.reconcile_queue (user_id);
 
-CREATE TABLE IF NOT EXISTS samna_auth.client_state (
+CREATE TABLE IF NOT EXISTS samna_auth.prophet_state (
     id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     app_id           UUID NOT NULL,
     last_applied_seq bigint      NOT NULL DEFAULT 0,
     sa_updated_at    timestamptz NOT NULL DEFAULT now(),
     UNIQUE (app_id)
+);
+
+CREATE TABLE IF NOT EXISTS samna_auth.disciple_state (
+    id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    last_applied_seq bigint      NOT NULL DEFAULT 0,
+    sa_updated_at    timestamptz NOT NULL DEFAULT now()
 );
 
 CREATE TABLE IF NOT EXISTS samna_auth.samna_client (

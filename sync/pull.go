@@ -17,8 +17,8 @@ type SnapshotResponse struct {
 
 func PullSnapshot(ctx context.Context) error {
 	endpoint := os.Getenv("SAUTH_ENDPOINT")
-	slug := os.Getenv("SAUTH_CLIENT_SLUG")
-	secret := os.Getenv("SAUTH_CLIENT_SECRET")
+	slug := os.Getenv("SAUTH_APP_SLUG")
+	secret := os.Getenv("SAUTH_APP_SECRET")
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint+"/sam/sync/snapshot", nil)
 	if err != nil {
@@ -61,8 +61,8 @@ func PullSnapshot(ctx context.Context) error {
 
 func PullSync(ctx context.Context) error {
 	endpoint := os.Getenv("SAUTH_ENDPOINT")
-	slug := os.Getenv("SAUTH_CLIENT_SLUG")
-	secret := os.Getenv("SAUTH_CLIENT_SECRET")
+	slug := os.Getenv("SAUTH_APP_SLUG")
+	secret := os.Getenv("SAUTH_APP_SECRET")
 
 	seq, err := GetSeq(ctx)
 	if err != nil {

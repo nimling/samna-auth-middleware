@@ -28,7 +28,7 @@ func GetLogin(ctx context.Context, provider *string) (string, error) {
 	}
 
 	q := parsed.Query()
-	q.Set("client_slug", os.Getenv("SAUTH_CLIENT_SLUG"))
+	q.Set("client_slug", os.Getenv("SAUTH_APP_SLUG"))
 	parsed.RawQuery = q.Encode()
 
 	return parsed.String(), nil

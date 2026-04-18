@@ -5,8 +5,8 @@ import (
 )
 
 func VerifyRequest(slug string, secret string) bool {
-	expectedSlug := os.Getenv("SAUTH_CLIENT_SLUG")
-	expectedSecret := os.Getenv("SAUTH_CLIENT_SECRET")
+	expectedSlug := os.Getenv("SAUTH_APP_SLUG")
+	expectedSecret := os.Getenv("SAUTH_APP_SECRET")
 
 	if expectedSlug == "" || expectedSecret == "" {
 		return false

@@ -68,24 +68,37 @@ func applyEntity[T any](ctx context.Context, tx bun.Tx, raw json.RawMessage) err
 }
 
 func UpdateSeq(ctx context.Context, seq int64) error {
-	_, err := db.Instance().NewInsert().
-		Model(&db.ClientState{
-			ID:             1,
-			LastAppliedSeq: seq,
-			UpdatedAt:      time.Now(),
-		}).
-		On("CONFLICT (id) DO UPDATE").
-		Set("last_applied_seq = EXCLUDED.last_applied_seq").
-		Set("sa_updated_at = EXCLUDED.sa_updated_at").
+	count, err := db.Instance().NewSelect().
+		Model((*db.DiscipleState)(nil)).
+		Count(ctx)
+	if err != nil {
+		return err
+	}
+
+	if count == 0 {
+		_, err = db.Instance().NewInsert().
+			Model(&db.DiscipleState{
+				LastAppliedSeq: seq,
+				UpdatedAt:      time.Now(),
+			}).
+			Exec(ctx)
+		return err
+	}
+
+	_, err = db.Instance().NewUpdate().
+		Model((*db.DiscipleState)(nil)).
+		Set("last_applied_seq = ?", seq).
+		Set("sa_updated_at = ?", time.Now()).
+		Where("TRUE").
 		Exec(ctx)
 	return err
 }
 
 func GetSeq(ctx context.Context) (int64, error) {
-	var state db.ClientState
+	var state db.DiscipleState
 	err := db.Instance().NewSelect().
 		Model(&state).
-		Where("id = 1").
+		Limit(1).
 		Scan(ctx)
 	if err != nil {
 		return 0, nil
