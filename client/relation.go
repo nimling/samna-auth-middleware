@@ -3,12 +3,31 @@ package client
 import (
 	"context"
 	"fmt"
+	"io"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/nimling/samna-auth-middleware/db"
 	"github.com/nimling/samna-auth-middleware/utils"
 )
+
+func GetRelations(ctx context.Context) (io.ReadCloser, error) {
+	c := newClient()
+	u, err := joinURL(c.apiURL, "relation")
+	if err != nil {
+		return nil, fmt.Errorf("build url: %w", err)
+	}
+	return c.client.Get(ctx, u)
+}
+
+func GetRelation(ctx context.Context, relationID uuid.UUID) (io.ReadCloser, error) {
+	c := newClient()
+	u, err := joinURL(c.apiURL, "relation", relationID.String())
+	if err != nil {
+		return nil, fmt.Errorf("build url: %w", err)
+	}
+	return c.client.Get(ctx, u)
+}
 
 func PostRelation(ctx context.Context, relation db.UserRelation) (db.UserRelation, error) {
 	if utils.GetDebugUserID() != nil {
