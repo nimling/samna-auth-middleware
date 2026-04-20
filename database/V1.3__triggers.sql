@@ -308,11 +308,14 @@ BEGIN
         RETURN COALESCE(NEW, OLD);
     END IF;
 
-    IF OLD.sa_owner_id IS NOT DISTINCT FROM NEW.sa_owner_id
-       AND (NOT EXISTS(SELECT 1 FROM samna_auth.get_table_columns(TG_TABLE_SCHEMA || '.' || TG_TABLE_NAME) WHERE column_name = 'sa_parent_id')
-            OR OLD.sa_parent_id IS NOT DISTINCT FROM NEW.sa_parent_id)
-    THEN
-        RETURN NEW;
+    IF TG_TABLE_NAME = 'organization' THEN
+        IF OLD.sa_owner_id IS NOT DISTINCT FROM NEW.sa_owner_id THEN
+            RETURN NEW;
+        END IF;
+    ELSIF TG_TABLE_NAME = 'location' THEN
+        IF OLD.sa_parent_id IS NOT DISTINCT FROM NEW.sa_parent_id THEN
+            RETURN NEW;
+        END IF;
     END IF;
 
     BEGIN

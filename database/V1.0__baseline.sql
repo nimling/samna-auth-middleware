@@ -23,8 +23,8 @@ CREATE TABLE IF NOT EXISTS samna_auth.samna_user (
     first_name VARCHAR(255),
     last_name VARCHAR(255),
     phone VARCHAR(50),
-    email VARCHAR(255) UNIQUE NOT NULL,
-    user_id UUID UNIQUE NOT NULL,
+    email VARCHAR(255) UNIQUE,
+    user_id UUID UNIQUE NOT NULL DEFAULT gen_random_uuid(),
     status samna_auth.user_status NOT NULL DEFAULT 'active',
     type samna_auth.user_type NOT NULL DEFAULT 'user',
     config JSONB DEFAULT NULL,
@@ -192,14 +192,12 @@ CREATE TABLE IF NOT EXISTS samna_auth.user_relation
 (
     id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id       uuid        NOT NULL REFERENCES samna_auth.samna_user (user_id),
-    client_id     uuid,
+    app_id        uuid,
     description   text,
     object_type   varchar     NOT NULL,
     object_id     uuid        NOT NULL,
     pinned        integer,
     priority      integer,
-    sa_parent_id  uuid,
-    sibling_id    uuid,
     used_at       timestamptz          DEFAULT CURRENT_TIMESTAMP,
     sa_deleted_at timestamptz,
     sa_created_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -209,7 +207,7 @@ CREATE TABLE IF NOT EXISTS samna_auth.user_relation
 CREATE INDEX IF NOT EXISTS idx_sa_user_relation_user_id ON samna_auth.user_relation (user_id);
 CREATE INDEX IF NOT EXISTS idx_sa_user_relation_object_id ON samna_auth.user_relation (object_id);
 CREATE INDEX IF NOT EXISTS idx_sa_user_relation_object_type ON samna_auth.user_relation (object_type);
-CREATE INDEX IF NOT EXISTS idx_sa_user_relation_client_id ON samna_auth.user_relation (client_id);
+CREATE INDEX IF NOT EXISTS idx_sa_user_relation_app_id ON samna_auth.user_relation (app_id);
 CREATE INDEX IF NOT EXISTS idx_sa_user_relation_sa_deleted_at ON samna_auth.user_relation (sa_deleted_at);
 
 CREATE OR REPLACE FUNCTION samna_auth.composite_id(VARIADIC parts text[])
@@ -313,7 +311,7 @@ CREATE TABLE IF NOT EXISTS samna_auth.samna_client (
     name          TEXT NOT NULL,
     description   TEXT,
     app_id        UUID NOT NULL,
-    client_key    UUID UNIQUE NOT NULL DEFAULT gen_random_uuid(),
+    client_id     UUID UNIQUE NOT NULL DEFAULT gen_random_uuid(),
     secret_hash   TEXT NOT NULL,
     status        VARCHAR(50) NOT NULL DEFAULT 'active',
     expires_at    TIMESTAMPTZ,
@@ -324,7 +322,7 @@ CREATE TABLE IF NOT EXISTS samna_auth.samna_client (
     sa_updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE INDEX IF NOT EXISTS idx_samna_client_client_key ON samna_auth.samna_client (client_key);
+CREATE INDEX IF NOT EXISTS idx_samna_client_client_id ON samna_auth.samna_client (client_id);
 CREATE INDEX IF NOT EXISTS idx_samna_client_app_id ON samna_auth.samna_client (app_id);
 CREATE INDEX IF NOT EXISTS idx_samna_client_sa_owner_id ON samna_auth.samna_client (sa_owner_id);
 CREATE INDEX IF NOT EXISTS idx_samna_client_sa_deleted_at ON samna_auth.samna_client (sa_deleted_at);
