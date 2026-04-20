@@ -8,17 +8,17 @@ import (
 	"github.com/google/uuid"
 )
 
-func (d *DB) GetClient(ctx context.Context, clientKey uuid.UUID) (*SamnaClient, error) {
+func (d *DB) GetClient(ctx context.Context, clientID uuid.UUID) (*SamnaClient, error) {
 	var client SamnaClient
 	err := d.NewSelect().
 		Model(&client).
-		Where("client_key = ?", clientKey).
+		Where("client_id = ?", clientID).
 		Where("sa_deleted_at IS NULL").
 		Where("status = ?", "active").
 		Where("expires_at IS NULL OR expires_at > ?", time.Now()).
 		Scan(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("get client by key: %w", err)
+		return nil, fmt.Errorf("get client: %w", err)
 	}
 	return &client, nil
 }

@@ -225,7 +225,7 @@ type SamnaClient struct {
 	Name       string     `bun:"name" json:"name"`
 	Description *string   `bun:"description" json:"description"`
 	AppID      uuid.UUID  `bun:"app_id" json:"app_id"`
-	ClientKey  uuid.UUID  `bun:"client_key" json:"client_key"`
+	ClientID   uuid.UUID  `bun:"client_id" json:"client_id"`
 	SecretHash string     `bun:"secret_hash" json:"-"`
 	Status     string     `bun:"status" json:"status"`
 	ExpiresAt  *time.Time `bun:"expires_at" json:"expires_at"`
@@ -269,22 +269,20 @@ type UserField struct {
 }
 
 type UserRelation struct {
-	bun.BaseModel `bun:"table:user_relation" json:"-"`
+	bun.BaseModel `bun:"table:samna_auth.user_relation" json:"-"`
 
-	ID          uuid.UUID  `bun:"id,pk,notnull,type:uuid,default:gen_random_uuid()" json:"id"`
-	UserID      uuid.UUID  `bun:"user_id,notnull,type:uuid" json:"user_id"`
-	AppID       *uuid.UUID `bun:"app_id,type:uuid" json:"app_id"`
+	ID          uuid.UUID  `bun:"id,pk" json:"id"`
+	UserID      uuid.UUID  `bun:"user_id" json:"user_id"`
+	AppID       *uuid.UUID `bun:"app_id" json:"app_id"`
 	Description *string    `bun:"description" json:"description"`
-	ObjectType  string     `bun:"column:object_type,type:string,notnull" json:"object_type"`
-	ObjectID    uuid.UUID  `bun:"object_id,notnull,type:uuid" json:"object_id"`
+	ObjectType  string     `bun:"object_type" json:"object_type"`
+	ObjectID    uuid.UUID  `bun:"object_id" json:"object_id"`
 	Pinned      int        `bun:"pinned" json:"pinned"`
 	Priority    int        `bun:"priority" json:"priority"`
-	ParentID    *uuid.UUID `bun:"sa_parent_id,type:uuid,default:null" json:"parent_id"`
-	SiblingID   *uuid.UUID `bun:"sibling_id,type:uuid,default:null" json:"sibling_id"`
-	UsedAt      *time.Time `bun:"used_at,default:current_timestamp" json:"used_at"`
-	DeletedAt   *time.Time `bun:"sa_deleted_at,default:null" json:"deleted_at,omitempty"`
-	CreatedAt   time.Time  `bun:"sa_created_at,notnull,default:current_timestamp" json:"created_at"`
-	UpdatedAt   time.Time  `bun:"sa_updated_at,notnull,default:current_timestamp" json:"updated_at"`
+	UsedAt      *time.Time `bun:"used_at" json:"used_at"`
+	DeletedAt   *time.Time `bun:"sa_deleted_at" json:"deleted_at,omitempty"`
+	CreatedAt   time.Time  `bun:"sa_created_at" json:"created_at"`
+	UpdatedAt   time.Time  `bun:"sa_updated_at" json:"updated_at"`
 }
 
 type Audit struct {
