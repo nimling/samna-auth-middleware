@@ -98,7 +98,7 @@ func GetMeConnections(ctx context.Context) (io.ReadCloser, error) {
 
 func GetMeModules(ctx context.Context) (io.ReadCloser, error) {
 	c := newClient()
-	u, err := joinURL(c.apiURL, "me", "modules")
+	u, err := joinURL(c.apiURL, "me", "module")
 	if err != nil {
 		return nil, fmt.Errorf("build url: %w", err)
 	}
@@ -107,7 +107,7 @@ func GetMeModules(ctx context.Context) (io.ReadCloser, error) {
 
 func GetMeOrganizations(ctx context.Context) (io.ReadCloser, error) {
 	c := newClient()
-	u, err := joinURL(c.apiURL, "me", "organizations")
+	u, err := joinURL(c.apiURL, "me", "organization")
 	if err != nil {
 		return nil, fmt.Errorf("build url: %w", err)
 	}
@@ -116,7 +116,7 @@ func GetMeOrganizations(ctx context.Context) (io.ReadCloser, error) {
 
 func GetMeLocations(ctx context.Context) (io.ReadCloser, error) {
 	c := newClient()
-	u, err := joinURL(c.apiURL, "me", "locations")
+	u, err := joinURL(c.apiURL, "me", "location")
 	if err != nil {
 		return nil, fmt.Errorf("build url: %w", err)
 	}

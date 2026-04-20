@@ -22,7 +22,7 @@ func GetUserAudit(ctx context.Context, userID uuid.UUID) (io.ReadCloser, error) 
 
 func GetUserAssets(ctx context.Context, userID uuid.UUID) (io.ReadCloser, error) {
 	c := newClient()
-	u, err := joinURL(c.apiURL, "user", userID.String(), "assets")
+	u, err := joinURL(c.apiURL, "user", userID.String(), "asset")
 	if err != nil {
 		return nil, fmt.Errorf("build url: %w", err)
 	}

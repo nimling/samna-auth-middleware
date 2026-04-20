@@ -22,7 +22,7 @@ func GetLocationAudit(ctx context.Context, locationID uuid.UUID) (io.ReadCloser,
 
 func GetLocationAssets(ctx context.Context, locationID uuid.UUID) (io.ReadCloser, error) {
 	c := newClient()
-	u, err := joinURL(c.apiURL, "location", locationID.String(), "assets")
+	u, err := joinURL(c.apiURL, "location", locationID.String(), "asset")
 	if err != nil {
 		return nil, fmt.Errorf("build url: %w", err)
 	}
