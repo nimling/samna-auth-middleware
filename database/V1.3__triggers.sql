@@ -367,3 +367,47 @@ CREATE OR REPLACE TRIGGER sa_hierarchy_mutation_organization
 CREATE OR REPLACE TRIGGER sa_hierarchy_mutation_location
     AFTER UPDATE OF sa_parent_id ON samna_auth.location
     FOR EACH ROW EXECUTE FUNCTION samna_auth.tg_hierarchy_mutation();
+
+CREATE OR REPLACE FUNCTION samna_auth.tg_search_index()
+RETURNS TRIGGER AS $$
+DECLARE
+    v_vector TSVECTOR;
+BEGIN
+    IF TG_OP = 'DELETE' THEN
+        DELETE FROM samna_auth.search_index
+        WHERE object_id = OLD.id AND object_type = TG_TABLE_NAME;
+        RETURN OLD;
+    END IF;
+
+    IF TG_TABLE_NAME = 'samna_user' THEN
+        v_vector := setweight(to_tsvector('english', COALESCE(NEW.first_name, '') || ' ' || COALESCE(NEW.last_name, '')), 'A') ||
+                    setweight(to_tsvector('english', COALESCE(NEW.email, '')), 'B');
+    ELSE
+        v_vector := setweight(to_tsvector('english', COALESCE(NEW.name, '')), 'A') ||
+                    setweight(to_tsvector('english', COALESCE(NEW.description, '')), 'B');
+    END IF;
+
+    INSERT INTO samna_auth.search_index (object_id, object_type, search_vector)
+    VALUES (NEW.id, TG_TABLE_NAME, v_vector)
+    ON CONFLICT (object_id, object_type) DO UPDATE
+    SET search_vector = EXCLUDED.search_vector;
+
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE TRIGGER sa_search_index_samna_user
+    AFTER INSERT OR UPDATE ON samna_auth.samna_user
+    FOR EACH ROW EXECUTE FUNCTION samna_auth.tg_search_index();
+
+CREATE OR REPLACE TRIGGER sa_search_index_claim
+    AFTER INSERT OR UPDATE ON samna_auth.claim
+    FOR EACH ROW EXECUTE FUNCTION samna_auth.tg_search_index();
+
+CREATE OR REPLACE TRIGGER sa_search_index_organization
+    AFTER INSERT OR UPDATE ON samna_auth.organization
+    FOR EACH ROW EXECUTE FUNCTION samna_auth.tg_search_index();
+
+CREATE OR REPLACE TRIGGER sa_search_index_location
+    AFTER INSERT OR UPDATE ON samna_auth.location
+    FOR EACH ROW EXECUTE FUNCTION samna_auth.tg_search_index();

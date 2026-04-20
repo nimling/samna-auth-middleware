@@ -904,16 +904,20 @@ CREATE OR REPLACE FUNCTION samna_auth.search_objects(
     sa_location_id UUID,
     rank REAL
 ) AS $$
+DECLARE
+    v_tsquery tsquery := plainto_tsquery('english', p_query);
 BEGIN
     RETURN QUERY
-    SELECT samna_auth.user_object.object_id, samna_auth.user_object.object_type, samna_auth.user_object.sa_name, samna_auth.user_object.sa_description, samna_auth.user_object.sa_link,
-           samna_auth.user_object.sa_access_level, samna_auth.user_object.sa_owner_id, samna_auth.user_object.sa_location_id,
-           ts_rank(samna_auth.user_object.search_vector, plainto_tsquery('english', p_query)) AS rank
-    FROM samna_auth.user_object
-    WHERE samna_auth.user_object.user_id = p_user_id
-      AND samna_auth.user_object.sa_access_level <= p_access_level
-      AND (p_object_types IS NULL OR samna_auth.user_object.object_type = ANY(p_object_types))
-      AND samna_auth.user_object.search_vector @@ plainto_tsquery('english', p_query)
+    SELECT uo.object_id, uo.object_type, uo.sa_name, uo.sa_description, uo.sa_link,
+           uo.sa_access_level, uo.sa_owner_id, uo.sa_location_id,
+           ts_rank(COALESCE(ssi.search_vector, psi.search_vector), v_tsquery) AS rank
+    FROM samna_auth.user_object uo
+    LEFT JOIN samna_auth.search_index ssi ON ssi.object_id = uo.object_id AND ssi.object_type = uo.object_type
+    LEFT JOIN search_index psi ON psi.object_id = uo.object_id AND psi.object_type = uo.object_type
+    WHERE uo.user_id = p_user_id
+      AND uo.sa_access_level <= p_access_level
+      AND (p_object_types IS NULL OR uo.object_type = ANY(p_object_types))
+      AND COALESCE(ssi.search_vector, psi.search_vector) @@ v_tsquery
     ORDER BY rank DESC
     LIMIT p_limit OFFSET p_offset;
 END;
@@ -934,22 +938,24 @@ BEGIN
 
     SELECT samna_auth.organization.id, 'organization'::text,
            samna_auth.organization.name::text, samna_auth.organization.description::text,
-           ts_rank(samna_auth.organization.search_vector, v_tsquery)::real
+           ts_rank(si.search_vector, v_tsquery)::real
     FROM samna_auth.organization
+    JOIN samna_auth.search_index si ON si.object_id = samna_auth.organization.id AND si.object_type = 'organization'
     WHERE samna_auth.organization.id IN (SELECT samna_auth.get_objects(p_user_id, 'organization', p_access_level))
       AND samna_auth.organization.sa_deleted_at IS NULL
-      AND samna_auth.organization.search_vector @@ v_tsquery
+      AND si.search_vector @@ v_tsquery
       AND (p_object_types IS NULL OR 'organization' = ANY(p_object_types))
 
     UNION ALL
 
     SELECT samna_auth.location.id, 'location'::text,
            samna_auth.location.name::text, samna_auth.location.description::text,
-           ts_rank(samna_auth.location.search_vector, v_tsquery)::real
+           ts_rank(si.search_vector, v_tsquery)::real
     FROM samna_auth.location
+    JOIN samna_auth.search_index si ON si.object_id = samna_auth.location.id AND si.object_type = 'location'
     WHERE samna_auth.location.id IN (SELECT samna_auth.get_objects(p_user_id, 'location', p_access_level))
       AND samna_auth.location.sa_deleted_at IS NULL
-      AND samna_auth.location.search_vector @@ v_tsquery
+      AND si.search_vector @@ v_tsquery
       AND (p_object_types IS NULL OR 'location' = ANY(p_object_types))
 
     UNION ALL
@@ -957,22 +963,24 @@ BEGIN
     SELECT samna_auth.samna_user.id, 'user'::text,
            (COALESCE(samna_auth.samna_user.first_name, '') || ' ' || COALESCE(samna_auth.samna_user.last_name, ''))::text,
            samna_auth.samna_user.email::text,
-           ts_rank(samna_auth.samna_user.search_vector, v_tsquery)::real
+           ts_rank(si.search_vector, v_tsquery)::real
     FROM samna_auth.samna_user
+    JOIN samna_auth.search_index si ON si.object_id = samna_auth.samna_user.id AND si.object_type = 'samna_user'
     WHERE samna_auth.samna_user.user_id IN (SELECT samna_auth.get_objects(p_user_id, 'user', p_access_level))
       AND samna_auth.samna_user.sa_deleted_at IS NULL
-      AND samna_auth.samna_user.search_vector @@ v_tsquery
+      AND si.search_vector @@ v_tsquery
       AND (p_object_types IS NULL OR 'user' = ANY(p_object_types))
 
     UNION ALL
 
     SELECT samna_auth.claim.id, 'claim'::text,
            samna_auth.claim.name::text, samna_auth.claim.description::text,
-           ts_rank(samna_auth.claim.search_vector, v_tsquery)::real
+           ts_rank(si.search_vector, v_tsquery)::real
     FROM samna_auth.claim
+    JOIN samna_auth.search_index si ON si.object_id = samna_auth.claim.id AND si.object_type = 'claim'
     WHERE samna_auth.claim.id IN (SELECT samna_auth.get_objects(p_user_id, 'claim', p_access_level))
       AND samna_auth.claim.sa_deleted_at IS NULL
-      AND samna_auth.claim.search_vector @@ v_tsquery
+      AND si.search_vector @@ v_tsquery
       AND (p_object_types IS NULL OR 'claim' = ANY(p_object_types))
 
     ORDER BY rank DESC

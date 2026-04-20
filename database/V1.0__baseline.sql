@@ -30,15 +30,10 @@ CREATE TABLE IF NOT EXISTS samna_auth.samna_user (
     config JSONB DEFAULT NULL,
     sa_deleted_at TIMESTAMP DEFAULT NULL,
     sa_created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    sa_updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    search_vector TSVECTOR GENERATED ALWAYS AS (
-        setweight(to_tsvector('english', COALESCE(first_name, '') || ' ' || COALESCE(last_name, '')), 'A') ||
-        setweight(to_tsvector('english', COALESCE(email, '')), 'B')
-    ) STORED
+    sa_updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 DROP INDEX IF EXISTS samna_auth.idx_samna_user_user_id;
-CREATE INDEX IF NOT EXISTS idx_samna_user_search ON samna_auth.samna_user USING GIN (search_vector);
 CREATE INDEX idx_samna_user_user_id ON samna_auth.samna_user(user_id);
 DROP INDEX IF EXISTS samna_auth.idx_samna_user_email;
 CREATE INDEX idx_samna_user_email ON samna_auth.samna_user(email);
@@ -57,15 +52,10 @@ CREATE TABLE IF NOT EXISTS samna_auth.claim (
     sa_root_id UUID NOT NULL,
     sa_deleted_at TIMESTAMP DEFAULT NULL,
     sa_created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    sa_updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    search_vector TSVECTOR GENERATED ALWAYS AS (
-        setweight(to_tsvector('english', COALESCE(name, '')), 'A') ||
-        setweight(to_tsvector('english', COALESCE(description, '')), 'B')
-    ) STORED
+    sa_updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 DROP INDEX IF EXISTS samna_auth.idx_claim_sa_owner_id;
-CREATE INDEX IF NOT EXISTS idx_claim_search ON samna_auth.claim USING GIN (search_vector);
 CREATE INDEX idx_claim_sa_owner_id ON samna_auth.claim(sa_owner_id);
 DROP INDEX IF EXISTS samna_auth.idx_claim_sa_root_id;
 CREATE INDEX idx_claim_sa_root_id ON samna_auth.claim(sa_root_id);
@@ -135,16 +125,11 @@ CREATE TABLE IF NOT EXISTS samna_auth.organization (
     sa_deleted_at TIMESTAMP DEFAULT NULL,
     sa_created_by UUID NOT NULL,
     sa_created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    sa_updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    search_vector TSVECTOR GENERATED ALWAYS AS (
-        setweight(to_tsvector('english', COALESCE(name, '')), 'A') ||
-        setweight(to_tsvector('english', COALESCE(description, '')), 'B')
-    ) STORED
+    sa_updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 DROP INDEX IF EXISTS samna_auth.idx_organization_sa_root_id;
 CREATE INDEX idx_organization_sa_root_id ON samna_auth.organization(sa_root_id);
-CREATE INDEX IF NOT EXISTS idx_organization_search ON samna_auth.organization USING GIN (search_vector);
 DROP INDEX IF EXISTS samna_auth.idx_organization_sa_owner_id;
 CREATE INDEX idx_organization_sa_owner_id ON samna_auth.organization(sa_owner_id);
 DROP INDEX IF EXISTS samna_auth.idx_organization_external_id;
@@ -170,15 +155,10 @@ CREATE TABLE IF NOT EXISTS samna_auth.location (
     sa_created_by UUID NOT NULL,
     sa_deleted_at TIMESTAMP DEFAULT NULL,
     sa_created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    sa_updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    search_vector TSVECTOR GENERATED ALWAYS AS (
-        setweight(to_tsvector('english', COALESCE(name, '')), 'A') ||
-        setweight(to_tsvector('english', COALESCE(description, '')), 'B')
-    ) STORED
+    sa_updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 DROP INDEX IF EXISTS samna_auth.idx_location_sa_owner_id;
-CREATE INDEX IF NOT EXISTS idx_location_search ON samna_auth.location USING GIN (search_vector);
 CREATE INDEX idx_location_sa_owner_id ON samna_auth.location(sa_owner_id);
 DROP INDEX IF EXISTS samna_auth.idx_location_sa_root_id;
 CREATE INDEX idx_location_sa_root_id ON samna_auth.location(sa_root_id);
@@ -255,11 +235,7 @@ CREATE TABLE IF NOT EXISTS samna_auth.user_object (
     sa_description   text,
     sa_link          text,
     sa_created_at    timestamptz NOT NULL DEFAULT now(),
-    sa_updated_at    timestamptz NOT NULL DEFAULT now(),
-    search_vector    tsvector GENERATED ALWAYS AS (
-        setweight(to_tsvector('english', COALESCE(sa_name, '')), 'A') ||
-        setweight(to_tsvector('english', COALESCE(sa_description, '')), 'B')
-    ) STORED
+    sa_updated_at    timestamptz NOT NULL DEFAULT now()
 );
 
 CREATE INDEX IF NOT EXISTS idx_user_object_user_type ON samna_auth.user_object (user_id, object_type, sa_access_level);
@@ -267,7 +243,15 @@ CREATE INDEX IF NOT EXISTS idx_user_object_owner ON samna_auth.user_object (sa_o
 CREATE INDEX IF NOT EXISTS idx_user_object_location ON samna_auth.user_object (sa_location_id);
 CREATE INDEX IF NOT EXISTS idx_user_object_object ON samna_auth.user_object (object_id, object_type);
 CREATE INDEX IF NOT EXISTS idx_user_object_claim ON samna_auth.user_object (claim_id);
-CREATE INDEX IF NOT EXISTS idx_user_object_search ON samna_auth.user_object USING gin (search_vector);
+
+CREATE TABLE IF NOT EXISTS samna_auth.search_index (
+    object_id     UUID NOT NULL,
+    object_type   TEXT NOT NULL,
+    search_vector TSVECTOR NOT NULL,
+    PRIMARY KEY (object_id, object_type)
+);
+
+CREATE INDEX IF NOT EXISTS idx_sa_search_index_vector ON samna_auth.search_index USING GIN (search_vector);
 
 CREATE TABLE IF NOT EXISTS samna_auth.user_users (
     id                   text        NOT NULL PRIMARY KEY,
