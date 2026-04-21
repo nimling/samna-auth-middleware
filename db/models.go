@@ -175,21 +175,12 @@ type ClaimObject struct {
 	Owner      *Organization `bun:"rel:belongs-to,join:sa_owner_id=id" json:"owner,omitempty"`
 }
 
-type UserClaimAccess struct {
-
-	ID               uuid.UUID     `bun:"id,pk" json:"id"`
-	ClaimID          uuid.UUID     `bun:"claim_id" json:"claim_id"`
-	UserID           uuid.UUID     `bun:"user_id" json:"user_id"`
-	ClaimName        string        `bun:"claim_name" json:"claim_name"`
-	ClaimDescription *string       `bun:"claim_description" json:"claim_description"`
-	AccessLevel      int           `bun:"sa_access_level" json:"access_level"`
-	ClaimType        string        `bun:"claim_type" json:"claim_type"`
-	CreatedBy        *uuid.UUID    `bun:"sa_created_by" json:"created_by"`
-	ClaimCreatedBy   *uuid.UUID    `bun:"claim_sa_created_by" json:"claim_created_by"`
-	ClaimOwnerID     uuid.UUID     `bun:"claim_sa_owner_id" json:"claim_owner_id"`
-	UserOwnerID      uuid.UUID     `bun:"user_sa_owner_id" json:"user_owner_id"`
-	RootID           uuid.UUID     `bun:"sa_root_id" json:"root_id"`
-	Objects          []ClaimObject `bun:"rel:has-many,join:claim_id=claim_id" json:"claim_objects"`
+type AccessClaim struct {
+	ID          uuid.UUID `bun:"id,pk" json:"id"`
+	ClaimID     uuid.UUID `bun:"claim_id" json:"claim_id"`
+	AccessLevel int       `bun:"sa_access_level" json:"access_level"`
+	OwnerID     uuid.UUID `bun:"sa_owner_id" json:"owner_id"`
+	RootID      uuid.UUID `bun:"sa_root_id" json:"root_id"`
 }
 
 type Asset struct {

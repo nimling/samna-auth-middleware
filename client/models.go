@@ -8,6 +8,7 @@ import (
 var ErrBadRequest = errors.New("bad request")
 var ErrForbidden = errors.New("forbidden")
 var ErrNotFound = errors.New("not found")
+var ErrUnauthorized = errors.New("unauthorized")
 
 type SAuthClient struct {
 	apiURL string

@@ -12,127 +12,127 @@ func GetClients(ctx echo.Context) error {
 	body, err := client.GetClients(ctx.Request().Context())
 	if err != nil {
 		ctx.Logger().Errorf("GetClients: %v", err)
-		return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
+		return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 	}
 	defer body.Close()
 	return ctx.Stream(http.StatusOK, "application/json", body)
 }
 
-func GetSamnaClient(ctx echo.Context) error {
+func GetClient(ctx echo.Context) error {
 	clientID, err := uuid.Parse(ctx.Param("id"))
 	if err != nil {
-		return RespondError(ctx, http.StatusBadRequest, "Bad request")
+		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
 
-	body, err := client.GetSamnaClient(ctx.Request().Context(), clientID)
+	body, err := client.GetClient(ctx.Request().Context(), clientID)
 	if err != nil {
-		ctx.Logger().Errorf("GetSamnaClient: %v", err)
-		return RespondError(ctx, http.StatusNotFound, "Not found")
+		ctx.Logger().Errorf("GetClient: %v", err)
+		return respondError(ctx, http.StatusNotFound, "Not found")
 	}
 	defer body.Close()
 	return ctx.Stream(http.StatusOK, "application/json", body)
 }
 
-func PostSamnaClient(ctx echo.Context) error {
+func PostClient(ctx echo.Context) error {
 	var reqBody map[string]any
 	if err := ctx.Bind(&reqBody); err != nil {
-		return RespondError(ctx, http.StatusBadRequest, "Bad request")
+		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
 
-	body, err := client.PostSamnaClient(ctx.Request().Context(), reqBody)
+	body, err := client.PostClient(ctx.Request().Context(), reqBody)
 	if err != nil {
-		ctx.Logger().Errorf("PostSamnaClient: %v", err)
-		return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
+		ctx.Logger().Errorf("PostClient: %v", err)
+		return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 	}
 	defer body.Close()
 	return ctx.Stream(http.StatusCreated, "application/json", body)
 }
 
-func PutSamnaClient(ctx echo.Context) error {
+func PutClient(ctx echo.Context) error {
 	clientID, err := uuid.Parse(ctx.Param("id"))
 	if err != nil {
-		return RespondError(ctx, http.StatusBadRequest, "Bad request")
+		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
 
 	var reqBody map[string]any
 	if err := ctx.Bind(&reqBody); err != nil {
-		return RespondError(ctx, http.StatusBadRequest, "Bad request")
+		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
 
-	body, err := client.PutSamnaClient(ctx.Request().Context(), clientID, reqBody)
+	body, err := client.PutClient(ctx.Request().Context(), clientID, reqBody)
 	if err != nil {
-		ctx.Logger().Errorf("PutSamnaClient: %v", err)
-		return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
-	}
-	defer body.Close()
-	return ctx.Stream(http.StatusOK, "application/json", body)
-}
-
-func DeleteSamnaClient(ctx echo.Context) error {
-	clientID, err := uuid.Parse(ctx.Param("id"))
-	if err != nil {
-		return RespondError(ctx, http.StatusBadRequest, "Bad request")
-	}
-
-	body, err := client.DeleteSamnaClient(ctx.Request().Context(), clientID)
-	if err != nil {
-		ctx.Logger().Errorf("DeleteSamnaClient: %v", err)
-		return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
+		ctx.Logger().Errorf("PutClient: %v", err)
+		return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 	}
 	defer body.Close()
 	return ctx.Stream(http.StatusOK, "application/json", body)
 }
 
-func PostSamnaClientRotate(ctx echo.Context) error {
+func DeleteClient(ctx echo.Context) error {
 	clientID, err := uuid.Parse(ctx.Param("id"))
 	if err != nil {
-		return RespondError(ctx, http.StatusBadRequest, "Bad request")
+		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
 
-	body, err := client.PostSamnaClientRotate(ctx.Request().Context(), clientID)
+	body, err := client.DeleteClient(ctx.Request().Context(), clientID)
 	if err != nil {
-		ctx.Logger().Errorf("PostSamnaClientRotate: %v", err)
-		return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
+		ctx.Logger().Errorf("DeleteClient: %v", err)
+		return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 	}
 	defer body.Close()
 	return ctx.Stream(http.StatusOK, "application/json", body)
 }
 
-func PostSamnaClientClaim(ctx echo.Context) error {
+func PostClientRotate(ctx echo.Context) error {
 	clientID, err := uuid.Parse(ctx.Param("id"))
 	if err != nil {
-		return RespondError(ctx, http.StatusBadRequest, "Bad request")
+		return respondError(ctx, http.StatusBadRequest, "Bad request")
+	}
+
+	body, err := client.PostClientRotate(ctx.Request().Context(), clientID)
+	if err != nil {
+		ctx.Logger().Errorf("PostClientRotate: %v", err)
+		return respondError(ctx, http.StatusInternalServerError, "Internal server error")
+	}
+	defer body.Close()
+	return ctx.Stream(http.StatusOK, "application/json", body)
+}
+
+func PostClientClaim(ctx echo.Context) error {
+	clientID, err := uuid.Parse(ctx.Param("id"))
+	if err != nil {
+		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
 
 	var reqBody map[string]any
 	if err := ctx.Bind(&reqBody); err != nil {
-		return RespondError(ctx, http.StatusBadRequest, "Bad request")
+		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
 
-	body, err := client.PostSamnaClientClaim(ctx.Request().Context(), clientID, reqBody)
+	body, err := client.PostClientClaim(ctx.Request().Context(), clientID, reqBody)
 	if err != nil {
-		ctx.Logger().Errorf("PostSamnaClientClaim: %v", err)
-		return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
+		ctx.Logger().Errorf("PostClientClaim: %v", err)
+		return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 	}
 	defer body.Close()
 	return ctx.Stream(http.StatusCreated, "application/json", body)
 }
 
-func DeleteSamnaClientClaim(ctx echo.Context) error {
+func DeleteClientClaim(ctx echo.Context) error {
 	clientID, err := uuid.Parse(ctx.Param("id"))
 	if err != nil {
-		return RespondError(ctx, http.StatusBadRequest, "Bad request")
+		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
 
 	claimID, err := uuid.Parse(ctx.Param("claim_id"))
 	if err != nil {
-		return RespondError(ctx, http.StatusBadRequest, "Bad request")
+		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
 
-	body, err := client.DeleteSamnaClientClaim(ctx.Request().Context(), clientID, claimID)
+	body, err := client.DeleteClientClaim(ctx.Request().Context(), clientID, claimID)
 	if err != nil {
-		ctx.Logger().Errorf("DeleteSamnaClientClaim: %v", err)
-		return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
+		ctx.Logger().Errorf("DeleteClientClaim: %v", err)
+		return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 	}
 	defer body.Close()
 	return ctx.Stream(http.StatusOK, "application/json", body)

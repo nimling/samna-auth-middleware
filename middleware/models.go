@@ -86,16 +86,3 @@ type ClaimUser struct {
 	Details   []*UserDetail `json:"details,omitempty"`
 }
 
-type ResponseToken struct {
-	AccessToken      string `json:"access_token"`
-	RefreshToken     string `json:"refresh_token"`
-	AccessExpiresIn  int    `json:"access_expires_in"`
-	RefreshExpiresIn int    `json:"refresh_expires_in"`
-	TokenType        string `json:"token_type"`
-}
-
-type openIDConfiguration struct {
-	Issuer        string `json:"issuer"`
-	TokenEndpoint string `json:"token_endpoint"`
-	JwksUri       string `json:"jwks_uri"`
-}

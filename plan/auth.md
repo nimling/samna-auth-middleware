@@ -7,7 +7,7 @@
 - UserField simplified (table: `samna_auth.user_field`, fields: field_id, user_id, value, synced)
 - ClientClaim removed (claims assigned via user_claim)
 - ActiveObject and ActiveUser removed (old view models)
-- ActiveClaim renamed to UserClaimAccess (scan target for get_access and GetUserClaims)
+- ActiveClaim renamed to AccessClaim (scan target for get_access)
 
 ## Sync
 

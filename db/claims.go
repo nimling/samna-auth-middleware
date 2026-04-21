@@ -6,8 +6,8 @@ import (
 	"github.com/google/uuid"
 )
 
-func (d *DB) GetAccess(ctx context.Context, userID uuid.UUID, objectID *uuid.UUID, accessLevel ClaimAccessLevel) (*UserClaimAccess, error) {
-	var claims []UserClaimAccess
+func (d *DB) GetAccess(ctx context.Context, userID uuid.UUID, objectID *uuid.UUID, accessLevel ClaimAccessLevel) (*AccessClaim, error) {
+	var claims []AccessClaim
 	err := d.NewSelect().
 		TableExpr("samna_auth.get_access(?, ?, ?) AS claim", userID, objectID, accessLevel).
 		Column("claim.*").
@@ -84,8 +84,8 @@ func (d *DB) Search(ctx context.Context, userID uuid.UUID, query string, objectT
 }
 
 func (d *DB) HasAccess(ctx context.Context, userID uuid.UUID, objectID *uuid.UUID, accessLevel ClaimAccessLevel) bool {
-	ac, err := d.GetAccess(ctx, userID, objectID, accessLevel)
-	return err == nil && ac != nil
+	claim, err := d.GetAccess(ctx, userID, objectID, accessLevel)
+	return err == nil && claim != nil
 }
 
 func (d *DB) GetObjectClaims(ctx context.Context, userID uuid.UUID, objectID uuid.UUID) ([]Claim, error) {

@@ -17,7 +17,7 @@ func GetClients(ctx context.Context) (io.ReadCloser, error) {
 	return c.client.Get(ctx, u)
 }
 
-func GetSamnaClient(ctx context.Context, clientID uuid.UUID) (io.ReadCloser, error) {
+func GetClient(ctx context.Context, clientID uuid.UUID) (io.ReadCloser, error) {
 	c := newClient()
 	u, err := joinURL(c.apiURL, "client", clientID.String())
 	if err != nil {
@@ -26,7 +26,7 @@ func GetSamnaClient(ctx context.Context, clientID uuid.UUID) (io.ReadCloser, err
 	return c.client.Get(ctx, u)
 }
 
-func PostSamnaClient(ctx context.Context, body any) (io.ReadCloser, error) {
+func PostClient(ctx context.Context, body any) (io.ReadCloser, error) {
 	c := newClient()
 	u, err := joinURL(c.apiURL, "client")
 	if err != nil {
@@ -35,7 +35,7 @@ func PostSamnaClient(ctx context.Context, body any) (io.ReadCloser, error) {
 	return c.client.Post(ctx, body, u)
 }
 
-func PutSamnaClient(ctx context.Context, clientID uuid.UUID, body any) (io.ReadCloser, error) {
+func PutClient(ctx context.Context, clientID uuid.UUID, body any) (io.ReadCloser, error) {
 	c := newClient()
 	u, err := joinURL(c.apiURL, "client", clientID.String())
 	if err != nil {
@@ -44,7 +44,7 @@ func PutSamnaClient(ctx context.Context, clientID uuid.UUID, body any) (io.ReadC
 	return c.client.Put(ctx, body, u)
 }
 
-func DeleteSamnaClient(ctx context.Context, clientID uuid.UUID) (io.ReadCloser, error) {
+func DeleteClient(ctx context.Context, clientID uuid.UUID) (io.ReadCloser, error) {
 	c := newClient()
 	u, err := joinURL(c.apiURL, "client", clientID.String())
 	if err != nil {
@@ -53,7 +53,7 @@ func DeleteSamnaClient(ctx context.Context, clientID uuid.UUID) (io.ReadCloser, 
 	return c.client.Delete(ctx, u)
 }
 
-func PostSamnaClientRotate(ctx context.Context, clientID uuid.UUID) (io.ReadCloser, error) {
+func PostClientRotate(ctx context.Context, clientID uuid.UUID) (io.ReadCloser, error) {
 	c := newClient()
 	u, err := joinURL(c.apiURL, "client", clientID.String(), "rotate")
 	if err != nil {
@@ -62,7 +62,7 @@ func PostSamnaClientRotate(ctx context.Context, clientID uuid.UUID) (io.ReadClos
 	return c.client.Post(ctx, nil, u)
 }
 
-func PostSamnaClientClaim(ctx context.Context, clientID uuid.UUID, body any) (io.ReadCloser, error) {
+func PostClientClaim(ctx context.Context, clientID uuid.UUID, body any) (io.ReadCloser, error) {
 	c := newClient()
 	u, err := joinURL(c.apiURL, "client", clientID.String(), "claim")
 	if err != nil {
@@ -71,7 +71,7 @@ func PostSamnaClientClaim(ctx context.Context, clientID uuid.UUID, body any) (io
 	return c.client.Post(ctx, body, u)
 }
 
-func DeleteSamnaClientClaim(ctx context.Context, clientID uuid.UUID, claimID uuid.UUID) (io.ReadCloser, error) {
+func DeleteClientClaim(ctx context.Context, clientID uuid.UUID, claimID uuid.UUID) (io.ReadCloser, error) {
 	c := newClient()
 	u, err := joinURL(c.apiURL, "client", clientID.String(), "claim", claimID.String())
 	if err != nil {

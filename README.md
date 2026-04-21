@@ -203,7 +203,7 @@ The `db` package provides direct PostgreSQL access via Bun ORM with a singleton 
 
 ### Models
 
-`SamnaUser`, `Organization`, `Location`, `Claim`, `UserClaim`, `ClaimObject`, `SamnaClient`, `UserClaimAccess`, `ObjectField`, `UserField`, `UserRelation`, `Audit`, `UserObject`, `GraphNode`
+`SamnaUser`, `Organization`, `Location`, `Claim`, `UserClaim`, `ClaimObject`, `SamnaClient`, `AccessClaim`, `ObjectField`, `UserField`, `UserRelation`, `Audit`, `UserObject`, `GraphNode`
 
 ### Access Levels
 

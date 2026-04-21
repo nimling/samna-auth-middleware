@@ -7,211 +7,179 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/nimling/samna-auth-middleware/client"
 	"github.com/nimling/samna-auth-middleware/db"
+	"github.com/nimling/samna-auth-middleware/middleware"
 	"github.com/nimling/samna-auth-middleware/utils"
 )
 
 func GetMe(ctx echo.Context) error {
-	if debugUserID := utils.GetDebugUserID(); debugUserID != nil {
+	userID := ctx.Get(middleware.UserIDKey).(uuid.UUID)
+
+	if utils.GetDebugUserID() != nil {
 		relations := db.ParseWithRelations(ctx.QueryParam("with"), db.UserRelations())
-		user, err := db.Instance().GetUser(ctx.Request().Context(), *debugUserID, relations...)
+		user, err := db.Instance().GetUser(ctx.Request().Context(), userID, relations...)
 		if err != nil {
 			ctx.Logger().Errorf("GetMe: %v", err)
-			return RespondError(ctx, http.StatusNotFound, "Not found")
+			return respondError(ctx, http.StatusNotFound, "Not found")
 		}
-		return RespondJSON(ctx, http.StatusOK, user, nil)
+		return respondJSON(ctx, http.StatusOK, user, 0)
 	}
 
-	body, err := client.GetMe(ctx.Request().Context())
+	body, err := client.GetUser(ctx.Request().Context(), userID)
 	if err != nil {
 		ctx.Logger().Errorf("GetMe: %v", err)
-		return RespondError(ctx, http.StatusNotFound, "Not found")
+		return respondError(ctx, http.StatusNotFound, "Not found")
 	}
 	defer body.Close()
 	return ctx.Stream(http.StatusOK, "application/json", body)
 }
 
 func PutMe(ctx echo.Context) error {
-	if debugUserID := utils.GetDebugUserID(); debugUserID != nil {
+	userID := ctx.Get(middleware.UserIDKey).(uuid.UUID)
+
+	if utils.GetDebugUserID() != nil {
 		var user db.SamnaUser
 		if err := ctx.Bind(&user); err != nil {
-			return RespondError(ctx, http.StatusBadRequest, "Bad request")
+			return respondError(ctx, http.StatusBadRequest, "Bad request")
 		}
-		if err := db.Instance().PutUser(ctx.Request().Context(), *debugUserID, &user); err != nil {
+		if err := db.Instance().PutUser(ctx.Request().Context(), userID, &user); err != nil {
 			ctx.Logger().Errorf("PutMe: %v", err)
-			return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
+			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 		}
-		return RespondJSON(ctx, http.StatusOK, user, nil)
+		return respondJSON(ctx, http.StatusOK, user, 0)
 	}
 
 	var user db.SamnaUser
 	if err := ctx.Bind(&user); err != nil {
-		return RespondError(ctx, http.StatusBadRequest, "Bad request")
+		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
-	result, err := client.PutMe(ctx.Request().Context(), user)
+	result, err := client.PutUser(ctx.Request().Context(), userID, user)
 	if err != nil {
 		ctx.Logger().Errorf("PutMe: %v", err)
-		return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
+		return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 	}
-	return RespondJSON(ctx, http.StatusOK, result, nil)
+	return respondJSON(ctx, http.StatusOK, result, 0)
 }
 
 func GetMeClaims(ctx echo.Context) error {
-	if debugUserID := utils.GetDebugUserID(); debugUserID != nil {
-		claims, err := db.Instance().GetUserClaims(ctx.Request().Context(), *debugUserID)
+	userID := ctx.Get(middleware.UserIDKey).(uuid.UUID)
+
+	if utils.GetDebugUserID() != nil {
+		claims, err := db.Instance().GetUserClaims(ctx.Request().Context(), userID)
 		if err != nil {
 			ctx.Logger().Errorf("GetMeClaims: %v", err)
-			return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
+			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 		}
-		return RespondJSON(ctx, http.StatusOK, claims, nil)
+		return respondJSON(ctx, http.StatusOK, claims, 0)
 	}
 
-	body, err := client.GetMeClaims(ctx.Request().Context())
+	body, err := client.GetUserClaims(ctx.Request().Context(), userID)
 	if err != nil {
 		ctx.Logger().Errorf("GetMeClaims: %v", err)
-		return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
+		return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 	}
 	defer body.Close()
 	return ctx.Stream(http.StatusOK, "application/json", body)
-}
-
-func PostMeAsset(ctx echo.Context) error {
-	if utils.GetDebugUserID() != nil {
-		ctx.Logger().Errorf("PostMeAsset: not available in debug mode")
-		return RespondError(ctx, http.StatusNotImplemented, "Not implemented")
-	}
-
-	body, err := client.PostMeAsset(ctx.Request().Context(), ctx.Request().Header.Get("Content-Type"), ctx.Request().Body)
-	if err != nil {
-		ctx.Logger().Errorf("PostMeAsset: %v", err)
-		return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
-	}
-	defer body.Close()
-	return ctx.Stream(http.StatusOK, "application/json", body)
-}
-
-func DeleteMeAsset(ctx echo.Context) error {
-	if utils.GetDebugUserID() != nil {
-		ctx.Logger().Errorf("DeleteMeAsset: not available in debug mode")
-		return RespondError(ctx, http.StatusNotImplemented, "Not implemented")
-	}
-
-	assetID, err := uuid.Parse(ctx.Param("id"))
-	if err != nil {
-		return RespondError(ctx, http.StatusBadRequest, "Bad request")
-	}
-
-	err = client.DeleteMeAsset(ctx.Request().Context(), assetID)
-	if err != nil {
-		ctx.Logger().Errorf("DeleteMeAsset: %v", err)
-		return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
-	}
-	return ctx.NoContent(http.StatusOK)
 }
 
 func GetMeRelations(ctx echo.Context) error {
-	if debugUserID := utils.GetDebugUserID(); debugUserID != nil {
-		relations, err := db.Instance().GetUserRelations(ctx.Request().Context(), *debugUserID)
+	userID := ctx.Get(middleware.UserIDKey).(uuid.UUID)
+
+	if utils.GetDebugUserID() != nil {
+		relations, err := db.Instance().GetUserRelations(ctx.Request().Context(), userID)
 		if err != nil {
 			ctx.Logger().Errorf("GetMeRelations: %v", err)
-			return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
+			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 		}
-		return RespondJSON(ctx, http.StatusOK, relations, nil)
+		return respondJSON(ctx, http.StatusOK, relations, 0)
 	}
 
-	body, err := client.GetMeConnections(ctx.Request().Context())
+	body, err := client.GetUserConnections(ctx.Request().Context(), userID)
 	if err != nil {
 		ctx.Logger().Errorf("GetMeRelations: %v", err)
-		return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
-	}
-	defer body.Close()
-	return ctx.Stream(http.StatusOK, "application/json", body)
-}
-
-func GetMeModules(ctx echo.Context) error {
-	if utils.GetDebugUserID() != nil {
-		ctx.Logger().Errorf("GetMeModules: not available in debug mode")
-		return RespondError(ctx, http.StatusNotImplemented, "Not implemented")
-	}
-
-	body, err := client.GetMeModules(ctx.Request().Context())
-	if err != nil {
-		ctx.Logger().Errorf("GetMeModules: %v", err)
-		return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
+		return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 	}
 	defer body.Close()
 	return ctx.Stream(http.StatusOK, "application/json", body)
 }
 
 func GetMeOrganizations(ctx echo.Context) error {
-	if debugUserID := utils.GetDebugUserID(); debugUserID != nil {
+	userID := ctx.Get(middleware.UserIDKey).(uuid.UUID)
+
+	if utils.GetDebugUserID() != nil {
 		relations := db.ParseWithRelations(ctx.QueryParam("with"), db.OrganizationRelations())
-		orgs, err := db.Instance().GetOrganizations(ctx.Request().Context(), *debugUserID, db.ACCESS_LEVEL_GUEST, relations...)
+		orgs, err := db.Instance().GetOrganizations(ctx.Request().Context(), userID, db.ACCESS_LEVEL_GUEST, relations...)
 		if err != nil {
 			ctx.Logger().Errorf("GetMeOrganizations: %v", err)
-			return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
+			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 		}
-		return RespondJSON(ctx, http.StatusOK, orgs, nil)
+		return respondJSON(ctx, http.StatusOK, orgs, 0)
 	}
 
-	body, err := client.GetMeOrganizations(ctx.Request().Context())
+	body, err := client.GetUserOrganizations(ctx.Request().Context(), userID)
 	if err != nil {
 		ctx.Logger().Errorf("GetMeOrganizations: %v", err)
-		return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
+		return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 	}
 	defer body.Close()
 	return ctx.Stream(http.StatusOK, "application/json", body)
 }
 
 func GetMeLocations(ctx echo.Context) error {
-	if debugUserID := utils.GetDebugUserID(); debugUserID != nil {
+	userID := ctx.Get(middleware.UserIDKey).(uuid.UUID)
+
+	if utils.GetDebugUserID() != nil {
 		relations := db.ParseWithRelations(ctx.QueryParam("with"), db.LocationRelations())
-		locs, err := db.Instance().GetLocations(ctx.Request().Context(), *debugUserID, db.ACCESS_LEVEL_MEMBER, relations...)
+		locs, err := db.Instance().GetLocations(ctx.Request().Context(), userID, db.ACCESS_LEVEL_MEMBER, relations...)
 		if err != nil {
 			ctx.Logger().Errorf("GetMeLocations: %v", err)
-			return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
+			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 		}
-		return RespondJSON(ctx, http.StatusOK, locs, nil)
+		return respondJSON(ctx, http.StatusOK, locs, 0)
 	}
 
-	body, err := client.GetMeLocations(ctx.Request().Context())
+	body, err := client.GetUserLocations(ctx.Request().Context(), userID)
 	if err != nil {
 		ctx.Logger().Errorf("GetMeLocations: %v", err)
-		return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
+		return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 	}
 	defer body.Close()
 	return ctx.Stream(http.StatusOK, "application/json", body)
 }
 
-func GetMeApps(ctx echo.Context) error {
+
+func GetMeAssets(ctx echo.Context) error {
+	userID := ctx.Get(middleware.UserIDKey).(uuid.UUID)
+
 	if utils.GetDebugUserID() != nil {
-		ctx.Logger().Errorf("GetMeApps: not available in debug mode")
-		return RespondError(ctx, http.StatusNotImplemented, "Not implemented")
+		ctx.Logger().Errorf("GetMeAssets: not available in debug mode")
+		return respondError(ctx, http.StatusNotImplemented, "Not implemented")
 	}
 
-	body, err := client.GetMeApps(ctx.Request().Context())
+	body, err := client.GetUserAssets(ctx.Request().Context(), userID)
 	if err != nil {
-		ctx.Logger().Errorf("GetMeApps: %v", err)
-		return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
+		ctx.Logger().Errorf("GetMeAssets: %v", err)
+		return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 	}
 	defer body.Close()
 	return ctx.Stream(http.StatusOK, "application/json", body)
 }
 
-func GetMeApp(ctx echo.Context) error {
+func GetMeAudit(ctx echo.Context) error {
+	userID := ctx.Get(middleware.UserIDKey).(uuid.UUID)
+
 	if utils.GetDebugUserID() != nil {
-		ctx.Logger().Errorf("GetMeApp: not available in debug mode")
-		return RespondError(ctx, http.StatusNotImplemented, "Not implemented")
+		audits, err := db.Instance().GetUserAudit(ctx.Request().Context(), userID)
+		if err != nil {
+			ctx.Logger().Errorf("GetMeAudit: %v", err)
+			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
+		}
+		return respondJSON(ctx, http.StatusOK, audits, 0)
 	}
 
-	appID, err := uuid.Parse(ctx.Param("app_id"))
+	body, err := client.GetUserAudit(ctx.Request().Context(), userID)
 	if err != nil {
-		return RespondError(ctx, http.StatusBadRequest, "Bad request")
-	}
-
-	body, err := client.GetMeApp(ctx.Request().Context(), appID)
-	if err != nil {
-		ctx.Logger().Errorf("GetMeApp: %v", err)
-		return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
+		ctx.Logger().Errorf("GetMeAudit: %v", err)
+		return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 	}
 	defer body.Close()
 	return ctx.Stream(http.StatusOK, "application/json", body)

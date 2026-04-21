@@ -14,7 +14,7 @@ import (
 func GetSearch(ctx echo.Context) error {
 	query := ctx.QueryParam("q")
 	if query == "" {
-		return RespondError(ctx, http.StatusBadRequest, "q is required")
+		return respondError(ctx, http.StatusBadRequest, "q is required")
 	}
 
 	var objectTypes []string
@@ -40,15 +40,15 @@ func GetSearch(ctx echo.Context) error {
 		results, err := db.Instance().Search(ctx.Request().Context(), *debugUserID, query, objectTypes, db.ACCESS_LEVEL_GUEST, limit, offset)
 		if err != nil {
 			ctx.Logger().Errorf("GetSearch: %v", err)
-			return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
+			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 		}
-		return RespondJSON(ctx, http.StatusOK, results, nil)
+		return respondJSON(ctx, http.StatusOK, results, 0)
 	}
 
 	body, err := client.GetSearch(ctx.Request().Context(), query, objectTypes, limit, offset)
 	if err != nil {
 		ctx.Logger().Errorf("GetSearch: %v", err)
-		return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
+		return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 	}
 	defer body.Close()
 	return ctx.Stream(http.StatusOK, "application/json", body)

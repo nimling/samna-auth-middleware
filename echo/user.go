@@ -15,15 +15,15 @@ func GetUsers(ctx echo.Context) error {
 		users, err := db.Instance().GetUsers(ctx.Request().Context(), *debugUserID, db.ACCESS_LEVEL_GUEST)
 		if err != nil {
 			ctx.Logger().Errorf("GetUsers: %v", err)
-			return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
+			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 		}
-		return RespondJSON(ctx, http.StatusOK, users, nil)
+		return respondJSON(ctx, http.StatusOK, users, 0)
 	}
 
 	body, err := client.GetUsers(ctx.Request().Context())
 	if err != nil {
 		ctx.Logger().Errorf("GetUsers: %v", err)
-		return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
+		return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 	}
 	defer body.Close()
 	return ctx.Stream(http.StatusOK, "application/json", body)
@@ -32,7 +32,7 @@ func GetUsers(ctx echo.Context) error {
 func GetUser(ctx echo.Context) error {
 	userID, err := uuid.Parse(ctx.Param("id"))
 	if err != nil {
-		return RespondError(ctx, http.StatusBadRequest, "Bad request")
+		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
 
 	if utils.GetDebugUserID() != nil {
@@ -40,15 +40,15 @@ func GetUser(ctx echo.Context) error {
 		user, err := db.Instance().GetUser(ctx.Request().Context(), userID, relations...)
 		if err != nil {
 			ctx.Logger().Errorf("GetUser: %v", err)
-			return RespondError(ctx, http.StatusNotFound, "Not found")
+			return respondError(ctx, http.StatusNotFound, "Not found")
 		}
-		return RespondJSON(ctx, http.StatusOK, user, nil)
+		return respondJSON(ctx, http.StatusOK, user, 0)
 	}
 
 	body, err := client.GetUser(ctx.Request().Context(), userID)
 	if err != nil {
 		ctx.Logger().Errorf("GetUser: %v", err)
-		return RespondError(ctx, http.StatusNotFound, "Not found")
+		return respondError(ctx, http.StatusNotFound, "Not found")
 	}
 	defer body.Close()
 	return ctx.Stream(http.StatusOK, "application/json", body)
@@ -57,22 +57,22 @@ func GetUser(ctx echo.Context) error {
 func GetUserAudit(ctx echo.Context) error {
 	userID, err := uuid.Parse(ctx.Param("id"))
 	if err != nil {
-		return RespondError(ctx, http.StatusBadRequest, "Bad request")
+		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
 
 	if utils.GetDebugUserID() != nil {
 		audits, err := db.Instance().GetUserAudit(ctx.Request().Context(), userID)
 		if err != nil {
 			ctx.Logger().Errorf("GetUserAudit: %v", err)
-			return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
+			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 		}
-		return RespondJSON(ctx, http.StatusOK, audits, nil)
+		return respondJSON(ctx, http.StatusOK, audits, 0)
 	}
 
 	body, err := client.GetUserAudit(ctx.Request().Context(), userID)
 	if err != nil {
 		ctx.Logger().Errorf("GetUserAudit: %v", err)
-		return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
+		return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 	}
 	defer body.Close()
 	return ctx.Stream(http.StatusOK, "application/json", body)
@@ -81,22 +81,22 @@ func GetUserAudit(ctx echo.Context) error {
 func GetUserClaims(ctx echo.Context) error {
 	userID, err := uuid.Parse(ctx.Param("id"))
 	if err != nil {
-		return RespondError(ctx, http.StatusBadRequest, "Bad request")
+		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
 
 	if utils.GetDebugUserID() != nil {
 		claims, err := db.Instance().GetUserClaims(ctx.Request().Context(), userID)
 		if err != nil {
 			ctx.Logger().Errorf("GetUserClaims: %v", err)
-			return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
+			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 		}
-		return RespondJSON(ctx, http.StatusOK, claims, nil)
+		return respondJSON(ctx, http.StatusOK, claims, 0)
 	}
 
 	body, err := client.GetUserClaims(ctx.Request().Context(), userID)
 	if err != nil {
 		ctx.Logger().Errorf("GetUserClaims: %v", err)
-		return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
+		return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 	}
 	defer body.Close()
 	return ctx.Stream(http.StatusOK, "application/json", body)
@@ -105,22 +105,22 @@ func GetUserClaims(ctx echo.Context) error {
 func GetUserRelations(ctx echo.Context) error {
 	userID, err := uuid.Parse(ctx.Param("id"))
 	if err != nil {
-		return RespondError(ctx, http.StatusBadRequest, "Bad request")
+		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
 
 	if utils.GetDebugUserID() != nil {
 		relations, err := db.Instance().GetUserRelations(ctx.Request().Context(), userID)
 		if err != nil {
 			ctx.Logger().Errorf("GetUserRelations: %v", err)
-			return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
+			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 		}
-		return RespondJSON(ctx, http.StatusOK, relations, nil)
+		return respondJSON(ctx, http.StatusOK, relations, 0)
 	}
 
 	body, err := client.GetUserConnections(ctx.Request().Context(), userID)
 	if err != nil {
 		ctx.Logger().Errorf("GetUserRelations: %v", err)
-		return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
+		return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 	}
 	defer body.Close()
 	return ctx.Stream(http.StatusOK, "application/json", body)
@@ -129,151 +129,82 @@ func GetUserRelations(ctx echo.Context) error {
 func PostUser(ctx echo.Context) error {
 	userID, err := uuid.Parse(ctx.Param("id"))
 	if err != nil {
-		return RespondError(ctx, http.StatusBadRequest, "Bad request")
+		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
 
 	var user db.SamnaUser
 	if err := ctx.Bind(&user); err != nil {
-		return RespondError(ctx, http.StatusBadRequest, "Bad request")
+		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
 	result, err := client.PostUser(ctx.Request().Context(), userID, user)
 	if err != nil {
 		ctx.Logger().Errorf("PostUser: %v", err)
-		return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
+		return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 	}
-	return RespondJSON(ctx, http.StatusCreated, result, nil)
+	return respondJSON(ctx, http.StatusCreated, result, 0)
 }
 
 func PutUser(ctx echo.Context) error {
 	userID, err := uuid.Parse(ctx.Param("id"))
 	if err != nil {
-		return RespondError(ctx, http.StatusBadRequest, "Bad request")
+		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
 
 	if utils.GetDebugUserID() != nil {
 		var user db.SamnaUser
 		if err := ctx.Bind(&user); err != nil {
-			return RespondError(ctx, http.StatusBadRequest, "Bad request")
+			return respondError(ctx, http.StatusBadRequest, "Bad request")
 		}
 		if err := db.Instance().PutUser(ctx.Request().Context(), userID, &user); err != nil {
 			ctx.Logger().Errorf("PutUser: %v", err)
-			return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
+			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 		}
-		return RespondJSON(ctx, http.StatusOK, user, nil)
+		return respondJSON(ctx, http.StatusOK, user, 0)
 	}
 
 	var user db.SamnaUser
 	if err := ctx.Bind(&user); err != nil {
-		return RespondError(ctx, http.StatusBadRequest, "Bad request")
+		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
 	result, err := client.PutUser(ctx.Request().Context(), userID, user)
 	if err != nil {
 		ctx.Logger().Errorf("PutUser: %v", err)
-		return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
+		return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 	}
-	return RespondJSON(ctx, http.StatusOK, result, nil)
+	return respondJSON(ctx, http.StatusOK, result, 0)
 }
 
 func DeleteUser(ctx echo.Context) error {
 	userID, err := uuid.Parse(ctx.Param("id"))
 	if err != nil {
-		return RespondError(ctx, http.StatusBadRequest, "Bad request")
+		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
 
 	result, err := client.DeleteUser(ctx.Request().Context(), userID)
 	if err != nil {
 		ctx.Logger().Errorf("DeleteUser: %v", err)
-		return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
+		return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 	}
-	return RespondJSON(ctx, http.StatusOK, result, nil)
-}
-
-func GetUserApps(ctx echo.Context) error {
-	userID, err := uuid.Parse(ctx.Param("id"))
-	if err != nil {
-		return RespondError(ctx, http.StatusBadRequest, "Bad request")
-	}
-
-	if utils.GetDebugUserID() != nil {
-		ctx.Logger().Errorf("GetUserApps: not available in debug mode")
-		return RespondError(ctx, http.StatusNotImplemented, "Not implemented")
-	}
-
-	body, err := client.GetUserApps(ctx.Request().Context(), userID)
-	if err != nil {
-		ctx.Logger().Errorf("GetUserApps: %v", err)
-		return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
-	}
-	defer body.Close()
-	return ctx.Stream(http.StatusOK, "application/json", body)
-}
-
-func GetUserApp(ctx echo.Context) error {
-	userID, err := uuid.Parse(ctx.Param("id"))
-	if err != nil {
-		return RespondError(ctx, http.StatusBadRequest, "Bad request")
-	}
-
-	appID, err := uuid.Parse(ctx.Param("app_id"))
-	if err != nil {
-		return RespondError(ctx, http.StatusBadRequest, "Bad request")
-	}
-
-	if utils.GetDebugUserID() != nil {
-		ctx.Logger().Errorf("GetUserApp: not available in debug mode")
-		return RespondError(ctx, http.StatusNotImplemented, "Not implemented")
-	}
-
-	body, err := client.GetUserApp(ctx.Request().Context(), userID, appID)
-	if err != nil {
-		ctx.Logger().Errorf("GetUserApp: %v", err)
-		return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
-	}
-	defer body.Close()
-	return ctx.Stream(http.StatusOK, "application/json", body)
+	return respondJSON(ctx, http.StatusOK, result, 0)
 }
 
 func GetUserAssets(ctx echo.Context) error {
 	userID, err := uuid.Parse(ctx.Param("id"))
 	if err != nil {
-		return RespondError(ctx, http.StatusBadRequest, "Bad request")
+		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
 
 	if utils.GetDebugUserID() != nil {
 		ctx.Logger().Errorf("GetUserAssets: not available in debug mode")
-		return RespondError(ctx, http.StatusNotImplemented, "Not implemented")
+		return respondError(ctx, http.StatusNotImplemented, "Not implemented")
 	}
 
 	body, err := client.GetUserAssets(ctx.Request().Context(), userID)
 	if err != nil {
 		ctx.Logger().Errorf("GetUserAssets: %v", err)
-		return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
+		return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 	}
 	defer body.Close()
 	return ctx.Stream(http.StatusOK, "application/json", body)
 }
 
-func PutUserApp(ctx echo.Context) error {
-	userID, err := uuid.Parse(ctx.Param("id"))
-	if err != nil {
-		return RespondError(ctx, http.StatusBadRequest, "Bad request")
-	}
-
-	appID, err := uuid.Parse(ctx.Param("app_id"))
-	if err != nil {
-		return RespondError(ctx, http.StatusBadRequest, "Bad request")
-	}
-
-	if utils.GetDebugUserID() != nil {
-		ctx.Logger().Errorf("PutUserApp: not available in debug mode")
-		return RespondError(ctx, http.StatusNotImplemented, "Not implemented")
-	}
-
-	body, err := client.PutUserApp(ctx.Request().Context(), userID, appID, nil)
-	if err != nil {
-		ctx.Logger().Errorf("PutUserApp: %v", err)
-		return RespondError(ctx, http.StatusInternalServerError, "Internal server error")
-	}
-	defer body.Close()
-	return ctx.Stream(http.StatusOK, "application/json", body)
-}

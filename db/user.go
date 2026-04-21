@@ -4,7 +4,6 @@ import (
 	"context"
 
 	"github.com/google/uuid"
-	"github.com/uptrace/bun"
 )
 
 func (d *DB) GetUser(ctx context.Context, userID uuid.UUID, relations ...RelationFunc) (*SamnaUser, error) {
@@ -34,14 +33,13 @@ func (d *DB) GetUsers(ctx context.Context, userID uuid.UUID, accessLevel ClaimAc
 	return users, nil
 }
 
-func (d *DB) GetUserClaims(ctx context.Context, userID uuid.UUID) ([]UserClaimAccess, error) {
-	var claims []UserClaimAccess
+func (d *DB) GetUserClaims(ctx context.Context, userID uuid.UUID) ([]UserClaim, error) {
+	var claims []UserClaim
 	err := d.NewSelect().
 		Model(&claims).
-		Relation("Objects", func(q *bun.SelectQuery) *bun.SelectQuery {
-			return q.Where("sa_deleted_at IS NULL")
-		}).
-		Where("user_id = ?", userID).
+		Relation("Owner").
+		Where("user_claim.user_id = ?", userID).
+		Where("user_claim.sa_deleted_at IS NULL").
 		Scan(ctx)
 	if err != nil {
 		return nil, err
