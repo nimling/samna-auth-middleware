@@ -23,7 +23,7 @@ CREATE TABLE IF NOT EXISTS samna_auth.samna_user (
     first_name VARCHAR(255),
     last_name VARCHAR(255),
     phone VARCHAR(50),
-    email VARCHAR(255) UNIQUE,
+    email VARCHAR(255),
     user_id UUID UNIQUE NOT NULL DEFAULT gen_random_uuid(),
     status samna_auth.user_status NOT NULL DEFAULT 'active',
     type samna_auth.user_type NOT NULL DEFAULT 'user',
