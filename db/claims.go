@@ -83,6 +83,18 @@ func (d *DB) Search(ctx context.Context, userID uuid.UUID, query string, objectT
 	return results, nil
 }
 
+func (d *DB) GetAudit(ctx context.Context, userID uuid.UUID, accessLevel ClaimAccessLevel) ([]Audit, error) {
+	var audits []Audit
+	err := d.NewSelect().
+		TableExpr("samna_auth.get_audit(?, ?) AS audit", userID, accessLevel).
+		Column("audit.*").
+		Scan(ctx, &audits)
+	if err != nil {
+		return nil, err
+	}
+	return audits, nil
+}
+
 func (d *DB) HasAccess(ctx context.Context, userID uuid.UUID, objectID *uuid.UUID, accessLevel ClaimAccessLevel) bool {
 	claim, err := d.GetAccess(ctx, userID, objectID, accessLevel)
 	return err == nil && claim != nil

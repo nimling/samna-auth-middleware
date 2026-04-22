@@ -789,6 +789,25 @@ END;
 $$ LANGUAGE plpgsql STABLE;
 
 -- ============================================================================
+-- get_audit (PUBLIC)
+-- ============================================================================
+CREATE OR REPLACE FUNCTION samna_auth.get_audit(
+    p_user_id UUID,
+    p_access_level INTEGER DEFAULT 8
+) RETURNS SETOF samna_auth.audit AS $$
+BEGIN
+    RETURN QUERY
+    SELECT a.* FROM samna_auth.audit a
+    WHERE a.sa_owner_id IN (
+        SELECT samna_auth.user_object.object_id FROM samna_auth.user_object
+        WHERE samna_auth.user_object.user_id = p_user_id
+          AND samna_auth.user_object.object_type = 'organization'
+          AND samna_auth.user_object.sa_access_level <= p_access_level
+    );
+END;
+$$ LANGUAGE plpgsql STABLE;
+
+-- ============================================================================
 -- INIT (PUBLIC)
 -- ============================================================================
 

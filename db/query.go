@@ -26,3 +26,10 @@ func ObjectWhere(userID uuid.UUID, objectType string, accessLevel ClaimAccessLev
 		userID, accessLevel, objectType,
 	)
 }
+
+func AuditWhere(userID uuid.UUID, accessLevel ClaimAccessLevel) string {
+	return fmt.Sprintf(
+		`id IN (SELECT id FROM samna_auth.get_audit('%[1]s', %[2]d))`,
+		userID, accessLevel,
+	)
+}
