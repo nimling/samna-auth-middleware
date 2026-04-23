@@ -557,6 +557,7 @@ CREATE OR REPLACE FUNCTION samna_auth.reconcile_user_object(
 DECLARE
     v_computed RECORD;
     v_id TEXT;
+    v_other_user_id UUID;
 BEGIN
     DELETE FROM samna_auth.user_object
     WHERE user_id = p_user_id AND object_id = p_object_id AND object_type = p_object_type;
@@ -586,6 +587,31 @@ BEGIN
         samna_auth.composite_id(p_object_id::text, p_object_type, p_user_id::text),
         p_object_id, p_object_type, p_user_id
     ) ON CONFLICT (id) DO NOTHING;
+
+    FOR v_other_user_id IN
+        SELECT ou.user_id FROM samna_auth.object_users ou
+        WHERE ou.object_id = p_object_id AND ou.object_type = p_object_type AND ou.user_id <> p_user_id
+    LOOP
+        INSERT INTO samna_auth.user_users (id, viewer_id, target_user_id)
+        VALUES (
+            samna_auth.composite_id(p_user_id::text, v_other_user_id::text),
+            p_user_id,
+            v_other_user_id
+        )
+        ON CONFLICT (id) DO UPDATE SET
+            last_shared_at = now(),
+            sharing_object_count = samna_auth.user_users.sharing_object_count + 1;
+
+        INSERT INTO samna_auth.user_users (id, viewer_id, target_user_id)
+        VALUES (
+            samna_auth.composite_id(v_other_user_id::text, p_user_id::text),
+            v_other_user_id,
+            p_user_id
+        )
+        ON CONFLICT (id) DO UPDATE SET
+            last_shared_at = now(),
+            sharing_object_count = samna_auth.user_users.sharing_object_count + 1;
+    END LOOP;
 END;
 $$ LANGUAGE plpgsql;
 

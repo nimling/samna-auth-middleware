@@ -2,6 +2,8 @@ package middleware
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/base64"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -10,6 +12,29 @@ import (
 	"github.com/nimling/samna-auth-middleware/client"
 	"github.com/nimling/samna-auth-middleware/utils"
 )
+
+func generateCSRFToken() (string, error) {
+	b := make([]byte, 32)
+	_, err := rand.Read(b)
+	if err != nil {
+		return "", err
+	}
+	return base64.URLEncoding.EncodeToString(b), nil
+}
+
+func writeCSRFCookie(ctx echo.Context) {
+	token, err := generateCSRFToken()
+	if err != nil {
+		ctx.Logger().Errorf("Failed to generate CSRF token: %v", err)
+		return
+	}
+	utils.WritePublicCookie(ctx, &http.Cookie{
+		Name:   csrfTokenCookieKey,
+		Value:  token,
+		Path:   "/",
+		MaxAge: 86400,
+	})
+}
 
 func refreshTokens(ctx echo.Context, config AuthMiddlewareConfig) (*client.ResponseToken, error) {
 	cookie, err := ctx.Cookie(refreshTokenCookieKey)
@@ -46,6 +71,8 @@ func refreshTokens(ctx echo.Context, config AuthMiddlewareConfig) (*client.Respo
 		})
 	}
 
+	writeCSRFCookie(ctx)
+
 	return tokenResp, nil
 }
 
@@ -73,6 +100,8 @@ func exchangeAuthorizationCode(ctx echo.Context, authCode string, config AuthMid
 		Path:   "/",
 		MaxAge: 30 * 24 * 3600,
 	})
+
+	writeCSRFCookie(ctx)
 
 	return nil
 }

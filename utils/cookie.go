@@ -34,6 +34,30 @@ func WriteCookie(ctx echo.Context, cookie *http.Cookie) {
 	ctx.SetCookie(cookie)
 }
 
+func WritePublicCookie(ctx echo.Context, cookie *http.Cookie) {
+	domain := os.Getenv("SAUTH_COOKIE_DOMAIN")
+	host := strings.Split(domain, ":")[0]
+	secure := true
+
+	if host == "localhost" {
+		domain = ""
+		secure = false
+	}
+
+	cookie = &http.Cookie{
+		Name:     cookie.Name,
+		Value:    cookie.Value,
+		HttpOnly: false,
+		Secure:   secure,
+		SameSite: http.SameSiteLaxMode,
+		Path:     cookie.Path,
+		MaxAge:   cookie.MaxAge,
+		Domain:   domain,
+	}
+
+	ctx.SetCookie(cookie)
+}
+
 func ClearCookie(ctx echo.Context, name string) {
 	domain := os.Getenv("SAUTH_COOKIE_DOMAIN")
 	host := strings.Split(domain, ":")[0]

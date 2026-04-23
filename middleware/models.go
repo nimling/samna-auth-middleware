@@ -17,6 +17,7 @@ const authCodeParamKey = "sauth_auth_code"
 const (
 	accessTokenCookieKey  = "sauth_access_token"
 	refreshTokenCookieKey = "sauth_refresh_token"
+	csrfTokenCookieKey    = "sauth_csrf_token"
 )
 
 type AuthError string
