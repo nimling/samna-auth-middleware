@@ -134,6 +134,7 @@ RETURNS TRIGGER AS $$
 DECLARE
     v_table text := TG_TABLE_SCHEMA || '.' || TG_TABLE_NAME;
     v_object_type text := TG_TABLE_NAME;
+    v_object_id uuid;
     v_user_id uuid;
     v_other_user_id uuid;
     v_affected_users uuid[];
@@ -141,6 +142,12 @@ DECLARE
 BEGIN
     IF current_setting('samna_auth.replay_mode', true) = 'true' THEN
         RETURN COALESCE(NEW, OLD);
+    END IF;
+
+    IF TG_TABLE_NAME = 'samna_user' THEN
+        EXECUTE format('SELECT ($1).user_id') INTO v_object_id USING CASE WHEN TG_OP = 'DELETE' THEN OLD ELSE NEW END;
+    ELSE
+        v_object_id := CASE WHEN TG_OP = 'DELETE' THEN OLD.id ELSE NEW.id END;
     END IF;
 
     IF TG_OP = 'UPDATE' THEN
@@ -155,7 +162,7 @@ BEGIN
         v_affected_users := samna_auth.find_affected_users_for_row(
             v_table,
             v_object_type,
-            CASE WHEN TG_OP = 'DELETE' THEN OLD.id ELSE NEW.id END,
+            v_object_id,
             CASE WHEN TG_OP = 'DELETE' THEN OLD.sa_owner_id ELSE NEW.sa_owner_id END
         );
 
@@ -163,7 +170,7 @@ BEGIN
             FOREACH v_user_id IN ARRAY v_affected_users LOOP
                 PERFORM samna_auth.reconcile_user_object(
                     v_user_id,
-                    CASE WHEN TG_OP = 'DELETE' THEN OLD.id ELSE NEW.id END,
+                    v_object_id,
                     v_object_type
                 );
             END LOOP;
@@ -198,9 +205,9 @@ BEGIN
         BEGIN
             INSERT INTO samna_auth.reconcile_queue (id, user_id, object_id, object_type)
             SELECT
-                samna_auth.composite_id(u::text, (CASE WHEN TG_OP = 'DELETE' THEN OLD.id ELSE NEW.id END)::text, v_object_type),
+                samna_auth.composite_id(u::text, v_object_id::text, v_object_type),
                 u,
-                CASE WHEN TG_OP = 'DELETE' THEN OLD.id ELSE NEW.id END,
+                v_object_id,
                 v_object_type
             FROM unnest(v_affected_users) u
             ON CONFLICT (id) DO NOTHING;
@@ -375,10 +382,17 @@ CREATE OR REPLACE FUNCTION samna_auth.tg_search_index()
 RETURNS TRIGGER AS $$
 DECLARE
     v_vector TSVECTOR;
+    v_object_id UUID;
 BEGIN
+    IF TG_TABLE_NAME = 'samna_user' THEN
+        EXECUTE format('SELECT ($1).user_id') INTO v_object_id USING CASE WHEN TG_OP = 'DELETE' THEN OLD ELSE NEW END;
+    ELSE
+        v_object_id := CASE WHEN TG_OP = 'DELETE' THEN OLD.id ELSE NEW.id END;
+    END IF;
+
     IF TG_OP = 'DELETE' THEN
         DELETE FROM samna_auth.search_index
-        WHERE object_id = OLD.id AND object_type = TG_TABLE_NAME;
+        WHERE object_id = v_object_id AND object_type = TG_TABLE_NAME;
         RETURN OLD;
     END IF;
 
@@ -391,7 +405,7 @@ BEGIN
     END IF;
 
     INSERT INTO samna_auth.search_index (object_id, object_type, search_vector)
-    VALUES (NEW.id, TG_TABLE_NAME, v_vector)
+    VALUES (v_object_id, TG_TABLE_NAME, v_vector)
     ON CONFLICT (object_id, object_type) DO UPDATE
     SET search_vector = EXCLUDED.search_vector;
 

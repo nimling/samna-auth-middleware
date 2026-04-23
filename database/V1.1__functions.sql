@@ -4,7 +4,7 @@
 
 -- ============================================================================
 -- create_claim (PUBLIC)
--- Creates a new claim and returns its id.
+-- Creates a new claim and returns the full row.
 -- ============================================================================
 CREATE OR REPLACE FUNCTION samna_auth.create_claim(
     p_name TEXT,
@@ -15,9 +15,9 @@ CREATE OR REPLACE FUNCTION samna_auth.create_claim(
     p_sa_created_by UUID,
     p_inherits BOOLEAN DEFAULT TRUE,
     p_type samna_auth.claim_type DEFAULT 'user'
-) RETURNS UUID AS $$
+) RETURNS samna_auth.claim AS $$
 DECLARE
-    v_claim_id UUID;
+    v_claim samna_auth.claim;
 BEGIN
     INSERT INTO samna_auth.claim (
         name, description, sa_access_level, sa_owner_id, sa_root_id,
@@ -26,14 +26,14 @@ BEGIN
         p_name, p_description, p_sa_access_level, p_sa_owner_id, p_sa_root_id,
         p_sa_created_by, p_inherits, p_type
     )
-    RETURNING id INTO v_claim_id;
-    RETURN v_claim_id;
+    RETURNING * INTO v_claim;
+    RETURN v_claim;
 END;
 $$ LANGUAGE plpgsql;
 
 -- ============================================================================
 -- assign_claim_user (PUBLIC)
--- Grants a claim to a user and returns the user_claim id.
+-- Grants a claim to a user and returns the full row.
 -- ============================================================================
 CREATE OR REPLACE FUNCTION samna_auth.assign_claim_user(
     p_claim_id UUID,
@@ -43,23 +43,23 @@ CREATE OR REPLACE FUNCTION samna_auth.assign_claim_user(
     p_reason TEXT DEFAULT NULL,
     p_starts_at TIMESTAMP DEFAULT NULL,
     p_ends_at TIMESTAMP DEFAULT NULL
-) RETURNS UUID AS $$
+) RETURNS samna_auth.user_claim AS $$
 DECLARE
-    v_user_claim_id UUID;
+    v_user_claim samna_auth.user_claim;
 BEGIN
     INSERT INTO samna_auth.user_claim (
         claim_id, user_id, sa_owner_id, sa_created_by, reason, starts_at, ends_at
     ) VALUES (
         p_claim_id, p_user_id, p_sa_owner_id, p_sa_created_by, p_reason, p_starts_at, p_ends_at
     )
-    RETURNING id INTO v_user_claim_id;
-    RETURN v_user_claim_id;
+    RETURNING * INTO v_user_claim;
+    RETURN v_user_claim;
 END;
 $$ LANGUAGE plpgsql;
 
 -- ============================================================================
 -- assign_claim_object (PUBLIC)
--- Binds a claim to an object and returns the claim_object id.
+-- Binds a claim to an object and returns the full row.
 -- ============================================================================
 CREATE OR REPLACE FUNCTION samna_auth.assign_claim_object(
     p_claim_id UUID,
@@ -73,9 +73,9 @@ CREATE OR REPLACE FUNCTION samna_auth.assign_claim_object(
     p_reason TEXT DEFAULT NULL,
     p_ref_id UUID DEFAULT NULL,
     p_function TEXT DEFAULT NULL
-) RETURNS UUID AS $$
+) RETURNS samna_auth.claim_object AS $$
 DECLARE
-    v_claim_object_id UUID;
+    v_claim_object samna_auth.claim_object;
 BEGIN
     INSERT INTO samna_auth.claim_object (
         claim_id, object_id, object_type, sa_owner_id, sa_root_id, sa_created_by,
@@ -84,8 +84,8 @@ BEGIN
         p_claim_id, p_object_id, p_object_type, p_sa_owner_id, p_sa_root_id, p_sa_created_by,
         p_level, p_inherits, p_reason, p_ref_id, p_function
     )
-    RETURNING id INTO v_claim_object_id;
-    RETURN v_claim_object_id;
+    RETURNING * INTO v_claim_object;
+    RETURN v_claim_object;
 END;
 $$ LANGUAGE plpgsql;
 
@@ -220,12 +220,12 @@ DECLARE
     v_target samna_auth.samna_user;
     v_source samna_auth.samna_user;
 BEGIN
-    SELECT * INTO v_target FROM samna_auth.samna_user WHERE id = p_target_id AND sa_deleted_at IS NULL;
+    SELECT * INTO v_target FROM samna_auth.samna_user WHERE user_id = p_target_id AND sa_deleted_at IS NULL;
     IF NOT FOUND THEN
         RAISE EXCEPTION 'target user % not found', p_target_id;
     END IF;
 
-    SELECT * INTO v_source FROM samna_auth.samna_user WHERE id = p_source_id AND sa_deleted_at IS NULL;
+    SELECT * INTO v_source FROM samna_auth.samna_user WHERE user_id = p_source_id AND sa_deleted_at IS NULL;
     IF NOT FOUND THEN
         RAISE EXCEPTION 'source user % not found', p_source_id;
     END IF;
@@ -237,7 +237,7 @@ BEGIN
         phone = COALESCE(NULLIF(v_source.phone, ''), v_target.phone),
         status = 'active',
         sa_updated_at = v_now
-    WHERE id = p_target_id;
+    WHERE user_id = p_target_id;
 
     UPDATE samna_auth.user_claim
     SET user_id = p_target_id, sa_updated_at = v_now
@@ -261,7 +261,7 @@ BEGIN
 
     UPDATE samna_auth.samna_user
     SET sa_deleted_at = v_now, sa_updated_at = v_now
-    WHERE id = p_source_id;
+    WHERE user_id = p_source_id;
 END;
 $$ LANGUAGE plpgsql;
 
@@ -777,13 +777,13 @@ BEGIN
     SELECT u.* FROM samna_auth.samna_user u WHERE u.user_id = p_user_id
     UNION
     SELECT u.* FROM samna_auth.samna_user u
-    WHERE u.sa_deleted_at IS NULL AND u.id IN (
+    WHERE u.sa_deleted_at IS NULL AND u.user_id IN (
         SELECT samna_auth.user_object.object_id FROM samna_auth.user_object
         WHERE samna_auth.user_object.user_id = p_user_id AND samna_auth.user_object.object_type = 'user'
           AND samna_auth.user_object.sa_access_level <= p_access_level)
     UNION
     SELECT u.* FROM samna_auth.samna_user u
-    JOIN samna_auth.user_users uu ON uu.target_user_id = u.id
+    JOIN samna_auth.user_users uu ON uu.target_user_id = u.user_id
     WHERE u.sa_deleted_at IS NULL AND uu.viewer_id = p_user_id;
 END;
 $$ LANGUAGE plpgsql STABLE;
@@ -1149,12 +1149,12 @@ BEGIN
 
     UNION ALL
 
-    SELECT u.id, 'user'::text,
+    SELECT u.user_id, 'user'::text,
            (COALESCE(u.first_name, '') || ' ' || COALESCE(u.last_name, ''))::text,
            u.email::text,
            ts_rank(si.search_vector, v_tsquery)::real
     FROM samna_auth.samna_user u
-    JOIN samna_auth.search_index si ON si.object_id = u.id AND si.object_type = 'samna_user'
+    JOIN samna_auth.search_index si ON si.object_id = u.user_id AND si.object_type = 'samna_user'
     WHERE u.user_id IN (SELECT samna_auth.get_objects(p_user_id, 'user', p_access_level))
       AND u.sa_deleted_at IS NULL
       AND si.search_vector @@ v_tsquery

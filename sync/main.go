@@ -44,7 +44,7 @@ func ApplyPayload(ctx context.Context, payload SyncPayload) error {
 		case "user_relation":
 			return applyEntity[db.UserRelation](ctx, tx, payload.Obj)
 		case "audit":
-			return applyEntity[db.Audit](ctx, tx, payload.Obj)
+			return applyAudit(ctx, tx, payload.Obj)
 		default:
 			return fmt.Errorf("unknown sync type: %s", payload.Type)
 		}
@@ -62,6 +62,21 @@ func applyEntity[T any](ctx context.Context, tx bun.Tx, raw json.RawMessage) err
 		On("CONFLICT (id) DO UPDATE").
 		Set("sa_updated_at = EXCLUDED.sa_updated_at").
 		Set("sa_deleted_at = EXCLUDED.sa_deleted_at").
+		Exec(ctx)
+
+	return err
+}
+
+func applyAudit(ctx context.Context, tx bun.Tx, raw json.RawMessage) error {
+	var entity db.Audit
+	if err := json.Unmarshal(raw, &entity); err != nil {
+		return fmt.Errorf("unmarshal entity: %w", err)
+	}
+
+	_, err := tx.NewInsert().
+		Model(&entity).
+		On("CONFLICT (id) DO UPDATE").
+		Set("sa_updated_at = EXCLUDED.sa_updated_at").
 		Exec(ctx)
 
 	return err
