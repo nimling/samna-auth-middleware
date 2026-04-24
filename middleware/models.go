@@ -17,6 +17,7 @@ const authCodeParamKey = "sauth_auth_code"
 const (
 	accessTokenCookieKey  = "sauth_access_token"
 	refreshTokenCookieKey = "sauth_refresh_token"
+	csrfTokenCookieKey    = "sauth_csrf_token"
 )
 
 type AuthError string
@@ -35,6 +36,8 @@ type UserType string
 const (
 	USER_TYPE_USER   UserType = "user"
 	USER_TYPE_CLIENT UserType = "client"
+	USER_TYPE_SYSTEM UserType = "system"
+	USER_TYPE_GUEST  UserType = "guest"
 )
 
 type AuthMiddlewareConfig struct {
@@ -44,6 +47,7 @@ type AuthMiddlewareConfig struct {
 	JWKSURL             url.URL
 	ExpectedTokenIssuer string
 	RedirectURI         string
+	PageRedirectURI     string
 	OpenIDConfigURL     url.URL
 	AuthorizedUserID    *uuid.UUID
 }
@@ -54,10 +58,11 @@ type AuthOptions struct {
 }
 
 type UserAuthOptions struct {
-	ClientSlug   string
-	ClientSecret string
-	RedirectURI  string
-	DebugUserID  *uuid.UUID
+	ClientSlug      string
+	ClientSecret    string
+	RedirectURI     string
+	PageRedirectURI string
+	DebugUserID     *uuid.UUID
 }
 
 type ClientAuthOptions struct {
@@ -84,16 +89,3 @@ type ClaimUser struct {
 	Details   []*UserDetail `json:"details,omitempty"`
 }
 
-type ResponseToken struct {
-	AccessToken      string `json:"access_token"`
-	RefreshToken     string `json:"refresh_token"`
-	AccessExpiresIn  int    `json:"access_expires_in"`
-	RefreshExpiresIn int    `json:"refresh_expires_in"`
-	TokenType        string `json:"token_type"`
-}
-
-type openIDConfiguration struct {
-	Issuer        string `json:"issuer"`
-	TokenEndpoint string `json:"token_endpoint"`
-	JwksUri       string `json:"jwks_uri"`
-}

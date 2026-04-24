@@ -4,7 +4,7 @@
 
 -- ============================================================================
 -- create_claim (PUBLIC)
--- Creates a new claim and returns its id.
+-- Creates a new claim and returns the full row.
 -- ============================================================================
 CREATE OR REPLACE FUNCTION samna_auth.create_claim(
     p_name TEXT,
@@ -15,9 +15,9 @@ CREATE OR REPLACE FUNCTION samna_auth.create_claim(
     p_sa_created_by UUID,
     p_inherits BOOLEAN DEFAULT TRUE,
     p_type samna_auth.claim_type DEFAULT 'user'
-) RETURNS UUID AS $$
+) RETURNS samna_auth.claim AS $$
 DECLARE
-    v_claim_id UUID;
+    v_claim samna_auth.claim;
 BEGIN
     INSERT INTO samna_auth.claim (
         name, description, sa_access_level, sa_owner_id, sa_root_id,
@@ -26,14 +26,14 @@ BEGIN
         p_name, p_description, p_sa_access_level, p_sa_owner_id, p_sa_root_id,
         p_sa_created_by, p_inherits, p_type
     )
-    RETURNING id INTO v_claim_id;
-    RETURN v_claim_id;
+    RETURNING * INTO v_claim;
+    RETURN v_claim;
 END;
 $$ LANGUAGE plpgsql;
 
 -- ============================================================================
 -- assign_claim_user (PUBLIC)
--- Grants a claim to a user and returns the user_claim id.
+-- Grants a claim to a user and returns the full row.
 -- ============================================================================
 CREATE OR REPLACE FUNCTION samna_auth.assign_claim_user(
     p_claim_id UUID,
@@ -43,23 +43,23 @@ CREATE OR REPLACE FUNCTION samna_auth.assign_claim_user(
     p_reason TEXT DEFAULT NULL,
     p_starts_at TIMESTAMP DEFAULT NULL,
     p_ends_at TIMESTAMP DEFAULT NULL
-) RETURNS UUID AS $$
+) RETURNS samna_auth.user_claim AS $$
 DECLARE
-    v_user_claim_id UUID;
+    v_user_claim samna_auth.user_claim;
 BEGIN
     INSERT INTO samna_auth.user_claim (
         claim_id, user_id, sa_owner_id, sa_created_by, reason, starts_at, ends_at
     ) VALUES (
         p_claim_id, p_user_id, p_sa_owner_id, p_sa_created_by, p_reason, p_starts_at, p_ends_at
     )
-    RETURNING id INTO v_user_claim_id;
-    RETURN v_user_claim_id;
+    RETURNING * INTO v_user_claim;
+    RETURN v_user_claim;
 END;
 $$ LANGUAGE plpgsql;
 
 -- ============================================================================
 -- assign_claim_object (PUBLIC)
--- Binds a claim to an object and returns the claim_object id.
+-- Binds a claim to an object and returns the full row.
 -- ============================================================================
 CREATE OR REPLACE FUNCTION samna_auth.assign_claim_object(
     p_claim_id UUID,
@@ -73,9 +73,9 @@ CREATE OR REPLACE FUNCTION samna_auth.assign_claim_object(
     p_reason TEXT DEFAULT NULL,
     p_ref_id UUID DEFAULT NULL,
     p_function TEXT DEFAULT NULL
-) RETURNS UUID AS $$
+) RETURNS samna_auth.claim_object AS $$
 DECLARE
-    v_claim_object_id UUID;
+    v_claim_object samna_auth.claim_object;
 BEGIN
     INSERT INTO samna_auth.claim_object (
         claim_id, object_id, object_type, sa_owner_id, sa_root_id, sa_created_by,
@@ -84,8 +84,8 @@ BEGIN
         p_claim_id, p_object_id, p_object_type, p_sa_owner_id, p_sa_root_id, p_sa_created_by,
         p_level, p_inherits, p_reason, p_ref_id, p_function
     )
-    RETURNING id INTO v_claim_object_id;
-    RETURN v_claim_object_id;
+    RETURNING * INTO v_claim_object;
+    RETURN v_claim_object;
 END;
 $$ LANGUAGE plpgsql;
 
@@ -120,6 +120,75 @@ END;
 $$ LANGUAGE plpgsql;
 
 -- ============================================================================
+-- update_claim (PUBLIC)
+-- ============================================================================
+CREATE OR REPLACE FUNCTION samna_auth.update_claim(
+    p_claim_id UUID,
+    p_name TEXT DEFAULT NULL,
+    p_description TEXT DEFAULT NULL,
+    p_sa_access_level INTEGER DEFAULT NULL,
+    p_inherits BOOLEAN DEFAULT NULL
+) RETURNS samna_auth.claim AS $$
+DECLARE
+    v_claim samna_auth.claim;
+BEGIN
+    UPDATE samna_auth.claim SET
+        name = COALESCE(p_name, name),
+        description = COALESCE(p_description, description),
+        sa_access_level = COALESCE(p_sa_access_level, sa_access_level),
+        inherits = COALESCE(p_inherits, inherits),
+        sa_updated_at = CURRENT_TIMESTAMP
+    WHERE id = p_claim_id AND sa_deleted_at IS NULL
+    RETURNING * INTO v_claim;
+    RETURN v_claim;
+END;
+$$ LANGUAGE plpgsql;
+
+-- ============================================================================
+-- update_claim_user (PUBLIC)
+-- ============================================================================
+CREATE OR REPLACE FUNCTION samna_auth.update_claim_user(
+    p_user_claim_id UUID,
+    p_reason TEXT DEFAULT NULL,
+    p_starts_at TIMESTAMPTZ DEFAULT NULL,
+    p_ends_at TIMESTAMPTZ DEFAULT NULL
+) RETURNS samna_auth.user_claim AS $$
+DECLARE
+    v_user_claim samna_auth.user_claim;
+BEGIN
+    UPDATE samna_auth.user_claim SET
+        reason = COALESCE(p_reason, reason),
+        starts_at = COALESCE(p_starts_at, starts_at),
+        ends_at = COALESCE(p_ends_at, ends_at),
+        sa_updated_at = CURRENT_TIMESTAMP
+    WHERE id = p_user_claim_id AND sa_deleted_at IS NULL
+    RETURNING * INTO v_user_claim;
+    RETURN v_user_claim;
+END;
+$$ LANGUAGE plpgsql;
+
+-- ============================================================================
+-- update_claim_object (PUBLIC)
+-- ============================================================================
+CREATE OR REPLACE FUNCTION samna_auth.update_claim_object(
+    p_claim_object_id UUID,
+    p_reason TEXT DEFAULT NULL,
+    p_inherits BOOLEAN DEFAULT NULL
+) RETURNS samna_auth.claim_object AS $$
+DECLARE
+    v_claim_object samna_auth.claim_object;
+BEGIN
+    UPDATE samna_auth.claim_object SET
+        reason = COALESCE(p_reason, reason),
+        inherits = COALESCE(p_inherits, inherits),
+        sa_updated_at = CURRENT_TIMESTAMP
+    WHERE id = p_claim_object_id AND sa_deleted_at IS NULL
+    RETURNING * INTO v_claim_object;
+    RETURN v_claim_object;
+END;
+$$ LANGUAGE plpgsql;
+
+-- ============================================================================
 -- remove_claim (PUBLIC)
 -- ============================================================================
 CREATE OR REPLACE FUNCTION samna_auth.remove_claim(
@@ -134,6 +203,65 @@ BEGIN
     UPDATE samna_auth.claim SET sa_deleted_at = CURRENT_TIMESTAMP
     WHERE id = p_claim_id AND sa_deleted_at IS NULL;
     RETURN FOUND;
+END;
+$$ LANGUAGE plpgsql;
+
+-- ============================================================================
+-- merge_user (PUBLIC)
+-- Merges source user into target user within the samna_auth schema.
+-- Moves all references from source to target, then soft deletes source.
+-- ============================================================================
+CREATE OR REPLACE FUNCTION samna_auth.merge_user(
+    p_target_id UUID,
+    p_source_id UUID
+) RETURNS VOID AS $$
+DECLARE
+    v_now TIMESTAMP := CURRENT_TIMESTAMP;
+    v_target samna_auth.samna_user;
+    v_source samna_auth.samna_user;
+BEGIN
+    SELECT * INTO v_target FROM samna_auth.samna_user WHERE user_id = p_target_id AND sa_deleted_at IS NULL;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'target user % not found', p_target_id;
+    END IF;
+
+    SELECT * INTO v_source FROM samna_auth.samna_user WHERE user_id = p_source_id AND sa_deleted_at IS NULL;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'source user % not found', p_source_id;
+    END IF;
+
+    UPDATE samna_auth.samna_user
+    SET first_name = COALESCE(NULLIF(v_source.first_name, ''), v_target.first_name),
+        last_name = COALESCE(NULLIF(v_source.last_name, ''), v_target.last_name),
+        email = COALESCE(NULLIF(v_source.email, ''), v_target.email),
+        phone = COALESCE(NULLIF(v_source.phone, ''), v_target.phone),
+        status = 'active',
+        sa_updated_at = v_now
+    WHERE user_id = p_target_id;
+
+    UPDATE samna_auth.user_claim
+    SET user_id = p_target_id, sa_updated_at = v_now
+    WHERE user_id = p_source_id AND sa_deleted_at IS NULL;
+
+    UPDATE samna_auth.user_relation
+    SET user_id = v_target.user_id, sa_updated_at = v_now
+    WHERE user_id = v_source.user_id AND sa_deleted_at IS NULL;
+
+    UPDATE samna_auth.user_field
+    SET user_id = p_target_id, sa_updated_at = v_now
+    WHERE user_id = p_source_id AND sa_deleted_at IS NULL;
+
+    DELETE FROM samna_auth.user_object WHERE user_id = p_source_id;
+    DELETE FROM samna_auth.user_users WHERE viewer_id = p_source_id OR target_user_id = p_source_id;
+    DELETE FROM samna_auth.object_users WHERE user_id = p_source_id;
+    DELETE FROM samna_auth.reconcile_queue WHERE user_id = p_source_id;
+
+    INSERT INTO samna_auth.audit (operation, message, type, object_type, object_id, sa_created_by, sa_owner_id)
+    VALUES ('merge', 'user ' || p_source_id::text || ' merged into ' || p_target_id::text, 'update', 'samna_auth.samna_user', p_target_id, p_target_id, p_target_id);
+
+    UPDATE samna_auth.samna_user
+    SET sa_deleted_at = v_now, sa_updated_at = v_now
+    WHERE user_id = p_source_id;
 END;
 $$ LANGUAGE plpgsql;
 
@@ -166,15 +294,15 @@ BEGIN
         SELECT o.id, o.sa_owner_id, o.sa_level, o.sa_root_id,
                CAST(COUNT(o.id) OVER (PARTITION BY o.sa_owner_id) AS int) AS siblings
         FROM samna_auth.organization o
-        WHERE o.sa_owner_id = start_id AND o.sa_deleted_at IS NULL
+        WHERE o.sa_owner_id = start_id AND o.id != start_id AND o.sa_deleted_at IS NULL
         UNION ALL
         SELECT o.id, o.sa_owner_id, o.sa_level, o.sa_root_id,
                CAST(COUNT(o.id) OVER (PARTITION BY o.sa_owner_id) AS int) AS siblings
         FROM samna_auth.organization o
-        INNER JOIN children c ON c.id = o.sa_owner_id WHERE o.sa_deleted_at IS NULL
+        INNER JOIN children c ON c.id = o.sa_owner_id WHERE o.id != start_id AND o.sa_deleted_at IS NULL
     )
     SELECT DISTINCT ON (c.id) c.id, c.sa_owner_id, c.sa_level, c.sa_root_id, c.siblings - 1
-    FROM children c WHERE c.id != start_id;
+    FROM children c;
 END;
 $$ LANGUAGE plpgsql STABLE;
 
@@ -348,42 +476,46 @@ BEGIN
     END IF;
 
     RETURN QUERY
-    SELECT co.claim_id, ac.sa_access_level, v_row_owner_id, v_row_location_id
-    FROM samna_auth.claim_object co
-    INNER JOIN samna_auth.active_claim ac ON ac.claim_id = co.claim_id
-    WHERE co.object_id = p_object_id AND co.object_type = p_object_type
-      AND co.sa_deleted_at IS NULL AND ac.user_id = p_user_id;
+    SELECT samna_auth.claim_object.claim_id, samna_auth.claim.sa_access_level, v_row_owner_id, v_row_location_id
+    FROM samna_auth.claim_object
+    INNER JOIN samna_auth.user_claim ON samna_auth.user_claim.claim_id = samna_auth.claim_object.claim_id AND samna_auth.user_claim.sa_deleted_at IS NULL AND (samna_auth.user_claim.starts_at IS NULL OR samna_auth.user_claim.starts_at <= CURRENT_TIMESTAMP) AND (samna_auth.user_claim.ends_at IS NULL OR samna_auth.user_claim.ends_at >= CURRENT_TIMESTAMP)
+    INNER JOIN samna_auth.claim ON samna_auth.claim.id = samna_auth.claim_object.claim_id AND samna_auth.claim.sa_deleted_at IS NULL
+    WHERE samna_auth.claim_object.object_id = p_object_id AND samna_auth.claim_object.object_type = p_object_type
+      AND samna_auth.claim_object.sa_deleted_at IS NULL AND samna_auth.user_claim.user_id = p_user_id;
 
     IF v_row_owner_id IS NOT NULL AND p_object_type NOT IN ('organization') THEN
         RETURN QUERY
-        SELECT co.claim_id, ac.sa_access_level, v_row_owner_id, v_row_location_id
-        FROM samna_auth.claim_object co
-        INNER JOIN samna_auth.active_claim ac ON ac.claim_id = co.claim_id
-        WHERE co.object_type = 'organization' AND co.sa_deleted_at IS NULL AND ac.user_id = p_user_id
-          AND (co.object_id = v_row_owner_id
-               OR (co.inherits = TRUE AND co.object_id IN (
+        SELECT samna_auth.claim_object.claim_id, samna_auth.claim.sa_access_level, v_row_owner_id, v_row_location_id
+        FROM samna_auth.claim_object
+        INNER JOIN samna_auth.user_claim ON samna_auth.user_claim.claim_id = samna_auth.claim_object.claim_id AND samna_auth.user_claim.sa_deleted_at IS NULL AND (samna_auth.user_claim.starts_at IS NULL OR samna_auth.user_claim.starts_at <= CURRENT_TIMESTAMP) AND (samna_auth.user_claim.ends_at IS NULL OR samna_auth.user_claim.ends_at >= CURRENT_TIMESTAMP)
+    INNER JOIN samna_auth.claim ON samna_auth.claim.id = samna_auth.claim_object.claim_id AND samna_auth.claim.sa_deleted_at IS NULL
+        WHERE samna_auth.claim_object.object_type = 'organization' AND samna_auth.claim_object.sa_deleted_at IS NULL AND samna_auth.user_claim.user_id = p_user_id
+          AND (samna_auth.claim_object.object_id = v_row_owner_id
+               OR (samna_auth.claim_object.inherits = TRUE AND samna_auth.claim_object.object_id IN (
                    SELECT po.id FROM samna_auth.get_parent_organizations(v_row_owner_id) po)));
     END IF;
 
     IF v_row_location_id IS NOT NULL AND p_object_type NOT IN ('organization', 'location') THEN
         RETURN QUERY
-        SELECT co.claim_id, ac.sa_access_level, v_row_owner_id, v_row_location_id
-        FROM samna_auth.claim_object co
-        INNER JOIN samna_auth.active_claim ac ON ac.claim_id = co.claim_id
-        WHERE co.object_type = 'location' AND co.sa_deleted_at IS NULL AND ac.user_id = p_user_id
-          AND (co.object_id = v_row_location_id
-               OR (co.inherits = TRUE AND co.object_id IN (
+        SELECT samna_auth.claim_object.claim_id, samna_auth.claim.sa_access_level, v_row_owner_id, v_row_location_id
+        FROM samna_auth.claim_object
+        INNER JOIN samna_auth.user_claim ON samna_auth.user_claim.claim_id = samna_auth.claim_object.claim_id AND samna_auth.user_claim.sa_deleted_at IS NULL AND (samna_auth.user_claim.starts_at IS NULL OR samna_auth.user_claim.starts_at <= CURRENT_TIMESTAMP) AND (samna_auth.user_claim.ends_at IS NULL OR samna_auth.user_claim.ends_at >= CURRENT_TIMESTAMP)
+    INNER JOIN samna_auth.claim ON samna_auth.claim.id = samna_auth.claim_object.claim_id AND samna_auth.claim.sa_deleted_at IS NULL
+        WHERE samna_auth.claim_object.object_type = 'location' AND samna_auth.claim_object.sa_deleted_at IS NULL AND samna_auth.user_claim.user_id = p_user_id
+          AND (samna_auth.claim_object.object_id = v_row_location_id
+               OR (samna_auth.claim_object.inherits = TRUE AND samna_auth.claim_object.object_id IN (
                    SELECT pl.id FROM samna_auth.get_parent_locations(v_row_location_id) pl)));
     END IF;
 
     IF v_row_parent_id IS NOT NULL AND p_object_type NOT IN ('organization', 'location') THEN
         RETURN QUERY
-        SELECT co.claim_id, ac.sa_access_level, v_row_owner_id, v_row_location_id
-        FROM samna_auth.claim_object co
-        INNER JOIN samna_auth.active_claim ac ON ac.claim_id = co.claim_id
-        WHERE co.object_type = p_object_type AND co.sa_deleted_at IS NULL
-          AND ac.user_id = p_user_id AND co.inherits = TRUE
-          AND co.object_id IN (
+        SELECT samna_auth.claim_object.claim_id, samna_auth.claim.sa_access_level, v_row_owner_id, v_row_location_id
+        FROM samna_auth.claim_object
+        INNER JOIN samna_auth.user_claim ON samna_auth.user_claim.claim_id = samna_auth.claim_object.claim_id AND samna_auth.user_claim.sa_deleted_at IS NULL AND (samna_auth.user_claim.starts_at IS NULL OR samna_auth.user_claim.starts_at <= CURRENT_TIMESTAMP) AND (samna_auth.user_claim.ends_at IS NULL OR samna_auth.user_claim.ends_at >= CURRENT_TIMESTAMP)
+    INNER JOIN samna_auth.claim ON samna_auth.claim.id = samna_auth.claim_object.claim_id AND samna_auth.claim.sa_deleted_at IS NULL
+        WHERE samna_auth.claim_object.object_type = p_object_type AND samna_auth.claim_object.sa_deleted_at IS NULL
+          AND samna_auth.user_claim.user_id = p_user_id AND samna_auth.claim_object.inherits = TRUE
+          AND samna_auth.claim_object.object_id IN (
               SELECT po.id FROM samna_auth.get_parent_objects(v_table_name, p_object_id) po
               WHERE po.id != p_object_id);
     END IF;
@@ -404,15 +536,10 @@ CREATE OR REPLACE FUNCTION samna_auth.find_affected_users_for_row(
 DECLARE
     v_users UUID[];
 BEGIN
-    SELECT ARRAY_AGG(DISTINCT ac.user_id) INTO v_users
-    FROM samna_auth.active_claim ac
-    INNER JOIN samna_auth.claim_object co ON co.claim_id = ac.claim_id
-    WHERE co.sa_deleted_at IS NULL
-      AND ((co.object_id = p_object_id AND co.object_type = p_object_type)
-           OR (co.object_type = 'organization' AND (
-               co.object_id = p_sa_owner_id
-               OR (co.inherits = TRUE AND co.object_id IN (
-                   SELECT po.id FROM samna_auth.get_parent_organizations(p_sa_owner_id) po)))));
+    SELECT ARRAY_AGG(DISTINCT samna_auth.user_object.user_id) INTO v_users
+    FROM samna_auth.user_object
+    WHERE (samna_auth.user_object.object_id = p_object_id AND samna_auth.user_object.object_type = p_object_type)
+       OR (samna_auth.user_object.sa_owner_id = p_sa_owner_id);
     RETURN COALESCE(v_users, ARRAY[]::UUID[]);
 END;
 $$ LANGUAGE plpgsql STABLE;
@@ -430,6 +557,7 @@ CREATE OR REPLACE FUNCTION samna_auth.reconcile_user_object(
 DECLARE
     v_computed RECORD;
     v_id TEXT;
+    v_other_user_id UUID;
 BEGIN
     DELETE FROM samna_auth.user_object
     WHERE user_id = p_user_id AND object_id = p_object_id AND object_type = p_object_type;
@@ -459,6 +587,31 @@ BEGIN
         samna_auth.composite_id(p_object_id::text, p_object_type, p_user_id::text),
         p_object_id, p_object_type, p_user_id
     ) ON CONFLICT (id) DO NOTHING;
+
+    FOR v_other_user_id IN
+        SELECT ou.user_id FROM samna_auth.object_users ou
+        WHERE ou.object_id = p_object_id AND ou.object_type = p_object_type AND ou.user_id <> p_user_id
+    LOOP
+        INSERT INTO samna_auth.user_users (id, viewer_id, target_user_id)
+        VALUES (
+            samna_auth.composite_id(p_user_id::text, v_other_user_id::text),
+            p_user_id,
+            v_other_user_id
+        )
+        ON CONFLICT (id) DO UPDATE SET
+            last_shared_at = now(),
+            sharing_object_count = samna_auth.user_users.sharing_object_count + 1;
+
+        INSERT INTO samna_auth.user_users (id, viewer_id, target_user_id)
+        VALUES (
+            samna_auth.composite_id(v_other_user_id::text, p_user_id::text),
+            v_other_user_id,
+            p_user_id
+        )
+        ON CONFLICT (id) DO UPDATE SET
+            last_shared_at = now(),
+            sharing_object_count = samna_auth.user_users.sharing_object_count + 1;
+    END LOOP;
 END;
 $$ LANGUAGE plpgsql;
 
@@ -475,9 +628,9 @@ DECLARE
     v_binding RECORD;
 BEGIN
     FOR v_binding IN
-        SELECT co.object_id, co.object_type, co.inherits
-        FROM samna_auth.claim_object co
-        WHERE co.claim_id = p_claim_id AND co.sa_deleted_at IS NULL
+        SELECT samna_auth.claim_object.object_id, samna_auth.claim_object.object_type, samna_auth.claim_object.inherits
+        FROM samna_auth.claim_object
+        WHERE samna_auth.claim_object.claim_id = p_claim_id AND samna_auth.claim_object.sa_deleted_at IS NULL
     LOOP
         RETURN QUERY SELECT v_binding.object_id, v_binding.object_type;
         IF v_binding.inherits AND v_binding.object_type = 'organization' THEN
@@ -527,16 +680,21 @@ CREATE OR REPLACE FUNCTION samna_auth.get_access(
     p_object_id UUID,
     p_access_level INTEGER DEFAULT 8
 ) RETURNS TABLE (
+    id UUID,
     claim_id UUID,
     sa_access_level INTEGER,
     sa_owner_id UUID,
-    sa_location_id UUID
+    sa_root_id UUID
 ) AS $$
 BEGIN
     PERFORM samna_auth.reconcile_if_pending(p_user_id);
     RETURN QUERY
-    SELECT uo.claim_id, uo.sa_access_level, uo.sa_owner_id, uo.sa_location_id
+    SELECT uc.id, uo.claim_id, uo.sa_access_level, c.sa_owner_id, c.sa_root_id
     FROM samna_auth.user_object uo
+    JOIN samna_auth.user_claim uc ON uc.claim_id = uo.claim_id AND uc.user_id = p_user_id AND uc.sa_deleted_at IS NULL
+        AND (uc.starts_at IS NULL OR uc.starts_at <= CURRENT_TIMESTAMP)
+        AND (uc.ends_at IS NULL OR uc.ends_at >= CURRENT_TIMESTAMP)
+    JOIN samna_auth.claim c ON c.id = uo.claim_id AND c.sa_deleted_at IS NULL
     WHERE uo.user_id = p_user_id AND uo.object_id = p_object_id
       AND uo.sa_access_level <= p_access_level
     ORDER BY uo.sa_access_level ASC LIMIT 1;
@@ -554,10 +712,10 @@ CREATE OR REPLACE FUNCTION samna_auth.get_claims(
 ) RETURNS SETOF samna_auth.claim AS $$
 BEGIN
     RETURN QUERY
-    SELECT c.* FROM samna_auth.user_object uo
-    JOIN samna_auth.claim c ON c.id = uo.claim_id
-    WHERE uo.user_id = p_user_id AND uo.object_id = p_object_id AND c.sa_deleted_at IS NULL
-    ORDER BY uo.sa_access_level ASC;
+    SELECT c.* FROM samna_auth.user_object
+    JOIN samna_auth.claim c ON c.id = samna_auth.user_object.claim_id
+    WHERE samna_auth.user_object.user_id = p_user_id AND samna_auth.user_object.object_id = p_object_id AND c.sa_deleted_at IS NULL
+    ORDER BY samna_auth.user_object.sa_access_level ASC;
 END;
 $$ LANGUAGE plpgsql STABLE;
 
@@ -573,9 +731,9 @@ CREATE OR REPLACE FUNCTION samna_auth.get_claims(
 BEGIN
     PERFORM samna_auth.reconcile_if_pending(p_user_id);
     RETURN QUERY
-    SELECT DISTINCT c.* FROM samna_auth.user_object uo
-    JOIN samna_auth.claim c ON c.id = uo.claim_id
-    WHERE uo.user_id = p_user_id AND uo.sa_access_level <= p_access_level AND c.sa_deleted_at IS NULL;
+    SELECT DISTINCT c.* FROM samna_auth.user_object
+    JOIN samna_auth.claim c ON c.id = samna_auth.user_object.claim_id
+    WHERE samna_auth.user_object.user_id = p_user_id AND samna_auth.user_object.sa_access_level <= p_access_level AND c.sa_deleted_at IS NULL;
 END;
 $$ LANGUAGE plpgsql STABLE;
 
@@ -592,9 +750,9 @@ CREATE OR REPLACE FUNCTION samna_auth.get_objects(
 BEGIN
     PERFORM samna_auth.reconcile_if_pending(p_user_id);
     RETURN QUERY
-    SELECT DISTINCT uo.object_id FROM samna_auth.user_object uo
-    WHERE uo.user_id = p_user_id AND uo.object_type = p_object_type
-      AND uo.sa_access_level <= p_access_level;
+    SELECT DISTINCT samna_auth.user_object.object_id FROM samna_auth.user_object
+    WHERE samna_auth.user_object.user_id = p_user_id AND samna_auth.user_object.object_type = p_object_type
+      AND samna_auth.user_object.sa_access_level <= p_access_level;
 END;
 $$ LANGUAGE plpgsql STABLE;
 
@@ -609,9 +767,9 @@ BEGIN
     RETURN QUERY
     SELECT o.* FROM samna_auth.organization o
     WHERE o.sa_deleted_at IS NULL AND o.id IN (
-        SELECT uo.object_id FROM samna_auth.user_object uo
-        WHERE uo.user_id = p_user_id AND uo.object_type = 'organization'
-          AND uo.sa_access_level <= p_access_level);
+        SELECT samna_auth.user_object.object_id FROM samna_auth.user_object
+        WHERE samna_auth.user_object.user_id = p_user_id AND samna_auth.user_object.object_type = 'organization'
+          AND samna_auth.user_object.sa_access_level <= p_access_level);
 END;
 $$ LANGUAGE plpgsql STABLE;
 
@@ -626,9 +784,9 @@ BEGIN
     RETURN QUERY
     SELECT l.* FROM samna_auth.location l
     WHERE l.sa_deleted_at IS NULL AND l.id IN (
-        SELECT uo.object_id FROM samna_auth.user_object uo
-        WHERE uo.user_id = p_user_id AND uo.object_type = 'location'
-          AND uo.sa_access_level <= p_access_level);
+        SELECT samna_auth.user_object.object_id FROM samna_auth.user_object
+        WHERE samna_auth.user_object.user_id = p_user_id AND samna_auth.user_object.object_type = 'location'
+          AND samna_auth.user_object.sa_access_level <= p_access_level);
 END;
 $$ LANGUAGE plpgsql STABLE;
 
@@ -645,14 +803,50 @@ BEGIN
     SELECT u.* FROM samna_auth.samna_user u WHERE u.user_id = p_user_id
     UNION
     SELECT u.* FROM samna_auth.samna_user u
-    WHERE u.sa_deleted_at IS NULL AND u.id IN (
-        SELECT uo.object_id FROM samna_auth.user_object uo
-        WHERE uo.user_id = p_user_id AND uo.object_type = 'user'
-          AND uo.sa_access_level <= p_access_level)
+    WHERE u.sa_deleted_at IS NULL AND u.user_id IN (
+        SELECT samna_auth.user_object.object_id FROM samna_auth.user_object
+        WHERE samna_auth.user_object.user_id = p_user_id AND samna_auth.user_object.object_type = 'user'
+          AND samna_auth.user_object.sa_access_level <= p_access_level)
     UNION
     SELECT u.* FROM samna_auth.samna_user u
-    JOIN samna_auth.user_users uu ON uu.target_user_id = u.id
+    JOIN samna_auth.user_users uu ON uu.target_user_id = u.user_id
     WHERE u.sa_deleted_at IS NULL AND uu.viewer_id = p_user_id;
+END;
+$$ LANGUAGE plpgsql STABLE;
+
+-- ============================================================================
+-- get_audit (PUBLIC)
+-- ============================================================================
+CREATE OR REPLACE FUNCTION samna_auth.get_audit(
+    p_user_id UUID,
+    p_access_level INTEGER DEFAULT 8
+) RETURNS SETOF samna_auth.audit AS $$
+BEGIN
+    RETURN QUERY
+    SELECT a.* FROM samna_auth.audit a
+    WHERE a.sa_owner_id IN (
+        SELECT samna_auth.user_object.object_id FROM samna_auth.user_object
+        WHERE samna_auth.user_object.user_id = p_user_id
+          AND samna_auth.user_object.object_type = 'organization'
+          AND samna_auth.user_object.sa_access_level <= p_access_level
+    );
+END;
+$$ LANGUAGE plpgsql STABLE;
+
+-- ============================================================================
+-- get_secrets (PUBLIC)
+-- ============================================================================
+CREATE OR REPLACE FUNCTION samna_auth.get_secrets(
+    p_user_id UUID,
+    p_access_level INTEGER DEFAULT 8
+) RETURNS SETOF samna_auth.samna_secret AS $$
+BEGIN
+    RETURN QUERY
+    SELECT s.* FROM samna_auth.samna_secret s
+    WHERE s.sa_deleted_at IS NULL AND s.id IN (
+        SELECT samna_auth.user_object.object_id FROM samna_auth.user_object
+        WHERE samna_auth.user_object.user_id = p_user_id AND samna_auth.user_object.object_type = 'samna_secret'
+          AND samna_auth.user_object.sa_access_level <= p_access_level);
 END;
 $$ LANGUAGE plpgsql STABLE;
 
@@ -711,7 +905,7 @@ BEGIN
             EXECUTE format('SELECT id FROM %I.%I WHERE sa_deleted_at IS NULL', v_schema, v_tbl)
         LOOP
             FOR v_user_id IN
-                SELECT DISTINCT ac.user_id FROM samna_auth.active_claim ac
+                SELECT DISTINCT samna_auth.user_claim.user_id FROM samna_auth.user_claim WHERE samna_auth.user_claim.sa_deleted_at IS NULL
             LOOP
                 BEGIN
                     PERFORM samna_auth.reconcile_user_object(v_user_id, v_object_id, v_object_type);
@@ -743,34 +937,74 @@ CREATE OR REPLACE FUNCTION samna_auth.get_claim_graph(
     p_access_level INTEGER DEFAULT 30
 )
 RETURNS TABLE(id UUID, label TEXT, type TEXT, data JSONB) AS $$
-WITH accessible_claims AS (
+WITH accessible_org_ids AS (
+    SELECT DISTINCT samna_auth.user_object.object_id
+    FROM samna_auth.user_object
+    WHERE samna_auth.user_object.user_id = p_user_id
+      AND samna_auth.user_object.object_type = 'organization'
+      AND samna_auth.user_object.sa_access_level <= p_access_level
+),
+accessible_claims AS (
     SELECT c.* FROM samna_auth.claim c
-    INNER JOIN samna_auth.get_organizations(p_user_id, p_access_level) o ON o.id = c.sa_owner_id
-    WHERE c.sa_deleted_at IS NULL AND c.type = 'user'
+    INNER JOIN accessible_org_ids aoi ON aoi.object_id = c.sa_owner_id
+    WHERE c.sa_deleted_at IS NULL
 ),
 accessible_claim_ids AS (SELECT ac.id FROM accessible_claims ac),
 accessible_user_claims AS (
-    SELECT uc.* FROM samna_auth.user_claim uc
-    INNER JOIN accessible_claim_ids aci ON aci.id = uc.claim_id
-    WHERE uc.sa_deleted_at IS NULL
+    SELECT samna_auth.user_claim.* FROM samna_auth.user_claim
+    INNER JOIN accessible_claim_ids aci ON aci.id = samna_auth.user_claim.claim_id
+    WHERE samna_auth.user_claim.sa_deleted_at IS NULL
 ),
 accessible_claim_objects AS (
-    SELECT co.* FROM samna_auth.claim_object co
-    INNER JOIN accessible_claim_ids aci ON aci.id = co.claim_id
-    WHERE co.sa_deleted_at IS NULL
+    SELECT samna_auth.claim_object.* FROM samna_auth.claim_object
+    INNER JOIN accessible_claim_ids aci ON aci.id = samna_auth.claim_object.claim_id
+    WHERE samna_auth.claim_object.sa_deleted_at IS NULL
 )
-SELECT c.id, c.name as label, 'claim'::TEXT as type, to_jsonb(c.*) as data FROM accessible_claims c
+SELECT c.id, c.name as label, 'claim'::TEXT as type,
+    jsonb_build_object(
+        'sources', jsonb_build_array(jsonb_build_object('id', c.sa_owner_id, 'type', 'organization')),
+        'description', c.description,
+        'sa_access_level', c.sa_access_level,
+        'inherits', c.inherits,
+        'claim_type', c.type
+    ) as data
+FROM accessible_claims c
 UNION ALL
-SELECT uc.id, uc.reason as label, 'user_claim'::TEXT as type, to_jsonb(uc.*) as data FROM accessible_user_claims uc
+SELECT uc.id, uc.reason as label, 'user_claim'::TEXT as type,
+    jsonb_build_object(
+        'sources', jsonb_build_array(
+            jsonb_build_object('id', uc.claim_id, 'type', 'claim'),
+            jsonb_build_object('id', uc.user_id, 'type', 'user')
+        ),
+        'starts_at', uc.starts_at,
+        'ends_at', uc.ends_at
+    ) as data
+FROM accessible_user_claims uc
 UNION ALL
-SELECT DISTINCT ON (u.id) u.id, CONCAT(u.first_name, ' ', u.last_name) as label,
-    'user'::TEXT as type, to_jsonb(u.*) as data
-FROM samna_auth.get_users(p_user_id, p_access_level) u
-WHERE u.user_id IN (SELECT DISTINCT auc.user_id FROM accessible_user_claims auc)
+SELECT DISTINCT ON (u.user_id) u.user_id as id, CONCAT(u.first_name, ' ', u.last_name) as label,
+    'user'::TEXT as type,
+    jsonb_build_object(
+        'sources', '[]'::jsonb,
+        'email', u.email,
+        'user_type', u.type
+    ) as data
+FROM samna_auth.samna_user u
+WHERE u.sa_deleted_at IS NULL
+  AND u.type != 'system'
+  AND u.user_id IN (SELECT DISTINCT auc.user_id FROM accessible_user_claims auc)
 UNION ALL
-SELECT DISTINCT ON (o.id) o.id, o.name as label, 'organization'::TEXT as type, to_jsonb(o.*) as data
-FROM samna_auth.get_organizations(p_user_id, p_access_level) o
-WHERE o.id IN (
+SELECT DISTINCT ON (o.id) o.id, o.name as label, 'organization'::TEXT as type,
+    jsonb_build_object(
+        'sources', CASE
+            WHEN o.sa_owner_id IS NULL THEN '[]'::jsonb
+            ELSE jsonb_build_array(jsonb_build_object('id', o.sa_owner_id, 'type', 'organization'))
+        END,
+        'description', o.description,
+        'sa_level', o.sa_level,
+        'org_type', o.type
+    ) as data
+FROM samna_auth.organization o
+WHERE o.sa_deleted_at IS NULL AND o.id IN (
     SELECT sa_owner_id FROM accessible_claims WHERE sa_owner_id IS NOT NULL
     UNION SELECT sa_root_id FROM accessible_claims WHERE sa_root_id IS NOT NULL
     UNION SELECT auc.sa_owner_id FROM accessible_user_claims auc WHERE auc.sa_owner_id IS NOT NULL
@@ -779,15 +1013,38 @@ WHERE o.id IN (
 UNION ALL
 SELECT DISTINCT ON (l.id) l.id,
     COALESCE(l.name, CONCAT(l.code, ' ', l.code_type), 'location') as label,
-    'location'::TEXT as type, to_jsonb(l.*) as data
-FROM samna_auth.get_locations(p_user_id, p_access_level) l
-WHERE l.id IN (SELECT aco.object_id FROM accessible_claim_objects aco WHERE aco.object_type = 'location')
+    'location'::TEXT as type,
+    jsonb_build_object(
+        'sources', (
+            SELECT COALESCE(jsonb_agg(jsonb_build_object('id', v.id, 'type', v.type)), '[]'::jsonb)
+            FROM (
+                SELECT l.sa_owner_id as id, 'organization'::TEXT as type
+                WHERE l.sa_owner_id IS NOT NULL
+                UNION ALL
+                SELECT l.sa_parent_id as id, 'location'::TEXT as type
+                WHERE l.sa_parent_id IS NOT NULL
+            ) v
+        ),
+        'description', l.description,
+        'sa_level', l.sa_level,
+        'location_type', l.type,
+        'code', l.code,
+        'code_type', l.code_type
+    ) as data
+FROM samna_auth.location l
+WHERE l.sa_deleted_at IS NULL
+  AND l.id IN (SELECT aco.object_id FROM accessible_claim_objects aco WHERE aco.object_type = 'location')
 UNION ALL
-SELECT co.object_id as id, COALESCE(co.reason, co.object_type) as label,
-    co.object_type::TEXT as type,
-    jsonb_build_object('object_id', co.object_id, 'object_type', co.object_type, 'claim_id', co.claim_id) as data
-FROM accessible_claim_objects co
-WHERE co.object_type NOT IN ('organization', 'location', 'user', 'claim');
+SELECT aco.object_id as id, COALESCE(aco.reason, aco.object_type) as label,
+    aco.object_type::TEXT as type,
+    jsonb_build_object(
+        'sources', jsonb_build_array(jsonb_build_object('id', aco.claim_id, 'type', 'claim')),
+        'object_id', aco.object_id,
+        'object_type', aco.object_type,
+        'claim_id', aco.claim_id
+    ) as data
+FROM accessible_claim_objects aco
+WHERE aco.object_type NOT IN ('organization', 'location', 'user', 'claim');
 $$ LANGUAGE SQL STABLE;
 
 -- ============================================================================
@@ -799,18 +1056,61 @@ CREATE OR REPLACE FUNCTION samna_auth.get_owner_graph(
     p_access_level INTEGER DEFAULT 30
 )
 RETURNS TABLE(id UUID, label TEXT, type TEXT, data JSONB) AS $$
-WITH accessible_orgs AS (
-    SELECT DISTINCT o.* FROM samna_auth.get_organizations(p_user_id, p_access_level) o
+WITH accessible_org_ids AS (
+    SELECT DISTINCT samna_auth.user_object.object_id
+    FROM samna_auth.user_object
+    WHERE samna_auth.user_object.user_id = p_user_id
+      AND samna_auth.user_object.object_type = 'organization'
+      AND samna_auth.user_object.sa_access_level <= p_access_level
+),
+accessible_orgs AS (
+    SELECT o.* FROM samna_auth.organization o
+    INNER JOIN accessible_org_ids aoi ON aoi.object_id = o.id
+    WHERE o.sa_deleted_at IS NULL
 ),
 accessible_locs AS (
-    SELECT DISTINCT l.* FROM samna_auth.get_locations(p_user_id, p_access_level) l
-    WHERE l.sa_owner_id IN (SELECT ao.id FROM accessible_orgs ao)
+    SELECT DISTINCT l.* FROM samna_auth.location l
+    INNER JOIN samna_auth.user_object uo
+        ON uo.object_id = l.id
+        AND uo.user_id = p_user_id
+        AND uo.object_type = 'location'
+        AND uo.sa_access_level <= p_access_level
+    WHERE l.sa_deleted_at IS NULL
+      AND l.sa_owner_id IN (SELECT accessible_orgs.id FROM accessible_orgs)
 )
-SELECT o.id, o.name as label, 'organization'::TEXT as type, to_jsonb(o.*) as data FROM accessible_orgs o
+SELECT o.id, o.name as label, 'organization'::TEXT as type,
+    jsonb_build_object(
+        'sources', CASE
+            WHEN o.sa_owner_id IS NULL THEN '[]'::jsonb
+            ELSE jsonb_build_array(jsonb_build_object('id', o.sa_owner_id, 'type', 'organization'))
+        END,
+        'description', o.description,
+        'sa_level', o.sa_level,
+        'org_type', o.type,
+        'external_id', o.external_id
+    ) as data
+FROM accessible_orgs o
 UNION ALL
-SELECT DISTINCT ON (l.id) l.id,
+SELECT l.id,
     COALESCE(l.name, CONCAT(l.code, ' ', l.code_type), 'location') as label,
-    'location'::TEXT as type, to_jsonb(l.*) as data
+    'location'::TEXT as type,
+    jsonb_build_object(
+        'sources', (
+            SELECT COALESCE(jsonb_agg(jsonb_build_object('id', v.id, 'type', v.type)), '[]'::jsonb)
+            FROM (
+                SELECT l.sa_owner_id as id, 'organization'::TEXT as type
+                WHERE l.sa_owner_id IS NOT NULL
+                UNION ALL
+                SELECT l.sa_parent_id as id, 'location'::TEXT as type
+                WHERE l.sa_parent_id IS NOT NULL
+            ) v
+        ),
+        'description', l.description,
+        'sa_level', l.sa_level,
+        'location_type', l.type,
+        'code', l.code,
+        'code_type', l.code_type
+    ) as data
 FROM accessible_locs l;
 $$ LANGUAGE SQL STABLE;
 
@@ -836,16 +1136,85 @@ CREATE OR REPLACE FUNCTION samna_auth.search_objects(
     sa_location_id UUID,
     rank REAL
 ) AS $$
+DECLARE
+    v_tsquery tsquery := plainto_tsquery('english', p_query);
 BEGIN
     RETURN QUERY
     SELECT uo.object_id, uo.object_type, uo.sa_name, uo.sa_description, uo.sa_link,
            uo.sa_access_level, uo.sa_owner_id, uo.sa_location_id,
-           ts_rank(uo.search_vector, plainto_tsquery('english', p_query)) AS rank
+           ts_rank(COALESCE(ssi.search_vector, psi.search_vector), v_tsquery) AS rank
     FROM samna_auth.user_object uo
+    LEFT JOIN samna_auth.search_index ssi ON ssi.object_id = uo.object_id AND ssi.object_type = uo.object_type
+    LEFT JOIN search_index psi ON psi.object_id = uo.object_id AND psi.object_type = uo.object_type
     WHERE uo.user_id = p_user_id
       AND uo.sa_access_level <= p_access_level
       AND (p_object_types IS NULL OR uo.object_type = ANY(p_object_types))
-      AND uo.search_vector @@ plainto_tsquery('english', p_query)
+      AND COALESCE(ssi.search_vector, psi.search_vector) @@ v_tsquery
+    ORDER BY rank DESC
+    LIMIT p_limit OFFSET p_offset;
+END;
+$$ LANGUAGE plpgsql STABLE;
+
+CREATE OR REPLACE FUNCTION samna_auth.search(
+    p_user_id UUID,
+    p_query TEXT,
+    p_object_types TEXT[] DEFAULT NULL,
+    p_access_level INTEGER DEFAULT 8,
+    p_limit INTEGER DEFAULT 20,
+    p_offset INTEGER DEFAULT 0
+) RETURNS TABLE (id UUID, object_type TEXT, name TEXT, description TEXT, rank REAL) AS $$
+DECLARE
+    v_tsquery tsquery := websearch_to_tsquery('english', p_query);
+BEGIN
+    RETURN QUERY
+
+    SELECT o.id, 'organization'::text,
+           o.name::text, o.description::text,
+           ts_rank(si.search_vector, v_tsquery)::real
+    FROM samna_auth.organization o
+    JOIN samna_auth.search_index si ON si.object_id = o.id AND si.object_type = 'organization'
+    WHERE o.id IN (SELECT samna_auth.get_objects(p_user_id, 'organization', p_access_level))
+      AND o.sa_deleted_at IS NULL
+      AND si.search_vector @@ v_tsquery
+      AND (p_object_types IS NULL OR 'organization' = ANY(p_object_types))
+
+    UNION ALL
+
+    SELECT l.id, 'location'::text,
+           l.name::text, l.description::text,
+           ts_rank(si.search_vector, v_tsquery)::real
+    FROM samna_auth.location l
+    JOIN samna_auth.search_index si ON si.object_id = l.id AND si.object_type = 'location'
+    WHERE l.id IN (SELECT samna_auth.get_objects(p_user_id, 'location', p_access_level))
+      AND l.sa_deleted_at IS NULL
+      AND si.search_vector @@ v_tsquery
+      AND (p_object_types IS NULL OR 'location' = ANY(p_object_types))
+
+    UNION ALL
+
+    SELECT u.user_id, 'user'::text,
+           (COALESCE(u.first_name, '') || ' ' || COALESCE(u.last_name, ''))::text,
+           u.email::text,
+           ts_rank(si.search_vector, v_tsquery)::real
+    FROM samna_auth.samna_user u
+    JOIN samna_auth.search_index si ON si.object_id = u.user_id AND si.object_type = 'samna_user'
+    WHERE u.user_id IN (SELECT samna_auth.get_objects(p_user_id, 'user', p_access_level))
+      AND u.sa_deleted_at IS NULL
+      AND si.search_vector @@ v_tsquery
+      AND (p_object_types IS NULL OR 'user' = ANY(p_object_types))
+
+    UNION ALL
+
+    SELECT c.id, 'claim'::text,
+           c.name::text, c.description::text,
+           ts_rank(si.search_vector, v_tsquery)::real
+    FROM samna_auth.claim c
+    JOIN samna_auth.search_index si ON si.object_id = c.id AND si.object_type = 'claim'
+    WHERE c.id IN (SELECT samna_auth.get_objects(p_user_id, 'claim', p_access_level))
+      AND c.sa_deleted_at IS NULL
+      AND si.search_vector @@ v_tsquery
+      AND (p_object_types IS NULL OR 'claim' = ANY(p_object_types))
+
     ORDER BY rank DESC
     LIMIT p_limit OFFSET p_offset;
 END;

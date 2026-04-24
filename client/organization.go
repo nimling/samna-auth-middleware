@@ -22,7 +22,7 @@ func GetOrganizationAudit(ctx context.Context, orgID uuid.UUID) (io.ReadCloser, 
 
 func GetOrganizationAssets(ctx context.Context, orgID uuid.UUID) (io.ReadCloser, error) {
 	c := newClient()
-	u, err := joinURL(c.apiURL, "organization", orgID.String(), "assets")
+	u, err := joinURL(c.apiURL, "organization", orgID.String(), "asset")
 	if err != nil {
 		return nil, fmt.Errorf("build url: %w", err)
 	}

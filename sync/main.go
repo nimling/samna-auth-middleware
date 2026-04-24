@@ -24,62 +24,340 @@ func ApplyPayload(ctx context.Context, payload SyncPayload) error {
 
 		switch payload.Type {
 		case "organization":
-			return applyEntity[db.Organization](ctx, tx, payload.Obj)
+			return applyOrganization(ctx, tx, payload.Obj)
 		case "location":
-			return applyEntity[db.Location](ctx, tx, payload.Obj)
+			return applyLocation(ctx, tx, payload.Obj)
 		case "samna_user":
-			return applyEntity[db.SamnaUser](ctx, tx, payload.Obj)
+			return applySamnaUser(ctx, tx, payload.Obj)
 		case "claim":
-			return applyEntity[db.Claim](ctx, tx, payload.Obj)
+			return applyClaim(ctx, tx, payload.Obj)
 		case "user_claim":
-			return applyEntity[db.UserClaim](ctx, tx, payload.Obj)
+			return applyUserClaim(ctx, tx, payload.Obj)
 		case "claim_object":
-			return applyEntity[db.ClaimObject](ctx, tx, payload.Obj)
-		case "client_claim":
-			return applyEntity[db.ClientClaim](ctx, tx, payload.Obj)
+			return applyClaimObject(ctx, tx, payload.Obj)
 		case "samna_client":
-			return applyEntity[db.SamnaClient](ctx, tx, payload.Obj)
+			return applySamnaClient(ctx, tx, payload.Obj)
+		case "samna_secret":
+			return applySamnaSecret(ctx, tx, payload.Obj)
+		case "samna_app":
+			return applySamnaApp(ctx, tx, payload.Obj)
+		case "object_field":
+			return applyObjectField(ctx, tx, payload.Obj)
+		case "user_field":
+			return applyUserField(ctx, tx, payload.Obj)
+		case "user_relation":
+			return applyUserRelation(ctx, tx, payload.Obj)
+		case "audit":
+			return applyAudit(ctx, tx, payload.Obj)
 		default:
 			return fmt.Errorf("unknown sync type: %s", payload.Type)
 		}
 	})
 }
 
-func applyEntity[T any](ctx context.Context, tx bun.Tx, raw json.RawMessage) error {
-	var entity T
+func applySamnaUser(ctx context.Context, tx bun.Tx, raw json.RawMessage) error {
+	var entity db.SamnaUser
 	if err := json.Unmarshal(raw, &entity); err != nil {
-		return fmt.Errorf("unmarshal entity: %w", err)
+		return fmt.Errorf("unmarshal: %w", err)
 	}
-
-	_, err := tx.NewInsert().
-		Model(&entity).
+	_, err := tx.NewInsert().Model(&entity).
 		On("CONFLICT (id) DO UPDATE").
-		Set("sa_updated_at = EXCLUDED.sa_updated_at").
+		Set("first_name = EXCLUDED.first_name").
+		Set("last_name = EXCLUDED.last_name").
+		Set("phone = EXCLUDED.phone").
+		Set("email = EXCLUDED.email").
+		Set("user_id = EXCLUDED.user_id").
+		Set("status = EXCLUDED.status").
+		Set("type = EXCLUDED.type").
+		Set("config = EXCLUDED.config").
 		Set("sa_deleted_at = EXCLUDED.sa_deleted_at").
+		Set("sa_updated_at = EXCLUDED.sa_updated_at").
 		Exec(ctx)
+	return err
+}
 
+func applyOrganization(ctx context.Context, tx bun.Tx, raw json.RawMessage) error {
+	var entity db.Organization
+	if err := json.Unmarshal(raw, &entity); err != nil {
+		return fmt.Errorf("unmarshal: %w", err)
+	}
+	_, err := tx.NewInsert().Model(&entity).
+		On("CONFLICT (id) DO UPDATE").
+		Set("name = EXCLUDED.name").
+		Set("description = EXCLUDED.description").
+		Set("sa_root_id = EXCLUDED.sa_root_id").
+		Set("sa_owner_id = EXCLUDED.sa_owner_id").
+		Set("type = EXCLUDED.type").
+		Set("sa_level = EXCLUDED.sa_level").
+		Set("external_id = EXCLUDED.external_id").
+		Set("provider_id = EXCLUDED.provider_id").
+		Set("sa_created_by = EXCLUDED.sa_created_by").
+		Set("sa_deleted_at = EXCLUDED.sa_deleted_at").
+		Set("sa_updated_at = EXCLUDED.sa_updated_at").
+		Exec(ctx)
+	return err
+}
+
+func applyLocation(ctx context.Context, tx bun.Tx, raw json.RawMessage) error {
+	var entity db.Location
+	if err := json.Unmarshal(raw, &entity); err != nil {
+		return fmt.Errorf("unmarshal: %w", err)
+	}
+	_, err := tx.NewInsert().Model(&entity).
+		On("CONFLICT (id) DO UPDATE").
+		Set("sa_owner_id = EXCLUDED.sa_owner_id").
+		Set("sa_root_id = EXCLUDED.sa_root_id").
+		Set("name = EXCLUDED.name").
+		Set("description = EXCLUDED.description").
+		Set("sa_parent_id = EXCLUDED.sa_parent_id").
+		Set("type = EXCLUDED.type").
+		Set("longitude = EXCLUDED.longitude").
+		Set("latitude = EXCLUDED.latitude").
+		Set("sa_level = EXCLUDED.sa_level").
+		Set("code_type = EXCLUDED.code_type").
+		Set("code = EXCLUDED.code").
+		Set("external_id = EXCLUDED.external_id").
+		Set("provider_id = EXCLUDED.provider_id").
+		Set("sa_created_by = EXCLUDED.sa_created_by").
+		Set("sa_deleted_at = EXCLUDED.sa_deleted_at").
+		Set("sa_updated_at = EXCLUDED.sa_updated_at").
+		Exec(ctx)
+	return err
+}
+
+func applyClaim(ctx context.Context, tx bun.Tx, raw json.RawMessage) error {
+	var entity db.Claim
+	if err := json.Unmarshal(raw, &entity); err != nil {
+		return fmt.Errorf("unmarshal: %w", err)
+	}
+	_, err := tx.NewInsert().Model(&entity).
+		On("CONFLICT (id) DO UPDATE").
+		Set("name = EXCLUDED.name").
+		Set("description = EXCLUDED.description").
+		Set("sa_access_level = EXCLUDED.sa_access_level").
+		Set("inherits = EXCLUDED.inherits").
+		Set("type = EXCLUDED.type").
+		Set("sa_created_by = EXCLUDED.sa_created_by").
+		Set("sa_owner_id = EXCLUDED.sa_owner_id").
+		Set("sa_root_id = EXCLUDED.sa_root_id").
+		Set("sa_deleted_at = EXCLUDED.sa_deleted_at").
+		Set("sa_updated_at = EXCLUDED.sa_updated_at").
+		Exec(ctx)
+	return err
+}
+
+func applyUserClaim(ctx context.Context, tx bun.Tx, raw json.RawMessage) error {
+	var entity db.UserClaim
+	if err := json.Unmarshal(raw, &entity); err != nil {
+		return fmt.Errorf("unmarshal: %w", err)
+	}
+	_, err := tx.NewInsert().Model(&entity).
+		On("CONFLICT (id) DO UPDATE").
+		Set("claim_id = EXCLUDED.claim_id").
+		Set("user_id = EXCLUDED.user_id").
+		Set("reason = EXCLUDED.reason").
+		Set("starts_at = EXCLUDED.starts_at").
+		Set("ends_at = EXCLUDED.ends_at").
+		Set("sa_created_by = EXCLUDED.sa_created_by").
+		Set("sa_owner_id = EXCLUDED.sa_owner_id").
+		Set("sa_deleted_at = EXCLUDED.sa_deleted_at").
+		Set("sa_updated_at = EXCLUDED.sa_updated_at").
+		Exec(ctx)
+	return err
+}
+
+func applyClaimObject(ctx context.Context, tx bun.Tx, raw json.RawMessage) error {
+	var entity db.ClaimObject
+	if err := json.Unmarshal(raw, &entity); err != nil {
+		return fmt.Errorf("unmarshal: %w", err)
+	}
+	_, err := tx.NewInsert().Model(&entity).
+		On("CONFLICT (id) DO UPDATE").
+		Set("reason = EXCLUDED.reason").
+		Set("function = EXCLUDED.function").
+		Set("claim_id = EXCLUDED.claim_id").
+		Set("object_id = EXCLUDED.object_id").
+		Set("object_type = EXCLUDED.object_type").
+		Set("sa_level = EXCLUDED.sa_level").
+		Set("inherits = EXCLUDED.inherits").
+		Set("ref_id = EXCLUDED.ref_id").
+		Set("sa_root_id = EXCLUDED.sa_root_id").
+		Set("sa_created_by = EXCLUDED.sa_created_by").
+		Set("sa_owner_id = EXCLUDED.sa_owner_id").
+		Set("sa_deleted_at = EXCLUDED.sa_deleted_at").
+		Set("sa_updated_at = EXCLUDED.sa_updated_at").
+		Exec(ctx)
+	return err
+}
+
+func applySamnaClient(ctx context.Context, tx bun.Tx, raw json.RawMessage) error {
+	var entity db.SamnaClient
+	if err := json.Unmarshal(raw, &entity); err != nil {
+		return fmt.Errorf("unmarshal: %w", err)
+	}
+	_, err := tx.NewInsert().Model(&entity).
+		On("CONFLICT (id) DO UPDATE").
+		Set("name = EXCLUDED.name").
+		Set("description = EXCLUDED.description").
+		Set("app_id = EXCLUDED.app_id").
+		Set("client_id = EXCLUDED.client_id").
+		Set("secret_hash = EXCLUDED.secret_hash").
+		Set("status = EXCLUDED.status").
+		Set("expires_at = EXCLUDED.expires_at").
+		Set("sa_owner_id = EXCLUDED.sa_owner_id").
+		Set("sa_created_by = EXCLUDED.sa_created_by").
+		Set("sa_deleted_at = EXCLUDED.sa_deleted_at").
+		Set("sa_updated_at = EXCLUDED.sa_updated_at").
+		Exec(ctx)
+	return err
+}
+
+func applySamnaSecret(ctx context.Context, tx bun.Tx, raw json.RawMessage) error {
+	var entity db.SamnaSecret
+	if err := json.Unmarshal(raw, &entity); err != nil {
+		return fmt.Errorf("unmarshal: %w", err)
+	}
+	_, err := tx.NewInsert().Model(&entity).
+		On("CONFLICT (id) DO UPDATE").
+		Set("app_id = EXCLUDED.app_id").
+		Set("key = EXCLUDED.key").
+		Set("value = EXCLUDED.value").
+		Set("sa_owner_id = EXCLUDED.sa_owner_id").
+		Set("sa_created_by = EXCLUDED.sa_created_by").
+		Set("sa_deleted_at = EXCLUDED.sa_deleted_at").
+		Set("sa_updated_at = EXCLUDED.sa_updated_at").
+		Exec(ctx)
+	return err
+}
+
+func applySamnaApp(ctx context.Context, tx bun.Tx, raw json.RawMessage) error {
+	var entity db.SamnaApp
+	if err := json.Unmarshal(raw, &entity); err != nil {
+		return fmt.Errorf("unmarshal: %w", err)
+	}
+	_, err := tx.NewInsert().Model(&entity).
+		On("CONFLICT (id) DO UPDATE").
+		Set("slug = EXCLUDED.slug").
+		Set("name = EXCLUDED.name").
+		Set("private_seed = EXCLUDED.private_seed").
+		Set("sa_deleted_at = EXCLUDED.sa_deleted_at").
+		Set("sa_updated_at = EXCLUDED.sa_updated_at").
+		Exec(ctx)
+	return err
+}
+
+func applyObjectField(ctx context.Context, tx bun.Tx, raw json.RawMessage) error {
+	var entity db.ObjectField
+	if err := json.Unmarshal(raw, &entity); err != nil {
+		return fmt.Errorf("unmarshal: %w", err)
+	}
+	_, err := tx.NewInsert().Model(&entity).
+		On("CONFLICT (id) DO UPDATE").
+		Set("app_id = EXCLUDED.app_id").
+		Set("object_type = EXCLUDED.object_type").
+		Set("name = EXCLUDED.name").
+		Set("description = EXCLUDED.description").
+		Set("json_schema = EXCLUDED.json_schema").
+		Set("required = EXCLUDED.required").
+		Set("value = EXCLUDED.value").
+		Set("sa_owner_id = EXCLUDED.sa_owner_id").
+		Set("sa_created_by = EXCLUDED.sa_created_by").
+		Set("sa_deleted_at = EXCLUDED.sa_deleted_at").
+		Set("sa_updated_at = EXCLUDED.sa_updated_at").
+		Exec(ctx)
+	return err
+}
+
+func applyUserField(ctx context.Context, tx bun.Tx, raw json.RawMessage) error {
+	var entity db.UserField
+	if err := json.Unmarshal(raw, &entity); err != nil {
+		return fmt.Errorf("unmarshal: %w", err)
+	}
+	_, err := tx.NewInsert().Model(&entity).
+		On("CONFLICT (id) DO UPDATE").
+		Set("field_id = EXCLUDED.field_id").
+		Set("user_id = EXCLUDED.user_id").
+		Set("value = EXCLUDED.value").
+		Set("sa_owner_id = EXCLUDED.sa_owner_id").
+		Set("sa_created_by = EXCLUDED.sa_created_by").
+		Set("sa_deleted_at = EXCLUDED.sa_deleted_at").
+		Set("sa_updated_at = EXCLUDED.sa_updated_at").
+		Exec(ctx)
+	return err
+}
+
+func applyUserRelation(ctx context.Context, tx bun.Tx, raw json.RawMessage) error {
+	var entity db.UserRelation
+	if err := json.Unmarshal(raw, &entity); err != nil {
+		return fmt.Errorf("unmarshal: %w", err)
+	}
+	_, err := tx.NewInsert().Model(&entity).
+		On("CONFLICT (id) DO UPDATE").
+		Set("user_id = EXCLUDED.user_id").
+		Set("app_id = EXCLUDED.app_id").
+		Set("description = EXCLUDED.description").
+		Set("object_type = EXCLUDED.object_type").
+		Set("object_id = EXCLUDED.object_id").
+		Set("pinned = EXCLUDED.pinned").
+		Set("priority = EXCLUDED.priority").
+		Set("used_at = EXCLUDED.used_at").
+		Set("sa_deleted_at = EXCLUDED.sa_deleted_at").
+		Set("sa_updated_at = EXCLUDED.sa_updated_at").
+		Exec(ctx)
+	return err
+}
+
+func applyAudit(ctx context.Context, tx bun.Tx, raw json.RawMessage) error {
+	var entity db.Audit
+	if err := json.Unmarshal(raw, &entity); err != nil {
+		return fmt.Errorf("unmarshal: %w", err)
+	}
+	_, err := tx.NewInsert().Model(&entity).
+		On("CONFLICT (id) DO UPDATE").
+		Set("operation = EXCLUDED.operation").
+		Set("message = EXCLUDED.message").
+		Set("type = EXCLUDED.type").
+		Set("object_type = EXCLUDED.object_type").
+		Set("object_id = EXCLUDED.object_id").
+		Set("sa_created_by = EXCLUDED.sa_created_by").
+		Set("sa_owner_id = EXCLUDED.sa_owner_id").
+		Set("sa_updated_at = EXCLUDED.sa_updated_at").
+		Exec(ctx)
 	return err
 }
 
 func UpdateSeq(ctx context.Context, seq int64) error {
-	_, err := db.Instance().NewInsert().
-		Model(&db.ClientState{
-			ID:             1,
-			LastAppliedSeq: seq,
-			UpdatedAt:      time.Now(),
-		}).
-		On("CONFLICT (id) DO UPDATE").
-		Set("last_applied_seq = EXCLUDED.last_applied_seq").
-		Set("sa_updated_at = EXCLUDED.sa_updated_at").
+	count, err := db.Instance().NewSelect().
+		Model((*db.DiscipleState)(nil)).
+		Count(ctx)
+	if err != nil {
+		return err
+	}
+
+	if count == 0 {
+		_, err = db.Instance().NewInsert().
+			Model(&db.DiscipleState{
+				LastAppliedSeq: seq,
+				UpdatedAt:      time.Now(),
+			}).
+			Exec(ctx)
+		return err
+	}
+
+	_, err = db.Instance().NewUpdate().
+		Model((*db.DiscipleState)(nil)).
+		Set("last_applied_seq = ?", seq).
+		Set("sa_updated_at = ?", time.Now()).
+		Where("TRUE").
 		Exec(ctx)
 	return err
 }
 
 func GetSeq(ctx context.Context) (int64, error) {
-	var state db.ClientState
+	var state db.DiscipleState
 	err := db.Instance().NewSelect().
 		Model(&state).
-		Where("id = 1").
+		Limit(1).
 		Scan(ctx)
 	if err != nil {
 		return 0, nil

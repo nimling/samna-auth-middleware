@@ -11,15 +11,25 @@ import (
 	"time"
 )
 
+type ResponseEnvelope struct {
+	Data json.RawMessage `json:"data"`
+}
+
 func DecodeJSON[T any](body io.ReadCloser, err error) (T, error) {
 	var zero T
 	if err != nil {
 		return zero, err
 	}
 	defer body.Close()
+
+	var envelope ResponseEnvelope
+	if err := json.NewDecoder(body).Decode(&envelope); err != nil {
+		return zero, fmt.Errorf("decode envelope: %w", err)
+	}
+
 	var result T
-	if err := json.NewDecoder(body).Decode(&result); err != nil {
-		return zero, fmt.Errorf("decode response: %w", err)
+	if err := json.Unmarshal(envelope.Data, &result); err != nil {
+		return zero, fmt.Errorf("decode data: %w", err)
 	}
 	return result, nil
 }

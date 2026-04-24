@@ -66,9 +66,9 @@ func PostAsset(ctx context.Context, asset db.Asset) (db.Asset, error) {
 	return result, nil
 }
 
-func PostAssetUpload(ctx context.Context, assetID uuid.UUID, contentType string, body io.Reader) (io.ReadCloser, error) {
+func PostAssetData(ctx context.Context, assetID uuid.UUID, contentType string, body io.Reader) (io.ReadCloser, error) {
 	c := newClient()
-	u, err := joinURL(c.apiURL, "asset", assetID.String())
+	u, err := joinURL(c.apiURL, "asset", assetID.String(), "data")
 	if err != nil {
 		return nil, fmt.Errorf("build url: %w", err)
 	}

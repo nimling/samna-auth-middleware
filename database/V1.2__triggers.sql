@@ -134,6 +134,7 @@ RETURNS TRIGGER AS $$
 DECLARE
     v_table text := TG_TABLE_SCHEMA || '.' || TG_TABLE_NAME;
     v_object_type text := TG_TABLE_NAME;
+    v_object_id uuid;
     v_user_id uuid;
     v_other_user_id uuid;
     v_affected_users uuid[];
@@ -141,6 +142,12 @@ DECLARE
 BEGIN
     IF current_setting('samna_auth.replay_mode', true) = 'true' THEN
         RETURN COALESCE(NEW, OLD);
+    END IF;
+
+    IF TG_TABLE_NAME = 'samna_user' THEN
+        EXECUTE format('SELECT ($1).user_id') INTO v_object_id USING CASE WHEN TG_OP = 'DELETE' THEN OLD ELSE NEW END;
+    ELSE
+        v_object_id := CASE WHEN TG_OP = 'DELETE' THEN OLD.id ELSE NEW.id END;
     END IF;
 
     IF TG_OP = 'UPDATE' THEN
@@ -155,7 +162,7 @@ BEGIN
         v_affected_users := samna_auth.find_affected_users_for_row(
             v_table,
             v_object_type,
-            CASE WHEN TG_OP = 'DELETE' THEN OLD.id ELSE NEW.id END,
+            v_object_id,
             CASE WHEN TG_OP = 'DELETE' THEN OLD.sa_owner_id ELSE NEW.sa_owner_id END
         );
 
@@ -163,7 +170,7 @@ BEGIN
             FOREACH v_user_id IN ARRAY v_affected_users LOOP
                 PERFORM samna_auth.reconcile_user_object(
                     v_user_id,
-                    CASE WHEN TG_OP = 'DELETE' THEN OLD.id ELSE NEW.id END,
+                    v_object_id,
                     v_object_type
                 );
             END LOOP;
@@ -198,9 +205,9 @@ BEGIN
         BEGIN
             INSERT INTO samna_auth.reconcile_queue (id, user_id, object_id, object_type)
             SELECT
-                samna_auth.composite_id(u::text, (CASE WHEN TG_OP = 'DELETE' THEN OLD.id ELSE NEW.id END)::text, v_object_type),
+                samna_auth.composite_id(u::text, v_object_id::text, v_object_type),
                 u,
-                CASE WHEN TG_OP = 'DELETE' THEN OLD.id ELSE NEW.id END,
+                v_object_id,
                 v_object_type
             FROM unnest(v_affected_users) u
             ON CONFLICT (id) DO NOTHING;
@@ -230,13 +237,9 @@ BEGIN
     END IF;
 
     BEGIN
-        IF TG_TABLE_NAME IN ('user_claim', 'client_claim') THEN
+        IF TG_TABLE_NAME = 'user_claim' THEN
             IF TG_OP = 'INSERT' OR (TG_OP = 'UPDATE' AND OLD.sa_deleted_at IS NULL AND NEW.sa_deleted_at IS NOT NULL) THEN
-                IF TG_TABLE_NAME = 'user_claim' THEN
-                    v_user_id := COALESCE(NEW.user_id, OLD.user_id);
-                ELSE
-                    v_user_id := COALESCE(NEW.client_id, OLD.client_id);
-                END IF;
+                v_user_id := COALESCE(NEW.user_id, OLD.user_id);
                 v_claim_id := COALESCE(NEW.claim_id, OLD.claim_id);
 
                 FOR v_reachable IN
@@ -257,7 +260,7 @@ BEGIN
         ELSIF TG_TABLE_NAME = 'claim_object' THEN
             IF TG_OP IN ('INSERT', 'UPDATE') THEN
                 FOR v_user_id IN
-                    SELECT ac.user_id FROM samna_auth.active_claim ac WHERE ac.claim_id = NEW.claim_id
+                    SELECT DISTINCT samna_auth.user_object.user_id FROM samna_auth.user_object WHERE samna_auth.user_object.claim_id = NEW.claim_id
                 LOOP
                     PERFORM samna_auth.reconcile_user_object(v_user_id, NEW.object_id, NEW.object_type);
                 END LOOP;
@@ -287,23 +290,35 @@ CREATE OR REPLACE TRIGGER sa_claim_mutation_user_claim
     AFTER INSERT OR UPDATE ON samna_auth.user_claim
     FOR EACH ROW EXECUTE FUNCTION samna_auth.tg_claim_mutation();
 
-CREATE OR REPLACE TRIGGER sa_claim_mutation_client_claim
-    AFTER INSERT OR UPDATE ON samna_auth.client_claim
-    FOR EACH ROW EXECUTE FUNCTION samna_auth.tg_claim_mutation();
-
 CREATE OR REPLACE TRIGGER update_samna_client_sa_updated_at
     BEFORE UPDATE ON samna_auth.samna_client
     FOR EACH ROW
     EXECUTE FUNCTION samna_auth.update_current_timestamp();
 
-CREATE OR REPLACE TRIGGER update_client_claim_sa_updated_at
-    BEFORE UPDATE ON samna_auth.client_claim
+CREATE OR REPLACE TRIGGER update_samna_secret_sa_updated_at
+    BEFORE UPDATE ON samna_auth.samna_secret
     FOR EACH ROW
     EXECUTE FUNCTION samna_auth.update_current_timestamp();
 
-CREATE OR REPLACE TRIGGER sa_audit_client_claim
-    AFTER INSERT OR UPDATE ON samna_auth.client_claim
-    FOR EACH ROW EXECUTE FUNCTION samna_auth.audit_trigger_function();
+CREATE OR REPLACE TRIGGER samna_auth_object_mutation
+    AFTER INSERT OR UPDATE OR DELETE ON samna_auth.samna_client
+    FOR EACH ROW EXECUTE FUNCTION samna_auth.tg_object_mutation();
+
+CREATE OR REPLACE TRIGGER samna_auth_object_mutation
+    AFTER INSERT OR UPDATE OR DELETE ON samna_auth.samna_secret
+    FOR EACH ROW EXECUTE FUNCTION samna_auth.tg_object_mutation();
+
+CREATE OR REPLACE TRIGGER samna_auth_object_mutation
+    AFTER INSERT OR UPDATE OR DELETE ON samna_auth.object_field
+    FOR EACH ROW EXECUTE FUNCTION samna_auth.tg_object_mutation();
+
+CREATE OR REPLACE TRIGGER samna_auth_object_mutation
+    AFTER INSERT OR UPDATE OR DELETE ON samna_auth.user_field
+    FOR EACH ROW EXECUTE FUNCTION samna_auth.tg_object_mutation();
+
+CREATE OR REPLACE TRIGGER samna_auth_object_mutation
+    AFTER INSERT OR UPDATE OR DELETE ON samna_auth.user_relation
+    FOR EACH ROW EXECUTE FUNCTION samna_auth.tg_object_mutation();
 
 -- ============================================================================
 -- tg_hierarchy_mutation (INTERNAL)
@@ -325,11 +340,14 @@ BEGIN
         RETURN COALESCE(NEW, OLD);
     END IF;
 
-    IF OLD.sa_owner_id IS NOT DISTINCT FROM NEW.sa_owner_id
-       AND (NOT EXISTS(SELECT 1 FROM samna_auth.get_table_columns(TG_TABLE_SCHEMA || '.' || TG_TABLE_NAME) WHERE column_name = 'sa_parent_id')
-            OR OLD.sa_parent_id IS NOT DISTINCT FROM NEW.sa_parent_id)
-    THEN
-        RETURN NEW;
+    IF TG_TABLE_NAME = 'organization' THEN
+        IF OLD.sa_owner_id IS NOT DISTINCT FROM NEW.sa_owner_id THEN
+            RETURN NEW;
+        END IF;
+    ELSIF TG_TABLE_NAME = 'location' THEN
+        IF OLD.sa_parent_id IS NOT DISTINCT FROM NEW.sa_parent_id THEN
+            RETURN NEW;
+        END IF;
     END IF;
 
     BEGIN
@@ -338,11 +356,9 @@ BEGIN
                 SELECT child.id FROM samna_auth.get_child_organizations(NEW.id) child
             LOOP
                 v_affected_users := ARRAY(
-                    SELECT DISTINCT ac.user_id
-                    FROM samna_auth.active_claim ac
-                    INNER JOIN samna_auth.claim_object co ON co.claim_id = ac.claim_id
-                    WHERE co.object_id = v_descendant.id AND co.object_type = 'organization'
-                      AND co.sa_deleted_at IS NULL
+                    SELECT DISTINCT samna_auth.user_object.user_id
+                    FROM samna_auth.user_object
+                    WHERE samna_auth.user_object.object_id = v_descendant.id AND samna_auth.user_object.object_type = 'organization'
                 );
                 IF v_affected_users IS NOT NULL THEN
                     FOREACH v_user_id IN ARRAY v_affected_users LOOP
@@ -356,11 +372,9 @@ BEGIN
                 SELECT child.id FROM samna_auth.get_child_locations(NEW.id) child
             LOOP
                 v_affected_users := ARRAY(
-                    SELECT DISTINCT ac.user_id
-                    FROM samna_auth.active_claim ac
-                    INNER JOIN samna_auth.claim_object co ON co.claim_id = ac.claim_id
-                    WHERE co.object_id = v_descendant.id AND co.object_type = 'location'
-                      AND co.sa_deleted_at IS NULL
+                    SELECT DISTINCT samna_auth.user_object.user_id
+                    FROM samna_auth.user_object
+                    WHERE samna_auth.user_object.object_id = v_descendant.id AND samna_auth.user_object.object_type = 'location'
                 );
                 IF v_affected_users IS NOT NULL THEN
                     FOREACH v_user_id IN ARRAY v_affected_users LOOP
@@ -388,3 +402,54 @@ CREATE OR REPLACE TRIGGER sa_hierarchy_mutation_organization
 CREATE OR REPLACE TRIGGER sa_hierarchy_mutation_location
     AFTER UPDATE OF sa_parent_id ON samna_auth.location
     FOR EACH ROW EXECUTE FUNCTION samna_auth.tg_hierarchy_mutation();
+
+CREATE OR REPLACE FUNCTION samna_auth.tg_search_index()
+RETURNS TRIGGER AS $$
+DECLARE
+    v_vector TSVECTOR;
+    v_object_id UUID;
+BEGIN
+    IF TG_TABLE_NAME = 'samna_user' THEN
+        EXECUTE format('SELECT ($1).user_id') INTO v_object_id USING CASE WHEN TG_OP = 'DELETE' THEN OLD ELSE NEW END;
+    ELSE
+        v_object_id := CASE WHEN TG_OP = 'DELETE' THEN OLD.id ELSE NEW.id END;
+    END IF;
+
+    IF TG_OP = 'DELETE' THEN
+        DELETE FROM samna_auth.search_index
+        WHERE object_id = v_object_id AND object_type = TG_TABLE_NAME;
+        RETURN OLD;
+    END IF;
+
+    IF TG_TABLE_NAME = 'samna_user' THEN
+        v_vector := setweight(to_tsvector('english', COALESCE(NEW.first_name, '') || ' ' || COALESCE(NEW.last_name, '')), 'A') ||
+                    setweight(to_tsvector('english', COALESCE(NEW.email, '')), 'B');
+    ELSE
+        v_vector := setweight(to_tsvector('english', COALESCE(NEW.name, '')), 'A') ||
+                    setweight(to_tsvector('english', COALESCE(NEW.description, '')), 'B');
+    END IF;
+
+    INSERT INTO samna_auth.search_index (object_id, object_type, search_vector)
+    VALUES (v_object_id, TG_TABLE_NAME, v_vector)
+    ON CONFLICT (object_id, object_type) DO UPDATE
+    SET search_vector = EXCLUDED.search_vector;
+
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE TRIGGER sa_search_index_samna_user
+    AFTER INSERT OR UPDATE ON samna_auth.samna_user
+    FOR EACH ROW EXECUTE FUNCTION samna_auth.tg_search_index();
+
+CREATE OR REPLACE TRIGGER sa_search_index_claim
+    AFTER INSERT OR UPDATE ON samna_auth.claim
+    FOR EACH ROW EXECUTE FUNCTION samna_auth.tg_search_index();
+
+CREATE OR REPLACE TRIGGER sa_search_index_organization
+    AFTER INSERT OR UPDATE ON samna_auth.organization
+    FOR EACH ROW EXECUTE FUNCTION samna_auth.tg_search_index();
+
+CREATE OR REPLACE TRIGGER sa_search_index_location
+    AFTER INSERT OR UPDATE ON samna_auth.location
+    FOR EACH ROW EXECUTE FUNCTION samna_auth.tg_search_index();

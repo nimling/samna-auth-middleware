@@ -157,9 +157,9 @@ e.GET("/logout", saecho.GetLogout)
 
 **Location**: `GetLocations`, `GetLocation`, `GetLocationClaims`, `PostLocation`, `PutLocation`, `DeleteLocation`
 
-**Claim**: `GetClaimGraph`, `GetClaims`, `GetClaim`, `GetClaimAudit`, `GetClaimSearch`, `PostClaim`, `PutClaim`, `DeleteClaim`, `PostClaimObject`, `DeleteClaimObject`, `PostClaimUser`, `DeleteClaimUser`
+**Claim**: `GetClaimGraph`, `GetClaims`, `GetClaim`, `GetClaimAudit`, `PostClaim`, `PutClaim`, `DeleteClaim`, `PostClaimObject`, `DeleteClaimObject`, `PostClaimUser`, `DeleteClaimUser`
 
-**Me**: `GetMe`, `PutMe`, `GetMeClaims`, `PostMeAsset`, `DeleteMeAsset`, `GetMeConnections`, `GetMeModules`, `GetMeOrganizations`, `GetMeLocations`, `GetMeApps`, `GetMeApp`
+**Me**: `GetMe`, `PutMe`, `GetMeClaims`, `PostMeAsset`, `DeleteMeAsset`, `GetMeRelations`, `GetMeModules`, `GetMeOrganizations`, `GetMeLocations`, `GetMeApps`, `GetMeApp`
 
 **Asset**: `GetAssets`, `GetAsset`, `GetAssetData`, `PostAsset`, `PostAssetUpload`, `PutAsset`, `DeleteAsset`
 
@@ -183,7 +183,7 @@ if err != nil {
 defer body.Close()
 ```
 
-The client reads `SAUTH_ENDPOINT`, `SAUTH_CLIENT_SLUG`, and `SAUTH_CLIENT_SECRET` from environment variables.
+The client reads `SAUTH_ENDPOINT`, `SAUTH_APP_SLUG`, and `SAUTH_APP_SECRET` from environment variables.
 
 ### Error Handling
 
@@ -203,7 +203,7 @@ The `db` package provides direct PostgreSQL access via Bun ORM with a singleton 
 
 ### Models
 
-`SamnaUser`, `Organization`, `Location`, `Claim`, `UserClaim`, `ClaimObject`, `SamnaClient`, `ClientClaim`, `ActiveClaim`, `ActiveObject`, `ActiveUser`, `GraphNode`
+`SamnaUser`, `Organization`, `Location`, `Claim`, `UserClaim`, `ClaimObject`, `SamnaClient`, `AccessClaim`, `ObjectField`, `UserField`, `UserRelation`, `Audit`, `UserObject`, `GraphNode`
 
 ### Access Levels
 
@@ -247,8 +247,8 @@ The `database/` directory contains Flyway style migrations for the `samna_auth` 
 | Variable | Used by | Description |
 |----------|---------|-------------|
 | `SAUTH_ENDPOINT` | middleware, client, sync | Base URL of the Samna Auth server |
-| `SAUTH_CLIENT_SLUG` | middleware, client, sync | App identifier slug |
-| `SAUTH_CLIENT_SECRET` | middleware, client, sync | App secret for authentication |
+| `SAUTH_APP_SLUG` | middleware, client, sync | App identifier slug |
+| `SAUTH_APP_SECRET` | middleware, client, sync | App secret for authentication |
 | `SAUTH_REDIRECT_URI` | middleware | OAuth redirect URI for auth code exchange |
 
 ### Database

@@ -28,6 +28,18 @@ func GetEnvURL(envKey string) url.URL {
 	return *parsedVal
 }
 
+func CookieDomainFromURI(uri string) string {
+	parsed, err := url.Parse(uri)
+	if err != nil {
+		return ""
+	}
+	host := parsed.Hostname()
+	if host == "localhost" {
+		return ""
+	}
+	return host
+}
+
 func GetEnvUUIDOptional(envKey string) *uuid.UUID {
 	envVal, ok := os.LookupEnv(envKey)
 	if !ok || envVal == "" {

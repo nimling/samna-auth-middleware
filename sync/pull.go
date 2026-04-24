@@ -10,15 +10,19 @@ import (
 	"time"
 )
 
+type responseEnvelope struct {
+	Data json.RawMessage `json:"data"`
+}
+
 type SnapshotResponse struct {
-	Records []SyncPayload `json:"data"`
+	Records []SyncPayload `json:"records"`
 	Seq     int64         `json:"seq"`
 }
 
 func PullSnapshot(ctx context.Context) error {
 	endpoint := os.Getenv("SAUTH_ENDPOINT")
-	slug := os.Getenv("SAUTH_CLIENT_SLUG")
-	secret := os.Getenv("SAUTH_CLIENT_SECRET")
+	slug := os.Getenv("SAUTH_APP_SLUG")
+	secret := os.Getenv("SAUTH_APP_SECRET")
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint+"/sam/sync/snapshot", nil)
 	if err != nil {
@@ -39,8 +43,13 @@ func PullSnapshot(ctx context.Context) error {
 		return fmt.Errorf("snapshot returned %d: %s", resp.StatusCode, string(body))
 	}
 
+	var envelope responseEnvelope
+	if err := json.NewDecoder(resp.Body).Decode(&envelope); err != nil {
+		return fmt.Errorf("decode envelope: %w", err)
+	}
+
 	var snapshot SnapshotResponse
-	if err := json.NewDecoder(resp.Body).Decode(&snapshot); err != nil {
+	if err := json.Unmarshal(envelope.Data, &snapshot); err != nil {
 		return fmt.Errorf("decode snapshot: %w", err)
 	}
 
@@ -61,8 +70,8 @@ func PullSnapshot(ctx context.Context) error {
 
 func PullSync(ctx context.Context) error {
 	endpoint := os.Getenv("SAUTH_ENDPOINT")
-	slug := os.Getenv("SAUTH_CLIENT_SLUG")
-	secret := os.Getenv("SAUTH_CLIENT_SECRET")
+	slug := os.Getenv("SAUTH_APP_SLUG")
+	secret := os.Getenv("SAUTH_APP_SECRET")
 
 	seq, err := GetSeq(ctx)
 	if err != nil {
@@ -88,8 +97,13 @@ func PullSync(ctx context.Context) error {
 		return fmt.Errorf("sync returned %d: %s", resp.StatusCode, string(body))
 	}
 
+	var syncEnvelope responseEnvelope
+	if err := json.NewDecoder(resp.Body).Decode(&syncEnvelope); err != nil {
+		return fmt.Errorf("decode envelope: %w", err)
+	}
+
 	var payloads []SyncPayload
-	if err := json.NewDecoder(resp.Body).Decode(&payloads); err != nil {
+	if err := json.Unmarshal(syncEnvelope.Data, &payloads); err != nil {
 		return fmt.Errorf("decode sync: %w", err)
 	}
 

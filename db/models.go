@@ -175,49 +175,12 @@ type ClaimObject struct {
 	Owner      *Organization `bun:"rel:belongs-to,join:sa_owner_id=id" json:"owner,omitempty"`
 }
 
-type ActiveClaim struct {
-	bun.BaseModel `bun:"table:samna_auth.active_claim"`
-
-	ID               uuid.UUID     `bun:"id,pk" json:"id"`
-	ClaimID          uuid.UUID     `bun:"claim_id" json:"claim_id"`
-	UserID           uuid.UUID     `bun:"user_id" json:"user_id"`
-	ClaimName        string        `bun:"claim_name" json:"claim_name"`
-	ClaimDescription *string       `bun:"claim_description" json:"claim_description"`
-	AccessLevel      int           `bun:"sa_access_level" json:"access_level"`
-	ClaimType        string        `bun:"claim_type" json:"claim_type"`
-	CreatedBy        *uuid.UUID    `bun:"sa_created_by" json:"created_by"`
-	ClaimCreatedBy   *uuid.UUID    `bun:"claim_sa_created_by" json:"claim_created_by"`
-	ClaimOwnerID     uuid.UUID     `bun:"claim_sa_owner_id" json:"claim_owner_id"`
-	UserOwnerID      uuid.UUID     `bun:"user_sa_owner_id" json:"user_owner_id"`
-	RootID           uuid.UUID     `bun:"sa_root_id" json:"root_id"`
-	Objects          []ClaimObject `bun:"rel:has-many,join:claim_id=claim_id" json:"claim_objects"`
-}
-
-type ActiveObject struct {
-	ObjectID   uuid.UUID  `bun:"object_id" json:"object_id"`
-	ObjectType string     `bun:"object_type" json:"object_type"`
-	ClaimID    uuid.UUID  `bun:"claim_id" json:"claim_id"`
-	Level      int        `bun:"sa_level" json:"level"`
-	Inherits   bool       `bun:"inherits" json:"inherits"`
-	RootID     uuid.UUID  `bun:"sa_root_id" json:"root_id"`
-	OwnerID    uuid.UUID  `bun:"sa_owner_id" json:"owner_id"`
-	RefID      *uuid.UUID `bun:"ref_id" json:"ref_id"`
-	Reason     *string    `bun:"reason" json:"reason"`
-	Function   *string    `bun:"function" json:"function"`
-	CreatedAt  time.Time  `bun:"sa_created_at" json:"created_at"`
-	UpdatedAt  time.Time  `bun:"sa_updated_at" json:"updated_at"`
-	DeletedAt  *time.Time `bun:"sa_deleted_at" json:"deleted_at"`
-}
-
-type ActiveUser struct {
-	TargetUserID uuid.UUID  `bun:"target_user_id" json:"target_user_id"`
-	UserID       uuid.UUID  `bun:"user_id" json:"user_id"`
-	ClaimID      uuid.UUID  `bun:"claim_id" json:"claim_id"`
-	OwnerID      uuid.UUID  `bun:"sa_owner_id" json:"owner_id"`
-	AccessLevel  int        `bun:"sa_access_level" json:"access_level"`
-	CreatedAt    time.Time  `bun:"sa_created_at" json:"created_at"`
-	UpdatedAt    time.Time  `bun:"sa_updated_at" json:"updated_at"`
-	DeletedAt    *time.Time `bun:"sa_deleted_at" json:"deleted_at"`
+type AccessClaim struct {
+	ID          uuid.UUID `bun:"id,pk" json:"id"`
+	ClaimID     uuid.UUID `bun:"claim_id" json:"claim_id"`
+	AccessLevel int       `bun:"sa_access_level" json:"access_level"`
+	OwnerID     uuid.UUID `bun:"sa_owner_id" json:"owner_id"`
+	RootID      uuid.UUID `bun:"sa_root_id" json:"root_id"`
 }
 
 type Asset struct {
@@ -253,7 +216,7 @@ type SamnaClient struct {
 	Name       string     `bun:"name" json:"name"`
 	Description *string   `bun:"description" json:"description"`
 	AppID      uuid.UUID  `bun:"app_id" json:"app_id"`
-	ClientKey  uuid.UUID  `bun:"client_key" json:"client_key"`
+	ClientID   uuid.UUID  `bun:"client_id" json:"client_id"`
 	SecretHash string     `bun:"secret_hash" json:"-"`
 	Status     string     `bun:"status" json:"status"`
 	ExpiresAt  *time.Time `bun:"expires_at" json:"expires_at"`
@@ -264,39 +227,79 @@ type SamnaClient struct {
 	UpdatedAt  time.Time  `bun:"sa_updated_at" json:"updated_at"`
 }
 
-type ClientClaim struct {
-	bun.BaseModel `bun:"table:samna_auth.client_claim"`
+type SamnaSecret struct {
+	bun.BaseModel `bun:"table:samna_auth.samna_secret"`
+
+	ID             uuid.UUID  `bun:"id,pk" json:"id"`
+	AppID          uuid.UUID  `bun:"app_id" json:"app_id"`
+	Key            string     `bun:"key" json:"key"`
+	Value          string     `bun:"value" json:"value,omitempty"`
+	OwnerID        uuid.UUID  `bun:"sa_owner_id" json:"owner_id"`
+	CreatedBy      *uuid.UUID `bun:"sa_created_by" json:"created_by"`
+	DeletedAt      *time.Time `bun:"sa_deleted_at" json:"deleted_at"`
+	CreatedAt      time.Time  `bun:"sa_created_at" json:"created_at"`
+	UpdatedAt      time.Time  `bun:"sa_updated_at" json:"updated_at"`
+}
+
+type SamnaApp struct {
+	bun.BaseModel `bun:"table:samna_auth.samna_app"`
+
+	ID          uuid.UUID  `bun:"id,pk" json:"id"`
+	Slug        string     `bun:"slug" json:"slug"`
+	Name        string     `bun:"name" json:"name"`
+	PrivateSeed string     `bun:"private_seed" json:"private_seed"`
+	DeletedAt   *time.Time `bun:"sa_deleted_at" json:"deleted_at"`
+	CreatedAt   time.Time  `bun:"sa_created_at" json:"created_at"`
+	UpdatedAt   time.Time  `bun:"sa_updated_at" json:"updated_at"`
+}
+
+type ObjectField struct {
+	bun.BaseModel `bun:"table:samna_auth.object_field"`
+
+	ID          uuid.UUID        `bun:"id,pk" json:"id"`
+	AppID       uuid.UUID        `bun:"app_id" json:"app_id"`
+	ObjectType  string           `bun:"object_type" json:"object_type"`
+	Name        string           `bun:"name" json:"name"`
+	Description *string          `bun:"description" json:"description"`
+	JsonSchema  *json.RawMessage `bun:"json_schema,type:jsonb" json:"json_schema"`
+	Required    bool             `bun:"required" json:"required"`
+	Value       *string          `bun:"value" json:"value"`
+	OwnerID     *uuid.UUID       `bun:"sa_owner_id" json:"owner_id"`
+	CreatedBy   *uuid.UUID       `bun:"sa_created_by" json:"created_by"`
+	DeletedAt   *time.Time       `bun:"sa_deleted_at" json:"deleted_at"`
+	CreatedAt   time.Time        `bun:"sa_created_at" json:"created_at"`
+	UpdatedAt   time.Time        `bun:"sa_updated_at" json:"updated_at"`
+}
+
+type UserField struct {
+	bun.BaseModel `bun:"table:samna_auth.user_field"`
 
 	ID        uuid.UUID  `bun:"id,pk" json:"id"`
-	ClaimID   uuid.UUID  `bun:"claim_id" json:"claim_id"`
-	ClientID  uuid.UUID  `bun:"client_id" json:"client_id"`
-	Reason    *string    `bun:"reason" json:"reason"`
-	StartsAt  *time.Time `bun:"starts_at" json:"starts_at"`
-	EndsAt    *time.Time `bun:"ends_at" json:"ends_at"`
+	FieldID   uuid.UUID  `bun:"field_id" json:"field_id"`
+	UserID    uuid.UUID  `bun:"user_id" json:"user_id"`
+	Value     *string    `bun:"value" json:"value"`
+	OwnerID   *uuid.UUID `bun:"sa_owner_id" json:"owner_id"`
 	CreatedBy *uuid.UUID `bun:"sa_created_by" json:"created_by"`
-	OwnerID   uuid.UUID  `bun:"sa_owner_id" json:"owner_id"`
 	DeletedAt *time.Time `bun:"sa_deleted_at" json:"deleted_at"`
 	CreatedAt time.Time  `bun:"sa_created_at" json:"created_at"`
 	UpdatedAt time.Time  `bun:"sa_updated_at" json:"updated_at"`
 }
 
 type UserRelation struct {
-	bun.BaseModel `bun:"table:user_relation" json:"-"`
+	bun.BaseModel `bun:"table:samna_auth.user_relation" json:"-"`
 
-	ID          uuid.UUID  `bun:"id,pk,notnull,type:uuid,default:gen_random_uuid()" json:"id"`
-	UserID      uuid.UUID  `bun:"user_id,notnull,type:uuid" json:"user_id"`
-	AppID       *uuid.UUID `bun:"app_id,type:uuid" json:"app_id"`
+	ID          uuid.UUID  `bun:"id,pk" json:"id"`
+	UserID      uuid.UUID  `bun:"user_id" json:"user_id"`
+	AppID       *uuid.UUID `bun:"app_id" json:"app_id"`
 	Description *string    `bun:"description" json:"description"`
-	ObjectType  string     `bun:"column:object_type,type:string,notnull" json:"object_type"`
-	ObjectID    uuid.UUID  `bun:"object_id,notnull,type:uuid" json:"object_id"`
+	ObjectType  string     `bun:"object_type" json:"object_type"`
+	ObjectID    uuid.UUID  `bun:"object_id" json:"object_id"`
 	Pinned      int        `bun:"pinned" json:"pinned"`
 	Priority    int        `bun:"priority" json:"priority"`
-	ParentID    *uuid.UUID `bun:"sa_parent_id,type:uuid,default:null" json:"parent_id"`
-	SiblingID   *uuid.UUID `bun:"sibling_id,type:uuid,default:null" json:"sibling_id"`
-	UsedAt      *time.Time `bun:"used_at,default:current_timestamp" json:"used_at"`
-	DeletedAt   *time.Time `bun:"sa_deleted_at,default:null" json:"deleted_at,omitempty"`
-	CreatedAt   time.Time  `bun:"sa_created_at,notnull,default:current_timestamp" json:"created_at"`
-	UpdatedAt   time.Time  `bun:"sa_updated_at,notnull,default:current_timestamp" json:"updated_at"`
+	UsedAt      *time.Time `bun:"used_at" json:"used_at"`
+	DeletedAt   *time.Time `bun:"sa_deleted_at" json:"deleted_at,omitempty"`
+	CreatedAt   time.Time  `bun:"sa_created_at" json:"created_at"`
+	UpdatedAt   time.Time  `bun:"sa_updated_at" json:"updated_at"`
 }
 
 type Audit struct {
@@ -361,10 +364,10 @@ type UserObjectEvent struct {
 	WrittenAt  time.Time       `bun:"written_at" json:"written_at"`
 }
 
-type ClientState struct {
-	bun.BaseModel  `bun:"table:samna_auth.client_state"`
+type DiscipleState struct {
+	bun.BaseModel  `bun:"table:samna_auth.disciple_state"`
 
-	ID             int       `bun:"id,pk" json:"id"`
+	ID             uuid.UUID `bun:"id,pk,type:uuid,default:gen_random_uuid()" json:"id"`
 	LastAppliedSeq int64     `bun:"last_applied_seq" json:"last_applied_seq"`
 	UpdatedAt      time.Time `bun:"sa_updated_at" json:"updated_at"`
 }
