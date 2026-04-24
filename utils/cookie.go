@@ -3,22 +3,20 @@ package utils
 import (
 	"net/http"
 	"os"
-	"strings"
 
 	"github.com/labstack/echo/v4"
 )
 
-func WriteCookie(ctx echo.Context, cookie *http.Cookie) {
-	domain := os.Getenv("SAUTH_COOKIE_DOMAIN")
-	host := strings.Split(domain, ":")[0]
-	secure := true
-
-	if host == "localhost" {
-		domain = ""
-		secure = false
-	} else {
-		domain = host
+func cookieDomain() (string, bool) {
+	domain := CookieDomainFromURI(os.Getenv("SAUTH_REDIRECT_URI"))
+	if domain == "" {
+		return "", false
 	}
+	return domain, true
+}
+
+func WriteCookie(ctx echo.Context, cookie *http.Cookie) {
+	domain, secure := cookieDomain()
 
 	cookie = &http.Cookie{
 		Name:     cookie.Name,
@@ -35,14 +33,7 @@ func WriteCookie(ctx echo.Context, cookie *http.Cookie) {
 }
 
 func WritePublicCookie(ctx echo.Context, cookie *http.Cookie) {
-	domain := os.Getenv("SAUTH_COOKIE_DOMAIN")
-	host := strings.Split(domain, ":")[0]
-	secure := true
-
-	if host == "localhost" {
-		domain = ""
-		secure = false
-	}
+	domain, secure := cookieDomain()
 
 	cookie = &http.Cookie{
 		Name:     cookie.Name,
@@ -59,16 +50,7 @@ func WritePublicCookie(ctx echo.Context, cookie *http.Cookie) {
 }
 
 func ClearCookie(ctx echo.Context, name string) {
-	domain := os.Getenv("SAUTH_COOKIE_DOMAIN")
-	host := strings.Split(domain, ":")[0]
-	secure := true
-
-	if host == "localhost" {
-		domain = ""
-		secure = false
-	} else {
-		domain = host
-	}
+	domain, secure := cookieDomain()
 
 	ctx.SetCookie(&http.Cookie{
 		Name:     name,

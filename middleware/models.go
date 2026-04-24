@@ -47,6 +47,7 @@ type AuthMiddlewareConfig struct {
 	JWKSURL             url.URL
 	ExpectedTokenIssuer string
 	RedirectURI         string
+	PageRedirectURI     string
 	OpenIDConfigURL     url.URL
 	AuthorizedUserID    *uuid.UUID
 }
@@ -57,10 +58,11 @@ type AuthOptions struct {
 }
 
 type UserAuthOptions struct {
-	ClientSlug   string
-	ClientSecret string
-	RedirectURI  string
-	DebugUserID  *uuid.UUID
+	ClientSlug      string
+	ClientSecret    string
+	RedirectURI     string
+	PageRedirectURI string
+	DebugUserID     *uuid.UUID
 }
 
 type ClientAuthOptions struct {

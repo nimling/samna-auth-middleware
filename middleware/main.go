@@ -105,7 +105,7 @@ func UserAuthMiddleware(opts *UserAuthOptions) echo.MiddlewareFunc {
 					return ctx.String(http.StatusInternalServerError, "Internal Server Error")
 				}
 
-				return ctx.Redirect(http.StatusFound, ctx.Path())
+				return ctx.Redirect(http.StatusFound, config.PageRedirectURI)
 			}
 
 			tokens, err := refreshTokens(ctx, *config)
@@ -137,10 +137,11 @@ func userAuthOptionsFromConfig(config *AuthMiddlewareConfig) *UserAuthOptions {
 		return nil
 	}
 	return &UserAuthOptions{
-		ClientSlug:   config.ClientSlug,
-		ClientSecret: config.ClientSecret,
-		RedirectURI:  config.RedirectURI,
-		DebugUserID:  config.AuthorizedUserID,
+		ClientSlug:      config.ClientSlug,
+		ClientSecret:    config.ClientSecret,
+		RedirectURI:     config.RedirectURI,
+		PageRedirectURI: config.PageRedirectURI,
+		DebugUserID:     config.AuthorizedUserID,
 	}
 }
 
@@ -161,6 +162,10 @@ func configFromUserAuthOptions(opts *UserAuthOptions) *AuthMiddlewareConfig {
 	if redirectURI == "" {
 		redirectURI = utils.GetEnv("SAUTH_REDIRECT_URI")
 	}
+	pageRedirectURI := opts.PageRedirectURI
+	if pageRedirectURI == "" {
+		pageRedirectURI = utils.GetEnv("SAUTH_PAGE_REDIRECT")
+	}
 	debugUserID := opts.DebugUserID
 	if debugUserID == nil {
 		debugUserID = utils.GetEnvUUIDOptional("SAUTH_DEBUG_USER_ID")
@@ -176,6 +181,7 @@ func configFromUserAuthOptions(opts *UserAuthOptions) *AuthMiddlewareConfig {
 		ClientSlug:       slug,
 		ClientSecret:     secret,
 		RedirectURI:      redirectURI,
+		PageRedirectURI:  pageRedirectURI,
 		OpenIDConfigURL:  *openIDUrl,
 		AuthorizedUserID: debugUserID,
 	}
@@ -192,6 +198,7 @@ func configFromEnv() *AuthMiddlewareConfig {
 		ClientSlug:       utils.GetEnv("SAUTH_APP_SLUG"),
 		ClientSecret:     utils.GetEnv("SAUTH_APP_SECRET"),
 		RedirectURI:      utils.GetEnv("SAUTH_REDIRECT_URI"),
+		PageRedirectURI:  utils.GetEnv("SAUTH_PAGE_REDIRECT"),
 		OpenIDConfigURL:  *openIDUrl,
 		AuthorizedUserID: utils.GetEnvUUIDOptional("SAUTH_DEBUG_USER_ID"),
 	}
