@@ -25,6 +25,10 @@ func getRequestID(ctx echo.Context) uuid.UUID {
 	return uuid.New()
 }
 
+func Redirect(ctx echo.Context, statusCode int, url string) error {
+	return ctx.Redirect(statusCode, url)
+}
+
 func respondError(ctx echo.Context, statusCode int, message string) error {
 	return ctx.JSON(statusCode, returnObject{
 		Count:     0,

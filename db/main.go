@@ -92,6 +92,8 @@ func Init(logger echo.Logger) {
 		(*UserClaim)(nil),
 		(*ClaimObject)(nil),
 		(*SamnaClient)(nil),
+		(*SamnaSecret)(nil),
+		(*SamnaApp)(nil),
 		(*ObjectField)(nil),
 		(*UserField)(nil),
 		(*UserRelation)(nil),

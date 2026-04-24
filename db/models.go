@@ -227,6 +227,33 @@ type SamnaClient struct {
 	UpdatedAt  time.Time  `bun:"sa_updated_at" json:"updated_at"`
 }
 
+type SamnaSecret struct {
+	bun.BaseModel `bun:"table:samna_auth.samna_secret"`
+
+	ID             uuid.UUID  `bun:"id,pk" json:"id"`
+	AppID          uuid.UUID  `bun:"app_id" json:"app_id"`
+	Key            string     `bun:"key" json:"key"`
+	ValueEncrypted string     `bun:"value_encrypted" json:"value_encrypted,omitempty"`
+	Value          string     `bun:"-" json:"value,omitempty"`
+	OwnerID        uuid.UUID  `bun:"sa_owner_id" json:"owner_id"`
+	CreatedBy      *uuid.UUID `bun:"sa_created_by" json:"created_by"`
+	DeletedAt      *time.Time `bun:"sa_deleted_at" json:"deleted_at"`
+	CreatedAt      time.Time  `bun:"sa_created_at" json:"created_at"`
+	UpdatedAt      time.Time  `bun:"sa_updated_at" json:"updated_at"`
+}
+
+type SamnaApp struct {
+	bun.BaseModel `bun:"table:samna_auth.samna_app"`
+
+	ID          uuid.UUID  `bun:"id,pk" json:"id"`
+	Slug        string     `bun:"slug" json:"slug"`
+	Name        string     `bun:"name" json:"name"`
+	PrivateSeed string     `bun:"private_seed" json:"private_seed"`
+	DeletedAt   *time.Time `bun:"sa_deleted_at" json:"deleted_at"`
+	CreatedAt   time.Time  `bun:"sa_created_at" json:"created_at"`
+	UpdatedAt   time.Time  `bun:"sa_updated_at" json:"updated_at"`
+}
+
 type ObjectField struct {
 	bun.BaseModel `bun:"table:samna_auth.object_field"`
 

@@ -295,6 +295,29 @@ CREATE OR REPLACE TRIGGER update_samna_client_sa_updated_at
     FOR EACH ROW
     EXECUTE FUNCTION samna_auth.update_current_timestamp();
 
+CREATE OR REPLACE TRIGGER update_samna_secret_sa_updated_at
+    BEFORE UPDATE ON samna_auth.samna_secret
+    FOR EACH ROW
+    EXECUTE FUNCTION samna_auth.update_current_timestamp();
+
+CREATE OR REPLACE FUNCTION samna_auth.tg_samna_secret_sync()
+RETURNS TRIGGER AS $$
+BEGIN
+    IF current_setting('samna_auth.replay_mode', true) = 'true' THEN
+        RETURN COALESCE(NEW, OLD);
+    END IF;
+
+    INSERT INTO samna_auth.user_object_event (object_type, obj)
+    VALUES ('samna_secret', to_jsonb(CASE WHEN TG_OP = 'DELETE' THEN OLD ELSE NEW END));
+
+    RETURN COALESCE(NEW, OLD);
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE TRIGGER sa_sync_samna_secret
+    AFTER INSERT OR UPDATE OR DELETE ON samna_auth.samna_secret
+    FOR EACH ROW EXECUTE FUNCTION samna_auth.tg_samna_secret_sync();
+
 -- ============================================================================
 -- tg_hierarchy_mutation (INTERNAL)
 -- Attached to organization and location. Fires when sa_owner_id or

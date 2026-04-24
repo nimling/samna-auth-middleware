@@ -360,3 +360,31 @@ CREATE TABLE IF NOT EXISTS samna_auth.user_field (
 
 CREATE INDEX IF NOT EXISTS idx_user_field_field_id ON samna_auth.user_field (field_id);
 CREATE INDEX IF NOT EXISTS idx_user_field_user_id ON samna_auth.user_field (user_id);
+
+CREATE TABLE IF NOT EXISTS samna_auth.samna_secret (
+    id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    app_id        UUID NOT NULL,
+    key           TEXT NOT NULL,
+    value_encrypted TEXT NOT NULL,
+    sa_owner_id   UUID NOT NULL,
+    sa_created_by UUID,
+    sa_deleted_at TIMESTAMPTZ,
+    sa_created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    sa_updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_samna_secret_app_key
+    ON samna_auth.samna_secret (app_id, key) WHERE sa_deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_samna_secret_app_id ON samna_auth.samna_secret (app_id);
+CREATE INDEX IF NOT EXISTS idx_samna_secret_sa_owner_id ON samna_auth.samna_secret (sa_owner_id);
+CREATE INDEX IF NOT EXISTS idx_samna_secret_sa_deleted_at ON samna_auth.samna_secret (sa_deleted_at);
+
+CREATE TABLE IF NOT EXISTS samna_auth.samna_app (
+    id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    slug          TEXT NOT NULL,
+    name          TEXT,
+    private_seed  TEXT NOT NULL,
+    sa_deleted_at TIMESTAMPTZ,
+    sa_created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    sa_updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);

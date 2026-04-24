@@ -19,7 +19,7 @@ func GetLogin(ctx echo.Context) error {
 		ctx.Logger().Errorf("GetLogin: %v", err)
 		return respondError(ctx, http.StatusForbidden, "Forbidden")
 	}
-	return ctx.Redirect(http.StatusTemporaryRedirect, redirectURL)
+	return Redirect(ctx, http.StatusTemporaryRedirect, redirectURL)
 }
 
 func GetLogout(ctx echo.Context) error {

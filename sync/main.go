@@ -37,6 +37,10 @@ func ApplyPayload(ctx context.Context, payload SyncPayload) error {
 			return applyEntity[db.ClaimObject](ctx, tx, payload.Obj)
 		case "samna_client":
 			return applyEntity[db.SamnaClient](ctx, tx, payload.Obj)
+		case "samna_secret":
+			return applySecret(ctx, tx, payload.Obj)
+		case "samna_app":
+			return applyApp(ctx, tx, payload.Obj)
 		case "object_field":
 			return applyEntity[db.ObjectField](ctx, tx, payload.Obj)
 		case "user_field":
@@ -60,6 +64,44 @@ func applyEntity[T any](ctx context.Context, tx bun.Tx, raw json.RawMessage) err
 	_, err := tx.NewInsert().
 		Model(&entity).
 		On("CONFLICT (id) DO UPDATE").
+		Set("sa_updated_at = EXCLUDED.sa_updated_at").
+		Set("sa_deleted_at = EXCLUDED.sa_deleted_at").
+		Exec(ctx)
+
+	return err
+}
+
+func applySecret(ctx context.Context, tx bun.Tx, raw json.RawMessage) error {
+	var entity db.SamnaSecret
+	if err := json.Unmarshal(raw, &entity); err != nil {
+		return fmt.Errorf("unmarshal entity: %w", err)
+	}
+
+	_, err := tx.NewInsert().
+		Model(&entity).
+		On("CONFLICT (id) DO UPDATE").
+		Set("key = EXCLUDED.key").
+		Set("value_encrypted = EXCLUDED.value_encrypted").
+		Set("sa_owner_id = EXCLUDED.sa_owner_id").
+		Set("sa_updated_at = EXCLUDED.sa_updated_at").
+		Set("sa_deleted_at = EXCLUDED.sa_deleted_at").
+		Exec(ctx)
+
+	return err
+}
+
+func applyApp(ctx context.Context, tx bun.Tx, raw json.RawMessage) error {
+	var entity db.SamnaApp
+	if err := json.Unmarshal(raw, &entity); err != nil {
+		return fmt.Errorf("unmarshal entity: %w", err)
+	}
+
+	_, err := tx.NewInsert().
+		Model(&entity).
+		On("CONFLICT (id) DO UPDATE").
+		Set("slug = EXCLUDED.slug").
+		Set("name = EXCLUDED.name").
+		Set("private_seed = EXCLUDED.private_seed").
 		Set("sa_updated_at = EXCLUDED.sa_updated_at").
 		Set("sa_deleted_at = EXCLUDED.sa_deleted_at").
 		Exec(ctx)

@@ -834,6 +834,19 @@ END;
 $$ LANGUAGE plpgsql STABLE;
 
 -- ============================================================================
+-- get_secrets (PUBLIC)
+-- ============================================================================
+CREATE OR REPLACE FUNCTION samna_auth.get_secrets(
+    p_app_id UUID
+) RETURNS SETOF samna_auth.samna_secret AS $$
+BEGIN
+    RETURN QUERY
+    SELECT s.* FROM samna_auth.samna_secret s
+    WHERE s.app_id = p_app_id AND s.sa_deleted_at IS NULL;
+END;
+$$ LANGUAGE plpgsql STABLE;
+
+-- ============================================================================
 -- INIT (PUBLIC)
 -- ============================================================================
 
