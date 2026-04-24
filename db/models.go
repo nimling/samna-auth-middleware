@@ -233,8 +233,7 @@ type SamnaSecret struct {
 	ID             uuid.UUID  `bun:"id,pk" json:"id"`
 	AppID          uuid.UUID  `bun:"app_id" json:"app_id"`
 	Key            string     `bun:"key" json:"key"`
-	ValueEncrypted string     `bun:"value_encrypted" json:"value_encrypted,omitempty"`
-	Value          string     `bun:"-" json:"value,omitempty"`
+	Value          string     `bun:"value" json:"value,omitempty"`
 	OwnerID        uuid.UUID  `bun:"sa_owner_id" json:"owner_id"`
 	CreatedBy      *uuid.UUID `bun:"sa_created_by" json:"created_by"`
 	DeletedAt      *time.Time `bun:"sa_deleted_at" json:"deleted_at"`

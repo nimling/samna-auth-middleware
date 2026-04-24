@@ -365,7 +365,7 @@ CREATE TABLE IF NOT EXISTS samna_auth.samna_secret (
     id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     app_id        UUID NOT NULL,
     key           TEXT NOT NULL,
-    value_encrypted TEXT NOT NULL,
+    value         TEXT NOT NULL,
     sa_owner_id   UUID NOT NULL,
     sa_created_by UUID,
     sa_deleted_at TIMESTAMPTZ,

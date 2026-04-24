@@ -300,23 +300,25 @@ CREATE OR REPLACE TRIGGER update_samna_secret_sa_updated_at
     FOR EACH ROW
     EXECUTE FUNCTION samna_auth.update_current_timestamp();
 
-CREATE OR REPLACE FUNCTION samna_auth.tg_samna_secret_sync()
-RETURNS TRIGGER AS $$
-BEGIN
-    IF current_setting('samna_auth.replay_mode', true) = 'true' THEN
-        RETURN COALESCE(NEW, OLD);
-    END IF;
+CREATE OR REPLACE TRIGGER samna_auth_object_mutation
+    AFTER INSERT OR UPDATE OR DELETE ON samna_auth.samna_client
+    FOR EACH ROW EXECUTE FUNCTION samna_auth.tg_object_mutation();
 
-    INSERT INTO samna_auth.user_object_event (object_type, obj)
-    VALUES ('samna_secret', to_jsonb(CASE WHEN TG_OP = 'DELETE' THEN OLD ELSE NEW END));
-
-    RETURN COALESCE(NEW, OLD);
-END;
-$$ LANGUAGE plpgsql;
-
-CREATE OR REPLACE TRIGGER sa_sync_samna_secret
+CREATE OR REPLACE TRIGGER samna_auth_object_mutation
     AFTER INSERT OR UPDATE OR DELETE ON samna_auth.samna_secret
-    FOR EACH ROW EXECUTE FUNCTION samna_auth.tg_samna_secret_sync();
+    FOR EACH ROW EXECUTE FUNCTION samna_auth.tg_object_mutation();
+
+CREATE OR REPLACE TRIGGER samna_auth_object_mutation
+    AFTER INSERT OR UPDATE OR DELETE ON samna_auth.object_field
+    FOR EACH ROW EXECUTE FUNCTION samna_auth.tg_object_mutation();
+
+CREATE OR REPLACE TRIGGER samna_auth_object_mutation
+    AFTER INSERT OR UPDATE OR DELETE ON samna_auth.user_field
+    FOR EACH ROW EXECUTE FUNCTION samna_auth.tg_object_mutation();
+
+CREATE OR REPLACE TRIGGER samna_auth_object_mutation
+    AFTER INSERT OR UPDATE OR DELETE ON samna_auth.user_relation
+    FOR EACH ROW EXECUTE FUNCTION samna_auth.tg_object_mutation();
 
 -- ============================================================================
 -- tg_hierarchy_mutation (INTERNAL)
