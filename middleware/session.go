@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"fmt"
+	"log"
 	"net/http"
 	"net/url"
 
@@ -63,7 +64,7 @@ func refreshTokens(ctx echo.Context, config AuthMiddlewareConfig) (*client.Respo
 			Name:   refreshTokenCookieKey,
 			Value:  tokenResp.RefreshToken,
 			Path:   "/",
-			MaxAge: 30 * 24 * 3600,
+			MaxAge: tokenResp.RefreshExpiresIn,
 		})
 	}
 
@@ -89,7 +90,7 @@ func exchangeAuthorizationCode(ctx echo.Context, authCode string, config AuthMid
 		Name:   refreshTokenCookieKey,
 		Value:  tokenResp.RefreshToken,
 		Path:   "/",
-		MaxAge: 30 * 24 * 3600,
+		MaxAge: tokenResp.RefreshExpiresIn,
 	})
 
 	writeCSRFCookie(ctx)
@@ -117,7 +118,7 @@ func getOpenIDConfiguration(ctx context.Context, config *AuthMiddlewareConfig) e
 	config.JWKSURL = *jwksUrl
 	config.TokenURL = *tokenUrl
 
-	fmt.Printf("\n\nGot OpenID Configuration: %+v\n", oidc)
+	log.Printf("samna_auth_middleware: oidc issuer=%s token=%s jwks=%s", oidc.Issuer, oidc.TokenEndpoint, oidc.JwksUri)
 
 	return nil
 }

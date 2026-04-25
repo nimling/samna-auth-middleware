@@ -17,7 +17,7 @@ func GetLogin(ctx echo.Context) error {
 	redirectURL, err := client.GetLogin(ctx.Request().Context(), provider)
 	if err != nil {
 		ctx.Logger().Errorf("GetLogin: %v", err)
-		return respondError(ctx, http.StatusForbidden, "Forbidden")
+		return respondError(ctx, http.StatusInternalServerError, "Internal Server Error")
 	}
 	return Redirect(ctx, http.StatusTemporaryRedirect, redirectURL)
 }

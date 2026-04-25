@@ -7,10 +7,14 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/nimling/samna-auth-middleware/client"
 	"github.com/nimling/samna-auth-middleware/db"
+	"github.com/nimling/samna-auth-middleware/middleware"
 )
 
 func GetRelations(ctx echo.Context) error {
-	userID := ctx.Get("user_id").(uuid.UUID)
+	userID, ok := ctx.Get(middleware.UserIDKey).(uuid.UUID)
+	if !ok {
+		return respondError(ctx, http.StatusUnauthorized, "Unauthorized")
+	}
 
 	relations, err := db.Instance().GetUserRelations(ctx.Request().Context(), userID)
 	if err != nil {
@@ -26,7 +30,10 @@ func GetRelation(ctx echo.Context) error {
 		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
 
-	userID := ctx.Get("user_id").(uuid.UUID)
+	userID, ok := ctx.Get(middleware.UserIDKey).(uuid.UUID)
+	if !ok {
+		return respondError(ctx, http.StatusUnauthorized, "Unauthorized")
+	}
 
 	relations, err := db.Instance().GetRelation(ctx.Request().Context(), userID, relationID)
 	if err != nil {
@@ -37,7 +44,10 @@ func GetRelation(ctx echo.Context) error {
 }
 
 func PostRelation(ctx echo.Context) error {
-	userID := ctx.Get("user_id").(uuid.UUID)
+	userID, ok := ctx.Get(middleware.UserIDKey).(uuid.UUID)
+	if !ok {
+		return respondError(ctx, http.StatusUnauthorized, "Unauthorized")
+	}
 
 	var relation db.UserRelation
 	if err := ctx.Bind(&relation); err != nil {

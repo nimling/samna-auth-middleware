@@ -2,6 +2,7 @@ package client
 
 import (
 	"encoding/json"
+	"log"
 	"net"
 	"net/url"
 	"path"
@@ -27,9 +28,16 @@ func localIP() string {
 }
 
 func requestBody(model any, excludeID bool) map[string]any {
-	data, _ := json.Marshal(model)
+	data, err := json.Marshal(model)
+	if err != nil {
+		log.Printf("samna_auth_middleware: requestBody marshal failed: %v", err)
+		return map[string]any{}
+	}
 	var m map[string]any
-	json.Unmarshal(data, &m)
+	if err := json.Unmarshal(data, &m); err != nil {
+		log.Printf("samna_auth_middleware: requestBody unmarshal failed: %v", err)
+		return map[string]any{}
+	}
 	delete(m, "created_at")
 	delete(m, "updated_at")
 	delete(m, "deleted_at")

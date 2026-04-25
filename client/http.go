@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -91,7 +90,7 @@ func (e *httpClient) execute(ctx context.Context, method string, expectedStatus 
 	case resp.StatusCode == expectedStatus:
 		return resp.Body, nil
 	case resp.StatusCode == http.StatusUnauthorized:
-		return nil, errors.New("unauthorized")
+		return nil, ErrUnauthorized
 	case resp.StatusCode == http.StatusForbidden:
 		return nil, ErrForbidden
 	case resp.StatusCode == http.StatusNotFound:
