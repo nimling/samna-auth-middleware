@@ -4,11 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"net/url"
 
 	"github.com/MicahParks/keyfunc/v3"
 	"github.com/labstack/echo/v4"
+	"github.com/nimling/samna-auth-middleware/client"
 	"github.com/nimling/samna-auth-middleware/utils"
 )
 
@@ -62,6 +64,10 @@ func UserAuthMiddleware(opts *UserAuthOptions) echo.MiddlewareFunc {
 	}
 
 	if err := getOpenIDConfiguration(context.Background(), config); err != nil {
+		if errors.Is(err, client.ErrNotFound) {
+			log.Printf("samna_auth_middleware: openid-configuration unavailable for slug %q (app inactive on samna_auth); auth disabled", config.ClientSlug)
+			return inactiveAppMiddleware()
+		}
 		panic(fmt.Errorf("getting OpenID configuration failed: %v", err))
 	}
 
@@ -122,6 +128,14 @@ func UserAuthMiddleware(opts *UserAuthOptions) echo.MiddlewareFunc {
 			ctx.Set(AccessTokenKey, tokens.AccessToken)
 
 			return next(ctx)
+		}
+	}
+}
+
+func inactiveAppMiddleware() echo.MiddlewareFunc {
+	return func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(ctx echo.Context) error {
+			return ctx.String(http.StatusServiceUnavailable, "Auth service unavailable")
 		}
 	}
 }

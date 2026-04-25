@@ -83,6 +83,9 @@ func GetOpenIDConfiguration(ctx context.Context, configURL string) (*OpenIDConfi
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, ErrNotFound
+	}
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("openid configuration request to %s returned status %d, check that the client slug exists", configURL, resp.StatusCode)
 	}
