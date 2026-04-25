@@ -459,6 +459,11 @@ BEGIN
         v_schema := 'public'; v_table := v_table_name;
     END IF;
 
+    IF NOT EXISTS(SELECT 1 FROM information_schema.tables t WHERE t.table_schema = v_schema AND t.table_name = v_table) THEN
+        RAISE WARNING 'compute_object_claims: table %.% does not exist for object_type=%', v_schema, v_table, p_object_type;
+        RETURN;
+    END IF;
+
     SELECT
         EXISTS(SELECT 1 FROM samna_auth.get_table_columns(v_table_name) WHERE column_name = 'sa_location_id'),
         EXISTS(SELECT 1 FROM samna_auth.get_table_columns(v_table_name) WHERE column_name = 'sa_parent_id')
@@ -478,7 +483,7 @@ BEGIN
     RETURN QUERY
     SELECT samna_auth.claim_object.claim_id, samna_auth.claim.sa_access_level, v_row_owner_id, v_row_location_id
     FROM samna_auth.claim_object
-    INNER JOIN samna_auth.user_claim ON samna_auth.user_claim.claim_id = samna_auth.claim_object.claim_id AND samna_auth.user_claim.sa_deleted_at IS NULL AND (samna_auth.user_claim.starts_at IS NULL OR samna_auth.user_claim.starts_at <= CURRENT_TIMESTAMP) AND (samna_auth.user_claim.ends_at IS NULL OR samna_auth.user_claim.ends_at >= CURRENT_TIMESTAMP)
+    INNER JOIN samna_auth.user_claim ON samna_auth.user_claim.claim_id = samna_auth.claim_object.claim_id AND samna_auth.user_claim.sa_deleted_at IS NULL
     INNER JOIN samna_auth.claim ON samna_auth.claim.id = samna_auth.claim_object.claim_id AND samna_auth.claim.sa_deleted_at IS NULL
     WHERE samna_auth.claim_object.object_id = p_object_id AND samna_auth.claim_object.object_type = p_object_type
       AND samna_auth.claim_object.sa_deleted_at IS NULL AND samna_auth.user_claim.user_id = p_user_id;
@@ -487,7 +492,7 @@ BEGIN
         RETURN QUERY
         SELECT samna_auth.claim_object.claim_id, samna_auth.claim.sa_access_level, v_row_owner_id, v_row_location_id
         FROM samna_auth.claim_object
-        INNER JOIN samna_auth.user_claim ON samna_auth.user_claim.claim_id = samna_auth.claim_object.claim_id AND samna_auth.user_claim.sa_deleted_at IS NULL AND (samna_auth.user_claim.starts_at IS NULL OR samna_auth.user_claim.starts_at <= CURRENT_TIMESTAMP) AND (samna_auth.user_claim.ends_at IS NULL OR samna_auth.user_claim.ends_at >= CURRENT_TIMESTAMP)
+        INNER JOIN samna_auth.user_claim ON samna_auth.user_claim.claim_id = samna_auth.claim_object.claim_id AND samna_auth.user_claim.sa_deleted_at IS NULL
     INNER JOIN samna_auth.claim ON samna_auth.claim.id = samna_auth.claim_object.claim_id AND samna_auth.claim.sa_deleted_at IS NULL
         WHERE samna_auth.claim_object.object_type = 'organization' AND samna_auth.claim_object.sa_deleted_at IS NULL AND samna_auth.user_claim.user_id = p_user_id
           AND (samna_auth.claim_object.object_id = v_row_owner_id
@@ -499,7 +504,7 @@ BEGIN
         RETURN QUERY
         SELECT samna_auth.claim_object.claim_id, samna_auth.claim.sa_access_level, v_row_owner_id, v_row_location_id
         FROM samna_auth.claim_object
-        INNER JOIN samna_auth.user_claim ON samna_auth.user_claim.claim_id = samna_auth.claim_object.claim_id AND samna_auth.user_claim.sa_deleted_at IS NULL AND (samna_auth.user_claim.starts_at IS NULL OR samna_auth.user_claim.starts_at <= CURRENT_TIMESTAMP) AND (samna_auth.user_claim.ends_at IS NULL OR samna_auth.user_claim.ends_at >= CURRENT_TIMESTAMP)
+        INNER JOIN samna_auth.user_claim ON samna_auth.user_claim.claim_id = samna_auth.claim_object.claim_id AND samna_auth.user_claim.sa_deleted_at IS NULL
     INNER JOIN samna_auth.claim ON samna_auth.claim.id = samna_auth.claim_object.claim_id AND samna_auth.claim.sa_deleted_at IS NULL
         WHERE samna_auth.claim_object.object_type = 'location' AND samna_auth.claim_object.sa_deleted_at IS NULL AND samna_auth.user_claim.user_id = p_user_id
           AND (samna_auth.claim_object.object_id = v_row_location_id
@@ -511,7 +516,7 @@ BEGIN
         RETURN QUERY
         SELECT samna_auth.claim_object.claim_id, samna_auth.claim.sa_access_level, v_row_owner_id, v_row_location_id
         FROM samna_auth.claim_object
-        INNER JOIN samna_auth.user_claim ON samna_auth.user_claim.claim_id = samna_auth.claim_object.claim_id AND samna_auth.user_claim.sa_deleted_at IS NULL AND (samna_auth.user_claim.starts_at IS NULL OR samna_auth.user_claim.starts_at <= CURRENT_TIMESTAMP) AND (samna_auth.user_claim.ends_at IS NULL OR samna_auth.user_claim.ends_at >= CURRENT_TIMESTAMP)
+        INNER JOIN samna_auth.user_claim ON samna_auth.user_claim.claim_id = samna_auth.claim_object.claim_id AND samna_auth.user_claim.sa_deleted_at IS NULL
     INNER JOIN samna_auth.claim ON samna_auth.claim.id = samna_auth.claim_object.claim_id AND samna_auth.claim.sa_deleted_at IS NULL
         WHERE samna_auth.claim_object.object_type = p_object_type AND samna_auth.claim_object.sa_deleted_at IS NULL
           AND samna_auth.user_claim.user_id = p_user_id AND samna_auth.claim_object.inherits = TRUE
@@ -568,7 +573,7 @@ BEGIN
     FOR v_computed IN
         SELECT * FROM samna_auth.compute_object_claims(p_user_id, p_object_id, p_object_type)
     LOOP
-        v_id := samna_auth.composite_id(v_computed.claim_id::text, p_object_id::text, p_object_type);
+        v_id := samna_auth.composite_id(p_user_id::text, v_computed.claim_id::text, p_object_id::text, p_object_type);
         INSERT INTO samna_auth.user_object (
             id, user_id, object_id, object_type, claim_id,
             sa_access_level, sa_owner_id, sa_location_id
@@ -688,6 +693,14 @@ CREATE OR REPLACE FUNCTION samna_auth.get_access(
 ) AS $$
 BEGIN
     PERFORM samna_auth.reconcile_if_pending(p_user_id);
+
+    DELETE FROM samna_auth.user_object uo
+    WHERE uo.user_id = p_user_id AND uo.object_id = p_object_id
+      AND uo.claim_id IN (
+          SELECT uc.claim_id FROM samna_auth.user_claim uc
+          WHERE uc.user_id = p_user_id AND uc.ends_at IS NOT NULL AND uc.ends_at < CURRENT_TIMESTAMP
+      );
+
     RETURN QUERY
     SELECT uc.id, uo.claim_id, uo.sa_access_level, c.sa_owner_id, c.sa_root_id
     FROM samna_auth.user_object uo
@@ -699,7 +712,7 @@ BEGIN
       AND uo.sa_access_level <= p_access_level
     ORDER BY uo.sa_access_level ASC LIMIT 1;
 END;
-$$ LANGUAGE plpgsql STABLE;
+$$ LANGUAGE plpgsql;
 
 -- ============================================================================
 -- get_claims (PUBLIC, overload: user + object)
@@ -730,12 +743,23 @@ CREATE OR REPLACE FUNCTION samna_auth.get_claims(
 ) RETURNS SETOF samna_auth.claim AS $$
 BEGIN
     PERFORM samna_auth.reconcile_if_pending(p_user_id);
+
+    DELETE FROM samna_auth.user_object
+    WHERE user_id = p_user_id
+      AND claim_id IN (
+          SELECT uc.claim_id FROM samna_auth.user_claim uc
+          WHERE uc.user_id = p_user_id AND uc.ends_at IS NOT NULL AND uc.ends_at < CURRENT_TIMESTAMP
+      );
+
     RETURN QUERY
-    SELECT DISTINCT c.* FROM samna_auth.user_object
-    JOIN samna_auth.claim c ON c.id = samna_auth.user_object.claim_id
-    WHERE samna_auth.user_object.user_id = p_user_id AND samna_auth.user_object.sa_access_level <= p_access_level AND c.sa_deleted_at IS NULL;
+    SELECT DISTINCT c.* FROM samna_auth.user_object uo
+    JOIN samna_auth.claim c ON c.id = uo.claim_id AND c.sa_deleted_at IS NULL
+    JOIN samna_auth.user_claim uc ON uc.claim_id = uo.claim_id AND uc.user_id = p_user_id AND uc.sa_deleted_at IS NULL
+        AND (uc.starts_at IS NULL OR uc.starts_at <= CURRENT_TIMESTAMP)
+        AND (uc.ends_at IS NULL OR uc.ends_at >= CURRENT_TIMESTAMP)
+    WHERE uo.user_id = p_user_id AND uo.sa_access_level <= p_access_level;
 END;
-$$ LANGUAGE plpgsql STABLE;
+$$ LANGUAGE plpgsql;
 
 -- ============================================================================
 -- get_objects (PUBLIC)
@@ -749,12 +773,23 @@ CREATE OR REPLACE FUNCTION samna_auth.get_objects(
 ) RETURNS TABLE(object_id UUID) AS $$
 BEGIN
     PERFORM samna_auth.reconcile_if_pending(p_user_id);
+
+    DELETE FROM samna_auth.user_object
+    WHERE user_id = p_user_id AND object_type = p_object_type
+      AND claim_id IN (
+          SELECT uc.claim_id FROM samna_auth.user_claim uc
+          WHERE uc.user_id = p_user_id AND uc.ends_at IS NOT NULL AND uc.ends_at < CURRENT_TIMESTAMP
+      );
+
     RETURN QUERY
-    SELECT DISTINCT samna_auth.user_object.object_id FROM samna_auth.user_object
-    WHERE samna_auth.user_object.user_id = p_user_id AND samna_auth.user_object.object_type = p_object_type
-      AND samna_auth.user_object.sa_access_level <= p_access_level;
+    SELECT DISTINCT uo.object_id FROM samna_auth.user_object uo
+    JOIN samna_auth.user_claim uc ON uc.claim_id = uo.claim_id AND uc.user_id = p_user_id AND uc.sa_deleted_at IS NULL
+        AND (uc.starts_at IS NULL OR uc.starts_at <= CURRENT_TIMESTAMP)
+        AND (uc.ends_at IS NULL OR uc.ends_at >= CURRENT_TIMESTAMP)
+    WHERE uo.user_id = p_user_id AND uo.object_type = p_object_type
+      AND uo.sa_access_level <= p_access_level;
 END;
-$$ LANGUAGE plpgsql STABLE;
+$$ LANGUAGE plpgsql;
 
 -- ============================================================================
 -- get_organizations (PUBLIC)

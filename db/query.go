@@ -8,7 +8,7 @@ import (
 
 func UserWhere(userID uuid.UUID, accessLevel ClaimAccessLevel) string {
 	return fmt.Sprintf(
-		`user_id = '%[1]s' OR user_id IN (SELECT user_id FROM samna_auth.get_users('%[1]s', %[2]d))`,
+		`(user_id = '%[1]s' OR user_id IN (SELECT user_id FROM samna_auth.get_users('%[1]s', %[2]d))) AND user_id NOT IN (SELECT user_id FROM samna_auth.samna_user WHERE type = 'system' AND sa_deleted_at IS NULL)`,
 		userID, accessLevel,
 	)
 }

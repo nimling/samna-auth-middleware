@@ -1,5 +1,5 @@
 deploy:
-    SBUMP_VERSION_VAR=APP_VERSION ../sbump/sbump.sh patch --push-version
+    ../sbump/sbump.sh patch --env APP_VERSION --push-version
 
 build:
     go build ./...

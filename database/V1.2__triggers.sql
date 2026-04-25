@@ -201,7 +201,21 @@ BEGIN
         END IF;
 
     EXCEPTION WHEN OTHERS THEN
-        RAISE NOTICE 'samna_auth tg_object_mutation error: %. Queuing for reconcile.', SQLERRM;
+        BEGIN
+            INSERT INTO samna_auth.audit (operation, message, type, object_type, object_id, sa_created_by, sa_owner_id)
+            VALUES (
+                'tg_object_mutation',
+                format('trigger error on %s.%s: %s', TG_TABLE_NAME, TG_OP, SQLERRM),
+                'error',
+                v_object_type,
+                v_object_id,
+                v_object_id,
+                v_object_id
+            );
+        EXCEPTION WHEN OTHERS THEN
+            RAISE WARNING 'samna_auth tg_object_mutation audit insert failed: %', SQLERRM;
+        END;
+
         BEGIN
             INSERT INTO samna_auth.reconcile_queue (id, user_id, object_id, object_type)
             SELECT
@@ -212,7 +226,7 @@ BEGIN
             FROM unnest(v_affected_users) u
             ON CONFLICT (id) DO NOTHING;
         EXCEPTION WHEN OTHERS THEN
-            RAISE NOTICE 'samna_auth reconcile queue insert failed: %', SQLERRM;
+            RAISE WARNING 'samna_auth tg_object_mutation reconcile queue failed: %', SQLERRM;
         END;
     END;
 
@@ -238,7 +252,9 @@ BEGIN
 
     BEGIN
         IF TG_TABLE_NAME = 'user_claim' THEN
-            IF TG_OP = 'INSERT' OR (TG_OP = 'UPDATE' AND OLD.sa_deleted_at IS NULL AND NEW.sa_deleted_at IS NOT NULL) THEN
+            IF TG_OP = 'INSERT'
+               OR (TG_OP = 'UPDATE' AND OLD.sa_deleted_at IS DISTINCT FROM NEW.sa_deleted_at)
+            THEN
                 v_user_id := COALESCE(NEW.user_id, OLD.user_id);
                 v_claim_id := COALESCE(NEW.claim_id, OLD.claim_id);
 
@@ -258,11 +274,21 @@ BEGIN
             END IF;
 
         ELSIF TG_TABLE_NAME = 'claim_object' THEN
-            IF TG_OP IN ('INSERT', 'UPDATE') THEN
+            IF TG_OP = 'INSERT'
+               OR (TG_OP = 'UPDATE' AND OLD.sa_deleted_at IS DISTINCT FROM NEW.sa_deleted_at)
+            THEN
+                v_claim_id := COALESCE(NEW.claim_id, OLD.claim_id);
                 FOR v_user_id IN
-                    SELECT DISTINCT samna_auth.user_object.user_id FROM samna_auth.user_object WHERE samna_auth.user_object.claim_id = NEW.claim_id
+                    SELECT DISTINCT uc.user_id
+                    FROM samna_auth.user_claim uc
+                    WHERE uc.claim_id = v_claim_id
+                      AND uc.sa_deleted_at IS NULL
                 LOOP
-                    PERFORM samna_auth.reconcile_user_object(v_user_id, NEW.object_id, NEW.object_type);
+                    PERFORM samna_auth.reconcile_user_object(
+                        v_user_id,
+                        COALESCE(NEW.object_id, OLD.object_id),
+                        COALESCE(NEW.object_type, OLD.object_type)
+                    );
                 END LOOP;
             END IF;
         END IF;
@@ -271,7 +297,39 @@ BEGIN
         VALUES (TG_TABLE_NAME, to_jsonb(COALESCE(NEW, OLD)));
 
     EXCEPTION WHEN OTHERS THEN
-        RAISE NOTICE 'samna_auth tg_claim_mutation error: %', SQLERRM;
+        BEGIN
+            INSERT INTO samna_auth.audit (operation, message, type, object_type, object_id, sa_created_by, sa_owner_id)
+            VALUES (
+                'tg_claim_mutation',
+                format('trigger error on %s.%s: %s', TG_TABLE_NAME, TG_OP, SQLERRM),
+                'error',
+                TG_TABLE_NAME,
+                COALESCE(v_claim_id, NEW.id, OLD.id),
+                COALESCE(v_user_id, NEW.id, OLD.id),
+                COALESCE(v_user_id, NEW.id, OLD.id)
+            );
+        EXCEPTION WHEN OTHERS THEN
+            RAISE WARNING 'samna_auth tg_claim_mutation audit insert failed: %', SQLERRM;
+        END;
+
+        IF v_user_id IS NOT NULL THEN
+            BEGIN
+                FOR v_reachable IN
+                    SELECT object_id, object_type
+                    FROM samna_auth.expand_claim_reachable_objects(v_claim_id)
+                LOOP
+                    INSERT INTO samna_auth.reconcile_queue (id, user_id, object_id, object_type)
+                    VALUES (
+                        samna_auth.composite_id(v_user_id::text, v_reachable.object_id::text, v_reachable.object_type),
+                        v_user_id,
+                        v_reachable.object_id,
+                        v_reachable.object_type
+                    ) ON CONFLICT (id) DO NOTHING;
+                END LOOP;
+            EXCEPTION WHEN OTHERS THEN
+                RAISE WARNING 'samna_auth tg_claim_mutation reconcile queue failed: %', SQLERRM;
+            END;
+        END IF;
     END;
 
     RETURN COALESCE(NEW, OLD);
