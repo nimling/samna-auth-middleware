@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"os"
 	"reflect"
@@ -20,6 +21,8 @@ type DB struct {
 
 var instance *DB
 var syncFunc func(ctx context.Context) error
+
+var ErrSyncUnreachable = errors.New("sync unreachable: app inactive on samna_auth")
 
 func RegisterSyncFunc(fn func(ctx context.Context) error) {
 	syncFunc = fn
@@ -118,6 +121,10 @@ func Init(logger echo.Logger) {
 	for attempt := 1; attempt <= maxRetries; attempt++ {
 		logger.Infof("Starting initial sync (attempt %d/%d)", attempt, maxRetries)
 		if err := syncFunc(context.Background()); err != nil {
+			if errors.Is(err, ErrSyncUnreachable) {
+				logger.Warnf("Initial sync skipped: %v", err)
+				return
+			}
 			logger.Errorf("Initial sync attempt %d failed: %v", attempt, err)
 			if attempt == maxRetries {
 				panic(fmt.Sprintf("initial sync failed after %d attempts: %v", maxRetries, err))
