@@ -46,11 +46,7 @@ func refreshTokens(ctx echo.Context, config AuthMiddlewareConfig) (*client.Respo
 		return nil, fmt.Errorf("refresh token from cookie is empty: %w", ErrorUnauthorized)
 	}
 
-	form := url.Values{}
-	form.Set("grant_type", "sauth_refresh_token")
-	form.Set("refresh_token", cookie.Value)
-
-	tokenResp, err := client.PostToken(ctx.Request().Context(), config.TokenURL.String(), config.ClientSlug, config.ClientSecret, form)
+	tokenResp, err := client.PostRefreshToken(ctx.Request().Context(), config.TokenURL.String(), config.ClientSlug, config.ClientSecret, cookie.Value)
 	if err != nil {
 		return nil, fmt.Errorf("refresh tokens: %w", err)
 	}
@@ -77,12 +73,7 @@ func refreshTokens(ctx echo.Context, config AuthMiddlewareConfig) (*client.Respo
 }
 
 func exchangeAuthorizationCode(ctx echo.Context, authCode string, config AuthMiddlewareConfig) error {
-	form := url.Values{}
-	form.Set("grant_type", "authorization_code")
-	form.Set("code", authCode)
-	form.Set("redirect_uri", config.RedirectURI)
-
-	tokenResp, err := client.PostToken(ctx.Request().Context(), config.TokenURL.String(), config.ClientSlug, config.ClientSecret, form)
+	tokenResp, err := client.PostAuthCode(ctx.Request().Context(), config.TokenURL.String(), config.ClientSlug, config.ClientSecret, authCode, config.RedirectURI)
 	if err != nil {
 		return fmt.Errorf("exchange authorization code: %w", err)
 	}

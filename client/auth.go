@@ -101,15 +101,16 @@ func GetOpenIDConfiguration(ctx context.Context, configURL string) (*OpenIDConfi
 	return &config, nil
 }
 
-func PostToken(ctx context.Context, tokenURL string, slug string, secret string, params url.Values) (*ResponseToken, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, tokenURL, strings.NewReader(params.Encode()))
+func postToken(ctx context.Context, tokenURL string, slug string, secret string, form url.Values) (*ResponseToken, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, tokenURL, strings.NewReader(form.Encode()))
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
 	}
 
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("Accept", "application/json")
-	req.SetBasicAuth(slug, secret)
+	req.Header.Set("SAuth-App-Slug", slug)
+	req.Header.Set("SAuth-App-Secret", secret)
 
 	httpClient := &http.Client{Timeout: 3 * time.Second}
 	resp, err := httpClient.Do(req)
@@ -131,4 +132,19 @@ func PostToken(ctx context.Context, tokenURL string, slug string, secret string,
 	}
 
 	return &token, nil
+}
+
+func PostAuthCode(ctx context.Context, tokenURL string, slug string, secret string, code string, redirectURI string) (*ResponseToken, error) {
+	form := url.Values{}
+	form.Set("grant_type", "authorization_code")
+	form.Set("code", code)
+	form.Set("redirect_uri", redirectURI)
+	return postToken(ctx, tokenURL, slug, secret, form)
+}
+
+func PostRefreshToken(ctx context.Context, tokenURL string, slug string, secret string, refreshToken string) (*ResponseToken, error) {
+	form := url.Values{}
+	form.Set("grant_type", "refresh_token")
+	form.Set("refresh_token", refreshToken)
+	return postToken(ctx, tokenURL, slug, secret, form)
 }

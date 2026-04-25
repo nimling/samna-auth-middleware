@@ -73,6 +73,21 @@ func UserAuthMiddleware(opts *UserAuthOptions) echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(ctx echo.Context) error {
 
+			if ctx.QueryParams().Has(authCodeParamKey) {
+				authCode := ctx.QueryParam(authCodeParamKey)
+
+				err := exchangeAuthorizationCode(ctx, authCode, *config)
+				if err != nil {
+					ctx.Logger().Warnf("Failed to exchange the authorization code: %v", err)
+					if errors.Is(err, ErrorUnauthorized) {
+						return ctx.String(http.StatusUnauthorized, "Unauthorized")
+					}
+					return ctx.String(http.StatusInternalServerError, "Internal Server Error")
+				}
+
+				return ctx.Redirect(http.StatusFound, config.PageRedirectURI)
+			}
+
 			accessToken, err := getAccessToken(ctx)
 			if err == nil {
 				claimUser, vldErr := ValidateToken(accessToken, config.ExpectedTokenIssuer, jwksClient.Keyfunc)
@@ -88,33 +103,12 @@ func UserAuthMiddleware(opts *UserAuthOptions) echo.MiddlewareFunc {
 				}
 			}
 
-			if err != nil {
-				ctx.Logger().Infof("Failed to retrieve the access_token: %v", err)
-			}
-
-			if ctx.QueryParams().Has(authCodeParamKey) {
-				authCode := ctx.QueryParam(authCodeParamKey)
-
-				err = exchangeAuthorizationCode(ctx, authCode, *config)
-				if err != nil {
-					ctx.Logger().Warnf("Failed to exchange the authorization code: %v", err)
-					if errors.Is(err, ErrorUnauthorized) {
-						return ctx.String(http.StatusUnauthorized, "Unauthorized")
-					}
-
-					return ctx.String(http.StatusInternalServerError, "Internal Server Error")
-				}
-
-				return ctx.Redirect(http.StatusFound, config.PageRedirectURI)
-			}
-
 			tokens, err := refreshTokens(ctx, *config)
 			if err != nil {
 				ctx.Logger().Warnf("Failed to refresh tokens: %v", err)
 				if errors.Is(err, ErrorUnauthorized) {
 					return ctx.String(http.StatusUnauthorized, "Unauthorized")
 				}
-
 				return ctx.String(http.StatusInternalServerError, "Internal Server Error")
 			}
 
