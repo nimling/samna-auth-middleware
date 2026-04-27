@@ -1,390 +1,686 @@
-CREATE SCHEMA IF NOT EXISTS samna_auth;
+-- ============================================================================
+-- Claimius V1.0 Baseline Schema
+-- ----------------------------------------------------------------------------
+-- All table definitions, indexes, and comments. No functions, no triggers.
+-- Tables are organized into logical groups:
+--
+--   1. Enums                    Type definitions for status / kind columns
+--   2. Identity                 samna_app, samna_user, samna_client, samna_secret
+--   3. Hierarchy roots          organization, location
+--   4. Claims and bindings      claim, user_claim, claim_object
+--   5. Registry                 table_info, inheritance_info
+--   6. Materialized access      user_object, object_users, user_users
+--   7. Sync                     sync_event, prophet_state, disciple_state,
+--                               reconcile_queue
+--   8. Audit                    audit
+--   9. Extensibility            object_field, user_field, user_relation
+--
+-- Naming conventions:
+--   sa_owner_id        Owning organization. Required on every registered table.
+--   sa_location_id     Optional location pin. Nullable.
+--   sa_parent_id       Self reference for hierarchical tables. Nullable for
+--                      non hierarchical tables. When present, must be paired
+--                      with sa_root_id.
+--   sa_root_id         Root of the self referencing tree. A row is a root iff
+--                      sa_owner_id == sa_root_id (organization) or
+--                      sa_parent_id == sa_root_id == id (parenthood tables).
+--   sa_created_by      The user_claim.id under which this row was created.
+--                      During bootstrap, this may be a samna_user.user_id.
+--   sa_deleted_at      Soft delete timestamp. NULL means active.
+--   sa_created_at      Insertion time.
+--   sa_updated_at      Last update time. Maintained by trigger.
+--
+-- Composite id format: <object_type>:<object_id>
+--   object_type is always <schema>.<table>, never bare table name.
+--   object_id is a uuid.
+-- ============================================================================
 
-DO $$ BEGIN
-    CREATE TYPE samna_auth.claim_type AS ENUM ('system', 'user', 'service', 'virtual');
-EXCEPTION
-    WHEN duplicate_object THEN null;
-END $$;
+-- ----------------------------------------------------------------------------
+-- 1. Enums
+-- ----------------------------------------------------------------------------
 
-DO $$ BEGIN
-    CREATE TYPE samna_auth.user_type AS ENUM ('user', 'client', 'system', 'guest');
-EXCEPTION
-    WHEN duplicate_object THEN null;
-END $$;
+DO $$
+    BEGIN
+        IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'claim_type') THEN
+            CREATE TYPE claimius.claim_type AS ENUM ('system', 'user', 'service', 'virtual');
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'user_type') THEN
+            CREATE TYPE claimius.user_type AS ENUM ('user', 'client', 'system', 'guest');
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'user_status') THEN
+            CREATE TYPE claimius.user_status AS ENUM ('active', 'pending', 'suspended', 'inactive');
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'tree_type') THEN
+            CREATE TYPE claimius.tree_type AS ENUM ('ownership', 'location', 'parenthood');
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'sync_operation') THEN
+            CREATE TYPE claimius.sync_operation AS ENUM ('upsert', 'delete');
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'app_status') THEN
+            CREATE TYPE claimius.app_status AS ENUM ('draft', 'active', 'inactive', 'erroneous');
+        END IF;
+    END $$;
 
-DO $$ BEGIN
-    CREATE TYPE samna_auth.user_status AS ENUM ('active', 'pending', 'suspended', 'inactive');
-EXCEPTION
-    WHEN duplicate_object THEN null;
-END $$;
+-- ----------------------------------------------------------------------------
+-- 2. Identity
+-- ----------------------------------------------------------------------------
 
-CREATE TABLE IF NOT EXISTS samna_auth.samna_user (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    first_name VARCHAR(255),
-    last_name VARCHAR(255),
-    phone VARCHAR(50),
-    email VARCHAR(255),
-    user_id UUID UNIQUE NOT NULL DEFAULT gen_random_uuid(),
-    status samna_auth.user_status NOT NULL DEFAULT 'active',
-    type samna_auth.user_type NOT NULL DEFAULT 'user',
-    config JSONB DEFAULT NULL,
-    sa_deleted_at TIMESTAMP DEFAULT NULL,
-    sa_created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    sa_updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+-- samna_app
+-- The app registry. Every record in claimius is scoped to an app via app_id.
+-- The set of apps in this table determines deployment role:
+--   single app row + remote prophet config -> disciple
+--   multiple app rows including a system app -> prophet
+--   both -> hybrid
+-- Per app cryptographic material (private_key, private_seed, app_secret) is
+-- generated by the implementing service in Go and passed in at create time.
+-- Claimius does not generate keys.
+CREATE TABLE IF NOT EXISTS claimius.samna_app (
+                                                  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                                                  slug            TEXT UNIQUE NOT NULL,
+                                                  name            TEXT NOT NULL,
+                                                  description     TEXT DEFAULT '',
+                                                  contact_email   TEXT,
+                                                  app_image       TEXT,
+                                                  redirect_uri    TEXT NOT NULL DEFAULT '',
+                                                  sync_uri        TEXT NOT NULL DEFAULT '',
+                                                  provider_ids    UUID[] NOT NULL DEFAULT ARRAY[]::UUID[],
+                                                  status          claimius.app_status NOT NULL DEFAULT 'active',
+                                                  private_key     TEXT NOT NULL,
+                                                  private_seed    TEXT NOT NULL,
+                                                  app_secret      TEXT,
+                                                  secret_version  INTEGER NOT NULL DEFAULT 1,
+                                                  claim_id        UUID,
+                                                  style           JSONB,
+                                                  sa_owner_id     UUID NOT NULL,
+                                                  sa_created_by   UUID NOT NULL,
+                                                  sa_deleted_at   TIMESTAMPTZ,
+                                                  sa_created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+                                                  sa_updated_at   TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-DROP INDEX IF EXISTS samna_auth.idx_samna_user_user_id;
-CREATE INDEX idx_samna_user_user_id ON samna_auth.samna_user(user_id);
-DROP INDEX IF EXISTS samna_auth.idx_samna_user_email;
-CREATE INDEX idx_samna_user_email ON samna_auth.samna_user(email);
-DROP INDEX IF EXISTS samna_auth.idx_samna_user_sa_deleted_at;
-CREATE INDEX idx_samna_user_sa_deleted_at ON samna_auth.samna_user(sa_deleted_at);
+COMMENT ON TABLE claimius.samna_app IS 'App registry. Set of rows determines deployment role.';
+COMMENT ON COLUMN claimius.samna_app.slug IS 'URL slug for app, unique.';
+COMMENT ON COLUMN claimius.samna_app.contact_email IS 'Contact email for the app.';
+COMMENT ON COLUMN claimius.samna_app.app_image IS 'App image URL or asset reference.';
+COMMENT ON COLUMN claimius.samna_app.redirect_uri IS 'OAuth redirect URI.';
+COMMENT ON COLUMN claimius.samna_app.sync_uri IS 'Sync receiver URL for this app (used by disciples).';
+COMMENT ON COLUMN claimius.samna_app.provider_ids IS 'Array of allowed provider UUIDs from external provider table.';
+COMMENT ON COLUMN claimius.samna_app.private_key IS 'App private key for signing. Generated externally in Go.';
+COMMENT ON COLUMN claimius.samna_app.private_seed IS 'Encryption seed material. Generated externally in Go.';
+COMMENT ON COLUMN claimius.samna_app.app_secret IS 'HMAC SHA256 hash of (seed || raw secret). Validation rehashes and compares.';
+COMMENT ON COLUMN claimius.samna_app.secret_version IS 'Version counter for app_secret rotation.';
+COMMENT ON COLUMN claimius.samna_app.claim_id IS 'Default claim granted to users who log in to this app.';
+COMMENT ON COLUMN claimius.samna_app.style IS 'UI styling configuration as JSON.';
+COMMENT ON COLUMN claimius.samna_app.sa_owner_id IS 'Organization that owns this app.';
+COMMENT ON COLUMN claimius.samna_app.sa_created_by IS 'user_claim.id of the actor who created this app.';
 
-CREATE TABLE IF NOT EXISTS samna_auth.claim (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    name TEXT NOT NULL,
-    description TEXT,
-    sa_access_level INTEGER NOT NULL,
-    inherits BOOLEAN NOT NULL DEFAULT TRUE,
-    type samna_auth.claim_type NOT NULL DEFAULT 'user',
-    sa_created_by UUID,
-    sa_owner_id UUID NOT NULL,
-    sa_root_id UUID NOT NULL,
-    sa_deleted_at TIMESTAMP DEFAULT NULL,
-    sa_created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    sa_updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+CREATE INDEX IF NOT EXISTS idx_samna_app_sa_deleted_at ON claimius.samna_app (sa_deleted_at);
+CREATE INDEX IF NOT EXISTS idx_samna_app_status ON claimius.samna_app (status);
+CREATE INDEX IF NOT EXISTS idx_samna_app_sa_owner_id ON claimius.samna_app (sa_owner_id);
+
+-- samna_user
+-- The canonical user record. One row per (user_id, app_id) pair, so the
+-- same human appears as multiple rows across apps. user_id is the stable
+-- application identifier referenced everywhere; id is the row PK.
+CREATE TABLE IF NOT EXISTS claimius.samna_user (
+                                                   id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                                                   user_id         UUID NOT NULL DEFAULT gen_random_uuid(),
+                                                   app_id          UUID NOT NULL REFERENCES claimius.samna_app(id),
+                                                   first_name      VARCHAR(255),
+                                                   last_name       VARCHAR(255),
+                                                   user_name       TEXT,
+                                                   user_image      TEXT,
+                                                   phone           VARCHAR(50),
+                                                   email           VARCHAR(255),
+                                                   status          claimius.user_status NOT NULL DEFAULT 'active',
+                                                   type            claimius.user_type NOT NULL DEFAULT 'user',
+                                                   config          JSONB,
+                                                   sa_deleted_at   TIMESTAMPTZ,
+                                                   sa_created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+                                                   sa_updated_at   TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-DROP INDEX IF EXISTS samna_auth.idx_claim_sa_owner_id;
-CREATE INDEX idx_claim_sa_owner_id ON samna_auth.claim(sa_owner_id);
-DROP INDEX IF EXISTS samna_auth.idx_claim_sa_root_id;
-CREATE INDEX idx_claim_sa_root_id ON samna_auth.claim(sa_root_id);
-DROP INDEX IF EXISTS samna_auth.idx_claim_sa_deleted_at;
-CREATE INDEX idx_claim_sa_deleted_at ON samna_auth.claim(sa_deleted_at);
+COMMENT ON TABLE claimius.samna_user IS 'User record. One row per (user_id, app_id) pair.';
+COMMENT ON COLUMN claimius.samna_user.user_id IS 'Stable application identifier across apps. Used in all references.';
+COMMENT ON COLUMN claimius.samna_user.app_id IS 'Required app scope. Disciples only hold rows for their own app.';
+COMMENT ON COLUMN claimius.samna_user.user_name IS 'Optional display username, distinct from first_name/last_name.';
+COMMENT ON COLUMN claimius.samna_user.user_image IS 'Optional user image. URL, string, or id that the implementing system recognizes.';
 
-CREATE TABLE IF NOT EXISTS samna_auth.claim_object (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    reason TEXT,
-    function TEXT,
-    claim_id UUID NOT NULL REFERENCES samna_auth.claim(id),
-    object_id UUID NOT NULL,
-    object_type TEXT NOT NULL,
-    sa_level INTEGER NOT NULL DEFAULT 0,
-    inherits BOOLEAN NOT NULL DEFAULT TRUE,
-    ref_id UUID,
-    sa_root_id UUID NOT NULL,
-    sa_created_by UUID,
-    sa_owner_id UUID NOT NULL,
-    sa_deleted_at TIMESTAMP DEFAULT NULL,
-    sa_created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    sa_updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+CREATE UNIQUE INDEX IF NOT EXISTS idx_samna_user_user_app
+    ON claimius.samna_user (user_id, app_id) WHERE sa_deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_samna_user_user_id ON claimius.samna_user (user_id);
+CREATE INDEX IF NOT EXISTS idx_samna_user_app_id ON claimius.samna_user (app_id);
+CREATE INDEX IF NOT EXISTS idx_samna_user_email ON claimius.samna_user (email);
+CREATE INDEX IF NOT EXISTS idx_samna_user_sa_deleted_at ON claimius.samna_user (sa_deleted_at);
+CREATE INDEX IF NOT EXISTS idx_samna_user_status ON claimius.samna_user (status);
+
+-- samna_client
+-- Service account. Authenticates with secret_hash. Claims attach via
+-- user_claim using client_id as user_id.
+CREATE TABLE IF NOT EXISTS claimius.samna_client (
+                                                     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                                                     name            TEXT NOT NULL,
+                                                     description     TEXT,
+                                                     app_id          UUID NOT NULL REFERENCES claimius.samna_app(id),
+                                                     client_id       UUID UNIQUE NOT NULL DEFAULT gen_random_uuid(),
+                                                     secret_hash     TEXT NOT NULL,
+                                                     status          VARCHAR(50) NOT NULL DEFAULT 'active',
+                                                     expires_at      TIMESTAMPTZ,
+                                                     sa_owner_id     UUID NOT NULL,
+                                                     sa_created_by   UUID,
+                                                     sa_deleted_at   TIMESTAMPTZ,
+                                                     sa_created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+                                                     sa_updated_at   TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-DROP INDEX IF EXISTS samna_auth.idx_claim_object_claim_id;
-CREATE INDEX idx_claim_object_claim_id ON samna_auth.claim_object(claim_id);
-DROP INDEX IF EXISTS samna_auth.idx_claim_object_object_id;
-CREATE INDEX idx_claim_object_object_id ON samna_auth.claim_object(object_id);
-DROP INDEX IF EXISTS samna_auth.idx_claim_object_object_type;
-CREATE INDEX idx_claim_object_object_type ON samna_auth.claim_object(object_type);
-DROP INDEX IF EXISTS samna_auth.idx_claim_object_sa_deleted_at;
-CREATE INDEX idx_claim_object_sa_deleted_at ON samna_auth.claim_object(sa_deleted_at);
+COMMENT ON TABLE claimius.samna_client IS 'Service account record. client_id used as user_id in user_claim.';
 
-CREATE TABLE IF NOT EXISTS samna_auth.user_claim (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    claim_id UUID NOT NULL REFERENCES samna_auth.claim(id),
-    user_id UUID NOT NULL,
-    reason VARCHAR,
-    starts_at TIMESTAMP,
-    ends_at TIMESTAMP,
-    sa_created_by UUID,
-    sa_owner_id UUID NOT NULL,
-    sa_deleted_at TIMESTAMP DEFAULT NULL,
-    sa_created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    sa_updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+CREATE INDEX IF NOT EXISTS idx_samna_client_client_id ON claimius.samna_client (client_id);
+CREATE INDEX IF NOT EXISTS idx_samna_client_app_id ON claimius.samna_client (app_id);
+CREATE INDEX IF NOT EXISTS idx_samna_client_sa_owner_id ON claimius.samna_client (sa_owner_id);
+CREATE INDEX IF NOT EXISTS idx_samna_client_sa_deleted_at ON claimius.samna_client (sa_deleted_at);
+
+-- samna_secret
+-- Per app secret store. Keyed by (app_id, key) when not soft deleted.
+CREATE TABLE IF NOT EXISTS claimius.samna_secret (
+                                                     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                                                     app_id          UUID NOT NULL REFERENCES claimius.samna_app(id),
+                                                     key             TEXT NOT NULL,
+                                                     value           TEXT NOT NULL,
+                                                     sa_owner_id     UUID NOT NULL,
+                                                     sa_created_by   UUID,
+                                                     sa_deleted_at   TIMESTAMPTZ,
+                                                     sa_created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+                                                     sa_updated_at   TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-DROP INDEX IF EXISTS samna_auth.idx_user_claim_claim_id;
-CREATE INDEX idx_user_claim_claim_id ON samna_auth.user_claim(claim_id);
-DROP INDEX IF EXISTS samna_auth.idx_user_claim_user_id;
-CREATE INDEX idx_user_claim_user_id ON samna_auth.user_claim(user_id);
-DROP INDEX IF EXISTS samna_auth.idx_user_claim_sa_owner_id;
-CREATE INDEX idx_user_claim_sa_owner_id ON samna_auth.user_claim(sa_owner_id);
-DROP INDEX IF EXISTS samna_auth.idx_user_claim_sa_deleted_at;
-CREATE INDEX idx_user_claim_sa_deleted_at ON samna_auth.user_claim(sa_deleted_at);
-
-CREATE TABLE IF NOT EXISTS samna_auth.organization (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    name VARCHAR(255) NOT NULL,
-    description TEXT,
-    sa_root_id UUID REFERENCES samna_auth.organization(id),
-    sa_owner_id UUID REFERENCES samna_auth.organization(id),
-    type VARCHAR(50),
-    sa_level INTEGER NOT NULL DEFAULT 0,
-    external_id VARCHAR(255),
-    provider_id UUID,
-    sa_deleted_at TIMESTAMP DEFAULT NULL,
-    sa_created_by UUID NOT NULL,
-    sa_created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    sa_updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-
-DROP INDEX IF EXISTS samna_auth.idx_organization_sa_root_id;
-CREATE INDEX idx_organization_sa_root_id ON samna_auth.organization(sa_root_id);
-DROP INDEX IF EXISTS samna_auth.idx_organization_sa_owner_id;
-CREATE INDEX idx_organization_sa_owner_id ON samna_auth.organization(sa_owner_id);
-DROP INDEX IF EXISTS samna_auth.idx_organization_external_id;
-CREATE INDEX idx_organization_external_id ON samna_auth.organization(external_id);
-DROP INDEX IF EXISTS samna_auth.idx_organization_provider_id;
-CREATE INDEX idx_organization_provider_id ON samna_auth.organization(provider_id);
-
-CREATE TABLE IF NOT EXISTS samna_auth.location (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    sa_owner_id UUID NOT NULL REFERENCES samna_auth.organization(id),
-    sa_root_id UUID NOT NULL REFERENCES samna_auth.organization(id),
-    name VARCHAR(255),
-    description TEXT,
-    sa_parent_id UUID REFERENCES samna_auth.location(id),
-    type VARCHAR(50) NOT NULL DEFAULT 'room',
-    longitude DOUBLE PRECISION,
-    latitude DOUBLE PRECISION,
-    sa_level INTEGER NOT NULL DEFAULT 0,
-    code_type VARCHAR(50),
-    code VARCHAR(255),
-    external_id VARCHAR(255),
-    provider_id UUID,
-    sa_created_by UUID NOT NULL,
-    sa_deleted_at TIMESTAMP DEFAULT NULL,
-    sa_created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    sa_updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-
-DROP INDEX IF EXISTS samna_auth.idx_location_sa_owner_id;
-CREATE INDEX idx_location_sa_owner_id ON samna_auth.location(sa_owner_id);
-DROP INDEX IF EXISTS samna_auth.idx_location_sa_root_id;
-CREATE INDEX idx_location_sa_root_id ON samna_auth.location(sa_root_id);
-DROP INDEX IF EXISTS samna_auth.idx_location_sa_parent_id;
-CREATE INDEX idx_location_sa_parent_id ON samna_auth.location(sa_parent_id);
-DROP INDEX IF EXISTS samna_auth.idx_location_external_id;
-CREATE INDEX idx_location_external_id ON samna_auth.location(external_id);
-DROP INDEX IF EXISTS samna_auth.idx_location_provider_id;
-CREATE INDEX idx_location_provider_id ON samna_auth.location(provider_id);
-
-CREATE TABLE IF NOT EXISTS samna_auth.audit
-(
-    id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-    operation     varchar     NOT NULL,
-    message       text                 DEFAULT '',
-    type          varchar     NOT NULL,
-    object_type   varchar     NOT NULL,
-    object_id     uuid        NOT NULL,
-    sa_created_by uuid        NOT NULL,
-    sa_owner_id   uuid        NOT NULL,
-    sa_created_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    sa_updated_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE INDEX IF NOT EXISTS idx_sa_audit_sa_owner_id ON samna_auth.audit (sa_owner_id);
-CREATE INDEX IF NOT EXISTS idx_sa_audit_sa_created_at ON samna_auth.audit (sa_created_at);
-CREATE INDEX IF NOT EXISTS idx_sa_audit_object_id ON samna_auth.audit (object_id);
-CREATE INDEX IF NOT EXISTS idx_sa_audit_object_type ON samna_auth.audit (object_type);
-
-CREATE TABLE IF NOT EXISTS samna_auth.user_relation
-(
-    id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id       uuid        NOT NULL REFERENCES samna_auth.samna_user (user_id),
-    app_id        uuid,
-    description   text,
-    object_type   varchar     NOT NULL,
-    object_id     uuid        NOT NULL,
-    pinned        integer,
-    priority      integer,
-    used_at       timestamptz          DEFAULT CURRENT_TIMESTAMP,
-    sa_deleted_at timestamptz,
-    sa_created_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    sa_updated_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE INDEX IF NOT EXISTS idx_sa_user_relation_user_id ON samna_auth.user_relation (user_id);
-CREATE INDEX IF NOT EXISTS idx_sa_user_relation_object_id ON samna_auth.user_relation (object_id);
-CREATE INDEX IF NOT EXISTS idx_sa_user_relation_object_type ON samna_auth.user_relation (object_type);
-CREATE INDEX IF NOT EXISTS idx_sa_user_relation_app_id ON samna_auth.user_relation (app_id);
-CREATE INDEX IF NOT EXISTS idx_sa_user_relation_sa_deleted_at ON samna_auth.user_relation (sa_deleted_at);
-
-CREATE OR REPLACE FUNCTION samna_auth.composite_id(VARIADIC parts text[])
-RETURNS text AS $$
-    SELECT array_to_string(parts, ':');
-$$ LANGUAGE sql IMMUTABLE;
-
-CREATE OR REPLACE FUNCTION samna_auth.decompose_id(p_id text)
-RETURNS text[] AS $$
-    SELECT string_to_array(p_id, ':');
-$$ LANGUAGE sql IMMUTABLE;
-
-CREATE TABLE IF NOT EXISTS samna_auth.user_object (
-    id               text        NOT NULL PRIMARY KEY,
-    user_id          uuid        NOT NULL,
-    object_id        uuid        NOT NULL,
-    object_type      text        NOT NULL,
-    claim_id         uuid        NOT NULL,
-    sa_access_level  integer     NOT NULL,
-    sa_owner_id      uuid,
-    sa_location_id   uuid,
-    sa_name          text,
-    sa_description   text,
-    sa_link          text,
-    sa_created_at    timestamptz NOT NULL DEFAULT now(),
-    sa_updated_at    timestamptz NOT NULL DEFAULT now()
-);
-
-CREATE INDEX IF NOT EXISTS idx_user_object_user_type ON samna_auth.user_object (user_id, object_type, sa_access_level);
-CREATE INDEX IF NOT EXISTS idx_user_object_owner ON samna_auth.user_object (sa_owner_id);
-CREATE INDEX IF NOT EXISTS idx_user_object_location ON samna_auth.user_object (sa_location_id);
-CREATE INDEX IF NOT EXISTS idx_user_object_object ON samna_auth.user_object (object_id, object_type);
-CREATE INDEX IF NOT EXISTS idx_user_object_claim ON samna_auth.user_object (claim_id);
-
-CREATE TABLE IF NOT EXISTS samna_auth.search_index (
-    object_id     UUID NOT NULL,
-    object_type   TEXT NOT NULL,
-    search_vector TSVECTOR NOT NULL,
-    PRIMARY KEY (object_id, object_type)
-);
-
-CREATE INDEX IF NOT EXISTS idx_sa_search_index_vector ON samna_auth.search_index USING GIN (search_vector);
-
-CREATE TABLE IF NOT EXISTS samna_auth.user_users (
-    id                   text        NOT NULL PRIMARY KEY,
-    viewer_id            uuid        NOT NULL,
-    target_user_id       uuid        NOT NULL,
-    first_shared_at      timestamptz NOT NULL DEFAULT now(),
-    last_shared_at       timestamptz NOT NULL DEFAULT now(),
-    sharing_object_count integer     NOT NULL DEFAULT 1
-);
-
-CREATE INDEX IF NOT EXISTS idx_user_users_viewer ON samna_auth.user_users (viewer_id);
-CREATE INDEX IF NOT EXISTS idx_user_users_target ON samna_auth.user_users (target_user_id);
-
-CREATE TABLE IF NOT EXISTS samna_auth.object_users (
-    id               text        NOT NULL PRIMARY KEY,
-    object_id        uuid        NOT NULL,
-    object_type      text        NOT NULL,
-    user_id          uuid        NOT NULL
-);
-
-CREATE INDEX IF NOT EXISTS idx_object_users_object ON samna_auth.object_users (object_id, object_type);
-CREATE INDEX IF NOT EXISTS idx_object_users_user ON samna_auth.object_users (user_id);
-
-CREATE TABLE IF NOT EXISTS samna_auth.user_object_event (
-    seq              bigserial   PRIMARY KEY,
-    object_type      text        NOT NULL,
-    obj              jsonb       NOT NULL,
-    written_at       timestamptz NOT NULL DEFAULT now()
-);
-
-CREATE INDEX IF NOT EXISTS idx_user_object_event_written ON samna_auth.user_object_event (written_at);
-
-CREATE TABLE IF NOT EXISTS samna_auth.reconcile_queue (
-    id               text        NOT NULL PRIMARY KEY,
-    user_id          uuid        NOT NULL,
-    object_id        uuid        NOT NULL,
-    object_type      text        NOT NULL,
-    sa_created_at    timestamptz NOT NULL DEFAULT now()
-);
-
-CREATE INDEX IF NOT EXISTS idx_reconcile_queue_user ON samna_auth.reconcile_queue (user_id);
-
-CREATE TABLE IF NOT EXISTS samna_auth.prophet_state (
-    id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    app_id           UUID NOT NULL,
-    last_applied_seq bigint      NOT NULL DEFAULT 0,
-    sa_updated_at    timestamptz NOT NULL DEFAULT now(),
-    UNIQUE (app_id)
-);
-
-CREATE TABLE IF NOT EXISTS samna_auth.disciple_state (
-    id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    last_applied_seq bigint      NOT NULL DEFAULT 0,
-    sa_updated_at    timestamptz NOT NULL DEFAULT now()
-);
-
-CREATE TABLE IF NOT EXISTS samna_auth.samna_client (
-    id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    name          TEXT NOT NULL,
-    description   TEXT,
-    app_id        UUID NOT NULL,
-    client_id     UUID UNIQUE NOT NULL DEFAULT gen_random_uuid(),
-    secret_hash   TEXT NOT NULL,
-    status        VARCHAR(50) NOT NULL DEFAULT 'active',
-    expires_at    TIMESTAMPTZ,
-    sa_owner_id   UUID NOT NULL,
-    sa_created_by UUID,
-    sa_deleted_at TIMESTAMPTZ,
-    sa_created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    sa_updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE INDEX IF NOT EXISTS idx_samna_client_client_id ON samna_auth.samna_client (client_id);
-CREATE INDEX IF NOT EXISTS idx_samna_client_app_id ON samna_auth.samna_client (app_id);
-CREATE INDEX IF NOT EXISTS idx_samna_client_sa_owner_id ON samna_auth.samna_client (sa_owner_id);
-CREATE INDEX IF NOT EXISTS idx_samna_client_sa_deleted_at ON samna_auth.samna_client (sa_deleted_at);
-
-CREATE TABLE IF NOT EXISTS samna_auth.object_field (
-    id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    app_id        UUID NOT NULL,
-    object_type   TEXT NOT NULL,
-    name          TEXT NOT NULL,
-    description   TEXT,
-    json_schema   JSONB,
-    required      BOOLEAN NOT NULL DEFAULT FALSE,
-    value         TEXT,
-    sa_owner_id   UUID,
-    sa_created_by UUID,
-    sa_deleted_at TIMESTAMPTZ,
-    sa_created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    sa_updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE INDEX IF NOT EXISTS idx_object_field_app_id ON samna_auth.object_field (app_id);
-CREATE INDEX IF NOT EXISTS idx_object_field_object_type ON samna_auth.object_field (object_type);
-
-CREATE TABLE IF NOT EXISTS samna_auth.user_field (
-    id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    field_id      UUID NOT NULL REFERENCES samna_auth.object_field(id),
-    user_id       UUID NOT NULL,
-    value         TEXT,
-    sa_owner_id   UUID,
-    sa_created_by UUID,
-    sa_deleted_at TIMESTAMPTZ,
-    sa_created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    sa_updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE INDEX IF NOT EXISTS idx_user_field_field_id ON samna_auth.user_field (field_id);
-CREATE INDEX IF NOT EXISTS idx_user_field_user_id ON samna_auth.user_field (user_id);
-
-CREATE TABLE IF NOT EXISTS samna_auth.samna_secret (
-    id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    app_id        UUID NOT NULL,
-    key           TEXT NOT NULL,
-    value         TEXT NOT NULL,
-    sa_owner_id   UUID NOT NULL,
-    sa_created_by UUID,
-    sa_deleted_at TIMESTAMPTZ,
-    sa_created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    sa_updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
+COMMENT ON TABLE claimius.samna_secret IS 'Per app secret store.';
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_samna_secret_app_key
-    ON samna_auth.samna_secret (app_id, key) WHERE sa_deleted_at IS NULL;
-CREATE INDEX IF NOT EXISTS idx_samna_secret_app_id ON samna_auth.samna_secret (app_id);
-CREATE INDEX IF NOT EXISTS idx_samna_secret_sa_owner_id ON samna_auth.samna_secret (sa_owner_id);
-CREATE INDEX IF NOT EXISTS idx_samna_secret_sa_deleted_at ON samna_auth.samna_secret (sa_deleted_at);
+    ON claimius.samna_secret (app_id, key) WHERE sa_deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_samna_secret_app_id ON claimius.samna_secret (app_id);
+CREATE INDEX IF NOT EXISTS idx_samna_secret_sa_owner_id ON claimius.samna_secret (sa_owner_id);
+CREATE INDEX IF NOT EXISTS idx_samna_secret_sa_deleted_at ON claimius.samna_secret (sa_deleted_at);
 
-CREATE TABLE IF NOT EXISTS samna_auth.samna_app (
-    id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    slug          TEXT NOT NULL,
-    name          TEXT,
-    private_seed  TEXT NOT NULL,
-    sa_deleted_at TIMESTAMPTZ,
-    sa_created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    sa_updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+-- ----------------------------------------------------------------------------
+-- 3. Hierarchy roots
+-- ----------------------------------------------------------------------------
+
+-- organization
+-- The org tree. Self references through sa_owner_id. Root iff
+-- sa_owner_id == sa_root_id == id. NEVER null sa_owner_id; root self
+-- references.
+CREATE TABLE IF NOT EXISTS claimius.organization (
+                                                     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                                                     app_id          UUID NOT NULL REFERENCES claimius.samna_app(id),
+                                                     name            VARCHAR(255) NOT NULL,
+                                                     description     TEXT,
+                                                     type            VARCHAR(50),
+                                                     sa_owner_id     UUID NOT NULL,
+                                                     sa_root_id      UUID NOT NULL,
+                                                     sa_location_id  UUID,
+                                                     sa_level        INTEGER NOT NULL DEFAULT 0,
+                                                     external_id     VARCHAR(255),
+                                                     provider_id     UUID,
+                                                     sa_created_by   UUID NOT NULL,
+                                                     sa_deleted_at   TIMESTAMPTZ,
+                                                     sa_created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+                                                     sa_updated_at   TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+COMMENT ON TABLE claimius.organization IS 'Organization tree. Root iff sa_owner_id == sa_root_id == id.';
+COMMENT ON COLUMN claimius.organization.sa_owner_id IS 'Parent org. Equals id at root.';
+COMMENT ON COLUMN claimius.organization.sa_root_id IS 'Top of tree. Equals id at root.';
+COMMENT ON COLUMN claimius.organization.sa_location_id IS 'Optional location pin for the org itself.';
+
+CREATE INDEX IF NOT EXISTS idx_organization_app_id ON claimius.organization (app_id);
+CREATE INDEX IF NOT EXISTS idx_organization_sa_owner_id ON claimius.organization (sa_owner_id);
+CREATE INDEX IF NOT EXISTS idx_organization_sa_root_id ON claimius.organization (sa_root_id);
+CREATE INDEX IF NOT EXISTS idx_organization_sa_location_id ON claimius.organization (sa_location_id) WHERE sa_location_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_organization_external_id ON claimius.organization (external_id);
+CREATE INDEX IF NOT EXISTS idx_organization_provider_id ON claimius.organization (provider_id);
+CREATE INDEX IF NOT EXISTS idx_organization_sa_deleted_at ON claimius.organization (sa_deleted_at);
+
+-- location
+-- The location tree. Locations belong to an organization. Self references
+-- through sa_parent_id. Root iff sa_parent_id == sa_root_id == id.
+CREATE TABLE IF NOT EXISTS claimius.location (
+                                                 id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                                                 app_id          UUID NOT NULL REFERENCES claimius.samna_app(id),
+                                                 sa_owner_id     UUID NOT NULL REFERENCES claimius.organization(id),
+                                                 sa_parent_id    UUID NOT NULL,
+                                                 sa_root_id      UUID NOT NULL,
+                                                 name            VARCHAR(255),
+                                                 description     TEXT,
+                                                 type            VARCHAR(50) NOT NULL DEFAULT 'room',
+                                                 longitude       DOUBLE PRECISION,
+                                                 latitude        DOUBLE PRECISION,
+                                                 sa_level        INTEGER NOT NULL DEFAULT 0,
+                                                 code_type       VARCHAR(50),
+                                                 code            VARCHAR(255),
+                                                 external_id     VARCHAR(255),
+                                                 provider_id     UUID,
+                                                 sa_created_by   UUID NOT NULL,
+                                                 sa_deleted_at   TIMESTAMPTZ,
+                                                 sa_created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+                                                 sa_updated_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+COMMENT ON TABLE claimius.location IS 'Location tree. Root iff sa_parent_id == sa_root_id == id.';
+COMMENT ON COLUMN claimius.location.sa_owner_id IS 'Owning organization. Required.';
+COMMENT ON COLUMN claimius.location.sa_parent_id IS 'Parent location. Equals id at root.';
+COMMENT ON COLUMN claimius.location.sa_root_id IS 'Top of tree. Equals id at root.';
+
+CREATE INDEX IF NOT EXISTS idx_location_app_id ON claimius.location (app_id);
+CREATE INDEX IF NOT EXISTS idx_location_sa_owner_id ON claimius.location (sa_owner_id);
+CREATE INDEX IF NOT EXISTS idx_location_sa_parent_id ON claimius.location (sa_parent_id);
+CREATE INDEX IF NOT EXISTS idx_location_sa_root_id ON claimius.location (sa_root_id);
+CREATE INDEX IF NOT EXISTS idx_location_external_id ON claimius.location (external_id);
+CREATE INDEX IF NOT EXISTS idx_location_provider_id ON claimius.location (provider_id);
+CREATE INDEX IF NOT EXISTS idx_location_sa_deleted_at ON claimius.location (sa_deleted_at);
+
+-- ----------------------------------------------------------------------------
+-- 4. Claims and bindings
+-- ----------------------------------------------------------------------------
+
+-- claim
+-- A named permission template. Carries an access level and is owned by an
+-- organization. is_deny flips this from grant semantics to deny semantics:
+-- a deny claim erases grants on the same path at level <= the deny's level.
+CREATE TABLE IF NOT EXISTS claimius.claim (
+                                              id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                                              app_id          UUID NOT NULL REFERENCES claimius.samna_app(id),
+                                              name            TEXT NOT NULL,
+                                              description     TEXT,
+                                              sa_access_level INTEGER NOT NULL,
+                                              inherits        BOOLEAN NOT NULL DEFAULT TRUE,
+                                              is_deny         BOOLEAN NOT NULL DEFAULT FALSE,
+                                              type            claimius.claim_type NOT NULL DEFAULT 'user',
+                                              sa_owner_id     UUID NOT NULL REFERENCES claimius.organization(id),
+                                              sa_root_id      UUID NOT NULL REFERENCES claimius.organization(id),
+                                              sa_created_by   UUID,
+                                              sa_deleted_at   TIMESTAMPTZ,
+                                              sa_created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+                                              sa_updated_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+COMMENT ON TABLE claimius.claim IS 'Permission template. is_deny inverts to deny semantics.';
+COMMENT ON COLUMN claimius.claim.sa_access_level IS '0 = system, 8 = guest. Lower number = stronger access.';
+COMMENT ON COLUMN claimius.claim.is_deny IS 'When true, this claim removes access at level <= sa_access_level on the bound path.';
+COMMENT ON COLUMN claimius.claim.inherits IS 'When true, claim_object bindings cascade through hierarchy.';
+
+CREATE INDEX IF NOT EXISTS idx_claim_app_id ON claimius.claim (app_id);
+CREATE INDEX IF NOT EXISTS idx_claim_sa_owner_id ON claimius.claim (sa_owner_id);
+CREATE INDEX IF NOT EXISTS idx_claim_sa_root_id ON claimius.claim (sa_root_id);
+CREATE INDEX IF NOT EXISTS idx_claim_is_deny ON claimius.claim (is_deny) WHERE is_deny = TRUE;
+CREATE INDEX IF NOT EXISTS idx_claim_sa_deleted_at ON claimius.claim (sa_deleted_at);
+
+-- user_claim
+-- Grants a claim to a user (or client). Optional time bounds. Reads filter
+-- by current time against starts_at and ends_at.
+CREATE TABLE IF NOT EXISTS claimius.user_claim (
+                                                   id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                                                   app_id          UUID NOT NULL REFERENCES claimius.samna_app(id),
+                                                   claim_id        UUID NOT NULL REFERENCES claimius.claim(id),
+                                                   user_id         UUID NOT NULL,
+                                                   reason          TEXT,
+                                                   starts_at       TIMESTAMPTZ,
+                                                   ends_at         TIMESTAMPTZ,
+                                                   sa_owner_id     UUID NOT NULL REFERENCES claimius.organization(id),
+                                                   sa_created_by   UUID NOT NULL,
+                                                   sa_deleted_at   TIMESTAMPTZ,
+                                                   sa_created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+                                                   sa_updated_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+COMMENT ON TABLE claimius.user_claim IS 'Grants a claim to a user in an app. id is referenced as sa_created_by everywhere.';
+COMMENT ON COLUMN claimius.user_claim.user_id IS 'References samna_user.user_id, not samna_user.id.';
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_user_claim_unique
+    ON claimius.user_claim (claim_id, user_id, app_id) WHERE sa_deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_user_claim_user_app ON claimius.user_claim (user_id, app_id);
+CREATE INDEX IF NOT EXISTS idx_user_claim_claim_id ON claimius.user_claim (claim_id);
+CREATE INDEX IF NOT EXISTS idx_user_claim_sa_owner_id ON claimius.user_claim (sa_owner_id);
+CREATE INDEX IF NOT EXISTS idx_user_claim_sa_deleted_at ON claimius.user_claim (sa_deleted_at);
+
+-- claim_object
+-- Binds a claim to a target object. Polymorphic via (object_type, object_id).
+-- When inherits is true, the binding cascades through hierarchy walks.
+CREATE TABLE IF NOT EXISTS claimius.claim_object (
+                                                     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                                                     app_id          UUID NOT NULL REFERENCES claimius.samna_app(id),
+                                                     claim_id        UUID NOT NULL REFERENCES claimius.claim(id),
+                                                     object_id       UUID NOT NULL,
+                                                     object_type     TEXT NOT NULL,
+                                                     reason          TEXT,
+                                                     function        TEXT,
+                                                     sa_level        INTEGER NOT NULL DEFAULT 0,
+                                                     inherits        BOOLEAN NOT NULL DEFAULT TRUE,
+                                                     ref_id          UUID,
+                                                     sa_owner_id     UUID NOT NULL REFERENCES claimius.organization(id),
+                                                     sa_root_id      UUID NOT NULL REFERENCES claimius.organization(id),
+                                                     sa_created_by   UUID,
+                                                     sa_deleted_at   TIMESTAMPTZ,
+                                                     sa_created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+                                                     sa_updated_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+COMMENT ON TABLE claimius.claim_object IS 'Binds a claim to an object. object_type is <schema>.<table>.';
+
+CREATE INDEX IF NOT EXISTS idx_claim_object_app_id ON claimius.claim_object (app_id);
+CREATE INDEX IF NOT EXISTS idx_claim_object_claim_id ON claimius.claim_object (claim_id);
+CREATE INDEX IF NOT EXISTS idx_claim_object_object ON claimius.claim_object (object_type, object_id);
+CREATE INDEX IF NOT EXISTS idx_claim_object_sa_owner_id ON claimius.claim_object (sa_owner_id);
+CREATE INDEX IF NOT EXISTS idx_claim_object_sa_deleted_at ON claimius.claim_object (sa_deleted_at);
+
+-- ----------------------------------------------------------------------------
+-- 5. Registry
+-- ----------------------------------------------------------------------------
+
+-- table_info
+-- Registry of every table managed by claimius. Populated by
+-- init_claimius_internal (for claimius.* tables) and init_claimius_tables
+-- (for external app tables). Holds metadata used by triggers and calc
+-- functions to avoid information_schema reflection at runtime.
+CREATE TABLE IF NOT EXISTS claimius.table_info (
+                                                   id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                                                   schema_name         TEXT NOT NULL,
+                                                   table_name          TEXT NOT NULL,
+                                                   object_type         TEXT GENERATED ALWAYS AS (schema_name || '.' || table_name) STORED,
+                                                   is_internal         BOOLEAN NOT NULL,
+                                                   has_sa_owner_id     BOOLEAN NOT NULL,
+                                                   has_sa_location_id  BOOLEAN NOT NULL,
+                                                   has_sa_parent_id    BOOLEAN NOT NULL,
+                                                   has_sa_root_id      BOOLEAN NOT NULL,
+                                                   has_sa_created_by   BOOLEAN NOT NULL,
+                                                   has_sa_deleted_at   BOOLEAN NOT NULL,
+                                                   has_sa_created_at   BOOLEAN NOT NULL,
+                                                   has_sa_updated_at   BOOLEAN NOT NULL,
+                                                   has_app_id          BOOLEAN NOT NULL,
+                                                   has_name            BOOLEAN NOT NULL,
+                                                   has_description     BOOLEAN NOT NULL,
+                                                   sa_created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+                                                   sa_updated_at       TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+COMMENT ON TABLE claimius.table_info IS 'Registry of all tables managed by claimius. Cached column metadata.';
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_table_info_object_type ON claimius.table_info (object_type);
+CREATE INDEX IF NOT EXISTS idx_table_info_is_internal ON claimius.table_info (is_internal);
+CREATE INDEX IF NOT EXISTS idx_table_info_has_parent ON claimius.table_info (has_sa_parent_id, has_sa_root_id);
+
+-- inheritance_info
+-- Cached hierarchy trees. One row per (object_type, root_id, type) triple.
+-- The tree jsonb is a nested map of "<object_type>:<object_id>" keys to
+-- { "level": N, "children": { ... } } values. Trees are heterogeneous: child
+-- nodes may have different object_types from the root (an ownership tree
+-- rooted at an organization can contain devices, locations, etc).
+CREATE TABLE IF NOT EXISTS claimius.inheritance_info (
+                                                         id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                                                         object_type     TEXT NOT NULL,
+                                                         root_id         UUID NOT NULL,
+                                                         type            claimius.tree_type NOT NULL,
+                                                         tree            JSONB NOT NULL DEFAULT '{}'::jsonb,
+                                                         sa_created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+                                                         sa_updated_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+COMMENT ON TABLE claimius.inheritance_info IS 'Cached hierarchy trees. One row per (object_type, root_id, type).';
+COMMENT ON COLUMN claimius.inheritance_info.tree IS 'Nested map. Keys are <object_type>:<object_id>. Values have level and children.';
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_inheritance_info_unique
+    ON claimius.inheritance_info (object_type, root_id, type);
+CREATE INDEX IF NOT EXISTS idx_inheritance_info_root ON claimius.inheritance_info (root_id);
+CREATE INDEX IF NOT EXISTS idx_inheritance_info_type ON claimius.inheritance_info (type);
+CREATE INDEX IF NOT EXISTS idx_inheritance_info_tree ON claimius.inheritance_info USING GIN (tree jsonb_path_ops);
+
+-- ----------------------------------------------------------------------------
+-- 6. Materialized access
+-- ----------------------------------------------------------------------------
+
+-- user_object
+-- The reverse access index. One row per (app_id, user_id, object_type,
+-- object_id) when the user has any access (claim based or direct). Carries
+-- denormalized rendering fields and a tsvector for search.
+-- Composite id format: <app_id>:<user_id>:<object_type>:<object_id>
+CREATE TABLE IF NOT EXISTS claimius.user_object (
+                                                    id                  TEXT PRIMARY KEY,
+                                                    app_id              UUID NOT NULL,
+                                                    user_id             UUID NOT NULL,
+                                                    object_id           UUID NOT NULL,
+                                                    object_type         TEXT NOT NULL,
+                                                    sa_access_level     INTEGER NOT NULL,
+                                                    grants              JSONB NOT NULL DEFAULT '[]'::jsonb,
+                                                    direct_grant        BOOLEAN NOT NULL DEFAULT FALSE,
+                                                    sa_owner_id         UUID,
+                                                    sa_location_id      UUID,
+                                                    sa_root_id          UUID,
+                                                    sa_name             TEXT,
+                                                    sa_description      TEXT,
+                                                    sa_link             TEXT,
+                                                    search_vector       TSVECTOR,
+                                                    sa_created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+                                                    sa_updated_at       TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+COMMENT ON TABLE claimius.user_object IS 'Reverse access index. Read path. One row per (app, user, object) with access.';
+COMMENT ON COLUMN claimius.user_object.grants IS 'JSON array of {claim_id, level, cascaded_from, tree_type}. Empty when only direct.';
+COMMENT ON COLUMN claimius.user_object.direct_grant IS 'True when user is creator (via sa_created_by lookup).';
+COMMENT ON COLUMN claimius.user_object.sa_access_level IS 'Effective level: min of grants[].level, or 0 if direct_grant.';
+
+CREATE INDEX IF NOT EXISTS idx_user_object_user_type ON claimius.user_object (user_id, app_id, object_type, sa_access_level);
+CREATE INDEX IF NOT EXISTS idx_user_object_object ON claimius.user_object (object_id, object_type);
+CREATE INDEX IF NOT EXISTS idx_user_object_owner ON claimius.user_object (app_id, sa_owner_id);
+CREATE INDEX IF NOT EXISTS idx_user_object_location ON claimius.user_object (app_id, sa_location_id) WHERE sa_location_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_user_object_root ON claimius.user_object (app_id, sa_root_id);
+CREATE INDEX IF NOT EXISTS idx_user_object_grants ON claimius.user_object USING GIN (grants jsonb_path_ops);
+CREATE INDEX IF NOT EXISTS idx_user_object_search ON claimius.user_object USING GIN (search_vector);
+
+-- object_users
+-- Inverse of user_object. For each object, lists users with access. Used to
+-- compute user_users.
+-- Composite id: <app_id>:<object_type>:<object_id>:<user_id>
+CREATE TABLE IF NOT EXISTS claimius.object_users (
+                                                     id              TEXT PRIMARY KEY,
+                                                     app_id          UUID NOT NULL,
+                                                     object_id       UUID NOT NULL,
+                                                     object_type     TEXT NOT NULL,
+                                                     user_id         UUID NOT NULL,
+                                                     sa_created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+                                                     sa_updated_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+COMMENT ON TABLE claimius.object_users IS 'Inverse of user_object. (object, user) pairs with access.';
+
+CREATE INDEX IF NOT EXISTS idx_object_users_object ON claimius.object_users (object_id, object_type);
+CREATE INDEX IF NOT EXISTS idx_object_users_user ON claimius.object_users (app_id, user_id);
+
+-- user_users
+-- Records that two users in the same app share at least one accessible
+-- object. Used by get_users to list visible users.
+-- Composite id: <app_id>:<viewer_id>:<target_user_id>
+CREATE TABLE IF NOT EXISTS claimius.user_users (
+                                                   id                      TEXT PRIMARY KEY,
+                                                   app_id                  UUID NOT NULL,
+                                                   viewer_id               UUID NOT NULL,
+                                                   target_user_id          UUID NOT NULL,
+                                                   first_shared_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+                                                   last_shared_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+                                                   sharing_object_count    INTEGER NOT NULL DEFAULT 1
+);
+
+COMMENT ON TABLE claimius.user_users IS 'Pairs of users sharing at least one accessible object.';
+
+CREATE INDEX IF NOT EXISTS idx_user_users_viewer ON claimius.user_users (app_id, viewer_id);
+CREATE INDEX IF NOT EXISTS idx_user_users_target ON claimius.user_users (app_id, target_user_id);
+
+-- ----------------------------------------------------------------------------
+-- 7. Sync
+-- ----------------------------------------------------------------------------
+
+-- sync_event
+-- Append only event stream. Prophet writes here, disciple reads here. Each
+-- event carries the full row payload as jsonb (or just {id} for deletes).
+-- Disciples upsert by composite id, idempotently.
+CREATE TABLE IF NOT EXISTS claimius.sync_event (
+                                                   seq             BIGSERIAL PRIMARY KEY,
+                                                   operation       claimius.sync_operation NOT NULL,
+                                                   event_type      TEXT NOT NULL,
+                                                   payload         JSONB NOT NULL,
+                                                   written_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+COMMENT ON TABLE claimius.sync_event IS 'Append only event stream for prophet to disciple sync.';
+COMMENT ON COLUMN claimius.sync_event.event_type IS 'Source table: claimius.user_object, claimius.object_users, etc.';
+
+CREATE INDEX IF NOT EXISTS idx_sync_event_written_at ON claimius.sync_event (written_at);
+CREATE INDEX IF NOT EXISTS idx_sync_event_type_seq ON claimius.sync_event (event_type, seq);
+
+-- prophet_state
+-- Per app cursor on the prophet side. Tracks the highest sync_event.seq
+-- already published to disciples for this app.
+CREATE TABLE IF NOT EXISTS claimius.prophet_state (
+                                                      id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                                                      app_id              UUID NOT NULL UNIQUE REFERENCES claimius.samna_app(id),
+                                                      last_applied_seq    BIGINT NOT NULL DEFAULT 0,
+                                                      sa_updated_at       TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+COMMENT ON TABLE claimius.prophet_state IS 'Per app publishing cursor.';
+
+-- disciple_state
+-- Singleton cursor on the disciple side. Tracks the highest sync_event.seq
+-- already applied locally.
+CREATE TABLE IF NOT EXISTS claimius.disciple_state (
+                                                       id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                                                       last_applied_seq    BIGINT NOT NULL DEFAULT 0,
+                                                       sa_updated_at       TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+COMMENT ON TABLE claimius.disciple_state IS 'Singleton consumption cursor for the disciple.';
+
+-- reconcile_queue
+-- Disciple side retry queue. When applying a sync_event fails, the
+-- (user, object, type) triple is queued here. reconcile_if_pending drains
+-- entries inline at the top of every read for that user.
+CREATE TABLE IF NOT EXISTS claimius.reconcile_queue (
+                                                        id              TEXT PRIMARY KEY,
+                                                        app_id          UUID NOT NULL,
+                                                        user_id         UUID NOT NULL,
+                                                        object_id       UUID NOT NULL,
+                                                        object_type     TEXT NOT NULL,
+                                                        sa_created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+COMMENT ON TABLE claimius.reconcile_queue IS 'Disciple side retry queue for failed event applications.';
+
+CREATE INDEX IF NOT EXISTS idx_reconcile_queue_user ON claimius.reconcile_queue (app_id, user_id);
+
+-- ----------------------------------------------------------------------------
+-- 8. Audit
+-- ----------------------------------------------------------------------------
+
+-- audit
+-- Append only audit log. Populated by audit_trigger_function.
+-- sa_created_by is nullable on this table only. Audit captures every event,
+-- including ones with no clear actor: denied access attempts, system trigger
+-- side effects, disciple replay, scheduled cleanups. Successful operations
+-- still write the acting user_claim.id; everything else writes NULL.
+CREATE TABLE IF NOT EXISTS claimius.audit (
+                                              id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                                              app_id          UUID,
+                                              operation       VARCHAR NOT NULL,
+                                              message         TEXT DEFAULT '',
+                                              type            VARCHAR NOT NULL,
+                                              object_type     VARCHAR NOT NULL,
+                                              object_id       UUID NOT NULL,
+                                              sa_owner_id     UUID NOT NULL,
+                                              sa_created_by   UUID,
+                                              sa_created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+                                              sa_updated_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+COMMENT ON TABLE claimius.audit IS 'Append only audit log. sa_created_by may be NULL when no actor applies (system triggers, replay, denied attempts).';
+COMMENT ON COLUMN claimius.audit.sa_created_by IS 'Acting user_claim.id, or NULL for system events with no clear actor.';
+
+CREATE INDEX IF NOT EXISTS idx_audit_app_id ON claimius.audit (app_id);
+CREATE INDEX IF NOT EXISTS idx_audit_sa_owner_id ON claimius.audit (sa_owner_id);
+CREATE INDEX IF NOT EXISTS idx_audit_sa_created_at ON claimius.audit (sa_created_at);
+CREATE INDEX IF NOT EXISTS idx_audit_object ON claimius.audit (object_type, object_id);
+
+-- ----------------------------------------------------------------------------
+-- 9. Extensibility
+-- ----------------------------------------------------------------------------
+
+-- object_field
+-- Per app schema definition for custom fields attached to a given
+-- object_type.
+CREATE TABLE IF NOT EXISTS claimius.object_field (
+                                                     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                                                     app_id          UUID NOT NULL REFERENCES claimius.samna_app(id),
+                                                     object_type     TEXT NOT NULL,
+                                                     name            TEXT NOT NULL,
+                                                     description     TEXT,
+                                                     json_schema     JSONB,
+                                                     required        BOOLEAN NOT NULL DEFAULT FALSE,
+                                                     value           TEXT,
+                                                     sa_owner_id     UUID NOT NULL REFERENCES claimius.organization(id),
+                                                     sa_created_by   UUID,
+                                                     sa_deleted_at   TIMESTAMPTZ,
+                                                     sa_created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+                                                     sa_updated_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+COMMENT ON TABLE claimius.object_field IS 'Per app custom field definitions for an object_type.';
+
+CREATE INDEX IF NOT EXISTS idx_object_field_app_id ON claimius.object_field (app_id);
+CREATE INDEX IF NOT EXISTS idx_object_field_object_type ON claimius.object_field (object_type);
+CREATE INDEX IF NOT EXISTS idx_object_field_sa_deleted_at ON claimius.object_field (sa_deleted_at);
+
+-- user_field
+-- User scoped value for an object_field. Lets each user supply their own
+-- data against an app's custom fields.
+CREATE TABLE IF NOT EXISTS claimius.user_field (
+                                                   id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                                                   app_id          UUID NOT NULL REFERENCES claimius.samna_app(id),
+                                                   field_id        UUID NOT NULL REFERENCES claimius.object_field(id),
+                                                   user_id         UUID NOT NULL,
+                                                   value           TEXT,
+                                                   sa_owner_id     UUID NOT NULL REFERENCES claimius.organization(id),
+                                                   sa_created_by   UUID,
+                                                   sa_deleted_at   TIMESTAMPTZ,
+                                                   sa_created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+                                                   sa_updated_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+COMMENT ON TABLE claimius.user_field IS 'Per user value for an object_field.';
+
+CREATE INDEX IF NOT EXISTS idx_user_field_app_id ON claimius.user_field (app_id);
+CREATE INDEX IF NOT EXISTS idx_user_field_field_id ON claimius.user_field (field_id);
+CREATE INDEX IF NOT EXISTS idx_user_field_user_id ON claimius.user_field (user_id);
+CREATE INDEX IF NOT EXISTS idx_user_field_sa_deleted_at ON claimius.user_field (sa_deleted_at);
+
+-- user_relation
+-- Lightweight per user pinning, priority, and tagging against arbitrary
+-- objects. Used for recents, favourites, per app object tagging.
+CREATE TABLE IF NOT EXISTS claimius.user_relation (
+                                                      id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                                                      app_id          UUID NOT NULL REFERENCES claimius.samna_app(id),
+                                                      user_id         UUID NOT NULL,
+                                                      description     TEXT,
+                                                      object_type     VARCHAR NOT NULL,
+                                                      object_id       UUID NOT NULL,
+                                                      pinned          INTEGER,
+                                                      priority        INTEGER,
+                                                      used_at         TIMESTAMPTZ DEFAULT now(),
+                                                      sa_deleted_at   TIMESTAMPTZ,
+                                                      sa_created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+                                                      sa_updated_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+COMMENT ON TABLE claimius.user_relation IS 'Per user pin, priority, and tag against any object.';
+
+CREATE INDEX IF NOT EXISTS idx_user_relation_user_id ON claimius.user_relation (user_id);
+CREATE INDEX IF NOT EXISTS idx_user_relation_object ON claimius.user_relation (object_type, object_id);
+CREATE INDEX IF NOT EXISTS idx_user_relation_app_id ON claimius.user_relation (app_id);
+CREATE INDEX IF NOT EXISTS idx_user_relation_sa_deleted_at ON claimius.user_relation (sa_deleted_at);
