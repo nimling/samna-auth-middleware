@@ -7,11 +7,10 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/nimling/samna-auth-middleware/client"
 	"github.com/nimling/samna-auth-middleware/db"
-	"github.com/nimling/samna-auth-middleware/utils"
 )
 
 func GetOrganizations(ctx echo.Context) error {
-	if debugUserID := utils.GetDebugUserID(); debugUserID != nil {
+	if debugUserID := getDebugUserID(); debugUserID != nil {
 		relations := db.ParseWithRelations(ctx.QueryParam("with"), db.OrganizationRelations())
 		orgs, err := db.Instance().GetOrganizations(ctx.Request().Context(), *debugUserID, db.ACCESS_LEVEL_GUEST, relations...)
 		if err != nil {
@@ -36,8 +35,8 @@ func GetOrganization(ctx echo.Context) error {
 		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
 
-	if debugUserID := utils.GetDebugUserID(); debugUserID != nil {
-		claims, err := db.Instance().GetAccess(ctx.Request().Context(), *debugUserID, &orgID, db.ACCESS_LEVEL_GUEST)
+	if debugUserID := getDebugUserID(); debugUserID != nil {
+		claims, err := db.Instance().GetAccess(ctx.Request().Context(), *debugUserID, orgID, db.OBJECT_TYPE_ORGANIZATION, db.ACCESS_LEVEL_GUEST)
 		if err != nil || claims == nil {
 			return respondError(ctx, http.StatusNotFound, "Not found")
 		}
@@ -59,10 +58,8 @@ func GetOrganization(ctx echo.Context) error {
 	return ctx.Stream(http.StatusOK, "application/json", body)
 }
 
-// GetOrganizationGraph returns the ownership graph containing organizations
-// and locations accessible to the authenticated user.
 func GetOrganizationGraph(ctx echo.Context) error {
-	if debugUserID := utils.GetDebugUserID(); debugUserID != nil {
+	if debugUserID := getDebugUserID(); debugUserID != nil {
 		nodes, err := db.Instance().GetOwnerGraph(ctx.Request().Context(), *debugUserID, db.ACCESS_LEVEL_MEMBER)
 		if err != nil {
 			ctx.Logger().Errorf("GetOrganizationGraph: %v", err)
@@ -86,7 +83,7 @@ func GetOrganizationAudit(ctx echo.Context) error {
 		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
 
-	if utils.GetDebugUserID() != nil {
+	if getDebugUserID() != nil {
 		audits, err := db.Instance().GetOrganizationAudit(ctx.Request().Context(), orgID)
 		if err != nil {
 			ctx.Logger().Errorf("GetOrganizationAudit: %v", err)
@@ -120,25 +117,25 @@ func GetOrganizationAssets(ctx echo.Context) error {
 }
 
 func PostOrganization(ctx echo.Context) error {
-	if debugUserID := utils.GetDebugUserID(); debugUserID != nil {
+	if debugUserID := getDebugUserID(); debugUserID != nil {
 		var org db.Organization
 		if err := ctx.Bind(&org); err != nil {
 			return respondError(ctx, http.StatusBadRequest, "Bad request")
 		}
-		if org.OwnerID == nil {
+		if org.OwnerID == (uuid.UUID{}) {
 			return respondError(ctx, http.StatusBadRequest, "owner_id is required")
 		}
-		claims, err := db.Instance().GetAccess(ctx.Request().Context(), *debugUserID, org.OwnerID, db.ACCESS_LEVEL_WRITE)
+		claims, err := db.Instance().GetAccess(ctx.Request().Context(), *debugUserID, org.OwnerID, db.OBJECT_TYPE_ORGANIZATION, db.ACCESS_LEVEL_WRITE)
 		if err != nil {
-			ctx.Logger().Errorf("PostOrganization ClaimAccess: %v", err)
+			ctx.Logger().Errorf("PostOrganization GetAccess: %v", err)
 			return respondError(ctx, http.StatusForbidden, "Forbidden")
 		}
-		if claims == nil {
-			ctx.Logger().Infof("PostOrganization: no access for user %s on object %s", *debugUserID, *org.OwnerID)
+		if claims == nil || claims.UserClaimID == nil {
+			ctx.Logger().Infof("PostOrganization: no actor claim for user %s on owner %s", *debugUserID, org.OwnerID)
 			return respondError(ctx, http.StatusForbidden, "Forbidden")
 		}
-		org.CreatedBy = claims.ID
-		org.RootID = &claims.RootID
+		org.CreatedBy = *claims.UserClaimID
+		org.RootID = claims.RootID
 		if err := db.Instance().PostOrganization(ctx.Request().Context(), &org); err != nil {
 			ctx.Logger().Errorf("PostOrganization: %v", err)
 			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
@@ -164,16 +161,13 @@ func PutOrganization(ctx echo.Context) error {
 		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
 
-	if debugUserID := utils.GetDebugUserID(); debugUserID != nil {
+	if debugUserID := getDebugUserID(); debugUserID != nil {
 		existing, err := db.Instance().GetOrganization(ctx.Request().Context(), orgID)
 		if err != nil {
 			return respondError(ctx, http.StatusNotFound, "Not found")
 		}
-		accessCheckID := orgID
-		if existing.OwnerID != nil {
-			accessCheckID = *existing.OwnerID
-		}
-		claims, err := db.Instance().GetAccess(ctx.Request().Context(), *debugUserID, &accessCheckID, db.ACCESS_LEVEL_WRITE)
+		accessCheckID := existing.OwnerID
+		claims, err := db.Instance().GetAccess(ctx.Request().Context(), *debugUserID, accessCheckID, db.OBJECT_TYPE_ORGANIZATION, db.ACCESS_LEVEL_WRITE)
 		if err != nil || claims == nil {
 			return respondError(ctx, http.StatusForbidden, "Forbidden")
 		}
@@ -206,16 +200,13 @@ func DeleteOrganization(ctx echo.Context) error {
 		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
 
-	if debugUserID := utils.GetDebugUserID(); debugUserID != nil {
+	if debugUserID := getDebugUserID(); debugUserID != nil {
 		existing, err := db.Instance().GetOrganization(ctx.Request().Context(), orgID)
 		if err != nil {
 			return respondError(ctx, http.StatusNotFound, "Not found")
 		}
-		accessCheckID := orgID
-		if existing.OwnerID != nil {
-			accessCheckID = *existing.OwnerID
-		}
-		claims, err := db.Instance().GetAccess(ctx.Request().Context(), *debugUserID, &accessCheckID, db.ACCESS_LEVEL_WRITE)
+		accessCheckID := existing.OwnerID
+		claims, err := db.Instance().GetAccess(ctx.Request().Context(), *debugUserID, accessCheckID, db.OBJECT_TYPE_ORGANIZATION, db.ACCESS_LEVEL_WRITE)
 		if err != nil || claims == nil {
 			return respondError(ctx, http.StatusForbidden, "Forbidden")
 		}

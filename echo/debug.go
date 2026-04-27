@@ -1,0 +1,19 @@
+package echo
+
+import (
+	"os"
+
+	"github.com/google/uuid"
+)
+
+func getDebugUserID() *uuid.UUID {
+	val, ok := os.LookupEnv("SAUTH_DEBUG_USER_ID")
+	if !ok || val == "" {
+		return nil
+	}
+	id, err := uuid.Parse(val)
+	if err != nil {
+		return nil
+	}
+	return &id
+}

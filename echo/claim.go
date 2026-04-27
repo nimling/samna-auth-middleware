@@ -7,13 +7,12 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/nimling/samna-auth-middleware/client"
 	"github.com/nimling/samna-auth-middleware/db"
-	"github.com/nimling/samna-auth-middleware/utils"
 )
 
 // GetClaimGraph returns the claim graph containing claims, user claims,
 // users, organizations, and typed object references for the authenticated user.
 func GetClaimGraph(ctx echo.Context) error {
-	if debugUserID := utils.GetDebugUserID(); debugUserID != nil {
+	if debugUserID := getDebugUserID(); debugUserID != nil {
 		nodes, err := db.Instance().GetClaimGraph(ctx.Request().Context(), *debugUserID, db.ACCESS_LEVEL_GUEST)
 		if err != nil {
 			ctx.Logger().Errorf("GetClaimGraph: %v", err)
@@ -32,7 +31,7 @@ func GetClaimGraph(ctx echo.Context) error {
 }
 
 func GetClaims(ctx echo.Context) error {
-	if debugUserID := utils.GetDebugUserID(); debugUserID != nil {
+	if debugUserID := getDebugUserID(); debugUserID != nil {
 		relations := db.ParseWithRelations(ctx.QueryParam("with"), db.ClaimRelations())
 		claims, err := db.Instance().GetClaims(ctx.Request().Context(), *debugUserID, db.ACCESS_LEVEL_GUEST, relations...)
 		if err != nil {
@@ -57,7 +56,7 @@ func GetClaim(ctx echo.Context) error {
 		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
 
-	if debugUserID := utils.GetDebugUserID(); debugUserID != nil {
+	if debugUserID := getDebugUserID(); debugUserID != nil {
 		relations := db.ParseWithRelations(ctx.QueryParam("with"), db.ClaimRelations())
 		claim, err := db.Instance().GetClaim(ctx.Request().Context(), *debugUserID, claimID, db.ACCESS_LEVEL_GUEST, relations...)
 		if err != nil {
@@ -82,7 +81,7 @@ func GetClaimAudit(ctx echo.Context) error {
 		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
 
-	if utils.GetDebugUserID() != nil {
+	if getDebugUserID() != nil {
 		results, err := db.Instance().GetClaimAudit(ctx.Request().Context(), claimID)
 		if err != nil {
 			ctx.Logger().Errorf("GetClaimAudit: %v", err)

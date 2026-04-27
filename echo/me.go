@@ -8,13 +8,12 @@ import (
 	"github.com/nimling/samna-auth-middleware/client"
 	"github.com/nimling/samna-auth-middleware/db"
 	"github.com/nimling/samna-auth-middleware/middleware"
-	"github.com/nimling/samna-auth-middleware/utils"
 )
 
 func GetMe(ctx echo.Context) error {
 	userID := ctx.Get(middleware.UserIDKey).(uuid.UUID)
 
-	if utils.GetDebugUserID() != nil {
+	if getDebugUserID() != nil {
 		relations := db.ParseWithRelations(ctx.QueryParam("with"), db.UserRelations())
 		user, err := db.Instance().GetUser(ctx.Request().Context(), userID, relations...)
 		if err != nil {
@@ -36,7 +35,7 @@ func GetMe(ctx echo.Context) error {
 func PutMe(ctx echo.Context) error {
 	userID := ctx.Get(middleware.UserIDKey).(uuid.UUID)
 
-	if utils.GetDebugUserID() != nil {
+	if getDebugUserID() != nil {
 		var user db.SamnaUser
 		if err := ctx.Bind(&user); err != nil {
 			return respondError(ctx, http.StatusBadRequest, "Bad request")
@@ -63,7 +62,7 @@ func PutMe(ctx echo.Context) error {
 func GetMeClaims(ctx echo.Context) error {
 	userID := ctx.Get(middleware.UserIDKey).(uuid.UUID)
 
-	if utils.GetDebugUserID() != nil {
+	if getDebugUserID() != nil {
 		claims, err := db.Instance().GetUserClaims(ctx.Request().Context(), userID)
 		if err != nil {
 			ctx.Logger().Errorf("GetMeClaims: %v", err)
@@ -84,7 +83,7 @@ func GetMeClaims(ctx echo.Context) error {
 func GetMeRelations(ctx echo.Context) error {
 	userID := ctx.Get(middleware.UserIDKey).(uuid.UUID)
 
-	if utils.GetDebugUserID() != nil {
+	if getDebugUserID() != nil {
 		relations, err := db.Instance().GetUserRelations(ctx.Request().Context(), userID)
 		if err != nil {
 			ctx.Logger().Errorf("GetMeRelations: %v", err)
@@ -105,7 +104,7 @@ func GetMeRelations(ctx echo.Context) error {
 func GetMeOrganizations(ctx echo.Context) error {
 	userID := ctx.Get(middleware.UserIDKey).(uuid.UUID)
 
-	if utils.GetDebugUserID() != nil {
+	if getDebugUserID() != nil {
 		relations := db.ParseWithRelations(ctx.QueryParam("with"), db.OrganizationRelations())
 		orgs, err := db.Instance().GetOrganizations(ctx.Request().Context(), userID, db.ACCESS_LEVEL_GUEST, relations...)
 		if err != nil {
@@ -127,7 +126,7 @@ func GetMeOrganizations(ctx echo.Context) error {
 func GetMeLocations(ctx echo.Context) error {
 	userID := ctx.Get(middleware.UserIDKey).(uuid.UUID)
 
-	if utils.GetDebugUserID() != nil {
+	if getDebugUserID() != nil {
 		relations := db.ParseWithRelations(ctx.QueryParam("with"), db.LocationRelations())
 		locs, err := db.Instance().GetLocations(ctx.Request().Context(), userID, db.ACCESS_LEVEL_MEMBER, relations...)
 		if err != nil {
@@ -150,9 +149,13 @@ func GetMeLocations(ctx echo.Context) error {
 func GetMeAssets(ctx echo.Context) error {
 	userID := ctx.Get(middleware.UserIDKey).(uuid.UUID)
 
-	if utils.GetDebugUserID() != nil {
-		ctx.Logger().Errorf("GetMeAssets: not available in debug mode")
-		return respondError(ctx, http.StatusNotImplemented, "Not implemented")
+	if getDebugUserID() != nil {
+		assets, err := db.Instance().GetUserAssets(ctx.Request().Context(), userID)
+		if err != nil {
+			ctx.Logger().Errorf("GetMeAssets: %v", err)
+			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
+		}
+		return respondJSON(ctx, http.StatusOK, assets, len(assets))
 	}
 
 	body, err := client.GetUserAssets(ctx.Request().Context(), userID)
@@ -167,7 +170,7 @@ func GetMeAssets(ctx echo.Context) error {
 func GetMeAudit(ctx echo.Context) error {
 	userID := ctx.Get(middleware.UserIDKey).(uuid.UUID)
 
-	if utils.GetDebugUserID() != nil {
+	if getDebugUserID() != nil {
 		audits, err := db.Instance().GetUserAudit(ctx.Request().Context(), userID)
 		if err != nil {
 			ctx.Logger().Errorf("GetMeAudit: %v", err)

@@ -2,17 +2,20 @@ package db
 
 import (
 	"context"
-	"crypto/aes"
-	"crypto/cipher"
 	"encoding/hex"
-	"errors"
+	"fmt"
 
 	"github.com/google/uuid"
 )
 
+type BodySecret struct {
+	Key   *string `json:"key"`
+	Value *string `json:"value"`
+}
+
 func (d *DB) GetSecrets(ctx context.Context, userID uuid.UUID, accessLevel ClaimAccessLevel) ([]SamnaSecret, error) {
 	var secrets []SamnaSecret
-	err := d.NewRaw("SELECT * FROM samna_auth.get_secrets(?, ?)", userID, accessLevel).
+	err := d.NewRaw("SELECT * FROM claimius.get_secrets(?, "+appIDExpr+", ?)", userID, appSlug(), accessLevel).
 		Scan(ctx, &secrets)
 	if err != nil {
 		return nil, err
@@ -34,51 +37,113 @@ func (d *DB) GetSecret(ctx context.Context, secretID uuid.UUID) (*SamnaSecret, e
 	return &secret, nil
 }
 
+func (d *DB) PostSecret(ctx context.Context, body BodySecret) (*SamnaSecret, error) {
+	if body.Key == nil || *body.Key == "" {
+		return nil, fmt.Errorf("key is required")
+	}
+	if body.Value == nil || *body.Value == "" {
+		return nil, fmt.Errorf("value is required")
+	}
+	app, err := d.lookupApp(ctx)
+	if err != nil {
+		return nil, err
+	}
+	seed, err := hex.DecodeString(app.PrivateSeed)
+	if err != nil {
+		return nil, fmt.Errorf("decode app seed: %w", err)
+	}
+	encrypted, err := aesEncrypt(*body.Value, seed)
+	if err != nil {
+		return nil, fmt.Errorf("encrypt: %w", err)
+	}
+	secret := SamnaSecret{
+		AppID:   app.ID,
+		Key:     *body.Key,
+		Value:   hex.EncodeToString(encrypted),
+		OwnerID: app.OwnerID,
+	}
+	_, err = d.NewInsert().Model(&secret).Returning("*").Exec(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("insert secret: %w", err)
+	}
+	return &secret, nil
+}
+
+func (d *DB) PutSecret(ctx context.Context, secretID uuid.UUID, body BodySecret) (*SamnaSecret, error) {
+	secret, err := d.GetSecret(ctx, secretID)
+	if err != nil {
+		return nil, err
+	}
+	if body.Key != nil {
+		secret.Key = *body.Key
+	}
+	if body.Value != nil {
+		app, err := d.lookupApp(ctx)
+		if err != nil {
+			return nil, err
+		}
+		seed, err := hex.DecodeString(app.PrivateSeed)
+		if err != nil {
+			return nil, fmt.Errorf("decode app seed: %w", err)
+		}
+		encrypted, err := aesEncrypt(*body.Value, seed)
+		if err != nil {
+			return nil, fmt.Errorf("encrypt: %w", err)
+		}
+		secret.Value = hex.EncodeToString(encrypted)
+	}
+	_, err = d.NewUpdate().
+		Model(secret).
+		Where("id = ?", secretID).
+		OmitZero().
+		Returning("*").
+		Exec(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("update secret: %w", err)
+	}
+	return secret, nil
+}
+
+func (d *DB) DeleteSecret(ctx context.Context, secretID uuid.UUID) error {
+	_, err := d.NewUpdate().
+		Model((*SamnaSecret)(nil)).
+		Set("sa_deleted_at = NOW()").
+		Where("id = ?", secretID).
+		Where("sa_deleted_at IS NULL").
+		Exec(ctx)
+	return err
+}
+
 func (d *DB) ResolveSecret(ctx context.Context, secretID uuid.UUID) (string, error) {
 	secret, err := d.GetSecret(ctx, secretID)
 	if err != nil {
 		return "", err
 	}
-
-	var app SamnaApp
-	err = d.NewSelect().
-		Model(&app).
-		Where("sa_deleted_at IS NULL").
-		Limit(1).
-		Scan(ctx)
+	app, err := d.lookupApp(ctx)
 	if err != nil {
 		return "", err
 	}
-
 	seed, err := hex.DecodeString(app.PrivateSeed)
 	if err != nil {
 		return "", err
 	}
-
 	ciphertext, err := hex.DecodeString(secret.Value)
 	if err != nil {
 		return "", err
 	}
+	return aesDecrypt(ciphertext, seed)
+}
 
-	block, err := aes.NewCipher(seed)
+func (d *DB) lookupApp(ctx context.Context) (*SamnaApp, error) {
+	var app SamnaApp
+	err := d.NewSelect().
+		Model(&app).
+		Where("slug = ?", appSlug()).
+		Where("sa_deleted_at IS NULL").
+		Limit(1).
+		Scan(ctx)
 	if err != nil {
-		return "", err
+		return nil, fmt.Errorf("lookup app: %w", err)
 	}
-
-	gcm, err := cipher.NewGCM(block)
-	if err != nil {
-		return "", err
-	}
-
-	nonceSize := gcm.NonceSize()
-	if len(ciphertext) < nonceSize {
-		return "", errors.New("ciphertext too short")
-	}
-
-	plaintext, err := gcm.Open(nil, ciphertext[:nonceSize], ciphertext[nonceSize:], nil)
-	if err != nil {
-		return "", err
-	}
-
-	return string(plaintext), nil
+	return &app, nil
 }

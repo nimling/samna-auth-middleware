@@ -8,7 +8,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/nimling/samna-auth-middleware/db"
-	"github.com/nimling/samna-auth-middleware/utils"
 )
 
 func GetLocationAudit(ctx context.Context, locationID uuid.UUID) (io.ReadCloser, error) {
@@ -57,11 +56,16 @@ func GetLocationClaims(ctx context.Context, locationID uuid.UUID) (io.ReadCloser
 }
 
 func PostLocation(ctx context.Context, loc db.Location) (db.Location, error) {
-	if utils.GetDebugUserID() != nil {
+	if getDebugUserID() != nil {
+		appID, err := resolveAppID(ctx)
+		if err != nil {
+			return loc, err
+		}
 		loc.ID = uuid.New()
+		loc.AppID = appID
 		loc.CreatedAt = time.Now()
 		loc.UpdatedAt = time.Now()
-		_, err := db.Instance().NewInsert().Model(&loc).Exec(ctx)
+		_, err = db.Instance().NewInsert().Model(&loc).Exec(ctx)
 		if err != nil {
 			return loc, fmt.Errorf("debug insert location: %w", err)
 		}
@@ -84,7 +88,7 @@ func PostLocation(ctx context.Context, loc db.Location) (db.Location, error) {
 }
 
 func PutLocation(ctx context.Context, locationID uuid.UUID, loc db.Location) (db.Location, error) {
-	if utils.GetDebugUserID() != nil {
+	if getDebugUserID() != nil {
 		loc.ID = locationID
 		loc.UpdatedAt = time.Now()
 		_, err := db.Instance().NewUpdate().Model(&loc).Where("id = ?", locationID).OmitZero().Exec(ctx)
@@ -110,7 +114,7 @@ func PutLocation(ctx context.Context, locationID uuid.UUID, loc db.Location) (db
 }
 
 func DeleteLocation(ctx context.Context, locationID uuid.UUID) (db.Location, error) {
-	if utils.GetDebugUserID() != nil {
+	if getDebugUserID() != nil {
 		var result db.Location
 		_, err := db.Instance().NewUpdate().Model(&result).Set("sa_deleted_at = NOW()").Where("id = ?", locationID).Where("sa_deleted_at IS NULL").Returning("*").Exec(ctx)
 		if err != nil {

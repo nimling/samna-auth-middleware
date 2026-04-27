@@ -1,7 +1,9 @@
 package client
 
 import (
+	"bytes"
 	"encoding/json"
+	"io"
 	"log"
 	"net"
 	"net/url"
@@ -9,6 +11,14 @@ import (
 
 	"github.com/google/uuid"
 )
+
+func jsonReader(v any) (io.ReadCloser, error) {
+	data, err := json.Marshal(v)
+	if err != nil {
+		return nil, err
+	}
+	return io.NopCloser(bytes.NewReader(data)), nil
+}
 
 func generateRequestID() string {
 	return uuid.New().String()

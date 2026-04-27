@@ -8,7 +8,6 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/nimling/samna-auth-middleware/client"
 	"github.com/nimling/samna-auth-middleware/db"
-	"github.com/nimling/samna-auth-middleware/utils"
 )
 
 func GetSearch(ctx echo.Context) error {
@@ -36,7 +35,7 @@ func GetSearch(ctx echo.Context) error {
 		}
 	}
 
-	if debugUserID := utils.GetDebugUserID(); debugUserID != nil {
+	if debugUserID := getDebugUserID(); debugUserID != nil {
 		results, err := db.Instance().Search(ctx.Request().Context(), *debugUserID, query, objectTypes, db.ACCESS_LEVEL_GUEST, limit, offset)
 		if err != nil {
 			ctx.Logger().Errorf("GetSearch: %v", err)

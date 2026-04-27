@@ -60,7 +60,7 @@ func PullSnapshot(ctx context.Context) error {
 
 	for _, payload := range snapshot.Records {
 		if err := ApplyPayload(ctx, payload); err != nil {
-			return fmt.Errorf("apply %s: %w", payload.Type, err)
+			return fmt.Errorf("apply %s: %w", payload.EventType, err)
 		}
 	}
 
@@ -118,7 +118,7 @@ func PullSync(ctx context.Context) error {
 	var maxSeq int64
 	for _, payload := range payloads {
 		if err := ApplyPayload(ctx, payload); err != nil {
-			return fmt.Errorf("apply %s seq %d: %w", payload.Type, payload.Seq, err)
+			return fmt.Errorf("apply %s seq %d: %w", payload.EventType, payload.Seq, err)
 		}
 		if payload.Seq > maxSeq {
 			maxSeq = payload.Seq

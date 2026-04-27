@@ -55,6 +55,9 @@ func UserAuthMiddleware(opts *UserAuthOptions) echo.MiddlewareFunc {
 	config := configFromUserAuthOptions(opts)
 
 	if config.AuthorizedUserID != nil {
+		if err := ensureDebugUser(context.Background(), *config.AuthorizedUserID); err != nil {
+			panic(fmt.Errorf("ensure debug user: %w", err))
+		}
 		return func(next echo.HandlerFunc) echo.HandlerFunc {
 			return func(ctx echo.Context) error {
 				ctx.Set(UserIDKey, *config.AuthorizedUserID)

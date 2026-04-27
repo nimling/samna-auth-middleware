@@ -873,6 +873,25 @@ BEGIN
                 UPDATE claimius.user_field SET user_id = p_target_user_id
                 WHERE user_id = p_source_user_id AND app_id = v_app_row.app_id;
 
+                -- Propagate the source's profile metadata onto the target row.
+                -- Replace name, image, phone, and config unconditionally; fill
+                -- email only when the target's email is NULL or empty so an
+                -- explicitly set target address is never silently overwritten.
+                UPDATE claimius.samna_user
+                SET first_name    = v_source_app_user.first_name,
+                    last_name     = v_source_app_user.last_name,
+                    user_name     = v_source_app_user.user_name,
+                    user_image    = v_source_app_user.user_image,
+                    phone         = v_source_app_user.phone,
+                    config        = v_source_app_user.config,
+                    email         = CASE
+                                        WHEN coalesce(NULLIF(email, ''), NULL) IS NULL
+                                            THEN v_source_app_user.email
+                                        ELSE email
+                        END,
+                    sa_updated_at = now()
+                WHERE id = v_target_app_user.id;
+
                 -- Hard delete materialized rows for the source; calc functions will
                 -- repopulate as transactions touch the target.
                 DELETE FROM claimius.user_object

@@ -7,11 +7,10 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/nimling/samna-auth-middleware/client"
 	"github.com/nimling/samna-auth-middleware/db"
-	"github.com/nimling/samna-auth-middleware/utils"
 )
 
 func GetUsers(ctx echo.Context) error {
-	if debugUserID := utils.GetDebugUserID(); debugUserID != nil {
+	if debugUserID := getDebugUserID(); debugUserID != nil {
 		users, err := db.Instance().GetUsers(ctx.Request().Context(), *debugUserID, db.ACCESS_LEVEL_GUEST)
 		if err != nil {
 			ctx.Logger().Errorf("GetUsers: %v", err)
@@ -35,7 +34,7 @@ func GetUser(ctx echo.Context) error {
 		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
 
-	if utils.GetDebugUserID() != nil {
+	if getDebugUserID() != nil {
 		relations := db.ParseWithRelations(ctx.QueryParam("with"), db.UserRelations())
 		user, err := db.Instance().GetUser(ctx.Request().Context(), userID, relations...)
 		if err != nil {
@@ -60,7 +59,7 @@ func GetUserAudit(ctx echo.Context) error {
 		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
 
-	if utils.GetDebugUserID() != nil {
+	if getDebugUserID() != nil {
 		audits, err := db.Instance().GetUserAudit(ctx.Request().Context(), userID)
 		if err != nil {
 			ctx.Logger().Errorf("GetUserAudit: %v", err)
@@ -84,7 +83,7 @@ func GetUserClaims(ctx echo.Context) error {
 		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
 
-	if utils.GetDebugUserID() != nil {
+	if getDebugUserID() != nil {
 		claims, err := db.Instance().GetUserClaims(ctx.Request().Context(), userID)
 		if err != nil {
 			ctx.Logger().Errorf("GetUserClaims: %v", err)
@@ -108,7 +107,7 @@ func GetUserRelations(ctx echo.Context) error {
 		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
 
-	if utils.GetDebugUserID() != nil {
+	if getDebugUserID() != nil {
 		relations, err := db.Instance().GetUserRelations(ctx.Request().Context(), userID)
 		if err != nil {
 			ctx.Logger().Errorf("GetUserRelations: %v", err)
@@ -150,7 +149,7 @@ func PutUser(ctx echo.Context) error {
 		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
 
-	if utils.GetDebugUserID() != nil {
+	if getDebugUserID() != nil {
 		var user db.SamnaUser
 		if err := ctx.Bind(&user); err != nil {
 			return respondError(ctx, http.StatusBadRequest, "Bad request")
@@ -194,9 +193,13 @@ func GetUserAssets(ctx echo.Context) error {
 		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
 
-	if utils.GetDebugUserID() != nil {
-		ctx.Logger().Errorf("GetUserAssets: not available in debug mode")
-		return respondError(ctx, http.StatusNotImplemented, "Not implemented")
+	if getDebugUserID() != nil {
+		assets, err := db.Instance().GetUserAssets(ctx.Request().Context(), userID)
+		if err != nil {
+			ctx.Logger().Errorf("GetUserAssets: %v", err)
+			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
+		}
+		return respondJSON(ctx, http.StatusOK, assets, len(assets))
 	}
 
 	body, err := client.GetUserAssets(ctx.Request().Context(), userID)

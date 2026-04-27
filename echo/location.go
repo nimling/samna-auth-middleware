@@ -7,11 +7,10 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/nimling/samna-auth-middleware/client"
 	"github.com/nimling/samna-auth-middleware/db"
-	"github.com/nimling/samna-auth-middleware/utils"
 )
 
 func GetLocations(ctx echo.Context) error {
-	if debugUserID := utils.GetDebugUserID(); debugUserID != nil {
+	if debugUserID := getDebugUserID(); debugUserID != nil {
 		relations := db.ParseWithRelations(ctx.QueryParam("with"), db.LocationRelations())
 		locs, err := db.Instance().GetLocations(ctx.Request().Context(), *debugUserID, db.ACCESS_LEVEL_MEMBER, relations...)
 		if err != nil {
@@ -36,8 +35,8 @@ func GetLocation(ctx echo.Context) error {
 		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
 
-	if debugUserID := utils.GetDebugUserID(); debugUserID != nil {
-		claims, err := db.Instance().GetAccess(ctx.Request().Context(), *debugUserID, &locationID, db.ACCESS_LEVEL_MEMBER)
+	if debugUserID := getDebugUserID(); debugUserID != nil {
+		claims, err := db.Instance().GetAccess(ctx.Request().Context(), *debugUserID, locationID, db.OBJECT_TYPE_LOCATION, db.ACCESS_LEVEL_MEMBER)
 		if err != nil || claims == nil {
 			return respondError(ctx, http.StatusNotFound, "Not found")
 		}
@@ -65,7 +64,7 @@ func GetLocationAudit(ctx echo.Context) error {
 		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
 
-	if utils.GetDebugUserID() != nil {
+	if getDebugUserID() != nil {
 		audits, err := db.Instance().GetLocationAudit(ctx.Request().Context(), locationID)
 		if err != nil {
 			ctx.Logger().Errorf("GetLocationAudit: %v", err)
@@ -99,22 +98,22 @@ func GetLocationAssets(ctx echo.Context) error {
 }
 
 func PostLocation(ctx echo.Context) error {
-	if debugUserID := utils.GetDebugUserID(); debugUserID != nil {
+	if debugUserID := getDebugUserID(); debugUserID != nil {
 		var loc db.Location
 		if err := ctx.Bind(&loc); err != nil {
 			return respondError(ctx, http.StatusBadRequest, "Bad request")
 		}
 		ownerID := loc.OwnerID
-		claims, err := db.Instance().GetAccess(ctx.Request().Context(), *debugUserID, &ownerID, db.ACCESS_LEVEL_WRITE)
+		claims, err := db.Instance().GetAccess(ctx.Request().Context(), *debugUserID, ownerID, db.OBJECT_TYPE_ORGANIZATION, db.ACCESS_LEVEL_WRITE)
 		if err != nil {
-			ctx.Logger().Errorf("PostLocation ClaimAccess: %v", err)
+			ctx.Logger().Errorf("PostLocation GetAccess: %v", err)
 			return respondError(ctx, http.StatusForbidden, "Forbidden")
 		}
-		if claims == nil {
-			ctx.Logger().Infof("PostLocation: no access for user %s on object %s", *debugUserID, ownerID)
+		if claims == nil || claims.UserClaimID == nil {
+			ctx.Logger().Infof("PostLocation: no actor claim for user %s on owner %s", *debugUserID, ownerID)
 			return respondError(ctx, http.StatusForbidden, "Forbidden")
 		}
-		loc.CreatedBy = claims.ID
+		loc.CreatedBy = *claims.UserClaimID
 		loc.RootID = claims.RootID
 		if err := db.Instance().PostLocation(ctx.Request().Context(), &loc); err != nil {
 			ctx.Logger().Errorf("PostLocation: %v", err)
@@ -141,8 +140,8 @@ func PutLocation(ctx echo.Context) error {
 		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
 
-	if debugUserID := utils.GetDebugUserID(); debugUserID != nil {
-		claims, err := db.Instance().GetAccess(ctx.Request().Context(), *debugUserID, &locationID, db.ACCESS_LEVEL_WRITE)
+	if debugUserID := getDebugUserID(); debugUserID != nil {
+		claims, err := db.Instance().GetAccess(ctx.Request().Context(), *debugUserID, locationID, db.OBJECT_TYPE_LOCATION, db.ACCESS_LEVEL_WRITE)
 		if err != nil || claims == nil {
 			return respondError(ctx, http.StatusForbidden, "Forbidden")
 		}
@@ -175,8 +174,8 @@ func DeleteLocation(ctx echo.Context) error {
 		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
 
-	if debugUserID := utils.GetDebugUserID(); debugUserID != nil {
-		claims, err := db.Instance().GetAccess(ctx.Request().Context(), *debugUserID, &locationID, db.ACCESS_LEVEL_WRITE)
+	if debugUserID := getDebugUserID(); debugUserID != nil {
+		claims, err := db.Instance().GetAccess(ctx.Request().Context(), *debugUserID, locationID, db.OBJECT_TYPE_LOCATION, db.ACCESS_LEVEL_WRITE)
 		if err != nil || claims == nil {
 			return respondError(ctx, http.StatusForbidden, "Forbidden")
 		}

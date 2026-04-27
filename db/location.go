@@ -25,7 +25,7 @@ func (d *DB) GetLocations(ctx context.Context, userID uuid.UUID, accessLevel Cla
 	var locs []Location
 	q := d.NewSelect().
 		Model(&locs).
-		Where("location.id IN (SELECT id FROM samna_auth.get_locations(?, ?))", userID, accessLevel)
+		Where("location.id IN (SELECT object_id FROM claimius.get_objects(?, "+appIDExpr+", ?, ?))", userID, appSlug(), OBJECT_TYPE_LOCATION, accessLevel)
 	q = ApplyRelations(q, relations)
 	err := q.Scan(ctx)
 	if err != nil {
@@ -36,19 +36,54 @@ func (d *DB) GetLocations(ctx context.Context, userID uuid.UUID, accessLevel Cla
 
 func (d *DB) GetChildLocations(ctx context.Context, startID uuid.UUID) ([]uuid.UUID, error) {
 	var ids []uuid.UUID
-	err := d.NewRaw("SELECT id FROM samna_auth.get_child_locations(?::uuid)", startID).
+	err := d.NewRaw(`
+		WITH RECURSIVE descendants AS (
+			SELECT id, sa_parent_id
+			FROM claimius.location
+			WHERE id = ?
+			  AND sa_deleted_at IS NULL
+			UNION ALL
+			SELECT l.id, l.sa_parent_id
+			FROM claimius.location l
+			JOIN descendants d ON l.sa_parent_id = d.id
+			WHERE l.id <> l.sa_parent_id
+			  AND l.sa_deleted_at IS NULL
+		)
+		SELECT id FROM descendants WHERE id <> ?
+	`, startID, startID).
 		Scan(ctx, &ids)
 	return ids, err
 }
 
 func (d *DB) GetParentLocations(ctx context.Context, startID uuid.UUID) ([]uuid.UUID, error) {
 	var ids []uuid.UUID
-	err := d.NewRaw("SELECT id FROM samna_auth.get_parent_locations(?::uuid)", startID).
+	err := d.NewRaw(`
+		WITH RECURSIVE ancestors AS (
+			SELECT id, sa_parent_id
+			FROM claimius.location
+			WHERE id = ?
+			  AND sa_deleted_at IS NULL
+			UNION ALL
+			SELECT l.id, l.sa_parent_id
+			FROM claimius.location l
+			JOIN ancestors a ON a.sa_parent_id = l.id
+			WHERE a.id <> a.sa_parent_id
+			  AND l.sa_deleted_at IS NULL
+		)
+		SELECT id FROM ancestors WHERE id <> ?
+	`, startID, startID).
 		Scan(ctx, &ids)
 	return ids, err
 }
 
 func (d *DB) PostLocation(ctx context.Context, loc *Location) error {
+	if loc.AppID == (uuid.UUID{}) {
+		appID, err := d.resolveAppID(ctx)
+		if err != nil {
+			return err
+		}
+		loc.AppID = appID
+	}
 	q := d.NewInsert().
 		Model(loc).
 		Returning("*")
@@ -83,7 +118,7 @@ func (d *DB) GetLocationAudit(ctx context.Context, locationID uuid.UUID) ([]Audi
 	var audits []Audit
 	err := d.NewSelect().
 		Model(&audits).
-		Where("object_type = ?", "location").
+		Where("object_type = ?", OBJECT_TYPE_LOCATION).
 		Where("object_id = ?", locationID).
 		OrderExpr("sa_created_at DESC").
 		Scan(ctx)

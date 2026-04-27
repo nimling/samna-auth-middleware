@@ -9,7 +9,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/nimling/samna-auth-middleware/db"
-	"github.com/nimling/samna-auth-middleware/utils"
 )
 
 func GetAssets(ctx context.Context) (io.ReadCloser, error) {
@@ -40,7 +39,7 @@ func GetAssetData(ctx context.Context, assetID uuid.UUID) (io.ReadCloser, error)
 }
 
 func PostAsset(ctx context.Context, asset db.Asset) (db.Asset, error) {
-	if utils.GetDebugUserID() != nil {
+	if getDebugUserID() != nil {
 		asset.ID = uuid.New()
 		asset.CreatedAt = time.Now()
 		asset.UpdatedAt = time.Now()
@@ -98,7 +97,7 @@ func PostAssetData(ctx context.Context, assetID uuid.UUID, contentType string, b
 }
 
 func PutAsset(ctx context.Context, assetID uuid.UUID, asset db.Asset) (db.Asset, error) {
-	if utils.GetDebugUserID() != nil {
+	if getDebugUserID() != nil {
 		asset.ID = assetID
 		asset.UpdatedAt = time.Now()
 		_, err := db.Instance().NewUpdate().Model(&asset).Where("id = ?", assetID).OmitZero().Exec(ctx)
@@ -124,7 +123,7 @@ func PutAsset(ctx context.Context, assetID uuid.UUID, asset db.Asset) (db.Asset,
 }
 
 func DeleteAsset(ctx context.Context, assetID uuid.UUID) (db.Asset, error) {
-	if utils.GetDebugUserID() != nil {
+	if getDebugUserID() != nil {
 		var result db.Asset
 		_, err := db.Instance().NewUpdate().Model(&result).Set("sa_deleted_at = NOW()").Where("id = ?", assetID).Where("sa_deleted_at IS NULL").Returning("*").Exec(ctx)
 		if err != nil {

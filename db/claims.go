@@ -6,10 +6,10 @@ import (
 	"github.com/google/uuid"
 )
 
-func (d *DB) GetAccess(ctx context.Context, userID uuid.UUID, objectID *uuid.UUID, accessLevel ClaimAccessLevel) (*AccessClaim, error) {
+func (d *DB) GetAccess(ctx context.Context, userID, objectID uuid.UUID, objectType string, accessLevel ClaimAccessLevel) (*AccessClaim, error) {
 	var claims []AccessClaim
 	err := d.NewSelect().
-		TableExpr("samna_auth.get_access(?, ?, ?) AS claim", userID, objectID, accessLevel).
+		TableExpr("claimius.get_access(?, "+appIDExpr+", ?, ?, ?) AS claim", userID, appSlug(), objectID, objectType, accessLevel).
 		Column("claim.*").
 		Scan(ctx, &claims)
 	if err != nil {
@@ -21,12 +21,12 @@ func (d *DB) GetAccess(ctx context.Context, userID uuid.UUID, objectID *uuid.UUI
 	return &claims[0], nil
 }
 
-func (d *DB) GetClaim(ctx context.Context, userID uuid.UUID, claimID uuid.UUID, accessLevel ClaimAccessLevel, relations ...RelationFunc) (*Claim, error) {
+func (d *DB) GetClaim(ctx context.Context, userID, claimID uuid.UUID, accessLevel ClaimAccessLevel, relations ...RelationFunc) (*Claim, error) {
 	var claim Claim
 	q := d.NewSelect().
 		Model(&claim).
 		Where("claim.id = ?", claimID).
-		Where("claim.id IN (SELECT id FROM samna_auth.get_claims(?, ?))", userID, accessLevel).
+		Where("claim.id IN (SELECT id FROM claimius.get_claims(?, "+appIDExpr+", ?))", userID, appSlug(), accessLevel).
 		Limit(1)
 	q = ApplyRelations(q, relations)
 	err := q.Scan(ctx)
@@ -40,7 +40,7 @@ func (d *DB) GetClaims(ctx context.Context, userID uuid.UUID, accessLevel ClaimA
 	var claims []Claim
 	q := d.NewSelect().
 		Model(&claims).
-		Where("claim.id IN (SELECT id FROM samna_auth.get_claims(?, ?))", userID, accessLevel)
+		Where("claim.id IN (SELECT id FROM claimius.get_claims(?, "+appIDExpr+", ?))", userID, appSlug(), accessLevel)
 	q = ApplyRelations(q, relations)
 	err := q.Scan(ctx)
 	if err != nil {
@@ -53,7 +53,7 @@ func (d *DB) GetClaimAudit(ctx context.Context, claimID uuid.UUID) ([]Audit, err
 	var audits []Audit
 	err := d.NewSelect().
 		Model(&audits).
-		Where("object_type = ?", "claim").
+		Where("object_type = ?", OBJECT_TYPE_CLAIM).
 		Where("object_id = ?", claimID).
 		OrderExpr("sa_created_at DESC").
 		Scan(ctx)
@@ -64,18 +64,24 @@ func (d *DB) GetClaimAudit(ctx context.Context, claimID uuid.UUID) ([]Audit, err
 }
 
 type SearchResult struct {
-	ID          uuid.UUID `bun:"id" json:"id"`
-	ObjectType  string    `bun:"object_type" json:"object_type"`
-	Name        string    `bun:"name" json:"name"`
-	Description string    `bun:"description" json:"description"`
-	Rank        float32   `bun:"rank" json:"rank"`
+	ObjectID    uuid.UUID  `bun:"object_id" json:"object_id"`
+	ObjectType  string     `bun:"object_type" json:"object_type"`
+	UserClaimID *uuid.UUID `bun:"user_claim_id" json:"user_claim_id"`
+	Name        *string    `bun:"sa_name" json:"name"`
+	Description *string    `bun:"sa_description" json:"description"`
+	Link        *string    `bun:"sa_link" json:"link"`
+	AccessLevel int        `bun:"sa_access_level" json:"access_level"`
+	OwnerID     *uuid.UUID `bun:"sa_owner_id" json:"owner_id"`
+	LocationID  *uuid.UUID `bun:"sa_location_id" json:"location_id"`
+	DirectGrant bool       `bun:"direct_grant" json:"direct_grant"`
+	Rank        float32    `bun:"rank" json:"rank"`
 }
 
 func (d *DB) Search(ctx context.Context, userID uuid.UUID, query string, objectTypes []string, accessLevel ClaimAccessLevel, limit int, offset int) ([]SearchResult, error) {
 	var results []SearchResult
 	err := d.NewRaw(
-		`SELECT * FROM samna_auth.search(?, ?, ?::text[], ?, ?, ?)`,
-		userID, query, objectTypes, accessLevel, limit, offset,
+		`SELECT * FROM claimius.search_objects(?, `+appIDExpr+`, ?, ?::text[], ?, ?, ?)`,
+		userID, appSlug(), query, objectTypes, accessLevel, limit, offset,
 	).Scan(ctx, &results)
 	if err != nil {
 		return nil, err
@@ -86,7 +92,7 @@ func (d *DB) Search(ctx context.Context, userID uuid.UUID, query string, objectT
 func (d *DB) GetAudit(ctx context.Context, userID uuid.UUID, accessLevel ClaimAccessLevel) ([]Audit, error) {
 	var audits []Audit
 	err := d.NewSelect().
-		TableExpr("samna_auth.get_audit(?, ?) AS audit", userID, accessLevel).
+		TableExpr("claimius.get_audit(?, "+appIDExpr+", ?) AS audit", userID, appSlug(), accessLevel).
 		Column("audit.*").
 		Scan(ctx, &audits)
 	if err != nil {
@@ -95,40 +101,34 @@ func (d *DB) GetAudit(ctx context.Context, userID uuid.UUID, accessLevel ClaimAc
 	return audits, nil
 }
 
-func (d *DB) HasAccess(ctx context.Context, userID uuid.UUID, objectID *uuid.UUID, accessLevel ClaimAccessLevel) bool {
-	claim, err := d.GetAccess(ctx, userID, objectID, accessLevel)
+func (d *DB) HasAccess(ctx context.Context, userID, objectID uuid.UUID, objectType string, accessLevel ClaimAccessLevel) bool {
+	claim, err := d.GetAccess(ctx, userID, objectID, objectType, accessLevel)
 	return err == nil && claim != nil
 }
 
-func (d *DB) GetObjectClaims(ctx context.Context, userID uuid.UUID, objectID uuid.UUID) ([]Claim, error) {
+func (d *DB) GetObjectClaims(ctx context.Context, userID, objectID uuid.UUID, objectType string) ([]Claim, error) {
 	var claims []Claim
 	err := d.NewSelect().
 		Model(&claims).
-		Where("claim.id IN (SELECT id FROM samna_auth.get_claims(?, ?))", userID, objectID).
+		Where("claim.id IN (SELECT id FROM claimius.get_claims(?, "+appIDExpr+", ?, ?))", userID, appSlug(), objectID, objectType).
 		Scan(ctx)
 	return claims, err
 }
 
-// GetOwnerGraph returns the ownership graph for a user. The graph contains
-// organizations and locations visible at the given access level.
 func (d *DB) GetOwnerGraph(ctx context.Context, userID uuid.UUID, accessLevel ClaimAccessLevel) ([]GraphNode, error) {
 	var nodes []GraphNode
 	err := d.NewSelect().
-		TableExpr("samna_auth.get_owner_graph(?, ?) AS graph", userID, accessLevel).
+		TableExpr("claimius.get_owner_graph(?, "+appIDExpr+", ?) AS graph", userID, appSlug(), accessLevel).
 		Column("graph.*").
 		Scan(ctx, &nodes)
 	return nodes, err
 }
 
-// GetClaimGraph returns the claim graph for a user. The graph contains claims,
-// user claims, users, organizations, locations, and unresolved typed object
-// references for any domain objects not managed by the auth schema.
 func (d *DB) GetClaimGraph(ctx context.Context, userID uuid.UUID, accessLevel ClaimAccessLevel) ([]GraphNode, error) {
 	var nodes []GraphNode
 	err := d.NewSelect().
-		TableExpr("samna_auth.get_claim_graph(?, ?) AS graph", userID, accessLevel).
+		TableExpr("claimius.get_claim_graph(?, "+appIDExpr+", ?) AS graph", userID, appSlug(), accessLevel).
 		Column("graph.*").
 		Scan(ctx, &nodes)
 	return nodes, err
 }
-

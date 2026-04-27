@@ -25,7 +25,7 @@ func (d *DB) GetUsers(ctx context.Context, userID uuid.UUID, accessLevel ClaimAc
 	var users []SamnaUser
 	err := d.NewSelect().
 		Model(&users).
-		Where("samna_user.id IN (SELECT id FROM samna_auth.get_users(?, ?))", userID, accessLevel).
+		Where("samna_user.user_id IN (SELECT user_id FROM claimius.get_users(?, "+appIDExpr+", ?))", userID, appSlug(), accessLevel).
 		Scan(ctx)
 	if err != nil {
 		return nil, err
@@ -88,7 +88,7 @@ func (d *DB) GetUserAudit(ctx context.Context, userID uuid.UUID) ([]Audit, error
 	var audits []Audit
 	err := d.NewSelect().
 		Model(&audits).
-		Where("object_type = ?", "samna_user").
+		Where("object_type = ?", OBJECT_TYPE_USER).
 		Where("object_id = ?", userID).
 		OrderExpr("sa_created_at DESC").
 		Scan(ctx)

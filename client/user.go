@@ -8,7 +8,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/nimling/samna-auth-middleware/db"
-	"github.com/nimling/samna-auth-middleware/utils"
 )
 
 func GetUserAudit(ctx context.Context, userID uuid.UUID) (io.ReadCloser, error) {
@@ -84,11 +83,17 @@ func GetUserLocations(ctx context.Context, userID uuid.UUID) (io.ReadCloser, err
 }
 
 func PostUser(ctx context.Context, userID uuid.UUID, user db.SamnaUser) (db.SamnaUser, error) {
-	if utils.GetDebugUserID() != nil {
+	if getDebugUserID() != nil {
+		appID, err := resolveAppID(ctx)
+		if err != nil {
+			return user, err
+		}
 		user.ID = uuid.New()
+		user.AppID = appID
+		user.UserID = userID
 		user.CreatedAt = time.Now()
 		user.UpdatedAt = time.Now()
-		_, err := db.Instance().NewInsert().Model(&user).Exec(ctx)
+		_, err = db.Instance().NewInsert().Model(&user).Exec(ctx)
 		if err != nil {
 			return user, fmt.Errorf("debug insert user: %w", err)
 		}
@@ -111,7 +116,7 @@ func PostUser(ctx context.Context, userID uuid.UUID, user db.SamnaUser) (db.Samn
 }
 
 func PutUser(ctx context.Context, userID uuid.UUID, user db.SamnaUser) (db.SamnaUser, error) {
-	if utils.GetDebugUserID() != nil {
+	if getDebugUserID() != nil {
 		user.UpdatedAt = time.Now()
 		_, err := db.Instance().NewUpdate().Model(&user).Where("user_id = ?", userID).OmitZero().Exec(ctx)
 		if err != nil {
@@ -136,7 +141,7 @@ func PutUser(ctx context.Context, userID uuid.UUID, user db.SamnaUser) (db.Samna
 }
 
 func DeleteUser(ctx context.Context, userID uuid.UUID) (db.SamnaUser, error) {
-	if utils.GetDebugUserID() != nil {
+	if getDebugUserID() != nil {
 		var result db.SamnaUser
 		_, err := db.Instance().NewUpdate().Model(&result).Set("sa_deleted_at = NOW()").Where("user_id = ?", userID).Where("sa_deleted_at IS NULL").Returning("*").Exec(ctx)
 		if err != nil {

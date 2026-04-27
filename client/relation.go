@@ -8,7 +8,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/nimling/samna-auth-middleware/db"
-	"github.com/nimling/samna-auth-middleware/utils"
 )
 
 func GetRelations(ctx context.Context) (io.ReadCloser, error) {
@@ -30,11 +29,16 @@ func GetRelation(ctx context.Context, relationID uuid.UUID) (io.ReadCloser, erro
 }
 
 func PostRelation(ctx context.Context, relation db.UserRelation) (db.UserRelation, error) {
-	if utils.GetDebugUserID() != nil {
+	if getDebugUserID() != nil {
+		appID, err := resolveAppID(ctx)
+		if err != nil {
+			return relation, err
+		}
 		relation.ID = uuid.New()
+		relation.AppID = appID
 		relation.CreatedAt = time.Now()
 		relation.UpdatedAt = time.Now()
-		_, err := db.Instance().NewInsert().Model(&relation).Exec(ctx)
+		_, err = db.Instance().NewInsert().Model(&relation).Exec(ctx)
 		if err != nil {
 			return relation, fmt.Errorf("debug insert relation: %w", err)
 		}
@@ -57,7 +61,7 @@ func PostRelation(ctx context.Context, relation db.UserRelation) (db.UserRelatio
 }
 
 func PutRelation(ctx context.Context, relationID uuid.UUID, relation db.UserRelation) (db.UserRelation, error) {
-	if utils.GetDebugUserID() != nil {
+	if getDebugUserID() != nil {
 		relation.ID = relationID
 		relation.UpdatedAt = time.Now()
 		_, err := db.Instance().NewUpdate().Model(&relation).Where("id = ?", relationID).OmitZero().Exec(ctx)
@@ -83,7 +87,7 @@ func PutRelation(ctx context.Context, relationID uuid.UUID, relation db.UserRela
 }
 
 func DeleteRelation(ctx context.Context, relationID uuid.UUID) (db.UserRelation, error) {
-	if utils.GetDebugUserID() != nil {
+	if getDebugUserID() != nil {
 		var result db.UserRelation
 		_, err := db.Instance().NewUpdate().Model(&result).Set("sa_deleted_at = CURRENT_TIMESTAMP").Where("id = ?", relationID).Where("sa_deleted_at IS NULL").Returning("*").Exec(ctx)
 		if err != nil {

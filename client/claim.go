@@ -8,7 +8,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/nimling/samna-auth-middleware/db"
-	"github.com/nimling/samna-auth-middleware/utils"
 )
 
 func GetClaimGraph(ctx context.Context) (io.ReadCloser, error) {
@@ -48,11 +47,16 @@ func GetClaimAudit(ctx context.Context, claimID uuid.UUID) (io.ReadCloser, error
 }
 
 func PostClaim(ctx context.Context, claim db.Claim) (db.Claim, error) {
-	if utils.GetDebugUserID() != nil {
+	if getDebugUserID() != nil {
+		appID, err := resolveAppID(ctx)
+		if err != nil {
+			return claim, err
+		}
 		claim.ID = uuid.New()
+		claim.AppID = appID
 		claim.CreatedAt = time.Now()
 		claim.UpdatedAt = time.Now()
-		_, err := db.Instance().NewInsert().Model(&claim).Exec(ctx)
+		_, err = db.Instance().NewInsert().Model(&claim).Exec(ctx)
 		if err != nil {
 			return claim, fmt.Errorf("debug insert claim: %w", err)
 		}
@@ -75,7 +79,7 @@ func PostClaim(ctx context.Context, claim db.Claim) (db.Claim, error) {
 }
 
 func PutClaim(ctx context.Context, claimID uuid.UUID, claim db.Claim) (db.Claim, error) {
-	if utils.GetDebugUserID() != nil {
+	if getDebugUserID() != nil {
 		claim.ID = claimID
 		claim.UpdatedAt = time.Now()
 		_, err := db.Instance().NewUpdate().Model(&claim).Where("id = ?", claimID).OmitZero().Exec(ctx)
@@ -101,7 +105,7 @@ func PutClaim(ctx context.Context, claimID uuid.UUID, claim db.Claim) (db.Claim,
 }
 
 func DeleteClaim(ctx context.Context, claimID uuid.UUID) (db.Claim, error) {
-	if utils.GetDebugUserID() != nil {
+	if getDebugUserID() != nil {
 		var claim db.Claim
 		_, err := db.Instance().NewUpdate().Model(&claim).Set("sa_deleted_at = NOW()").Where("id = ?", claimID).Where("sa_deleted_at IS NULL").Returning("*").Exec(ctx)
 		if err != nil {
@@ -126,12 +130,17 @@ func DeleteClaim(ctx context.Context, claimID uuid.UUID) (db.Claim, error) {
 }
 
 func PostClaimObject(ctx context.Context, claimID uuid.UUID, co db.ClaimObject) (db.ClaimObject, error) {
-	if utils.GetDebugUserID() != nil {
+	if getDebugUserID() != nil {
+		appID, err := resolveAppID(ctx)
+		if err != nil {
+			return co, err
+		}
 		co.ID = uuid.New()
+		co.AppID = appID
 		co.ClaimID = claimID
 		co.CreatedAt = time.Now()
 		co.UpdatedAt = time.Now()
-		_, err := db.Instance().NewInsert().Model(&co).Exec(ctx)
+		_, err = db.Instance().NewInsert().Model(&co).Exec(ctx)
 		if err != nil {
 			return co, fmt.Errorf("debug insert claim object: %w", err)
 		}
@@ -154,7 +163,7 @@ func PostClaimObject(ctx context.Context, claimID uuid.UUID, co db.ClaimObject) 
 }
 
 func DeleteClaimObject(ctx context.Context, claimID uuid.UUID, objectID uuid.UUID) (db.ClaimObject, error) {
-	if utils.GetDebugUserID() != nil {
+	if getDebugUserID() != nil {
 		var co db.ClaimObject
 		_, err := db.Instance().NewUpdate().Model(&co).Set("sa_deleted_at = NOW()").Where("claim_id = ?", claimID).Where("object_id = ?", objectID).Where("sa_deleted_at IS NULL").Returning("*").Exec(ctx)
 		if err != nil {
@@ -179,12 +188,17 @@ func DeleteClaimObject(ctx context.Context, claimID uuid.UUID, objectID uuid.UUI
 }
 
 func PostUserClaim(ctx context.Context, claimID uuid.UUID, uc db.UserClaim) (db.UserClaim, error) {
-	if utils.GetDebugUserID() != nil {
+	if getDebugUserID() != nil {
+		appID, err := resolveAppID(ctx)
+		if err != nil {
+			return uc, err
+		}
 		uc.ID = uuid.New()
+		uc.AppID = appID
 		uc.ClaimID = claimID
 		uc.CreatedAt = time.Now()
 		uc.UpdatedAt = time.Now()
-		_, err := db.Instance().NewInsert().Model(&uc).Exec(ctx)
+		_, err = db.Instance().NewInsert().Model(&uc).Exec(ctx)
 		if err != nil {
 			return uc, fmt.Errorf("debug insert user claim: %w", err)
 		}
@@ -207,7 +221,7 @@ func PostUserClaim(ctx context.Context, claimID uuid.UUID, uc db.UserClaim) (db.
 }
 
 func DeleteUserClaim(ctx context.Context, claimID uuid.UUID, userID uuid.UUID) (db.UserClaim, error) {
-	if utils.GetDebugUserID() != nil {
+	if getDebugUserID() != nil {
 		var uc db.UserClaim
 		_, err := db.Instance().NewUpdate().Model(&uc).Set("sa_deleted_at = NOW()").Where("claim_id = ?", claimID).Where("user_id = ?", userID).Where("sa_deleted_at IS NULL").Returning("*").Exec(ctx)
 		if err != nil {

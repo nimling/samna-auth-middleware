@@ -21,7 +21,7 @@ func PostSync(ctx echo.Context) error {
 	}
 
 	if err := sync.ApplyPayload(ctx.Request().Context(), payload); err != nil {
-		ctx.Logger().Errorf("sync apply %s: %v", payload.Type, err)
+		ctx.Logger().Errorf("sync apply %s: %v", payload.EventType, err)
 		return ctx.String(http.StatusInternalServerError, "Internal Server Error")
 	}
 

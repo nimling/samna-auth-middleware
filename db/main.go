@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 	"github.com/uptrace/bun"
 	"github.com/uptrace/bun/dialect/pgdialect"
@@ -23,6 +24,27 @@ var instance *DB
 var syncFunc func(ctx context.Context) error
 
 var ErrSyncUnreachable = errors.New("sync unreachable: app inactive on samna_auth")
+
+// appIDExpr is the SQL fragment that resolves the disciple's app_id by slug.
+// Embed inline wherever a claimius.* function needs an app_id, paired with
+// appSlug() as the parameter.
+const appIDExpr = `(SELECT id FROM claimius.samna_app WHERE slug = ? AND sa_deleted_at IS NULL)`
+
+func appSlug() string {
+	return os.Getenv("SAUTH_APP_SLUG")
+}
+
+// resolveAppID does a one shot lookup for the disciple's app_id keyed by
+// SAUTH_APP_SLUG. No Go side caching; the caller pays one roundtrip per use.
+// Used internally for Bun model inserts that need app_id populated.
+func (d *DB) resolveAppID(ctx context.Context) (uuid.UUID, error) {
+	var id uuid.UUID
+	err := d.NewRaw(`SELECT id FROM claimius.samna_app WHERE slug = ? AND sa_deleted_at IS NULL LIMIT 1`, appSlug()).Scan(ctx, &id)
+	if err != nil {
+		return uuid.Nil, fmt.Errorf("resolve app id: %w", err)
+	}
+	return id, nil
+}
 
 func RegisterSyncFunc(fn func(ctx context.Context) error) {
 	syncFunc = fn
@@ -56,6 +78,11 @@ func Init(logger echo.Logger) {
 	pgPass, exists := os.LookupEnv("PGPASSWORD")
 	if !exists {
 		logger.Fatal("PGPASSWORD not set")
+		return
+	}
+
+	if appSlug() == "" {
+		logger.Fatal("SAUTH_APP_SLUG not set")
 		return
 	}
 
@@ -103,7 +130,7 @@ func Init(logger echo.Logger) {
 		(*UserObject)(nil),
 		(*UserUsers)(nil),
 		(*ObjectUsers)(nil),
-		(*UserObjectEvent)(nil),
+		(*SyncEvent)(nil),
 		(*DiscipleState)(nil),
 	)
 
