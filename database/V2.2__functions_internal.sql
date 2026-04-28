@@ -10,6 +10,24 @@
 -- Tree builders. Used by init, hierarchy reparenting, and bulk operations.
 -- ----------------------------------------------------------------------------
 
+-- _tree_row
+-- Composite type used internally to assemble tree nodes before constructing
+-- the jsonb. Defined here at the top of the file because some functions
+-- below reference claimius._tree_row[] in their DECLARE block, which is
+-- parsed at CREATE FUNCTION time and so requires the type to already exist.
+DO $$
+    BEGIN
+        IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = '_tree_row' AND typnamespace = (SELECT oid FROM pg_namespace WHERE nspname = 'claimius')) THEN
+            CREATE TYPE claimius._tree_row AS (
+                                                  object_type TEXT,
+                                                  object_id UUID,
+                                                  parent_type TEXT,
+                                                  parent_id UUID,
+                                                  level INTEGER
+                                              );
+        END IF;
+    END $$;
+
 -- build_ownership_tree
 -- Walks live data and rebuilds the ownership tree for one root organization.
 -- Replaces or creates the inheritance_info row for
@@ -125,6 +143,7 @@ COMMENT ON FUNCTION claimius.build_location_tree(UUID) IS 'Rebuilds the location
 CREATE OR REPLACE FUNCTION claimius.build_parenthood_tree(p_object_type TEXT, p_root_id UUID)
     RETURNS VOID AS $$
 DECLARE
+    v_rows claimius._tree_row[];
     v_tree JSONB;
     v_sql TEXT;
 BEGIN
@@ -148,9 +167,9 @@ BEGIN
                     p_object_type, p_object_type
              );
 
-    EXECUTE v_sql INTO v_tree USING p_root_id;
+    EXECUTE v_sql INTO v_rows USING p_root_id;
 
-    SELECT claimius._build_tree_jsonb(p_root_id, p_object_type, v_tree::claimius._tree_row[]) INTO v_tree;
+    SELECT claimius._build_tree_jsonb(p_root_id, p_object_type, coalesce(v_rows, ARRAY[]::claimius._tree_row[])) INTO v_tree;
 
     INSERT INTO claimius.inheritance_info (object_type, root_id, type, tree)
     VALUES (p_object_type, p_root_id, 'parenthood', coalesce(v_tree, '{}'::JSONB))
@@ -164,22 +183,6 @@ COMMENT ON FUNCTION claimius.build_parenthood_tree(TEXT, UUID) IS 'Rebuilds the 
 -- ----------------------------------------------------------------------------
 -- Tree builder helpers
 -- ----------------------------------------------------------------------------
-
--- _tree_row
--- Composite type used internally to assemble tree nodes before constructing
--- the jsonb. Created at first use.
-DO $$
-    BEGIN
-        IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = '_tree_row' AND typnamespace = (SELECT oid FROM pg_namespace WHERE nspname = 'claimius')) THEN
-            CREATE TYPE claimius._tree_row AS (
-                                                  object_type TEXT,
-                                                  object_id UUID,
-                                                  parent_type TEXT,
-                                                  parent_id UUID,
-                                                  level INTEGER
-                                              );
-        END IF;
-    END $$;
 
 -- _build_tree_jsonb
 -- Assembles a flat array of tree rows into a nested jsonb. Children of the
@@ -743,7 +746,7 @@ BEGIN
           AND co.sa_deleted_at IS NULL
           AND (
             (co.object_type = p_object_type AND co.object_id = p_object_id)
-                OR (co.inherits = TRUE AND EXISTS (
+                OR (co.inherits = TRUE AND c.inherits = TRUE AND EXISTS (
                 SELECT 1 FROM claimius.inheritance_info ii
                 WHERE EXISTS (
                     SELECT 1 FROM claimius.get_subtree(ii.object_type, ii.root_id, co.object_type, co.object_id) s

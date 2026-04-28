@@ -1443,6 +1443,28 @@ BEGIN
                  );
     END IF;
 
+    -- 8b. bind claim to system app directly. Every resource (except users
+    -- and the claim itself) carries at least one direct claim_object grant
+    -- so that access never depends solely on cascade. inherits = FALSE
+    -- because the org binding above already cascades to the app via the
+    -- ownership tree; this is an owner anchor, not a cascade source.
+    IF NOT EXISTS (
+        SELECT 1 FROM claimius.claim_object
+        WHERE app_id = v_app_id
+          AND claim_id = v_claim_id
+          AND object_id = v_app_id
+          AND object_type = 'claimius.samna_app'
+          AND sa_deleted_at IS NULL
+    ) THEN
+        INSERT INTO claimius.claim_object (
+            app_id, claim_id, object_id, object_type,
+            sa_owner_id, sa_root_id, sa_created_by, inherits
+        ) VALUES (
+                     v_app_id, v_claim_id, v_app_id, 'claimius.samna_app',
+                     v_org_id, v_org_id, p_system_user_id, FALSE
+                 );
+    END IF;
+
     -- 9. grant claim to system user
     -- Partial unique index on (claim_id, user_id, app_id) WHERE sa_deleted_at IS NULL.
     -- SELECT-then-INSERT, capturing the id either way for the return jsonb.

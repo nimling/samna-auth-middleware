@@ -57,6 +57,14 @@ A claim with `is_deny = true` erases grants at level `<= claim.sa_access_level` 
 
 ## Hard rules
 
+### Owner claim rule
+
+Every resource that participates in the access model must carry at least one direct `claim_object` row binding it to some claim. The owner claim is the claim used to create the resource, captured from the actor's `user_claim_id` at write time, or one specified explicitly by the writer. Without a direct binding, access depends entirely on cascade and the resource is invisible the moment the cascade chain is interrupted. Two exceptions: `samna_user` rows (handled by `user_users` denormalization and `ensure_app_user`) and a claim itself (a claim does not bind itself via `claim_object`; circular). When the implementer inserts an organization, location, app, or registered application table row, an `assign_claim_object` (or direct `claim_object` insert during bootstrap) must follow before any read attempts to find the row.
+
+### Inheritance is a logical AND
+
+A cascade fires for a (claim, binding) pair only when BOTH `claim.inherits = TRUE` AND `claim_object.inherits = TRUE`. The claim's flag is the master switch; the per-binding flag narrows. A claim with `inherits = FALSE` cascades nothing regardless of the per-binding flag. A binding with `inherits = FALSE` does not cascade even when the claim says it can. Both flags must agree.
+
 ### Reads only through `get_*` functions
 
 ```sql
@@ -92,30 +100,30 @@ Write functions return a **single jsonb object** keyed by the affected table nam
 ```sql
 -- For claim machinery, ALWAYS use the function. Returns jsonb.
 SELECT claimius.assign_claim_user(
-               p_app_id        => $app_id,
-               p_claim_id      => $claim_id,
-               p_user_id       => $user_id,
-               p_sa_owner_id   => $org_id,
-               p_sa_created_by => $user_claim_id
-       );
+    p_app_id        => $app_id,
+    p_claim_id      => $claim_id,
+    p_user_id       => $user_id,
+    p_sa_owner_id   => $org_id,
+    p_sa_created_by => $user_claim_id
+);
 
 -- Inside a DO block, capture and pull what you need:
 DO $$
-    DECLARE
-        v_result   JSONB;
-        v_claim_id UUID;
-    BEGIN
-        v_result := claimius.create_claim(
-                p_app_id          => $app_id,
-                p_name            => 'Editor',
-                p_sa_access_level => 5,
-                p_sa_owner_id     => $org_id,
-                p_sa_root_id      => $root_org_id,
-                p_sa_created_by   => $user_claim_id
-                    );
-        v_claim_id := (v_result -> 'claim' ->> 'id')::UUID;
-        -- now use v_claim_id in further calls
-    END $$;
+DECLARE
+    v_result   JSONB;
+    v_claim_id UUID;
+BEGIN
+    v_result := claimius.create_claim(
+        p_app_id          => $app_id,
+        p_name            => 'Editor',
+        p_sa_access_level => 5,
+        p_sa_owner_id     => $org_id,
+        p_sa_root_id      => $root_org_id,
+        p_sa_created_by   => $user_claim_id
+    );
+    v_claim_id := (v_result -> 'claim' ->> 'id')::UUID;
+    -- now use v_claim_id in further calls
+END $$;
 
 -- For tables WITHOUT a function (samna_app, organization, location,
 -- samna_user, samna_client, samna_secret, object_field, user_field,
@@ -124,8 +132,8 @@ DO $$
 INSERT INTO claimius.organization (
     app_id, name, sa_owner_id, sa_root_id, sa_level, sa_created_by
 ) VALUES (
-             $app_id, 'Acme NYC', $parent_org_id, $parent_org_root_id, 1, $user_claim_id
-         );
+    $app_id, 'Acme NYC', $parent_org_id, $parent_org_root_id, 1, $user_claim_id
+);
 ```
 
 Tables that have a write function (use the function):

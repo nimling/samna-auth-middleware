@@ -31,6 +31,14 @@ Apps register their tables via `init_claimius_tables`. Triggers attached at regi
 
 ## Decision rules
 
+### "Did I bind the resource to a claim after creating it?"
+
+Every resource that participates in the access model must have at least one direct `claim_object` row pointing at it. After inserting an organization, location, app, or registered application table row, follow up with `assign_claim_object` (or a direct `claim_object` insert during bootstrap). The owner claim is normally the claim the actor used to create the resource (the one referenced by `user_claim_id`); pass an explicit claim id when the writer wants a different binding. Two exceptions: `samna_user` rows (handled by `user_users` and `ensure_app_user`) and a claim itself (no self-binding).
+
+### "Will this binding cascade?"
+
+A cascade fires only when BOTH `claim.inherits = TRUE` AND the `claim_object.inherits = TRUE` for that specific binding. Either flag set to FALSE blocks cascade for that binding. A claim with `inherits = FALSE` blocks all of its cascades regardless of per-binding flags.
+
 ### "Should I read directly from a claimius table?"
 
 NO. Always use `get_*` functions:
@@ -144,16 +152,16 @@ Yes. The `user_object.grants` jsonb array carries one entry per contributing cla
 
 ```sql
 CREATE TABLE public.my_table (
-                                 id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                                 app_id          UUID NOT NULL,
-                                 sa_owner_id     UUID NOT NULL,                        -- organization
-                                 sa_created_by   UUID NOT NULL,                        -- user_claim.id
-                                 sa_created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
-                                 sa_updated_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
-                                 sa_deleted_at   TIMESTAMPTZ,
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    app_id          UUID NOT NULL,
+    sa_owner_id     UUID NOT NULL,                        -- organization
+    sa_created_by   UUID NOT NULL,                        -- user_claim.id
+    sa_created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+    sa_updated_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+    sa_deleted_at   TIMESTAMPTZ,
 
     -- optional: pin to a location
-                                 sa_location_id  UUID,
+    sa_location_id  UUID,
 
     -- optional: declares this table self referencing.
     -- BOTH must be present, or NEITHER.
@@ -161,12 +169,12 @@ CREATE TABLE public.my_table (
     -- sa_root_id    UUID NOT NULL,
 
     -- optional but useful: denormalized into user_object for search
-                                 name            TEXT,
-                                 description     TEXT,
+    name            TEXT,
+    description     TEXT,
 
     -- your business columns here
 
-                                 UNIQUE (...) -- as appropriate
+    UNIQUE (...) -- as appropriate
 );
 
 -- After creation, register:
@@ -200,12 +208,12 @@ If a user asks you to create something and the order is non obvious, lay out the
 
 ```sql
 SELECT claimius.ensure_app_user(
-               p_user_id => $stable_user_uuid,
-               p_app_id  => $app_id,
-               p_first_name => $first,
-               p_last_name  => $last,
-               p_email      => $email
-       );
+    p_user_id => $stable_user_uuid,
+    p_app_id  => $app_id,
+    p_first_name => $first,
+    p_last_name  => $last,
+    p_email      => $email
+);
 ```
 
 Idempotent. Inserts the per-app `samna_user` row if missing, AND grants the app's default claim (`samna_app.claim_id`, configured during `init_prophet`) as a `user_claim`. Returns `{"samna_user": {...}, "user_claim": {...}}` when the app has a default claim, or `{"samna_user": {...}}` when it doesn't. The default claim is intentionally minimal: holding it alone grants no resource access; it is the "you have an account in this app" marker. The implementing app grants additional claims later as users earn permissions.
@@ -217,36 +225,36 @@ Write functions return jsonb with table name keys. `create_claim` returns `{"cla
 ```sql
 -- 1. Ensure the claim exists
 SELECT claimius.create_claim(
-               p_app_id          => $app_id,
-               p_name            => 'Recipe Editor',
-               p_description     => 'Can edit recipes in this kitchen',
-               p_sa_access_level => 4,
-               p_sa_owner_id     => $org_id,
-               p_sa_root_id      => $root_org_id,
-               p_sa_created_by   => $acting_user_claim
-       );
+    p_app_id          => $app_id,
+    p_name            => 'Recipe Editor',
+    p_description     => 'Can edit recipes in this kitchen',
+    p_sa_access_level => 4,
+    p_sa_owner_id     => $org_id,
+    p_sa_root_id      => $root_org_id,
+    p_sa_created_by   => $acting_user_claim
+);
 
 -- 2. Bind the claim to the kitchen organization (cascades to all recipes
 --    owned by this org)
 SELECT claimius.assign_claim_object(
-               p_app_id        => $app_id,
-               p_claim_id      => $claim_id,
-               p_object_id     => $kitchen_org_id,
-               p_object_type   => 'claimius.organization',
-               p_sa_owner_id   => $org_id,
-               p_sa_root_id    => $root_org_id,
-               p_sa_created_by => $acting_user_claim,
-               p_inherits      => TRUE
-       );
+    p_app_id        => $app_id,
+    p_claim_id      => $claim_id,
+    p_object_id     => $kitchen_org_id,
+    p_object_type   => 'claimius.organization',
+    p_sa_owner_id   => $org_id,
+    p_sa_root_id    => $root_org_id,
+    p_sa_created_by => $acting_user_claim,
+    p_inherits      => TRUE
+);
 
 -- 3. Grant the claim to the user
 SELECT claimius.assign_claim_user(
-               p_app_id        => $app_id,
-               p_claim_id      => $claim_id,
-               p_user_id       => $user_id,
-               p_sa_owner_id   => $org_id,
-               p_sa_created_by => $acting_user_claim
-       );
+    p_app_id        => $app_id,
+    p_claim_id      => $claim_id,
+    p_user_id       => $user_id,
+    p_sa_owner_id   => $org_id,
+    p_sa_created_by => $acting_user_claim
+);
 ```
 
 ### Building a hierarchy

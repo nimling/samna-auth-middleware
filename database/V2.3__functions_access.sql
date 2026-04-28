@@ -390,7 +390,7 @@ BEGIN
         v_app_id := coalesce(NEW.app_id, OLD.app_id);
         -- Recompute every (user, object) pair this claim could touch
         FOR v_pair IN
-            SELECT uc.user_id, co.object_type, co.object_id
+            SELECT uc.user_id, co.object_type, co.object_id, co.inherits AS co_inherits
             FROM claimius.user_claim uc
                      JOIN claimius.claim_object co ON co.claim_id = uc.claim_id
             WHERE uc.claim_id = v_claim_id
@@ -399,8 +399,11 @@ BEGIN
               AND co.sa_deleted_at IS NULL
             LOOP
                 PERFORM claimius.recompute_user_object(v_app_id, v_pair.user_id, v_pair.object_type, v_pair.object_id);
-                -- expand cascading bindings
-                IF (SELECT inherits FROM claimius.claim WHERE id = v_claim_id) THEN
+                -- Cascade only when BOTH the claim and this specific claim_object
+                -- have inherits = TRUE. claim.inherits is the master switch;
+                -- claim_object.inherits is the per binding override.
+                IF coalesce((SELECT inherits FROM claimius.claim WHERE id = v_claim_id), FALSE)
+                    AND v_pair.co_inherits THEN
                     PERFORM claimius._cascade_recompute(v_app_id, v_pair.user_id, v_pair.object_type, v_pair.object_id);
                 END IF;
             END LOOP;
@@ -419,8 +422,10 @@ BEGIN
               AND uc.sa_deleted_at IS NULL
             LOOP
                 PERFORM claimius.recompute_user_object(v_app_id, v_pair.user_id, v_object_type, v_object_id);
-                -- cascading
-                IF coalesce(NEW.inherits, OLD.inherits, FALSE) THEN
+                -- Cascade only when BOTH the claim and this claim_object have
+                -- inherits = TRUE.
+                IF coalesce(NEW.inherits, OLD.inherits, FALSE)
+                    AND coalesce((SELECT inherits FROM claimius.claim WHERE id = v_claim_id), FALSE) THEN
                     PERFORM claimius._cascade_recompute(v_app_id, v_pair.user_id, v_object_type, v_object_id);
                 END IF;
             END LOOP;
@@ -438,7 +443,9 @@ BEGIN
               AND co.sa_deleted_at IS NULL
             LOOP
                 PERFORM claimius.recompute_user_object(v_app_id, v_user_id, v_pair.object_type, v_pair.object_id);
-                IF v_pair.inherits THEN
+                -- Cascade only when BOTH the claim and the binding inherit.
+                IF v_pair.inherits
+                    AND coalesce((SELECT inherits FROM claimius.claim WHERE id = v_claim_id), FALSE) THEN
                     PERFORM claimius._cascade_recompute(v_app_id, v_user_id, v_pair.object_type, v_pair.object_id);
                 END IF;
             END LOOP;
