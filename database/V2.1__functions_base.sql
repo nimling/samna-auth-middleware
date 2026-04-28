@@ -232,6 +232,7 @@ BEGIN
     END IF;
 
     FOR v_key, v_value IN SELECT * FROM jsonb_each(p_tree) LOOP
+            key := v_key;
             RETURN NEXT;
             IF v_value ? 'children' THEN
                 RETURN QUERY SELECT * FROM claimius._walk_tree(v_value -> 'children');

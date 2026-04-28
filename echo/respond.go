@@ -1,6 +1,7 @@
 package echo
 
 import (
+	"encoding/json"
 	"reflect"
 
 	"github.com/google/uuid"
@@ -30,26 +31,40 @@ func Redirect(ctx echo.Context, statusCode int, url string) error {
 }
 
 func respondError(ctx echo.Context, statusCode int, message string) error {
-	return ctx.JSON(statusCode, returnObject{
+	returnData := returnObject{
 		Count:     0,
 		Data:      []any{},
 		Error:     &returnError{Message: message},
 		RequestID: getRequestID(ctx),
-	})
+	}
+
+	ctx.Response().Header().Set(echo.HeaderContentType, echo.MIMEApplicationJSONCharsetUTF8)
+	ctx.Response().WriteHeader(statusCode)
+	enc := json.NewEncoder(ctx.Response())
+	enc.SetEscapeHTML(false)
+	enc.SetIndent("", "  ")
+	return enc.Encode(returnData)
 }
 
 func respondJSON(ctx echo.Context, statusCode int, data any, count int) error {
 	rt := reflect.TypeOf(data)
-	if rt != nil && rt.Kind() != reflect.Slice && rt.Kind() != reflect.Array {
-		data = []any{data}
-		if count == 0 {
-			count = 1
-		}
+	switch {
+	case rt != nil && (rt.Kind() == reflect.Slice || rt.Kind() == reflect.Array):
+		count = reflect.ValueOf(data).Len()
+	default:
+		count = 1
 	}
 
-	return ctx.JSON(statusCode, returnObject{
+	returnData := returnObject{
 		Data:      data,
 		Count:     count,
 		RequestID: getRequestID(ctx),
-	})
+	}
+
+	ctx.Response().Header().Set(echo.HeaderContentType, echo.MIMEApplicationJSONCharsetUTF8)
+	ctx.Response().WriteHeader(statusCode)
+	enc := json.NewEncoder(ctx.Response())
+	enc.SetEscapeHTML(false)
+	enc.SetIndent("", "  ")
+	return enc.Encode(returnData)
 }
