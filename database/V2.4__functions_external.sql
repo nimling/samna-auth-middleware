@@ -1191,6 +1191,74 @@ $$ LANGUAGE plpgsql STABLE;
 COMMENT ON FUNCTION claimius.get_disciple_app IS 'Returns the upstream prophet app this disciple mirrors. Raises on pure prophet.';
 
 -- ----------------------------------------------------------------------------
+-- get_prophet_app_id
+-- get_disciple_app_id
+-- get_app_id
+-- Scalar UUID wrappers over the row returning identity functions, usable
+-- in places that reject subqueries (notably column DEFAULT expressions,
+-- which Postgres parses without subquery support but accepts function
+-- calls). Behavior:
+--   get_prophet_app_id  - system app id on prophet/hybrid; raises on disciple
+--   get_disciple_app_id - upstream app id on disciple/hybrid; raises on prophet
+--   get_app_id          - the deployment's "own" app id:
+--                         - pure prophet: system app id
+--                         - pure disciple: disciple app id
+--                         - hybrid: system app id (prophet half wins; callers
+--                                   that need the disciple half on a hybrid
+--                                   must use get_disciple_app_id explicitly)
+-- All granted to every role.
+-- ----------------------------------------------------------------------------
+
+CREATE OR REPLACE FUNCTION claimius.get_prophet_app_id()
+    RETURNS UUID AS $$
+SELECT id FROM claimius.get_prophet_app();
+$$ LANGUAGE sql STABLE;
+
+COMMENT ON FUNCTION claimius.get_prophet_app_id IS 'Scalar wrapper over get_prophet_app. Returns the system app id; raises on pure disciple.';
+
+CREATE OR REPLACE FUNCTION claimius.get_disciple_app_id()
+    RETURNS UUID AS $$
+SELECT id FROM claimius.get_disciple_app();
+$$ LANGUAGE sql STABLE;
+
+COMMENT ON FUNCTION claimius.get_disciple_app_id IS 'Scalar wrapper over get_disciple_app. Returns the upstream prophet app id; raises on pure prophet.';
+
+CREATE OR REPLACE FUNCTION claimius.get_app_id()
+    RETURNS UUID AS $$
+DECLARE
+    v_id UUID;
+BEGIN
+    -- Prefer the prophet/system app id. On a pure disciple this lookup
+    -- finds nothing, so we fall through to the disciple side.
+    SELECT a.id INTO v_id
+    FROM claimius.prophet_state ps
+             JOIN claimius.samna_app a ON a.slug = ps.system_app_slug
+    WHERE ps.system_app_slug IS NOT NULL
+      AND a.sa_deleted_at IS NULL
+    LIMIT 1;
+
+    IF v_id IS NOT NULL THEN
+        RETURN v_id;
+    END IF;
+
+    -- Pure disciple: fall back to disciple_state's slug.
+    SELECT a.id INTO v_id
+    FROM claimius.disciple_state ds
+             JOIN claimius.samna_app a ON a.slug = ds.disciple_app_slug
+    WHERE a.sa_deleted_at IS NULL
+    LIMIT 1;
+
+    IF v_id IS NULL THEN
+        RAISE EXCEPTION 'get_app_id: deployment has neither a prophet system app nor a disciple app registered.';
+    END IF;
+
+    RETURN v_id;
+END;
+$$ LANGUAGE plpgsql STABLE;
+
+COMMENT ON FUNCTION claimius.get_app_id IS 'Returns the deployment own app id. Prophet/hybrid: system app. Pure disciple: upstream app.';
+
+-- ----------------------------------------------------------------------------
 -- init_prophet
 -- Bootstrap a fresh claimius deployment as a prophet. Creates the system
 -- app, system organization (self rooted), system user, system claim, and

@@ -86,18 +86,18 @@ After Claimius migrations finish, the implementing app runs:
 -- Returns a JSONB object keyed by table name, with the full row each table
 -- received. Capture it if you need ids for follow on inserts.
 SELECT claimius.init_prophet(
-    p_system_app_slug          => 'my_app',
-    p_system_app_name          => 'My Application',
-    p_system_app_private_key   => '<rsa private key from Go>',
-    p_system_app_private_seed  => '<32 random bytes hex from Go>',
-    p_system_app_redirect_uri  => 'https://my.app/oauth/callback',
-    p_system_app_sync_uri      => 'https://my.app/claimius/sync',
-    p_default_claim            => jsonb_build_object(
-        'name',            'Guest',
-        'description',     'Default claim granted to every regular user on first login. Marks account existence; grants no resource access.',
-        'sa_access_level', 8
-    )
-);
+               p_system_app_slug          => 'my_app',
+               p_system_app_name          => 'My Application',
+               p_system_app_private_key   => '<rsa private key from Go>',
+               p_system_app_private_seed  => '<32 random bytes hex from Go>',
+               p_system_app_redirect_uri  => 'https://my.app/oauth/callback',
+               p_system_app_sync_uri      => 'https://my.app/claimius/sync',
+               p_default_claim            => jsonb_build_object(
+                       'name',            'Guest',
+                       'description',     'Default claim granted to every regular user on first login. Marks account existence; grants no resource access.',
+                       'sa_access_level', 8
+                                             )
+       );
 -- Result shape (JSONB), seven keys:
 --   {
 --     "samna_app":     { full samna_app row, app_secret is NULL until set by implementer },
@@ -116,31 +116,31 @@ SELECT claimius.init_prophet(
 -- same migration artefact deploys against any prophet. Returns empty
 -- jsonb {}.
 SELECT claimius.init_disciple(
-    p_disciple_app_slug => 'mainapp'
-);
+               p_disciple_app_slug => 'mainapp'
+       );
 
 -- Or a hybrid. Calls both init_prophet (creates this hybrid's own system
 -- app) AND init_disciple (records the upstream prophet app slug). Returns
 -- the same jsonb shape as init_prophet.
 SELECT claimius.init_hybrid(
-    p_system_app_slug          => 'my_app',
-    p_system_app_name          => 'My Application',
-    p_system_app_private_key   => '<rsa private key from Go>',
-    p_system_app_private_seed  => '<32 random bytes hex from Go>',
-    p_disciple_app_slug        => 'upstream_prophet_slug',
-    p_default_claim            => jsonb_build_object(
-        'name',            'Guest',
-        'description',     'Default claim for new users.',
-        'sa_access_level', 8
-    )
-);
+               p_system_app_slug          => 'my_app',
+               p_system_app_name          => 'My Application',
+               p_system_app_private_key   => '<rsa private key from Go>',
+               p_system_app_private_seed  => '<32 random bytes hex from Go>',
+               p_disciple_app_slug        => 'upstream_prophet_slug',
+               p_default_claim            => jsonb_build_object(
+                       'name',            'Guest',
+                       'description',     'Default claim for new users.',
+                       'sa_access_level', 8
+                                             )
+       );
 
 -- Then register app tables:
 SELECT claimius.init_claimius_tables(
-    'public.device',
-    'public.sensor',
-    'public.recipe'
-);
+               'public.device',
+               'public.sensor',
+               'public.recipe'
+       );
 ```
 
 ## Bootstrap and creation order on a prophet
@@ -189,7 +189,7 @@ For the system app on a fresh prophet, `app_secret` is NULL after `init_prophet`
 
 ## Self identity
 
-A disciple consumes from exactly one upstream prophet app. A prophet has exactly one system app. Both deployments need to answer "which app am I, structurally" without leaking the slug into application code. Two functions cover this:
+A disciple consumes from exactly one upstream prophet app. A prophet has exactly one system app. Both deployments need to answer "which app am I, structurally" without leaking the slug into application code. Two row returning functions cover this:
 
 ```sql
 -- On prophet or hybrid: returns the system app row.
@@ -203,12 +203,38 @@ SELECT * FROM claimius.get_disciple_app();
 
 Both return `SETOF claimius.samna_app` so they compose with `WHERE`/`JOIN` naturally. They are read-only, fast (single indexed lookup), and granted to every role.
 
+Three scalar variants exist for places that reject subqueries (column `DEFAULT` expressions, generated columns, check constraints):
+
+```sql
+claimius.get_prophet_app_id()  -- UUID, system app id; raises on pure disciple
+claimius.get_disciple_app_id() -- UUID, upstream app id; raises on pure prophet
+claimius.get_app_id()          -- UUID, deployment own app id (resolution below)
+```
+
+`get_app_id()` resolves to the prophet/system app on prophet and hybrid deployments, and to the disciple app on a pure disciple. On a hybrid the prophet side wins; callers that specifically want the disciple side on a hybrid must use `get_disciple_app_id()`.
+
+Use these in column defaults instead of inlining a subquery:
+
+```sql
+-- Wrong: Postgres rejects subqueries in DEFAULT expressions
+CREATE TABLE public.thing (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    app_id UUID NOT NULL DEFAULT (SELECT id FROM claimius.get_disciple_app())
+);
+
+-- Right: function call in DEFAULT works
+CREATE TABLE public.thing (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    app_id UUID NOT NULL DEFAULT claimius.get_disciple_app_id()
+);
+```
+
 The slugs are stored at init:
 
 - `init_prophet(p_system_app_slug => 'mainapp', ...)` writes `'mainapp'` to `claimius.prophet_state.system_app_slug` on the system app's row. A partial unique index (`WHERE system_app_slug IS NOT NULL`) enforces "at most one system row."
 - `init_disciple(p_disciple_app_slug => 'mainapp')` writes `'mainapp'` to `claimius.disciple_state.disciple_app_slug` (singleton, NOT NULL).
 
-Implementer middleware should call `claimius.get_disciple_app()` to obtain the disciple's app id rather than maintaining a parallel `app_id()` helper. On a disciple `claimius.samna_app` only ever contains rows that arrive via sync; the slug-keyed lookup gives you the canonical row even before any migration runs against it.
+Implementer middleware should call `claimius.get_disciple_app()` (or `get_disciple_app_id()` for a bare UUID) instead of maintaining a parallel `app_id()` helper. On a disciple `claimius.samna_app` only ever contains rows that arrive via sync; the slug-keyed lookup gives you the canonical row even before any migration runs against it.
 
 ## Reading and writing
 
@@ -217,26 +243,26 @@ Every read goes through a `get_*` function. The functions self heal (drain `reco
 ```sql
 -- Can this user see this object at admin level (3) or stronger?
 SELECT * FROM claimius.get_access(
-        p_user_id     => :user_id,
-        p_app_id      => :app_id,
-        p_object_id   => :object_id,
-        p_object_type => 'public.device',
-        p_min_level   => 3
-              );
+    p_user_id     => :user_id,
+    p_app_id      => :app_id,
+    p_object_id   => :object_id,
+    p_object_type => 'public.device',
+    p_min_level   => 3
+);
 
 -- All objects of this type the user can see:
 SELECT * FROM claimius.get_objects(
-        p_user_id     => :user_id,
-        p_app_id      => :app_id,
-        p_object_type => 'public.device'
-              );
+    p_user_id     => :user_id,
+    p_app_id      => :app_id,
+    p_object_type => 'public.device'
+);
 
 -- Full text search across accessible objects:
 SELECT * FROM claimius.search_objects(
-        p_user_id => :user_id,
-        p_app_id  => :app_id,
-        p_query   => 'thermostat kitchen'
-              );
+    p_user_id => :user_id,
+    p_app_id  => :app_id,
+    p_query   => 'thermostat kitchen'
+);
 ```
 
 ### `user_claim_id` and the actor token contract
@@ -374,11 +400,11 @@ INSERT INTO claimius.samna_app (
     private_key, private_seed,
     style, claim_id, sa_owner_id, sa_created_by, status
 ) VALUES (
-             :slug, :name, :description, :contact_email, :app_image,
-             :redirect_uri, :sync_uri, :provider_ids,
-             :private_key, :private_seed,
-             :style, :default_claim_id, :owning_org_id, :acting_user_claim, 'active'
-         );
+    :slug, :name, :description, :contact_email, :app_image,
+    :redirect_uri, :sync_uri, :provider_ids,
+    :private_key, :private_seed,
+    :style, :default_claim_id, :owning_org_id, :acting_user_claim, 'active'
+);
 ```
 
 After: typically `INSERT INTO claimius.prophet_state (app_id, last_applied_seq) VALUES (:new_app_id, 0)` so the new app has a sync cursor. When the implementing service is ready to issue an API key for this app (typically returned to the caller of the create-app endpoint), generate it externally and `UPDATE claimius.samna_app SET app_secret = :hash, secret_version = secret_version + 1 WHERE id = :new_app_id`.
@@ -413,12 +439,12 @@ INSERT INTO claimius.organization (
     app_id, name, type,
     sa_owner_id, sa_root_id, sa_level, sa_created_by
 ) VALUES (
-             :app_id, 'Acme NYC', 'office',
-             :parent_org_id,
-             :parent_org_root_id,    -- same as the parent's sa_root_id
-             :parent_level + 1,
-             :acting_user_claim
-         );
+    :app_id, 'Acme NYC', 'office',
+    :parent_org_id,
+    :parent_org_root_id,    -- same as the parent's sa_root_id
+    :parent_level + 1,
+    :acting_user_claim
+);
 ```
 
 After: calc trigger splices the new org into the existing ownership tree. Anyone with an inheriting claim on an ancestor automatically gets access (recomputed in `user_object`).
@@ -431,12 +457,12 @@ A location requires an owning organization. Top level locations self reference o
 -- Root location:
 WITH new_loc AS (
     INSERT INTO claimius.location (
-                                   app_id, sa_owner_id, name, type,
-                                   sa_parent_id, sa_root_id, sa_level, sa_created_by
-        ) VALUES (
-                     :app_id, :org_id, 'Headquarters', 'building',
-                     gen_random_uuid(), gen_random_uuid(), 0, :acting_user_claim
-                 ) RETURNING id
+        app_id, sa_owner_id, name, type,
+        sa_parent_id, sa_root_id, sa_level, sa_created_by
+    ) VALUES (
+        :app_id, :org_id, 'Headquarters', 'building',
+        gen_random_uuid(), gen_random_uuid(), 0, :acting_user_claim
+    ) RETURNING id
 )
 UPDATE claimius.location SET sa_parent_id = id, sa_root_id = id
 WHERE id = (SELECT id FROM new_loc);
@@ -446,9 +472,9 @@ INSERT INTO claimius.location (
     app_id, sa_owner_id, name, type,
     sa_parent_id, sa_root_id, sa_level, sa_created_by
 ) VALUES (
-             :app_id, :org_id, 'Conference Room A', 'room',
-             :parent_loc_id, :parent_loc_root_id, :parent_level + 1, :acting_user_claim
-         );
+    :app_id, :org_id, 'Conference Room A', 'room',
+    :parent_loc_id, :parent_loc_root_id, :parent_level + 1, :acting_user_claim
+);
 ```
 
 After: calc trigger updates the location tree and (if applicable) splices the location into the owning org's ownership tree.
@@ -476,35 +502,35 @@ This is the standard pattern whenever you create a new "thing" and want someone 
 ```sql
 -- 1. Create the claim
 SELECT claimius.create_claim(
-    p_app_id          => :app_id,
-    p_name            => 'Admin: Acme NYC',
-    p_description     => 'Full access to Acme NYC and descendants',
-    p_sa_access_level => 1,
-    p_sa_owner_id     => :org_id,
-    p_sa_root_id      => :root_org_id,
-    p_sa_created_by   => :acting_user_claim
-);
+               p_app_id          => :app_id,
+               p_name            => 'Admin: Acme NYC',
+               p_description     => 'Full access to Acme NYC and descendants',
+               p_sa_access_level => 1,
+               p_sa_owner_id     => :org_id,
+               p_sa_root_id      => :root_org_id,
+               p_sa_created_by   => :acting_user_claim
+       );
 
 -- 2. Bind it to the object
 SELECT claimius.assign_claim_object(
-    p_app_id        => :app_id,
-    p_claim_id      => :claim_id,
-    p_object_id     => :org_id,
-    p_object_type   => 'claimius.organization',
-    p_sa_owner_id   => :org_id,
-    p_sa_root_id    => :root_org_id,
-    p_sa_created_by => :acting_user_claim,
-    p_inherits      => TRUE
-);
+               p_app_id        => :app_id,
+               p_claim_id      => :claim_id,
+               p_object_id     => :org_id,
+               p_object_type   => 'claimius.organization',
+               p_sa_owner_id   => :org_id,
+               p_sa_root_id    => :root_org_id,
+               p_sa_created_by => :acting_user_claim,
+               p_inherits      => TRUE
+       );
 
 -- 3. Grant the claim to the user
 SELECT claimius.assign_claim_user(
-    p_app_id        => :app_id,
-    p_claim_id      => :claim_id,
-    p_user_id       => :user_id,
-    p_sa_owner_id   => :org_id,
-    p_sa_created_by => :acting_user_claim
-);
+               p_app_id        => :app_id,
+               p_claim_id      => :claim_id,
+               p_user_id       => :user_id,
+               p_sa_owner_id   => :org_id,
+               p_sa_created_by => :acting_user_claim
+       );
 ```
 
 After each step, calc triggers fan out and recompute `user_object` for affected users. By the end of step 3, the user can immediately read through `get_*` functions.
@@ -513,14 +539,14 @@ After each step, calc triggers fan out and recompute `user_object` for affected 
 
 ```sql
 SELECT claimius.ensure_app_user(
-    p_user_id    => :user_id,
-    p_app_id     => :app_id,
-    p_first_name => :first,
-    p_last_name  => :last,
-    p_user_name  => :user_name,
-    p_user_image => :user_image,
-    p_email      => :email
-);
+               p_user_id    => :user_id,
+               p_app_id     => :app_id,
+               p_first_name => :first,
+               p_last_name  => :last,
+               p_user_name  => :user_name,
+               p_user_image => :user_image,
+               p_email      => :email
+       );
 ```
 
 Idempotent. Inserts the `samna_user` row if missing. If the app has `samna_app.claim_id` set (the default claim, configured during `init_prophet` via `p_default_claim`), also grants that claim to the user as a `user_claim` row. Returns:

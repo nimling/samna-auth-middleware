@@ -137,7 +137,7 @@ Tables that have a write function (use the function):
 - Cross root moves → `migrate_root` (admin only, rare)
 - Bootstrap → `init_prophet`, `init_disciple` (requires `p_disciple_app_slug`), `init_hybrid` (requires both `p_system_app_slug` and `p_disciple_app_slug`)
 - Table registration → `init_claimius_tables`
-- Self identity → `get_prophet_app()` (system app on prophet/hybrid), `get_disciple_app()` (upstream app on disciple/hybrid). Both return `SETOF claimius.samna_app`. Use these instead of maintaining a local `app_id()` helper.
+- Self identity → `get_prophet_app()` (system app on prophet/hybrid), `get_disciple_app()` (upstream app on disciple/hybrid). Both return `SETOF claimius.samna_app`. Scalar UUID variants `get_prophet_app_id()`, `get_disciple_app_id()`, and `get_app_id()` exist for use in `DEFAULT` expressions and other places that reject subqueries. `get_app_id()` returns the prophet/system app id on prophet and hybrid, the disciple app id on pure disciple. Use these instead of maintaining a local `app_id()` helper.
 
 Tables where direct INSERT/UPDATE is the documented path:
 - `samna_app` (use `init_prophet` for the FIRST app only)
