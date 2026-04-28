@@ -2,7 +2,6 @@ package middleware
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 
@@ -19,7 +18,7 @@ import (
 // claimius.ensure_app_user, and a user_claim grant. sa_created_by is the
 // user_id under the bootstrap exception described in .claude/rules/claimius.md.
 // All app id resolution after the samna_app upsert goes through
-// claimius.get_disciple_app() inline in SQL.
+// claimius.get_disciple_app_id() inline in SQL.
 func ensureDebugUser(ctx context.Context, userID uuid.UUID) error {
 	instance := db.Instance()
 	if instance == nil {
@@ -32,7 +31,7 @@ func ensureDebugUser(ctx context.Context, userID uuid.UUID) error {
 
 	return instance.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
 		// Register the disciple; sets disciple_state.disciple_app_slug so
-		// claimius.get_disciple_app() returns the row for this slug.
+		// claimius.get_disciple_app_id() returns the id for this slug.
 		if _, err := tx.NewRaw(`SELECT claimius.init_disciple(?)`, slug).Exec(ctx); err != nil {
 			return fmt.Errorf("init_disciple: %w", err)
 		}
@@ -43,7 +42,7 @@ func ensureDebugUser(ctx context.Context, userID uuid.UUID) error {
 			SELECT EXISTS (
 				SELECT 1 FROM claimius.samna_user
 				WHERE user_id = ?
-				  AND app_id = (SELECT id FROM claimius.get_disciple_app() LIMIT 1)
+				  AND app_id = claimius.get_disciple_app_id()
 				  AND sa_deleted_at IS NULL
 			)
 		`, userID).Scan(ctx, &exists); err != nil {
@@ -55,8 +54,8 @@ func ensureDebugUser(ctx context.Context, userID uuid.UUID) error {
 
 		preOrgID := uuid.New()
 
-		// Upsert samna_app. After this, claimius.get_disciple_app() resolves to
-		// this row and is the canonical source of app_id everywhere downstream.
+		// Upsert samna_app. After this, claimius.get_disciple_app_id() resolves
+		// to this row and is the canonical source of app_id everywhere downstream.
 		if _, err := tx.NewRaw(`
 			INSERT INTO claimius.samna_app (slug, name, description, private_key, private_seed, sa_owner_id, sa_created_by)
 			VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -66,10 +65,9 @@ func ensureDebugUser(ctx context.Context, userID uuid.UUID) error {
 			return fmt.Errorf("upsert samna_app: %w", err)
 		}
 
-		// Insert organization with app_id resolved via get_disciple_app().
 		if _, err := tx.NewRaw(`
 			INSERT INTO claimius.organization (id, app_id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
-			VALUES (?, (SELECT id FROM claimius.get_disciple_app() LIMIT 1), ?, ?, ?, ?, ?, ?)
+			VALUES (?, claimius.get_disciple_app_id(), ?, ?, ?, ?, ?, ?)
 		`, preOrgID, "Debug Organization", string(db.ORGANIZATION_TYPE_COMPANY),
 			preOrgID, preOrgID, 0, userID,
 		).Exec(ctx); err != nil {
@@ -79,7 +77,7 @@ func ensureDebugUser(ctx context.Context, userID uuid.UUID) error {
 		if _, err := tx.NewRaw(`
 			SELECT claimius.ensure_app_user(
 				p_user_id := ?,
-				p_app_id := (SELECT id FROM claimius.get_disciple_app() LIMIT 1),
+				p_app_id := claimius.get_disciple_app_id(),
 				p_first_name := ?, p_last_name := ?, p_email := ?
 			)
 		`, userID, "Debug", "User", "debug@local",
@@ -87,32 +85,21 @@ func ensureDebugUser(ctx context.Context, userID uuid.UUID) error {
 			return fmt.Errorf("ensure_app_user: %w", err)
 		}
 
-		var claimRow struct {
-			Payload json.RawMessage `bun:"payload"`
-		}
+		var claimID uuid.UUID
 		if err := tx.NewRaw(`
-			SELECT claimius.create_claim(
-				(SELECT id FROM claimius.get_disciple_app() LIMIT 1),
+			SELECT (claimius.create_claim(
+				claimius.get_disciple_app_id(),
 				?, ?, ?, ?, ?, ?
-			) AS payload
+			) -> 'claim' ->> 'id')::uuid
 		`, "Owner", "Owner of debug organization",
 			int(db.ACCESS_LEVEL_OWNER), preOrgID, preOrgID, userID,
-		).Scan(ctx, &claimRow); err != nil {
+		).Scan(ctx, &claimID); err != nil {
 			return fmt.Errorf("create_claim: %w", err)
 		}
-		var claimWrap struct {
-			Claim struct {
-				ID uuid.UUID `json:"id"`
-			} `json:"claim"`
-		}
-		if err := json.Unmarshal(claimRow.Payload, &claimWrap); err != nil {
-			return fmt.Errorf("parse create_claim: %w", err)
-		}
-		claimID := claimWrap.Claim.ID
 
 		if _, err := tx.NewRaw(`
 			SELECT claimius.assign_claim_object(
-				(SELECT id FROM claimius.get_disciple_app() LIMIT 1),
+				claimius.get_disciple_app_id(),
 				?, ?, ?, ?, ?, ?
 			)
 		`, claimID, preOrgID, db.OBJECT_TYPE_ORGANIZATION,
@@ -123,7 +110,7 @@ func ensureDebugUser(ctx context.Context, userID uuid.UUID) error {
 
 		if _, err := tx.NewRaw(`
 			SELECT claimius.assign_claim_user(
-				(SELECT id FROM claimius.get_disciple_app() LIMIT 1),
+				claimius.get_disciple_app_id(),
 				?, ?, ?, ?
 			)
 		`, claimID, userID, preOrgID, userID,

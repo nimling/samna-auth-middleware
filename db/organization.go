@@ -25,7 +25,7 @@ func (d *DB) GetOrganizations(ctx context.Context, userID uuid.UUID, accessLevel
 	var orgs []Organization
 	q := d.NewSelect().
 		Model(&orgs).
-		Where("organization.id IN (SELECT object_id FROM claimius.get_objects(?, (SELECT id FROM claimius.get_disciple_app() LIMIT 1), ?, ?))", userID, OBJECT_TYPE_ORGANIZATION, accessLevel)
+		Where("organization.id IN (SELECT object_id FROM claimius.get_objects(?, claimius.get_disciple_app_id(), ?, ?))", userID, OBJECT_TYPE_ORGANIZATION, accessLevel)
 	q = ApplyRelations(q, relations)
 	err := q.Scan(ctx)
 	if err != nil {

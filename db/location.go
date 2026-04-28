@@ -25,7 +25,7 @@ func (d *DB) GetLocations(ctx context.Context, userID uuid.UUID, accessLevel Cla
 	var locs []Location
 	q := d.NewSelect().
 		Model(&locs).
-		Where("location.id IN (SELECT object_id FROM claimius.get_objects(?, (SELECT id FROM claimius.get_disciple_app() LIMIT 1), ?, ?))", userID, OBJECT_TYPE_LOCATION, accessLevel)
+		Where("location.id IN (SELECT object_id FROM claimius.get_objects(?, claimius.get_disciple_app_id(), ?, ?))", userID, OBJECT_TYPE_LOCATION, accessLevel)
 	q = ApplyRelations(q, relations)
 	err := q.Scan(ctx)
 	if err != nil {
