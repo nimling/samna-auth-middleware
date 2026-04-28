@@ -46,7 +46,7 @@ NO. Always use `get_*` functions:
 - `get_direct_access(user_id, app_id, object_id, object_type)` for creator checks
 - `get_objects(user_id, app_id, object_type, min_level)` to list visible objects
 - `get_organizations`, `get_locations`, `get_users`, `get_claims`, `get_audit`, `get_secrets` for typed lists
-- `get_owner_graph`, `get_claim_graph` for hierarchy/access visualizations
+- `get_owner_graph`, `get_claim_graph` for hierarchy/access visualizations. Both take optional `start_id` and `depth` for subgraph queries; both cover all registered tables in the deployment. Output rows: `(object_id, object_type, label, parent_id, data jsonb)` where `object_type` is schema-qualified. `data` always carries `access_level` and `level` plus per-type fallback fields (with `sa_` prefixes stripped).
 - `search_objects(user_id, app_id, query, types, min_level, limit, offset)` for full text search
 
 ### "Should I INSERT/UPDATE a claimius table directly?"

@@ -217,10 +217,11 @@ type Asset struct {
 }
 
 type GraphNode struct {
-	ID    uuid.UUID       `bun:"id" json:"id"`
-	Label string          `bun:"label" json:"label"`
-	Type  string          `bun:"type" json:"type"`
-	Data  json.RawMessage `bun:"data,type:jsonb" json:"data"`
+	ObjectID   uuid.UUID       `bun:"object_id" json:"object_id"`
+	ObjectType string          `bun:"object_type" json:"object_type"`
+	Label      string          `bun:"label" json:"label"`
+	ParentID   *uuid.UUID      `bun:"parent_id" json:"parent_id"`
+	Data       json.RawMessage `bun:"data,type:jsonb" json:"data"`
 }
 
 type SamnaClient struct {

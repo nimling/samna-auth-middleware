@@ -4,35 +4,35 @@ type: project_rules
 applies_to: any project that has the `claimius` schema deployed in its Postgres database
 priority: critical
 description: |
-  claimius schema, claim based access control, prophet disciple sync,
-  user_object materialized index, get_access get_objects get_users
-  get_organizations get_locations get_claims search_objects access guard
-  authorization permission check, claim user_claim claim_object assign,
-  organization location ownership tree parent root sa_owner_id sa_root_id
-  sa_parent_id sa_location_id sa_created_by sa_deleted_at app_id, deny
-  is_deny inherits cascaded_from grants direct_grant, samna_app samna_user
-  samna_client samna_secret inheritance_info table_info sync_event,
-  init_prophet init_disciple init_hybrid init_claimius_tables
-  init_claimius_internal ensure_app_user merge_user migrate_root,
-  calc_object_access calc_hierarchical_access calc_claim_access
-  emit_sync_event audit_trigger replay_mode reconcile_queue
-  prophet_state disciple_state, register a table for access control,
-  permission template, role grant claimius_writer claimius_reader
-  claimius_disciple_client, org chart access graph hierarchy rendering,
-  full text search over accessible objects.
+   claimius schema, claim based access control, prophet disciple sync,
+   user_object materialized index, get_access get_objects get_users
+   get_organizations get_locations get_claims search_objects access guard
+   authorization permission check, claim user_claim claim_object assign,
+   organization location ownership tree parent root sa_owner_id sa_root_id
+   sa_parent_id sa_location_id sa_created_by sa_deleted_at app_id, deny
+   is_deny inherits cascaded_from grants direct_grant, samna_app samna_user
+   samna_client samna_secret inheritance_info table_info sync_event,
+   init_prophet init_disciple init_hybrid init_claimius_tables
+   init_claimius_internal ensure_app_user merge_user migrate_root,
+   calc_object_access calc_hierarchical_access calc_claim_access
+   emit_sync_event audit_trigger replay_mode reconcile_queue
+   prophet_state disciple_state, register a table for access control,
+   permission template, role grant claimius_writer claimius_reader
+   claimius_disciple_client, org chart access graph hierarchy rendering,
+   full text search over accessible objects.
 hard_constraints:
-  - reads always go through `get_*` functions, never direct SELECT on claimius tables
-  - writes go through a write function when one exists; otherwise direct INSERT/UPDATE on the prophet side is fine. Triggers fire either way and maintain `user_object`. (See "Creating things" in the README for which entities have functions.)
-  - hard delete is forbidden in app code; default is soft delete via `sa_deleted_at`
-  - `sa_created_by` is a `user_claim.id`, not a `samna_user.user_id` (except in bootstrap)
-  - `samna_user.user_id` is the human-stable identifier; `samna_user.id` is the row PK
-  - tree roots are self referential (`sa_owner_id == sa_root_id == id`); no nullable parents
-  - `sa_parent_id` and `sa_root_id` come together or not at all
-  - every materialized state query must filter on `app_id`
-  - object types are always schema qualified (`public.device`, never bare `device`)
-  - `claimius.replay_mode` is set ONLY by the disciple sync layer, never by app code
-  - cross root reparenting is forbidden in normal flow; admin must use `migrate_root`
-  - composite ids use the format `<schema>.<table>:<uuid>` joined by colons
+   - reads always go through `get_*` functions, never direct SELECT on claimius tables
+   - writes go through a write function when one exists; otherwise direct INSERT/UPDATE on the prophet side is fine. Triggers fire either way and maintain `user_object`. (See "Creating things" in the README for which entities have functions.)
+   - hard delete is forbidden in app code; default is soft delete via `sa_deleted_at`
+   - `sa_created_by` is a `user_claim.id`, not a `samna_user.user_id` (except in bootstrap)
+   - `samna_user.user_id` is the human-stable identifier; `samna_user.id` is the row PK
+   - tree roots are self referential (`sa_owner_id == sa_root_id == id`); no nullable parents
+   - `sa_parent_id` and `sa_root_id` come together or not at all
+   - every materialized state query must filter on `app_id`
+   - object types are always schema qualified (`public.device`, never bare `device`)
+   - `claimius.replay_mode` is set ONLY by the disciple sync layer, never by app code
+   - cross root reparenting is forbidden in normal flow; admin must use `migrate_root`
+   - composite ids use the format `<schema>.<table>:<uuid>` joined by colons
 ask_user_when_unsure: true
 do_not_invent: true
 ---
@@ -89,8 +89,8 @@ The `get_*` family includes:
 - `get_claims(user, app, object_id, object_type)` - claims against one object
 - `get_audit(user, app, min_level, limit, offset)` - audit log
 - `get_secrets(user, app, min_level)` - visible secrets
-- `get_owner_graph(user, app, min_level)` - hierarchy nodes for rendering
-- `get_claim_graph(user, app, min_level)` - access graph for rendering
+- `get_owner_graph(user, app, start_id?, depth?, min_level?)` - ownership graph (orgs, locations, registered tables with sa_owner_id/sa_location_id). `start_id` = an org to root from (NULL = all roots); `depth` = levels of descent (0 = unlimited). Each row: `(object_id, object_type, label, parent_id, data jsonb)`. `object_type` is schema-qualified (`'claimius.organization'`, `'public.bookable'`, etc.). `data` always carries `access_level` and `level` plus per-type fallback fields with `sa_` prefixes stripped (`owner_id` not `sa_owner_id`).
+- `get_claim_graph(user, app, start_id?, depth?, min_level?)` - access graph (user, other users seen, claims, user_claims, claim_object connectors, reachable objects). `start_id` = a single claim (NULL = all the user holds); `depth` = 0 includes cascaded objects, >= 1 direct only. Same row shape as `get_owner_graph`. Topology connects user -> user_claim and claim -> claim_object -> object so the frontend gets a connected graph.
 - `search_objects(user, app, query, types, min_level, limit, offset)` - full text search
 
 ### Writes: function if it exists, direct INSERT otherwise
@@ -265,12 +265,12 @@ If you're tempted to skip steps because "the FK doesn't exist yet anyway," stop 
 
 ```sql
 SELECT claimius.ensure_app_user(
-               p_user_id    => $user_id,
-               p_app_id     => $app_id,
-               p_first_name => $first,
-               p_last_name  => $last,
-               p_email      => $email
-       );
+    p_user_id    => $user_id,
+    p_app_id     => $app_id,
+    p_first_name => $first,
+    p_last_name  => $last,
+    p_email      => $email
+);
 ```
 
 This creates the per app `samna_user` row idempotently. Use the returned row.
@@ -297,10 +297,14 @@ Returns object_id, sa_access_level, denormalized name/description/link, and tree
 ### You're rendering an org chart in a frontend
 
 ```sql
+-- Whole accessible ownership graph
 SELECT * FROM claimius.get_owner_graph($user_id, $app_id);
+
+-- Subtree of one specific org, two levels deep
+SELECT * FROM claimius.get_owner_graph($user_id, $app_id, $start_org_id, 2);
 ```
 
-Returns flat `(id, label, type, parent_id, data)` rows. Render as a tree in the frontend by grouping on `parent_id`.
+Returns flat `(object_id, object_type, label, parent_id, data)` rows where `object_type` is schema-qualified (`'claimius.organization'`, `'public.bookable'`, etc.). The `data` jsonb always carries `access_level` and `level`. Render as a tree in the frontend by grouping on `parent_id`. To enrich rows with table-specific fields, write your own wrapper that UNIONs claimius's output with rows from your app tables (filtered through `claimius.get_objects`).
 
 ### A claim grant should expire automatically
 

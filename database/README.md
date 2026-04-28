@@ -90,18 +90,18 @@ After Claimius migrations finish, the implementing app runs:
 -- Returns a JSONB object keyed by table name, with the full row each table
 -- received. Capture it if you need ids for follow on inserts.
 SELECT claimius.init_prophet(
-    p_system_app_slug          => 'my_app',
-    p_system_app_name          => 'My Application',
-    p_system_app_private_key   => '<rsa private key from Go>',
-    p_system_app_private_seed  => '<32 random bytes hex from Go>',
-    p_system_app_redirect_uri  => 'https://my.app/oauth/callback',
-    p_system_app_sync_uri      => 'https://my.app/claimius/sync',
-    p_default_claim            => jsonb_build_object(
-        'name',            'Guest',
-        'description',     'Default claim granted to every regular user on first login. Marks account existence; grants no resource access.',
-        'sa_access_level', 8
-    )
-);
+           p_system_app_slug          => 'my_app',
+           p_system_app_name          => 'My Application',
+           p_system_app_private_key   => '<rsa private key from Go>',
+           p_system_app_private_seed  => '<32 random bytes hex from Go>',
+           p_system_app_redirect_uri  => 'https://my.app/oauth/callback',
+           p_system_app_sync_uri      => 'https://my.app/claimius/sync',
+           p_default_claim            => jsonb_build_object(
+               'name',            'Guest',
+               'description',     'Default claim granted to every regular user on first login. Marks account existence; grants no resource access.',
+               'sa_access_level', 8
+                                         )
+       );
 -- Result shape (JSONB), seven keys:
 --   {
 --     "samna_app":     { full samna_app row, app_secret is NULL until set by implementer },
@@ -120,31 +120,31 @@ SELECT claimius.init_prophet(
 -- same migration artefact deploys against any prophet. Returns empty
 -- jsonb {}.
 SELECT claimius.init_disciple(
-    p_disciple_app_slug => 'mainapp'
-);
+           p_disciple_app_slug => 'mainapp'
+       );
 
 -- Or a hybrid. Calls both init_prophet (creates this hybrid's own system
 -- app) AND init_disciple (records the upstream prophet app slug). Returns
 -- the same jsonb shape as init_prophet.
 SELECT claimius.init_hybrid(
-    p_system_app_slug          => 'my_app',
-    p_system_app_name          => 'My Application',
-    p_system_app_private_key   => '<rsa private key from Go>',
-    p_system_app_private_seed  => '<32 random bytes hex from Go>',
-    p_disciple_app_slug        => 'upstream_prophet_slug',
-    p_default_claim            => jsonb_build_object(
-        'name',            'Guest',
-        'description',     'Default claim for new users.',
-        'sa_access_level', 8
-    )
-);
+           p_system_app_slug          => 'my_app',
+           p_system_app_name          => 'My Application',
+           p_system_app_private_key   => '<rsa private key from Go>',
+           p_system_app_private_seed  => '<32 random bytes hex from Go>',
+           p_disciple_app_slug        => 'upstream_prophet_slug',
+           p_default_claim            => jsonb_build_object(
+               'name',            'Guest',
+               'description',     'Default claim for new users.',
+               'sa_access_level', 8
+                                         )
+       );
 
 -- Then register app tables:
 SELECT claimius.init_claimius_tables(
-    'public.device',
-    'public.sensor',
-    'public.recipe'
-);
+           'public.device',
+           'public.sensor',
+           'public.recipe'
+       );
 ```
 
 ## Bootstrap and creation order on a prophet
@@ -589,12 +589,85 @@ Disciple:
 
 The same composite ids on prophet and disciple guarantee idempotent upserts. Apply an event twice, get the same row.
 
+## Graphs
+
+Two functions return flat node lists suitable for visualizing the deployment's access topology. Both return rows of shape `(object_id UUID, object_type TEXT, label TEXT, parent_id UUID, data JSONB)` so the frontend can pipe them straight into a graph layout (dagre, d3-force, whatever). Both go through `reconcile_if_pending` and `check_user_active` first.
+
+Every row's `data` jsonb contains at minimum two keys:
+- `access_level` (INTEGER or NULL): the user's effective access level for this object, from `user_object.sa_access_level`. NULL for nodes that aren't accessible objects in the standard model (the requesting user themselves, user_claim connectors, claim_object connectors).
+- `level` (INTEGER or NULL): the tree depth of the row in its native hierarchy (orgs and locations have it; other types are NULL).
+
+Additional keys vary by node kind. All field names in `data` use plain naming without `sa_` prefixes (so `owner_id` not `sa_owner_id`, `location_id` not `sa_location_id`, `description` not `sa_description`, etc.).
+
+### `get_owner_graph(p_user_id, p_app_id, p_start_id, p_depth, p_min_level)`
+
+Returns the ownership graph: organizations, locations, and every registered application table that has `sa_owner_id` and/or `sa_location_id`. Rows are scoped to what the calling user has access to via `get_objects`.
+
+Arguments:
+- `p_start_id UUID DEFAULT NULL`: organization id to start from. NULL walks every accessible root org. If the start id is not an accessible org, the function returns empty silently.
+- `p_depth INTEGER DEFAULT 0`: how many levels of descent below the start. 0 means unlimited. The start org is depth 0; its direct children are depth 1; and so on.
+- `p_min_level INTEGER DEFAULT 30`: access level filter passed through to `get_objects`.
+
+Per-row `data` shape:
+- Organizations (`object_type = 'claimius.organization'`): `{ access_level, level, description, type, owner_id }`.
+- Locations (`object_type = 'claimius.location'`): `{ access_level, level, description, type, owner_id, longitude, latitude }`.
+- Other registered tables: `{ access_level, level (NULL), description, owner_id, location_id }`.
+
+`label` comes from the row's `name` column when available (via `user_object.sa_name`), otherwise the id as fallback.
+
+`parent_id` is the canonical ancestor in priority order: `sa_parent_id`, then `sa_location_id`, then `sa_owner_id`. NULL for tree roots.
+
+### `get_claim_graph(p_user_id, p_app_id, p_start_id, p_depth, p_min_level)`
+
+Returns the access graph: the requesting user, every other user this user can see (via `user_users`), every claim the user holds, the user_claim grants, claim_object connector nodes, and the actual objects reachable through those bindings.
+
+Arguments:
+- `p_start_id UUID DEFAULT NULL`: claim id. NULL includes every claim the user holds. If the start id is not a claim the user holds, the function returns empty silently.
+- `p_depth INTEGER DEFAULT 0`: 0 includes cascaded objects; >= 1 includes only directly-bound objects (no cascade descendants).
+- `p_min_level INTEGER DEFAULT 30`.
+
+Topology:
+```
+user (parent_id = NULL)
+  '- user_claim    (parent_id = user.id)
+  '- other users   (parent_id = user.id, via user_users)
+claim (parent_id = NULL)
+  '- claim_object  (parent_id = claim.id)
+        '- object  (parent_id = claim_object.id)
+```
+
+Per-row `data` shape:
+- The requesting user (`object_type = 'claimius.samna_user'`, parent_id NULL): `{ access_level (NULL), level (NULL), user_id, email, status }`.
+- Other users (`object_type = 'claimius.samna_user'`, parent_id = requesting user id): `{ access_level, level (NULL), user_id, email, status }`.
+- user_claim (`object_type = 'claimius.user_claim'`): `{ access_level (NULL), level (NULL), claim_id, starts_at, ends_at, reason }`.
+- Claim (`object_type = 'claimius.claim'`): `{ access_level (the claim's own level), level (NULL), description, is_deny, inherits, type }`.
+- claim_object connector (`object_type = 'claimius.claim_object'`): `{ access_level (NULL), level (NULL), target_object_id, target_object_type, inherits }`.
+- Reachable object (`object_type = the object's schema-qualified type`): `{ access_level, level (NULL), description, owner_id, location_id, tree_type }`. `tree_type` is `'direct'` for directly-bound objects or `'ownership'`/`'location'`/`'parenthood'` for cascaded ones.
+
+### Extending the graphs
+
+The graph functions surface what claimius knows: the structural ownership chain and the access topology, with object data limited to the columns claimius materializes (`sa_name`, `sa_description`, `sa_access_level`, `sa_owner_id`, `sa_location_id`). If you need richer per-table fields (a bookable's `type_id`, an asset's specifics, etc.) write a wrapper in your own schema that UNIONs claimius's output with rows from your own tables, scoped through `get_objects`:
+
+```sql
+CREATE OR REPLACE FUNCTION public.get_owner_graph(p_user_id UUID, p_start_id UUID DEFAULT NULL, p_depth INTEGER DEFAULT 0, p_min_level INTEGER DEFAULT 30)
+RETURNS TABLE(object_id UUID, object_type TEXT, label TEXT, parent_id UUID, data JSONB) AS $$
+DECLARE
+    v_app_id UUID := claimius.get_app_id();
+BEGIN
+    RETURN QUERY SELECT * FROM claimius.get_owner_graph(p_user_id, v_app_id, p_start_id, p_depth, p_min_level);
+    -- Add your own enrichment, override per-row data jsonb where you want
+    -- richer fields, etc. claimius's rows will still be there with the
+    -- canonical schema-qualified types.
+END;
+$$ LANGUAGE plpgsql;
+```
+
 ## What is NOT in Claimius
 
 - The HTTP/RPC sync transport. Bring your own.
 - The implementing app's own tables (you write those).
 - Authentication. Claimius assumes you've already authenticated the user.
-- Frontend rendering of graphs. `get_owner_graph` and `get_claim_graph` return flat node lists you can render however you like.
+- Frontend graph rendering. `get_owner_graph` and `get_claim_graph` produce flat node lists; layout (dagre, d3-force, etc.) is the frontend's job.
 
 ## Files
 
@@ -613,3 +686,7 @@ migrations/
   rules/claimius.md          AI assistant guidance for any project using Claimius
   skill/claimius/SKILL.md    AI skill that enforces correct usage patterns
 ```
+
+## License
+
+[Whatever license you choose]
