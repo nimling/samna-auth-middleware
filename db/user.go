@@ -25,7 +25,7 @@ func (d *DB) GetUsers(ctx context.Context, userID uuid.UUID, accessLevel ClaimAc
 	var users []SamnaUser
 	err := d.NewSelect().
 		Model(&users).
-		Where("samna_user.user_id IN (SELECT user_id FROM claimius.get_users(?, "+appIDExpr+", ?))", userID, appSlug(), accessLevel).
+		Where("samna_user.user_id IN (SELECT user_id FROM claimius.get_users(?, (SELECT id FROM claimius.get_disciple_app() LIMIT 1), ?))", userID, accessLevel).
 		Scan(ctx)
 	if err != nil {
 		return nil, err

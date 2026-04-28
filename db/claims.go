@@ -9,7 +9,7 @@ import (
 func (d *DB) GetAccess(ctx context.Context, userID, objectID uuid.UUID, objectType string, accessLevel ClaimAccessLevel) (*AccessClaim, error) {
 	var claims []AccessClaim
 	err := d.NewSelect().
-		TableExpr("claimius.get_access(?, "+appIDExpr+", ?, ?, ?) AS claim", userID, appSlug(), objectID, objectType, accessLevel).
+		TableExpr("claimius.get_access(?, (SELECT id FROM claimius.get_disciple_app() LIMIT 1), ?, ?, ?) AS claim", userID, objectID, objectType, accessLevel).
 		Column("claim.*").
 		Scan(ctx, &claims)
 	if err != nil {
@@ -26,7 +26,7 @@ func (d *DB) GetClaim(ctx context.Context, userID, claimID uuid.UUID, accessLeve
 	q := d.NewSelect().
 		Model(&claim).
 		Where("claim.id = ?", claimID).
-		Where("claim.id IN (SELECT id FROM claimius.get_claims(?, "+appIDExpr+", ?))", userID, appSlug(), accessLevel).
+		Where("claim.id IN (SELECT id FROM claimius.get_claims(?, (SELECT id FROM claimius.get_disciple_app() LIMIT 1), ?))", userID, accessLevel).
 		Limit(1)
 	q = ApplyRelations(q, relations)
 	err := q.Scan(ctx)
@@ -40,7 +40,7 @@ func (d *DB) GetClaims(ctx context.Context, userID uuid.UUID, accessLevel ClaimA
 	var claims []Claim
 	q := d.NewSelect().
 		Model(&claims).
-		Where("claim.id IN (SELECT id FROM claimius.get_claims(?, "+appIDExpr+", ?))", userID, appSlug(), accessLevel)
+		Where("claim.id IN (SELECT id FROM claimius.get_claims(?, (SELECT id FROM claimius.get_disciple_app() LIMIT 1), ?))", userID, accessLevel)
 	q = ApplyRelations(q, relations)
 	err := q.Scan(ctx)
 	if err != nil {
@@ -80,8 +80,8 @@ type SearchResult struct {
 func (d *DB) Search(ctx context.Context, userID uuid.UUID, query string, objectTypes []string, accessLevel ClaimAccessLevel, limit int, offset int) ([]SearchResult, error) {
 	var results []SearchResult
 	err := d.NewRaw(
-		`SELECT * FROM claimius.search_objects(?, `+appIDExpr+`, ?, ?::text[], ?, ?, ?)`,
-		userID, appSlug(), query, objectTypes, accessLevel, limit, offset,
+		`SELECT * FROM claimius.search_objects(?, (SELECT id FROM claimius.get_disciple_app() LIMIT 1), ?, ?::text[], ?, ?, ?)`,
+		userID, query, objectTypes, accessLevel, limit, offset,
 	).Scan(ctx, &results)
 	if err != nil {
 		return nil, err
@@ -92,7 +92,7 @@ func (d *DB) Search(ctx context.Context, userID uuid.UUID, query string, objectT
 func (d *DB) GetAudit(ctx context.Context, userID uuid.UUID, accessLevel ClaimAccessLevel) ([]Audit, error) {
 	var audits []Audit
 	err := d.NewSelect().
-		TableExpr("claimius.get_audit(?, "+appIDExpr+", ?) AS audit", userID, appSlug(), accessLevel).
+		TableExpr("claimius.get_audit(?, (SELECT id FROM claimius.get_disciple_app() LIMIT 1), ?) AS audit", userID, accessLevel).
 		Column("audit.*").
 		Scan(ctx, &audits)
 	if err != nil {
@@ -110,7 +110,7 @@ func (d *DB) GetObjectClaims(ctx context.Context, userID, objectID uuid.UUID, ob
 	var claims []Claim
 	err := d.NewSelect().
 		Model(&claims).
-		Where("claim.id IN (SELECT id FROM claimius.get_claims(?, "+appIDExpr+", ?, ?))", userID, appSlug(), objectID, objectType).
+		Where("claim.id IN (SELECT id FROM claimius.get_claims(?, (SELECT id FROM claimius.get_disciple_app() LIMIT 1), ?, ?))", userID, objectID, objectType).
 		Scan(ctx)
 	return claims, err
 }
@@ -118,7 +118,7 @@ func (d *DB) GetObjectClaims(ctx context.Context, userID, objectID uuid.UUID, ob
 func (d *DB) GetOwnerGraph(ctx context.Context, userID uuid.UUID, accessLevel ClaimAccessLevel) ([]GraphNode, error) {
 	var nodes []GraphNode
 	err := d.NewSelect().
-		TableExpr("claimius.get_owner_graph(?, "+appIDExpr+", ?) AS graph", userID, appSlug(), accessLevel).
+		TableExpr("claimius.get_owner_graph(?, (SELECT id FROM claimius.get_disciple_app() LIMIT 1), ?) AS graph", userID, accessLevel).
 		Column("graph.*").
 		Scan(ctx, &nodes)
 	return nodes, err
@@ -127,7 +127,7 @@ func (d *DB) GetOwnerGraph(ctx context.Context, userID uuid.UUID, accessLevel Cl
 func (d *DB) GetClaimGraph(ctx context.Context, userID uuid.UUID, accessLevel ClaimAccessLevel) ([]GraphNode, error) {
 	var nodes []GraphNode
 	err := d.NewSelect().
-		TableExpr("claimius.get_claim_graph(?, "+appIDExpr+", ?) AS graph", userID, appSlug(), accessLevel).
+		TableExpr("claimius.get_claim_graph(?, (SELECT id FROM claimius.get_disciple_app() LIMIT 1), ?) AS graph", userID, accessLevel).
 		Column("graph.*").
 		Scan(ctx, &nodes)
 	return nodes, err

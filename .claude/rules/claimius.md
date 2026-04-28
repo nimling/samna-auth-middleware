@@ -135,8 +135,9 @@ Tables that have a write function (use the function):
 - `samna_user` (per app row creation) → `ensure_app_user`
 - Cross app moves → `merge_user`
 - Cross root moves → `migrate_root` (admin only, rare)
-- Bootstrap → `init_prophet`, `init_disciple`, `init_hybrid`
+- Bootstrap → `init_prophet`, `init_disciple` (requires `p_disciple_app_slug`), `init_hybrid` (requires both `p_system_app_slug` and `p_disciple_app_slug`)
 - Table registration → `init_claimius_tables`
+- Self identity → `get_prophet_app()` (system app on prophet/hybrid), `get_disciple_app()` (upstream app on disciple/hybrid). Both return `SETOF claimius.samna_app`. Use these instead of maintaining a local `app_id()` helper.
 
 Tables where direct INSERT/UPDATE is the documented path:
 - `samna_app` (use `init_prophet` for the FIRST app only)
@@ -256,12 +257,12 @@ If you're tempted to skip steps because "the FK doesn't exist yet anyway," stop 
 
 ```sql
 SELECT claimius.ensure_app_user(
-    p_user_id    => $user_id,
-    p_app_id     => $app_id,
-    p_first_name => $first,
-    p_last_name  => $last,
-    p_email      => $email
-);
+               p_user_id    => $user_id,
+               p_app_id     => $app_id,
+               p_first_name => $first,
+               p_last_name  => $last,
+               p_email      => $email
+       );
 ```
 
 This creates the per app `samna_user` row idempotently. Use the returned row.

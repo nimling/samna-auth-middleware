@@ -47,7 +47,7 @@ func (d *DB) GetUserFields(ctx context.Context, fieldID uuid.UUID) ([]UserField,
 
 func (d *DB) PostObjectField(ctx context.Context, field *ObjectField) error {
 	if field.AppID == (uuid.UUID{}) {
-		app, err := d.lookupApp(ctx)
+		app, err := d.GetApp(ctx)
 		if err != nil {
 			return err
 		}
@@ -86,7 +86,7 @@ func (d *DB) DeleteObjectField(ctx context.Context, fieldID uuid.UUID) error {
 
 func (d *DB) PostUserField(ctx context.Context, field *UserField) error {
 	if field.AppID == (uuid.UUID{}) {
-		app, err := d.lookupApp(ctx)
+		app, err := d.GetApp(ctx)
 		if err != nil {
 			return err
 		}

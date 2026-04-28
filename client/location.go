@@ -57,12 +57,12 @@ func GetLocationClaims(ctx context.Context, locationID uuid.UUID) (io.ReadCloser
 
 func PostLocation(ctx context.Context, loc db.Location) (db.Location, error) {
 	if getDebugUserID() != nil {
-		appID, err := resolveAppID(ctx)
+		app, err := db.Instance().GetApp(ctx)
 		if err != nil {
 			return loc, err
 		}
 		loc.ID = uuid.New()
-		loc.AppID = appID
+		loc.AppID = app.ID
 		loc.CreatedAt = time.Now()
 		loc.UpdatedAt = time.Now()
 		_, err = db.Instance().NewInsert().Model(&loc).Exec(ctx)

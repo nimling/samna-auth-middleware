@@ -66,12 +66,12 @@ func GetOrganizationClaims(ctx context.Context, orgID uuid.UUID) (io.ReadCloser,
 
 func PostOrganization(ctx context.Context, org db.Organization) (db.Organization, error) {
 	if getDebugUserID() != nil {
-		appID, err := resolveAppID(ctx)
+		app, err := db.Instance().GetApp(ctx)
 		if err != nil {
 			return org, err
 		}
 		org.ID = uuid.New()
-		org.AppID = appID
+		org.AppID = app.ID
 		org.CreatedAt = time.Now()
 		org.UpdatedAt = time.Now()
 		_, err = db.Instance().NewInsert().Model(&org).Exec(ctx)

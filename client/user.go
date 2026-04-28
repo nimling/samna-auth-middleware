@@ -84,12 +84,12 @@ func GetUserLocations(ctx context.Context, userID uuid.UUID) (io.ReadCloser, err
 
 func PostUser(ctx context.Context, userID uuid.UUID, user db.SamnaUser) (db.SamnaUser, error) {
 	if getDebugUserID() != nil {
-		appID, err := resolveAppID(ctx)
+		app, err := db.Instance().GetApp(ctx)
 		if err != nil {
 			return user, err
 		}
 		user.ID = uuid.New()
-		user.AppID = appID
+		user.AppID = app.ID
 		user.UserID = userID
 		user.CreatedAt = time.Now()
 		user.UpdatedAt = time.Now()

@@ -9,7 +9,6 @@ import (
 	"reflect"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 	"github.com/uptrace/bun"
 	"github.com/uptrace/bun/dialect/pgdialect"
@@ -25,25 +24,19 @@ var syncFunc func(ctx context.Context) error
 
 var ErrSyncUnreachable = errors.New("sync unreachable: app inactive on samna_auth")
 
-// appIDExpr is the SQL fragment that resolves the disciple's app_id by slug.
-// Embed inline wherever a claimius.* function needs an app_id, paired with
-// appSlug() as the parameter.
-const appIDExpr = `(SELECT id FROM claimius.samna_app WHERE slug = ? AND sa_deleted_at IS NULL)`
-
-func appSlug() string {
-	return os.Getenv("SAUTH_APP_SLUG")
-}
-
-// resolveAppID does a one shot lookup for the disciple's app_id keyed by
-// SAUTH_APP_SLUG. No Go side caching; the caller pays one roundtrip per use.
-// Used internally for Bun model inserts that need app_id populated.
-func (d *DB) resolveAppID(ctx context.Context) (uuid.UUID, error) {
-	var id uuid.UUID
-	err := d.NewRaw(`SELECT id FROM claimius.samna_app WHERE slug = ? AND sa_deleted_at IS NULL LIMIT 1`, appSlug()).Scan(ctx, &id)
-	if err != nil {
-		return uuid.Nil, fmt.Errorf("resolve app id: %w", err)
+// GetApp returns the deployment's app row. On a disciple this is the upstream
+// prophet app this disciple mirrors (claimius.get_disciple_app). On a pure
+// prophet this falls back to claimius.get_prophet_app. Errors when neither is
+// registered.
+func (d *DB) GetApp(ctx context.Context) (*SamnaApp, error) {
+	var app SamnaApp
+	if err := d.NewRaw(`SELECT * FROM claimius.get_disciple_app() LIMIT 1`).Scan(ctx, &app); err == nil {
+		return &app, nil
 	}
-	return id, nil
+	if err := d.NewRaw(`SELECT * FROM claimius.get_prophet_app() LIMIT 1`).Scan(ctx, &app); err != nil {
+		return nil, fmt.Errorf("no claimius app registered: %w", err)
+	}
+	return &app, nil
 }
 
 func RegisterSyncFunc(fn func(ctx context.Context) error) {
@@ -78,11 +71,6 @@ func Init(logger echo.Logger) {
 	pgPass, exists := os.LookupEnv("PGPASSWORD")
 	if !exists {
 		logger.Fatal("PGPASSWORD not set")
-		return
-	}
-
-	if appSlug() == "" {
-		logger.Fatal("SAUTH_APP_SLUG not set")
 		return
 	}
 

@@ -52,8 +52,9 @@ It depends on the table.
 - `samna_user` (per app row creation) → `ensure_app_user`
 - Cross app moves → `merge_user`
 - Cross root moves → `migrate_root`
-- Bootstrap → `init_prophet`, `init_disciple`, `init_hybrid`
+- Bootstrap → `init_prophet`, `init_disciple` (requires `p_disciple_app_slug`), `init_hybrid` (requires both `p_system_app_slug` and `p_disciple_app_slug`)
 - External table registration → `init_claimius_tables`
+- Self identity → `get_prophet_app()` returns the system app on prophet/hybrid (raises on disciple); `get_disciple_app()` returns the upstream app on disciple/hybrid (raises on prophet). Both return `SETOF claimius.samna_app`. Use these instead of maintaining a local `app_id()` helper.
 
 **Direct INSERT/UPDATE is fine** on the prophet for:
 - `samna_app` (use `init_prophet` only for the FIRST app)

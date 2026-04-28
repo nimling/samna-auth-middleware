@@ -30,12 +30,12 @@ func GetRelation(ctx context.Context, relationID uuid.UUID) (io.ReadCloser, erro
 
 func PostRelation(ctx context.Context, relation db.UserRelation) (db.UserRelation, error) {
 	if getDebugUserID() != nil {
-		appID, err := resolveAppID(ctx)
+		app, err := db.Instance().GetApp(ctx)
 		if err != nil {
 			return relation, err
 		}
 		relation.ID = uuid.New()
-		relation.AppID = appID
+		relation.AppID = app.ID
 		relation.CreatedAt = time.Now()
 		relation.UpdatedAt = time.Now()
 		_, err = db.Instance().NewInsert().Model(&relation).Exec(ctx)

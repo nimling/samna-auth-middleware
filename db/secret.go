@@ -15,7 +15,7 @@ type BodySecret struct {
 
 func (d *DB) GetSecrets(ctx context.Context, userID uuid.UUID, accessLevel ClaimAccessLevel) ([]SamnaSecret, error) {
 	var secrets []SamnaSecret
-	err := d.NewRaw("SELECT * FROM claimius.get_secrets(?, "+appIDExpr+", ?)", userID, appSlug(), accessLevel).
+	err := d.NewRaw("SELECT * FROM claimius.get_secrets(?, (SELECT id FROM claimius.get_disciple_app() LIMIT 1), ?)", userID, accessLevel).
 		Scan(ctx, &secrets)
 	if err != nil {
 		return nil, err
@@ -44,7 +44,7 @@ func (d *DB) PostSecret(ctx context.Context, body BodySecret) (*SamnaSecret, err
 	if body.Value == nil || *body.Value == "" {
 		return nil, fmt.Errorf("value is required")
 	}
-	app, err := d.lookupApp(ctx)
+	app, err := d.GetApp(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -78,7 +78,7 @@ func (d *DB) PutSecret(ctx context.Context, secretID uuid.UUID, body BodySecret)
 		secret.Key = *body.Key
 	}
 	if body.Value != nil {
-		app, err := d.lookupApp(ctx)
+		app, err := d.GetApp(ctx)
 		if err != nil {
 			return nil, err
 		}
@@ -119,7 +119,7 @@ func (d *DB) ResolveSecret(ctx context.Context, secretID uuid.UUID) (string, err
 	if err != nil {
 		return "", err
 	}
-	app, err := d.lookupApp(ctx)
+	app, err := d.GetApp(ctx)
 	if err != nil {
 		return "", err
 	}
@@ -132,18 +132,4 @@ func (d *DB) ResolveSecret(ctx context.Context, secretID uuid.UUID) (string, err
 		return "", err
 	}
 	return aesDecrypt(ciphertext, seed)
-}
-
-func (d *DB) lookupApp(ctx context.Context) (*SamnaApp, error) {
-	var app SamnaApp
-	err := d.NewSelect().
-		Model(&app).
-		Where("slug = ?", appSlug()).
-		Where("sa_deleted_at IS NULL").
-		Limit(1).
-		Scan(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("lookup app: %w", err)
-	}
-	return &app, nil
 }

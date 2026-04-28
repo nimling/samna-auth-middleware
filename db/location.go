@@ -25,7 +25,7 @@ func (d *DB) GetLocations(ctx context.Context, userID uuid.UUID, accessLevel Cla
 	var locs []Location
 	q := d.NewSelect().
 		Model(&locs).
-		Where("location.id IN (SELECT object_id FROM claimius.get_objects(?, "+appIDExpr+", ?, ?))", userID, appSlug(), OBJECT_TYPE_LOCATION, accessLevel)
+		Where("location.id IN (SELECT object_id FROM claimius.get_objects(?, (SELECT id FROM claimius.get_disciple_app() LIMIT 1), ?, ?))", userID, OBJECT_TYPE_LOCATION, accessLevel)
 	q = ApplyRelations(q, relations)
 	err := q.Scan(ctx)
 	if err != nil {
@@ -78,11 +78,11 @@ func (d *DB) GetParentLocations(ctx context.Context, startID uuid.UUID) ([]uuid.
 
 func (d *DB) PostLocation(ctx context.Context, loc *Location) error {
 	if loc.AppID == (uuid.UUID{}) {
-		appID, err := d.resolveAppID(ctx)
+		app, err := d.GetApp(ctx)
 		if err != nil {
 			return err
 		}
-		loc.AppID = appID
+		loc.AppID = app.ID
 	}
 	q := d.NewInsert().
 		Model(loc).

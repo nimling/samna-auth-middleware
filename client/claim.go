@@ -48,12 +48,12 @@ func GetClaimAudit(ctx context.Context, claimID uuid.UUID) (io.ReadCloser, error
 
 func PostClaim(ctx context.Context, claim db.Claim) (db.Claim, error) {
 	if getDebugUserID() != nil {
-		appID, err := resolveAppID(ctx)
+		app, err := db.Instance().GetApp(ctx)
 		if err != nil {
 			return claim, err
 		}
 		claim.ID = uuid.New()
-		claim.AppID = appID
+		claim.AppID = app.ID
 		claim.CreatedAt = time.Now()
 		claim.UpdatedAt = time.Now()
 		_, err = db.Instance().NewInsert().Model(&claim).Exec(ctx)
@@ -131,12 +131,12 @@ func DeleteClaim(ctx context.Context, claimID uuid.UUID) (db.Claim, error) {
 
 func PostClaimObject(ctx context.Context, claimID uuid.UUID, co db.ClaimObject) (db.ClaimObject, error) {
 	if getDebugUserID() != nil {
-		appID, err := resolveAppID(ctx)
+		app, err := db.Instance().GetApp(ctx)
 		if err != nil {
 			return co, err
 		}
 		co.ID = uuid.New()
-		co.AppID = appID
+		co.AppID = app.ID
 		co.ClaimID = claimID
 		co.CreatedAt = time.Now()
 		co.UpdatedAt = time.Now()
@@ -189,12 +189,12 @@ func DeleteClaimObject(ctx context.Context, claimID uuid.UUID, objectID uuid.UUI
 
 func PostUserClaim(ctx context.Context, claimID uuid.UUID, uc db.UserClaim) (db.UserClaim, error) {
 	if getDebugUserID() != nil {
-		appID, err := resolveAppID(ctx)
+		app, err := db.Instance().GetApp(ctx)
 		if err != nil {
 			return uc, err
 		}
 		uc.ID = uuid.New()
-		uc.AppID = appID
+		uc.AppID = app.ID
 		uc.ClaimID = claimID
 		uc.CreatedAt = time.Now()
 		uc.UpdatedAt = time.Now()

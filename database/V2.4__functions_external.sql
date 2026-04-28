@@ -1130,6 +1130,67 @@ $$ LANGUAGE plpgsql;
 COMMENT ON FUNCTION claimius.init_claimius_internal IS 'Registers internal claimius.* tables in table_info. Called once at schema bootstrap.';
 
 -- ----------------------------------------------------------------------------
+-- get_prophet_app
+-- Returns the system app row for this deployment. The system app is the
+-- one created by init_prophet, identified by its slug stored on
+-- prophet_state.system_app_slug. Works on prophet and hybrid deployments.
+-- Raises on a pure disciple, where no system app exists.
+-- Granted to all roles since this is identity lookup, not user gated.
+-- ----------------------------------------------------------------------------
+
+CREATE OR REPLACE FUNCTION claimius.get_prophet_app()
+    RETURNS SETOF claimius.samna_app AS $$
+DECLARE
+    v_slug TEXT;
+BEGIN
+    SELECT system_app_slug INTO v_slug
+    FROM claimius.prophet_state
+    WHERE system_app_slug IS NOT NULL
+    LIMIT 1;
+
+    IF v_slug IS NULL THEN
+        RAISE EXCEPTION 'get_prophet_app: no system app registered. This deployment is a pure disciple, or init_prophet has not run.';
+    END IF;
+
+    RETURN QUERY
+        SELECT * FROM claimius.samna_app
+        WHERE slug = v_slug AND sa_deleted_at IS NULL;
+END;
+$$ LANGUAGE plpgsql STABLE;
+
+COMMENT ON FUNCTION claimius.get_prophet_app IS 'Returns the system app row for this deployment (prophet or hybrid). Raises on pure disciple.';
+
+-- ----------------------------------------------------------------------------
+-- get_disciple_app
+-- Returns the upstream prophet app row this disciple mirrors, identified
+-- by the slug stored on disciple_state.disciple_app_slug. Works on
+-- disciple and hybrid deployments. Raises on a pure prophet, where
+-- disciple_state has no row.
+-- Granted to all roles since this is identity lookup, not user gated.
+-- ----------------------------------------------------------------------------
+
+CREATE OR REPLACE FUNCTION claimius.get_disciple_app()
+    RETURNS SETOF claimius.samna_app AS $$
+DECLARE
+    v_slug TEXT;
+BEGIN
+    SELECT disciple_app_slug INTO v_slug
+    FROM claimius.disciple_state
+    LIMIT 1;
+
+    IF v_slug IS NULL THEN
+        RAISE EXCEPTION 'get_disciple_app: no disciple app registered. This deployment is a pure prophet, or init_disciple has not run.';
+    END IF;
+
+    RETURN QUERY
+        SELECT * FROM claimius.samna_app
+        WHERE slug = v_slug AND sa_deleted_at IS NULL;
+END;
+$$ LANGUAGE plpgsql STABLE;
+
+COMMENT ON FUNCTION claimius.get_disciple_app IS 'Returns the upstream prophet app this disciple mirrors. Raises on pure prophet.';
+
+-- ----------------------------------------------------------------------------
 -- init_prophet
 -- Bootstrap a fresh claimius deployment as a prophet. Creates the system
 -- app, system organization (self rooted), system user, system claim, and
@@ -1333,10 +1394,11 @@ BEGIN
         RETURNING id INTO v_user_claim_id;
     END IF;
 
-    -- 10. prophet_state row for this app (UNIQUE on app_id column, ON CONFLICT works)
-    INSERT INTO claimius.prophet_state (app_id, last_applied_seq)
-    VALUES (v_app_id, 0)
-    ON CONFLICT (app_id) DO NOTHING;
+    -- 10. prophet_state row for this app, marked as the system app via
+    -- system_app_slug. Partial unique index enforces at most one system row.
+    INSERT INTO claimius.prophet_state (app_id, last_applied_seq, system_app_slug)
+    VALUES (v_app_id, 0, p_system_app_slug)
+    ON CONFLICT (app_id) DO UPDATE SET system_app_slug = EXCLUDED.system_app_slug;
 
     -- 11. role grants for prophet runtime
     PERFORM claimius._grant_prophet_roles();
@@ -1382,24 +1444,40 @@ COMMENT ON FUNCTION claimius.init_prophet IS 'Bootstrap function. Sets up system
 -- ----------------------------------------------------------------------------
 -- init_disciple
 -- Bootstrap a fresh claimius deployment as a disciple. Records that this
--- instance is a disciple, sets up disciple_state, and grants the
--- disciple_client role. The actual data arrives via sync from the prophet.
+-- instance is a disciple, sets up disciple_state with the slug of the
+-- upstream prophet app this disciple mirrors, and grants the
+-- disciple_client role. Pass p_disciple_app_slug from an environment
+-- variable (e.g. CLAIMIUS_DISCIPLE_APP_SLUG) so the same migration
+-- artefact can be deployed against any prophet. The actual data arrives
+-- via sync from the prophet.
 -- ----------------------------------------------------------------------------
 
-CREATE OR REPLACE FUNCTION claimius.init_disciple()
+CREATE OR REPLACE FUNCTION claimius.init_disciple(
+    p_disciple_app_slug TEXT
+)
     RETURNS JSONB AS $$
 BEGIN
-    -- Singleton row in disciple_state (internal, not returned).
-    -- disciple_state has no unique constraint other than PK, so SELECT-then-INSERT
-    -- to keep this idempotent without relying on ON CONFLICT inference.
+    IF p_disciple_app_slug IS NULL OR p_disciple_app_slug = '' THEN
+        RAISE EXCEPTION 'init_disciple: p_disciple_app_slug is required.';
+    END IF;
+
+    -- Singleton row in disciple_state. SELECT-then-INSERT, then UPDATE the
+    -- slug so re-running init_disciple with a different slug is allowed
+    -- (idempotent for the same value, corrective for a wrong one).
     IF NOT EXISTS (SELECT 1 FROM claimius.disciple_state) THEN
-        INSERT INTO claimius.disciple_state (last_applied_seq) VALUES (0);
+        INSERT INTO claimius.disciple_state (last_applied_seq, disciple_app_slug)
+        VALUES (0, p_disciple_app_slug);
+    ELSE
+        UPDATE claimius.disciple_state
+        SET disciple_app_slug = p_disciple_app_slug,
+            sa_updated_at = now()
+        WHERE disciple_app_slug <> p_disciple_app_slug;
     END IF;
 
     -- Roles: disciple gets reader plus disciple_client
     PERFORM claimius._grant_disciple_roles();
 
-    RAISE NOTICE 'Disciple initialized. Sync layer must populate samna_app and other tables from prophet.';
+    RAISE NOTICE 'Disciple initialized for app slug %. Sync layer must populate samna_app and other tables from prophet.', p_disciple_app_slug;
 
     -- Disciples have nothing user meaningful to return: state arrives via
     -- sync. We return an empty jsonb so the function has the same return
@@ -1408,7 +1486,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius.init_disciple IS 'Bootstrap as a disciple. State arrives from prophet via sync.';
+COMMENT ON FUNCTION claimius.init_disciple IS 'Bootstrap as a disciple. Requires the upstream prophet app slug. State arrives from prophet via sync.';
 
 -- ----------------------------------------------------------------------------
 -- init_hybrid
@@ -1422,6 +1500,7 @@ CREATE OR REPLACE FUNCTION claimius.init_hybrid(
     p_system_app_name          TEXT,
     p_system_app_private_key   TEXT,
     p_system_app_private_seed  TEXT,
+    p_disciple_app_slug        TEXT,
     p_system_user_id           UUID DEFAULT gen_random_uuid(),
     p_system_app_redirect_uri  TEXT DEFAULT '',
     p_system_app_sync_uri      TEXT DEFAULT '',
@@ -1448,7 +1527,7 @@ BEGIN
             p_system_claim_name, p_system_claim_id,
             p_default_claim
                 );
-    PERFORM claimius.init_disciple();
+    PERFORM claimius.init_disciple(p_disciple_app_slug);
     PERFORM claimius._grant_hybrid_roles();
     RAISE NOTICE 'Hybrid initialized.';
     RETURN v_result;

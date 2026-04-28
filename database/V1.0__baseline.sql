@@ -538,22 +538,31 @@ CREATE INDEX IF NOT EXISTS idx_sync_event_type_seq ON claimius.sync_event (event
 
 -- prophet_state
 -- Per app cursor on the prophet side. Tracks the highest sync_event.seq
--- already published to disciples for this app.
+-- already published to disciples for this app. Additionally carries the
+-- system_app_slug marker on the system app's row (NULL on every other row),
+-- which is how get_prophet_app finds the deployment's system app.
 CREATE TABLE IF NOT EXISTS claimius.prophet_state (
                                                       id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
                                                       app_id              UUID NOT NULL UNIQUE REFERENCES claimius.samna_app(id),
                                                       last_applied_seq    BIGINT NOT NULL DEFAULT 0,
+                                                      system_app_slug     TEXT,
                                                       sa_updated_at       TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-COMMENT ON TABLE claimius.prophet_state IS 'Per app publishing cursor.';
+CREATE UNIQUE INDEX IF NOT EXISTS idx_prophet_state_system_singleton
+    ON claimius.prophet_state (system_app_slug)
+    WHERE system_app_slug IS NOT NULL;
+
+COMMENT ON TABLE claimius.prophet_state IS 'Per app publishing cursor. system_app_slug marks the deployment system app row.';
 
 -- disciple_state
 -- Singleton cursor on the disciple side. Tracks the highest sync_event.seq
--- already applied locally.
+-- already applied locally. disciple_app_slug records which app this disciple
+-- mirrors from upstream prophet; set by init_disciple.
 CREATE TABLE IF NOT EXISTS claimius.disciple_state (
                                                        id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
                                                        last_applied_seq    BIGINT NOT NULL DEFAULT 0,
+                                                       disciple_app_slug   TEXT NOT NULL,
                                                        sa_updated_at       TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
