@@ -24,7 +24,7 @@ func (d *DB) GetClient(ctx context.Context, clientID uuid.UUID) (*SamnaClient, e
 }
 
 func (d *DB) GetClientClaims(ctx context.Context, clientID uuid.UUID) ([]UserClaim, error) {
-	var claims []UserClaim
+	claims := make([]UserClaim, 0)
 	err := d.NewSelect().
 		Model(&claims).
 		Where("user_id = ?", clientID).

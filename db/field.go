@@ -7,7 +7,7 @@ import (
 )
 
 func (d *DB) GetObjectFields(ctx context.Context) ([]ObjectField, error) {
-	var fields []ObjectField
+	fields := make([]ObjectField, 0)
 	err := d.NewSelect().
 		Model(&fields).
 		Where("sa_deleted_at IS NULL").
@@ -33,7 +33,7 @@ func (d *DB) GetObjectField(ctx context.Context, fieldID uuid.UUID) (*ObjectFiel
 }
 
 func (d *DB) GetUserFields(ctx context.Context, fieldID uuid.UUID) ([]UserField, error) {
-	var fields []UserField
+	fields := make([]UserField, 0)
 	err := d.NewSelect().
 		Model(&fields).
 		Where("field_id = ?", fieldID).

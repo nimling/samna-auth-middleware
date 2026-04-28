@@ -7,7 +7,7 @@ import (
 )
 
 func (d *DB) GetAssets(ctx context.Context) ([]Asset, error) {
-	var assets []Asset
+	assets := make([]Asset, 0)
 	err := d.NewSelect().
 		Model(&assets).
 		Where("sa_deleted_at IS NULL").
@@ -33,7 +33,7 @@ func (d *DB) GetAsset(ctx context.Context, assetID uuid.UUID) (*Asset, error) {
 }
 
 func (d *DB) GetUserAssets(ctx context.Context, userID uuid.UUID) ([]Asset, error) {
-	var assets []Asset
+	assets := make([]Asset, 0)
 	err := d.NewSelect().
 		Model(&assets).
 		Where("user_id = ?", userID).

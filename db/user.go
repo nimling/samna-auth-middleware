@@ -22,7 +22,7 @@ func (d *DB) GetUser(ctx context.Context, userID uuid.UUID, relations ...Relatio
 }
 
 func (d *DB) GetUsers(ctx context.Context, userID uuid.UUID, accessLevel ClaimAccessLevel) ([]SamnaUser, error) {
-	var users []SamnaUser
+	users := make([]SamnaUser, 0)
 	err := d.NewSelect().
 		Model(&users).
 		Where("samna_user.user_id IN (SELECT user_id FROM claimius.get_users(?, claimius.get_disciple_app_id(), ?))", userID, accessLevel).
@@ -34,7 +34,7 @@ func (d *DB) GetUsers(ctx context.Context, userID uuid.UUID, accessLevel ClaimAc
 }
 
 func (d *DB) GetUserClaims(ctx context.Context, userID uuid.UUID) ([]UserClaim, error) {
-	var claims []UserClaim
+	claims := make([]UserClaim, 0)
 	err := d.NewSelect().
 		Model(&claims).
 		Relation("Owner").
@@ -48,7 +48,7 @@ func (d *DB) GetUserClaims(ctx context.Context, userID uuid.UUID) ([]UserClaim, 
 }
 
 func (d *DB) GetUserRelations(ctx context.Context, userID uuid.UUID) ([]UserRelation, error) {
-	var relations []UserRelation
+	relations := make([]UserRelation, 0)
 	err := d.NewSelect().
 		Model(&relations).
 		Where("user_id = ?", userID).
@@ -61,7 +61,7 @@ func (d *DB) GetUserRelations(ctx context.Context, userID uuid.UUID) ([]UserRela
 }
 
 func (d *DB) GetRelation(ctx context.Context, userID uuid.UUID, objectID uuid.UUID) ([]UserRelation, error) {
-	var relations []UserRelation
+	relations := make([]UserRelation, 0)
 	err := d.NewSelect().
 		Model(&relations).
 		Where("user_id = ?", userID).
@@ -85,7 +85,7 @@ func (d *DB) PutUser(ctx context.Context, userID uuid.UUID, user *SamnaUser) err
 }
 
 func (d *DB) GetUserAudit(ctx context.Context, userID uuid.UUID) ([]Audit, error) {
-	var audits []Audit
+	audits := make([]Audit, 0)
 	err := d.NewSelect().
 		Model(&audits).
 		Where("object_type = ?", OBJECT_TYPE_USER).

@@ -14,7 +14,7 @@ type BodySecret struct {
 }
 
 func (d *DB) GetSecrets(ctx context.Context, userID uuid.UUID, accessLevel ClaimAccessLevel) ([]SamnaSecret, error) {
-	var secrets []SamnaSecret
+	secrets := make([]SamnaSecret, 0)
 	err := d.NewRaw("SELECT * FROM claimius.get_secrets(?, claimius.get_disciple_app_id(), ?)", userID, accessLevel).
 		Scan(ctx, &secrets)
 	if err != nil {

@@ -22,7 +22,7 @@ func (d *DB) GetOrganization(ctx context.Context, orgID uuid.UUID, relations ...
 }
 
 func (d *DB) GetOrganizations(ctx context.Context, userID uuid.UUID, accessLevel ClaimAccessLevel, relations ...RelationFunc) ([]Organization, error) {
-	var orgs []Organization
+	orgs := make([]Organization, 0)
 	q := d.NewSelect().
 		Model(&orgs).
 		Where("organization.id IN (SELECT object_id FROM claimius.get_objects(?, claimius.get_disciple_app_id(), ?, ?))", userID, OBJECT_TYPE_ORGANIZATION, accessLevel)
@@ -35,7 +35,7 @@ func (d *DB) GetOrganizations(ctx context.Context, userID uuid.UUID, accessLevel
 }
 
 func (d *DB) GetChildOrganizations(ctx context.Context, startID uuid.UUID) ([]uuid.UUID, error) {
-	var ids []uuid.UUID
+	ids := make([]uuid.UUID, 0)
 	err := d.NewRaw(`
 		WITH RECURSIVE descendants AS (
 			SELECT id, sa_owner_id
@@ -56,7 +56,7 @@ func (d *DB) GetChildOrganizations(ctx context.Context, startID uuid.UUID) ([]uu
 }
 
 func (d *DB) GetParentOrganizations(ctx context.Context, startID uuid.UUID) ([]uuid.UUID, error) {
-	var ids []uuid.UUID
+	ids := make([]uuid.UUID, 0)
 	err := d.NewRaw(`
 		WITH RECURSIVE ancestors AS (
 			SELECT id, sa_owner_id
@@ -115,7 +115,7 @@ func (d *DB) DeleteOrganization(ctx context.Context, orgID uuid.UUID) error {
 }
 
 func (d *DB) GetOrganizationAudit(ctx context.Context, orgID uuid.UUID) ([]Audit, error) {
-	var audits []Audit
+	audits := make([]Audit, 0)
 	err := d.NewSelect().
 		Model(&audits).
 		Where("object_type = ?", OBJECT_TYPE_ORGANIZATION).

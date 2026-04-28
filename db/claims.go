@@ -7,7 +7,7 @@ import (
 )
 
 func (d *DB) GetAccess(ctx context.Context, userID, objectID uuid.UUID, objectType string, accessLevel ClaimAccessLevel) (*AccessClaim, error) {
-	var claims []AccessClaim
+	claims := make([]AccessClaim, 0)
 	err := d.NewSelect().
 		TableExpr("claimius.get_access(?, claimius.get_disciple_app_id(), ?, ?, ?) AS claim", userID, objectID, objectType, accessLevel).
 		Column("claim.*").
@@ -37,7 +37,7 @@ func (d *DB) GetClaim(ctx context.Context, userID, claimID uuid.UUID, accessLeve
 }
 
 func (d *DB) GetClaims(ctx context.Context, userID uuid.UUID, accessLevel ClaimAccessLevel, relations ...RelationFunc) ([]Claim, error) {
-	var claims []Claim
+	claims := make([]Claim, 0)
 	q := d.NewSelect().
 		Model(&claims).
 		Where("claim.id IN (SELECT id FROM claimius.get_claims(?, claimius.get_disciple_app_id(), ?))", userID, accessLevel)
@@ -50,7 +50,7 @@ func (d *DB) GetClaims(ctx context.Context, userID uuid.UUID, accessLevel ClaimA
 }
 
 func (d *DB) GetClaimAudit(ctx context.Context, claimID uuid.UUID) ([]Audit, error) {
-	var audits []Audit
+	audits := make([]Audit, 0)
 	err := d.NewSelect().
 		Model(&audits).
 		Where("object_type = ?", OBJECT_TYPE_CLAIM).
@@ -78,7 +78,7 @@ type SearchResult struct {
 }
 
 func (d *DB) Search(ctx context.Context, userID uuid.UUID, query string, objectTypes []string, accessLevel ClaimAccessLevel, limit int, offset int) ([]SearchResult, error) {
-	var results []SearchResult
+	results := make([]SearchResult, 0)
 	err := d.NewRaw(
 		`SELECT * FROM claimius.search_objects(?, claimius.get_disciple_app_id(), ?, ?::text[], ?, ?, ?)`,
 		userID, query, objectTypes, accessLevel, limit, offset,
@@ -90,7 +90,7 @@ func (d *DB) Search(ctx context.Context, userID uuid.UUID, query string, objectT
 }
 
 func (d *DB) GetAudit(ctx context.Context, userID uuid.UUID, accessLevel ClaimAccessLevel) ([]Audit, error) {
-	var audits []Audit
+	audits := make([]Audit, 0)
 	err := d.NewSelect().
 		TableExpr("claimius.get_audit(?, claimius.get_disciple_app_id(), ?) AS audit", userID, accessLevel).
 		Column("audit.*").
@@ -107,7 +107,7 @@ func (d *DB) HasAccess(ctx context.Context, userID, objectID uuid.UUID, objectTy
 }
 
 func (d *DB) GetObjectClaims(ctx context.Context, userID, objectID uuid.UUID, objectType string) ([]Claim, error) {
-	var claims []Claim
+	claims := make([]Claim, 0)
 	err := d.NewSelect().
 		Model(&claims).
 		Where("claim.id IN (SELECT id FROM claimius.get_claims(?, claimius.get_disciple_app_id(), ?, ?))", userID, objectID, objectType).
@@ -116,7 +116,7 @@ func (d *DB) GetObjectClaims(ctx context.Context, userID, objectID uuid.UUID, ob
 }
 
 func (d *DB) GetOwnerGraph(ctx context.Context, userID uuid.UUID, accessLevel ClaimAccessLevel) ([]GraphNode, error) {
-	var nodes []GraphNode
+	nodes := make([]GraphNode, 0)
 	err := d.NewSelect().
 		TableExpr("claimius.get_owner_graph(?, claimius.get_disciple_app_id(), ?) AS graph", userID, accessLevel).
 		Column("graph.*").
@@ -125,7 +125,7 @@ func (d *DB) GetOwnerGraph(ctx context.Context, userID uuid.UUID, accessLevel Cl
 }
 
 func (d *DB) GetClaimGraph(ctx context.Context, userID uuid.UUID, accessLevel ClaimAccessLevel) ([]GraphNode, error) {
-	var nodes []GraphNode
+	nodes := make([]GraphNode, 0)
 	err := d.NewSelect().
 		TableExpr("claimius.get_claim_graph(?, claimius.get_disciple_app_id(), ?) AS graph", userID, accessLevel).
 		Column("graph.*").

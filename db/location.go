@@ -22,7 +22,7 @@ func (d *DB) GetLocation(ctx context.Context, locationID uuid.UUID, relations ..
 }
 
 func (d *DB) GetLocations(ctx context.Context, userID uuid.UUID, accessLevel ClaimAccessLevel, relations ...RelationFunc) ([]Location, error) {
-	var locs []Location
+	locs := make([]Location, 0)
 	q := d.NewSelect().
 		Model(&locs).
 		Where("location.id IN (SELECT object_id FROM claimius.get_objects(?, claimius.get_disciple_app_id(), ?, ?))", userID, OBJECT_TYPE_LOCATION, accessLevel)
@@ -35,7 +35,7 @@ func (d *DB) GetLocations(ctx context.Context, userID uuid.UUID, accessLevel Cla
 }
 
 func (d *DB) GetChildLocations(ctx context.Context, startID uuid.UUID) ([]uuid.UUID, error) {
-	var ids []uuid.UUID
+	ids := make([]uuid.UUID, 0)
 	err := d.NewRaw(`
 		WITH RECURSIVE descendants AS (
 			SELECT id, sa_parent_id
@@ -56,7 +56,7 @@ func (d *DB) GetChildLocations(ctx context.Context, startID uuid.UUID) ([]uuid.U
 }
 
 func (d *DB) GetParentLocations(ctx context.Context, startID uuid.UUID) ([]uuid.UUID, error) {
-	var ids []uuid.UUID
+	ids := make([]uuid.UUID, 0)
 	err := d.NewRaw(`
 		WITH RECURSIVE ancestors AS (
 			SELECT id, sa_parent_id
@@ -115,7 +115,7 @@ func (d *DB) DeleteLocation(ctx context.Context, locationID uuid.UUID) error {
 }
 
 func (d *DB) GetLocationAudit(ctx context.Context, locationID uuid.UUID) ([]Audit, error) {
-	var audits []Audit
+	audits := make([]Audit, 0)
 	err := d.NewSelect().
 		Model(&audits).
 		Where("object_type = ?", OBJECT_TYPE_LOCATION).
