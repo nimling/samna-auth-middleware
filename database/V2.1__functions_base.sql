@@ -130,10 +130,14 @@ COMMENT ON FUNCTION claimius.in_replay_mode() IS 'True when claimius.replay_mode
 
 -- get_subtree
 -- Returns (object_type, object_id) pairs from an inheritance_info tree,
--- starting at (p_start_type, p_start_id) and descending. If start is null,
--- returns everything from the root downward (excluding the root itself,
--- since the root is identified by inheritance_info.root_id and not stored
--- in the tree jsonb).
+-- starting at (p_start_type, p_start_id) and descending.
+--   - If start is null: returns everything below the root, root itself excluded.
+--   - If start equals the root: returns the root plus the entire tree below it.
+--   - Otherwise: looks up the start node inside the tree, returns the start
+--     plus its descendants.
+-- The root identity is (p_object_type, p_root_id) and is not stored inside
+-- the tree jsonb (only descendants are), so the start-equals-root case has
+-- to be handled explicitly.
 CREATE OR REPLACE FUNCTION claimius.get_subtree(
     p_object_type   TEXT,
     p_root_id       UUID,
@@ -154,6 +158,10 @@ BEGIN
     END IF;
 
     IF p_start_type IS NULL OR p_start_id IS NULL THEN
+        v_subtree := v_tree;
+    ELSIF p_start_type = p_object_type AND p_start_id = p_root_id THEN
+        -- Start at the root: emit the root identity, then walk the full tree.
+        RETURN QUERY SELECT p_start_type, p_start_id;
         v_subtree := v_tree;
     ELSE
         v_start_key := claimius.composite_id(p_start_type, p_start_id::TEXT);
