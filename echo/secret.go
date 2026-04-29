@@ -61,7 +61,7 @@ func PostSecret(ctx echo.Context) error {
 		secret, err := db.Instance().PostSecret(ctx.Request().Context(), reqBody)
 		if err != nil {
 			ctx.Logger().Errorf("PostSecret: %v", err)
-			return respondError(ctx, http.StatusInternalServerError, err.Error())
+			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 		}
 		return respondJSON(ctx, http.StatusCreated, secret, 1)
 	}
@@ -90,7 +90,7 @@ func PutSecret(ctx echo.Context) error {
 		secret, err := db.Instance().PutSecret(ctx.Request().Context(), secretID, reqBody)
 		if err != nil {
 			ctx.Logger().Errorf("PutSecret: %v", err)
-			return respondError(ctx, http.StatusInternalServerError, err.Error())
+			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 		}
 		return respondJSON(ctx, http.StatusOK, secret, 1)
 	}

@@ -1,7 +1,6 @@
 package echo
 
 import (
-	"fmt"
 	"io"
 	"net/http"
 
@@ -65,7 +64,7 @@ func GetAssetData(ctx echo.Context) error {
 			return respondError(ctx, http.StatusNotFound, "Not found")
 		}
 		if asset.BlobURL == nil || *asset.BlobURL == "" {
-			return respondError(ctx, http.StatusNotFound, "asset has no blob_url")
+			return respondError(ctx, http.StatusNotFound, "Not found")
 		}
 		req, err := http.NewRequestWithContext(ctx.Request().Context(), http.MethodGet, *asset.BlobURL, nil)
 		if err != nil {
@@ -75,11 +74,11 @@ func GetAssetData(ctx echo.Context) error {
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
 			ctx.Logger().Errorf("GetAssetData fetch blob: %v", err)
-			return respondError(ctx, http.StatusBadGateway, fmt.Sprintf("blob fetch failed: %v", err))
+			return respondError(ctx, http.StatusBadGateway, "Bad gateway")
 		}
 		defer resp.Body.Close()
 		if resp.StatusCode != http.StatusOK {
-			return respondError(ctx, resp.StatusCode, "blob fetch returned non-200")
+			return respondError(ctx, resp.StatusCode, "Bad gateway")
 		}
 		contentType := resp.Header.Get("Content-Type")
 		if contentType == "" {
@@ -131,7 +130,7 @@ func PostAssetData(ctx echo.Context) error {
 			return respondError(ctx, http.StatusNotFound, "Not found")
 		}
 		if asset.BlobURL == nil || *asset.BlobURL == "" {
-			return respondError(ctx, http.StatusBadRequest, "asset has no blob_url; set blob_url on the asset row before uploading data")
+			return respondError(ctx, http.StatusBadRequest, "Bad request")
 		}
 		req, err := http.NewRequestWithContext(ctx.Request().Context(), http.MethodPut, *asset.BlobURL, ctx.Request().Body)
 		if err != nil {
@@ -142,12 +141,12 @@ func PostAssetData(ctx echo.Context) error {
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
 			ctx.Logger().Errorf("PostAssetData put blob: %v", err)
-			return respondError(ctx, http.StatusBadGateway, fmt.Sprintf("blob put failed: %v", err))
+			return respondError(ctx, http.StatusBadGateway, "Bad gateway")
 		}
 		defer resp.Body.Close()
 		if resp.StatusCode >= 300 {
-			body, _ := io.ReadAll(resp.Body)
-			return respondError(ctx, resp.StatusCode, fmt.Sprintf("blob put returned %d: %s", resp.StatusCode, string(body)))
+			io.Copy(io.Discard, resp.Body)
+			return respondError(ctx, resp.StatusCode, "Bad gateway")
 		}
 		return respondJSON(ctx, http.StatusOK, asset, 1)
 	}

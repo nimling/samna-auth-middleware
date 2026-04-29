@@ -13,7 +13,7 @@ import (
 func GetSearch(ctx echo.Context) error {
 	query := ctx.QueryParam("q")
 	if query == "" {
-		return respondError(ctx, http.StatusBadRequest, "q is required")
+		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
 
 	var objectTypes []string

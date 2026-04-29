@@ -91,7 +91,7 @@ The `get_*` family includes:
 - `get_secrets(user, app, min_level)` - visible secrets
 - `get_owner_graph(user, app, start_id?, depth?, min_level?)` - ownership graph (orgs, locations, registered tables with sa_owner_id/sa_location_id). `start_id` = an org to root from (NULL = all roots); `depth` = levels of descent (0 = unlimited). Each row: `(object_id, object_type, label, parent_id, data jsonb)`. `object_type` is schema-qualified (`'claimius.organization'`, `'public.bookable'`, etc.). `data` always carries `access_level` and `level` plus per-type fallback fields with `sa_` prefixes stripped (`owner_id` not `sa_owner_id`).
 - `get_claim_graph(user, app, start_id?, depth?, min_level?)` - access graph (user, other users seen, claims, user_claims, claim_object connectors, reachable objects). `start_id` = a single claim (NULL = all the user holds); `depth` = 0 includes cascaded objects, >= 1 direct only. Same row shape as `get_owner_graph`. Topology connects user -> user_claim and claim -> claim_object -> object so the frontend gets a connected graph.
-- `search_objects(user, app, query, types, min_level, limit, offset)` - full text search
+- `search(user, app, query, types, min_level, limit, offset)` - full text search
 
 ### Writes: function if it exists, direct INSERT otherwise
 
@@ -265,12 +265,12 @@ If you're tempted to skip steps because "the FK doesn't exist yet anyway," stop 
 
 ```sql
 SELECT claimius.ensure_app_user(
-    p_user_id    => $user_id,
-    p_app_id     => $app_id,
-    p_first_name => $first,
-    p_last_name  => $last,
-    p_email      => $email
-);
+           p_user_id    => $user_id,
+           p_app_id     => $app_id,
+           p_first_name => $first,
+           p_last_name  => $last,
+           p_email      => $email
+       );
 ```
 
 This creates the per app `samna_user` row idempotently. Use the returned row.
@@ -280,7 +280,7 @@ This creates the per app `samna_user` row idempotently. Use the returned row.
 ```sql
 -- Simplest case: yes/no.
 SELECT EXISTS (
-    SELECT 1 FROM claimius.get_access($user_id, $app_id, $object_id, $object_type, $required_level)
+   SELECT 1 FROM claimius.get_access($user_id, $app_id, $object_id, $object_type, $required_level)
 );
 ```
 

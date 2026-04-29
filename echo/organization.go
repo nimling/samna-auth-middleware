@@ -123,7 +123,10 @@ func PostOrganization(ctx echo.Context) error {
 			return respondError(ctx, http.StatusBadRequest, "Bad request")
 		}
 		if org.OwnerID == (uuid.UUID{}) {
-			return respondError(ctx, http.StatusBadRequest, "owner_id is required")
+			return respondError(ctx, http.StatusBadRequest, "Bad request")
+		}
+		if org.Type == db.ORGANIZATION_TYPE_SYSTEM {
+			return respondError(ctx, http.StatusBadRequest, "Bad request")
 		}
 		claims, err := db.Instance().GetAccess(ctx.Request().Context(), *debugUserID, org.OwnerID, db.OBJECT_TYPE_ORGANIZATION, db.ACCESS_LEVEL_WRITE)
 		if err != nil {
@@ -145,6 +148,9 @@ func PostOrganization(ctx echo.Context) error {
 
 	var org db.Organization
 	if err := ctx.Bind(&org); err != nil {
+		return respondError(ctx, http.StatusBadRequest, "Bad request")
+	}
+	if org.Type == db.ORGANIZATION_TYPE_SYSTEM {
 		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
 	result, err := client.PostOrganization(ctx.Request().Context(), org)
@@ -175,6 +181,9 @@ func PutOrganization(ctx echo.Context) error {
 		if err := ctx.Bind(&org); err != nil {
 			return respondError(ctx, http.StatusBadRequest, "Bad request")
 		}
+		if org.Type == db.ORGANIZATION_TYPE_SYSTEM {
+			return respondError(ctx, http.StatusBadRequest, "Bad request")
+		}
 		if err := db.Instance().PutOrganization(ctx.Request().Context(), orgID, &org); err != nil {
 			ctx.Logger().Errorf("PutOrganization: %v", err)
 			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
@@ -184,6 +193,9 @@ func PutOrganization(ctx echo.Context) error {
 
 	var org db.Organization
 	if err := ctx.Bind(&org); err != nil {
+		return respondError(ctx, http.StatusBadRequest, "Bad request")
+	}
+	if org.Type == db.ORGANIZATION_TYPE_SYSTEM {
 		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
 	result, err := client.PutOrganization(ctx.Request().Context(), orgID, org)

@@ -262,7 +262,7 @@ SELECT * FROM claimius.get_objects(
 );
 
 -- Full text search across accessible objects:
-SELECT * FROM claimius.search_objects(
+SELECT * FROM claimius.search(
     p_user_id => :user_id,
     p_app_id  => :app_id,
     p_query   => 'thermostat kitchen'
@@ -271,7 +271,7 @@ SELECT * FROM claimius.search_objects(
 
 ### `user_claim_id` and the actor token contract
 
-`get_access`, `get_objects`, and `search_objects` return a `user_claim_id` column alongside the access information. This is the **actor token** the caller uses as `sa_created_by` on follow on writes.
+`get_access`, `get_objects`, and `search` return a `user_claim_id` column alongside the access information. This is the **actor token** the caller uses as `sa_created_by` on follow on writes.
 
 The contract: when `claim_id` is non null on the returned row, `user_claim_id` is also populated. When access is direct only (`direct_grant = true`, no surviving claim), `user_claim_id` is null. Callers needing an actor for direct only access must resolve a fallback user_claim themselves, typically the user's bootstrap user_claim for the app.
 
@@ -284,7 +284,7 @@ FROM claimius.get_access(
     p_object_id   => :recipe_id,
     p_object_type => 'public.recipe',
     p_min_level   => 4
-);
+     );
 
 -- Now use it as the actor for the write.
 UPDATE public.recipe SET name = :new_name, sa_created_by = :acting_user_claim
@@ -421,13 +421,13 @@ A root org self references on `sa_owner_id` and `sa_root_id`.
 
 ```sql
 WITH new_org AS (
-    INSERT INTO claimius.organization (
-        app_id, name, type,
-        sa_owner_id, sa_root_id, sa_level, sa_created_by
-    ) VALUES (
-        :app_id, 'Acme Inc', 'company',
-        gen_random_uuid(), gen_random_uuid(), 0, :acting_user_claim
-    ) RETURNING id
+   INSERT INTO claimius.organization (
+                                      app_id, name, type,
+                                      sa_owner_id, sa_root_id, sa_level, sa_created_by
+      ) VALUES (
+                  :app_id, 'Acme Inc', 'company',
+                  gen_random_uuid(), gen_random_uuid(), 0, :acting_user_claim
+               ) RETURNING id
 )
 UPDATE claimius.organization
 SET sa_owner_id = id, sa_root_id = id
@@ -460,25 +460,25 @@ A location requires an owning organization. Top level locations self reference o
 ```sql
 -- Root location:
 WITH new_loc AS (
-    INSERT INTO claimius.location (
-        app_id, sa_owner_id, name, type,
-        sa_parent_id, sa_root_id, sa_level, sa_created_by
-    ) VALUES (
-        :app_id, :org_id, 'Headquarters', 'building',
-        gen_random_uuid(), gen_random_uuid(), 0, :acting_user_claim
-    ) RETURNING id
+   INSERT INTO claimius.location (
+                                  app_id, sa_owner_id, name, type,
+                                  sa_parent_id, sa_root_id, sa_level, sa_created_by
+      ) VALUES (
+                  :app_id, :org_id, 'Headquarters', 'building',
+                  gen_random_uuid(), gen_random_uuid(), 0, :acting_user_claim
+               ) RETURNING id
 )
 UPDATE claimius.location SET sa_parent_id = id, sa_root_id = id
 WHERE id = (SELECT id FROM new_loc);
 
 -- Child location:
 INSERT INTO claimius.location (
-    app_id, sa_owner_id, name, type,
-    sa_parent_id, sa_root_id, sa_level, sa_created_by
+   app_id, sa_owner_id, name, type,
+   sa_parent_id, sa_root_id, sa_level, sa_created_by
 ) VALUES (
-    :app_id, :org_id, 'Conference Room A', 'room',
-    :parent_loc_id, :parent_loc_root_id, :parent_level + 1, :acting_user_claim
-);
+            :app_id, :org_id, 'Conference Room A', 'room',
+            :parent_loc_id, :parent_loc_root_id, :parent_level + 1, :acting_user_claim
+         );
 ```
 
 After: calc trigger updates the location tree and (if applicable) splices the location into the owning org's ownership tree.
@@ -489,10 +489,10 @@ Just a normal INSERT with the required `sa_*` columns. The calc trigger attached
 
 ```sql
 INSERT INTO public.device (
-    id, app_id, name, sa_owner_id, sa_created_by
+   id, app_id, name, sa_owner_id, sa_created_by
 ) VALUES (
-    gen_random_uuid(), :app_id, 'Thermostat 1', :org_id, :acting_user_claim
-);
+            gen_random_uuid(), :app_id, 'Thermostat 1', :org_id, :acting_user_claim
+         );
 ```
 
 If your table has `sa_location_id`, set it to a valid location id and the row will also appear in that location's tree. If your table has `sa_parent_id`/`sa_root_id`, set both, and either point at a parent (child case) or point at self (root case).
@@ -506,35 +506,35 @@ This is the standard pattern whenever you create a new "thing" and want someone 
 ```sql
 -- 1. Create the claim
 SELECT claimius.create_claim(
-    p_app_id          => :app_id,
-    p_name            => 'Admin: Acme NYC',
-    p_description     => 'Full access to Acme NYC and descendants',
-    p_sa_access_level => 1,
-    p_sa_owner_id     => :org_id,
-    p_sa_root_id      => :root_org_id,
-    p_sa_created_by   => :acting_user_claim
-);
+           p_app_id          => :app_id,
+           p_name            => 'Admin: Acme NYC',
+           p_description     => 'Full access to Acme NYC and descendants',
+           p_sa_access_level => 1,
+           p_sa_owner_id     => :org_id,
+           p_sa_root_id      => :root_org_id,
+           p_sa_created_by   => :acting_user_claim
+       );
 
 -- 2. Bind it to the object
 SELECT claimius.assign_claim_object(
-    p_app_id        => :app_id,
-    p_claim_id      => :claim_id,
-    p_object_id     => :org_id,
-    p_object_type   => 'claimius.organization',
-    p_sa_owner_id   => :org_id,
-    p_sa_root_id    => :root_org_id,
-    p_sa_created_by => :acting_user_claim,
-    p_inherits      => TRUE
-);
+           p_app_id        => :app_id,
+           p_claim_id      => :claim_id,
+           p_object_id     => :org_id,
+           p_object_type   => 'claimius.organization',
+           p_sa_owner_id   => :org_id,
+           p_sa_root_id    => :root_org_id,
+           p_sa_created_by => :acting_user_claim,
+           p_inherits      => TRUE
+       );
 
 -- 3. Grant the claim to the user
 SELECT claimius.assign_claim_user(
-    p_app_id        => :app_id,
-    p_claim_id      => :claim_id,
-    p_user_id       => :user_id,
-    p_sa_owner_id   => :org_id,
-    p_sa_created_by => :acting_user_claim
-);
+           p_app_id        => :app_id,
+           p_claim_id      => :claim_id,
+           p_user_id       => :user_id,
+           p_sa_owner_id   => :org_id,
+           p_sa_created_by => :acting_user_claim
+       );
 ```
 
 After each step, calc triggers fan out and recompute `user_object` for affected users. By the end of step 3, the user can immediately read through `get_*` functions.
@@ -543,14 +543,14 @@ After each step, calc triggers fan out and recompute `user_object` for affected 
 
 ```sql
 SELECT claimius.ensure_app_user(
-    p_user_id    => :user_id,
-    p_app_id     => :app_id,
-    p_first_name => :first,
-    p_last_name  => :last,
-    p_user_name  => :user_name,
-    p_user_image => :user_image,
-    p_email      => :email
-);
+           p_user_id    => :user_id,
+           p_app_id     => :app_id,
+           p_first_name => :first,
+           p_last_name  => :last,
+           p_user_name  => :user_name,
+           p_user_image => :user_image,
+           p_email      => :email
+       );
 ```
 
 Idempotent. Inserts the `samna_user` row if missing. If the app has `samna_app.claim_id` set (the default claim, configured during `init_prophet` via `p_default_claim`), also grants that claim to the user as a `user_claim` row. Returns:
@@ -650,14 +650,14 @@ The graph functions surface what claimius knows: the structural ownership chain 
 
 ```sql
 CREATE OR REPLACE FUNCTION public.get_owner_graph(p_user_id UUID, p_start_id UUID DEFAULT NULL, p_depth INTEGER DEFAULT 0, p_min_level INTEGER DEFAULT 30)
-RETURNS TABLE(object_id UUID, object_type TEXT, label TEXT, parent_id UUID, data JSONB) AS $$
+   RETURNS TABLE(object_id UUID, object_type TEXT, label TEXT, parent_id UUID, data JSONB) AS $$
 DECLARE
-    v_app_id UUID := claimius.get_app_id();
+   v_app_id UUID := claimius.get_app_id();
 BEGIN
-    RETURN QUERY SELECT * FROM claimius.get_owner_graph(p_user_id, v_app_id, p_start_id, p_depth, p_min_level);
-    -- Add your own enrichment, override per-row data jsonb where you want
-    -- richer fields, etc. claimius's rows will still be there with the
-    -- canonical schema-qualified types.
+   RETURN QUERY SELECT * FROM claimius.get_owner_graph(p_user_id, v_app_id, p_start_id, p_depth, p_min_level);
+   -- Add your own enrichment, override per-row data jsonb where you want
+   -- richer fields, etc. claimius's rows will still be there with the
+   -- canonical schema-qualified types.
 END;
 $$ LANGUAGE plpgsql;
 ```

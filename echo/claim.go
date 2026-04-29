@@ -105,6 +105,12 @@ func PostClaim(ctx echo.Context) error {
 	if err := ctx.Bind(&claim); err != nil {
 		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
+	if claim.Type == db.CLAIM_TYPE_SYSTEM {
+		return respondError(ctx, http.StatusBadRequest, "Bad request")
+	}
+	if claim.AccessLevel == int(db.ACCESS_LEVEL_SYSTEM) {
+		return respondError(ctx, http.StatusBadRequest, "Bad request")
+	}
 	result, err := client.PostClaim(ctx.Request().Context(), claim)
 	if err != nil {
 		ctx.Logger().Errorf("PostClaim: %v", err)
@@ -121,6 +127,12 @@ func PutClaim(ctx echo.Context) error {
 
 	var claim db.Claim
 	if err := ctx.Bind(&claim); err != nil {
+		return respondError(ctx, http.StatusBadRequest, "Bad request")
+	}
+	if claim.Type == db.CLAIM_TYPE_SYSTEM {
+		return respondError(ctx, http.StatusBadRequest, "Bad request")
+	}
+	if claim.AccessLevel == int(db.ACCESS_LEVEL_SYSTEM) {
 		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
 	result, err := client.PutClaim(ctx.Request().Context(), claimID, claim)
