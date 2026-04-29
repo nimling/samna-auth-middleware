@@ -126,7 +126,6 @@ func PostLocation(ctx echo.Context) error {
 		}
 		loc.ID = uuid.UUID{}
 		loc.CreatedBy = *ac.UserClaimID
-		loc.RootID = ac.RootID
 		if err := db.Instance().PostLocation(ctx.Request().Context(), &loc); err != nil {
 			ctx.Logger().Errorf("PostLocation: %v", err)
 			return respondError(ctx, http.StatusInternalServerError, "Internal server error")

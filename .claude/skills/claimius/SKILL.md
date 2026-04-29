@@ -292,7 +292,7 @@ SELECT * FROM public.recipe WHERE kitchen_id = $kitchen_id;
 
 -- RIGHT: gated by user access
 SELECT r.*
-FROM public.recipe r
+FROM public.recipe rgit 
 WHERE r.id IN (
     SELECT object_id FROM claimius.get_objects($user_id, $app_id, 'public.recipe', $min_level)
 )

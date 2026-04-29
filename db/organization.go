@@ -84,13 +84,14 @@ func (d *DB) PostOrganization(ctx context.Context, org *Organization) error {
 		}
 		org.AppID = app.ID
 	}
-	q := d.NewInsert().
-		Model(org).
-		Returning("*")
 	if org.ID == (uuid.UUID{}) {
-		q = q.ExcludeColumn("id")
+		org.ID = uuid.New()
 	}
-	_, err := q.Exec(ctx, org)
+	_, err := d.NewInsert().
+		Model(org).
+		ExcludeColumn("sa_created_at", "sa_updated_at", "sa_deleted_at").
+		Returning("*").
+		Exec(ctx, org)
 	return err
 }
 
@@ -99,8 +100,10 @@ func (d *DB) PutOrganization(ctx context.Context, orgID uuid.UUID, org *Organiza
 		Model(org).
 		Where("id = ?", orgID).
 		Where("sa_deleted_at IS NULL").
+		ExcludeColumn("id", "sa_created_at", "sa_updated_at", "sa_deleted_at").
 		OmitZero().
-		Exec(ctx)
+		Returning("*").
+		Exec(ctx, org)
 	return err
 }
 

@@ -106,7 +106,7 @@ type Location struct {
 	ID          uuid.UUID     `bun:"id,pk,default:gen_random_uuid()" json:"id"`
 	AppID       uuid.UUID     `bun:"app_id" json:"-"`
 	OwnerID     uuid.UUID     `bun:"sa_owner_id" json:"owner_id"`
-	ParentID    uuid.UUID     `bun:"sa_parent_id" json:"parent_id"`
+	ParentID    *uuid.UUID    `bun:"sa_parent_id" json:"parent_id"`
 	RootID      uuid.UUID     `bun:"sa_root_id" json:"root_id"`
 	Name        *string       `bun:"name" json:"name"`
 	Description *string       `bun:"description" json:"description"`

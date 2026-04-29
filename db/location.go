@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/google/uuid"
 )
@@ -84,13 +85,23 @@ func (d *DB) PostLocation(ctx context.Context, loc *Location) error {
 		}
 		loc.AppID = app.ID
 	}
-	q := d.NewInsert().
-		Model(loc).
-		Returning("*")
 	if loc.ID == (uuid.UUID{}) {
-		q = q.ExcludeColumn("id")
+		loc.ID = uuid.New()
 	}
-	_, err := q.Exec(ctx, loc)
+	if loc.ParentID == nil {
+		loc.RootID = loc.ID
+	} else {
+		parent, err := d.GetLocation(ctx, *loc.ParentID)
+		if err != nil {
+			return fmt.Errorf("get parent location: %w", err)
+		}
+		loc.RootID = parent.RootID
+	}
+	_, err := d.NewInsert().
+		Model(loc).
+		ExcludeColumn("sa_created_at", "sa_updated_at", "sa_deleted_at").
+		Returning("*").
+		Exec(ctx, loc)
 	return err
 }
 
@@ -99,8 +110,10 @@ func (d *DB) PutLocation(ctx context.Context, locationID uuid.UUID, loc *Locatio
 		Model(loc).
 		Where("id = ?", locationID).
 		Where("sa_deleted_at IS NULL").
+		ExcludeColumn("id", "sa_created_at", "sa_updated_at", "sa_deleted_at").
 		OmitZero().
-		Exec(ctx)
+		Returning("*").
+		Exec(ctx, loc)
 	return err
 }
 

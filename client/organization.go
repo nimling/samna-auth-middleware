@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/nimling/samna-auth-middleware/db"
@@ -66,16 +65,7 @@ func GetOrganizationClaims(ctx context.Context, orgID uuid.UUID) (io.ReadCloser,
 
 func PostOrganization(ctx context.Context, org db.Organization) (db.Organization, error) {
 	if getDebugUserID() != nil {
-		app, err := db.Instance().GetApp(ctx)
-		if err != nil {
-			return org, err
-		}
-		org.ID = uuid.New()
-		org.AppID = app.ID
-		org.CreatedAt = time.Now()
-		org.UpdatedAt = time.Now()
-		_, err = db.Instance().NewInsert().Model(&org).Exec(ctx)
-		if err != nil {
+		if err := db.Instance().PostOrganization(ctx, &org); err != nil {
 			return org, fmt.Errorf("debug insert organization: %w", err)
 		}
 		return org, nil
@@ -98,10 +88,7 @@ func PostOrganization(ctx context.Context, org db.Organization) (db.Organization
 
 func PutOrganization(ctx context.Context, orgID uuid.UUID, org db.Organization) (db.Organization, error) {
 	if getDebugUserID() != nil {
-		org.ID = orgID
-		org.UpdatedAt = time.Now()
-		_, err := db.Instance().NewUpdate().Model(&org).Where("id = ?", orgID).OmitZero().Exec(ctx)
-		if err != nil {
+		if err := db.Instance().PutOrganization(ctx, orgID, &org); err != nil {
 			return org, fmt.Errorf("debug update organization: %w", err)
 		}
 		return org, nil

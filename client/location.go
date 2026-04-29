@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/nimling/samna-auth-middleware/db"
@@ -57,16 +56,7 @@ func GetLocationClaims(ctx context.Context, locationID uuid.UUID) (io.ReadCloser
 
 func PostLocation(ctx context.Context, loc db.Location) (db.Location, error) {
 	if getDebugUserID() != nil {
-		app, err := db.Instance().GetApp(ctx)
-		if err != nil {
-			return loc, err
-		}
-		loc.ID = uuid.New()
-		loc.AppID = app.ID
-		loc.CreatedAt = time.Now()
-		loc.UpdatedAt = time.Now()
-		_, err = db.Instance().NewInsert().Model(&loc).Exec(ctx)
-		if err != nil {
+		if err := db.Instance().PostLocation(ctx, &loc); err != nil {
 			return loc, fmt.Errorf("debug insert location: %w", err)
 		}
 		return loc, nil
@@ -89,10 +79,7 @@ func PostLocation(ctx context.Context, loc db.Location) (db.Location, error) {
 
 func PutLocation(ctx context.Context, locationID uuid.UUID, loc db.Location) (db.Location, error) {
 	if getDebugUserID() != nil {
-		loc.ID = locationID
-		loc.UpdatedAt = time.Now()
-		_, err := db.Instance().NewUpdate().Model(&loc).Where("id = ?", locationID).OmitZero().Exec(ctx)
-		if err != nil {
+		if err := db.Instance().PutLocation(ctx, locationID, &loc); err != nil {
 			return loc, fmt.Errorf("debug update location: %w", err)
 		}
 		return loc, nil
