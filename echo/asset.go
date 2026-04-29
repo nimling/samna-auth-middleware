@@ -103,6 +103,7 @@ func PostAsset(ctx echo.Context) error {
 	}
 
 	if getDebugUserID() != nil {
+		asset.ID = uuid.UUID{}
 		if err := db.Instance().PostAsset(ctx.Request().Context(), &asset); err != nil {
 			ctx.Logger().Errorf("PostAsset: %v", err)
 			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
