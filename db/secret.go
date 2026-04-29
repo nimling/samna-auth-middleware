@@ -25,7 +25,7 @@ func (d *DB) GetSecrets(ctx context.Context, userID uuid.UUID, accessLevel Claim
 
 func (d *DB) GetSecret(ctx context.Context, secretID uuid.UUID) (*SamnaSecret, error) {
 	var secret SamnaSecret
-	err := d.NewSelect().
+	err := d.NewSelect().ExcludeColumn("app_id").
 		Model(&secret).
 		Where("id = ?", secretID).
 		Where("sa_deleted_at IS NULL").

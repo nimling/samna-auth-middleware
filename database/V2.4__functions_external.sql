@@ -619,7 +619,7 @@ BEGIN
         SELECT l.id ,
                'claimius.location'::TEXT ,
                l.name::TEXT ,
-               CASE WHEN l.sa_parent_id = l.id THEN l.sa_owner_id ELSE l.sa_parent_id END ,
+               CASE WHEN l.sa_parent_id IS NULL THEN l.sa_owner_id ELSE l.sa_parent_id END ,
                jsonb_build_object(
                        'access_level', uo.sa_access_level,
                        'level', l.sa_level,
@@ -1677,6 +1677,59 @@ END;
 $$ LANGUAGE plpgsql STABLE;
 
 COMMENT ON FUNCTION claimius.get_app_id IS 'Returns the deployment own app id. Prophet/hybrid: system app. Pure disciple: upstream app.';
+
+-- ----------------------------------------------------------------------------
+-- create_root_organization
+-- Creates a new root organization (one with no parent in the ownership
+-- tree). Two phase self reference is handled internally so callers do not
+-- need to know the convention.
+--
+-- Returns the inserted row as jsonb keyed by table name. Idempotent on
+-- (app_id, name): if a non deleted org with the same name already exists in
+-- the app, returns that row instead of creating a new one.
+-- ----------------------------------------------------------------------------
+
+CREATE OR REPLACE FUNCTION claimius.create_root_organization(
+    p_app_id            UUID,
+    p_name              TEXT,
+    p_actor_user_claim_id UUID,
+    p_description       TEXT DEFAULT NULL,
+    p_type              TEXT DEFAULT 'standard',
+    p_id                UUID DEFAULT NULL
+) RETURNS JSONB AS $$
+DECLARE
+    v_id    UUID;
+    v_row   claimius.organization;
+BEGIN
+    -- Idempotency: existing root org with same (app, name)?
+    SELECT * INTO v_row
+    FROM claimius.organization
+    WHERE app_id = p_app_id
+      AND name = p_name
+      AND sa_deleted_at IS NULL
+      AND sa_owner_id = id
+    LIMIT 1;
+
+    IF v_row.id IS NOT NULL THEN
+        RETURN jsonb_build_object('organization', to_jsonb(v_row));
+    END IF;
+
+    v_id := coalesce(p_id, gen_random_uuid());
+
+    INSERT INTO claimius.organization (
+        id, app_id, name, description, type,
+        sa_owner_id, sa_root_id, sa_level, sa_created_by
+    ) VALUES (
+                 v_id, p_app_id, p_name, p_description, p_type,
+                 v_id, v_id, 0, p_actor_user_claim_id
+             )
+    RETURNING * INTO v_row;
+
+    RETURN jsonb_build_object('organization', to_jsonb(v_row));
+END;
+$$ LANGUAGE plpgsql;
+
+COMMENT ON FUNCTION claimius.create_root_organization(UUID, TEXT, UUID, TEXT, TEXT, UUID) IS 'Creates a new root organization with self referencing sa_owner_id and sa_root_id. Idempotent on (app_id, name).';
 
 -- ----------------------------------------------------------------------------
 -- init_prophet

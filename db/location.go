@@ -8,7 +8,7 @@ import (
 
 func (d *DB) GetLocation(ctx context.Context, locationID uuid.UUID, relations ...RelationFunc) (*Location, error) {
 	var loc Location
-	q := d.NewSelect().
+	q := d.NewSelect().ExcludeColumn("app_id").
 		Model(&loc).
 		Where("id = ?", locationID).
 		Where("sa_deleted_at IS NULL").
@@ -23,7 +23,7 @@ func (d *DB) GetLocation(ctx context.Context, locationID uuid.UUID, relations ..
 
 func (d *DB) GetLocations(ctx context.Context, userID uuid.UUID, accessLevel ClaimAccessLevel, relations ...RelationFunc) ([]Location, error) {
 	locs := make([]Location, 0)
-	q := d.NewSelect().
+	q := d.NewSelect().ExcludeColumn("app_id").
 		Model(&locs).
 		Where("location.id IN (SELECT object_id FROM claimius.get_objects(?, claimius.get_disciple_app_id(), ?, ?))", userID, OBJECT_TYPE_LOCATION, accessLevel)
 	q = ApplyRelations(q, relations)
@@ -116,7 +116,7 @@ func (d *DB) DeleteLocation(ctx context.Context, locationID uuid.UUID) error {
 
 func (d *DB) GetLocationAudit(ctx context.Context, locationID uuid.UUID) ([]Audit, error) {
 	audits := make([]Audit, 0)
-	err := d.NewSelect().
+	err := d.NewSelect().ExcludeColumn("app_id").
 		Model(&audits).
 		Where("object_type = ?", OBJECT_TYPE_LOCATION).
 		Where("object_id = ?", locationID).

@@ -26,7 +26,7 @@ hard_constraints:
    - hard delete is forbidden in app code; default is soft delete via `sa_deleted_at`
    - `sa_created_by` is a `user_claim.id`, not a `samna_user.user_id` (except in bootstrap)
    - `samna_user.user_id` is the human-stable identifier; `samna_user.id` is the row PK
-   - tree roots are self referential (`sa_owner_id == sa_root_id == id`); no nullable parents
+   - tree roots: organizations and parenthood tables self reference (`sa_owner_id == sa_root_id == id` or `sa_parent_id == sa_root_id == id`); locations use `sa_parent_id IS NULL` with `sa_root_id == id`. `sa_owner_id` is never nullable.
    - `sa_parent_id` and `sa_root_id` come together or not at all
    - every materialized state query must filter on `app_id`
    - object types are always schema qualified (`public.device`, never bare `device`)
@@ -184,7 +184,7 @@ The composite id format is colon separated: `claimius.composite_id('public.devic
 
 ### `sa_owner_id == sa_root_id == id` defines a tree root
 
-There are no nullable parent columns. Bootstrap creates self references on the root row. Walking ownership: stop when `sa_owner_id = id`. Same for location parent and parenthood parent.
+Tree roots: organizations and parenthood tables self reference (`sa_owner_id = id` or `sa_parent_id = id`). Locations use `sa_parent_id IS NULL`. `sa_owner_id` is never nullable. Walking ownership: stop when `sa_owner_id = id`. Walking location: stop when `sa_parent_id IS NULL`. Walking parenthood: stop when `sa_parent_id = id`. Use `claimius.create_root_organization` to create root orgs (handles two phase self reference internally).
 
 ### App scoping
 

@@ -459,7 +459,7 @@ func upsertUserUsers(ctx context.Context, tx bun.Tx, raw json.RawMessage) error 
 }
 
 func UpdateSeq(ctx context.Context, seq int64) error {
-	count, err := db.Instance().NewSelect().
+	count, err := db.Instance().NewSelect().ExcludeColumn("app_id").
 		Model((*db.DiscipleState)(nil)).
 		Count(ctx)
 	if err != nil {
@@ -487,7 +487,7 @@ func UpdateSeq(ctx context.Context, seq int64) error {
 
 func GetSeq(ctx context.Context) (int64, error) {
 	var state db.DiscipleState
-	err := db.Instance().NewSelect().
+	err := db.Instance().NewSelect().ExcludeColumn("app_id").
 		Model(&state).
 		Limit(1).
 		Scan(ctx)
