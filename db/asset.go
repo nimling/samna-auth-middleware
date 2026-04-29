@@ -50,11 +50,11 @@ func (d *DB) GetUserAssets(ctx context.Context, userID uuid.UUID) ([]Asset, erro
 }
 
 func (d *DB) PostAsset(ctx context.Context, asset *Asset) error {
-	q := d.NewInsert().Model(asset).Returning("*")
-	if asset.ID == (uuid.UUID{}) {
-		q = q.ExcludeColumn("id")
-	}
-	_, err := q.Exec(ctx)
+	_, err := d.NewInsert().
+		Model(asset).
+		ExcludeColumn("id", "app_id", "sa_created_at", "sa_updated_at", "sa_deleted_at").
+		Returning("*").
+		Exec(ctx)
 	return err
 }
 

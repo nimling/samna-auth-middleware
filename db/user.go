@@ -80,8 +80,7 @@ func (d *DB) GetRelation(ctx context.Context, userID uuid.UUID, objectID uuid.UU
 }
 
 func (d *DB) PostRelation(ctx context.Context, in *UserRelation) error {
-	in.ID = uuid.UUID{}
-	q := d.NewInsert().Model(in).ExcludeColumn("id").Returning("*")
+	q := d.NewInsert().Model(in).ExcludeColumn("id", "app_id", "sa_created_at", "sa_updated_at", "sa_deleted_at").Returning("*")
 	_, err := q.Exec(ctx)
 	return err
 }

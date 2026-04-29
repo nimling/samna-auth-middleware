@@ -58,12 +58,15 @@ func (d *DB) PostSecret(ctx context.Context, body BodySecret) (*SamnaSecret, err
 		return nil, fmt.Errorf("encrypt: %w", err)
 	}
 	secret := SamnaSecret{
-		AppID:   app.ID,
 		Key:     *body.Key,
 		Value:   hex.EncodeToString(encrypted),
 		OwnerID: app.OwnerID,
 	}
-	_, err = d.NewInsert().Model(&secret).Returning("*").Exec(ctx)
+	_, err = d.NewInsert().
+		Model(&secret).
+		ExcludeColumn("id", "app_id", "sa_created_at", "sa_updated_at", "sa_deleted_at").
+		Returning("*").
+		Exec(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("insert secret: %w", err)
 	}

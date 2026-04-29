@@ -79,19 +79,9 @@ func (d *DB) GetParentOrganizations(ctx context.Context, startID uuid.UUID) ([]u
 }
 
 func (d *DB) PostOrganization(ctx context.Context, org *Organization) error {
-	if org.AppID == (uuid.UUID{}) {
-		app, err := d.GetApp(ctx)
-		if err != nil {
-			return err
-		}
-		org.AppID = app.ID
-	}
-	if org.ID == (uuid.UUID{}) {
-		org.ID = uuid.New()
-	}
 	_, err := d.NewInsert().
 		Model(org).
-		ExcludeColumn("sa_created_at", "sa_updated_at", "sa_deleted_at").
+		ExcludeColumn("id", "app_id", "sa_created_at", "sa_updated_at", "sa_deleted_at").
 		Returning("*").
 		Exec(ctx, org)
 	return err

@@ -80,13 +80,6 @@ func (d *DB) GetParentLocations(ctx context.Context, startID uuid.UUID) ([]uuid.
 }
 
 func (d *DB) PostLocation(ctx context.Context, loc *Location) error {
-	if loc.AppID == (uuid.UUID{}) {
-		app, err := d.GetApp(ctx)
-		if err != nil {
-			return err
-		}
-		loc.AppID = app.ID
-	}
 	if loc.ID == (uuid.UUID{}) {
 		loc.ID = uuid.New()
 	}
@@ -101,7 +94,7 @@ func (d *DB) PostLocation(ctx context.Context, loc *Location) error {
 	}
 	_, err := d.NewInsert().
 		Model(loc).
-		ExcludeColumn("sa_created_at", "sa_updated_at", "sa_deleted_at").
+		ExcludeColumn("app_id", "sa_created_at", "sa_updated_at", "sa_deleted_at").
 		Returning("*").
 		Exec(ctx, loc)
 	return err

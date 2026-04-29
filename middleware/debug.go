@@ -2,6 +2,11 @@ package middleware
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
+	"encoding/base64"
+	"encoding/hex"
 	"fmt"
 	"os"
 
@@ -9,6 +14,20 @@ import (
 	"github.com/nimling/samna-auth-middleware/db"
 	"github.com/uptrace/bun"
 )
+
+func generateDebugMasterKey() (string, string, error) {
+	privateKey, err := rsa.GenerateKey(rand.Reader, 4096)
+	if err != nil {
+		return "", "", fmt.Errorf("generate rsa key: %w", err)
+	}
+	seed := make([]byte, 32)
+	if _, err := rand.Read(seed); err != nil {
+		return "", "", fmt.Errorf("generate seed: %w", err)
+	}
+	privateKeyBase64 := base64.RawURLEncoding.EncodeToString(x509.MarshalPKCS1PrivateKey(privateKey))
+	seedHex := hex.EncodeToString(seed)
+	return privateKeyBase64, seedHex, nil
+}
 
 // ensureDebugUser idempotently materializes a simulated logged in user.
 // If a samna_user row already exists for the configured disciple app, returns
@@ -54,13 +73,19 @@ func ensureDebugUser(ctx context.Context, userID uuid.UUID) error {
 
 		preOrgID := uuid.New()
 
-		// Upsert samna_app. After this, claimius.get_disciple_app_id() resolves
-		// to this row and is the canonical source of app_id everywhere downstream.
+		privateKey, privateSeed, err := generateDebugMasterKey()
+		if err != nil {
+			return fmt.Errorf("generate master key: %w", err)
+		}
+
 		if _, err := tx.NewRaw(`
 			INSERT INTO claimius.samna_app (slug, name, description, private_key, private_seed, sa_owner_id, sa_created_by)
 			VALUES (?, ?, ?, ?, ?, ?, ?)
-			ON CONFLICT (slug) DO UPDATE SET sa_updated_at = now()
-		`, slug, "Debug App", "Debug bootstrap app", "", "", preOrgID, userID,
+			ON CONFLICT (slug) DO UPDATE SET
+				private_key   = CASE WHEN claimius.samna_app.private_key   = '' THEN EXCLUDED.private_key   ELSE claimius.samna_app.private_key   END,
+				private_seed  = CASE WHEN claimius.samna_app.private_seed  = '' THEN EXCLUDED.private_seed  ELSE claimius.samna_app.private_seed  END,
+				sa_updated_at = now()
+		`, slug, "Debug App", "Debug bootstrap app", privateKey, privateSeed, preOrgID, userID,
 		).Exec(ctx); err != nil {
 			return fmt.Errorf("upsert samna_app: %w", err)
 		}

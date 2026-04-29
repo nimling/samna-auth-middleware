@@ -64,7 +64,7 @@ type SamnaUser struct {
 
 	ID        uuid.UUID        `bun:"id,pk,default:gen_random_uuid()" json:"id"`
 	UserID    uuid.UUID        `bun:"user_id,default:gen_random_uuid()" json:"user_id"`
-	AppID     uuid.UUID        `bun:"app_id" json:"-"`
+	AppID     uuid.UUID        `bun:"app_id,notnull,type:uuid,default:claimius.get_disciple_app_id()" json:"-"`
 	FirstName *string          `bun:"first_name" json:"first_name"`
 	LastName  *string          `bun:"last_name" json:"last_name"`
 	UserName  *string          `bun:"user_name" json:"user_name"`
@@ -83,7 +83,7 @@ type Organization struct {
 	bun.BaseModel `bun:"table:claimius.organization"`
 
 	ID          uuid.UUID        `bun:"id,pk,default:gen_random_uuid()" json:"id"`
-	AppID       uuid.UUID        `bun:"app_id" json:"-"`
+	AppID       uuid.UUID        `bun:"app_id,notnull,type:uuid,default:claimius.get_disciple_app_id()" json:"-"`
 	Name        string           `bun:"name" json:"name"`
 	Description *string          `bun:"description" json:"description"`
 	Type        OrganizationType `bun:"type" json:"type"`
@@ -104,7 +104,7 @@ type Location struct {
 	bun.BaseModel `bun:"table:claimius.location"`
 
 	ID          uuid.UUID     `bun:"id,pk,default:gen_random_uuid()" json:"id"`
-	AppID       uuid.UUID     `bun:"app_id" json:"-"`
+	AppID       uuid.UUID     `bun:"app_id,notnull,type:uuid,default:claimius.get_disciple_app_id()" json:"-"`
 	OwnerID     uuid.UUID     `bun:"sa_owner_id" json:"owner_id"`
 	ParentID    *uuid.UUID    `bun:"sa_parent_id" json:"parent_id"`
 	RootID      uuid.UUID     `bun:"sa_root_id" json:"root_id"`
@@ -129,7 +129,7 @@ type Claim struct {
 	bun.BaseModel `bun:"table:claimius.claim"`
 
 	ID           uuid.UUID     `bun:"id,pk,default:gen_random_uuid()" json:"id"`
-	AppID        uuid.UUID     `bun:"app_id" json:"-"`
+	AppID        uuid.UUID     `bun:"app_id,notnull,type:uuid,default:claimius.get_disciple_app_id()" json:"-"`
 	Name         string        `bun:"name" json:"name"`
 	Description  *string       `bun:"description" json:"description"`
 	AccessLevel  int           `bun:"sa_access_level" json:"access_level"`
@@ -151,7 +151,7 @@ type UserClaim struct {
 	bun.BaseModel `bun:"table:claimius.user_claim"`
 
 	ID        uuid.UUID     `bun:"id,pk,default:gen_random_uuid()" json:"id"`
-	AppID     uuid.UUID     `bun:"app_id" json:"-"`
+	AppID     uuid.UUID     `bun:"app_id,notnull,type:uuid,default:claimius.get_disciple_app_id()" json:"-"`
 	ClaimID   uuid.UUID     `bun:"claim_id" json:"claim_id"`
 	UserID    uuid.UUID     `bun:"user_id" json:"user_id"`
 	Reason    *string       `bun:"reason" json:"reason"`
@@ -170,7 +170,7 @@ type ClaimObject struct {
 	bun.BaseModel `bun:"table:claimius.claim_object"`
 
 	ID         uuid.UUID     `bun:"id,pk,default:gen_random_uuid()" json:"id"`
-	AppID      uuid.UUID     `bun:"app_id" json:"-"`
+	AppID      uuid.UUID     `bun:"app_id,notnull,type:uuid,default:claimius.get_disciple_app_id()" json:"-"`
 	ClaimID    uuid.UUID     `bun:"claim_id" json:"claim_id"`
 	ObjectID   uuid.UUID     `bun:"object_id" json:"object_id"`
 	ObjectType string        `bun:"object_type" json:"object_type"`
@@ -230,7 +230,7 @@ type SamnaClient struct {
 	ID          uuid.UUID  `bun:"id,pk,default:gen_random_uuid()" json:"id"`
 	Name        string     `bun:"name" json:"name"`
 	Description *string    `bun:"description" json:"description"`
-	AppID       uuid.UUID  `bun:"app_id" json:"-"`
+	AppID       uuid.UUID  `bun:"app_id,notnull,type:uuid,default:claimius.get_disciple_app_id()" json:"-"`
 	ClientID    uuid.UUID  `bun:"client_id,default:gen_random_uuid()" json:"client_id"`
 	SecretHash  string     `bun:"secret_hash" json:"-"`
 	Status      string     `bun:"status,default:'active'" json:"status"`
@@ -246,7 +246,7 @@ type SamnaSecret struct {
 	bun.BaseModel `bun:"table:claimius.samna_secret"`
 
 	ID        uuid.UUID  `bun:"id,pk,default:gen_random_uuid()" json:"id"`
-	AppID     uuid.UUID  `bun:"app_id" json:"-"`
+	AppID     uuid.UUID  `bun:"app_id,notnull,type:uuid,default:claimius.get_disciple_app_id()" json:"-"`
 	Key       string     `bun:"key" json:"key"`
 	Value     string     `bun:"value" json:"value,omitempty"`
 	OwnerID   uuid.UUID  `bun:"sa_owner_id" json:"owner_id"`
@@ -286,7 +286,7 @@ type ObjectField struct {
 	bun.BaseModel `bun:"table:claimius.object_field"`
 
 	ID          uuid.UUID        `bun:"id,pk,default:gen_random_uuid()" json:"id"`
-	AppID       uuid.UUID        `bun:"app_id" json:"-"`
+	AppID       uuid.UUID        `bun:"app_id,notnull,type:uuid,default:claimius.get_disciple_app_id()" json:"-"`
 	ObjectType  string           `bun:"object_type" json:"object_type"`
 	Name        string           `bun:"name" json:"name"`
 	Description *string          `bun:"description" json:"description"`
@@ -304,7 +304,7 @@ type UserField struct {
 	bun.BaseModel `bun:"table:claimius.user_field"`
 
 	ID        uuid.UUID  `bun:"id,pk,default:gen_random_uuid()" json:"id"`
-	AppID     uuid.UUID  `bun:"app_id" json:"-"`
+	AppID     uuid.UUID  `bun:"app_id,notnull,type:uuid,default:claimius.get_disciple_app_id()" json:"-"`
 	FieldID   uuid.UUID  `bun:"field_id" json:"field_id"`
 	UserID    uuid.UUID  `bun:"user_id" json:"user_id"`
 	Value     *string    `bun:"value" json:"value"`
@@ -319,7 +319,7 @@ type UserRelation struct {
 	bun.BaseModel `bun:"table:claimius.user_relation" json:"-"`
 
 	ID          uuid.UUID  `bun:"id,pk,default:gen_random_uuid()" json:"id"`
-	AppID       uuid.UUID  `bun:"app_id" json:"-"`
+	AppID       uuid.UUID  `bun:"app_id,notnull,type:uuid,default:claimius.get_disciple_app_id()" json:"-"`
 	UserID      uuid.UUID  `bun:"user_id" json:"user_id"`
 	Description *string    `bun:"description" json:"description"`
 	ObjectType  string     `bun:"object_type" json:"object_type"`
@@ -336,7 +336,7 @@ type Audit struct {
 	bun.BaseModel `bun:"table:claimius.audit"`
 
 	ID         uuid.UUID  `bun:"id,pk,default:gen_random_uuid()" json:"id"`
-	AppID      *uuid.UUID `bun:"app_id" json:"-"`
+	AppID      *uuid.UUID `bun:"app_id,notnull,type:uuid,default:claimius.get_disciple_app_id()" json:"-"`
 	Operation  string     `bun:"operation" json:"operation"`
 	Message    string     `bun:"message,default:''" json:"message"`
 	Type       string     `bun:"type" json:"type"`
@@ -352,7 +352,7 @@ type UserObject struct {
 	bun.BaseModel `bun:"table:claimius.user_object"`
 
 	ID          string          `bun:"id,pk" json:"id"`
-	AppID       uuid.UUID       `bun:"app_id" json:"-"`
+	AppID       uuid.UUID       `bun:"app_id,notnull,type:uuid,default:claimius.get_disciple_app_id()" json:"-"`
 	UserID      uuid.UUID       `bun:"user_id" json:"user_id"`
 	ObjectID    uuid.UUID       `bun:"object_id" json:"object_id"`
 	ObjectType  string          `bun:"object_type" json:"object_type"`
@@ -373,7 +373,7 @@ type UserUsers struct {
 	bun.BaseModel `bun:"table:claimius.user_users"`
 
 	ID                 string    `bun:"id,pk" json:"id"`
-	AppID              uuid.UUID `bun:"app_id" json:"-"`
+	AppID              uuid.UUID `bun:"app_id,notnull,type:uuid,default:claimius.get_disciple_app_id()" json:"-"`
 	ViewerID           uuid.UUID `bun:"viewer_id" json:"viewer_id"`
 	TargetUserID       uuid.UUID `bun:"target_user_id" json:"target_user_id"`
 	FirstSharedAt      time.Time `bun:"first_shared_at,default:now()" json:"first_shared_at"`
@@ -385,7 +385,7 @@ type ObjectUsers struct {
 	bun.BaseModel `bun:"table:claimius.object_users"`
 
 	ID         string    `bun:"id,pk" json:"id"`
-	AppID      uuid.UUID `bun:"app_id" json:"-"`
+	AppID      uuid.UUID `bun:"app_id,notnull,type:uuid,default:claimius.get_disciple_app_id()" json:"-"`
 	ObjectID   uuid.UUID `bun:"object_id" json:"object_id"`
 	ObjectType string    `bun:"object_type" json:"object_type"`
 	UserID     uuid.UUID `bun:"user_id" json:"user_id"`
