@@ -8,8 +8,9 @@ import (
 
 func (d *DB) GetOrganization(ctx context.Context, orgID uuid.UUID, relations ...RelationFunc) (*Organization, error) {
 	var org Organization
-	q := d.NewSelect().ExcludeColumn("app_id").
+	q := d.NewSelect().
 		Model(&org).
+		ExcludeColumn("app_id").
 		Where("id = ?", orgID).
 		Where("sa_deleted_at IS NULL").
 		Limit(1)
@@ -23,8 +24,9 @@ func (d *DB) GetOrganization(ctx context.Context, orgID uuid.UUID, relations ...
 
 func (d *DB) GetOrganizations(ctx context.Context, userID uuid.UUID, accessLevel ClaimAccessLevel, relations ...RelationFunc) ([]Organization, error) {
 	orgs := make([]Organization, 0)
-	q := d.NewSelect().ExcludeColumn("app_id").
+	q := d.NewSelect().
 		Model(&orgs).
+		ExcludeColumn("app_id").
 		Where("organization.id IN (SELECT object_id FROM claimius.get_objects(?, claimius.get_disciple_app_id(), ?, ?))", userID, OBJECT_TYPE_ORGANIZATION, accessLevel)
 	q = ApplyRelations(q, relations)
 	err := q.Scan(ctx)
@@ -119,8 +121,9 @@ func (d *DB) DeleteOrganization(ctx context.Context, orgID uuid.UUID) error {
 
 func (d *DB) GetOrganizationAudit(ctx context.Context, orgID uuid.UUID) ([]Audit, error) {
 	audits := make([]Audit, 0)
-	err := d.NewSelect().ExcludeColumn("app_id").
+	err := d.NewSelect().
 		Model(&audits).
+		ExcludeColumn("app_id").
 		Where("object_type = ?", OBJECT_TYPE_ORGANIZATION).
 		Where("object_id = ?", orgID).
 		OrderExpr("sa_created_at DESC").

@@ -8,8 +8,9 @@ import (
 
 func (d *DB) GetObjectFields(ctx context.Context) ([]ObjectField, error) {
 	fields := make([]ObjectField, 0)
-	err := d.NewSelect().ExcludeColumn("app_id").
+	err := d.NewSelect().
 		Model(&fields).
+		ExcludeColumn("app_id").
 		Where("sa_deleted_at IS NULL").
 		Scan(ctx)
 	if err != nil {
@@ -20,8 +21,9 @@ func (d *DB) GetObjectFields(ctx context.Context) ([]ObjectField, error) {
 
 func (d *DB) GetObjectField(ctx context.Context, fieldID uuid.UUID) (*ObjectField, error) {
 	var field ObjectField
-	err := d.NewSelect().ExcludeColumn("app_id").
+	err := d.NewSelect().
 		Model(&field).
+		ExcludeColumn("app_id").
 		Where("id = ?", fieldID).
 		Where("sa_deleted_at IS NULL").
 		Limit(1).
@@ -34,8 +36,9 @@ func (d *DB) GetObjectField(ctx context.Context, fieldID uuid.UUID) (*ObjectFiel
 
 func (d *DB) GetUserFields(ctx context.Context, fieldID uuid.UUID) ([]UserField, error) {
 	fields := make([]UserField, 0)
-	err := d.NewSelect().ExcludeColumn("app_id").
+	err := d.NewSelect().
 		Model(&fields).
+		ExcludeColumn("app_id").
 		Where("field_id = ?", fieldID).
 		Where("sa_deleted_at IS NULL").
 		Scan(ctx)

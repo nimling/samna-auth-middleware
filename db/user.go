@@ -8,8 +8,9 @@ import (
 
 func (d *DB) GetUser(ctx context.Context, userID uuid.UUID, relations ...RelationFunc) (*SamnaUser, error) {
 	var user SamnaUser
-	q := d.NewSelect().ExcludeColumn("app_id").
+	q := d.NewSelect().
 		Model(&user).
+		ExcludeColumn("app_id").
 		Where("user_id = ?", userID).
 		Where("sa_deleted_at IS NULL").
 		Limit(1)
@@ -23,8 +24,9 @@ func (d *DB) GetUser(ctx context.Context, userID uuid.UUID, relations ...Relatio
 
 func (d *DB) GetUsers(ctx context.Context, userID uuid.UUID, accessLevel ClaimAccessLevel) ([]SamnaUser, error) {
 	users := make([]SamnaUser, 0)
-	err := d.NewSelect().ExcludeColumn("app_id").
+	err := d.NewSelect().
 		Model(&users).
+		ExcludeColumn("app_id").
 		Where("samna_user.user_id IN (SELECT user_id FROM claimius.get_users(?, claimius.get_disciple_app_id(), ?))", userID, accessLevel).
 		Scan(ctx)
 	if err != nil {
@@ -35,8 +37,9 @@ func (d *DB) GetUsers(ctx context.Context, userID uuid.UUID, accessLevel ClaimAc
 
 func (d *DB) GetUserClaims(ctx context.Context, userID uuid.UUID) ([]UserClaim, error) {
 	claims := make([]UserClaim, 0)
-	err := d.NewSelect().ExcludeColumn("app_id").
+	err := d.NewSelect().
 		Model(&claims).
+		ExcludeColumn("app_id").
 		Relation("Owner").
 		Where("user_claim.user_id = ?", userID).
 		Where("user_claim.sa_deleted_at IS NULL").
@@ -49,8 +52,9 @@ func (d *DB) GetUserClaims(ctx context.Context, userID uuid.UUID) ([]UserClaim, 
 
 func (d *DB) GetUserRelations(ctx context.Context, userID uuid.UUID) ([]UserRelation, error) {
 	relations := make([]UserRelation, 0)
-	err := d.NewSelect().ExcludeColumn("app_id").
+	err := d.NewSelect().
 		Model(&relations).
+		ExcludeColumn("app_id").
 		Where("user_id = ?", userID).
 		Where("sa_deleted_at IS NULL").
 		Scan(ctx)
@@ -62,8 +66,9 @@ func (d *DB) GetUserRelations(ctx context.Context, userID uuid.UUID) ([]UserRela
 
 func (d *DB) GetRelation(ctx context.Context, userID uuid.UUID, objectID uuid.UUID) ([]UserRelation, error) {
 	relations := make([]UserRelation, 0)
-	err := d.NewSelect().ExcludeColumn("app_id").
+	err := d.NewSelect().
 		Model(&relations).
+		ExcludeColumn("app_id").
 		Where("user_id = ?", userID).
 		Where("object_id = ?", objectID).
 		Where("sa_deleted_at IS NULL").
@@ -134,8 +139,9 @@ func (d *DB) DeleteUser(ctx context.Context, userID uuid.UUID) error {
 
 func (d *DB) GetUserAudit(ctx context.Context, userID uuid.UUID) ([]Audit, error) {
 	audits := make([]Audit, 0)
-	err := d.NewSelect().ExcludeColumn("app_id").
+	err := d.NewSelect().
 		Model(&audits).
+		ExcludeColumn("app_id").
 		Where("object_type = ?", OBJECT_TYPE_USER).
 		Where("object_id = ?", userID).
 		OrderExpr("sa_created_at DESC").
