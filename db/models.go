@@ -410,3 +410,17 @@ type DiscipleState struct {
 	LastAppliedSeq int64     `bun:"last_applied_seq,default:0" json:"last_applied_seq"`
 	UpdatedAt      time.Time `bun:"sa_updated_at,default:now()" json:"updated_at"`
 }
+
+type SearchResult struct {
+	ObjectID    uuid.UUID  `bun:"object_id" json:"object_id"`
+	ObjectType  string     `bun:"object_type" json:"object_type"`
+	UserClaimID *uuid.UUID `bun:"user_claim_id" json:"user_claim_id"`
+	Name        *string    `bun:"sa_name" json:"name"`
+	Description *string    `bun:"sa_description" json:"description"`
+	Link        *string    `bun:"sa_link" json:"link"`
+	AccessLevel int        `bun:"sa_access_level" json:"access_level"`
+	OwnerID     *uuid.UUID `bun:"sa_owner_id" json:"owner_id"`
+	LocationID  *uuid.UUID `bun:"sa_location_id" json:"location_id"`
+	DirectGrant bool       `bun:"direct_grant" json:"direct_grant"`
+	Rank        float32    `bun:"rank" json:"rank"`
+}

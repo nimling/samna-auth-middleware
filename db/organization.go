@@ -10,9 +10,9 @@ func (d *DB) GetOrganization(ctx context.Context, orgID uuid.UUID, relations ...
 	var org Organization
 	q := d.NewSelect().
 		Model(&org).
-		ExcludeColumn("app_id").
 		Where("id = ?", orgID).
 		Where("sa_deleted_at IS NULL").
+		ExcludeColumn("app_id").
 		Limit(1)
 	q = ApplyRelations(q, relations)
 	err := q.Scan(ctx)
@@ -27,7 +27,7 @@ func (d *DB) GetOrganizations(ctx context.Context, userID uuid.UUID, accessLevel
 	q := d.NewSelect().
 		Model(&orgs).
 		ExcludeColumn("app_id").
-		Where("organization.id IN (SELECT object_id FROM claimius.get_objects(?, claimius.get_disciple_app_id(), ?, ?))", userID, OBJECT_TYPE_ORGANIZATION, accessLevel)
+		Where(ObjectWhere(userID, OBJECT_TYPE_ORGANIZATION, accessLevel))
 	q = ApplyRelations(q, relations)
 	err := q.Scan(ctx)
 	if err != nil {
@@ -39,20 +39,15 @@ func (d *DB) GetOrganizations(ctx context.Context, userID uuid.UUID, accessLevel
 func (d *DB) GetChildOrganizations(ctx context.Context, startID uuid.UUID) ([]uuid.UUID, error) {
 	ids := make([]uuid.UUID, 0)
 	err := d.NewRaw(`
-		WITH RECURSIVE descendants AS (
-			SELECT id, sa_owner_id
-			FROM claimius.organization
-			WHERE id = ?
-			  AND sa_deleted_at IS NULL
-			UNION ALL
-			SELECT o.id, o.sa_owner_id
-			FROM claimius.organization o
-			JOIN descendants d ON o.sa_owner_id = d.id
-			WHERE o.id <> o.sa_owner_id
-			  AND o.sa_deleted_at IS NULL
+		SELECT object_id
+		FROM claimius.get_subtree(
+			?,
+			(SELECT sa_root_id FROM claimius.organization WHERE id = ? AND sa_deleted_at IS NULL),
+			?,
+			?
 		)
-		SELECT id FROM descendants WHERE id <> ?
-	`, startID, startID).
+		WHERE object_id <> ?
+	`, OBJECT_TYPE_ORGANIZATION, startID, OBJECT_TYPE_ORGANIZATION, startID, startID).
 		Scan(ctx, &ids)
 	return ids, err
 }
@@ -60,20 +55,10 @@ func (d *DB) GetChildOrganizations(ctx context.Context, startID uuid.UUID) ([]uu
 func (d *DB) GetParentOrganizations(ctx context.Context, startID uuid.UUID) ([]uuid.UUID, error) {
 	ids := make([]uuid.UUID, 0)
 	err := d.NewRaw(`
-		WITH RECURSIVE ancestors AS (
-			SELECT id, sa_owner_id
-			FROM claimius.organization
-			WHERE id = ?
-			  AND sa_deleted_at IS NULL
-			UNION ALL
-			SELECT o.id, o.sa_owner_id
-			FROM claimius.organization o
-			JOIN ancestors a ON a.sa_owner_id = o.id
-			WHERE a.id <> a.sa_owner_id
-			  AND o.sa_deleted_at IS NULL
-		)
-		SELECT id FROM ancestors WHERE id <> ?
-	`, startID, startID).
+		SELECT object_id
+		FROM claimius.get_owner_ancestors(?, ?)
+		WHERE hop > 0
+	`, OBJECT_TYPE_ORGANIZATION, startID).
 		Scan(ctx, &ids)
 	return ids, err
 }
@@ -81,7 +66,8 @@ func (d *DB) GetParentOrganizations(ctx context.Context, startID uuid.UUID) ([]u
 func (d *DB) PostOrganization(ctx context.Context, org *Organization) error {
 	_, err := d.NewInsert().
 		Model(org).
-		ExcludeColumn("id", "app_id", "sa_created_at", "sa_updated_at", "sa_deleted_at").
+		ExcludeColumn("id", "sa_created_at", "sa_updated_at", "sa_deleted_at").
+		Value("app_id", "claimius.get_disciple_app_id()").
 		Returning("*").
 		Exec(ctx, org)
 	return err
@@ -92,7 +78,7 @@ func (d *DB) PutOrganization(ctx context.Context, orgID uuid.UUID, org *Organiza
 		Model(org).
 		Where("id = ?", orgID).
 		Where("sa_deleted_at IS NULL").
-		ExcludeColumn("id", "sa_created_at", "sa_updated_at", "sa_deleted_at").
+		ExcludeColumn("id", "app_id", "sa_created_at", "sa_updated_at", "sa_deleted_at").
 		OmitZero().
 		Returning("*").
 		Exec(ctx, org)
@@ -102,9 +88,9 @@ func (d *DB) PutOrganization(ctx context.Context, orgID uuid.UUID, org *Organiza
 func (d *DB) DeleteOrganization(ctx context.Context, orgID uuid.UUID) error {
 	_, err := d.NewUpdate().
 		Model((*Organization)(nil)).
-		Set("sa_deleted_at = NOW()").
 		Where("id = ?", orgID).
 		Where("sa_deleted_at IS NULL").
+		Set("sa_deleted_at = NOW()").
 		Exec(ctx)
 	return err
 }
@@ -113,9 +99,9 @@ func (d *DB) GetOrganizationAudit(ctx context.Context, orgID uuid.UUID) ([]Audit
 	audits := make([]Audit, 0)
 	err := d.NewSelect().
 		Model(&audits).
-		ExcludeColumn("app_id").
-		Where("object_type = ?", OBJECT_TYPE_ORGANIZATION).
 		Where("object_id = ?", orgID).
+		Where("object_type = ?", OBJECT_TYPE_ORGANIZATION).
+		ExcludeColumn("app_id").
 		OrderExpr("sa_created_at DESC").
 		Scan(ctx)
 	if err != nil {

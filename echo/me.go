@@ -63,7 +63,8 @@ func GetMeClaims(ctx echo.Context) error {
 	userID := ctx.Get(middleware.UserIDKey).(uuid.UUID)
 
 	if getDebugUserID() != nil {
-		claims, err := db.Instance().GetUserClaims(ctx.Request().Context(), userID)
+		relations := db.ParseWithRelations(ctx.QueryParam("with"), db.ClaimRelations())
+		claims, err := db.Instance().GetClaims(ctx.Request().Context(), userID, db.ACCESS_LEVEL_GUEST, relations...)
 		if err != nil {
 			ctx.Logger().Errorf("GetMeClaims: %v", err)
 			return respondError(ctx, http.StatusInternalServerError, "Internal server error")

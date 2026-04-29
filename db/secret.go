@@ -27,9 +27,9 @@ func (d *DB) GetSecret(ctx context.Context, secretID uuid.UUID) (*SamnaSecret, e
 	var secret SamnaSecret
 	err := d.NewSelect().
 		Model(&secret).
-		ExcludeColumn("app_id").
 		Where("id = ?", secretID).
 		Where("sa_deleted_at IS NULL").
+		ExcludeColumn("app_id").
 		Limit(1).
 		Scan(ctx)
 	if err != nil {
@@ -64,7 +64,8 @@ func (d *DB) PostSecret(ctx context.Context, body BodySecret) (*SamnaSecret, err
 	}
 	_, err = d.NewInsert().
 		Model(&secret).
-		ExcludeColumn("id", "app_id", "sa_created_at", "sa_updated_at", "sa_deleted_at").
+		ExcludeColumn("id", "sa_created_at", "sa_updated_at", "sa_deleted_at").
+		Value("app_id", "claimius.get_disciple_app_id()").
 		Returning("*").
 		Exec(ctx)
 	if err != nil {
@@ -100,6 +101,7 @@ func (d *DB) PutSecret(ctx context.Context, secretID uuid.UUID, body BodySecret)
 		Model(secret).
 		Where("id = ?", secretID).
 		OmitZero().
+		ExcludeColumn("app_id").
 		Returning("*").
 		Exec(ctx)
 	if err != nil {
@@ -111,9 +113,9 @@ func (d *DB) PutSecret(ctx context.Context, secretID uuid.UUID, body BodySecret)
 func (d *DB) DeleteSecret(ctx context.Context, secretID uuid.UUID) error {
 	_, err := d.NewUpdate().
 		Model((*SamnaSecret)(nil)).
-		Set("sa_deleted_at = NOW()").
 		Where("id = ?", secretID).
 		Where("sa_deleted_at IS NULL").
+		Set("sa_deleted_at = NOW()").
 		Exec(ctx)
 	return err
 }

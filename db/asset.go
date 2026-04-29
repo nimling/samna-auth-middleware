@@ -10,7 +10,6 @@ func (d *DB) GetAssets(ctx context.Context) ([]Asset, error) {
 	assets := make([]Asset, 0)
 	err := d.NewSelect().
 		Model(&assets).
-		ExcludeColumn("app_id").
 		Where("sa_deleted_at IS NULL").
 		Scan(ctx)
 	if err != nil {
@@ -23,7 +22,6 @@ func (d *DB) GetAsset(ctx context.Context, assetID uuid.UUID) (*Asset, error) {
 	var asset Asset
 	err := d.NewSelect().
 		Model(&asset).
-		ExcludeColumn("app_id").
 		Where("id = ?", assetID).
 		Where("sa_deleted_at IS NULL").
 		Limit(1).
@@ -38,7 +36,6 @@ func (d *DB) GetUserAssets(ctx context.Context, userID uuid.UUID) ([]Asset, erro
 	assets := make([]Asset, 0)
 	err := d.NewSelect().
 		Model(&assets).
-		ExcludeColumn("app_id").
 		Where("user_id = ?", userID).
 		Where("sa_deleted_at IS NULL").
 		OrderExpr("index ASC, sa_created_at DESC").
@@ -52,7 +49,7 @@ func (d *DB) GetUserAssets(ctx context.Context, userID uuid.UUID) ([]Asset, erro
 func (d *DB) PostAsset(ctx context.Context, asset *Asset) error {
 	_, err := d.NewInsert().
 		Model(asset).
-		ExcludeColumn("id", "app_id", "sa_created_at", "sa_updated_at", "sa_deleted_at").
+		ExcludeColumn("id", "sa_created_at", "sa_updated_at", "sa_deleted_at").
 		Returning("*").
 		Exec(ctx)
 	return err

@@ -2,7 +2,6 @@ package db
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/google/uuid"
 )
@@ -11,9 +10,9 @@ func (d *DB) GetLocation(ctx context.Context, locationID uuid.UUID, relations ..
 	var loc Location
 	q := d.NewSelect().
 		Model(&loc).
-		ExcludeColumn("app_id").
 		Where("id = ?", locationID).
 		Where("sa_deleted_at IS NULL").
+		ExcludeColumn("app_id").
 		Limit(1)
 	q = ApplyRelations(q, relations)
 	err := q.Scan(ctx)
@@ -28,7 +27,7 @@ func (d *DB) GetLocations(ctx context.Context, userID uuid.UUID, accessLevel Cla
 	q := d.NewSelect().
 		Model(&locs).
 		ExcludeColumn("app_id").
-		Where("location.id IN (SELECT object_id FROM claimius.get_objects(?, claimius.get_disciple_app_id(), ?, ?))", userID, OBJECT_TYPE_LOCATION, accessLevel)
+		Where(ObjectWhere(userID, OBJECT_TYPE_LOCATION, accessLevel))
 	q = ApplyRelations(q, relations)
 	err := q.Scan(ctx)
 	if err != nil {
@@ -40,20 +39,15 @@ func (d *DB) GetLocations(ctx context.Context, userID uuid.UUID, accessLevel Cla
 func (d *DB) GetChildLocations(ctx context.Context, startID uuid.UUID) ([]uuid.UUID, error) {
 	ids := make([]uuid.UUID, 0)
 	err := d.NewRaw(`
-		WITH RECURSIVE descendants AS (
-			SELECT id, sa_parent_id
-			FROM claimius.location
-			WHERE id = ?
-			  AND sa_deleted_at IS NULL
-			UNION ALL
-			SELECT l.id, l.sa_parent_id
-			FROM claimius.location l
-			JOIN descendants d ON l.sa_parent_id = d.id
-			WHERE l.id <> l.sa_parent_id
-			  AND l.sa_deleted_at IS NULL
+		SELECT object_id
+		FROM claimius.get_subtree(
+			?,
+			(SELECT sa_root_id FROM claimius.location WHERE id = ? AND sa_deleted_at IS NULL),
+			?,
+			?
 		)
-		SELECT id FROM descendants WHERE id <> ?
-	`, startID, startID).
+		WHERE object_id <> ?
+	`, OBJECT_TYPE_LOCATION, startID, OBJECT_TYPE_LOCATION, startID, startID).
 		Scan(ctx, &ids)
 	return ids, err
 }
@@ -61,40 +55,19 @@ func (d *DB) GetChildLocations(ctx context.Context, startID uuid.UUID) ([]uuid.U
 func (d *DB) GetParentLocations(ctx context.Context, startID uuid.UUID) ([]uuid.UUID, error) {
 	ids := make([]uuid.UUID, 0)
 	err := d.NewRaw(`
-		WITH RECURSIVE ancestors AS (
-			SELECT id, sa_parent_id
-			FROM claimius.location
-			WHERE id = ?
-			  AND sa_deleted_at IS NULL
-			UNION ALL
-			SELECT l.id, l.sa_parent_id
-			FROM claimius.location l
-			JOIN ancestors a ON a.sa_parent_id = l.id
-			WHERE a.id <> a.sa_parent_id
-			  AND l.sa_deleted_at IS NULL
-		)
-		SELECT id FROM ancestors WHERE id <> ?
-	`, startID, startID).
+		SELECT object_id
+		FROM claimius.get_parenthood_ancestors(?, ?)
+		WHERE hop > 0
+	`, OBJECT_TYPE_LOCATION, startID).
 		Scan(ctx, &ids)
 	return ids, err
 }
 
 func (d *DB) PostLocation(ctx context.Context, loc *Location) error {
-	if loc.ID == (uuid.UUID{}) {
-		loc.ID = uuid.New()
-	}
-	if loc.ParentID == nil {
-		loc.RootID = loc.ID
-	} else {
-		parent, err := d.GetLocation(ctx, *loc.ParentID)
-		if err != nil {
-			return fmt.Errorf("get parent location: %w", err)
-		}
-		loc.RootID = parent.RootID
-	}
 	_, err := d.NewInsert().
 		Model(loc).
-		ExcludeColumn("app_id", "sa_created_at", "sa_updated_at", "sa_deleted_at").
+		ExcludeColumn("id", "sa_created_at", "sa_updated_at", "sa_deleted_at").
+		Value("app_id", "claimius.get_disciple_app_id()").
 		Returning("*").
 		Exec(ctx, loc)
 	return err
@@ -105,7 +78,7 @@ func (d *DB) PutLocation(ctx context.Context, locationID uuid.UUID, loc *Locatio
 		Model(loc).
 		Where("id = ?", locationID).
 		Where("sa_deleted_at IS NULL").
-		ExcludeColumn("id", "sa_created_at", "sa_updated_at", "sa_deleted_at").
+		ExcludeColumn("id", "app_id", "sa_created_at", "sa_updated_at", "sa_deleted_at").
 		OmitZero().
 		Returning("*").
 		Exec(ctx, loc)
@@ -115,9 +88,9 @@ func (d *DB) PutLocation(ctx context.Context, locationID uuid.UUID, loc *Locatio
 func (d *DB) DeleteLocation(ctx context.Context, locationID uuid.UUID) error {
 	_, err := d.NewUpdate().
 		Model((*Location)(nil)).
-		Set("sa_deleted_at = NOW()").
 		Where("id = ?", locationID).
 		Where("sa_deleted_at IS NULL").
+		Set("sa_deleted_at = NOW()").
 		Exec(ctx)
 	return err
 }
@@ -126,9 +99,9 @@ func (d *DB) GetLocationAudit(ctx context.Context, locationID uuid.UUID) ([]Audi
 	audits := make([]Audit, 0)
 	err := d.NewSelect().
 		Model(&audits).
-		ExcludeColumn("app_id").
-		Where("object_type = ?", OBJECT_TYPE_LOCATION).
 		Where("object_id = ?", locationID).
+		Where("object_type = ?", OBJECT_TYPE_LOCATION).
+		ExcludeColumn("app_id").
 		OrderExpr("sa_created_at DESC").
 		Scan(ctx)
 	if err != nil {

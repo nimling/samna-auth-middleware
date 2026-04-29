@@ -27,7 +27,7 @@ func (d *DB) GetUsers(ctx context.Context, userID uuid.UUID, accessLevel ClaimAc
 	err := d.NewSelect().
 		Model(&users).
 		ExcludeColumn("app_id").
-		Where("samna_user.user_id IN (SELECT user_id FROM claimius.get_users(?, claimius.get_disciple_app_id(), ?))", userID, accessLevel).
+		Where(UserWhere(userID, accessLevel)).
 		Scan(ctx)
 	if err != nil {
 		return nil, err
@@ -68,10 +68,10 @@ func (d *DB) GetRelation(ctx context.Context, userID uuid.UUID, objectID uuid.UU
 	relations := make([]UserRelation, 0)
 	err := d.NewSelect().
 		Model(&relations).
-		ExcludeColumn("app_id").
 		Where("user_id = ?", userID).
 		Where("object_id = ?", objectID).
 		Where("sa_deleted_at IS NULL").
+		ExcludeColumn("app_id").
 		Scan(ctx)
 	if err != nil {
 		return nil, err
@@ -80,7 +80,11 @@ func (d *DB) GetRelation(ctx context.Context, userID uuid.UUID, objectID uuid.UU
 }
 
 func (d *DB) PostRelation(ctx context.Context, in *UserRelation) error {
-	q := d.NewInsert().Model(in).ExcludeColumn("id", "app_id", "sa_created_at", "sa_updated_at", "sa_deleted_at").Returning("*")
+	q := d.NewInsert().
+		Model(in).
+		ExcludeColumn("id", "sa_created_at", "sa_updated_at", "sa_deleted_at").
+		Value("app_id", "claimius.get_disciple_app_id()").
+		Returning("*")
 	_, err := q.Exec(ctx)
 	return err
 }
@@ -90,6 +94,7 @@ func (d *DB) PutRelation(ctx context.Context, relationID uuid.UUID, in *UserRela
 		Model(in).
 		Where("id = ?", relationID).
 		Where("sa_deleted_at IS NULL").
+		ExcludeColumn("app_id").
 		OmitZero().
 		Exec(ctx)
 	return err
@@ -98,13 +103,14 @@ func (d *DB) PutRelation(ctx context.Context, relationID uuid.UUID, in *UserRela
 func (d *DB) DeleteRelation(ctx context.Context, relationID uuid.UUID) error {
 	_, err := d.NewUpdate().
 		Model((*UserRelation)(nil)).
-		Set("sa_deleted_at = NOW()").
 		Where("id = ?", relationID).
 		Where("sa_deleted_at IS NULL").
+		Set("sa_deleted_at = NOW()").
 		Exec(ctx)
 	return err
 }
 
+// TODO:: THis is wrong!
 func (d *DB) PostUser(ctx context.Context, userID uuid.UUID, in SamnaUser) (*SamnaUser, error) {
 	_, err := d.NewRaw(`
 		SELECT claimius.ensure_app_user(?, claimius.get_disciple_app_id(), ?, ?, ?, ?, ?, ?)
@@ -120,6 +126,7 @@ func (d *DB) PutUser(ctx context.Context, userID uuid.UUID, user *SamnaUser) err
 		Model(user).
 		Where("user_id = ?", userID).
 		Where("sa_deleted_at IS NULL").
+		Value("app_id", "claimius.get_disciple_app_id()").
 		OmitZero().
 		Exec(ctx)
 	return err
@@ -128,10 +135,9 @@ func (d *DB) PutUser(ctx context.Context, userID uuid.UUID, user *SamnaUser) err
 func (d *DB) DeleteUser(ctx context.Context, userID uuid.UUID) error {
 	_, err := d.NewUpdate().
 		Model((*SamnaUser)(nil)).
-		Set("sa_deleted_at = NOW()").
 		Where("user_id = ?", userID).
-		Where("app_id = claimius.get_disciple_app_id()").
 		Where("sa_deleted_at IS NULL").
+		Set("sa_deleted_at = NOW()").
 		Exec(ctx)
 	return err
 }
@@ -140,9 +146,9 @@ func (d *DB) GetUserAudit(ctx context.Context, userID uuid.UUID) ([]Audit, error
 	audits := make([]Audit, 0)
 	err := d.NewSelect().
 		Model(&audits).
-		ExcludeColumn("app_id").
-		Where("object_type = ?", OBJECT_TYPE_USER).
 		Where("object_id = ?", userID).
+		Where("object_type = ?", OBJECT_TYPE_USER).
+		ExcludeColumn("app_id").
 		OrderExpr("sa_created_at DESC").
 		Scan(ctx)
 	if err != nil {
