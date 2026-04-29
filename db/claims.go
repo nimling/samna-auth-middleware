@@ -8,7 +8,7 @@ import (
 
 func (d *DB) GetAccess(ctx context.Context, userID, objectID uuid.UUID, objectType string, accessLevel ClaimAccessLevel) (*AccessClaim, error) {
 	claims := make([]AccessClaim, 0)
-	err := d.NewSelect().ExcludeColumn("app_id").
+	err := d.NewSelect().
 		TableExpr("claimius.get_access(?, claimius.get_disciple_app_id(), ?, ?, ?) AS claim", userID, objectID, objectType, accessLevel).
 		Column("claim.*").
 		Scan(ctx, &claims)
@@ -23,7 +23,7 @@ func (d *DB) GetAccess(ctx context.Context, userID, objectID uuid.UUID, objectTy
 
 func (d *DB) GetDirectAccess(ctx context.Context, userID, objectID uuid.UUID, objectType string) (*AccessClaim, error) {
 	claims := make([]AccessClaim, 0)
-	err := d.NewSelect().ExcludeColumn("app_id").
+	err := d.NewSelect().
 		TableExpr("claimius.get_direct_access(?, claimius.get_disciple_app_id(), ?, ?) AS claim", userID, objectID, objectType).
 		Column("claim.*").
 		Scan(ctx, &claims)
@@ -106,7 +106,7 @@ func (d *DB) Search(ctx context.Context, userID uuid.UUID, query string, objectT
 
 func (d *DB) GetAudit(ctx context.Context, userID uuid.UUID, accessLevel ClaimAccessLevel) ([]Audit, error) {
 	audits := make([]Audit, 0)
-	err := d.NewSelect().ExcludeColumn("app_id").
+	err := d.NewSelect().
 		TableExpr("claimius.get_audit(?, claimius.get_disciple_app_id(), ?) AS audit", userID, accessLevel).
 		Column("audit.*").
 		Scan(ctx, &audits)
@@ -132,7 +132,7 @@ func (d *DB) GetObjectClaims(ctx context.Context, userID, objectID uuid.UUID, ob
 
 func (d *DB) GetOwnerGraph(ctx context.Context, userID uuid.UUID, accessLevel ClaimAccessLevel) ([]GraphNode, error) {
 	nodes := make([]GraphNode, 0)
-	err := d.NewSelect().ExcludeColumn("app_id").
+	err := d.NewSelect().
 		TableExpr("claimius.get_owner_graph(p_user_id := ?, p_app_id := claimius.get_disciple_app_id(), p_min_level := ?) AS graph", userID, accessLevel).
 		Column("graph.*").
 		Scan(ctx, &nodes)
@@ -141,7 +141,7 @@ func (d *DB) GetOwnerGraph(ctx context.Context, userID uuid.UUID, accessLevel Cl
 
 func (d *DB) GetClaimGraph(ctx context.Context, userID uuid.UUID, accessLevel ClaimAccessLevel) ([]GraphNode, error) {
 	nodes := make([]GraphNode, 0)
-	err := d.NewSelect().ExcludeColumn("app_id").
+	err := d.NewSelect().
 		TableExpr("claimius.get_claim_graph(p_user_id := ?, p_app_id := claimius.get_disciple_app_id(), p_min_level := ?) AS graph", userID, accessLevel).
 		Column("graph.*").
 		Scan(ctx, &nodes)
