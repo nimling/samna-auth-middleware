@@ -974,3 +974,262 @@ END;
 $$ LANGUAGE plpgsql STABLE;
 
 COMMENT ON FUNCTION claimius._affected_users_for_object IS 'Users whose access to the object could change.';
+
+-- ============================================================================
+-- Ancestor walks
+-- ============================================================================
+-- Three helpers walk an object's structural ancestors. Each returns rows
+-- shaped (object_type TEXT, object_id UUID, hop INTEGER) with hop = 0 for
+-- the object itself, hop = 1 for its direct parent in that tree, etc.
+-- get_ancestors combines all three and tags each row with the tree_type.
+
+-- get_owner_ancestors
+-- Walks the ownership chain. For an organization, walks org parents via
+-- sa_owner_id. For any other registered object with sa_owner_id, jumps to
+-- the owning org and walks the org chain from there.
+CREATE OR REPLACE FUNCTION claimius.get_owner_ancestors(
+    p_object_type TEXT,
+    p_object_id   UUID
+) RETURNS TABLE(object_type TEXT, object_id UUID, hop INTEGER) AS $$
+DECLARE
+    v_owner_id UUID;
+    v_info     RECORD;
+BEGIN
+    -- Always include the object itself at hop 0
+    RETURN QUERY SELECT p_object_type, p_object_id, 0;
+
+    SELECT t.has_sa_owner_id INTO v_info
+    FROM claimius.table_info t
+    WHERE t.object_type = p_object_type;
+
+    IF v_info IS NULL OR NOT v_info.has_sa_owner_id THEN
+        RETURN;
+    END IF;
+
+    IF p_object_type = 'claimius.organization' THEN
+        -- Walk org ancestors. Base case: the starting object itself.
+        -- Recursion: jump to the parent (sa_owner_id) unless we're already
+        -- at the self referential root. Then we trim hop 0 from the result
+        -- (the object itself was already returned at line 999).
+        RETURN QUERY
+            WITH RECURSIVE chain AS (
+                SELECT o.id, o.sa_owner_id, 0 AS lvl
+                FROM claimius.organization o
+                WHERE o.id = p_object_id
+                  AND o.sa_deleted_at IS NULL
+                UNION ALL
+                SELECT parent.id, parent.sa_owner_id, c.lvl + 1
+                FROM claimius.organization parent
+                         JOIN chain c ON parent.id = c.sa_owner_id
+                WHERE parent.sa_deleted_at IS NULL
+                  AND c.id <> c.sa_owner_id  -- stop once we've emitted a root
+            )
+            SELECT 'claimius.organization'::TEXT, c.id, c.lvl
+            FROM chain c
+            WHERE c.lvl > 0;
+    ELSE
+        -- Read the object's sa_owner_id and walk the org chain from there
+        EXECUTE format(
+                'SELECT sa_owner_id FROM %I.%I WHERE id = $1',
+                split_part(p_object_type, '.', 1),
+                split_part(p_object_type, '.', 2)
+                ) INTO v_owner_id USING p_object_id;
+
+        IF v_owner_id IS NULL THEN
+            RETURN;
+        END IF;
+
+        -- Hop 1 is the direct owning org
+        RETURN QUERY SELECT 'claimius.organization'::TEXT, v_owner_id, 1;
+
+        -- Walk the org's ancestor chain
+        RETURN QUERY
+            WITH RECURSIVE chain AS (
+                SELECT o.id, o.sa_owner_id, 2 AS lvl
+                FROM claimius.organization o
+                WHERE o.id = v_owner_id
+                  AND o.sa_deleted_at IS NULL
+                  AND o.id <> o.sa_owner_id
+                UNION ALL
+                SELECT parent.id, parent.sa_owner_id, c.lvl + 1
+                FROM claimius.organization parent
+                         JOIN chain c ON parent.id = c.sa_owner_id
+                WHERE parent.sa_deleted_at IS NULL
+                  AND parent.id <> parent.sa_owner_id
+            )
+            SELECT 'claimius.organization'::TEXT, c.sa_owner_id, c.lvl
+            FROM chain c;
+    END IF;
+END;
+$$ LANGUAGE plpgsql STABLE;
+
+COMMENT ON FUNCTION claimius.get_owner_ancestors IS 'Owner chain ancestors of an object, hop 0 = self.';
+
+-- get_location_ancestors
+-- Walks the location chain. For an object with sa_location_id, hop 1 is the
+-- direct location, hop 2 is its parent location (via location.sa_parent_id),
+-- and so on. At each location encountered, also yields that location's
+-- owning org plus the org's ancestor chain (so a claim on a parent org of
+-- a location grants access via the location too).
+CREATE OR REPLACE FUNCTION claimius.get_location_ancestors(
+    p_object_type TEXT,
+    p_object_id   UUID
+) RETURNS TABLE(object_type TEXT, object_id UUID, hop INTEGER) AS $$
+DECLARE
+    v_location_id UUID;
+    v_info        RECORD;
+BEGIN
+    RETURN QUERY SELECT p_object_type, p_object_id, 0;
+
+    SELECT t.has_sa_location_id INTO v_info
+    FROM claimius.table_info t
+    WHERE t.object_type = p_object_type;
+
+    IF v_info IS NULL OR NOT v_info.has_sa_location_id THEN
+        RETURN;
+    END IF;
+
+    IF p_object_type = 'claimius.location' THEN
+        v_location_id := p_object_id;
+    ELSE
+        EXECUTE format(
+                'SELECT sa_location_id FROM %I.%I WHERE id = $1',
+                split_part(p_object_type, '.', 1),
+                split_part(p_object_type, '.', 2)
+                ) INTO v_location_id USING p_object_id;
+    END IF;
+
+    IF v_location_id IS NULL THEN
+        RETURN;
+    END IF;
+
+    -- Walk the location parent chain. hop offset: if starting object IS a
+    -- location, we treat it as hop 0 (already returned), so its parent is
+    -- hop 1. Otherwise the direct location is hop 1 and its parent is hop 2.
+    RETURN QUERY
+        WITH RECURSIVE loc_chain AS (
+            SELECT l.id, l.sa_parent_id, l.sa_owner_id,
+                   CASE WHEN p_object_type = 'claimius.location' THEN 0 ELSE 1 END AS lvl
+            FROM claimius.location l
+            WHERE l.id = v_location_id
+              AND l.sa_deleted_at IS NULL
+            UNION ALL
+            SELECT parent.id, parent.sa_parent_id, parent.sa_owner_id, lc.lvl + 1
+            FROM claimius.location parent
+                     JOIN loc_chain lc ON parent.id = lc.sa_parent_id
+            WHERE parent.sa_deleted_at IS NULL
+              AND parent.id <> lc.id
+        )
+        -- Yield each location in the chain (skip hop 0 if we already returned the object)
+        SELECT 'claimius.location'::TEXT, lc.id, lc.lvl
+        FROM loc_chain lc
+        WHERE lc.lvl > 0 OR p_object_type <> 'claimius.location';
+
+    -- For each location in the chain, also yield its owning org and the
+    -- org's ancestor chain. We use the location's own hop as the base,
+    -- then add 1 for the owning org and continue upward.
+    RETURN QUERY
+        WITH RECURSIVE loc_chain AS (
+            SELECT l.id, l.sa_parent_id, l.sa_owner_id,
+                   CASE WHEN p_object_type = 'claimius.location' THEN 0 ELSE 1 END AS lvl
+            FROM claimius.location l
+            WHERE l.id = v_location_id
+              AND l.sa_deleted_at IS NULL
+            UNION ALL
+            SELECT parent.id, parent.sa_parent_id, parent.sa_owner_id, lc.lvl + 1
+            FROM claimius.location parent
+                     JOIN loc_chain lc ON parent.id = lc.sa_parent_id
+            WHERE parent.sa_deleted_at IS NULL
+              AND parent.id <> lc.id
+        ),
+                       org_chain AS (
+                           SELECT lc.sa_owner_id AS id, lc.lvl + 1 AS lvl
+                           FROM loc_chain lc
+                           WHERE lc.sa_owner_id IS NOT NULL
+                           UNION ALL
+                           SELECT parent.sa_owner_id, oc.lvl + 1
+                           FROM claimius.organization parent
+                                    JOIN org_chain oc ON parent.id = oc.id
+                           WHERE parent.sa_deleted_at IS NULL
+                             AND parent.id <> parent.sa_owner_id
+                       )
+        SELECT 'claimius.organization'::TEXT, oc.id, oc.lvl
+        FROM org_chain oc
+        WHERE oc.id IS NOT NULL;
+END;
+$$ LANGUAGE plpgsql STABLE;
+
+COMMENT ON FUNCTION claimius.get_location_ancestors IS 'Location chain ancestors of an object plus each location''s owning org chain.';
+
+-- get_parenthood_ancestors
+-- Walks same-table parents via sa_parent_id, when the object_type has it.
+CREATE OR REPLACE FUNCTION claimius.get_parenthood_ancestors(
+    p_object_type TEXT,
+    p_object_id   UUID
+) RETURNS TABLE(object_type TEXT, object_id UUID, hop INTEGER) AS $$
+DECLARE
+    v_info  RECORD;
+    v_sql   TEXT;
+BEGIN
+    RETURN QUERY SELECT p_object_type, p_object_id, 0;
+
+    SELECT t.has_sa_parent_id INTO v_info
+    FROM claimius.table_info t
+    WHERE t.object_type = p_object_type;
+
+    IF v_info IS NULL OR NOT v_info.has_sa_parent_id THEN
+        RETURN;
+    END IF;
+
+    v_sql := format($f$
+        WITH RECURSIVE chain AS (
+            SELECT t.id, t.sa_parent_id, 1 AS lvl
+            FROM %I.%I t
+            WHERE t.id = $1
+              AND t.id <> t.sa_parent_id
+              AND t.sa_deleted_at IS NULL
+            UNION ALL
+            SELECT parent.id, parent.sa_parent_id, c.lvl + 1
+            FROM %I.%I parent
+            JOIN chain c ON parent.id = c.sa_parent_id
+            WHERE parent.id <> parent.sa_parent_id
+              AND parent.sa_deleted_at IS NULL
+        )
+        SELECT %L::TEXT, chain.sa_parent_id, chain.lvl
+        FROM chain
+    $f$,
+                    split_part(p_object_type, '.', 1), split_part(p_object_type, '.', 2),
+                    split_part(p_object_type, '.', 1), split_part(p_object_type, '.', 2),
+                    p_object_type
+             );
+
+    RETURN QUERY EXECUTE v_sql USING p_object_id;
+END;
+$$ LANGUAGE plpgsql STABLE;
+
+COMMENT ON FUNCTION claimius.get_parenthood_ancestors IS 'Same-table sa_parent_id ancestors, hop 0 = self.';
+
+-- get_ancestors
+-- Combined ancestor walk. Yields rows from the owner, location, and
+-- parenthood trees, tagged with tree_type. Hops are independent per tree;
+-- the same object may appear in multiple trees with different hops.
+CREATE OR REPLACE FUNCTION claimius.get_ancestors(
+    p_object_type TEXT,
+    p_object_id   UUID
+) RETURNS TABLE(object_type TEXT, object_id UUID, hop INTEGER, tree_type TEXT) AS $$
+BEGIN
+    RETURN QUERY
+        SELECT a.object_type, a.object_id, a.hop, 'ownership'::TEXT
+        FROM claimius.get_owner_ancestors(p_object_type, p_object_id) a;
+
+    RETURN QUERY
+        SELECT a.object_type, a.object_id, a.hop, 'location'::TEXT
+        FROM claimius.get_location_ancestors(p_object_type, p_object_id) a;
+
+    RETURN QUERY
+        SELECT a.object_type, a.object_id, a.hop, 'parenthood'::TEXT
+        FROM claimius.get_parenthood_ancestors(p_object_type, p_object_id) a;
+END;
+$$ LANGUAGE plpgsql STABLE;
+
+COMMENT ON FUNCTION claimius.get_ancestors IS 'Combined ancestor walk across owner, location, and parenthood trees.';

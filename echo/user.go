@@ -135,6 +135,16 @@ func PostUser(ctx echo.Context) error {
 	if err := ctx.Bind(&user); err != nil {
 		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
+
+	if getDebugUserID() != nil {
+		out, err := db.Instance().PostUser(ctx.Request().Context(), userID, user)
+		if err != nil {
+			ctx.Logger().Errorf("PostUser: %v", err)
+			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
+		}
+		return respondJSON(ctx, http.StatusCreated, out, 0)
+	}
+
 	result, err := client.PostUser(ctx.Request().Context(), userID, user)
 	if err != nil {
 		ctx.Logger().Errorf("PostUser: %v", err)
@@ -177,6 +187,14 @@ func DeleteUser(ctx echo.Context) error {
 	userID, err := uuid.Parse(ctx.Param("id"))
 	if err != nil {
 		return respondError(ctx, http.StatusBadRequest, "Bad request")
+	}
+
+	if getDebugUserID() != nil {
+		if err := db.Instance().DeleteUser(ctx.Request().Context(), userID); err != nil {
+			ctx.Logger().Errorf("DeleteUser: %v", err)
+			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
+		}
+		return ctx.NoContent(http.StatusOK)
 	}
 
 	result, err := client.DeleteUser(ctx.Request().Context(), userID)

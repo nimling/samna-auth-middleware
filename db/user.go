@@ -74,12 +74,60 @@ func (d *DB) GetRelation(ctx context.Context, userID uuid.UUID, objectID uuid.UU
 	return relations, nil
 }
 
+func (d *DB) PostRelation(ctx context.Context, in *UserRelation) error {
+	in.ID = uuid.UUID{}
+	q := d.NewInsert().Model(in).ExcludeColumn("id").Returning("*")
+	_, err := q.Exec(ctx)
+	return err
+}
+
+func (d *DB) PutRelation(ctx context.Context, relationID uuid.UUID, in *UserRelation) error {
+	_, err := d.NewUpdate().
+		Model(in).
+		Where("id = ?", relationID).
+		Where("sa_deleted_at IS NULL").
+		OmitZero().
+		Exec(ctx)
+	return err
+}
+
+func (d *DB) DeleteRelation(ctx context.Context, relationID uuid.UUID) error {
+	_, err := d.NewUpdate().
+		Model((*UserRelation)(nil)).
+		Set("sa_deleted_at = NOW()").
+		Where("id = ?", relationID).
+		Where("sa_deleted_at IS NULL").
+		Exec(ctx)
+	return err
+}
+
+func (d *DB) PostUser(ctx context.Context, userID uuid.UUID, in SamnaUser) (*SamnaUser, error) {
+	_, err := d.NewRaw(`
+		SELECT claimius.ensure_app_user(?, claimius.get_disciple_app_id(), ?, ?, ?, ?, ?, ?)
+	`, userID, in.FirstName, in.LastName, in.UserName, in.UserImage, in.Email, in.Phone).Exec(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return d.GetUser(ctx, userID)
+}
+
 func (d *DB) PutUser(ctx context.Context, userID uuid.UUID, user *SamnaUser) error {
 	_, err := d.NewUpdate().
 		Model(user).
 		Where("user_id = ?", userID).
 		Where("sa_deleted_at IS NULL").
 		OmitZero().
+		Exec(ctx)
+	return err
+}
+
+func (d *DB) DeleteUser(ctx context.Context, userID uuid.UUID) error {
+	_, err := d.NewUpdate().
+		Model((*SamnaUser)(nil)).
+		Set("sa_deleted_at = NOW()").
+		Where("user_id = ?", userID).
+		Where("app_id = claimius.get_disciple_app_id()").
+		Where("sa_deleted_at IS NULL").
 		Exec(ctx)
 	return err
 }

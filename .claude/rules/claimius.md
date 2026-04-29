@@ -79,8 +79,8 @@ SELECT * FROM claimius.get_objects($user_id, $app_id, 'public.device', $min_leve
 ```
 
 The `get_*` family includes:
-- `get_access(user, app, object_id, object_type, min_level)` - strongest active grant; returns user_claim_id as actor token
-- `get_direct_access(user, app, object_id, object_type)` - creator grant boolean
+- `get_access(user, app, object_id, object_type, min_level)` - strongest active claim grant; returns user_claim_id as actor token. Only returns a row when at least one surviving claim covers the object.
+- `get_direct_access(user, app, object_id, object_type)` - same row shape as `get_access`. Walks the owner, location, and parenthood ancestor chains and returns the closest, highest-privilege user_claim the user holds on any ancestor. Use as a fallback when `get_access` returns nothing but the caller still expects an actor token via the user's structural relationship to the object.
 - `get_objects(user, app, object_type, min_level)` - all visible objects of one type
 - `get_organizations(user, app, min_level)` - visible organizations
 - `get_locations(user, app, min_level)` - visible locations
@@ -170,9 +170,9 @@ The only exception is during bootstrap (inside `init_prophet`), where `sa_create
 
 ### `user_claim_id` from `get_access` is the actor token for follow on writes
 
-`get_access`, `get_objects`, and `search_objects` return a `user_claim_id` column. **Contract: when `claim_id` is non null on the returned row, `user_claim_id` is also populated.** Callers use this as `sa_created_by` on follow on writes within the same request.
+`get_access`, `get_objects`, and `search` return a `user_claim_id` column. **Contract: when a row is returned, `user_claim_id` is populated.** Callers use it as `sa_created_by` on follow on writes within the same request.
 
-When access is direct only (`direct_grant = true`, `claim_id` null), `user_claim_id` is also null. Callers needing an actor for direct only access must resolve a fallback user_claim themselves, typically the user's bootstrap user_claim for the app.
+When `get_access` returns no rows but the user is expected to have access via structural relationship (e.g. they hold a claim on a parent organization but no direct claim on this object), call `get_direct_access`. It walks the owner, location, and parenthood ancestor chains and returns the closest, highest-privilege user_claim the user holds on any ancestor, in the same row shape as `get_access`. If both functions return nothing, the user has no path to act on the object.
 
 The list and graph functions (`get_organizations`, `get_locations`, `get_users`, `get_claims`, `get_audit`, `get_secrets`, `get_owner_graph`, `get_claim_graph`) do NOT return `user_claim_id`. To get the actor token after listing, call `get_access` for the specific object the caller is about to act on.
 
@@ -265,12 +265,12 @@ If you're tempted to skip steps because "the FK doesn't exist yet anyway," stop 
 
 ```sql
 SELECT claimius.ensure_app_user(
-           p_user_id    => $user_id,
-           p_app_id     => $app_id,
-           p_first_name => $first,
-           p_last_name  => $last,
-           p_email      => $email
-       );
+    p_user_id    => $user_id,
+    p_app_id     => $app_id,
+    p_first_name => $first,
+    p_last_name  => $last,
+    p_email      => $email
+);
 ```
 
 This creates the per app `samna_user` row idempotently. Use the returned row.

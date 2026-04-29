@@ -111,6 +111,32 @@ func PostClaim(ctx echo.Context) error {
 	if claim.AccessLevel == int(db.ACCESS_LEVEL_SYSTEM) {
 		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
+	if claim.OwnerID == (uuid.UUID{}) {
+		return respondError(ctx, http.StatusBadRequest, "Bad request")
+	}
+
+	if debugUserID := getDebugUserID(); debugUserID != nil {
+		ac, err := db.Instance().GetAccess(ctx.Request().Context(), *debugUserID, claim.OwnerID, db.OBJECT_TYPE_ORGANIZATION, db.ACCESS_LEVEL_ADMIN)
+		if err != nil {
+			ctx.Logger().Errorf("PostClaim GetAccess: %v", err)
+			return respondError(ctx, http.StatusForbidden, "Forbidden")
+		}
+		if ac == nil {
+			ac, err = db.Instance().GetDirectAccess(ctx.Request().Context(), *debugUserID, claim.OwnerID, db.OBJECT_TYPE_ORGANIZATION)
+			if err != nil || ac == nil {
+				return respondError(ctx, http.StatusForbidden, "Forbidden")
+			}
+		}
+		claim.RootID = ac.RootID
+		claim.CreatedBy = ac.UserClaimID
+		out, err := db.Instance().PostClaim(ctx.Request().Context(), claim)
+		if err != nil {
+			ctx.Logger().Errorf("PostClaim: %v", err)
+			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
+		}
+		return respondJSON(ctx, http.StatusCreated, out, 0)
+	}
+
 	result, err := client.PostClaim(ctx.Request().Context(), claim)
 	if err != nil {
 		ctx.Logger().Errorf("PostClaim: %v", err)
@@ -135,6 +161,26 @@ func PutClaim(ctx echo.Context) error {
 	if claim.AccessLevel == int(db.ACCESS_LEVEL_SYSTEM) {
 		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
+
+	if debugUserID := getDebugUserID(); debugUserID != nil {
+		ac, err := db.Instance().GetAccess(ctx.Request().Context(), *debugUserID, claimID, db.OBJECT_TYPE_CLAIM, db.ACCESS_LEVEL_ADMIN)
+		if err != nil {
+			return respondError(ctx, http.StatusForbidden, "Forbidden")
+		}
+		if ac == nil {
+			ac, err = db.Instance().GetDirectAccess(ctx.Request().Context(), *debugUserID, claimID, db.OBJECT_TYPE_CLAIM)
+			if err != nil || ac == nil {
+				return respondError(ctx, http.StatusForbidden, "Forbidden")
+			}
+		}
+		out, err := db.Instance().PutClaim(ctx.Request().Context(), claimID, claim)
+		if err != nil {
+			ctx.Logger().Errorf("PutClaim: %v", err)
+			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
+		}
+		return respondJSON(ctx, http.StatusOK, out, 0)
+	}
+
 	result, err := client.PutClaim(ctx.Request().Context(), claimID, claim)
 	if err != nil {
 		ctx.Logger().Errorf("PutClaim: %v", err)
@@ -147,6 +193,24 @@ func DeleteClaim(ctx echo.Context) error {
 	claimID, err := uuid.Parse(ctx.Param("id"))
 	if err != nil {
 		return respondError(ctx, http.StatusBadRequest, "Bad request")
+	}
+
+	if debugUserID := getDebugUserID(); debugUserID != nil {
+		ac, err := db.Instance().GetAccess(ctx.Request().Context(), *debugUserID, claimID, db.OBJECT_TYPE_CLAIM, db.ACCESS_LEVEL_ADMIN)
+		if err != nil {
+			return respondError(ctx, http.StatusForbidden, "Forbidden")
+		}
+		if ac == nil {
+			ac, err = db.Instance().GetDirectAccess(ctx.Request().Context(), *debugUserID, claimID, db.OBJECT_TYPE_CLAIM)
+			if err != nil || ac == nil {
+				return respondError(ctx, http.StatusForbidden, "Forbidden")
+			}
+		}
+		if err := db.Instance().DeleteClaim(ctx.Request().Context(), claimID, *ac.UserClaimID); err != nil {
+			ctx.Logger().Errorf("DeleteClaim: %v", err)
+			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
+		}
+		return ctx.NoContent(http.StatusOK)
 	}
 
 	result, err := client.DeleteClaim(ctx.Request().Context(), claimID)
@@ -167,6 +231,29 @@ func PostClaimObject(ctx echo.Context) error {
 	if err := ctx.Bind(&co); err != nil {
 		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
+
+	if debugUserID := getDebugUserID(); debugUserID != nil {
+		ac, err := db.Instance().GetAccess(ctx.Request().Context(), *debugUserID, claimID, db.OBJECT_TYPE_CLAIM, db.ACCESS_LEVEL_ADMIN)
+		if err != nil {
+			return respondError(ctx, http.StatusForbidden, "Forbidden")
+		}
+		if ac == nil {
+			ac, err = db.Instance().GetDirectAccess(ctx.Request().Context(), *debugUserID, claimID, db.OBJECT_TYPE_CLAIM)
+			if err != nil || ac == nil {
+				return respondError(ctx, http.StatusForbidden, "Forbidden")
+			}
+		}
+		co.OwnerID = ac.OwnerID
+		co.RootID = ac.RootID
+		co.CreatedBy = ac.UserClaimID
+		out, err := db.Instance().PostClaimObject(ctx.Request().Context(), claimID, co)
+		if err != nil {
+			ctx.Logger().Errorf("PostClaimObject: %v", err)
+			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
+		}
+		return respondJSON(ctx, http.StatusCreated, out, 0)
+	}
+
 	result, err := client.PostClaimObject(ctx.Request().Context(), claimID, co)
 	if err != nil {
 		ctx.Logger().Errorf("PostClaimObject: %v", err)
@@ -184,6 +271,24 @@ func DeleteClaimObject(ctx echo.Context) error {
 	objectID, err := uuid.Parse(ctx.Param("object_id"))
 	if err != nil {
 		return respondError(ctx, http.StatusBadRequest, "Bad request")
+	}
+
+	if debugUserID := getDebugUserID(); debugUserID != nil {
+		ac, err := db.Instance().GetAccess(ctx.Request().Context(), *debugUserID, claimID, db.OBJECT_TYPE_CLAIM, db.ACCESS_LEVEL_ADMIN)
+		if err != nil {
+			return respondError(ctx, http.StatusForbidden, "Forbidden")
+		}
+		if ac == nil {
+			ac, err = db.Instance().GetDirectAccess(ctx.Request().Context(), *debugUserID, claimID, db.OBJECT_TYPE_CLAIM)
+			if err != nil || ac == nil {
+				return respondError(ctx, http.StatusForbidden, "Forbidden")
+			}
+		}
+		if err := db.Instance().DeleteClaimObject(ctx.Request().Context(), claimID, objectID, *ac.UserClaimID); err != nil {
+			ctx.Logger().Errorf("DeleteClaimObject: %v", err)
+			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
+		}
+		return ctx.NoContent(http.StatusOK)
 	}
 
 	result, err := client.DeleteClaimObject(ctx.Request().Context(), claimID, objectID)
@@ -204,6 +309,28 @@ func PostClaimUser(ctx echo.Context) error {
 	if err := ctx.Bind(&uc); err != nil {
 		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
+
+	if debugUserID := getDebugUserID(); debugUserID != nil {
+		ac, err := db.Instance().GetAccess(ctx.Request().Context(), *debugUserID, claimID, db.OBJECT_TYPE_CLAIM, db.ACCESS_LEVEL_ADMIN)
+		if err != nil {
+			return respondError(ctx, http.StatusForbidden, "Forbidden")
+		}
+		if ac == nil {
+			ac, err = db.Instance().GetDirectAccess(ctx.Request().Context(), *debugUserID, claimID, db.OBJECT_TYPE_CLAIM)
+			if err != nil || ac == nil {
+				return respondError(ctx, http.StatusForbidden, "Forbidden")
+			}
+		}
+		uc.OwnerID = ac.OwnerID
+		uc.CreatedBy = *ac.UserClaimID
+		out, err := db.Instance().PostClaimUser(ctx.Request().Context(), claimID, uc)
+		if err != nil {
+			ctx.Logger().Errorf("PostClaimUser: %v", err)
+			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
+		}
+		return respondJSON(ctx, http.StatusCreated, out, 0)
+	}
+
 	result, err := client.PostUserClaim(ctx.Request().Context(), claimID, uc)
 	if err != nil {
 		ctx.Logger().Errorf("PostClaimUser: %v", err)
@@ -221,6 +348,24 @@ func DeleteClaimUser(ctx echo.Context) error {
 	userID, err := uuid.Parse(ctx.Param("user_id"))
 	if err != nil {
 		return respondError(ctx, http.StatusBadRequest, "Bad request")
+	}
+
+	if debugUserID := getDebugUserID(); debugUserID != nil {
+		ac, err := db.Instance().GetAccess(ctx.Request().Context(), *debugUserID, claimID, db.OBJECT_TYPE_CLAIM, db.ACCESS_LEVEL_ADMIN)
+		if err != nil {
+			return respondError(ctx, http.StatusForbidden, "Forbidden")
+		}
+		if ac == nil {
+			ac, err = db.Instance().GetDirectAccess(ctx.Request().Context(), *debugUserID, claimID, db.OBJECT_TYPE_CLAIM)
+			if err != nil || ac == nil {
+				return respondError(ctx, http.StatusForbidden, "Forbidden")
+			}
+		}
+		if err := db.Instance().DeleteClaimUser(ctx.Request().Context(), claimID, userID, *ac.UserClaimID); err != nil {
+			ctx.Logger().Errorf("DeleteClaimUser: %v", err)
+			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
+		}
+		return ctx.NoContent(http.StatusOK)
 	}
 
 	result, err := client.DeleteUserClaim(ctx.Request().Context(), claimID, userID)

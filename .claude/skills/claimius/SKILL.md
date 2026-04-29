@@ -43,7 +43,7 @@ A cascade fires only when BOTH `claim.inherits = TRUE` AND the `claim_object.inh
 
 NO. Always use `get_*` functions:
 - `get_access(user_id, app_id, object_id, object_type, min_level)` for access checks
-- `get_direct_access(user_id, app_id, object_id, object_type)` for creator checks
+- `get_direct_access(user_id, app_id, object_id, object_type)` to find the closest user_claim via ancestor walk when `get_access` returns nothing
 - `get_objects(user_id, app_id, object_type, min_level)` to list visible objects
 - `get_organizations`, `get_locations`, `get_users`, `get_claims`, `get_audit`, `get_secrets` for typed lists
 - `get_owner_graph`, `get_claim_graph` for hierarchy/access visualizations. Both take optional `start_id` and `depth` for subgraph queries; both cover all registered tables in the deployment. Output rows: `(object_id, object_type, label, parent_id, data jsonb)` where `object_type` is schema-qualified. `data` always carries `access_level` and `level` plus per-type fallback fields (with `sa_` prefixes stripped).
@@ -112,7 +112,7 @@ UPDATE public.recipe SET name = :new_name, sa_created_by = :acting_user_claim
 WHERE id = :recipe_id;
 ```
 
-When `direct_grant = true` and `claim_id` is null (creator only access), `user_claim_id` is also null. The caller must look up a fallback user_claim themselves (typically the user's bootstrap user_claim for the app). Other `get_*` functions (`get_organizations`, `get_locations`, `get_users`, `get_claims`, `get_audit`, `get_secrets`, graphs) do not return `user_claim_id`. Call `get_access` for the specific object before writing.
+When `get_access` returns no rows, fall back to `get_direct_access` which walks the owner, location, and parenthood ancestor chains and returns the closest, highest-privilege user_claim the user holds. Same row shape as `get_access`. Other `get_*` functions (`get_organizations`, `get_locations`, `get_users`, `get_claims`, `get_audit`, `get_secrets`, graphs) do not return `user_claim_id`. Call `get_access` for the specific object before writing.
 
 ### "How do I scope a query to one app?"
 

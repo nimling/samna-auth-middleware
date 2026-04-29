@@ -55,12 +55,20 @@ func PostRelation(ctx echo.Context) error {
 	}
 	relation.UserID = userID
 
+	if getDebugUserID() != nil {
+		if err := db.Instance().PostRelation(ctx.Request().Context(), &relation); err != nil {
+			ctx.Logger().Errorf("PostRelation: %v", err)
+			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
+		}
+		return respondJSON(ctx, http.StatusCreated, relation, 1)
+	}
+
 	result, err := client.PostRelation(ctx.Request().Context(), relation)
 	if err != nil {
 		ctx.Logger().Errorf("PostRelation: %v", err)
 		return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 	}
-	return respondJSON(ctx, http.StatusOK, result, 1)
+	return respondJSON(ctx, http.StatusCreated, result, 1)
 }
 
 func PutRelation(ctx echo.Context) error {
@@ -72,6 +80,14 @@ func PutRelation(ctx echo.Context) error {
 	var relation db.UserRelation
 	if err := ctx.Bind(&relation); err != nil {
 		return respondError(ctx, http.StatusBadRequest, "Bad request")
+	}
+
+	if getDebugUserID() != nil {
+		if err := db.Instance().PutRelation(ctx.Request().Context(), relationID, &relation); err != nil {
+			ctx.Logger().Errorf("PutRelation: %v", err)
+			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
+		}
+		return respondJSON(ctx, http.StatusOK, relation, 1)
 	}
 
 	result, err := client.PutRelation(ctx.Request().Context(), relationID, relation)
@@ -86,6 +102,14 @@ func DeleteRelation(ctx echo.Context) error {
 	relationID, err := uuid.Parse(ctx.Param("id"))
 	if err != nil {
 		return respondError(ctx, http.StatusBadRequest, "Bad request")
+	}
+
+	if getDebugUserID() != nil {
+		if err := db.Instance().DeleteRelation(ctx.Request().Context(), relationID); err != nil {
+			ctx.Logger().Errorf("DeleteRelation: %v", err)
+			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
+		}
+		return ctx.NoContent(http.StatusOK)
 	}
 
 	result, err := client.DeleteRelation(ctx.Request().Context(), relationID)

@@ -36,9 +36,15 @@ func GetLocation(ctx echo.Context) error {
 	}
 
 	if debugUserID := getDebugUserID(); debugUserID != nil {
-		claims, err := db.Instance().GetAccess(ctx.Request().Context(), *debugUserID, locationID, db.OBJECT_TYPE_LOCATION, db.ACCESS_LEVEL_MEMBER)
-		if err != nil || claims == nil {
+		ac, err := db.Instance().GetAccess(ctx.Request().Context(), *debugUserID, locationID, db.OBJECT_TYPE_LOCATION, db.ACCESS_LEVEL_MEMBER)
+		if err != nil {
 			return respondError(ctx, http.StatusNotFound, "Not found")
+		}
+		if ac == nil {
+			ac, err = db.Instance().GetDirectAccess(ctx.Request().Context(), *debugUserID, locationID, db.OBJECT_TYPE_LOCATION)
+			if err != nil || ac == nil {
+				return respondError(ctx, http.StatusNotFound, "Not found")
+			}
 		}
 		relations := db.ParseWithRelations(ctx.QueryParam("with"), db.LocationRelations())
 		loc, err := db.Instance().GetLocation(ctx.Request().Context(), locationID, relations...)
@@ -103,18 +109,24 @@ func PostLocation(ctx echo.Context) error {
 		if err := ctx.Bind(&loc); err != nil {
 			return respondError(ctx, http.StatusBadRequest, "Bad request")
 		}
-		ownerID := loc.OwnerID
-		claims, err := db.Instance().GetAccess(ctx.Request().Context(), *debugUserID, ownerID, db.OBJECT_TYPE_ORGANIZATION, db.ACCESS_LEVEL_WRITE)
+		ac, err := db.Instance().GetAccess(ctx.Request().Context(), *debugUserID, loc.OwnerID, db.OBJECT_TYPE_ORGANIZATION, db.ACCESS_LEVEL_WRITE)
 		if err != nil {
 			ctx.Logger().Errorf("PostLocation GetAccess: %v", err)
 			return respondError(ctx, http.StatusForbidden, "Forbidden")
 		}
-		if claims == nil || claims.UserClaimID == nil {
-			ctx.Logger().Infof("PostLocation: no actor claim for user %s on owner %s", *debugUserID, ownerID)
+		if ac == nil {
+			ac, err = db.Instance().GetDirectAccess(ctx.Request().Context(), *debugUserID, loc.OwnerID, db.OBJECT_TYPE_ORGANIZATION)
+			if err != nil {
+				ctx.Logger().Errorf("PostLocation GetDirectAccess: %v", err)
+				return respondError(ctx, http.StatusForbidden, "Forbidden")
+			}
+		}
+		if ac == nil {
 			return respondError(ctx, http.StatusForbidden, "Forbidden")
 		}
-		loc.CreatedBy = *claims.UserClaimID
-		loc.RootID = claims.RootID
+		loc.ID = uuid.UUID{}
+		loc.CreatedBy = *ac.UserClaimID
+		loc.RootID = ac.RootID
 		if err := db.Instance().PostLocation(ctx.Request().Context(), &loc); err != nil {
 			ctx.Logger().Errorf("PostLocation: %v", err)
 			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
@@ -141,9 +153,15 @@ func PutLocation(ctx echo.Context) error {
 	}
 
 	if debugUserID := getDebugUserID(); debugUserID != nil {
-		claims, err := db.Instance().GetAccess(ctx.Request().Context(), *debugUserID, locationID, db.OBJECT_TYPE_LOCATION, db.ACCESS_LEVEL_WRITE)
-		if err != nil || claims == nil {
+		ac, err := db.Instance().GetAccess(ctx.Request().Context(), *debugUserID, locationID, db.OBJECT_TYPE_LOCATION, db.ACCESS_LEVEL_WRITE)
+		if err != nil {
 			return respondError(ctx, http.StatusForbidden, "Forbidden")
+		}
+		if ac == nil {
+			ac, err = db.Instance().GetDirectAccess(ctx.Request().Context(), *debugUserID, locationID, db.OBJECT_TYPE_LOCATION)
+			if err != nil || ac == nil {
+				return respondError(ctx, http.StatusForbidden, "Forbidden")
+			}
 		}
 		var loc db.Location
 		if err := ctx.Bind(&loc); err != nil {
@@ -175,9 +193,15 @@ func DeleteLocation(ctx echo.Context) error {
 	}
 
 	if debugUserID := getDebugUserID(); debugUserID != nil {
-		claims, err := db.Instance().GetAccess(ctx.Request().Context(), *debugUserID, locationID, db.OBJECT_TYPE_LOCATION, db.ACCESS_LEVEL_WRITE)
-		if err != nil || claims == nil {
+		ac, err := db.Instance().GetAccess(ctx.Request().Context(), *debugUserID, locationID, db.OBJECT_TYPE_LOCATION, db.ACCESS_LEVEL_WRITE)
+		if err != nil {
 			return respondError(ctx, http.StatusForbidden, "Forbidden")
+		}
+		if ac == nil {
+			ac, err = db.Instance().GetDirectAccess(ctx.Request().Context(), *debugUserID, locationID, db.OBJECT_TYPE_LOCATION)
+			if err != nil || ac == nil {
+				return respondError(ctx, http.StatusForbidden, "Forbidden")
+			}
 		}
 		if err := db.Instance().DeleteLocation(ctx.Request().Context(), locationID); err != nil {
 			ctx.Logger().Errorf("DeleteLocation: %v", err)

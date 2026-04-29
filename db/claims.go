@@ -21,6 +21,21 @@ func (d *DB) GetAccess(ctx context.Context, userID, objectID uuid.UUID, objectTy
 	return &claims[0], nil
 }
 
+func (d *DB) GetDirectAccess(ctx context.Context, userID, objectID uuid.UUID, objectType string) (*AccessClaim, error) {
+	claims := make([]AccessClaim, 0)
+	err := d.NewSelect().
+		TableExpr("claimius.get_direct_access(?, claimius.get_disciple_app_id(), ?, ?) AS claim", userID, objectID, objectType).
+		Column("claim.*").
+		Scan(ctx, &claims)
+	if err != nil {
+		return nil, err
+	}
+	if len(claims) == 0 {
+		return nil, nil
+	}
+	return &claims[0], nil
+}
+
 func (d *DB) GetClaim(ctx context.Context, userID, claimID uuid.UUID, accessLevel ClaimAccessLevel, relations ...RelationFunc) (*Claim, error) {
 	var claim Claim
 	q := d.NewSelect().
@@ -131,4 +146,97 @@ func (d *DB) GetClaimGraph(ctx context.Context, userID uuid.UUID, accessLevel Cl
 		Column("graph.*").
 		Scan(ctx, &nodes)
 	return nodes, err
+}
+
+func (d *DB) PostClaim(ctx context.Context, in Claim) (*Claim, error) {
+	var id uuid.UUID
+	err := d.NewRaw(`
+		SELECT (claimius.create_claim(
+			claimius.get_disciple_app_id(),
+			?, ?, ?, ?, ?, ?, ?, ?, ?::claimius.claim_type
+		) -> 'claim' ->> 'id')::uuid
+	`, in.Name, in.Description, in.AccessLevel, in.OwnerID, in.RootID, in.CreatedBy,
+		in.Inherits, in.IsDeny, string(in.Type)).Scan(ctx, &id)
+	if err != nil {
+		return nil, err
+	}
+	out := Claim{}
+	if err := d.NewSelect().Model(&out).Where("id = ?", id).Scan(ctx); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (d *DB) PutClaim(ctx context.Context, claimID uuid.UUID, in Claim) (*Claim, error) {
+	_, err := d.NewRaw(`
+		SELECT claimius.update_claim(?, ?, ?, ?, ?, ?)
+	`, claimID, in.Name, in.Description, in.AccessLevel, in.Inherits, in.IsDeny).Exec(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := Claim{}
+	if err := d.NewSelect().Model(&out).Where("id = ?", claimID).Scan(ctx); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (d *DB) DeleteClaim(ctx context.Context, claimID, deletedBy uuid.UUID) error {
+	_, err := d.NewRaw(`SELECT claimius.remove_claim(?, ?)`, claimID, deletedBy).Exec(ctx)
+	return err
+}
+
+func (d *DB) PostClaimObject(ctx context.Context, claimID uuid.UUID, in ClaimObject) (*ClaimObject, error) {
+	var id uuid.UUID
+	err := d.NewRaw(`
+		SELECT (claimius.assign_claim_object(
+			claimius.get_disciple_app_id(),
+			?, ?, ?, ?, ?, ?, ?, ?, ?, NULL::uuid, ?
+		) -> 'claim_object' ->> 'id')::uuid
+	`, claimID, in.ObjectID, in.ObjectType, in.OwnerID, in.RootID, in.CreatedBy,
+		in.Level, in.Inherits, in.Reason, in.Function).Scan(ctx, &id)
+	if err != nil {
+		return nil, err
+	}
+	out := ClaimObject{}
+	if err := d.NewSelect().Model(&out).Where("id = ?", id).Scan(ctx); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (d *DB) DeleteClaimObject(ctx context.Context, claimID, objectID, deletedBy uuid.UUID) error {
+	_, err := d.NewRaw(`
+		SELECT claimius.remove_claim_object(co.id, ?)
+		FROM claimius.claim_object co
+		WHERE co.claim_id = ? AND co.object_id = ? AND co.sa_deleted_at IS NULL
+	`, deletedBy, claimID, objectID).Exec(ctx)
+	return err
+}
+
+func (d *DB) PostClaimUser(ctx context.Context, claimID uuid.UUID, in UserClaim) (*UserClaim, error) {
+	var id uuid.UUID
+	err := d.NewRaw(`
+		SELECT (claimius.assign_claim_user(
+			claimius.get_disciple_app_id(),
+			?, ?, ?, ?, ?, ?, ?
+		) -> 'user_claim' ->> 'id')::uuid
+	`, claimID, in.UserID, in.OwnerID, in.CreatedBy, in.Reason, in.StartsAt, in.EndsAt).Scan(ctx, &id)
+	if err != nil {
+		return nil, err
+	}
+	out := UserClaim{}
+	if err := d.NewSelect().Model(&out).Where("id = ?", id).Scan(ctx); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (d *DB) DeleteClaimUser(ctx context.Context, claimID, userID, deletedBy uuid.UUID) error {
+	_, err := d.NewRaw(`
+		SELECT claimius.remove_user_claim(uc.id, ?)
+		FROM claimius.user_claim uc
+		WHERE uc.claim_id = ? AND uc.user_id = ? AND uc.sa_deleted_at IS NULL
+	`, deletedBy, claimID, userID).Exec(ctx)
+	return err
 }

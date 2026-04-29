@@ -79,12 +79,6 @@ BEGIN
                      AND (uc.ends_at IS NULL OR uc.ends_at > now())
                           JOIN claimius.claim c ON c.id = uc.claim_id
                      AND c.sa_deleted_at IS NULL
-                 UNION ALL
-                 SELECT
-                     uo.id, NULL::UUID, NULL::UUID, 0,
-                     uo.sa_owner_id, uo.sa_root_id, uo.sa_location_id, TRUE
-                 FROM uo
-                 WHERE uo.direct_grant = TRUE
              )
         SELECT s.user_object_id, s.user_claim_id, s.claim_id, s.lvl,
                s.sa_owner_id, s.sa_root_id, s.sa_location_id, s.direct_grant
@@ -94,40 +88,81 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius.get_access IS 'Strongest active claim based grant for one (user, app, object). user_claim_id is the actor token for follow-on writes.';
+COMMENT ON FUNCTION claimius.get_access(UUID, UUID, UUID, TEXT, INTEGER) IS 'Strongest active claim based grant for one (user, app, object). user_claim_id is the actor token for follow-on writes.';
 
 -- ----------------------------------------------------------------------------
 -- get_direct_access
--- Returns whether the user has direct (creator) access to the object.
+-- Locates the closest, highest-privilege user_claim the calling user holds
+-- that's structurally related to the given object. Walks the owner,
+-- location, and parenthood ancestor chains; for each ancestor checks
+-- whether the user has any user_claim bound to it via claim_object.
+-- Returns the same row shape as get_access (user_object_id, user_claim_id,
+-- claim_id, sa_access_level, sa_owner_id, sa_root_id, sa_location_id,
+-- direct_grant). Returns no rows when no claim is found anywhere up the
+-- chain, which means the user has no access through the structural lookup.
+--
+-- Use this when get_access returns no row but the caller still expects an
+-- actor token via the user's structural relationship to the object. In
+-- normal flow, every resource should have a direct claim_object binding
+-- (the owner claim rule), so this lookup mostly serves edge cases.
 -- ----------------------------------------------------------------------------
+
+DROP FUNCTION IF EXISTS claimius.get_direct_access(UUID, UUID, UUID, TEXT);
 
 CREATE OR REPLACE FUNCTION claimius.get_direct_access(
     p_user_id       UUID,
     p_app_id        UUID,
     p_object_id     UUID,
     p_object_type   TEXT
-) RETURNS BOOLEAN AS $$
-DECLARE
-    v_direct BOOLEAN;
+) RETURNS TABLE (
+                    user_object_id      TEXT,
+                    user_claim_id       UUID,
+                    claim_id            UUID,
+                    sa_access_level     INTEGER,
+                    sa_owner_id         UUID,
+                    sa_root_id          UUID,
+                    sa_location_id      UUID,
+                    direct_grant        BOOLEAN
+                ) AS $$
 BEGIN
     PERFORM claimius.reconcile_if_pending(p_app_id, p_user_id);
 
     IF NOT claimius.check_user_active(p_app_id, p_user_id) THEN
-        RETURN FALSE;
+        RETURN;
     END IF;
 
-    SELECT direct_grant INTO v_direct
-    FROM claimius.user_object
-    WHERE user_id = p_user_id
-      AND app_id = p_app_id
-      AND object_id = p_object_id
-      AND object_type = p_object_type;
-
-    RETURN coalesce(v_direct, FALSE);
+    RETURN QUERY
+        SELECT
+            claimius.composite_id(p_object_type, p_object_id::TEXT),
+            uc.id,
+            c.id,
+            c.sa_access_level,
+            co.sa_owner_id,
+            co.sa_root_id,
+            NULL::UUID,
+            FALSE
+        FROM claimius.get_ancestors(p_object_type, p_object_id) a
+                 JOIN claimius.claim_object co
+                      ON co.app_id = p_app_id
+                          AND co.object_type = a.object_type
+                          AND co.object_id = a.object_id
+                          AND co.sa_deleted_at IS NULL
+                 JOIN claimius.user_claim uc
+                      ON uc.claim_id = co.claim_id
+                          AND uc.user_id = p_user_id
+                          AND uc.app_id = p_app_id
+                          AND uc.sa_deleted_at IS NULL
+                          AND (uc.starts_at IS NULL OR uc.starts_at <= now())
+                          AND (uc.ends_at IS NULL OR uc.ends_at > now())
+                 JOIN claimius.claim c
+                      ON c.id = uc.claim_id
+                          AND c.sa_deleted_at IS NULL
+        ORDER BY a.hop ASC, c.sa_access_level ASC, uc.id ASC
+        LIMIT 1;
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql STABLE;
 
-COMMENT ON FUNCTION claimius.get_direct_access IS 'True if user holds direct (creator) grant on the object.';
+COMMENT ON FUNCTION claimius.get_direct_access(UUID, UUID, UUID, TEXT) IS 'Locates the closest, highest-privilege user_claim the user holds related to the given object via ancestor walk.';
 
 -- ----------------------------------------------------------------------------
 -- get_objects
