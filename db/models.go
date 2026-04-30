@@ -11,12 +11,22 @@ import (
 
 type ObjectType string
 
-func (o ObjectType) MarshalJSON() ([]byte, error) {
-	s := string(o)
-	if dot := strings.IndexByte(s, '.'); dot >= 0 {
-		s = s[dot+1:]
+func StripObjectSchema(qualified string) string {
+	if dot := strings.IndexByte(qualified, '.'); dot >= 0 {
+		return qualified[dot+1:]
 	}
-	return json.Marshal(s)
+	return qualified
+}
+
+func QualifyObjectTypeWith(s string, defaultSchema string) string {
+	if s == "" || strings.IndexByte(s, '.') >= 0 {
+		return s
+	}
+	return defaultSchema + "." + s
+}
+
+func (o ObjectType) MarshalJSON() ([]byte, error) {
+	return json.Marshal(StripObjectSchema(string(o)))
 }
 
 func (o *ObjectType) UnmarshalJSON(data []byte) error {
@@ -24,18 +34,12 @@ func (o *ObjectType) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &s); err != nil {
 		return err
 	}
-	if s != "" && strings.IndexByte(s, '.') < 0 {
-		s = "claimius." + s
-	}
-	*o = ObjectType(s)
+	*o = ObjectType(QualifyObjectTypeWith(s, "claimius"))
 	return nil
 }
 
 func QualifyObjectType(s string) string {
-	if s == "" || strings.IndexByte(s, '.') >= 0 {
-		return s
-	}
-	return "claimius." + s
+	return QualifyObjectTypeWith(s, "claimius")
 }
 
 type ClaimAccessLevel int
