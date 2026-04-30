@@ -31,7 +31,7 @@ func UserAuthMiddleware(opts *UserAuthOptions) echo.MiddlewareFunc {
 
 	if err := getOpenIDConfiguration(context.Background(), config); err != nil {
 		if errors.Is(err, client.ErrNotFound) {
-			log.Printf("samna_auth_middleware: openid-configuration unavailable for slug %q (app inactive on samna_auth); auth disabled", config.ClientSlug)
+			log.Printf("samna_auth_middleware: openid-configuration unavailable for slug %q; auth disabled", config.ClientSlug)
 			return inactiveAppMiddleware()
 		}
 		panic(fmt.Errorf("getting OpenID configuration failed: %v", err))
