@@ -173,3 +173,16 @@ CREATE TRIGGER tg_emit_sync_event AFTER INSERT OR UPDATE OR DELETE ON claimius.o
 DROP TRIGGER IF EXISTS tg_emit_sync_event ON claimius.user_users;
 CREATE TRIGGER tg_emit_sync_event AFTER INSERT OR UPDATE OR DELETE ON claimius.user_users
     FOR EACH ROW EXECUTE FUNCTION claimius.emit_sync_event();
+
+-- ----------------------------------------------------------------------------
+-- Self root triggers: BEFORE INSERT, set self referencing root values when
+-- callers haven't supplied them. Applies to organization and location.
+-- ----------------------------------------------------------------------------
+
+DROP TRIGGER IF EXISTS tg_self_root ON claimius.organization;
+CREATE TRIGGER tg_self_root BEFORE INSERT ON claimius.organization
+    FOR EACH ROW EXECUTE FUNCTION claimius._set_self_owner_on_insert();
+
+DROP TRIGGER IF EXISTS tg_self_root ON claimius.location;
+CREATE TRIGGER tg_self_root BEFORE INSERT ON claimius.location
+    FOR EACH ROW EXECUTE FUNCTION claimius._set_self_root_on_insert();

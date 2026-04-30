@@ -14,7 +14,7 @@ The mistakes that historically caused damage:
 1. Reading directly from `claimius.user_object` instead of going through `get_*` functions.
 2. Treating `samna_user.id` as the user identifier when `samna_user.user_id` is.
 3. Adding `sa_parent_id` without `sa_root_id`, or vice versa.
-4. Allowing nullable `sa_owner_id` "for the root case" instead of using self references. (Locations are the one exception: `sa_parent_id` is nullable and NULL means root. `sa_owner_id` is never nullable on any table.)
+4. Allowing nullable `sa_owner_id` or `sa_parent_id` "for the root case" instead of using self references. All parent columns are NOT NULL; roots self reference.
 5. Inserting into `claim`, `user_claim`, or `claim_object` directly instead of using the write functions; OR writing to computed tables like `user_object`, `object_users`, `user_users`, `inheritance_info`, `table_info`, `sync_event` at all.
 6. Modifying access calculations by editing `user_object` rows.
 7. Forgetting `app_id` in filters, leaking access across apps.
@@ -292,7 +292,7 @@ SELECT * FROM public.recipe WHERE kitchen_id = $kitchen_id;
 
 -- RIGHT: gated by user access
 SELECT r.*
-FROM public.recipe rgit 
+FROM public.recipe r
 WHERE r.id IN (
     SELECT object_id FROM claimius.get_objects($user_id, $app_id, 'public.recipe', $min_level)
 )

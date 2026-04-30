@@ -7,8 +7,18 @@ import (
 )
 
 func getDebugUserID() *uuid.UUID {
-	val, ok := os.LookupEnv("SAUTH_DEBUG_USER_ID")
-	if !ok || val == "" {
+	if id := getEnvUUID("SAUTH_DEBUG_USER_ID"); id != nil {
+		return id
+	}
+	if os.Getenv("SAUTH_DEBUG_CLIENT_SECRET") == "" {
+		return nil
+	}
+	return getEnvUUID("SAUTH_DEBUG_CLIENT_ID")
+}
+
+func getEnvUUID(envKey string) *uuid.UUID {
+	val := os.Getenv(envKey)
+	if val == "" {
 		return nil
 	}
 	id, err := uuid.Parse(val)

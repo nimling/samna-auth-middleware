@@ -51,15 +51,19 @@ BEGIN
     END IF;
 
     -- Pull useful fields from the row using JSON conversion (works for any
-    -- registered shape).
+    -- registered shape). app_id comes from the row when the table has it,
+    -- otherwise from claimius.get_app_id().
     IF v_op <> 'DELETE' THEN
-        v_app_id    := (to_jsonb(NEW) ->> 'app_id')::UUID;
+        v_app_id    := claimius._app_id_for_row(v_object_type, to_jsonb(NEW));
         v_owner_id  := (to_jsonb(NEW) ->> 'sa_owner_id')::UUID;
         v_location_id := (to_jsonb(NEW) ->> 'sa_location_id')::UUID;
         v_is_active := (to_jsonb(NEW) ->> 'sa_deleted_at') IS NULL;
     END IF;
     IF v_op <> 'INSERT' THEN
         v_was_active := (to_jsonb(OLD) ->> 'sa_deleted_at') IS NULL;
+        IF v_op = 'DELETE' THEN
+            v_app_id := claimius._app_id_for_row(v_object_type, to_jsonb(OLD));
+        END IF;
     END IF;
 
     -- Tree maintenance: detach on delete or hard delete; attach on insert
@@ -237,7 +241,7 @@ BEGIN
     END IF;
 
     IF v_op <> 'DELETE' THEN
-        v_app_id    := (to_jsonb(NEW) ->> 'app_id')::UUID;
+        v_app_id    := claimius._app_id_for_row(v_object_type, to_jsonb(NEW));
         v_root_id   := (to_jsonb(NEW) ->> 'sa_root_id')::UUID;
         v_is_active := (to_jsonb(NEW) ->> 'sa_deleted_at') IS NULL;
     END IF;
@@ -245,7 +249,7 @@ BEGIN
         v_old_root_id := (to_jsonb(OLD) ->> 'sa_root_id')::UUID;
         v_was_active := (to_jsonb(OLD) ->> 'sa_deleted_at') IS NULL;
         IF v_op = 'DELETE' THEN
-            v_app_id := (to_jsonb(OLD) ->> 'app_id')::UUID;
+            v_app_id := claimius._app_id_for_row(v_object_type, to_jsonb(OLD));
         END IF;
     END IF;
 
@@ -537,7 +541,7 @@ BEGIN
 
     v_object_type := TG_TABLE_SCHEMA || '.' || TG_TABLE_NAME;
     v_obj_id := NEW.id;
-    v_app_id := (to_jsonb(NEW) ->> 'app_id')::UUID;
+    v_app_id := claimius._app_id_for_row(v_object_type, to_jsonb(NEW));
     v_owner_id := (to_jsonb(NEW) ->> 'sa_owner_id')::UUID;
     v_created_by := (to_jsonb(NEW) ->> 'sa_created_by')::UUID;
 
@@ -640,3 +644,108 @@ END;
 $$ LANGUAGE plpgsql;
 
 COMMENT ON FUNCTION claimius.check_user_active IS 'Verifies user is active, cascading soft delete otherwise.';
+
+-- ----------------------------------------------------------------------------
+-- Self root triggers
+-- BEFORE INSERT triggers that fill self referencing parent and root columns.
+--   Root row (parent column NULL or = NEW.id): set parent column and
+--   sa_root_id to NEW.id.
+--   Child row (parent column set, sa_root_id NULL): copy sa_root_id from
+--   the parent row.
+-- Three variants by hierarchy: organization (sa_owner_id), location
+-- (sa_parent_id, lookup in same table), parenthood (sa_parent_id, lookup in
+-- the firing table via TG_TABLE_*).
+-- ----------------------------------------------------------------------------
+
+-- For organizations. Parent column is sa_owner_id; lookup target is
+-- claimius.organization.
+CREATE OR REPLACE FUNCTION claimius._set_self_owner_on_insert()
+    RETURNS TRIGGER AS $$
+DECLARE
+    v_root UUID;
+BEGIN
+    -- Caller already provided sa_root_id: trust it.
+    IF NEW.sa_root_id IS NOT NULL THEN
+        RETURN NEW;
+    END IF;
+
+    -- New root: self reference both columns.
+    IF NEW.sa_owner_id IS NULL OR NEW.sa_owner_id = NEW.id THEN
+        NEW.sa_owner_id := NEW.id;
+        NEW.sa_root_id  := NEW.id;
+        RETURN NEW;
+    END IF;
+
+    -- Child: copy parent org's sa_root_id.
+    SELECT sa_root_id INTO v_root
+    FROM claimius.organization
+    WHERE id = NEW.sa_owner_id;
+
+    NEW.sa_root_id := coalesce(v_root, NEW.id);
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+COMMENT ON FUNCTION claimius._set_self_owner_on_insert IS 'BEFORE INSERT for organizations. Self references on root creation; copies parent org sa_root_id otherwise.';
+
+-- For locations.
+-- Parent column is sa_parent_id (locations belong to a location tree).
+-- Lookup target is claimius.location (parent is in the same table).
+-- sa_owner_id is required and not auto filled.
+CREATE OR REPLACE FUNCTION claimius._set_self_root_on_insert()
+    RETURNS TRIGGER AS $$
+DECLARE
+    v_root UUID;
+BEGIN
+    IF NEW.sa_root_id IS NOT NULL THEN
+        RETURN NEW;
+    END IF;
+
+    -- New root: parent self references, sa_root_id self references.
+    IF NEW.sa_parent_id IS NULL OR NEW.sa_parent_id = NEW.id THEN
+        NEW.sa_parent_id := NEW.id;
+        NEW.sa_root_id   := NEW.id;
+        RETURN NEW;
+    END IF;
+
+    -- Child: copy parent location's sa_root_id.
+    SELECT sa_root_id INTO v_root
+    FROM claimius.location
+    WHERE id = NEW.sa_parent_id;
+
+    NEW.sa_root_id := coalesce(v_root, NEW.id);
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+COMMENT ON FUNCTION claimius._set_self_root_on_insert IS 'BEFORE INSERT for locations. Self references on root creation; copies parent location sa_root_id otherwise.';
+
+-- For parenthood tables. Parent column is sa_parent_id; lookup target is
+-- the same table the trigger fires on (TG_TABLE_*).
+CREATE OR REPLACE FUNCTION claimius._set_self_parent_on_insert()
+    RETURNS TRIGGER AS $$
+DECLARE
+    v_root  UUID;
+    v_sql   TEXT;
+BEGIN
+    IF NEW.sa_root_id IS NOT NULL THEN
+        RETURN NEW;
+    END IF;
+
+    -- New root.
+    IF NEW.sa_parent_id IS NULL OR NEW.sa_parent_id = NEW.id THEN
+        NEW.sa_parent_id := NEW.id;
+        NEW.sa_root_id   := NEW.id;
+        RETURN NEW;
+    END IF;
+
+    -- Child: dynamic lookup against the same table.
+    v_sql := format('SELECT sa_root_id FROM %I.%I WHERE id = $1', TG_TABLE_SCHEMA, TG_TABLE_NAME);
+    EXECUTE v_sql INTO v_root USING NEW.sa_parent_id;
+
+    NEW.sa_root_id := coalesce(v_root, NEW.id);
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+COMMENT ON FUNCTION claimius._set_self_parent_on_insert IS 'BEFORE INSERT for parenthood tables. Self references on root creation; copies parent sa_root_id from the same table otherwise.';

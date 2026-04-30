@@ -619,7 +619,7 @@ BEGIN
         SELECT l.id ,
                'claimius.location'::TEXT ,
                l.name::TEXT ,
-               CASE WHEN l.sa_parent_id IS NULL THEN l.sa_owner_id ELSE l.sa_parent_id END ,
+               CASE WHEN l.sa_parent_id = l.id THEN l.sa_owner_id ELSE l.sa_parent_id END ,
                jsonb_build_object(
                        'access_level', uo.sa_access_level,
                        'level', l.sa_level,
@@ -1435,6 +1435,7 @@ BEGIN
     IF v_to_remove IS NOT NULL THEN
         FOREACH v_old_object_type IN ARRAY v_to_remove LOOP
                 PERFORM claimius._detach_calc_trigger(v_old_object_type);
+                PERFORM claimius._detach_self_root_trigger(v_old_object_type);
                 DELETE FROM claimius.table_info WHERE object_type = v_old_object_type;
                 DELETE FROM claimius.inheritance_info WHERE object_type = v_old_object_type;
                 DELETE FROM claimius.user_object WHERE object_type = v_old_object_type;
@@ -1452,6 +1453,7 @@ BEGIN
             END IF;
             PERFORM claimius._register_table_info(v_object_type, FALSE);
             PERFORM claimius._attach_calc_trigger(v_object_type);
+            PERFORM claimius._attach_self_root_trigger(v_object_type);
             RAISE NOTICE 'Registered table %', v_object_type;
         END LOOP;
 
@@ -1698,7 +1700,6 @@ CREATE OR REPLACE FUNCTION claimius.create_root_organization(
     p_id                UUID DEFAULT NULL
 ) RETURNS JSONB AS $$
 DECLARE
-    v_id    UUID;
     v_row   claimius.organization;
 BEGIN
     -- Idempotency: existing root org with same (app, name)?
@@ -1714,14 +1715,12 @@ BEGIN
         RETURN jsonb_build_object('organization', to_jsonb(v_row));
     END IF;
 
-    v_id := coalesce(p_id, gen_random_uuid());
-
     INSERT INTO claimius.organization (
         id, app_id, name, description, type,
-        sa_owner_id, sa_root_id, sa_level, sa_created_by
+        sa_level, sa_created_by
     ) VALUES (
-                 v_id, p_app_id, p_name, p_description, p_type,
-                 v_id, v_id, 0, p_actor_user_claim_id
+                 coalesce(p_id, gen_random_uuid()), p_app_id, p_name, p_description, p_type,
+                 0, p_actor_user_claim_id
              )
     RETURNING * INTO v_row;
 

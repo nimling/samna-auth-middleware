@@ -18,13 +18,12 @@
 -- Naming conventions:
 --   sa_owner_id        Owning organization. Required on every registered table.
 --   sa_location_id     Optional location pin. Nullable.
---   sa_parent_id       Self reference. Nullable on claimius.location only
---                      (NULL means root). NOT NULL on parenthood tables;
---                      when present must be paired with sa_root_id.
+--   sa_parent_id       Self reference for hierarchical tables. When present,
+--                      must be paired with sa_root_id. Root rows self
+--                      reference (sa_parent_id = id).
 --   sa_root_id         Root of the self referencing tree. A row is a root iff
---                      sa_owner_id == sa_root_id (organization),
---                      sa_parent_id IS NULL (location), or
---                      sa_parent_id == sa_root_id == id (parenthood tables).
+--                      sa_owner_id == sa_root_id == id (organization) or
+--                      sa_parent_id == sa_root_id == id (location, parenthood).
 --   sa_created_by      The user_claim.id under which this row was created.
 --                      During bootstrap, this may be a samna_user.user_id.
 --   sa_deleted_at      Soft delete timestamp. NULL means active.
@@ -244,12 +243,12 @@ CREATE INDEX IF NOT EXISTS idx_organization_sa_deleted_at ON claimius.organizati
 
 -- location
 -- The location tree. Locations belong to an organization. Self references
--- through sa_parent_id. Root iff sa_parent_id IS NULL.
+-- through sa_parent_id. Root iff sa_parent_id == sa_root_id == id.
 CREATE TABLE IF NOT EXISTS claimius.location (
                                                  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
                                                  app_id          UUID NOT NULL REFERENCES claimius.samna_app(id),
                                                  sa_owner_id     UUID NOT NULL REFERENCES claimius.organization(id),
-                                                 sa_parent_id    UUID,
+                                                 sa_parent_id    UUID NOT NULL,
                                                  sa_root_id      UUID NOT NULL,
                                                  name            VARCHAR(255),
                                                  description     TEXT,
@@ -267,9 +266,9 @@ CREATE TABLE IF NOT EXISTS claimius.location (
                                                  sa_updated_at   TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-COMMENT ON TABLE claimius.location IS 'Location tree. Root iff sa_parent_id IS NULL.';
+COMMENT ON TABLE claimius.location IS 'Location tree. Root iff sa_parent_id == sa_root_id == id.';
 COMMENT ON COLUMN claimius.location.sa_owner_id IS 'Owning organization. Required.';
-COMMENT ON COLUMN claimius.location.sa_parent_id IS 'Parent location. NULL at root.';
+COMMENT ON COLUMN claimius.location.sa_parent_id IS 'Parent location. Equals id at root.';
 COMMENT ON COLUMN claimius.location.sa_root_id IS 'Top of tree. Equals id at root.';
 
 CREATE INDEX IF NOT EXISTS idx_location_app_id ON claimius.location (app_id);

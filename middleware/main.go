@@ -7,10 +7,13 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"os"
 
 	"github.com/MicahParks/keyfunc/v3"
+	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 	"github.com/nimling/samna-auth-middleware/client"
+	"github.com/nimling/samna-auth-middleware/db"
 	"github.com/nimling/samna-auth-middleware/utils"
 )
 
@@ -24,6 +27,26 @@ func UserAuthMiddleware(opts *UserAuthOptions) echo.MiddlewareFunc {
 		return func(next echo.HandlerFunc) echo.HandlerFunc {
 			return func(ctx echo.Context) error {
 				ctx.Set(UserIDKey, *config.AuthorizedUserID)
+				return next(ctx)
+			}
+		}
+	}
+
+	if db.IsDebugMode() {
+		if config.DebugClientID != nil {
+			if err := ensureDebugUser(context.Background(), *config.DebugClientID); err != nil {
+				panic(fmt.Errorf("ensure debug user: %w", err))
+			}
+		}
+		return func(next echo.HandlerFunc) echo.HandlerFunc {
+			return func(ctx echo.Context) error {
+				clientErr := authenticateClient(ctx, config.DebugClientID, config.DebugClientSecret)
+				if errors.Is(clientErr, ErrorCredentialMissing) {
+					return ctx.String(http.StatusUnauthorized, "Unauthorized")
+				}
+				if clientErr != nil {
+					return respondAuthError(ctx, clientErr)
+				}
 				return next(ctx)
 			}
 		}
@@ -96,7 +119,18 @@ func inactiveAppMiddleware() echo.MiddlewareFunc {
 
 func configFromUserAuthOptions(opts *UserAuthOptions) *AuthMiddlewareConfig {
 	if opts == nil {
-		return configFromEnv()
+		opts = &UserAuthOptions{}
+	}
+
+	debugUserID := opts.DebugUserID
+	if debugUserID == nil {
+		debugUserID = getEnvUUID("SAUTH_DEBUG_USER_ID")
+	}
+	debugClientID := getEnvUUID("SAUTH_DEBUG_CLIENT_ID")
+	debugClientSecret := os.Getenv("SAUTH_DEBUG_CLIENT_SECRET")
+
+	if debugUserID != nil && debugClientID != nil && *debugUserID != *debugClientID {
+		panic("SAUTH_DEBUG_USER_ID and SAUTH_DEBUG_CLIENT_ID must hold the same UUID")
 	}
 
 	slug := opts.ClientSlug
@@ -105,7 +139,11 @@ func configFromUserAuthOptions(opts *UserAuthOptions) *AuthMiddlewareConfig {
 	}
 	secret := opts.ClientSecret
 	if secret == "" {
-		secret = utils.GetEnv("SAUTH_APP_SECRET")
+		if db.IsDebugMode() {
+			secret = os.Getenv("SAUTH_APP_SECRET")
+		} else {
+			secret = utils.GetEnv("SAUTH_APP_SECRET")
+		}
 	}
 	redirectURI := opts.RedirectURI
 	if redirectURI == "" {
@@ -114,10 +152,6 @@ func configFromUserAuthOptions(opts *UserAuthOptions) *AuthMiddlewareConfig {
 	pageRedirectURI := opts.PageRedirectURI
 	if pageRedirectURI == "" {
 		pageRedirectURI = utils.GetEnv("SAUTH_PAGE_REDIRECT")
-	}
-	debugUserID := opts.DebugUserID
-	if debugUserID == nil {
-		debugUserID = utils.GetEnvUUIDOptional("SAUTH_DEBUG_USER_ID")
 	}
 
 	openIDUrlStr := utils.GetEnv("SAUTH_ENDPOINT") + "/api/app/" + slug + "/.well-known/openid-configuration"
@@ -133,26 +167,19 @@ func configFromUserAuthOptions(opts *UserAuthOptions) *AuthMiddlewareConfig {
 		PageRedirectURI:   pageRedirectURI,
 		OpenIDConfigURL:   *openIDUrl,
 		AuthorizedUserID:  debugUserID,
-		DebugClientID:     utils.GetEnvUUIDOptional("SAUTH_DEBUG_CLIENT_ID"),
-		DebugClientSecret: utils.GetEnvOptional("SAUTH_DEBUG_CLIENT_SECRET"),
+		DebugClientID:     debugClientID,
+		DebugClientSecret: debugClientSecret,
 	}
 }
 
-func configFromEnv() *AuthMiddlewareConfig {
-	openIDUrlStr := utils.GetEnv("SAUTH_ENDPOINT") + "/api/app/" + utils.GetEnv("SAUTH_APP_SLUG") + "/.well-known/openid-configuration"
-	openIDUrl, err := url.Parse(openIDUrlStr)
+func getEnvUUID(envKey string) *uuid.UUID {
+	val := os.Getenv(envKey)
+	if val == "" {
+		return nil
+	}
+	id, err := uuid.Parse(val)
 	if err != nil {
-		panic(fmt.Errorf("failed to parse openid configuration URL: %v", err))
+		panic(fmt.Sprintf("Environment variable %s is not a valid UUID", envKey))
 	}
-
-	return &AuthMiddlewareConfig{
-		ClientSlug:        utils.GetEnv("SAUTH_APP_SLUG"),
-		ClientSecret:      utils.GetEnv("SAUTH_APP_SECRET"),
-		RedirectURI:       utils.GetEnv("SAUTH_REDIRECT_URI"),
-		PageRedirectURI:   utils.GetEnv("SAUTH_PAGE_REDIRECT"),
-		OpenIDConfigURL:   *openIDUrl,
-		AuthorizedUserID:  utils.GetEnvUUIDOptional("SAUTH_DEBUG_USER_ID"),
-		DebugClientID:     utils.GetEnvUUIDOptional("SAUTH_DEBUG_CLIENT_ID"),
-		DebugClientSecret: utils.GetEnvOptional("SAUTH_DEBUG_CLIENT_SECRET"),
-	}
+	return &id
 }

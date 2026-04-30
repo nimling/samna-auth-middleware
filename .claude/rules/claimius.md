@@ -26,9 +26,10 @@ hard_constraints:
    - hard delete is forbidden in app code; default is soft delete via `sa_deleted_at`
    - `sa_created_by` is a `user_claim.id`, not a `samna_user.user_id` (except in bootstrap)
    - `samna_user.user_id` is the human-stable identifier; `samna_user.id` is the row PK
-   - tree roots: organizations and parenthood tables self reference (`sa_owner_id == sa_root_id == id` or `sa_parent_id == sa_root_id == id`); locations use `sa_parent_id IS NULL` with `sa_root_id == id`. `sa_owner_id` is never nullable.
+   - tree roots are self referential (`sa_owner_id == sa_root_id == id` for orgs, `sa_parent_id == sa_root_id == id` for locations and parenthood tables); no nullable parents
    - `sa_parent_id` and `sa_root_id` come together or not at all
    - every materialized state query must filter on `app_id`
+   - registered external tables may omit the `app_id` column; claimius infers it from `get_app_id()` at trigger time. Required on prophets that host more than one app (registration is rejected otherwise).
    - object types are always schema qualified (`public.device`, never bare `device`)
    - `claimius.replay_mode` is set ONLY by the disciple sync layer, never by app code
    - cross root reparenting is forbidden in normal flow; admin must use `migrate_root`
@@ -184,7 +185,9 @@ The composite id format is colon separated: `claimius.composite_id('public.devic
 
 ### `sa_owner_id == sa_root_id == id` defines a tree root
 
-Tree roots: organizations and parenthood tables self reference (`sa_owner_id = id` or `sa_parent_id = id`). Locations use `sa_parent_id IS NULL`. `sa_owner_id` is never nullable. Walking ownership: stop when `sa_owner_id = id`. Walking location: stop when `sa_parent_id IS NULL`. Walking parenthood: stop when `sa_parent_id = id`. Use `claimius.create_root_organization` to create root orgs (handles two phase self reference internally).
+There are no nullable parent columns. Roots self reference (`sa_owner_id = id` on orgs, `sa_parent_id = id` on locations and parenthood tables). Walking ownership: stop when `sa_owner_id = id`. Walking location/parenthood: stop when `sa_parent_id = id`.
+
+**Auto root trigger** (`tg_self_root`, BEFORE INSERT): handles root self reference and child `sa_root_id` lookup. New roots: caller leaves the parent column NULL (or sets to `NEW.id`); trigger self references both. Children: caller sets the parent, leaves `sa_root_id` NULL; trigger copies the parent's `sa_root_id`. Internal claimius tables (`organization`, `location`) get this trigger automatically; implementer registered parenthood tables get it via `init_claimius_tables`. Use `claimius.create_root_organization` for explicit root org creation when you need the idempotency guard on `(app_id, name)`.
 
 ### App scoping
 

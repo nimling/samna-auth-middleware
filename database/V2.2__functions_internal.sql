@@ -347,6 +347,29 @@ $$ LANGUAGE plpgsql STABLE;
 -- Registration helpers
 -- ----------------------------------------------------------------------------
 
+-- _app_id_for_row
+-- Returns the app_id for a registered row. Reads the row's app_id column
+-- if the table has one; otherwise infers it from claimius.get_app_id().
+-- Used by every trigger that needs to scope a row's effects to an app.
+CREATE OR REPLACE FUNCTION claimius._app_id_for_row(p_object_type TEXT, p_row JSONB)
+    RETURNS UUID AS $$
+DECLARE
+    v_has_app_id BOOLEAN;
+BEGIN
+    SELECT t.has_app_id INTO v_has_app_id
+    FROM claimius.table_info t
+    WHERE t.object_type = p_object_type;
+
+    IF v_has_app_id THEN
+        RETURN (p_row ->> 'app_id')::UUID;
+    END IF;
+
+    RETURN claimius.get_app_id();
+END;
+$$ LANGUAGE plpgsql STABLE;
+
+COMMENT ON FUNCTION claimius._app_id_for_row(TEXT, JSONB) IS 'Resolves a row''s app_id: from the row when the table has the column, otherwise from claimius.get_app_id().';
+
 -- _register_table_info
 -- Inspects a table's columns, validates required columns, and populates the
 -- table_info row. Raises if required columns are missing.
@@ -414,6 +437,25 @@ BEGIN
         -- sa_parent_id and sa_root_id must come together
         IF v_has_parent <> v_has_root THEN
             RAISE EXCEPTION 'Table % must have both sa_parent_id and sa_root_id, or neither', p_object_type;
+        END IF;
+
+        -- Tables without app_id rely on claimius.get_app_id() at runtime to
+        -- determine scope. That works only when the deployment hosts a
+        -- single app's data: pure disciple, hybrid, or prophet with only
+        -- the system app. On a prophet hosting non system apps,
+        -- get_app_id() returns the system app id, which would mis-scope
+        -- writes to other hosted apps. Reject the registration in that
+        -- case so the implementer adds an app_id column.
+        IF NOT v_has_app_id THEN
+            IF EXISTS (SELECT 1 FROM claimius.prophet_state WHERE system_app_slug IS NOT NULL)
+                AND EXISTS (
+                    SELECT 1 FROM claimius.samna_app a
+                                      JOIN claimius.prophet_state p ON p.system_app_slug IS NOT NULL
+                    WHERE a.slug <> p.system_app_slug
+                      AND a.sa_deleted_at IS NULL
+                ) THEN
+                RAISE EXCEPTION 'Table % has no app_id column but this prophet hosts non system apps; add an app_id column to disambiguate row scope', p_object_type;
+            END IF;
         END IF;
     END IF;
 
@@ -501,6 +543,77 @@ END;
 $$ LANGUAGE plpgsql;
 
 COMMENT ON FUNCTION claimius._detach_calc_trigger(TEXT) IS 'Removes calc trigger from a deregistered table.';
+
+-- _attach_self_root_trigger
+-- Attaches the appropriate self root BEFORE INSERT trigger to a registered
+-- table based on its column shape. Picks one of three trigger functions:
+--   has_sa_parent_id + has_sa_root_id -> _set_self_parent_on_insert
+--   has_sa_root_id only               -> _set_self_root_on_insert
+--   has_sa_owner_id + has_sa_root_id  -> _set_self_owner_on_insert
+-- Tables without sa_root_id get no trigger (nothing to self reference).
+-- Drops any existing trigger first so the operation is idempotent.
+CREATE OR REPLACE FUNCTION claimius._attach_self_root_trigger(p_object_type TEXT)
+    RETURNS VOID AS $$
+DECLARE
+    v_schema        TEXT;
+    v_table         TEXT;
+    v_parts         TEXT[];
+    v_has_owner     BOOLEAN;
+    v_has_parent    BOOLEAN;
+    v_has_root      BOOLEAN;
+    v_func_name     TEXT;
+    v_trigger_name  TEXT := 'tg_self_root';
+BEGIN
+    v_parts := claimius.split_object_type(p_object_type);
+    v_schema := v_parts[1];
+    v_table := v_parts[2];
+
+    SELECT t.has_sa_owner_id, t.has_sa_parent_id, t.has_sa_root_id
+    INTO v_has_owner, v_has_parent, v_has_root
+    FROM claimius.table_info t WHERE t.object_type = p_object_type;
+
+    -- No sa_root_id: nothing to self reference, skip.
+    IF NOT v_has_root THEN
+        EXECUTE format('DROP TRIGGER IF EXISTS %I ON %I.%I', v_trigger_name, v_schema, v_table);
+        RETURN;
+    END IF;
+
+    IF v_has_parent THEN
+        -- Parenthood table: parent + root self reference together.
+        v_func_name := 'claimius._set_self_parent_on_insert';
+    ELSIF v_has_owner THEN
+        -- Owner only (organization): owner + root self reference together.
+        v_func_name := 'claimius._set_self_owner_on_insert';
+    ELSE
+        -- Root only (location): only root self references; parent stays NULL.
+        v_func_name := 'claimius._set_self_root_on_insert';
+    END IF;
+
+    EXECUTE format('DROP TRIGGER IF EXISTS %I ON %I.%I', v_trigger_name, v_schema, v_table);
+    EXECUTE format(
+            'CREATE TRIGGER %I BEFORE INSERT ON %I.%I FOR EACH ROW EXECUTE FUNCTION %s()',
+            v_trigger_name, v_schema, v_table, v_func_name
+            );
+END;
+$$ LANGUAGE plpgsql;
+
+COMMENT ON FUNCTION claimius._attach_self_root_trigger(TEXT) IS 'Attaches the right self root BEFORE INSERT trigger to a registered table.';
+
+-- _detach_self_root_trigger
+-- Removes the self root trigger from a previously registered table.
+CREATE OR REPLACE FUNCTION claimius._detach_self_root_trigger(p_object_type TEXT)
+    RETURNS VOID AS $$
+DECLARE
+    v_parts TEXT[];
+BEGIN
+    v_parts := claimius.split_object_type(p_object_type);
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = v_parts[1] AND table_name = v_parts[2]) THEN
+        EXECUTE format('DROP TRIGGER IF EXISTS tg_self_root ON %I.%I', v_parts[1], v_parts[2]);
+    END IF;
+END;
+$$ LANGUAGE plpgsql;
+
+COMMENT ON FUNCTION claimius._detach_self_root_trigger(TEXT) IS 'Removes self root trigger from a deregistered table.';
 
 -- ----------------------------------------------------------------------------
 -- Calc functions: the heart of access maintenance
