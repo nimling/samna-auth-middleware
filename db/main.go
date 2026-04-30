@@ -153,7 +153,7 @@ func Init(logger echo.Logger) {
 }
 
 func IsDebugMode() bool {
-	return os.Getenv("SAUTH_DEBUG_USER_ID") != ""
+	return os.Getenv("SAUTH_DEBUG_USER_ID") != "" || (os.Getenv("SAUTH_DEBUG_CLIENT_ID") != "" && os.Getenv("SAUTH_DEBUG_CLIENT_SECRET") != "")
 }
 
 func Instance() *DB {

@@ -66,7 +66,7 @@ func UserAuthMiddleware(opts *UserAuthOptions) echo.MiddlewareFunc {
 				return next(ctx)
 			}
 
-			if clientErr := authenticateClient(ctx); !errors.Is(clientErr, ErrorCredentialMissing) {
+			if clientErr := authenticateClient(ctx, config.DebugClientID, config.DebugClientSecret); !errors.Is(clientErr, ErrorCredentialMissing) {
 				if clientErr != nil {
 					return respondAuthError(ctx, clientErr)
 				}
@@ -127,12 +127,14 @@ func configFromUserAuthOptions(opts *UserAuthOptions) *AuthMiddlewareConfig {
 	}
 
 	return &AuthMiddlewareConfig{
-		ClientSlug:       slug,
-		ClientSecret:     secret,
-		RedirectURI:      redirectURI,
-		PageRedirectURI:  pageRedirectURI,
-		OpenIDConfigURL:  *openIDUrl,
-		AuthorizedUserID: debugUserID,
+		ClientSlug:        slug,
+		ClientSecret:      secret,
+		RedirectURI:       redirectURI,
+		PageRedirectURI:   pageRedirectURI,
+		OpenIDConfigURL:   *openIDUrl,
+		AuthorizedUserID:  debugUserID,
+		DebugClientID:     utils.GetEnvUUIDOptional("SAUTH_DEBUG_CLIENT_ID"),
+		DebugClientSecret: utils.GetEnvOptional("SAUTH_DEBUG_CLIENT_SECRET"),
 	}
 }
 
@@ -144,11 +146,13 @@ func configFromEnv() *AuthMiddlewareConfig {
 	}
 
 	return &AuthMiddlewareConfig{
-		ClientSlug:       utils.GetEnv("SAUTH_APP_SLUG"),
-		ClientSecret:     utils.GetEnv("SAUTH_APP_SECRET"),
-		RedirectURI:      utils.GetEnv("SAUTH_REDIRECT_URI"),
-		PageRedirectURI:  utils.GetEnv("SAUTH_PAGE_REDIRECT"),
-		OpenIDConfigURL:  *openIDUrl,
-		AuthorizedUserID: utils.GetEnvUUIDOptional("SAUTH_DEBUG_USER_ID"),
+		ClientSlug:        utils.GetEnv("SAUTH_APP_SLUG"),
+		ClientSecret:      utils.GetEnv("SAUTH_APP_SECRET"),
+		RedirectURI:       utils.GetEnv("SAUTH_REDIRECT_URI"),
+		PageRedirectURI:   utils.GetEnv("SAUTH_PAGE_REDIRECT"),
+		OpenIDConfigURL:   *openIDUrl,
+		AuthorizedUserID:  utils.GetEnvUUIDOptional("SAUTH_DEBUG_USER_ID"),
+		DebugClientID:     utils.GetEnvUUIDOptional("SAUTH_DEBUG_CLIENT_ID"),
+		DebugClientSecret: utils.GetEnvOptional("SAUTH_DEBUG_CLIENT_SECRET"),
 	}
 }

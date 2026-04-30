@@ -51,6 +51,8 @@ type AuthMiddlewareConfig struct {
 	PageRedirectURI     string
 	OpenIDConfigURL     url.URL
 	AuthorizedUserID    *uuid.UUID
+	DebugClientID       *uuid.UUID
+	DebugClientSecret   string
 }
 
 type UserAuthOptions struct {

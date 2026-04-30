@@ -40,6 +40,10 @@ func CookieDomainFromURI(uri string) string {
 	return host
 }
 
+func GetEnvOptional(envKey string) string {
+	return os.Getenv(envKey)
+}
+
 func GetEnvUUIDOptional(envKey string) *uuid.UUID {
 	envVal, ok := os.LookupEnv(envKey)
 	if !ok || envVal == "" {

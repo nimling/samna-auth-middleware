@@ -8,13 +8,17 @@ import (
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 	"github.com/nimling/samna-auth-middleware/db"
+	"github.com/nimling/samna-auth-middleware/utils"
 	"golang.org/x/crypto/bcrypt"
 )
 
 func ClientAuthMiddleware() echo.MiddlewareFunc {
+	debugID := utils.GetEnvUUIDOptional("SAUTH_DEBUG_CLIENT_ID")
+	debugSecret := utils.GetEnvOptional("SAUTH_DEBUG_CLIENT_SECRET")
+
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(ctx echo.Context) error {
-			err := authenticateClient(ctx)
+			err := authenticateClient(ctx, debugID, debugSecret)
 			if errors.Is(err, ErrorCredentialMissing) {
 				return ctx.String(http.StatusUnauthorized, "Unauthorized")
 			}
@@ -26,12 +30,20 @@ func ClientAuthMiddleware() echo.MiddlewareFunc {
 	}
 }
 
-func authenticateClient(ctx echo.Context) error {
+func authenticateClient(ctx echo.Context, debugID *uuid.UUID, debugSecret string) error {
 	keyHeader := ctx.Request().Header.Get("SAuth-Client-Key")
 	secretHeader := ctx.Request().Header.Get("SAuth-Client-Secret")
 
 	if keyHeader == "" || secretHeader == "" {
 		return ErrorCredentialMissing
+	}
+
+	if debugID != nil && debugSecret != "" {
+		if keyHeader == debugID.String() && secretHeader == debugSecret {
+			ctx.Set(UserIDKey, *debugID)
+			return nil
+		}
+		return fmt.Errorf("debug client bypass mismatch: %w", ErrorUnauthorized)
 	}
 
 	clientKey, err := uuid.Parse(keyHeader)
