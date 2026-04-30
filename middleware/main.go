@@ -14,43 +14,6 @@ import (
 	"github.com/nimling/samna-auth-middleware/utils"
 )
 
-func Auth(opts *AuthOptions) echo.MiddlewareFunc {
-	if opts == nil {
-		opts = &AuthOptions{}
-	}
-
-	var userMW echo.MiddlewareFunc
-	var clientMW echo.MiddlewareFunc
-
-	if opts.UserAuth != nil {
-		userMW = UserAuthMiddleware(opts.UserAuth)
-	} else {
-		userMW = UserAuthMiddleware(nil)
-	}
-
-	if opts.ClientAuth != nil {
-		clientMW = ClientAuthMiddleware(opts.ClientAuth)
-	} else {
-		clientMW = ClientAuthMiddleware(nil)
-	}
-
-	return func(next echo.HandlerFunc) echo.HandlerFunc {
-		return func(ctx echo.Context) error {
-			withClient := clientMW(next)
-			withUser := userMW(withClient)
-			return withUser(ctx)
-		}
-	}
-}
-
-func AuthMiddlewareEnv() echo.MiddlewareFunc {
-	return AuthMiddleware(nil)
-}
-
-func AuthMiddleware(config *AuthMiddlewareConfig) echo.MiddlewareFunc {
-	return UserAuthMiddleware(userAuthOptionsFromConfig(config))
-}
-
 func UserAuthMiddleware(opts *UserAuthOptions) echo.MiddlewareFunc {
 	config := configFromUserAuthOptions(opts)
 
@@ -81,58 +44,46 @@ func UserAuthMiddleware(opts *UserAuthOptions) echo.MiddlewareFunc {
 
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(ctx echo.Context) error {
-
-			if ctx.QueryParams().Has(authCodeParamKey) {
-				authCode := ctx.QueryParam(authCodeParamKey)
-
-				err := exchangeAuthorizationCode(ctx, authCode, *config)
-				if err != nil {
-					ctx.Logger().Warnf("Failed to exchange the authorization code: %v", err)
-					if errors.Is(err, ErrorUnauthorized) {
-						return ctx.String(http.StatusUnauthorized, "Unauthorized")
-					}
-					return ctx.String(http.StatusInternalServerError, "Internal Server Error")
+			if handled, exErr := exchangeAuthCodeFromQuery(ctx, config); handled {
+				if exErr != nil {
+					ctx.Logger().Warnf("Failed to exchange the authorization code: %v", exErr)
+					return respondAuthError(ctx, exErr)
 				}
-
 				return ctx.Redirect(http.StatusFound, config.PageRedirectURI)
 			}
 
-			accessToken, err := getAccessToken(ctx)
-			if err == nil {
-				claimUser, vldErr := ValidateToken(accessToken, config.ExpectedTokenIssuer, jwksClient.Keyfunc)
-				if vldErr == nil {
-					ctx.Set(UserIDKey, claimUser.ID)
-					ctx.Set(AccessTokenKey, accessToken)
-					return next(ctx)
+			if bearerErr := authenticateBearer(ctx, config, jwksClient.Keyfunc); !errors.Is(bearerErr, ErrorCredentialMissing) {
+				if bearerErr != nil {
+					return respondAuthError(ctx, bearerErr)
 				}
-
-				if !errors.Is(vldErr, ErrorTokenExpired) {
-					ctx.Logger().Errorf("Failed to validate the access_token: %v", vldErr)
-					return ctx.String(http.StatusUnauthorized, "Unauthorized")
-				}
+				return next(ctx)
 			}
 
-			tokens, err := refreshTokens(ctx, *config)
-			if err != nil {
-				ctx.Logger().Warnf("Failed to refresh tokens: %v", err)
-				if errors.Is(err, ErrorUnauthorized) {
-					return ctx.String(http.StatusUnauthorized, "Unauthorized")
+			if cookieErr := authenticateCookie(ctx, config, jwksClient.Keyfunc); !errors.Is(cookieErr, ErrorCredentialMissing) {
+				if cookieErr != nil {
+					return respondAuthError(ctx, cookieErr)
 				}
-				return ctx.String(http.StatusInternalServerError, "Internal Server Error")
+				return next(ctx)
 			}
 
-			claims, err := claimsFromTokenUnsafe(tokens.AccessToken)
-			if err != nil {
-				ctx.Logger().Errorf("Failed to parse the token claims: %v", err)
-				return ctx.String(http.StatusInternalServerError, "Internal Server Error")
+			if clientErr := authenticateClient(ctx); !errors.Is(clientErr, ErrorCredentialMissing) {
+				if clientErr != nil {
+					return respondAuthError(ctx, clientErr)
+				}
+				return next(ctx)
 			}
 
-			ctx.Set(UserIDKey, claims.ID)
-			ctx.Set(AccessTokenKey, tokens.AccessToken)
-
-			return next(ctx)
+			return ctx.String(http.StatusUnauthorized, "Unauthorized")
 		}
 	}
+}
+
+func respondAuthError(ctx echo.Context, err error) error {
+	if errors.Is(err, ErrorUnauthorized) {
+		return ctx.String(http.StatusUnauthorized, "Unauthorized")
+	}
+	ctx.Logger().Errorf("auth error: %v", err)
+	return ctx.String(http.StatusInternalServerError, "Internal Server Error")
 }
 
 func inactiveAppMiddleware() echo.MiddlewareFunc {
@@ -140,19 +91,6 @@ func inactiveAppMiddleware() echo.MiddlewareFunc {
 		return func(ctx echo.Context) error {
 			return ctx.String(http.StatusServiceUnavailable, "Auth service unavailable")
 		}
-	}
-}
-
-func userAuthOptionsFromConfig(config *AuthMiddlewareConfig) *UserAuthOptions {
-	if config == nil {
-		return nil
-	}
-	return &UserAuthOptions{
-		ClientSlug:      config.ClientSlug,
-		ClientSecret:    config.ClientSecret,
-		RedirectURI:     config.RedirectURI,
-		PageRedirectURI: config.PageRedirectURI,
-		DebugUserID:     config.AuthorizedUserID,
 	}
 }
 

@@ -19,7 +19,7 @@ func main() {
 	db.RegisterSyncFunc(sync.PullSnapshot)
 	db.Init(e.Logger)
 
-	auth := middleware.Auth(nil)
+	auth := middleware.UserAuthMiddleware(nil)
 
 	e.GET("/login", saecho.GetLogin)
 	e.GET("/login/:provider", saecho.GetLogin)

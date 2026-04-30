@@ -17,7 +17,7 @@ func main() {
 	db.RegisterSyncFunc(sync.PullSnapshot)
 	db.Init(e.Logger)
 
-	e.Use(middleware.AuthMiddlewareEnv())
+	e.Use(middleware.UserAuthMiddleware(nil))
 
 	e.GET("/whoami", func(ctx echo.Context) error {
 		userID := ctx.Get(middleware.UserIDKey).(uuid.UUID)

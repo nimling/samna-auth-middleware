@@ -27,8 +27,9 @@ func (e AuthError) Error() string {
 }
 
 const (
-	ErrorTokenExpired AuthError = "Token is expired"
-	ErrorUnauthorized AuthError = "Unauthorized"
+	ErrorTokenExpired      AuthError = "Token is expired"
+	ErrorUnauthorized      AuthError = "Unauthorized"
+	ErrorCredentialMissing AuthError = "Credential missing"
 )
 
 type UserType string
@@ -52,20 +53,12 @@ type AuthMiddlewareConfig struct {
 	AuthorizedUserID    *uuid.UUID
 }
 
-type AuthOptions struct {
-	UserAuth   *UserAuthOptions
-	ClientAuth *ClientAuthOptions
-}
-
 type UserAuthOptions struct {
 	ClientSlug      string
 	ClientSecret    string
 	RedirectURI     string
 	PageRedirectURI string
 	DebugUserID     *uuid.UUID
-}
-
-type ClientAuthOptions struct {
 }
 
 type UserDetail struct {

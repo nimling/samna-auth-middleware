@@ -4,15 +4,66 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
 	"net/url"
 
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/labstack/echo/v4"
 	"github.com/nimling/samna-auth-middleware/client"
 	"github.com/nimling/samna-auth-middleware/utils"
 )
+
+func authenticateCookie(ctx echo.Context, config *AuthMiddlewareConfig, keyFunc jwt.Keyfunc) error {
+	accessCookie, accessErr := ctx.Cookie(accessTokenCookieKey)
+	refreshCookie, refreshErr := ctx.Cookie(refreshTokenCookieKey)
+
+	accessPresent := accessErr == nil && accessCookie.Value != ""
+	refreshPresent := refreshErr == nil && refreshCookie.Value != ""
+
+	if !accessPresent && !refreshPresent {
+		return ErrorCredentialMissing
+	}
+
+	if accessPresent {
+		claimUser, vldErr := ValidateToken(accessCookie.Value, config.ExpectedTokenIssuer, keyFunc)
+		if vldErr == nil {
+			ctx.Set(UserIDKey, claimUser.ID)
+			ctx.Set(AccessTokenKey, accessCookie.Value)
+			return nil
+		}
+		if !errors.Is(vldErr, ErrorTokenExpired) {
+			ctx.Logger().Errorf("Failed to validate the cookie access_token: %v", vldErr)
+			return fmt.Errorf("validate cookie token: %w: %w", vldErr, ErrorUnauthorized)
+		}
+	}
+
+	tokens, err := refreshTokens(ctx, *config)
+	if err != nil {
+		ctx.Logger().Warnf("Failed to refresh tokens: %v", err)
+		return err
+	}
+
+	claims, err := claimsFromTokenUnsafe(tokens.AccessToken)
+	if err != nil {
+		ctx.Logger().Errorf("Failed to parse the refreshed token claims: %v", err)
+		return fmt.Errorf("parse refreshed token claims: %w", err)
+	}
+
+	ctx.Set(UserIDKey, claims.ID)
+	ctx.Set(AccessTokenKey, tokens.AccessToken)
+	return nil
+}
+
+func exchangeAuthCodeFromQuery(ctx echo.Context, config *AuthMiddlewareConfig) (bool, error) {
+	if !ctx.QueryParams().Has(authCodeParamKey) {
+		return false, nil
+	}
+	authCode := ctx.QueryParam(authCodeParamKey)
+	return true, exchangeAuthorizationCode(ctx, authCode, *config)
+}
 
 func generateCSRFToken() (string, error) {
 	b := make([]byte, 32)

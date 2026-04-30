@@ -10,22 +10,22 @@ import (
 	"github.com/labstack/echo/v4"
 )
 
-func getAccessToken(ctx echo.Context) (string, error) {
+func authenticateBearer(ctx echo.Context, config *AuthMiddlewareConfig, keyFunc jwt.Keyfunc) error {
 	authHeader := ctx.Request().Header.Get(echo.HeaderAuthorization)
-	if authHeader != "" && strings.HasPrefix(authHeader, "Bearer ") {
-		return strings.TrimPrefix(authHeader, "Bearer "), nil
+	if authHeader == "" || !strings.HasPrefix(authHeader, "Bearer ") {
+		return ErrorCredentialMissing
 	}
+	token := strings.TrimPrefix(authHeader, "Bearer ")
 
-	cookie, err := ctx.Cookie(accessTokenCookieKey)
+	claimUser, err := ValidateToken(token, config.ExpectedTokenIssuer, keyFunc)
 	if err != nil {
-		return "", err
+		ctx.Logger().Errorf("Failed to validate the bearer access_token: %v", err)
+		return fmt.Errorf("validate bearer token: %w: %w", err, ErrorUnauthorized)
 	}
 
-	if cookie.Value == "" {
-		return "", errors.New("access_token cookie is empty")
-	}
-
-	return cookie.Value, nil
+	ctx.Set(UserIDKey, claimUser.ID)
+	ctx.Set(AccessTokenKey, token)
+	return nil
 }
 
 func ValidateToken(tokenString, expectedIss string, keyFunc jwt.Keyfunc) (*ClaimUser, error) {

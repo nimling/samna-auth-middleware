@@ -1,6 +1,8 @@
 package middleware
 
 import (
+	"errors"
+	"fmt"
 	"net/http"
 
 	"github.com/google/uuid"
@@ -9,41 +11,43 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
-func ClientAuthMiddleware(opts *ClientAuthOptions) echo.MiddlewareFunc {
-	if opts == nil {
-		opts = &ClientAuthOptions{}
-	}
-
+func ClientAuthMiddleware() echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(ctx echo.Context) error {
-			clientKeyHeader := ctx.Request().Header.Get("SAuth-Client-Key")
-			clientSecretHeader := ctx.Request().Header.Get("SAuth-Client-Secret")
-
-			if clientKeyHeader == "" || clientSecretHeader == "" {
-				return next(ctx)
+			err := authenticateClient(ctx)
+			if errors.Is(err, ErrorCredentialMissing) {
+				return ctx.String(http.StatusUnauthorized, "Unauthorized")
 			}
-
-			if ctx.Request().Header.Get(echo.HeaderAuthorization) != "" {
-				return next(ctx)
-			}
-
-			clientKey, err := uuid.Parse(clientKeyHeader)
 			if err != nil {
-				return ctx.String(http.StatusUnauthorized, "Unauthorized")
+				return respondAuthError(ctx, err)
 			}
-
-			samnaClient, err := db.Instance().GetClient(ctx.Request().Context(), clientKey)
-			if err != nil {
-				return ctx.String(http.StatusUnauthorized, "Unauthorized")
-			}
-
-			if err := bcrypt.CompareHashAndPassword([]byte(samnaClient.SecretHash), []byte(clientSecretHeader)); err != nil {
-				return ctx.String(http.StatusUnauthorized, "Unauthorized")
-			}
-
-			ctx.Set(UserIDKey, samnaClient.ID)
-
 			return next(ctx)
 		}
 	}
+}
+
+func authenticateClient(ctx echo.Context) error {
+	keyHeader := ctx.Request().Header.Get("SAuth-Client-Key")
+	secretHeader := ctx.Request().Header.Get("SAuth-Client-Secret")
+
+	if keyHeader == "" || secretHeader == "" {
+		return ErrorCredentialMissing
+	}
+
+	clientKey, err := uuid.Parse(keyHeader)
+	if err != nil {
+		return fmt.Errorf("parse client key: %w: %w", err, ErrorUnauthorized)
+	}
+
+	samnaClient, err := db.Instance().GetClient(ctx.Request().Context(), clientKey)
+	if err != nil {
+		return fmt.Errorf("lookup client: %w: %w", err, ErrorUnauthorized)
+	}
+
+	if err := bcrypt.CompareHashAndPassword([]byte(samnaClient.SecretHash), []byte(secretHeader)); err != nil {
+		return fmt.Errorf("verify client secret: %w: %w", err, ErrorUnauthorized)
+	}
+
+	ctx.Set(UserIDKey, samnaClient.ID)
+	return nil
 }

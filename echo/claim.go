@@ -134,6 +134,20 @@ func PostClaim(ctx echo.Context) error {
 			ctx.Logger().Errorf("PostClaim: %v", err)
 			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 		}
+		if ac.ClaimID != nil {
+			_, coErr := db.Instance().PostClaimObject(ctx.Request().Context(), *ac.ClaimID, db.ClaimObject{
+				ClaimID:    *ac.ClaimID,
+				ObjectID:   out.ID,
+				ObjectType: db.OBJECT_TYPE_CLAIM,
+				OwnerID:    claim.OwnerID,
+				RootID:     ac.RootID,
+				CreatedBy:  ac.UserClaimID,
+				Inherits:   true,
+			})
+			if coErr != nil {
+				ctx.Logger().Warnf("PostClaim bind claim_object: %v", coErr)
+			}
+		}
 		return respondJSON(ctx, http.StatusCreated, out, 0)
 	}
 

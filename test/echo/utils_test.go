@@ -55,7 +55,7 @@ func InitTestEcho() *echo.Echo {
 	db.RegisterSyncFunc(sync.PullSnapshot)
 	db.Init(e.Logger)
 
-	middleware.Auth(nil)
+	middleware.UserAuthMiddleware(nil)
 
 	return e
 }

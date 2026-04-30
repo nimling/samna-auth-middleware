@@ -42,7 +42,7 @@ func (d *DB) GetClaim(ctx context.Context, userID, claimID uuid.UUID, accessLeve
 		Model(&claim).
 		ExcludeColumn("app_id").
 		Where("claim.id = ?", claimID).
-		Where("claim.id IN (SELECT id FROM claimius.get_claims(?, claimius.get_disciple_app_id(), ?))", userID, accessLevel).
+		Where("EXISTS (SELECT 1 FROM claimius.get_access(?, claimius.get_disciple_app_id(), claim.id, ?, ?))", userID, OBJECT_TYPE_CLAIM, accessLevel).
 		Limit(1)
 	q = ApplyRelations(q, relations)
 	err := q.Scan(ctx)
