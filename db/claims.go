@@ -84,7 +84,7 @@ func (d *DB) GetClaimAudit(ctx context.Context, claimID uuid.UUID) ([]Audit, err
 func (d *DB) Search(ctx context.Context, userID uuid.UUID, query string, objectTypes []string, accessLevel ClaimAccessLevel, limit int, offset int) ([]SearchResult, error) {
 	results := make([]SearchResult, 0)
 	err := d.NewRaw(
-		`SELECT * FROM claimius.search_objects(?, claimius.get_disciple_app_id(), ?, ?::text[], ?, ?, ?)`,
+		`SELECT * FROM claimius.search(?, claimius.get_disciple_app_id(), ?, ?::text[], ?, ?, ?)`,
 		userID, query, objectTypes, accessLevel, limit, offset,
 	).Scan(ctx, &results)
 	if err != nil {

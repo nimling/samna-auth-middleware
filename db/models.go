@@ -2,11 +2,41 @@ package db
 
 import (
 	"encoding/json"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/uptrace/bun"
 )
+
+type ObjectType string
+
+func (o ObjectType) MarshalJSON() ([]byte, error) {
+	s := string(o)
+	if dot := strings.IndexByte(s, '.'); dot >= 0 {
+		s = s[dot+1:]
+	}
+	return json.Marshal(s)
+}
+
+func (o *ObjectType) UnmarshalJSON(data []byte) error {
+	var s string
+	if err := json.Unmarshal(data, &s); err != nil {
+		return err
+	}
+	if s != "" && strings.IndexByte(s, '.') < 0 {
+		s = "claimius." + s
+	}
+	*o = ObjectType(s)
+	return nil
+}
+
+func QualifyObjectType(s string) string {
+	if s == "" || strings.IndexByte(s, '.') >= 0 {
+		return s
+	}
+	return "claimius." + s
+}
 
 type ClaimAccessLevel int
 
@@ -173,7 +203,7 @@ type ClaimObject struct {
 	AppID      uuid.UUID     `bun:"app_id,notnull,type:uuid,default:claimius.get_disciple_app_id()" json:"-"`
 	ClaimID    uuid.UUID     `bun:"claim_id" json:"claim_id"`
 	ObjectID   uuid.UUID     `bun:"object_id" json:"object_id"`
-	ObjectType string        `bun:"object_type" json:"object_type"`
+	ObjectType ObjectType    `bun:"object_type" json:"object_type"`
 	Reason     *string       `bun:"reason" json:"reason"`
 	Function   *string       `bun:"function" json:"function"`
 	Level      int           `bun:"sa_level,default:0" json:"level"`
@@ -218,7 +248,7 @@ type Asset struct {
 
 type GraphNode struct {
 	ObjectID   uuid.UUID       `bun:"object_id" json:"object_id"`
-	ObjectType string          `bun:"object_type" json:"object_type"`
+	ObjectType ObjectType      `bun:"object_type" json:"object_type"`
 	Label      string          `bun:"label" json:"label"`
 	ParentID   *uuid.UUID      `bun:"parent_id" json:"parent_id"`
 	Data       json.RawMessage `bun:"data,type:jsonb" json:"data"`
@@ -287,7 +317,7 @@ type ObjectField struct {
 
 	ID          uuid.UUID        `bun:"id,pk,default:gen_random_uuid()" json:"id"`
 	AppID       uuid.UUID        `bun:"app_id,notnull,type:uuid,default:claimius.get_disciple_app_id()" json:"-"`
-	ObjectType  string           `bun:"object_type" json:"object_type"`
+	ObjectType  ObjectType       `bun:"object_type" json:"object_type"`
 	Name        string           `bun:"name" json:"name"`
 	Description *string          `bun:"description" json:"description"`
 	JsonSchema  *json.RawMessage `bun:"json_schema,type:jsonb" json:"json_schema"`
@@ -322,7 +352,7 @@ type UserRelation struct {
 	AppID       uuid.UUID  `bun:"app_id,notnull,type:uuid,default:claimius.get_disciple_app_id()" json:"-"`
 	UserID      uuid.UUID  `bun:"user_id" json:"user_id"`
 	Description *string    `bun:"description" json:"description"`
-	ObjectType  string     `bun:"object_type" json:"object_type"`
+	ObjectType  ObjectType `bun:"object_type" json:"object_type"`
 	ObjectID    uuid.UUID  `bun:"object_id" json:"object_id"`
 	Pinned      *int       `bun:"pinned" json:"pinned"`
 	Priority    *int       `bun:"priority" json:"priority"`
@@ -340,7 +370,7 @@ type Audit struct {
 	Operation  string     `bun:"operation" json:"operation"`
 	Message    string     `bun:"message,default:''" json:"message"`
 	Type       string     `bun:"type" json:"type"`
-	ObjectType string     `bun:"object_type" json:"object_type"`
+	ObjectType ObjectType `bun:"object_type" json:"object_type"`
 	ObjectID   uuid.UUID  `bun:"object_id" json:"object_id"`
 	OwnerID    uuid.UUID  `bun:"sa_owner_id" json:"owner_id"`
 	CreatedBy  *uuid.UUID `bun:"sa_created_by" json:"created_by"`
@@ -355,7 +385,7 @@ type UserObject struct {
 	AppID       uuid.UUID       `bun:"app_id,notnull,type:uuid,default:claimius.get_disciple_app_id()" json:"-"`
 	UserID      uuid.UUID       `bun:"user_id" json:"user_id"`
 	ObjectID    uuid.UUID       `bun:"object_id" json:"object_id"`
-	ObjectType  string          `bun:"object_type" json:"object_type"`
+	ObjectType  ObjectType      `bun:"object_type" json:"object_type"`
 	AccessLevel int             `bun:"sa_access_level" json:"sa_access_level"`
 	Grants      json.RawMessage `bun:"grants,type:jsonb,default:'[]'" json:"grants"`
 	DirectGrant bool            `bun:"direct_grant,default:false" json:"direct_grant"`
@@ -384,13 +414,13 @@ type UserUsers struct {
 type ObjectUsers struct {
 	bun.BaseModel `bun:"table:claimius.object_users"`
 
-	ID         string    `bun:"id,pk" json:"id"`
-	AppID      uuid.UUID `bun:"app_id,notnull,type:uuid,default:claimius.get_disciple_app_id()" json:"-"`
-	ObjectID   uuid.UUID `bun:"object_id" json:"object_id"`
-	ObjectType string    `bun:"object_type" json:"object_type"`
-	UserID     uuid.UUID `bun:"user_id" json:"user_id"`
-	CreatedAt  time.Time `bun:"sa_created_at,default:now()" json:"created_at"`
-	UpdatedAt  time.Time `bun:"sa_updated_at,default:now()" json:"updated_at"`
+	ID         string     `bun:"id,pk" json:"id"`
+	AppID      uuid.UUID  `bun:"app_id,notnull,type:uuid,default:claimius.get_disciple_app_id()" json:"-"`
+	ObjectID   uuid.UUID  `bun:"object_id" json:"object_id"`
+	ObjectType ObjectType `bun:"object_type" json:"object_type"`
+	UserID     uuid.UUID  `bun:"user_id" json:"user_id"`
+	CreatedAt  time.Time  `bun:"sa_created_at,default:now()" json:"created_at"`
+	UpdatedAt  time.Time  `bun:"sa_updated_at,default:now()" json:"updated_at"`
 }
 
 type SyncEvent struct {
@@ -413,14 +443,14 @@ type DiscipleState struct {
 
 type SearchResult struct {
 	ObjectID    uuid.UUID  `bun:"object_id" json:"object_id"`
-	ObjectType  string     `bun:"object_type" json:"object_type"`
+	ObjectType  ObjectType `bun:"object_type" json:"object_type"`
 	UserClaimID *uuid.UUID `bun:"user_claim_id" json:"user_claim_id"`
-	Name        *string    `bun:"sa_name" json:"name"`
-	Description *string    `bun:"sa_description" json:"description"`
-	Link        *string    `bun:"sa_link" json:"link"`
-	AccessLevel int        `bun:"sa_access_level" json:"access_level"`
-	OwnerID     *uuid.UUID `bun:"sa_owner_id" json:"owner_id"`
-	LocationID  *uuid.UUID `bun:"sa_location_id" json:"location_id"`
-	DirectGrant bool       `bun:"direct_grant" json:"direct_grant"`
+	Name        *string    `bun:"name" json:"name"`
+	Description *string    `bun:"description" json:"description"`
+	Link        *string    `bun:"link" json:"link"`
+	AccessLevel int        `bun:"access_level" json:"access_level"`
+	OwnerID     *uuid.UUID `bun:"owner_id" json:"owner_id"`
+	LocationID  *uuid.UUID `bun:"location_id" json:"location_id"`
+	DirectGrant bool       `bun:"is_direct_grant" json:"direct_grant"`
 	Rank        float32    `bun:"rank" json:"rank"`
 }

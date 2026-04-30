@@ -1488,6 +1488,7 @@ DECLARE
     v_table TEXT;
     v_parts TEXT[];
     v_row_count INTEGER := 0;
+    v_has_app_id BOOLEAN;
     v_user RECORD;
     v_obj RECORD;
     v_sql TEXT;
@@ -1496,10 +1497,17 @@ BEGIN
     v_schema := v_parts[1];
     v_table := v_parts[2];
 
+    SELECT t.has_app_id INTO v_has_app_id
+    FROM claimius.table_info t WHERE t.object_type = p_object_type;
+
     -- For every live row in the table, find every potentially affected user
     -- and recompute. Triggers are short circuited by replay_mode.
     PERFORM set_config('claimius.replay_mode', 'false', TRUE);
-    v_sql := format('SELECT id, app_id FROM %I.%I WHERE sa_deleted_at IS NULL', v_schema, v_table);
+    IF v_has_app_id THEN
+        v_sql := format('SELECT id, app_id FROM %I.%I WHERE sa_deleted_at IS NULL', v_schema, v_table);
+    ELSE
+        v_sql := format('SELECT id, claimius.get_app_id() AS app_id FROM %I.%I WHERE sa_deleted_at IS NULL', v_schema, v_table);
+    END IF;
     FOR v_obj IN EXECUTE v_sql LOOP
             FOR v_user IN
                 SELECT user_id FROM claimius._affected_users_for_object(v_obj.app_id, p_object_type, v_obj.id)

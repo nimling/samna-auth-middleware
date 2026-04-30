@@ -19,6 +19,9 @@ func GetSearch(ctx echo.Context) error {
 	var objectTypes []string
 	if ot := ctx.QueryParam("object_types"); ot != "" {
 		objectTypes = strings.Split(ot, ",")
+		for i, t := range objectTypes {
+			objectTypes[i] = db.QualifyObjectType(strings.TrimSpace(t))
+		}
 	}
 
 	limit := 20
