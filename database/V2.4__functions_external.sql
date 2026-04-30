@@ -1526,6 +1526,73 @@ $$ LANGUAGE plpgsql;
 COMMENT ON FUNCTION claimius._bulk_seed_user_object IS 'Seeds user_object for an existing table at registration time.';
 
 -- ----------------------------------------------------------------------------
+-- recompute_state
+-- Rebuilds inheritance_info trees and user_object materialization for every
+-- registered table from live data. Idempotent. Use after a bulk write that
+-- ran with claimius.replay_mode = 'true', or any time materialization needs
+-- to be reconciled with current rows.
+--
+-- Self contained: reads the registry from claimius.table_info; takes no
+-- arguments; assumes init_claimius_internal() and init_claimius_tables(...)
+-- have already registered the relevant tables. If table_info is empty the
+-- function is a no-op.
+-- ----------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION claimius.recompute_state()
+    RETURNS VOID AS $$
+DECLARE
+    v_root    UUID;
+    v_table   RECORD;
+    v_sql     TEXT;
+    v_id      UUID;
+BEGIN
+    PERFORM set_config('claimius.replay_mode', 'true', TRUE);
+    BEGIN
+        FOR v_root IN
+            SELECT id FROM claimius.organization
+            WHERE sa_owner_id = id AND sa_deleted_at IS NULL
+            LOOP
+                PERFORM claimius.build_ownership_tree(v_root);
+            END LOOP;
+
+        FOR v_root IN
+            SELECT id FROM claimius.location
+            WHERE sa_parent_id = id AND sa_deleted_at IS NULL
+            LOOP
+                PERFORM claimius.build_location_tree(v_root);
+            END LOOP;
+
+        FOR v_table IN
+            SELECT object_type, schema_name, table_name
+            FROM claimius.table_info
+            WHERE has_sa_parent_id
+              AND has_sa_root_id
+              AND object_type NOT IN ('claimius.organization', 'claimius.location')
+            LOOP
+                v_sql := format(
+                        'SELECT id FROM %I.%I WHERE sa_parent_id = id AND sa_deleted_at IS NULL',
+                        v_table.schema_name, v_table.table_name
+                         );
+                FOR v_id IN EXECUTE v_sql LOOP
+                        PERFORM claimius.build_parenthood_tree(v_table.object_type, v_id);
+                    END LOOP;
+            END LOOP;
+
+        FOR v_table IN
+            SELECT object_type FROM claimius.table_info
+            LOOP
+                PERFORM claimius._bulk_seed_user_object(v_table.object_type);
+            END LOOP;
+    EXCEPTION WHEN OTHERS THEN
+        PERFORM set_config('claimius.replay_mode', 'false', TRUE);
+        RAISE;
+    END;
+    PERFORM set_config('claimius.replay_mode', 'false', TRUE);
+END;
+$$ LANGUAGE plpgsql;
+
+COMMENT ON FUNCTION claimius.recompute_state() IS 'Rebuilds inheritance_info and user_object for every registered table from live data. Idempotent. Run after bulk writes that bypassed calc triggers.';
+
+-- ----------------------------------------------------------------------------
 -- init_claimius_internal
 -- Registers all claimius.* tables in table_info. Called once at the end of
 -- claimius schema bootstrap (VX.0__init.sql). Not callable by implementers.
@@ -2121,7 +2188,8 @@ BEGIN
              claimius.assign_claim_object, claimius.update_claim_object, claimius.remove_claim_object,
              claimius.merge_user, claimius.migrate_root,
              claimius.init_prophet, claimius.init_disciple, claimius.init_hybrid,
-             claimius.init_claimius_tables, claimius.init_claimius_internal
+             claimius.init_claimius_tables, claimius.init_claimius_internal,
+             claimius.recompute_state
              FROM claimius_reader';
 
     -- Writer: EXECUTE on everything, plus INSERT/UPDATE on tables that do
@@ -2149,7 +2217,8 @@ BEGIN
              claimius.assign_claim_object, claimius.update_claim_object, claimius.remove_claim_object,
              claimius.merge_user, claimius.migrate_root,
              claimius.init_prophet, claimius.init_disciple, claimius.init_hybrid,
-             claimius.init_claimius_tables, claimius.init_claimius_internal
+             claimius.init_claimius_tables, claimius.init_claimius_internal,
+             claimius.recompute_state
              FROM claimius_reader';
     EXECUTE 'GRANT INSERT, UPDATE, DELETE ON claimius.user_object, claimius.object_users, claimius.user_users,
              claimius.disciple_state, claimius.samna_user, claimius.samna_client,
