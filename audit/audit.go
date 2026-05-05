@@ -18,6 +18,7 @@ func Write(a db.Audit) {
 			_, err := db.Instance().
 				NewInsert().
 				Model(&a).
+				ExcludeColumn("app_id").
 				Exec(ctx)
 			cancel()
 

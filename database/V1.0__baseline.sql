@@ -603,7 +603,7 @@ CREATE INDEX IF NOT EXISTS idx_reconcile_queue_user ON claimius.reconcile_queue 
 -- still write the acting user_claim.id; everything else writes NULL.
 CREATE TABLE IF NOT EXISTS claimius.audit (
                                               id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                                              app_id          UUID,
+                                              app_id          UUID NOT NULL DEFAULT claimius.get_disciple_app_id(),
                                               operation       VARCHAR NOT NULL,
                                               message         TEXT DEFAULT '',
                                               type            VARCHAR NOT NULL,
