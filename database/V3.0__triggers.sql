@@ -76,10 +76,6 @@ DROP TRIGGER IF EXISTS tg_update_timestamp ON claimius.table_info;
 CREATE TRIGGER tg_update_timestamp BEFORE UPDATE ON claimius.table_info
     FOR EACH ROW EXECUTE FUNCTION claimius.update_timestamp();
 
-DROP TRIGGER IF EXISTS tg_update_timestamp ON claimius.inheritance_info;
-CREATE TRIGGER tg_update_timestamp BEFORE UPDATE ON claimius.inheritance_info
-    FOR EACH ROW EXECUTE FUNCTION claimius.update_timestamp();
-
 -- ----------------------------------------------------------------------------
 -- Audit triggers: organization, location, claim, claim_object, user_claim
 -- ----------------------------------------------------------------------------

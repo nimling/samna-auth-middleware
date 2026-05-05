@@ -1437,7 +1437,9 @@ BEGIN
                 PERFORM claimius._detach_calc_trigger(v_old_object_type);
                 PERFORM claimius._detach_self_root_trigger(v_old_object_type);
                 DELETE FROM claimius.table_info WHERE object_type = v_old_object_type;
-                DELETE FROM claimius.inheritance_info WHERE object_type = v_old_object_type;
+                DELETE FROM claimius.inheritance_info
+                 WHERE ancestor_type = v_old_object_type
+                    OR descendant_type = v_old_object_type;
                 DELETE FROM claimius.user_object WHERE object_type = v_old_object_type;
                 DELETE FROM claimius.object_users WHERE object_type = v_old_object_type;
                 DELETE FROM claimius.reconcile_queue WHERE object_type = v_old_object_type;
@@ -1480,7 +1482,11 @@ COMMENT ON FUNCTION claimius.init_claimius_tables IS 'Registers external tables.
 -- _bulk_seed_user_object
 -- For a registered table with existing rows, populates user_object,
 -- object_users, and user_users for every (user, object) pair where access
--- exists. Run while replay_mode is true.
+-- exists. Inherits the caller's replay_mode setting; callers run this with
+-- replay_mode = true so emit_sync_event short circuits and the bulk seed
+-- produces no sync events. Per-row cost is bounded because the helpers
+-- _affected_users_for_object and _build_grants_for_object both use indexed
+-- joins against the inheritance_info closure table.
 CREATE OR REPLACE FUNCTION claimius._bulk_seed_user_object(p_object_type TEXT)
     RETURNS VOID AS $$
 DECLARE
@@ -1500,9 +1506,6 @@ BEGIN
     SELECT t.has_app_id INTO v_has_app_id
     FROM claimius.table_info t WHERE t.object_type = p_object_type;
 
-    -- For every live row in the table, find every potentially affected user
-    -- and recompute. Triggers are short circuited by replay_mode.
-    PERFORM set_config('claimius.replay_mode', 'false', TRUE);
     IF v_has_app_id THEN
         v_sql := format('SELECT id, app_id FROM %I.%I WHERE sa_deleted_at IS NULL', v_schema, v_table);
     ELSE
@@ -1519,7 +1522,6 @@ BEGIN
                 RAISE NOTICE '  ... seeded % rows of %', v_row_count, p_object_type;
             END IF;
         END LOOP;
-    PERFORM set_config('claimius.replay_mode', 'true', TRUE);
 END;
 $$ LANGUAGE plpgsql;
 
@@ -1578,7 +1580,14 @@ BEGIN
             END LOOP;
 
         FOR v_table IN
-            SELECT object_type FROM claimius.table_info
+            SELECT ti.object_type
+            FROM claimius.table_info ti
+            WHERE ti.has_sa_deleted_at
+              AND EXISTS (
+                SELECT 1 FROM claimius.claim_object co
+                WHERE co.object_type = ti.object_type
+                  AND co.sa_deleted_at IS NULL
+            )
             LOOP
                 PERFORM claimius._bulk_seed_user_object(v_table.object_type);
             END LOOP;
@@ -1925,10 +1934,12 @@ BEGIN
     -- 4. reconcile: app's sa_owner_id should match the actual system org id
     UPDATE claimius.samna_app SET sa_owner_id = v_org_id WHERE id = v_app_id AND sa_owner_id <> v_org_id;
 
-    -- 5. ensure inheritance_info row for system org (full unique index, ON CONFLICT works)
-    INSERT INTO claimius.inheritance_info (object_type, root_id, type, tree)
-    VALUES ('claimius.organization', v_org_id, 'ownership', '{}'::JSONB)
-    ON CONFLICT (object_type, root_id, type) DO NOTHING;
+    -- 5. ensure ownership tree closure self-edge for the system org
+    INSERT INTO claimius.inheritance_info (
+        tree_type, root_id, ancestor_type, ancestor_id, descendant_type, descendant_id, depth
+    ) VALUES (
+        'ownership', v_org_id, 'claimius.organization', v_org_id, 'claimius.organization', v_org_id, 0
+    ) ON CONFLICT DO NOTHING;
 
     -- 6. system claim (sidelined: granted only to the system user)
     SELECT id INTO v_claim_id FROM claimius.claim

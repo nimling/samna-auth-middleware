@@ -36,7 +36,7 @@ Implementers don't need to know about `sa_root_id`. Just set the parent (`sa_own
 
 **Composite ids**: identifiers that span polymorphic tables use the format `<object_type>:<object_id>` where `object_type` is the schema qualified table name (`public.device`, `claimius.organization`).
 
-**Trees**: each `inheritance_info` row caches one hierarchy as a nested jsonb. Calc functions update these caches surgically. Reads use them via `get_subtree`.
+**Trees**: `inheritance_info` is a closure table: one row per ancestor-descendant edge across the three tree types (ownership, location, parenthood). Self-edges at depth 0 are included so a node is its own ancestor. Calc functions maintain edges incrementally on writes; full rebuilds happen via `build_ownership_tree`, `build_location_tree`, `build_parenthood_tree`. Reads use indexed JOINs against the closure or the `get_subtree` / `get_*_ancestors` helpers.
 
 **user_object**: the materialized reverse access index. One row per `(app, user, object)` with access. Carries the contributing grants array, denormalized rendering fields, and a tsvector for search. This is the table consumers read from indirectly through `get_*` functions.
 
@@ -163,7 +163,7 @@ A fresh prophet has nothing in the database. Bringing it up requires a precise o
 2. **System samna_user** is inserted, scoped to the system app.
 3. **System organization** is inserted with `sa_owner_id = sa_root_id = id` (self rooted), and `app_id` points at the system app.
 4. **App's `sa_owner_id`** is reconciled with an UPDATE to point at the real system org.
-5. **`inheritance_info` row** for the system org's ownership tree is created (an empty tree, since nothing else exists yet).
+5. **`inheritance_info` self-edge** for the system org is inserted (`ownership` tree, depth 0), bootstrapping the closure for that root.
 6. **System claim** ('System Administrator', level 0) is created, owned by the system org. This claim is sidelined: granted only to the system user, never via `ensure_app_user`.
    6b. **Default claim** is created from `p_default_claim` (name, description, level supplied by the implementer). Type is `'user'`, `inherits = false`, no `claim_object` binding. Holding this claim alone grants no resource access; it is a "you have an account" marker.
 7. **App's `claim_id`** is updated to point at the **default claim** (NOT the system claim). This is the claim every regular user receives via `ensure_app_user`.
@@ -435,7 +435,7 @@ SELECT claimius.create_root_organization(
 );
 ```
 
-Returns `{"organization": {...}}`. After: calc trigger creates the `inheritance_info` ownership row. Nobody has access to the new org yet. To give someone access, follow with the create-claim + assign pattern below.
+Returns `{"organization": {...}}`. After: calc trigger inserts the org's edges into the `inheritance_info` ownership closure (self-edge plus one edge per ancestor in the existing chain). Nobody has access to the new org yet. To give someone access, follow with the create-claim + assign pattern below.
 
 ### A new organization (child of an existing org)
 

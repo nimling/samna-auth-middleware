@@ -105,7 +105,8 @@ COMMENT ON FUNCTION claimius.calc_object_access() IS 'Trigger on regular registe
 
 -- _attach_object_to_trees
 -- Splices a non hierarchical row into its ownership and (optionally)
--- location trees, calling add_to_tree for each.
+-- location trees by inserting closure edges: a self-edge for the row plus
+-- one edge per ancestor of the parent at depth + 1.
 CREATE OR REPLACE FUNCTION claimius._attach_object_to_trees(
     p_object_type TEXT,
     p_object_id   UUID,
@@ -116,92 +117,82 @@ DECLARE
     v_loc_id    UUID;
     v_owner_root UUID;
     v_loc_root  UUID;
-    v_owner_lvl INTEGER;
-    v_loc_lvl   INTEGER;
+    v_inserted  INTEGER;
 BEGIN
     v_owner_id := (to_jsonb(p_row) ->> 'sa_owner_id')::UUID;
     v_loc_id   := (to_jsonb(p_row) ->> 'sa_location_id')::UUID;
 
     IF v_owner_id IS NOT NULL THEN
-        SELECT sa_root_id, sa_level INTO v_owner_root, v_owner_lvl
+        SELECT sa_root_id INTO v_owner_root
         FROM claimius.organization WHERE id = v_owner_id;
         IF v_owner_root IS NOT NULL THEN
-            -- ensure inheritance_info row exists
-            INSERT INTO claimius.inheritance_info (object_type, root_id, type, tree)
-            VALUES ('claimius.organization', v_owner_root, 'ownership', '{}'::JSONB)
-            ON CONFLICT (object_type, root_id, type) DO NOTHING;
-            -- splice as child of owner
-            BEGIN
-                PERFORM claimius.add_to_tree(
-                        'claimius.organization', v_owner_root, 'ownership',
-                        'claimius.organization', v_owner_id,
-                        p_object_type, p_object_id,
-                        coalesce(v_owner_lvl, 0) + 1
-                        );
-            EXCEPTION WHEN OTHERS THEN
-                -- parent not in tree yet; rebuild whole tree
+            -- self-edge
+            INSERT INTO claimius.inheritance_info (
+                tree_type, root_id, ancestor_type, ancestor_id, descendant_type, descendant_id, depth
+            ) VALUES (
+                'ownership', v_owner_root, p_object_type, p_object_id, p_object_type, p_object_id, 0
+            ) ON CONFLICT DO NOTHING;
+            -- ancestor edges via owner's existing closure
+            INSERT INTO claimius.inheritance_info (
+                tree_type, root_id, ancestor_type, ancestor_id, descendant_type, descendant_id, depth
+            )
+            SELECT 'ownership', v_owner_root, e.ancestor_type, e.ancestor_id, p_object_type, p_object_id, e.depth + 1
+            FROM claimius.inheritance_info e
+            WHERE e.tree_type = 'ownership'
+              AND e.root_id = v_owner_root
+              AND e.descendant_type = 'claimius.organization'
+              AND e.descendant_id   = v_owner_id
+            ON CONFLICT DO NOTHING;
+            GET DIAGNOSTICS v_inserted = ROW_COUNT;
+            -- owner not in tree yet: rebuild from scratch
+            IF v_inserted = 0 THEN
                 PERFORM claimius.build_ownership_tree(v_owner_root);
-            END;
+            END IF;
         END IF;
     END IF;
 
     IF v_loc_id IS NOT NULL THEN
-        SELECT sa_root_id, sa_level INTO v_loc_root, v_loc_lvl
+        SELECT sa_root_id INTO v_loc_root
         FROM claimius.location WHERE id = v_loc_id;
         IF v_loc_root IS NOT NULL THEN
-            INSERT INTO claimius.inheritance_info (object_type, root_id, type, tree)
-            VALUES ('claimius.location', v_loc_root, 'location', '{}'::JSONB)
-            ON CONFLICT (object_type, root_id, type) DO NOTHING;
-            BEGIN
-                PERFORM claimius.add_to_tree(
-                        'claimius.location', v_loc_root, 'location',
-                        'claimius.location', v_loc_id,
-                        p_object_type, p_object_id,
-                        coalesce(v_loc_lvl, 0) + 1
-                        );
-            EXCEPTION WHEN OTHERS THEN
+            INSERT INTO claimius.inheritance_info (
+                tree_type, root_id, ancestor_type, ancestor_id, descendant_type, descendant_id, depth
+            ) VALUES (
+                'location', v_loc_root, p_object_type, p_object_id, p_object_type, p_object_id, 0
+            ) ON CONFLICT DO NOTHING;
+            INSERT INTO claimius.inheritance_info (
+                tree_type, root_id, ancestor_type, ancestor_id, descendant_type, descendant_id, depth
+            )
+            SELECT 'location', v_loc_root, e.ancestor_type, e.ancestor_id, p_object_type, p_object_id, e.depth + 1
+            FROM claimius.inheritance_info e
+            WHERE e.tree_type = 'location'
+              AND e.root_id = v_loc_root
+              AND e.descendant_type = 'claimius.location'
+              AND e.descendant_id   = v_loc_id
+            ON CONFLICT DO NOTHING;
+            GET DIAGNOSTICS v_inserted = ROW_COUNT;
+            IF v_inserted = 0 THEN
                 PERFORM claimius.build_location_tree(v_loc_root);
-            END;
+            END IF;
         END IF;
     END IF;
 END;
 $$ LANGUAGE plpgsql;
 
 -- _detach_object_from_trees
--- Removes a row from its ownership and location trees.
+-- Removes a non hierarchical row from its ownership and location trees by
+-- deleting every closure edge where this row appears as descendant. Since
+-- the row is non hierarchical it has no descendants of its own.
 CREATE OR REPLACE FUNCTION claimius._detach_object_from_trees(
     p_object_type TEXT,
     p_object_id   UUID,
     p_row         RECORD
 ) RETURNS VOID AS $$
-DECLARE
-    v_owner_id  UUID;
-    v_loc_id    UUID;
-    v_owner_root UUID;
-    v_loc_root  UUID;
 BEGIN
-    v_owner_id := (to_jsonb(p_row) ->> 'sa_owner_id')::UUID;
-    v_loc_id   := (to_jsonb(p_row) ->> 'sa_location_id')::UUID;
-
-    IF v_owner_id IS NOT NULL THEN
-        SELECT sa_root_id INTO v_owner_root FROM claimius.organization WHERE id = v_owner_id;
-        IF v_owner_root IS NOT NULL THEN
-            PERFORM claimius.remove_from_tree(
-                    'claimius.organization', v_owner_root, 'ownership',
-                    p_object_type, p_object_id
-                    );
-        END IF;
-    END IF;
-
-    IF v_loc_id IS NOT NULL THEN
-        SELECT sa_root_id INTO v_loc_root FROM claimius.location WHERE id = v_loc_id;
-        IF v_loc_root IS NOT NULL THEN
-            PERFORM claimius.remove_from_tree(
-                    'claimius.location', v_loc_root, 'location',
-                    p_object_type, p_object_id
-                    );
-        END IF;
-    END IF;
+    DELETE FROM claimius.inheritance_info
+    WHERE tree_type IN ('ownership', 'location')
+      AND descendant_type = p_object_type
+      AND descendant_id   = p_object_id;
 END;
 $$ LANGUAGE plpgsql;
 
@@ -278,20 +269,22 @@ BEGIN
             PERFORM claimius.recompute_user_object(v_app_id, v_user.user_id, v_object_type, v_obj_id);
         END LOOP;
 
-    -- For descendant rows in the same tree, recompute too. We use
-    -- get_subtree to find them.
+    -- For descendant rows in the same tree, recompute too. Read descendants
+    -- directly from the closure index.
     IF v_object_type IN ('claimius.organization', 'claimius.location') OR (
         SELECT t.has_sa_parent_id AND t.has_sa_root_id FROM claimius.table_info t WHERE t.object_type = v_object_type
     ) THEN
         FOR v_user IN
-            WITH subtree AS (
-                SELECT s.object_type, s.object_id
-                FROM claimius.get_subtree(v_object_type, coalesce(v_root_id, v_old_root_id), v_object_type, v_obj_id) s
+            WITH descendants AS (
+                SELECT DISTINCT e.descendant_type AS object_type, e.descendant_id AS object_id
+                FROM claimius.inheritance_info e
+                WHERE e.ancestor_type = v_object_type
+                  AND e.ancestor_id   = v_obj_id
             ),
                  affected AS (
-                     SELECT DISTINCT u.user_id, st.object_type, st.object_id
-                     FROM subtree st
-                              CROSS JOIN LATERAL claimius._affected_users_for_object(v_app_id, st.object_type, st.object_id) u
+                     SELECT DISTINCT u.user_id, d.object_type, d.object_id
+                     FROM descendants d
+                              CROSS JOIN LATERAL claimius._affected_users_for_object(v_app_id, d.object_type, d.object_id) u
                  )
             SELECT * FROM affected
             LOOP
@@ -314,8 +307,10 @@ $$ LANGUAGE plpgsql;
 COMMENT ON FUNCTION claimius.calc_hierarchical_access() IS 'Trigger on hierarchical tables. Rebuilds affected tree and reconciles users.';
 
 -- _reattach_location_in_ownership
--- A location is also an object that can appear in the ownership tree of
--- its sa_owner_id organization. This helper keeps it consistent.
+-- A location is also a node in the ownership tree of its sa_owner_id
+-- organization. When the owner changes, drop the location's edges from the
+-- previous owner's ownership tree and insert fresh edges under the new
+-- owner. Closure operations only.
 CREATE OR REPLACE FUNCTION claimius._reattach_location_in_ownership(
     p_obj_id UUID, p_new RECORD, p_old RECORD, p_op TEXT
 ) RETURNS VOID AS $$
@@ -324,42 +319,48 @@ DECLARE
     v_new_owner UUID;
     v_old_root  UUID;
     v_new_root  UUID;
-    v_lvl       INTEGER;
+    v_inserted  INTEGER;
 BEGIN
     IF p_op <> 'INSERT' THEN
         v_old_owner := (to_jsonb(p_old) ->> 'sa_owner_id')::UUID;
     END IF;
     IF p_op <> 'DELETE' THEN
         v_new_owner := (to_jsonb(p_new) ->> 'sa_owner_id')::UUID;
-        v_lvl       := (to_jsonb(p_new) ->> 'sa_level')::INTEGER;
     END IF;
 
     IF v_old_owner IS NOT NULL THEN
         SELECT sa_root_id INTO v_old_root FROM claimius.organization WHERE id = v_old_owner;
         IF v_old_root IS NOT NULL THEN
-            PERFORM claimius.remove_from_tree(
-                    'claimius.organization', v_old_root, 'ownership',
-                    'claimius.location', p_obj_id
-                    );
+            DELETE FROM claimius.inheritance_info
+            WHERE tree_type = 'ownership'
+              AND root_id = v_old_root
+              AND descendant_type = 'claimius.location'
+              AND descendant_id   = p_obj_id;
         END IF;
     END IF;
 
     IF v_new_owner IS NOT NULL THEN
         SELECT sa_root_id INTO v_new_root FROM claimius.organization WHERE id = v_new_owner;
         IF v_new_root IS NOT NULL THEN
-            INSERT INTO claimius.inheritance_info (object_type, root_id, type, tree)
-            VALUES ('claimius.organization', v_new_root, 'ownership', '{}'::JSONB)
-            ON CONFLICT (object_type, root_id, type) DO NOTHING;
-            BEGIN
-                PERFORM claimius.add_to_tree(
-                        'claimius.organization', v_new_root, 'ownership',
-                        'claimius.organization', v_new_owner,
-                        'claimius.location', p_obj_id,
-                        coalesce(v_lvl, 0) + 1
-                        );
-            EXCEPTION WHEN OTHERS THEN
+            INSERT INTO claimius.inheritance_info (
+                tree_type, root_id, ancestor_type, ancestor_id, descendant_type, descendant_id, depth
+            ) VALUES (
+                'ownership', v_new_root, 'claimius.location', p_obj_id, 'claimius.location', p_obj_id, 0
+            ) ON CONFLICT DO NOTHING;
+            INSERT INTO claimius.inheritance_info (
+                tree_type, root_id, ancestor_type, ancestor_id, descendant_type, descendant_id, depth
+            )
+            SELECT 'ownership', v_new_root, e.ancestor_type, e.ancestor_id, 'claimius.location', p_obj_id, e.depth + 1
+            FROM claimius.inheritance_info e
+            WHERE e.tree_type = 'ownership'
+              AND e.root_id = v_new_root
+              AND e.descendant_type = 'claimius.organization'
+              AND e.descendant_id   = v_new_owner
+            ON CONFLICT DO NOTHING;
+            GET DIAGNOSTICS v_inserted = ROW_COUNT;
+            IF v_inserted = 0 THEN
                 PERFORM claimius.build_ownership_tree(v_new_root);
-            END;
+            END IF;
         END IF;
     END IF;
 END;
@@ -475,9 +476,10 @@ DECLARE
     v_descendant RECORD;
 BEGIN
     FOR v_descendant IN
-        SELECT DISTINCT s.object_type, s.object_id
-        FROM claimius.inheritance_info ii,
-             LATERAL claimius.get_subtree(ii.object_type, ii.root_id, p_object_type, p_object_id) s
+        SELECT DISTINCT e.descendant_type AS object_type, e.descendant_id AS object_id
+        FROM claimius.inheritance_info e
+        WHERE e.ancestor_type = p_object_type
+          AND e.ancestor_id   = p_object_id
         LOOP
             PERFORM claimius.recompute_user_object(p_app_id, p_user_id, v_descendant.object_type, v_descendant.object_id);
         END LOOP;
@@ -663,7 +665,11 @@ CREATE OR REPLACE FUNCTION claimius._set_self_owner_on_insert()
     RETURNS TRIGGER AS $$
 DECLARE
     v_root UUID;
+    v_zero CONSTANT UUID := '00000000-0000-0000-0000-000000000000'::uuid;
 BEGIN
+    IF NEW.sa_root_id  = v_zero THEN NEW.sa_root_id  := NULL; END IF;
+    IF NEW.sa_owner_id = v_zero THEN NEW.sa_owner_id := NULL; END IF;
+
     -- Caller already provided sa_root_id: trust it.
     IF NEW.sa_root_id IS NOT NULL THEN
         RETURN NEW;
@@ -696,7 +702,11 @@ CREATE OR REPLACE FUNCTION claimius._set_self_root_on_insert()
     RETURNS TRIGGER AS $$
 DECLARE
     v_root UUID;
+    v_zero CONSTANT UUID := '00000000-0000-0000-0000-000000000000'::uuid;
 BEGIN
+    IF NEW.sa_root_id   = v_zero THEN NEW.sa_root_id   := NULL; END IF;
+    IF NEW.sa_parent_id = v_zero THEN NEW.sa_parent_id := NULL; END IF;
+
     IF NEW.sa_root_id IS NOT NULL THEN
         RETURN NEW;
     END IF;
@@ -727,7 +737,11 @@ CREATE OR REPLACE FUNCTION claimius._set_self_parent_on_insert()
 DECLARE
     v_root  UUID;
     v_sql   TEXT;
+    v_zero  CONSTANT UUID := '00000000-0000-0000-0000-000000000000'::uuid;
 BEGIN
+    IF NEW.sa_root_id   = v_zero THEN NEW.sa_root_id   := NULL; END IF;
+    IF NEW.sa_parent_id = v_zero THEN NEW.sa_parent_id := NULL; END IF;
+
     IF NEW.sa_root_id IS NOT NULL THEN
         RETURN NEW;
     END IF;

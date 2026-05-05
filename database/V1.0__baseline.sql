@@ -410,29 +410,35 @@ CREATE INDEX IF NOT EXISTS idx_table_info_is_internal ON claimius.table_info (is
 CREATE INDEX IF NOT EXISTS idx_table_info_has_parent ON claimius.table_info (has_sa_parent_id, has_sa_root_id);
 
 -- inheritance_info
--- Cached hierarchy trees. One row per (object_type, root_id, type) triple.
--- The tree jsonb is a nested map of "<object_type>:<object_id>" keys to
--- { "level": N, "children": { ... } } values. Trees are heterogeneous: child
--- nodes may have different object_types from the root (an ownership tree
--- rooted at an organization can contain devices, locations, etc).
+-- Closure table of every ancestor-descendant relationship across the three
+-- hierarchy types (ownership, location, parenthood). One row per edge.
+-- Self-edges (depth = 0) included so a node is its own ancestor: that lets
+-- "is X reachable from Y in tree T" be a single indexed lookup.
+-- Trees are heterogeneous: descendant rows can carry a different object_type
+-- from the root (an ownership tree rooted at an organization can contain
+-- devices, locations, etc.).
 CREATE TABLE IF NOT EXISTS claimius.inheritance_info (
-                                                         id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                                                         object_type     TEXT NOT NULL,
+                                                         tree_type       claimius.tree_type NOT NULL,
                                                          root_id         UUID NOT NULL,
-                                                         type            claimius.tree_type NOT NULL,
-                                                         tree            JSONB NOT NULL DEFAULT '{}'::jsonb,
+                                                         ancestor_type   TEXT NOT NULL,
+                                                         ancestor_id     UUID NOT NULL,
+                                                         descendant_type TEXT NOT NULL,
+                                                         descendant_id   UUID NOT NULL,
+                                                         depth           INTEGER NOT NULL,
                                                          sa_created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
-                                                         sa_updated_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+                                                         sa_updated_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+                                                         PRIMARY KEY (tree_type, root_id, ancestor_type, ancestor_id, descendant_type, descendant_id)
 );
 
-COMMENT ON TABLE claimius.inheritance_info IS 'Cached hierarchy trees. One row per (object_type, root_id, type).';
-COMMENT ON COLUMN claimius.inheritance_info.tree IS 'Nested map. Keys are <object_type>:<object_id>. Values have level and children.';
+COMMENT ON TABLE claimius.inheritance_info IS 'Closure table of ancestor-descendant edges per tree. Self-edges at depth 0.';
+COMMENT ON COLUMN claimius.inheritance_info.depth IS '0 for self-edge; 1 for direct child; N for N-hop descendant.';
 
-CREATE UNIQUE INDEX IF NOT EXISTS idx_inheritance_info_unique
-    ON claimius.inheritance_info (object_type, root_id, type);
-CREATE INDEX IF NOT EXISTS idx_inheritance_info_root ON claimius.inheritance_info (root_id);
-CREATE INDEX IF NOT EXISTS idx_inheritance_info_type ON claimius.inheritance_info (type);
-CREATE INDEX IF NOT EXISTS idx_inheritance_info_tree ON claimius.inheritance_info USING GIN (tree jsonb_path_ops);
+CREATE INDEX IF NOT EXISTS idx_inheritance_info_descendant
+    ON claimius.inheritance_info (descendant_type, descendant_id, tree_type)
+    INCLUDE (ancestor_type, ancestor_id, root_id, depth);
+CREATE INDEX IF NOT EXISTS idx_inheritance_info_ancestor
+    ON claimius.inheritance_info (ancestor_type, ancestor_id, tree_type)
+    INCLUDE (descendant_type, descendant_id, root_id, depth);
 
 -- ----------------------------------------------------------------------------
 -- 6. Materialized access

@@ -234,7 +234,7 @@ A prophet has tables that reference each other circularly. Get the order wrong a
 2. System `samna_user` (scoped to the system app)
 3. System `organization` (self rooted: `sa_owner_id = sa_root_id = id`, `app_id` points at the system app)
 4. UPDATE the system app's `sa_owner_id` to the real system org id
-5. `inheritance_info` row for the system org (empty tree)
+5. `inheritance_info` self-edge for the system org in the `ownership` tree (depth 0), bootstrapping the closure for that root
 6. System `claim` ("System Administrator", level 0). Sidelined: granted only to the system user.
    6b. Default `claim` (name, description, level supplied by the implementer via `p_default_claim`). `inherits = false`, no `claim_object`. Holding it grants no resource access. This is what every regular user receives.
 7. UPDATE the system app's `claim_id` to the **default** claim id (NOT the system admin claim).
