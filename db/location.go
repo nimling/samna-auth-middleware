@@ -41,13 +41,14 @@ func (d *DB) GetChildLocations(ctx context.Context, startID uuid.UUID) ([]uuid.U
 	err := d.NewRaw(`
 		SELECT object_id
 		FROM claimius.get_subtree(
-			?,
+			'location',
 			(SELECT sa_root_id FROM claimius.location WHERE id = ? AND sa_deleted_at IS NULL),
 			?,
 			?
 		)
-		WHERE object_id <> ?
-	`, OBJECT_TYPE_LOCATION, startID, OBJECT_TYPE_LOCATION, startID, startID).
+		WHERE object_type = ?
+		  AND object_id <> ?
+	`, startID, OBJECT_TYPE_LOCATION, startID, OBJECT_TYPE_LOCATION, startID).
 		Scan(ctx, &ids)
 	return ids, err
 }
