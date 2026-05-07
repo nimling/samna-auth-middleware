@@ -47,6 +47,9 @@ func UserAuthMiddleware(opts *UserAuthOptions) echo.MiddlewareFunc {
 				if clientErr != nil {
 					return respondAuthError(ctx, clientErr)
 				}
+				if forwardErr := forwardUserToken(ctx); forwardErr != nil {
+					return respondAuthError(ctx, forwardErr)
+				}
 				return next(ctx)
 			}
 		}
@@ -92,6 +95,9 @@ func UserAuthMiddleware(opts *UserAuthOptions) echo.MiddlewareFunc {
 			if clientErr := authenticateClient(ctx, config.DebugClientID, config.DebugClientSecret); !errors.Is(clientErr, ErrorCredentialMissing) {
 				if clientErr != nil {
 					return respondAuthError(ctx, clientErr)
+				}
+				if forwardErr := forwardUserToken(ctx); forwardErr != nil {
+					return respondAuthError(ctx, forwardErr)
 				}
 				return next(ctx)
 			}

@@ -2,11 +2,13 @@ package echo
 
 import (
 	"net/http"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 	"github.com/nimling/samna-auth-middleware/client"
 	"github.com/nimling/samna-auth-middleware/db"
+	"github.com/uptrace/bun"
 )
 
 func GetUsers(ctx echo.Context) error {
@@ -107,9 +109,72 @@ func GetUserRelations(ctx echo.Context) error {
 		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
 
+	params := ctx.QueryParams()
+
+	orgIDs := make([]uuid.UUID, 0)
+	for _, raw := range params["org_id"] {
+		for _, s := range strings.Split(raw, ",") {
+			s = strings.TrimSpace(s)
+			if s == "" {
+				continue
+			}
+			id, perr := uuid.Parse(s)
+			if perr != nil {
+				return respondError(ctx, http.StatusBadRequest, "Bad request")
+			}
+			orgIDs = append(orgIDs, id)
+		}
+	}
+
+	locIDs := make([]uuid.UUID, 0)
+	for _, raw := range params["loc_id"] {
+		for _, s := range strings.Split(raw, ",") {
+			s = strings.TrimSpace(s)
+			if s == "" {
+				continue
+			}
+			id, perr := uuid.Parse(s)
+			if perr != nil {
+				return respondError(ctx, http.StatusBadRequest, "Bad request")
+			}
+			locIDs = append(locIDs, id)
+		}
+	}
+
+	usrIDs := make([]uuid.UUID, 0)
+	for _, raw := range params["usr_id"] {
+		for _, s := range strings.Split(raw, ",") {
+			s = strings.TrimSpace(s)
+			if s == "" {
+				continue
+			}
+			id, perr := uuid.Parse(s)
+			if perr != nil {
+				return respondError(ctx, http.StatusBadRequest, "Bad request")
+			}
+			usrIDs = append(usrIDs, id)
+		}
+	}
+
 	if getDebugUserID() != nil {
-		relations, err := db.Instance().GetUserRelations(ctx.Request().Context(), userID)
-		if err != nil {
+		relations := make([]db.UserRelation, 0)
+		q := db.Instance().NewSelect().
+			Model(&relations).
+			ExcludeColumn("app_id").
+			Where("user_relation.user_id = ?", userID).
+			Where("user_relation.sa_deleted_at IS NULL")
+
+		if len(orgIDs) > 0 {
+			q.Where("user_relation.object_type = ? AND user_relation.object_id IN (?)", db.OBJECT_TYPE_ORGANIZATION, bun.In(orgIDs))
+		}
+		if len(locIDs) > 0 {
+			q.Where("user_relation.object_type = ? AND user_relation.object_id IN (?)", db.OBJECT_TYPE_LOCATION, bun.In(locIDs))
+		}
+		if len(usrIDs) > 0 {
+			q.Where("user_relation.user_id IN (?)", bun.In(usrIDs))
+		}
+
+		if err := q.Scan(ctx.Request().Context()); err != nil {
 			ctx.Logger().Errorf("GetUserRelations: %v", err)
 			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 		}

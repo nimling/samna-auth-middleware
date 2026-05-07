@@ -10,11 +10,14 @@ import (
 	"github.com/nimling/samna-auth-middleware/db"
 )
 
-func GetRelations(ctx context.Context) (io.ReadCloser, error) {
+func GetRelations(ctx context.Context, rawQuery string) (io.ReadCloser, error) {
 	c := newClient()
 	u, err := joinURL(c.apiURL, "relation")
 	if err != nil {
 		return nil, fmt.Errorf("build url: %w", err)
+	}
+	if rawQuery != "" {
+		u = u + "?" + rawQuery
 	}
 	return c.client.Get(ctx, u)
 }

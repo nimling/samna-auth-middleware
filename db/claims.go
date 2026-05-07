@@ -120,19 +120,19 @@ func (d *DB) GetObjectClaims(ctx context.Context, userID, objectID uuid.UUID, ob
 	return claims, err
 }
 
-func (d *DB) GetOwnerGraph(ctx context.Context, userID uuid.UUID, accessLevel ClaimAccessLevel) ([]GraphNode, error) {
+func (d *DB) GetOwnerGraph(ctx context.Context, userID uuid.UUID, startID *uuid.UUID, depth int, accessLevel ClaimAccessLevel) ([]GraphNode, error) {
 	nodes := make([]GraphNode, 0)
 	err := d.NewSelect().
-		TableExpr("claimius.get_owner_graph(p_user_id := ?, p_app_id := claimius.get_disciple_app_id(), p_min_level := ?) AS graph", userID, accessLevel).
+		TableExpr("claimius.get_owner_graph(p_user_id := ?, p_app_id := claimius.get_disciple_app_id(), p_start_id := ?, p_depth := ?, p_min_level := ?) AS graph", userID, startID, depth, accessLevel).
 		Column("graph.*").
 		Scan(ctx, &nodes)
 	return nodes, err
 }
 
-func (d *DB) GetClaimGraph(ctx context.Context, userID uuid.UUID, accessLevel ClaimAccessLevel) ([]GraphNode, error) {
+func (d *DB) GetClaimGraph(ctx context.Context, userID uuid.UUID, startID *uuid.UUID, depth int, accessLevel ClaimAccessLevel) ([]GraphNode, error) {
 	nodes := make([]GraphNode, 0)
 	err := d.NewSelect().
-		TableExpr("claimius.get_claim_graph(p_user_id := ?, p_app_id := claimius.get_disciple_app_id(), p_min_level := ?) AS graph", userID, accessLevel).
+		TableExpr("claimius.get_claim_graph(p_user_id := ?, p_app_id := claimius.get_disciple_app_id(), p_start_id := ?, p_depth := ?, p_min_level := ?) AS graph", userID, startID, depth, accessLevel).
 		Column("graph.*").
 		Scan(ctx, &nodes)
 	return nodes, err

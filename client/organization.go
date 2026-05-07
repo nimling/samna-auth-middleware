@@ -27,11 +27,14 @@ func GetOrganizationAssets(ctx context.Context, orgID uuid.UUID) (io.ReadCloser,
 	return c.client.Get(ctx, u)
 }
 
-func GetOrganizations(ctx context.Context) (io.ReadCloser, error) {
+func GetOrganizations(ctx context.Context, rawQuery string) (io.ReadCloser, error) {
 	c := newClient()
 	u, err := joinURL(c.apiURL, "organization")
 	if err != nil {
 		return nil, fmt.Errorf("build url: %w", err)
+	}
+	if rawQuery != "" {
+		u = u + "?" + rawQuery
 	}
 	return c.client.Get(ctx, u)
 }
@@ -45,12 +48,13 @@ func GetOrganization(ctx context.Context, orgID uuid.UUID) (io.ReadCloser, error
 	return c.client.Get(ctx, u)
 }
 
-func GetOrganizationGraph(ctx context.Context) (io.ReadCloser, error) {
+func GetOrganizationGraph(ctx context.Context, startID *uuid.UUID, depth int, accessLevel db.ClaimAccessLevel) (io.ReadCloser, error) {
 	c := newClient()
 	u, err := joinURL(c.apiURL, "organization", "graph")
 	if err != nil {
 		return nil, fmt.Errorf("build url: %w", err)
 	}
+	u = appendGraphQuery(u, startID, depth, accessLevel)
 	return c.client.Get(ctx, u)
 }
 

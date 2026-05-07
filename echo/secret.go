@@ -2,24 +2,94 @@ package echo
 
 import (
 	"net/http"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 	"github.com/nimling/samna-auth-middleware/client"
 	"github.com/nimling/samna-auth-middleware/db"
+	"github.com/uptrace/bun"
 )
 
 func GetSecrets(ctx echo.Context) error {
+	params := ctx.QueryParams()
+
+	orgIDs := make([]uuid.UUID, 0)
+	for _, raw := range params["org_id"] {
+		for _, s := range strings.Split(raw, ",") {
+			s = strings.TrimSpace(s)
+			if s == "" {
+				continue
+			}
+			id, err := uuid.Parse(s)
+			if err != nil {
+				return respondError(ctx, http.StatusBadRequest, "Bad request")
+			}
+			orgIDs = append(orgIDs, id)
+		}
+	}
+
+	locIDs := make([]uuid.UUID, 0)
+	for _, raw := range params["loc_id"] {
+		for _, s := range strings.Split(raw, ",") {
+			s = strings.TrimSpace(s)
+			if s == "" {
+				continue
+			}
+			id, err := uuid.Parse(s)
+			if err != nil {
+				return respondError(ctx, http.StatusBadRequest, "Bad request")
+			}
+			locIDs = append(locIDs, id)
+		}
+	}
+
+	usrIDs := make([]uuid.UUID, 0)
+	for _, raw := range params["usr_id"] {
+		for _, s := range strings.Split(raw, ",") {
+			s = strings.TrimSpace(s)
+			if s == "" {
+				continue
+			}
+			id, err := uuid.Parse(s)
+			if err != nil {
+				return respondError(ctx, http.StatusBadRequest, "Bad request")
+			}
+			usrIDs = append(usrIDs, id)
+		}
+	}
+
 	if debugUserID := getDebugUserID(); debugUserID != nil {
-		secrets, err := db.Instance().GetSecrets(ctx.Request().Context(), *debugUserID, db.ACCESS_LEVEL_GUEST)
-		if err != nil {
+		secrets := make([]db.SamnaSecret, 0)
+		q := db.Instance().NewSelect().
+			Model(&secrets).
+			ExcludeColumn("app_id").
+			Where("samna_secret.sa_deleted_at IS NULL").
+			Where("samna_secret.id IN (SELECT id FROM claimius.get_secrets(?, claimius.get_disciple_app_id(), ?))", *debugUserID, db.ACCESS_LEVEL_GUEST)
+
+		if len(orgIDs) > 0 {
+			q.Where("samna_secret.sa_owner_id IN (?)", bun.In(orgIDs))
+		}
+		if len(locIDs) > 0 {
+			q.Where("samna_secret.sa_owner_id IN (SELECT sa_owner_id FROM claimius.location WHERE sa_deleted_at IS NULL AND id IN (?))", bun.In(locIDs))
+		}
+		if len(usrIDs) > 0 {
+			q.WhereGroup(" AND ", func(qq *bun.SelectQuery) *bun.SelectQuery {
+				for _, uid := range usrIDs {
+					qq = qq.WhereOr("samna_secret.id IN (SELECT id FROM claimius.get_secrets(?, claimius.get_disciple_app_id(), ?))", uid, db.ACCESS_LEVEL_GUEST)
+				}
+				return qq
+			})
+		}
+
+		if err := q.Scan(ctx.Request().Context()); err != nil {
 			ctx.Logger().Errorf("GetSecrets: %v", err)
 			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 		}
 		return respondJSON(ctx, http.StatusOK, secrets, len(secrets))
 	}
 
-	body, err := client.GetSecrets(ctx.Request().Context())
+	body, err := client.GetSecrets(ctx.Request().Context(), ctx.QueryString())
 	if err != nil {
 		ctx.Logger().Errorf("GetSecrets: %v", err)
 		return respondError(ctx, http.StatusInternalServerError, "Internal server error")

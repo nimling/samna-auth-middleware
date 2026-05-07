@@ -7,10 +7,13 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
+	"github.com/nimling/samna-auth-middleware/client"
 	"github.com/nimling/samna-auth-middleware/db"
 	"github.com/nimling/samna-auth-middleware/utils"
 	"golang.org/x/crypto/bcrypt"
 )
+
+const userTokenHeader = "SAuth-User-Token"
 
 func ClientAuthMiddleware() echo.MiddlewareFunc {
 	debugID := utils.GetEnvUUIDOptional("SAUTH_DEBUG_CLIENT_ID")
@@ -24,6 +27,9 @@ func ClientAuthMiddleware() echo.MiddlewareFunc {
 			}
 			if err != nil {
 				return respondAuthError(ctx, err)
+			}
+			if forwardErr := forwardUserToken(ctx); forwardErr != nil {
+				return respondAuthError(ctx, forwardErr)
 			}
 			return next(ctx)
 		}
@@ -61,5 +67,21 @@ func authenticateClient(ctx echo.Context, debugID *uuid.UUID, debugSecret string
 	}
 
 	ctx.Set(UserIDKey, samnaClient.ID)
+	return nil
+}
+
+func forwardUserToken(ctx echo.Context) error {
+	token := ctx.Request().Header.Get(userTokenHeader)
+	if token == "" {
+		return nil
+	}
+	user, err := client.PostUserTokenValidate(ctx.Request().Context(), token)
+	if err != nil {
+		return fmt.Errorf("validate forwarded user token: %w: %w", err, ErrorUnauthorized)
+	}
+	if user.UserID == uuid.Nil {
+		return ErrorUnauthorized
+	}
+	ctx.Set(UserIDKey, user.UserID)
 	return nil
 }

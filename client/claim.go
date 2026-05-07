@@ -10,20 +10,24 @@ import (
 	"github.com/nimling/samna-auth-middleware/db"
 )
 
-func GetClaimGraph(ctx context.Context) (io.ReadCloser, error) {
+func GetClaimGraph(ctx context.Context, startID *uuid.UUID, depth int, accessLevel db.ClaimAccessLevel) (io.ReadCloser, error) {
 	c := newClient()
 	u, err := joinURL(c.apiURL, "claim", "graph")
 	if err != nil {
 		return nil, fmt.Errorf("build url: %w", err)
 	}
+	u = appendGraphQuery(u, startID, depth, accessLevel)
 	return c.client.Get(ctx, u)
 }
 
-func GetClaims(ctx context.Context) (io.ReadCloser, error) {
+func GetClaims(ctx context.Context, rawQuery string) (io.ReadCloser, error) {
 	c := newClient()
 	u, err := joinURL(c.apiURL, "claim")
 	if err != nil {
 		return nil, fmt.Errorf("build url: %w", err)
+	}
+	if rawQuery != "" {
+		u = u + "?" + rawQuery
 	}
 	return c.client.Get(ctx, u)
 }

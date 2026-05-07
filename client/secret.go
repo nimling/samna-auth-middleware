@@ -9,11 +9,14 @@ import (
 	"github.com/nimling/samna-auth-middleware/db"
 )
 
-func GetSecrets(ctx context.Context) (io.ReadCloser, error) {
+func GetSecrets(ctx context.Context, rawQuery string) (io.ReadCloser, error) {
 	c := newClient()
 	u, err := joinURL(c.apiURL, "secret")
 	if err != nil {
 		return nil, fmt.Errorf("build url: %w", err)
+	}
+	if rawQuery != "" {
+		u = u + "?" + rawQuery
 	}
 	return c.client.Get(ctx, u)
 }

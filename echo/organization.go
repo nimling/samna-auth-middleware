@@ -2,25 +2,95 @@ package echo
 
 import (
 	"net/http"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 	"github.com/nimling/samna-auth-middleware/client"
 	"github.com/nimling/samna-auth-middleware/db"
+	"github.com/uptrace/bun"
 )
 
 func GetOrganizations(ctx echo.Context) error {
+	params := ctx.QueryParams()
+
+	orgIDs := make([]uuid.UUID, 0)
+	for _, raw := range params["org_id"] {
+		for _, s := range strings.Split(raw, ",") {
+			s = strings.TrimSpace(s)
+			if s == "" {
+				continue
+			}
+			id, err := uuid.Parse(s)
+			if err != nil {
+				return respondError(ctx, http.StatusBadRequest, "Bad request")
+			}
+			orgIDs = append(orgIDs, id)
+		}
+	}
+
+	locIDs := make([]uuid.UUID, 0)
+	for _, raw := range params["loc_id"] {
+		for _, s := range strings.Split(raw, ",") {
+			s = strings.TrimSpace(s)
+			if s == "" {
+				continue
+			}
+			id, err := uuid.Parse(s)
+			if err != nil {
+				return respondError(ctx, http.StatusBadRequest, "Bad request")
+			}
+			locIDs = append(locIDs, id)
+		}
+	}
+
+	usrIDs := make([]uuid.UUID, 0)
+	for _, raw := range params["usr_id"] {
+		for _, s := range strings.Split(raw, ",") {
+			s = strings.TrimSpace(s)
+			if s == "" {
+				continue
+			}
+			id, err := uuid.Parse(s)
+			if err != nil {
+				return respondError(ctx, http.StatusBadRequest, "Bad request")
+			}
+			usrIDs = append(usrIDs, id)
+		}
+	}
+
 	if debugUserID := getDebugUserID(); debugUserID != nil {
 		relations := db.ParseWithRelations(ctx.QueryParam("with"), db.OrganizationRelations())
-		orgs, err := db.Instance().GetOrganizations(ctx.Request().Context(), *debugUserID, db.ACCESS_LEVEL_GUEST, relations...)
-		if err != nil {
+		orgs := make([]db.Organization, 0)
+		q := db.Instance().NewSelect().
+			Model(&orgs).
+			ExcludeColumn("app_id").
+			Where(db.ObjectWhere(*debugUserID, db.OBJECT_TYPE_ORGANIZATION, db.ACCESS_LEVEL_GUEST))
+		q = db.ApplyRelations(q, relations)
+
+		if len(orgIDs) > 0 {
+			q.Where("organization.id IN (?)", bun.In(orgIDs))
+		}
+		if len(locIDs) > 0 {
+			q.Where("organization.id IN (SELECT sa_owner_id FROM claimius.location WHERE sa_deleted_at IS NULL AND id IN (?))", bun.In(locIDs))
+		}
+		if len(usrIDs) > 0 {
+			q.WhereGroup(" AND ", func(qq *bun.SelectQuery) *bun.SelectQuery {
+				for _, uid := range usrIDs {
+					qq = qq.WhereOr("organization.id IN (SELECT id FROM claimius.get_organizations(?, claimius.get_disciple_app_id(), ?))", uid, db.ACCESS_LEVEL_GUEST)
+				}
+				return qq
+			})
+		}
+
+		if err := q.Scan(ctx.Request().Context()); err != nil {
 			ctx.Logger().Errorf("GetOrganizations: %v", err)
 			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 		}
 		return respondJSON(ctx, http.StatusOK, orgs, 0)
 	}
 
-	body, err := client.GetOrganizations(ctx.Request().Context())
+	body, err := client.GetOrganizations(ctx.Request().Context(), ctx.QueryString())
 	if err != nil {
 		ctx.Logger().Errorf("GetOrganizations: %v", err)
 		return respondError(ctx, http.StatusInternalServerError, "Internal server error")
@@ -65,8 +135,13 @@ func GetOrganization(ctx echo.Context) error {
 }
 
 func GetOrganizationGraph(ctx echo.Context) error {
+	startID, depth, level, err := parseGraphQuery(ctx, db.ACCESS_LEVEL_MEMBER)
+	if err != nil {
+		return respondError(ctx, http.StatusBadRequest, "Bad request")
+	}
+
 	if debugUserID := getDebugUserID(); debugUserID != nil {
-		nodes, err := db.Instance().GetOwnerGraph(ctx.Request().Context(), *debugUserID, db.ACCESS_LEVEL_MEMBER)
+		nodes, err := db.Instance().GetOwnerGraph(ctx.Request().Context(), *debugUserID, startID, depth, level)
 		if err != nil {
 			ctx.Logger().Errorf("GetOrganizationGraph: %v", err)
 			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
@@ -74,7 +149,7 @@ func GetOrganizationGraph(ctx echo.Context) error {
 		return respondJSON(ctx, http.StatusOK, nodes, 0)
 	}
 
-	body, err := client.GetOrganizationGraph(ctx.Request().Context())
+	body, err := client.GetOrganizationGraph(ctx.Request().Context(), startID, depth, level)
 	if err != nil {
 		ctx.Logger().Errorf("GetOrganizationGraph: %v", err)
 		return respondError(ctx, http.StatusInternalServerError, "Internal server error")

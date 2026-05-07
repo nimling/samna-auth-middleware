@@ -182,3 +182,33 @@ CREATE TRIGGER tg_self_root BEFORE INSERT ON claimius.organization
 DROP TRIGGER IF EXISTS tg_self_root ON claimius.location;
 CREATE TRIGGER tg_self_root BEFORE INSERT ON claimius.location
     FOR EACH ROW EXECUTE FUNCTION claimius._set_self_root_on_insert();
+
+-- ----------------------------------------------------------------------------
+-- Claim graph cache invalidation. Drops claim_graph_cache rows whenever a
+-- write touches data that feeds the cached graph.
+-- ----------------------------------------------------------------------------
+
+DROP TRIGGER IF EXISTS tg_invalidate_claim_graph_cache ON claimius.user_object;
+CREATE TRIGGER tg_invalidate_claim_graph_cache
+    AFTER INSERT OR UPDATE OR DELETE ON claimius.user_object
+    FOR EACH ROW EXECUTE FUNCTION claimius._invalidate_claim_graph_cache();
+
+DROP TRIGGER IF EXISTS tg_invalidate_claim_graph_cache ON claimius.user_users;
+CREATE TRIGGER tg_invalidate_claim_graph_cache
+    AFTER INSERT OR UPDATE OR DELETE ON claimius.user_users
+    FOR EACH ROW EXECUTE FUNCTION claimius._invalidate_claim_graph_cache();
+
+DROP TRIGGER IF EXISTS tg_invalidate_claim_graph_cache ON claimius.samna_user;
+CREATE TRIGGER tg_invalidate_claim_graph_cache
+    AFTER INSERT OR UPDATE OR DELETE ON claimius.samna_user
+    FOR EACH ROW EXECUTE FUNCTION claimius._invalidate_claim_graph_cache();
+
+DROP TRIGGER IF EXISTS tg_invalidate_claim_graph_cache ON claimius.claim;
+CREATE TRIGGER tg_invalidate_claim_graph_cache
+    AFTER INSERT OR UPDATE OR DELETE ON claimius.claim
+    FOR EACH ROW EXECUTE FUNCTION claimius._invalidate_claim_graph_cache();
+
+DROP TRIGGER IF EXISTS tg_invalidate_claim_graph_cache ON claimius.claim_object;
+CREATE TRIGGER tg_invalidate_claim_graph_cache
+    AFTER INSERT OR UPDATE OR DELETE ON claimius.claim_object
+    FOR EACH ROW EXECUTE FUNCTION claimius._invalidate_claim_graph_cache();

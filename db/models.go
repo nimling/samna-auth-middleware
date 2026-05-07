@@ -103,14 +103,42 @@ type SamnaUser struct {
 	LastName  *string          `bun:"last_name" json:"last_name"`
 	UserName  *string          `bun:"user_name" json:"user_name"`
 	UserImage *string          `bun:"user_image" json:"user_image"`
-	Phone     *string          `bun:"phone" json:"phone"`
-	Email     string           `bun:"email" json:"email"`
-	Status    *string          `bun:"status,default:'active'" json:"status"`
-	Type      *string          `bun:"type,default:'user'" json:"type"`
+	Phone      *string          `bun:"phone" json:"phone"`
+	Email      string           `bun:"email" json:"email"`
+	ExternalID *string          `bun:"external_id" json:"external_id,omitempty"`
+	Status     *string          `bun:"status,default:'active'" json:"status"`
+	Type       *string          `bun:"type,default:'user'" json:"type"`
 	Config    *json.RawMessage `bun:"config" json:"config"`
 	DeletedAt *time.Time       `bun:"sa_deleted_at" json:"deleted_at"`
 	CreatedAt time.Time        `bun:"sa_created_at,default:now()" json:"created_at"`
 	UpdatedAt time.Time        `bun:"sa_updated_at,default:now()" json:"updated_at"`
+}
+
+type SamnaUserToken struct {
+	Token   string     `json:"token"`
+	IDClaim *string    `json:"id_claim,omitempty"`
+	User    *SamnaUser `json:"user,omitempty"`
+	ClaimID *uuid.UUID `json:"claim_id"`
+	AppID   *uuid.UUID `json:"app_id"`
+	Reason  *string    `json:"reason,omitempty"`
+}
+
+type NotrustIdentity struct {
+	bun.BaseModel `bun:"table:notrust_identity"`
+
+	ID         uuid.UUID       `bun:"id,pk,default:gen_random_uuid()" json:"id"`
+	AppID      uuid.UUID       `bun:"app_id,notnull,type:uuid,default:claimius.get_disciple_app_id()" json:"app_id"`
+	UserID     uuid.UUID       `bun:"user_id,notnull,type:uuid" json:"user_id"`
+	ExternalID string          `bun:"external_id,notnull" json:"external_id"`
+	IDClaim    string          `bun:"id_claim,notnull,default:'sub'" json:"id_claim"`
+	ClaimID    uuid.UUID       `bun:"claim_id,notnull,type:uuid" json:"claim_id"`
+	Reason     *string         `bun:"reason" json:"reason,omitempty"`
+	Data       json.RawMessage `bun:"data,notnull,type:jsonb" json:"data"`
+	OwnerID    uuid.UUID       `bun:"sa_owner_id,notnull,type:uuid" json:"owner_id"`
+	CreatedBy  uuid.UUID       `bun:"sa_created_by,notnull,type:uuid" json:"created_by"`
+	DeletedAt  *time.Time      `bun:"sa_deleted_at" json:"deleted_at,omitempty"`
+	CreatedAt  time.Time       `bun:"sa_created_at,default:now()" json:"created_at"`
+	UpdatedAt  time.Time       `bun:"sa_updated_at,default:now()" json:"updated_at"`
 }
 
 type Organization struct {
