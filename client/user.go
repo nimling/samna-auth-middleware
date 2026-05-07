@@ -102,10 +102,11 @@ func PostUser(ctx context.Context, userID uuid.UUID, user db.SamnaUser) (db.Samn
 		return user, nil
 	}
 	c := newClient()
-	u, err := joinURL(c.apiURL, "user", userID.String())
+	u, err := joinURL(c.apiURL, "user")
 	if err != nil {
 		return db.SamnaUser{}, fmt.Errorf("build url: %w", err)
 	}
+	user.UserID = userID
 	result, err := DecodeJSON[db.SamnaUser](c.client.Post(ctx, requestBody(user, true), u))
 	if err != nil {
 		return result, err
