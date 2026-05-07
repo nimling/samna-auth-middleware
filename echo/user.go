@@ -270,6 +270,34 @@ func DeleteUser(ctx echo.Context) error {
 	return respondJSON(ctx, http.StatusOK, result, 0)
 }
 
+func PostUserToken(ctx echo.Context) error {
+	var payload db.SamnaUserToken
+	if err := ctx.Bind(&payload); err != nil {
+		return respondError(ctx, http.StatusBadRequest, "Bad request")
+	}
+	result, err := client.PostUserToken(ctx.Request().Context(), payload)
+	if err != nil {
+		ctx.Logger().Errorf("PostUserToken: %v", err)
+		return respondError(ctx, http.StatusInternalServerError, "Internal server error")
+	}
+	return respondJSON(ctx, http.StatusCreated, result, 0)
+}
+
+func PostUserTokenValidate(ctx echo.Context) error {
+	var body struct {
+		Token string `json:"token"`
+	}
+	if err := ctx.Bind(&body); err != nil {
+		return respondError(ctx, http.StatusBadRequest, "Bad request")
+	}
+	result, err := client.PostUserTokenValidate(ctx.Request().Context(), body.Token)
+	if err != nil {
+		ctx.Logger().Errorf("PostUserTokenValidate: %v", err)
+		return respondError(ctx, http.StatusUnauthorized, "Unauthorized")
+	}
+	return respondJSON(ctx, http.StatusOK, result, 0)
+}
+
 func GetUserAssets(ctx echo.Context) error {
 	userID, err := uuid.Parse(ctx.Param("id"))
 	if err != nil {
