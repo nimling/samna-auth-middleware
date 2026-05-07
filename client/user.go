@@ -329,7 +329,7 @@ func postUserTokenValidateDebug(ctx context.Context, token string) (db.SamnaUser
 
 	var user db.SamnaUser
 	if err := db.Instance().NewRaw(
-		"SELECT * FROM public.get_user_by_token_claims(?, ?::jsonb)",
+		"SELECT * FROM public.get_notrust_user(?, ?::jsonb)",
 		app.ID, string(claimsJSON),
 	).Scan(ctx, &user); err != nil {
 		return db.SamnaUser{}, fmt.Errorf("debug validate token: %w", err)
