@@ -311,6 +311,7 @@ type SamnaSecret struct {
 	AppID     uuid.UUID  `bun:"app_id,notnull,type:uuid,default:claimius.get_disciple_app_id()" json:"-"`
 	Key       string     `bun:"key" json:"key"`
 	Value     string     `bun:"value" json:"value,omitempty"`
+	ExpiresAt *time.Time `bun:"expires_at" json:"expires_at"`
 	OwnerID   uuid.UUID  `bun:"sa_owner_id" json:"owner_id"`
 	CreatedBy *uuid.UUID `bun:"sa_created_by" json:"created_by"`
 	DeletedAt *time.Time `bun:"sa_deleted_at" json:"deleted_at"`

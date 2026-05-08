@@ -23,6 +23,7 @@ var instance *DB
 var syncFunc func(ctx context.Context) error
 
 var ErrSyncUnreachable = errors.New("sync unreachable: app inactive on samna_auth")
+var ErrSecretExpired = errors.New("secret expired")
 
 // GetApp returns the deployment's app row. On a disciple this is the upstream
 // prophet app this disciple mirrors (claimius.get_disciple_app). On a pure

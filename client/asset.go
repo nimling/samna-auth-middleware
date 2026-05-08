@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/nimling/samna-auth-middleware/db"
@@ -39,16 +38,6 @@ func GetAssetData(ctx context.Context, assetID uuid.UUID) (io.ReadCloser, error)
 }
 
 func PostAsset(ctx context.Context, asset db.Asset) (db.Asset, error) {
-	if getDebugUserID() != nil {
-		asset.ID = uuid.New()
-		asset.CreatedAt = time.Now()
-		asset.UpdatedAt = time.Now()
-		_, err := db.Instance().NewInsert().Model(&asset).Exec(ctx)
-		if err != nil {
-			return asset, fmt.Errorf("debug insert asset: %w", err)
-		}
-		return asset, nil
-	}
 	c := newClient()
 	u, err := joinURL(c.apiURL, "asset")
 	if err != nil {
@@ -97,15 +86,6 @@ func PostAssetData(ctx context.Context, assetID uuid.UUID, contentType string, b
 }
 
 func PutAsset(ctx context.Context, assetID uuid.UUID, asset db.Asset) (db.Asset, error) {
-	if getDebugUserID() != nil {
-		asset.ID = assetID
-		asset.UpdatedAt = time.Now()
-		_, err := db.Instance().NewUpdate().Model(&asset).Where("id = ?", assetID).OmitZero().Exec(ctx)
-		if err != nil {
-			return asset, fmt.Errorf("debug update asset: %w", err)
-		}
-		return asset, nil
-	}
 	c := newClient()
 	u, err := joinURL(c.apiURL, "asset", assetID.String())
 	if err != nil {
@@ -123,14 +103,6 @@ func PutAsset(ctx context.Context, assetID uuid.UUID, asset db.Asset) (db.Asset,
 }
 
 func DeleteAsset(ctx context.Context, assetID uuid.UUID) (db.Asset, error) {
-	if getDebugUserID() != nil {
-		var result db.Asset
-		_, err := db.Instance().NewUpdate().Model(&result).Set("sa_deleted_at = NOW()").Where("id = ?", assetID).Where("sa_deleted_at IS NULL").Returning("*").Exec(ctx)
-		if err != nil {
-			return result, fmt.Errorf("debug delete asset: %w", err)
-		}
-		return result, nil
-	}
 	c := newClient()
 	u, err := joinURL(c.apiURL, "asset", assetID.String())
 	if err != nil {

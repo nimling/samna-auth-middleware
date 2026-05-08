@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/nimling/samna-auth-middleware/db"
@@ -32,21 +31,6 @@ func GetRelation(ctx context.Context, relationID uuid.UUID) (io.ReadCloser, erro
 }
 
 func PostRelation(ctx context.Context, relation db.UserRelation) (db.UserRelation, error) {
-	if getDebugUserID() != nil {
-		app, err := db.Instance().GetApp(ctx)
-		if err != nil {
-			return relation, err
-		}
-		relation.ID = uuid.New()
-		relation.AppID = app.ID
-		relation.CreatedAt = time.Now()
-		relation.UpdatedAt = time.Now()
-		_, err = db.Instance().NewInsert().Model(&relation).Exec(ctx)
-		if err != nil {
-			return relation, fmt.Errorf("debug insert relation: %w", err)
-		}
-		return relation, nil
-	}
 	c := newClient()
 	u, err := joinURL(c.apiURL, "relation")
 	if err != nil {
@@ -64,15 +48,6 @@ func PostRelation(ctx context.Context, relation db.UserRelation) (db.UserRelatio
 }
 
 func PutRelation(ctx context.Context, relationID uuid.UUID, relation db.UserRelation) (db.UserRelation, error) {
-	if getDebugUserID() != nil {
-		relation.ID = relationID
-		relation.UpdatedAt = time.Now()
-		_, err := db.Instance().NewUpdate().Model(&relation).Where("id = ?", relationID).OmitZero().Exec(ctx)
-		if err != nil {
-			return relation, fmt.Errorf("debug update relation: %w", err)
-		}
-		return relation, nil
-	}
 	c := newClient()
 	u, err := joinURL(c.apiURL, "relation", relationID.String())
 	if err != nil {
@@ -90,14 +65,6 @@ func PutRelation(ctx context.Context, relationID uuid.UUID, relation db.UserRela
 }
 
 func DeleteRelation(ctx context.Context, relationID uuid.UUID) (db.UserRelation, error) {
-	if getDebugUserID() != nil {
-		var result db.UserRelation
-		_, err := db.Instance().NewUpdate().Model(&result).Set("sa_deleted_at = CURRENT_TIMESTAMP").Where("id = ?", relationID).Where("sa_deleted_at IS NULL").Returning("*").Exec(ctx)
-		if err != nil {
-			return result, fmt.Errorf("debug delete relation: %w", err)
-		}
-		return result, nil
-	}
 	c := newClient()
 	u, err := joinURL(c.apiURL, "relation", relationID.String())
 	if err != nil {

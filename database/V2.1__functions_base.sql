@@ -86,6 +86,19 @@ $$ LANGUAGE plpgsql STABLE;
 
 COMMENT ON FUNCTION claimius.table_has_column(TEXT, TEXT) IS 'True if the given table has the given column.';
 
+-- ensure_uuid_null
+-- Defensive helper for callers that may emit the zero UUID instead of SQL
+-- NULL. Returns NULL for both NULL and the all zero UUID; passes any real
+-- UUID through unchanged. Applied at the top of public functions that
+-- accept an optional UUID parameter so the wire shape "value or NULL" is
+-- honored even when a caller serializes a zero UUID literal.
+CREATE OR REPLACE FUNCTION claimius.ensure_uuid_null(p UUID) RETURNS UUID
+    LANGUAGE sql IMMUTABLE PARALLEL SAFE AS $$
+SELECT NULLIF(p, '00000000-0000-0000-0000-000000000000'::uuid);
+$$;
+
+COMMENT ON FUNCTION claimius.ensure_uuid_null IS 'Returns NULL when input is NULL or the zero UUID; otherwise the UUID unchanged.';
+
 -- write_audit
 -- Inserts a row into claimius.audit. Used by audit triggers and by error
 -- paths inside other triggers.

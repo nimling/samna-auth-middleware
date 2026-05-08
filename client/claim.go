@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/nimling/samna-auth-middleware/db"
@@ -51,21 +50,6 @@ func GetClaimAudit(ctx context.Context, claimID uuid.UUID) (io.ReadCloser, error
 }
 
 func PostClaim(ctx context.Context, claim db.Claim) (db.Claim, error) {
-	if getDebugUserID() != nil {
-		app, err := db.Instance().GetApp(ctx)
-		if err != nil {
-			return claim, err
-		}
-		claim.ID = uuid.New()
-		claim.AppID = app.ID
-		claim.CreatedAt = time.Now()
-		claim.UpdatedAt = time.Now()
-		_, err = db.Instance().NewInsert().Model(&claim).Exec(ctx)
-		if err != nil {
-			return claim, fmt.Errorf("debug insert claim: %w", err)
-		}
-		return claim, nil
-	}
 	c := newClient()
 	u, err := joinURL(c.apiURL, "claim")
 	if err != nil {
@@ -83,15 +67,6 @@ func PostClaim(ctx context.Context, claim db.Claim) (db.Claim, error) {
 }
 
 func PutClaim(ctx context.Context, claimID uuid.UUID, claim db.Claim) (db.Claim, error) {
-	if getDebugUserID() != nil {
-		claim.ID = claimID
-		claim.UpdatedAt = time.Now()
-		_, err := db.Instance().NewUpdate().Model(&claim).Where("id = ?", claimID).OmitZero().Exec(ctx)
-		if err != nil {
-			return claim, fmt.Errorf("debug update claim: %w", err)
-		}
-		return claim, nil
-	}
 	c := newClient()
 	u, err := joinURL(c.apiURL, "claim", claimID.String())
 	if err != nil {
@@ -109,14 +84,6 @@ func PutClaim(ctx context.Context, claimID uuid.UUID, claim db.Claim) (db.Claim,
 }
 
 func DeleteClaim(ctx context.Context, claimID uuid.UUID) (db.Claim, error) {
-	if getDebugUserID() != nil {
-		var claim db.Claim
-		_, err := db.Instance().NewUpdate().Model(&claim).Set("sa_deleted_at = NOW()").Where("id = ?", claimID).Where("sa_deleted_at IS NULL").Returning("*").Exec(ctx)
-		if err != nil {
-			return claim, fmt.Errorf("debug delete claim: %w", err)
-		}
-		return claim, nil
-	}
 	c := newClient()
 	u, err := joinURL(c.apiURL, "claim", claimID.String())
 	if err != nil {
@@ -134,22 +101,6 @@ func DeleteClaim(ctx context.Context, claimID uuid.UUID) (db.Claim, error) {
 }
 
 func PostClaimObject(ctx context.Context, claimID uuid.UUID, co db.ClaimObject) (db.ClaimObject, error) {
-	if getDebugUserID() != nil {
-		app, err := db.Instance().GetApp(ctx)
-		if err != nil {
-			return co, err
-		}
-		co.ID = uuid.New()
-		co.AppID = app.ID
-		co.ClaimID = claimID
-		co.CreatedAt = time.Now()
-		co.UpdatedAt = time.Now()
-		_, err = db.Instance().NewInsert().Model(&co).Exec(ctx)
-		if err != nil {
-			return co, fmt.Errorf("debug insert claim object: %w", err)
-		}
-		return co, nil
-	}
 	c := newClient()
 	u, err := joinURL(c.apiURL, "claim", claimID.String(), "object")
 	if err != nil {
@@ -167,14 +118,6 @@ func PostClaimObject(ctx context.Context, claimID uuid.UUID, co db.ClaimObject) 
 }
 
 func DeleteClaimObject(ctx context.Context, claimID uuid.UUID, objectID uuid.UUID) (db.ClaimObject, error) {
-	if getDebugUserID() != nil {
-		var co db.ClaimObject
-		_, err := db.Instance().NewUpdate().Model(&co).Set("sa_deleted_at = NOW()").Where("claim_id = ?", claimID).Where("object_id = ?", objectID).Where("sa_deleted_at IS NULL").Returning("*").Exec(ctx)
-		if err != nil {
-			return co, fmt.Errorf("debug delete claim object: %w", err)
-		}
-		return co, nil
-	}
 	c := newClient()
 	u, err := joinURL(c.apiURL, "claim", claimID.String(), "object", objectID.String())
 	if err != nil {
@@ -192,22 +135,6 @@ func DeleteClaimObject(ctx context.Context, claimID uuid.UUID, objectID uuid.UUI
 }
 
 func PostUserClaim(ctx context.Context, claimID uuid.UUID, uc db.UserClaim) (db.UserClaim, error) {
-	if getDebugUserID() != nil {
-		app, err := db.Instance().GetApp(ctx)
-		if err != nil {
-			return uc, err
-		}
-		uc.ID = uuid.New()
-		uc.AppID = app.ID
-		uc.ClaimID = claimID
-		uc.CreatedAt = time.Now()
-		uc.UpdatedAt = time.Now()
-		_, err = db.Instance().NewInsert().Model(&uc).Exec(ctx)
-		if err != nil {
-			return uc, fmt.Errorf("debug insert user claim: %w", err)
-		}
-		return uc, nil
-	}
 	c := newClient()
 	u, err := joinURL(c.apiURL, "claim", claimID.String(), "user")
 	if err != nil {
@@ -225,14 +152,6 @@ func PostUserClaim(ctx context.Context, claimID uuid.UUID, uc db.UserClaim) (db.
 }
 
 func DeleteUserClaim(ctx context.Context, claimID uuid.UUID, userID uuid.UUID) (db.UserClaim, error) {
-	if getDebugUserID() != nil {
-		var uc db.UserClaim
-		_, err := db.Instance().NewUpdate().Model(&uc).Set("sa_deleted_at = NOW()").Where("claim_id = ?", claimID).Where("user_id = ?", userID).Where("sa_deleted_at IS NULL").Returning("*").Exec(ctx)
-		if err != nil {
-			return uc, fmt.Errorf("debug delete user claim: %w", err)
-		}
-		return uc, nil
-	}
 	c := newClient()
 	u, err := joinURL(c.apiURL, "claim", claimID.String(), "user", userID.String())
 	if err != nil {

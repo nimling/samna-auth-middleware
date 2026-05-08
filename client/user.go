@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"time"
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
@@ -85,19 +84,6 @@ func GetUserLocations(ctx context.Context, userID uuid.UUID) (io.ReadCloser, err
 }
 
 func PostUser(ctx context.Context, userID uuid.UUID, user db.SamnaUser) (db.SamnaUser, error) {
-	if getDebugUserID() != nil {
-		app, err := db.Instance().GetApp(ctx)
-		if err != nil {
-			return user, err
-		}
-		user.AppID = app.ID
-		user.UserID = userID
-		_, err = db.Instance().NewInsert().Model(&user).Returning("*").Exec(ctx)
-		if err != nil {
-			return user, fmt.Errorf("debug insert user: %w", err)
-		}
-		return user, nil
-	}
 	c := newClient()
 	u, err := joinURL(c.apiURL, "user")
 	if err != nil {
@@ -116,14 +102,6 @@ func PostUser(ctx context.Context, userID uuid.UUID, user db.SamnaUser) (db.Samn
 }
 
 func PutUser(ctx context.Context, userID uuid.UUID, user db.SamnaUser) (db.SamnaUser, error) {
-	if getDebugUserID() != nil {
-		user.UpdatedAt = time.Now()
-		_, err := db.Instance().NewUpdate().Model(&user).Where("user_id = ?", userID).OmitZero().Exec(ctx)
-		if err != nil {
-			return user, fmt.Errorf("debug update user: %w", err)
-		}
-		return user, nil
-	}
 	c := newClient()
 	u, err := joinURL(c.apiURL, "user", userID.String())
 	if err != nil {
@@ -141,14 +119,6 @@ func PutUser(ctx context.Context, userID uuid.UUID, user db.SamnaUser) (db.Samna
 }
 
 func DeleteUser(ctx context.Context, userID uuid.UUID) (db.SamnaUser, error) {
-	if getDebugUserID() != nil {
-		var result db.SamnaUser
-		_, err := db.Instance().NewUpdate().Model(&result).Set("sa_deleted_at = NOW()").Where("user_id = ?", userID).Where("sa_deleted_at IS NULL").Returning("*").Exec(ctx)
-		if err != nil {
-			return result, fmt.Errorf("debug delete user: %w", err)
-		}
-		return result, nil
-	}
 	c := newClient()
 	u, err := joinURL(c.apiURL, "user", userID.String())
 	if err != nil {

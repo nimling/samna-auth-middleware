@@ -1738,6 +1738,8 @@ CREATE OR REPLACE FUNCTION claimius.create_root_organization(
 DECLARE
     v_row   claimius.organization;
 BEGIN
+    p_id := claimius.ensure_uuid_null(p_id);
+
     -- Idempotency: existing root org with same (app, name)?
     SELECT * INTO v_row
     FROM claimius.organization
@@ -1785,7 +1787,7 @@ CREATE OR REPLACE FUNCTION claimius.init_prophet(
     p_system_app_name       TEXT,
     p_system_app_private_key  TEXT,
     p_system_app_private_seed TEXT,
-    p_system_user_id        UUID DEFAULT gen_random_uuid(),
+    p_system_user_id        UUID DEFAULT NULL,
     p_system_app_redirect_uri  TEXT DEFAULT '',
     p_system_app_sync_uri      TEXT DEFAULT '',
     p_system_app_contact_email TEXT DEFAULT NULL,
@@ -1795,7 +1797,7 @@ CREATE OR REPLACE FUNCTION claimius.init_prophet(
     p_system_app_description TEXT DEFAULT 'System app',
     p_system_org_name       TEXT DEFAULT 'System',
     p_system_claim_name     TEXT DEFAULT 'System Administrator',
-    p_system_claim_id       UUID DEFAULT gen_random_uuid(),
+    p_system_claim_id       UUID DEFAULT NULL,
     p_default_claim         JSONB DEFAULT NULL
 ) RETURNS JSONB AS $$
 DECLARE
@@ -1810,6 +1812,9 @@ DECLARE
     v_default_desc      TEXT;
     v_default_level     INTEGER;
 BEGIN
+    p_system_user_id  := COALESCE(claimius.ensure_uuid_null(p_system_user_id),  gen_random_uuid());
+    p_system_claim_id := COALESCE(claimius.ensure_uuid_null(p_system_claim_id), gen_random_uuid());
+
     -- Validate the required default claim metadata. The system claim is
     -- created with hardcoded properties; the default claim (granted to every
     -- regular user on first login via ensure_app_user) is implementer defined.
@@ -2101,7 +2106,7 @@ CREATE OR REPLACE FUNCTION claimius.init_hybrid(
     p_system_app_private_key   TEXT,
     p_system_app_private_seed  TEXT,
     p_disciple_app_slug        TEXT,
-    p_system_user_id           UUID DEFAULT gen_random_uuid(),
+    p_system_user_id           UUID DEFAULT NULL,
     p_system_app_redirect_uri  TEXT DEFAULT '',
     p_system_app_sync_uri      TEXT DEFAULT '',
     p_system_app_contact_email TEXT DEFAULT NULL,
@@ -2111,7 +2116,7 @@ CREATE OR REPLACE FUNCTION claimius.init_hybrid(
     p_system_app_description   TEXT DEFAULT 'System app',
     p_system_org_name          TEXT DEFAULT 'System',
     p_system_claim_name        TEXT DEFAULT 'System Administrator',
-    p_system_claim_id          UUID DEFAULT gen_random_uuid(),
+    p_system_claim_id          UUID DEFAULT NULL,
     p_default_claim            JSONB DEFAULT NULL
 ) RETURNS JSONB AS $$
 DECLARE
@@ -2233,6 +2238,8 @@ DECLARE
     v_default_claim_id UUID;
     v_default_claim_owner UUID;
 BEGIN
+    p_user_id := claimius.ensure_uuid_null(p_user_id);
+
     -- Find or insert the samna_user row
     SELECT * INTO v_user_row FROM claimius.samna_user
     WHERE user_id = p_user_id AND app_id = p_app_id AND sa_deleted_at IS NULL;

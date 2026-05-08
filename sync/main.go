@@ -280,6 +280,7 @@ func upsertSamnaSecret(ctx context.Context, tx bun.Tx, raw json.RawMessage) erro
 		Set("app_id = EXCLUDED.app_id").
 		Set("key = EXCLUDED.key").
 		Set("value = EXCLUDED.value").
+		Set("expires_at = EXCLUDED.expires_at").
 		Set("sa_owner_id = EXCLUDED.sa_owner_id").
 		Set("sa_created_by = EXCLUDED.sa_created_by").
 		Set("sa_deleted_at = EXCLUDED.sa_deleted_at").

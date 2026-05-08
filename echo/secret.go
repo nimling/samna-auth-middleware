@@ -65,7 +65,7 @@ func GetSecrets(ctx echo.Context) error {
 			Model(&secrets).
 			ExcludeColumn("app_id").
 			Where("samna_secret.sa_deleted_at IS NULL").
-			Where("samna_secret.id IN (SELECT id FROM claimius.get_secrets(?, claimius.get_disciple_app_id(), ?))", *debugUserID, db.ACCESS_LEVEL_GUEST)
+			Where("samna_secret.id IN (SELECT id FROM claimius.get_secrets(?, claimius.get_disciple_app_id(), ?))", *debugUserID, db.ACCESS_LEVEL_ADMIN)
 
 		if len(orgIDs) > 0 {
 			q.Where("samna_secret.sa_owner_id IN (?)", bun.In(orgIDs))
@@ -76,7 +76,7 @@ func GetSecrets(ctx echo.Context) error {
 		if len(usrIDs) > 0 {
 			q.WhereGroup(" AND ", func(qq *bun.SelectQuery) *bun.SelectQuery {
 				for _, uid := range usrIDs {
-					qq = qq.WhereOr("samna_secret.id IN (SELECT id FROM claimius.get_secrets(?, claimius.get_disciple_app_id(), ?))", uid, db.ACCESS_LEVEL_GUEST)
+					qq = qq.WhereOr("samna_secret.id IN (SELECT id FROM claimius.get_secrets(?, claimius.get_disciple_app_id(), ?))", uid, db.ACCESS_LEVEL_ADMIN)
 				}
 				return qq
 			})
@@ -104,7 +104,17 @@ func GetSecret(ctx echo.Context) error {
 		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
 
-	if getDebugUserID() != nil {
+	if debugUserID := getDebugUserID(); debugUserID != nil {
+		ac, err := db.Instance().GetAccess(ctx.Request().Context(), *debugUserID, secretID, db.OBJECT_TYPE_SAMNA_SECRET, db.ACCESS_LEVEL_ADMIN)
+		if err != nil {
+			return respondError(ctx, http.StatusNotFound, "Not found")
+		}
+		if ac == nil {
+			ac, err = db.Instance().GetDirectAccess(ctx.Request().Context(), *debugUserID, secretID, db.OBJECT_TYPE_SAMNA_SECRET)
+			if err != nil || ac == nil {
+				return respondError(ctx, http.StatusNotFound, "Not found")
+			}
+		}
 		secret, err := db.Instance().GetSecret(ctx.Request().Context(), secretID)
 		if err != nil {
 			return respondError(ctx, http.StatusNotFound, "Not found")
@@ -126,9 +136,26 @@ func PostSecret(ctx echo.Context) error {
 	if err := ctx.Bind(&reqBody); err != nil {
 		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
+	if reqBody.OwnerID == nil || *reqBody.OwnerID == (uuid.UUID{}) {
+		return respondError(ctx, http.StatusBadRequest, "Bad request")
+	}
 
-	if getDebugUserID() != nil {
-		secret, err := db.Instance().PostSecret(ctx.Request().Context(), reqBody)
+	if debugUserID := getDebugUserID(); debugUserID != nil {
+		ac, err := db.Instance().GetAccess(ctx.Request().Context(), *debugUserID, *reqBody.OwnerID, db.OBJECT_TYPE_ORGANIZATION, db.ACCESS_LEVEL_ADMIN)
+		if err != nil {
+			ctx.Logger().Errorf("PostSecret GetAccess: %v", err)
+			return respondError(ctx, http.StatusForbidden, "Forbidden")
+		}
+		if ac == nil {
+			ac, err = db.Instance().GetDirectAccess(ctx.Request().Context(), *debugUserID, *reqBody.OwnerID, db.OBJECT_TYPE_ORGANIZATION)
+			if err != nil || ac == nil {
+				return respondError(ctx, http.StatusForbidden, "Forbidden")
+			}
+		}
+		if ac.UserClaimID == nil || ac.ClaimID == nil {
+			return respondError(ctx, http.StatusForbidden, "Forbidden")
+		}
+		secret, err := db.Instance().PostSecret(ctx.Request().Context(), reqBody, *reqBody.OwnerID, *ac.UserClaimID, ac.RootID, *ac.ClaimID)
 		if err != nil {
 			ctx.Logger().Errorf("PostSecret: %v", err)
 			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
@@ -156,7 +183,17 @@ func PutSecret(ctx echo.Context) error {
 		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
 
-	if getDebugUserID() != nil {
+	if debugUserID := getDebugUserID(); debugUserID != nil {
+		ac, err := db.Instance().GetAccess(ctx.Request().Context(), *debugUserID, secretID, db.OBJECT_TYPE_SAMNA_SECRET, db.ACCESS_LEVEL_ADMIN)
+		if err != nil {
+			return respondError(ctx, http.StatusForbidden, "Forbidden")
+		}
+		if ac == nil {
+			ac, err = db.Instance().GetDirectAccess(ctx.Request().Context(), *debugUserID, secretID, db.OBJECT_TYPE_SAMNA_SECRET)
+			if err != nil || ac == nil {
+				return respondError(ctx, http.StatusForbidden, "Forbidden")
+			}
+		}
 		secret, err := db.Instance().PutSecret(ctx.Request().Context(), secretID, reqBody)
 		if err != nil {
 			ctx.Logger().Errorf("PutSecret: %v", err)
@@ -180,7 +217,17 @@ func DeleteSecret(ctx echo.Context) error {
 		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
 
-	if getDebugUserID() != nil {
+	if debugUserID := getDebugUserID(); debugUserID != nil {
+		ac, err := db.Instance().GetAccess(ctx.Request().Context(), *debugUserID, secretID, db.OBJECT_TYPE_SAMNA_SECRET, db.ACCESS_LEVEL_ADMIN)
+		if err != nil {
+			return respondError(ctx, http.StatusForbidden, "Forbidden")
+		}
+		if ac == nil {
+			ac, err = db.Instance().GetDirectAccess(ctx.Request().Context(), *debugUserID, secretID, db.OBJECT_TYPE_SAMNA_SECRET)
+			if err != nil || ac == nil {
+				return respondError(ctx, http.StatusForbidden, "Forbidden")
+			}
+		}
 		if err := db.Instance().DeleteSecret(ctx.Request().Context(), secretID); err != nil {
 			ctx.Logger().Errorf("DeleteSecret: %v", err)
 			return respondError(ctx, http.StatusInternalServerError, "Internal server error")

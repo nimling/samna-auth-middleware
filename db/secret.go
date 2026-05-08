@@ -4,13 +4,17 @@ import (
 	"context"
 	"encoding/hex"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
+	"github.com/uptrace/bun"
 )
 
 type BodySecret struct {
-	Key   *string `json:"key"`
-	Value *string `json:"value"`
+	Key       *string    `json:"key"`
+	Value     *string    `json:"value"`
+	OwnerID   *uuid.UUID `json:"owner_id"`
+	ExpiresAt *time.Time `json:"expires_at"`
 }
 
 func (d *DB) GetSecrets(ctx context.Context, userID uuid.UUID, accessLevel ClaimAccessLevel) ([]SamnaSecret, error) {
@@ -38,7 +42,7 @@ func (d *DB) GetSecret(ctx context.Context, secretID uuid.UUID) (*SamnaSecret, e
 	return &secret, nil
 }
 
-func (d *DB) PostSecret(ctx context.Context, body BodySecret) (*SamnaSecret, error) {
+func (d *DB) PostSecret(ctx context.Context, body BodySecret, ownerID, createdBy, rootID, claimID uuid.UUID) (*SamnaSecret, error) {
 	if body.Key == nil || *body.Key == "" {
 		return nil, fmt.Errorf("key is required")
 	}
@@ -58,18 +62,33 @@ func (d *DB) PostSecret(ctx context.Context, body BodySecret) (*SamnaSecret, err
 		return nil, fmt.Errorf("encrypt: %w", err)
 	}
 	secret := SamnaSecret{
-		Key:     *body.Key,
-		Value:   hex.EncodeToString(encrypted),
-		OwnerID: app.OwnerID,
+		Key:       *body.Key,
+		Value:     hex.EncodeToString(encrypted),
+		ExpiresAt: body.ExpiresAt,
+		OwnerID:   ownerID,
+		CreatedBy: &createdBy,
 	}
-	_, err = d.NewInsert().
-		Model(&secret).
-		ExcludeColumn("id", "sa_created_at", "sa_updated_at", "sa_deleted_at").
-		Value("app_id", "claimius.get_disciple_app_id()").
-		Returning("*").
-		Exec(ctx)
+	err = d.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
+		if _, err := tx.NewInsert().
+			Model(&secret).
+			ExcludeColumn("id", "sa_created_at", "sa_updated_at", "sa_deleted_at").
+			Value("app_id", "claimius.get_disciple_app_id()").
+			Returning("*").
+			Exec(ctx); err != nil {
+			return fmt.Errorf("insert secret: %w", err)
+		}
+		if _, err := tx.NewRaw(`
+			SELECT claimius.assign_claim_object(
+				claimius.get_disciple_app_id(),
+				?, ?, 'claimius.samna_secret', ?, ?, ?, ?, TRUE
+			)
+		`, claimID, secret.ID, ownerID, rootID, createdBy, int(ACCESS_LEVEL_ADMIN)).Exec(ctx); err != nil {
+			return fmt.Errorf("assign claim object: %w", err)
+		}
+		return nil
+	})
 	if err != nil {
-		return nil, fmt.Errorf("insert secret: %w", err)
+		return nil, err
 	}
 	return &secret, nil
 }
@@ -96,6 +115,9 @@ func (d *DB) PutSecret(ctx context.Context, secretID uuid.UUID, body BodySecret)
 			return nil, fmt.Errorf("encrypt: %w", err)
 		}
 		secret.Value = hex.EncodeToString(encrypted)
+	}
+	if body.ExpiresAt != nil {
+		secret.ExpiresAt = body.ExpiresAt
 	}
 	_, err = d.NewUpdate().
 		Model(secret).
@@ -124,6 +146,9 @@ func (d *DB) ResolveSecret(ctx context.Context, secretID uuid.UUID) (string, err
 	secret, err := d.GetSecret(ctx, secretID)
 	if err != nil {
 		return "", err
+	}
+	if secret.ExpiresAt != nil && !secret.ExpiresAt.After(time.Now()) {
+		return "", ErrSecretExpired
 	}
 	app, err := d.GetApp(ctx)
 	if err != nil {

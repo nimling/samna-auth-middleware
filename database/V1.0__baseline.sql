@@ -187,6 +187,7 @@ CREATE TABLE IF NOT EXISTS claimius.samna_secret (
                                                      app_id          UUID NOT NULL REFERENCES claimius.samna_app(id),
                                                      key             TEXT NOT NULL,
                                                      value           TEXT NOT NULL,
+                                                     expires_at      TIMESTAMPTZ,
                                                      sa_owner_id     UUID NOT NULL,
                                                      sa_created_by   UUID,
                                                      sa_deleted_at   TIMESTAMPTZ,
