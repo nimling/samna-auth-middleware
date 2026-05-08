@@ -83,13 +83,12 @@ func GetUserLocations(ctx context.Context, userID uuid.UUID) (io.ReadCloser, err
 	return c.client.Get(ctx, u)
 }
 
-func PostUser(ctx context.Context, userID uuid.UUID, user db.SamnaUser) (db.SamnaUser, error) {
+func PostUser(ctx context.Context, user db.SamnaUser) (db.SamnaUser, error) {
 	c := newClient()
 	u, err := joinURL(c.apiURL, "user")
 	if err != nil {
 		return db.SamnaUser{}, fmt.Errorf("build url: %w", err)
 	}
-	user.UserID = userID
 	result, err := DecodeJSON[db.SamnaUser](c.client.Post(ctx, requestBody(user, true), u))
 	if err != nil {
 		return result, err
@@ -212,21 +211,17 @@ func postUserTokenDebug(ctx context.Context, payload db.SamnaUserToken) (db.Samn
 		user.Email = payload.User.Email
 	}
 
-	_, err = db.Instance().NewInsert().Model(&user).
-		On("CONFLICT (user_id, app_id) WHERE sa_deleted_at IS NULL DO UPDATE").
-		Set("first_name = EXCLUDED.first_name").
-		Set("last_name = EXCLUDED.last_name").
-		Set("user_name = EXCLUDED.user_name").
-		Set("user_image = EXCLUDED.user_image").
-		Set("phone = EXCLUDED.phone").
-		Set("email = EXCLUDED.email").
-		Set("external_id = EXCLUDED.external_id").
-		Set("sa_updated_at = EXCLUDED.sa_updated_at").
-		Returning("*").
-		Exec(ctx)
-	if err != nil {
-		return user, fmt.Errorf("debug upsert samna_user: %w", err)
+	if err := db.Instance().NewRaw(`
+		SELECT (claimius.ensure_app_user(?, claimius.get_disciple_app_id(), ?, ?, ?, ?, ?, ?, ?) -> 'samna_user' ->> 'user_id')::uuid
+	`, user.UserID, user.FirstName, user.LastName, user.UserName, user.UserImage, user.Email, user.Phone, user.ExternalID).Scan(ctx, &user.UserID); err != nil {
+		return user, fmt.Errorf("debug ensure_app_user: %w", err)
 	}
+
+	fetched, err := db.Instance().GetUser(ctx, user.UserID)
+	if err != nil {
+		return user, fmt.Errorf("debug fetch samna_user: %w", err)
+	}
+	user = *fetched
 
 	if payload.AppID != nil && payload.ClaimID != nil {
 		claimsJSON, marshalErr := json.Marshal(claims)

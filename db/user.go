@@ -110,11 +110,11 @@ func (d *DB) DeleteRelation(ctx context.Context, relationID uuid.UUID) error {
 	return err
 }
 
-// TODO:: THis is wrong!
-func (d *DB) PostUser(ctx context.Context, userID uuid.UUID, in SamnaUser) (*SamnaUser, error) {
-	_, err := d.NewRaw(`
-		SELECT claimius.ensure_app_user(?, claimius.get_disciple_app_id(), ?, ?, ?, ?, ?, ?)
-	`, userID, in.FirstName, in.LastName, in.UserName, in.UserImage, in.Email, in.Phone).Exec(ctx)
+func (d *DB) PostUser(ctx context.Context, in SamnaUser) (*SamnaUser, error) {
+	var userID uuid.UUID
+	err := d.NewRaw(`
+		SELECT (claimius.ensure_app_user(?, claimius.get_disciple_app_id(), ?, ?, ?, ?, ?, ?, ?) -> 'samna_user' ->> 'user_id')::uuid
+	`, in.UserID, in.FirstName, in.LastName, in.UserName, in.UserImage, in.Email, in.Phone, in.ExternalID).Scan(ctx, &userID)
 	if err != nil {
 		return nil, err
 	}

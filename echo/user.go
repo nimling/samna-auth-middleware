@@ -197,7 +197,7 @@ func PostUser(ctx echo.Context) error {
 	}
 
 	if getDebugUserID() != nil {
-		out, err := db.Instance().PostUser(ctx.Request().Context(), user.UserID, user)
+		out, err := db.Instance().PostUser(ctx.Request().Context(), user)
 		if err != nil {
 			ctx.Logger().Errorf("PostUser: %v", err)
 			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
@@ -205,7 +205,7 @@ func PostUser(ctx echo.Context) error {
 		return respondJSON(ctx, http.StatusCreated, out, 0)
 	}
 
-	result, err := client.PostUser(ctx.Request().Context(), user.UserID, user)
+	result, err := client.PostUser(ctx.Request().Context(), user)
 	if err != nil {
 		ctx.Logger().Errorf("PostUser: %v", err)
 		return respondError(ctx, http.StatusInternalServerError, "Internal server error")
