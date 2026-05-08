@@ -191,18 +191,13 @@ func GetUserRelations(ctx echo.Context) error {
 }
 
 func PostUser(ctx echo.Context) error {
-	userID, err := uuid.Parse(ctx.Param("id"))
-	if err != nil {
-		return respondError(ctx, http.StatusBadRequest, "Bad request")
-	}
-
 	var user db.SamnaUser
 	if err := ctx.Bind(&user); err != nil {
 		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
 
 	if getDebugUserID() != nil {
-		out, err := db.Instance().PostUser(ctx.Request().Context(), userID, user)
+		out, err := db.Instance().PostUser(ctx.Request().Context(), user.UserID, user)
 		if err != nil {
 			ctx.Logger().Errorf("PostUser: %v", err)
 			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
@@ -210,7 +205,7 @@ func PostUser(ctx echo.Context) error {
 		return respondJSON(ctx, http.StatusCreated, out, 0)
 	}
 
-	result, err := client.PostUser(ctx.Request().Context(), userID, user)
+	result, err := client.PostUser(ctx.Request().Context(), user.UserID, user)
 	if err != nil {
 		ctx.Logger().Errorf("PostUser: %v", err)
 		return respondError(ctx, http.StatusInternalServerError, "Internal server error")

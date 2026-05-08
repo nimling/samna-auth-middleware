@@ -2243,7 +2243,8 @@ BEGIN
             email, phone, external_id, status, type
         )
         VALUES (
-                   p_user_id, p_app_id, p_first_name, p_last_name, p_user_name, p_user_image,
+                   COALESCE(p_user_id, gen_random_uuid()),
+                   p_app_id, p_first_name, p_last_name, p_user_name, p_user_image,
                    p_email, p_phone, p_external_id, 'active', 'user'
                )
         RETURNING * INTO v_user_row;
@@ -2260,7 +2261,7 @@ BEGIN
     -- already has a live user_claim for this claim, return the existing one.
     IF v_default_claim_id IS NOT NULL THEN
         SELECT * INTO v_uc_row FROM claimius.user_claim
-        WHERE user_id = p_user_id
+        WHERE user_id = v_user_row.user_id
           AND app_id = p_app_id
           AND claim_id = v_default_claim_id
           AND sa_deleted_at IS NULL
@@ -2270,9 +2271,9 @@ BEGIN
             INSERT INTO claimius.user_claim (
                 app_id, claim_id, user_id, sa_owner_id, sa_created_by
             ) VALUES (
-                         p_app_id, v_default_claim_id, p_user_id,
+                         p_app_id, v_default_claim_id, v_user_row.user_id,
                          v_default_claim_owner,
-                         p_user_id  -- bootstrap exception: actor is the user themselves on first login
+                         v_user_row.user_id  -- bootstrap exception: actor is the user themselves on first login
                      )
             RETURNING * INTO v_uc_row;
         END IF;

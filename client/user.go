@@ -90,12 +90,9 @@ func PostUser(ctx context.Context, userID uuid.UUID, user db.SamnaUser) (db.Samn
 		if err != nil {
 			return user, err
 		}
-		user.ID = uuid.New()
 		user.AppID = app.ID
 		user.UserID = userID
-		user.CreatedAt = time.Now()
-		user.UpdatedAt = time.Now()
-		_, err = db.Instance().NewInsert().Model(&user).Exec(ctx)
+		_, err = db.Instance().NewInsert().Model(&user).Returning("*").Exec(ctx)
 		if err != nil {
 			return user, fmt.Errorf("debug insert user: %w", err)
 		}
@@ -214,11 +211,11 @@ func postUserTokenDebug(ctx context.Context, payload db.SamnaUserToken) (db.Samn
 		return db.SamnaUser{}, fmt.Errorf("id claim not a string")
 	}
 
-	targetUserID := uuid.New()
+	var userID uuid.UUID
 	if payload.User != nil && payload.User.UserID != uuid.Nil {
-		targetUserID = payload.User.UserID
+		userID = payload.User.UserID
 	} else if parsedID, parseErr := uuid.Parse(tokenID); parseErr == nil {
-		targetUserID = parsedID
+		userID = parsedID
 	}
 
 	externalID := tokenID
@@ -232,11 +229,9 @@ func postUserTokenDebug(ctx context.Context, payload db.SamnaUserToken) (db.Samn
 	}
 
 	user := db.SamnaUser{
-		UserID:     targetUserID,
+		UserID:     userID,
 		AppID:      app.ID,
 		ExternalID: &externalID,
-		CreatedAt:  time.Now(),
-		UpdatedAt:  time.Now(),
 	}
 	if payload.User != nil {
 		user.FirstName = payload.User.FirstName
@@ -257,6 +252,7 @@ func postUserTokenDebug(ctx context.Context, payload db.SamnaUserToken) (db.Samn
 		Set("email = EXCLUDED.email").
 		Set("external_id = EXCLUDED.external_id").
 		Set("sa_updated_at = EXCLUDED.sa_updated_at").
+		Returning("*").
 		Exec(ctx)
 	if err != nil {
 		return user, fmt.Errorf("debug upsert samna_user: %w", err)
@@ -269,7 +265,7 @@ func postUserTokenDebug(ctx context.Context, payload db.SamnaUserToken) (db.Samn
 		}
 		notrust := db.NotrustIdentity{
 			AppID:      *payload.AppID,
-			UserID:     targetUserID,
+			UserID:     user.UserID,
 			ExternalID: externalID,
 			IDClaim:    idClaim,
 			ClaimID:    *payload.ClaimID,
