@@ -61,14 +61,22 @@ func GetOrganizations(ctx echo.Context) error {
 	}
 
 	if debugUserID := getDebugUserID(); debugUserID != nil {
-		relations := db.ParseWithRelations(ctx.QueryParams()["with"], db.OrganizationRelations())
+		with, err := db.QueryWithObject(ctx)
+		if err != nil {
+			ctx.Logger().Warn(err)
+			return respondError(ctx, http.StatusBadRequest, "Bad request")
+		}
 		orgs := make([]db.Organization, 0)
-		q := db.Instance().NewSelect().
-			Model(&orgs).
-		ExcludeColumn("sa_deleted_at").
-			ExcludeColumn("app_id").
-			Where(db.ObjectWhere(*debugUserID, db.OBJECT_TYPE_ORGANIZATION, db.ACCESS_NONE))
-		q = db.ApplyRelations(q, relations)
+		q := db.Instance().GetOrganizationsQuery(&orgs, *debugUserID, db.ACCESS_NONE)
+		for _, w := range with {
+			switch w {
+			case db.OBJECT_TYPE_ORGANIZATION:
+				q = q.Relation(db.RelationParent())
+			default:
+				ctx.Logger().Warnf("unsupported with object: %s", w)
+				return respondError(ctx, http.StatusBadRequest, "Bad request")
+			}
+		}
 
 		if len(orgIDs) > 0 {
 			q.Where("organization.id IN (?)", bun.In(orgIDs))
@@ -118,9 +126,23 @@ func GetOrganization(ctx echo.Context) error {
 				return respondError(ctx, http.StatusNotFound, "Not found")
 			}
 		}
-		relations := db.ParseWithRelations(ctx.QueryParams()["with"], db.OrganizationRelations())
-		org, err := db.Instance().GetOrganization(ctx.Request().Context(), orgID, relations...)
+		with, err := db.QueryWithObject(ctx)
 		if err != nil {
+			ctx.Logger().Warn(err)
+			return respondError(ctx, http.StatusBadRequest, "Bad request")
+		}
+		var org db.Organization
+		q := db.Instance().GetOrganizationQuery(&org, orgID)
+		for _, w := range with {
+			switch w {
+			case db.OBJECT_TYPE_ORGANIZATION:
+				q = q.Relation(db.RelationParent())
+			default:
+				ctx.Logger().Warnf("unsupported with object: %s", w)
+				return respondError(ctx, http.StatusBadRequest, "Bad request")
+			}
+		}
+		if err := q.Scan(ctx.Request().Context()); err != nil {
 			ctx.Logger().Errorf("GetOrganization: %v", err)
 			return respondError(ctx, http.StatusNotFound, "Not found")
 		}

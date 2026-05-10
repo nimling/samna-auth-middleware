@@ -5,7 +5,31 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+	"github.com/labstack/echo/v4"
 )
+
+func QueryWithObject(ctx echo.Context) ([]ObjectType, error) {
+	seen := make(map[ObjectType]struct{})
+	var out []ObjectType
+	for _, v := range ctx.QueryParams()["with"] {
+		for _, raw := range strings.Split(v, ",") {
+			name := strings.TrimSpace(raw)
+			if name == "" {
+				continue
+			}
+			qualified, err := ResolveObjectType(name)
+			if err != nil {
+				return nil, err
+			}
+			if _, dup := seen[qualified]; dup {
+				continue
+			}
+			seen[qualified] = struct{}{}
+			out = append(out, qualified)
+		}
+	}
+	return out, nil
+}
 
 func UserWhere(userID uuid.UUID, requiredAccess ClaimAccess) string {
 	return fmt.Sprintf(

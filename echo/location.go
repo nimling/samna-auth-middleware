@@ -12,9 +12,23 @@ import (
 
 func GetLocations(ctx echo.Context) error {
 	if debugUserID := getDebugUserID(); debugUserID != nil {
-		relations := db.ParseWithRelations(ctx.QueryParams()["with"], db.LocationRelations())
-		locs, err := db.Instance().GetLocations(ctx.Request().Context(), *debugUserID, db.ACCESS_READ, relations...)
+		with, err := db.QueryWithObject(ctx)
 		if err != nil {
+			ctx.Logger().Warn(err)
+			return respondError(ctx, http.StatusBadRequest, "Bad request")
+		}
+		locs := make([]db.Location, 0)
+		q := db.Instance().GetLocationsQuery(&locs, *debugUserID, db.ACCESS_READ)
+		for _, w := range with {
+			switch w {
+			case db.OBJECT_TYPE_ORGANIZATION:
+				q = q.Relation(db.RelationOwner())
+			default:
+				ctx.Logger().Warnf("unsupported with object: %s", w)
+				return respondError(ctx, http.StatusBadRequest, "Bad request")
+			}
+		}
+		if err := q.Scan(ctx.Request().Context()); err != nil {
 			ctx.Logger().Errorf("GetLocations: %v", err)
 			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 		}
@@ -47,9 +61,23 @@ func GetLocation(ctx echo.Context) error {
 				return respondError(ctx, http.StatusNotFound, "Not found")
 			}
 		}
-		relations := db.ParseWithRelations(ctx.QueryParams()["with"], db.LocationRelations())
-		loc, err := db.Instance().GetLocation(ctx.Request().Context(), locationID, relations...)
+		with, err := db.QueryWithObject(ctx)
 		if err != nil {
+			ctx.Logger().Warn(err)
+			return respondError(ctx, http.StatusBadRequest, "Bad request")
+		}
+		var loc db.Location
+		q := db.Instance().GetLocationQuery(&loc, locationID)
+		for _, w := range with {
+			switch w {
+			case db.OBJECT_TYPE_ORGANIZATION:
+				q = q.Relation(db.RelationOwner())
+			default:
+				ctx.Logger().Warnf("unsupported with object: %s", w)
+				return respondError(ctx, http.StatusBadRequest, "Bad request")
+			}
+		}
+		if err := q.Scan(ctx.Request().Context()); err != nil {
 			ctx.Logger().Errorf("GetLocation: %v", err)
 			return respondError(ctx, http.StatusNotFound, "Not found")
 		}

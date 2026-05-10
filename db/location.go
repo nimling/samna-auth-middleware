@@ -4,39 +4,44 @@ import (
 	"context"
 
 	"github.com/google/uuid"
+	"github.com/uptrace/bun"
 )
 
-func (d *DB) GetLocation(ctx context.Context, locationID uuid.UUID, relations ...RelationFunc) (*Location, error) {
+func (d *DB) GetLocation(ctx context.Context, locationID uuid.UUID) (*Location, error) {
 	var loc Location
-	q := d.NewSelect().
-		Model(&loc).
-		ExcludeColumn("sa_deleted_at").
-		Where("id = ?", locationID).
-		Where("sa_deleted_at IS NULL").
-		ExcludeColumn("app_id").
-		Limit(1)
-	q = ApplyRelations(q, relations)
-	err := q.Scan(ctx)
+	err := d.GetLocationQuery(&loc, locationID).Scan(ctx)
 	if err != nil {
 		return nil, err
 	}
 	return &loc, nil
 }
 
-func (d *DB) GetLocations(ctx context.Context, userID uuid.UUID, requiredAccess ClaimAccess, relations ...RelationFunc) ([]Location, error) {
-	locs := make([]Location, 0)
-	q := d.NewSelect().
-		Model(&locs).
-		Where("sa_deleted_at IS NULL").
+func (d *DB) GetLocationQuery(loc *Location, locationID uuid.UUID) *bun.SelectQuery {
+	return d.NewSelect().
+		Model(loc).
 		ExcludeColumn("sa_deleted_at").
+		Where("id = ?", locationID).
+		Where("sa_deleted_at IS NULL").
 		ExcludeColumn("app_id").
-		Where(ObjectWhere(userID, OBJECT_TYPE_LOCATION, requiredAccess))
-	q = ApplyRelations(q, relations)
-	err := q.Scan(ctx)
+		Limit(1)
+}
+
+func (d *DB) GetLocations(ctx context.Context, userID uuid.UUID, requiredAccess ClaimAccess) ([]Location, error) {
+	locs := make([]Location, 0)
+	err := d.GetLocationsQuery(&locs, userID, requiredAccess).Scan(ctx)
 	if err != nil {
 		return nil, err
 	}
 	return locs, nil
+}
+
+func (d *DB) GetLocationsQuery(locs *[]Location, userID uuid.UUID, requiredAccess ClaimAccess) *bun.SelectQuery {
+	return d.NewSelect().
+		Model(locs).
+		Where("sa_deleted_at IS NULL").
+		ExcludeColumn("sa_deleted_at").
+		ExcludeColumn("app_id").
+		Where(ObjectWhere(userID, OBJECT_TYPE_LOCATION, requiredAccess))
 }
 
 func (d *DB) GetChildLocations(ctx context.Context, startID uuid.UUID) ([]uuid.UUID, error) {

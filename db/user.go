@@ -4,38 +4,44 @@ import (
 	"context"
 
 	"github.com/google/uuid"
+	"github.com/uptrace/bun"
 )
 
-func (d *DB) GetUser(ctx context.Context, userID uuid.UUID, relations ...RelationFunc) (*SamnaUser, error) {
+func (d *DB) GetUser(ctx context.Context, userID uuid.UUID) (*SamnaUser, error) {
 	var user SamnaUser
-	q := d.NewSelect().
-		Model(&user).
-		ExcludeColumn("sa_deleted_at").
-		ExcludeColumn("app_id").
-		Where("user_id = ?", userID).
-		Where("sa_deleted_at IS NULL").
-		Limit(1)
-	q = ApplyRelations(q, relations)
-	err := q.Scan(ctx)
+	err := d.GetUserQuery(&user, userID).Scan(ctx)
 	if err != nil {
 		return nil, err
 	}
 	return &user, nil
 }
 
-func (d *DB) GetUsers(ctx context.Context, userID uuid.UUID, requiredAccess ClaimAccess) ([]SamnaUser, error) {
-	users := make([]SamnaUser, 0)
-	err := d.NewSelect().
-		Model(&users).
-		Where("sa_deleted_at IS NULL").
+func (d *DB) GetUserQuery(user *SamnaUser, userID uuid.UUID) *bun.SelectQuery {
+	return d.NewSelect().
+		Model(user).
 		ExcludeColumn("sa_deleted_at").
 		ExcludeColumn("app_id").
-		Where(UserWhere(userID, requiredAccess)).
-		Scan(ctx)
+		Where("user_id = ?", userID).
+		Where("sa_deleted_at IS NULL").
+		Limit(1)
+}
+
+func (d *DB) GetUsers(ctx context.Context, userID uuid.UUID, requiredAccess ClaimAccess) ([]SamnaUser, error) {
+	users := make([]SamnaUser, 0)
+	err := d.GetUsersQuery(&users, userID, requiredAccess).Scan(ctx)
 	if err != nil {
 		return nil, err
 	}
 	return users, nil
+}
+
+func (d *DB) GetUsersQuery(users *[]SamnaUser, userID uuid.UUID, requiredAccess ClaimAccess) *bun.SelectQuery {
+	return d.NewSelect().
+		Model(users).
+		Where("sa_deleted_at IS NULL").
+		ExcludeColumn("sa_deleted_at").
+		ExcludeColumn("app_id").
+		Where(UserWhere(userID, requiredAccess))
 }
 
 func (d *DB) GetUserClaims(ctx context.Context, userID uuid.UUID) ([]UserClaim, error) {

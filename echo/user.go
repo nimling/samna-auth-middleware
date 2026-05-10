@@ -38,8 +38,7 @@ func GetUser(ctx echo.Context) error {
 	}
 
 	if getDebugUserID() != nil {
-		relations := db.ParseWithRelations(ctx.QueryParams()["with"], db.UserRelations())
-		user, err := db.Instance().GetUser(ctx.Request().Context(), userID, relations...)
+		user, err := db.Instance().GetUser(ctx.Request().Context(), userID)
 		if err != nil {
 			ctx.Logger().Errorf("GetUser: %v", err)
 			return respondError(ctx, http.StatusNotFound, "Not found")

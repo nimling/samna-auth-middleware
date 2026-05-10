@@ -119,14 +119,26 @@ func GetClaims(ctx echo.Context) error {
 	}
 
 	if debugUserID := getDebugUserID(); debugUserID != nil {
-		relations := db.ParseWithRelations(ctx.QueryParams()["with"], db.ClaimRelations())
+		with, err := db.QueryWithObject(ctx)
+		if err != nil {
+			ctx.Logger().Warn(err)
+			return respondError(ctx, http.StatusBadRequest, "Bad request")
+		}
 		claims := make([]db.Claim, 0)
-		q := db.Instance().NewSelect().
-			Model(&claims).
-		ExcludeColumn("sa_deleted_at").
-			ExcludeColumn("app_id").
-			Where(db.ClaimWhere(*debugUserID, db.ACCESS_NONE))
-		q = db.ApplyRelations(q, relations)
+		q := db.Instance().GetClaimsQuery(&claims, *debugUserID, db.ACCESS_NONE)
+		for _, w := range with {
+			switch w {
+			case db.OBJECT_TYPE_CLAIM_OBJECT:
+				q = q.Relation(db.RelationClaimObjects())
+			case db.OBJECT_TYPE_USER_CLAIM:
+				q = q.Relation(db.RelationClaimUsers())
+			case db.OBJECT_TYPE_ORGANIZATION:
+				q = q.Relation(db.RelationOwner())
+			default:
+				ctx.Logger().Warnf("unsupported with object: %s", w)
+				return respondError(ctx, http.StatusBadRequest, "Bad request")
+			}
+		}
 
 		if len(orgIDs) > 0 {
 			q.Where("claim.sa_owner_id IN (?)", bun.In(orgIDs))
@@ -161,9 +173,27 @@ func GetClaim(ctx echo.Context) error {
 	}
 
 	if debugUserID := getDebugUserID(); debugUserID != nil {
-		relations := db.ParseWithRelations(ctx.QueryParams()["with"], db.ClaimRelations())
-		claim, err := db.Instance().GetClaim(ctx.Request().Context(), *debugUserID, claimID, db.ACCESS_NONE, relations...)
+		with, err := db.QueryWithObject(ctx)
 		if err != nil {
+			ctx.Logger().Warn(err)
+			return respondError(ctx, http.StatusBadRequest, "Bad request")
+		}
+		var claim db.Claim
+		q := db.Instance().GetClaimQuery(&claim, *debugUserID, claimID, db.ACCESS_NONE)
+		for _, w := range with {
+			switch w {
+			case db.OBJECT_TYPE_CLAIM_OBJECT:
+				q = q.Relation(db.RelationClaimObjects())
+			case db.OBJECT_TYPE_USER_CLAIM:
+				q = q.Relation(db.RelationClaimUsers())
+			case db.OBJECT_TYPE_ORGANIZATION:
+				q = q.Relation(db.RelationOwner())
+			default:
+				ctx.Logger().Warnf("unsupported with object: %s", w)
+				return respondError(ctx, http.StatusBadRequest, "Bad request")
+			}
+		}
+		if err := q.Scan(ctx.Request().Context()); err != nil {
 			ctx.Logger().Errorf("GetClaim: %v", err)
 			return respondError(ctx, http.StatusNotFound, "Not found")
 		}

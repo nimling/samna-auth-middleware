@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/google/uuid"
+	"github.com/uptrace/bun"
 )
 
 func (d *DB) GetAccess(ctx context.Context, userID, objectID uuid.UUID, objectType string, requiredAccess ClaimAccess) (*AccessClaim, error) {
@@ -51,38 +52,42 @@ func (d *DB) GetDirectAccess(ctx context.Context, userID, objectID uuid.UUID, ob
 	return &claims[0], nil
 }
 
-func (d *DB) GetClaim(ctx context.Context, userID, claimID uuid.UUID, requiredAccess ClaimAccess, relations ...RelationFunc) (*Claim, error) {
+func (d *DB) GetClaim(ctx context.Context, userID, claimID uuid.UUID, requiredAccess ClaimAccess) (*Claim, error) {
 	var claim Claim
-	q := d.NewSelect().
-		Model(&claim).
-		Where("sa_deleted_at IS NULL").
-		ExcludeColumn("sa_deleted_at").
-		ExcludeColumn("app_id").
-		Where("claim.id = ?", claimID).
-		Where("EXISTS (SELECT 1 FROM claimius.get_access(?, claimius.get_disciple_app_id(), claim.id, ?, ?))", userID, OBJECT_TYPE_CLAIM, requiredAccess).
-		Limit(1)
-	q = ApplyRelations(q, relations)
-	err := q.Scan(ctx)
+	err := d.GetClaimQuery(&claim, userID, claimID, requiredAccess).Scan(ctx)
 	if err != nil {
 		return nil, err
 	}
 	return &claim, nil
 }
 
-func (d *DB) GetClaims(ctx context.Context, userID uuid.UUID, requiredAccess ClaimAccess, relations ...RelationFunc) ([]Claim, error) {
-	claims := make([]Claim, 0)
-	q := d.NewSelect().
-		Model(&claims).
+func (d *DB) GetClaimQuery(claim *Claim, userID, claimID uuid.UUID, requiredAccess ClaimAccess) *bun.SelectQuery {
+	return d.NewSelect().
+		Model(claim).
 		Where("sa_deleted_at IS NULL").
 		ExcludeColumn("sa_deleted_at").
 		ExcludeColumn("app_id").
-		Where("claim.id IN (SELECT id FROM claimius.get_claims(?, claimius.get_disciple_app_id(), ?))", userID, requiredAccess)
-	q = ApplyRelations(q, relations)
-	err := q.Scan(ctx)
+		Where("claim.id = ?", claimID).
+		Where("EXISTS (SELECT 1 FROM claimius.get_access(?, claimius.get_disciple_app_id(), claim.id, ?, ?))", userID, OBJECT_TYPE_CLAIM, requiredAccess).
+		Limit(1)
+}
+
+func (d *DB) GetClaims(ctx context.Context, userID uuid.UUID, requiredAccess ClaimAccess) ([]Claim, error) {
+	claims := make([]Claim, 0)
+	err := d.GetClaimsQuery(&claims, userID, requiredAccess).Scan(ctx)
 	if err != nil {
 		return nil, err
 	}
 	return claims, nil
+}
+
+func (d *DB) GetClaimsQuery(claims *[]Claim, userID uuid.UUID, requiredAccess ClaimAccess) *bun.SelectQuery {
+	return d.NewSelect().
+		Model(claims).
+		Where("sa_deleted_at IS NULL").
+		ExcludeColumn("sa_deleted_at").
+		ExcludeColumn("app_id").
+		Where("claim.id IN (SELECT id FROM claimius.get_claims(?, claimius.get_disciple_app_id(), ?))", userID, requiredAccess)
 }
 
 func (d *DB) GetClaimAudit(ctx context.Context, actorID, claimID uuid.UUID, requiredAccess ClaimAccess) ([]Audit, error) {

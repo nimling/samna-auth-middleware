@@ -4,39 +4,44 @@ import (
 	"context"
 
 	"github.com/google/uuid"
+	"github.com/uptrace/bun"
 )
 
-func (d *DB) GetOrganization(ctx context.Context, orgID uuid.UUID, relations ...RelationFunc) (*Organization, error) {
+func (d *DB) GetOrganization(ctx context.Context, orgID uuid.UUID) (*Organization, error) {
 	var org Organization
-	q := d.NewSelect().
-		Model(&org).
-		ExcludeColumn("sa_deleted_at").
-		Where("id = ?", orgID).
-		Where("sa_deleted_at IS NULL").
-		ExcludeColumn("app_id").
-		Limit(1)
-	q = ApplyRelations(q, relations)
-	err := q.Scan(ctx)
+	err := d.GetOrganizationQuery(&org, orgID).Scan(ctx)
 	if err != nil {
 		return nil, err
 	}
 	return &org, nil
 }
 
-func (d *DB) GetOrganizations(ctx context.Context, userID uuid.UUID, requiredAccess ClaimAccess, relations ...RelationFunc) ([]Organization, error) {
-	orgs := make([]Organization, 0)
-	q := d.NewSelect().
-		Model(&orgs).
-		Where("sa_deleted_at IS NULL").
+func (d *DB) GetOrganizationQuery(org *Organization, orgID uuid.UUID) *bun.SelectQuery {
+	return d.NewSelect().
+		Model(org).
 		ExcludeColumn("sa_deleted_at").
+		Where("id = ?", orgID).
+		Where("sa_deleted_at IS NULL").
 		ExcludeColumn("app_id").
-		Where(ObjectWhere(userID, OBJECT_TYPE_ORGANIZATION, requiredAccess))
-	q = ApplyRelations(q, relations)
-	err := q.Scan(ctx)
+		Limit(1)
+}
+
+func (d *DB) GetOrganizations(ctx context.Context, userID uuid.UUID, requiredAccess ClaimAccess) ([]Organization, error) {
+	orgs := make([]Organization, 0)
+	err := d.GetOrganizationsQuery(&orgs, userID, requiredAccess).Scan(ctx)
 	if err != nil {
 		return nil, err
 	}
 	return orgs, nil
+}
+
+func (d *DB) GetOrganizationsQuery(orgs *[]Organization, userID uuid.UUID, requiredAccess ClaimAccess) *bun.SelectQuery {
+	return d.NewSelect().
+		Model(orgs).
+		Where("sa_deleted_at IS NULL").
+		ExcludeColumn("sa_deleted_at").
+		ExcludeColumn("app_id").
+		Where(ObjectWhere(userID, OBJECT_TYPE_ORGANIZATION, requiredAccess))
 }
 
 func (d *DB) GetChildOrganizations(ctx context.Context, startID uuid.UUID) ([]uuid.UUID, error) {

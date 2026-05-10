@@ -14,8 +14,7 @@ func GetMe(ctx echo.Context) error {
 	userID := ctx.Get(middleware.UserIDKey).(uuid.UUID)
 
 	if getDebugUserID() != nil {
-		relations := db.ParseWithRelations(ctx.QueryParams()["with"], db.UserRelations())
-		user, err := db.Instance().GetUser(ctx.Request().Context(), userID, relations...)
+		user, err := db.Instance().GetUser(ctx.Request().Context(), userID)
 		if err != nil {
 			ctx.Logger().Errorf("GetMe: %v", err)
 			return respondError(ctx, http.StatusNotFound, "Not found")
@@ -63,9 +62,27 @@ func GetMeClaims(ctx echo.Context) error {
 	userID := ctx.Get(middleware.UserIDKey).(uuid.UUID)
 
 	if getDebugUserID() != nil {
-		relations := db.ParseWithRelations(ctx.QueryParams()["with"], db.ClaimRelations())
-		claims, err := db.Instance().GetClaims(ctx.Request().Context(), userID, db.ACCESS_NONE, relations...)
+		with, err := db.QueryWithObject(ctx)
 		if err != nil {
+			ctx.Logger().Warn(err)
+			return respondError(ctx, http.StatusBadRequest, "Bad request")
+		}
+		claims := make([]db.Claim, 0)
+		q := db.Instance().GetClaimsQuery(&claims, userID, db.ACCESS_NONE)
+		for _, w := range with {
+			switch w {
+			case db.OBJECT_TYPE_CLAIM_OBJECT:
+				q = q.Relation(db.RelationClaimObjects())
+			case db.OBJECT_TYPE_USER_CLAIM:
+				q = q.Relation(db.RelationClaimUsers())
+			case db.OBJECT_TYPE_ORGANIZATION:
+				q = q.Relation(db.RelationOwner())
+			default:
+				ctx.Logger().Warnf("unsupported with object: %s", w)
+				return respondError(ctx, http.StatusBadRequest, "Bad request")
+			}
+		}
+		if err := q.Scan(ctx.Request().Context()); err != nil {
 			ctx.Logger().Errorf("GetMeClaims: %v", err)
 			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 		}
@@ -106,9 +123,23 @@ func GetMeOrganizations(ctx echo.Context) error {
 	userID := ctx.Get(middleware.UserIDKey).(uuid.UUID)
 
 	if getDebugUserID() != nil {
-		relations := db.ParseWithRelations(ctx.QueryParams()["with"], db.OrganizationRelations())
-		orgs, err := db.Instance().GetOrganizations(ctx.Request().Context(), userID, db.ACCESS_NONE, relations...)
+		with, err := db.QueryWithObject(ctx)
 		if err != nil {
+			ctx.Logger().Warn(err)
+			return respondError(ctx, http.StatusBadRequest, "Bad request")
+		}
+		orgs := make([]db.Organization, 0)
+		q := db.Instance().GetOrganizationsQuery(&orgs, userID, db.ACCESS_NONE)
+		for _, w := range with {
+			switch w {
+			case db.OBJECT_TYPE_ORGANIZATION:
+				q = q.Relation(db.RelationParent())
+			default:
+				ctx.Logger().Warnf("unsupported with object: %s", w)
+				return respondError(ctx, http.StatusBadRequest, "Bad request")
+			}
+		}
+		if err := q.Scan(ctx.Request().Context()); err != nil {
 			ctx.Logger().Errorf("GetMeOrganizations: %v", err)
 			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 		}
@@ -128,9 +159,23 @@ func GetMeLocations(ctx echo.Context) error {
 	userID := ctx.Get(middleware.UserIDKey).(uuid.UUID)
 
 	if getDebugUserID() != nil {
-		relations := db.ParseWithRelations(ctx.QueryParams()["with"], db.LocationRelations())
-		locs, err := db.Instance().GetLocations(ctx.Request().Context(), userID, db.ACCESS_READ, relations...)
+		with, err := db.QueryWithObject(ctx)
 		if err != nil {
+			ctx.Logger().Warn(err)
+			return respondError(ctx, http.StatusBadRequest, "Bad request")
+		}
+		locs := make([]db.Location, 0)
+		q := db.Instance().GetLocationsQuery(&locs, userID, db.ACCESS_READ)
+		for _, w := range with {
+			switch w {
+			case db.OBJECT_TYPE_ORGANIZATION:
+				q = q.Relation(db.RelationOwner())
+			default:
+				ctx.Logger().Warnf("unsupported with object: %s", w)
+				return respondError(ctx, http.StatusBadRequest, "Bad request")
+			}
+		}
+		if err := q.Scan(ctx.Request().Context()); err != nil {
 			ctx.Logger().Errorf("GetMeLocations: %v", err)
 			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 		}
