@@ -2,6 +2,7 @@ package db
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"time"
 
@@ -34,12 +35,39 @@ func (o *ObjectType) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &s); err != nil {
 		return err
 	}
-	*o = ObjectType(QualifyObjectTypeWith(s, "claimius"))
+	qualified, err := ResolveObjectType(s)
+	if err != nil {
+		return err
+	}
+	*o = qualified
 	return nil
 }
 
 func QualifyObjectType(s string) string {
 	return QualifyObjectTypeWith(s, "claimius")
+}
+
+var bareObjectTypes = map[string]ObjectType{
+	StripObjectSchema(OBJECT_TYPE_USER):         OBJECT_TYPE_USER,
+	StripObjectSchema(OBJECT_TYPE_ORGANIZATION): OBJECT_TYPE_ORGANIZATION,
+	StripObjectSchema(OBJECT_TYPE_LOCATION):     OBJECT_TYPE_LOCATION,
+	StripObjectSchema(OBJECT_TYPE_CLAIM):        OBJECT_TYPE_CLAIM,
+	StripObjectSchema(OBJECT_TYPE_USER_CLAIM):   OBJECT_TYPE_USER_CLAIM,
+	StripObjectSchema(OBJECT_TYPE_CLAIM_OBJECT): OBJECT_TYPE_CLAIM_OBJECT,
+	StripObjectSchema(OBJECT_TYPE_SAMNA_APP):    OBJECT_TYPE_SAMNA_APP,
+	StripObjectSchema(OBJECT_TYPE_SAMNA_CLIENT): OBJECT_TYPE_SAMNA_CLIENT,
+	StripObjectSchema(OBJECT_TYPE_SAMNA_SECRET): OBJECT_TYPE_SAMNA_SECRET,
+}
+
+// ResolveObjectType returns the qualified ObjectType for a bare or qualified claimius input, erroring on unknown.
+func ResolveObjectType(s string) (ObjectType, error) {
+	if q, ok := bareObjectTypes[s]; ok {
+		return q, nil
+	}
+	if q, ok := bareObjectTypes[StripObjectSchema(s)]; ok {
+		return q, nil
+	}
+	return "", fmt.Errorf("unknown object_type: %q", s)
 }
 
 type ClaimAccess int
