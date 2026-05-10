@@ -106,7 +106,7 @@ type SamnaUser struct {
 	ExternalID *string          `bun:"external_id" json:"external_id,omitempty"`
 	Status     *string          `bun:"status,default:'active'" json:"status"`
 	Type       *string          `bun:"type,default:'user'" json:"type"`
-	Config    *json.RawMessage `bun:"config" json:"config"`
+	Config    *json.RawMessage `bun:"config" json:"config,omitzero"`
 	DeletedAt *time.Time       `bun:"sa_deleted_at" json:"deleted_at,omitzero"`
 	CreatedAt time.Time        `bun:"sa_created_at,default:now()" json:"created_at"`
 	UpdatedAt time.Time        `bun:"sa_updated_at,default:now()" json:"updated_at"`
@@ -149,7 +149,7 @@ type Organization struct {
 	Type        OrganizationType `bun:"type" json:"type"`
 	OwnerID     uuid.UUID        `bun:"sa_owner_id" json:"owner_id"`
 	RootID      uuid.UUID        `bun:"sa_root_id" json:"root_id"`
-	LocationID  *uuid.UUID       `bun:"sa_location_id" json:"location_id"`
+	LocationID  *uuid.UUID       `bun:"sa_location_id" json:"location_id,omitzero"`
 	Level       int              `bun:"sa_level,default:0" json:"level"`
 	ExternalID  *string          `bun:"external_id" json:"external_id,omitempty"`
 	ProviderID  *uuid.UUID       `bun:"provider_id" json:"-"`

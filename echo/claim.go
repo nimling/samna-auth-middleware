@@ -119,7 +119,7 @@ func GetClaims(ctx echo.Context) error {
 	}
 
 	if debugUserID := getDebugUserID(); debugUserID != nil {
-		relations := db.ParseWithRelations(ctx.QueryParam("with"), db.ClaimRelations())
+		relations := db.ParseWithRelations(ctx.QueryParams()["with"], db.ClaimRelations())
 		claims := make([]db.Claim, 0)
 		q := db.Instance().NewSelect().
 			Model(&claims).
@@ -161,7 +161,7 @@ func GetClaim(ctx echo.Context) error {
 	}
 
 	if debugUserID := getDebugUserID(); debugUserID != nil {
-		relations := db.ParseWithRelations(ctx.QueryParam("with"), db.ClaimRelations())
+		relations := db.ParseWithRelations(ctx.QueryParams()["with"], db.ClaimRelations())
 		claim, err := db.Instance().GetClaim(ctx.Request().Context(), *debugUserID, claimID, db.ACCESS_NONE, relations...)
 		if err != nil {
 			ctx.Logger().Errorf("GetClaim: %v", err)

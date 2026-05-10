@@ -61,7 +61,7 @@ func GetOrganizations(ctx echo.Context) error {
 	}
 
 	if debugUserID := getDebugUserID(); debugUserID != nil {
-		relations := db.ParseWithRelations(ctx.QueryParam("with"), db.OrganizationRelations())
+		relations := db.ParseWithRelations(ctx.QueryParams()["with"], db.OrganizationRelations())
 		orgs := make([]db.Organization, 0)
 		q := db.Instance().NewSelect().
 			Model(&orgs).
@@ -118,7 +118,7 @@ func GetOrganization(ctx echo.Context) error {
 				return respondError(ctx, http.StatusNotFound, "Not found")
 			}
 		}
-		relations := db.ParseWithRelations(ctx.QueryParam("with"), db.OrganizationRelations())
+		relations := db.ParseWithRelations(ctx.QueryParams()["with"], db.OrganizationRelations())
 		org, err := db.Instance().GetOrganization(ctx.Request().Context(), orgID, relations...)
 		if err != nil {
 			ctx.Logger().Errorf("GetOrganization: %v", err)

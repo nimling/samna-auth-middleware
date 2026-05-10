@@ -12,7 +12,7 @@ import (
 
 func GetLocations(ctx echo.Context) error {
 	if debugUserID := getDebugUserID(); debugUserID != nil {
-		relations := db.ParseWithRelations(ctx.QueryParam("with"), db.LocationRelations())
+		relations := db.ParseWithRelations(ctx.QueryParams()["with"], db.LocationRelations())
 		locs, err := db.Instance().GetLocations(ctx.Request().Context(), *debugUserID, db.ACCESS_READ, relations...)
 		if err != nil {
 			ctx.Logger().Errorf("GetLocations: %v", err)
@@ -47,7 +47,7 @@ func GetLocation(ctx echo.Context) error {
 				return respondError(ctx, http.StatusNotFound, "Not found")
 			}
 		}
-		relations := db.ParseWithRelations(ctx.QueryParam("with"), db.LocationRelations())
+		relations := db.ParseWithRelations(ctx.QueryParams()["with"], db.LocationRelations())
 		loc, err := db.Instance().GetLocation(ctx.Request().Context(), locationID, relations...)
 		if err != nil {
 			ctx.Logger().Errorf("GetLocation: %v", err)

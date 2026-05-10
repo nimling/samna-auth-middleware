@@ -14,7 +14,7 @@ func GetMe(ctx echo.Context) error {
 	userID := ctx.Get(middleware.UserIDKey).(uuid.UUID)
 
 	if getDebugUserID() != nil {
-		relations := db.ParseWithRelations(ctx.QueryParam("with"), db.UserRelations())
+		relations := db.ParseWithRelations(ctx.QueryParams()["with"], db.UserRelations())
 		user, err := db.Instance().GetUser(ctx.Request().Context(), userID, relations...)
 		if err != nil {
 			ctx.Logger().Errorf("GetMe: %v", err)
@@ -63,7 +63,7 @@ func GetMeClaims(ctx echo.Context) error {
 	userID := ctx.Get(middleware.UserIDKey).(uuid.UUID)
 
 	if getDebugUserID() != nil {
-		relations := db.ParseWithRelations(ctx.QueryParam("with"), db.ClaimRelations())
+		relations := db.ParseWithRelations(ctx.QueryParams()["with"], db.ClaimRelations())
 		claims, err := db.Instance().GetClaims(ctx.Request().Context(), userID, db.ACCESS_NONE, relations...)
 		if err != nil {
 			ctx.Logger().Errorf("GetMeClaims: %v", err)
@@ -106,7 +106,7 @@ func GetMeOrganizations(ctx echo.Context) error {
 	userID := ctx.Get(middleware.UserIDKey).(uuid.UUID)
 
 	if getDebugUserID() != nil {
-		relations := db.ParseWithRelations(ctx.QueryParam("with"), db.OrganizationRelations())
+		relations := db.ParseWithRelations(ctx.QueryParams()["with"], db.OrganizationRelations())
 		orgs, err := db.Instance().GetOrganizations(ctx.Request().Context(), userID, db.ACCESS_NONE, relations...)
 		if err != nil {
 			ctx.Logger().Errorf("GetMeOrganizations: %v", err)
@@ -128,7 +128,7 @@ func GetMeLocations(ctx echo.Context) error {
 	userID := ctx.Get(middleware.UserIDKey).(uuid.UUID)
 
 	if getDebugUserID() != nil {
-		relations := db.ParseWithRelations(ctx.QueryParam("with"), db.LocationRelations())
+		relations := db.ParseWithRelations(ctx.QueryParams()["with"], db.LocationRelations())
 		locs, err := db.Instance().GetLocations(ctx.Request().Context(), userID, db.ACCESS_READ, relations...)
 		if err != nil {
 			ctx.Logger().Errorf("GetMeLocations: %v", err)

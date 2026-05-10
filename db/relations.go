@@ -32,16 +32,26 @@ var locationRelations = map[string]RelationFunc{
 	"owner":  RelationOwner,
 }
 
-func ParseWithRelations(withParam string, allowed map[string]RelationFunc) []RelationFunc {
-	if withParam == "" {
+func ParseWithRelations(values []string, allowed map[string]RelationFunc) []RelationFunc {
+	if len(values) == 0 {
 		return nil
 	}
 
+	seen := make(map[string]struct{})
 	var result []RelationFunc
-	for _, name := range strings.Split(withParam, ",") {
-		name = strings.TrimSpace(name)
-		if fn, ok := allowed[name]; ok {
-			result = append(result, fn)
+	for _, v := range values {
+		for _, name := range strings.Split(v, ",") {
+			name = strings.TrimSpace(name)
+			if name == "" {
+				continue
+			}
+			if _, dup := seen[name]; dup {
+				continue
+			}
+			if fn, ok := allowed[name]; ok {
+				seen[name] = struct{}{}
+				result = append(result, fn)
+			}
 		}
 	}
 	return result

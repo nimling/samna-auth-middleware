@@ -38,7 +38,7 @@ func GetUser(ctx echo.Context) error {
 	}
 
 	if getDebugUserID() != nil {
-		relations := db.ParseWithRelations(ctx.QueryParam("with"), db.UserRelations())
+		relations := db.ParseWithRelations(ctx.QueryParams()["with"], db.UserRelations())
 		user, err := db.Instance().GetUser(ctx.Request().Context(), userID, relations...)
 		if err != nil {
 			ctx.Logger().Errorf("GetUser: %v", err)
