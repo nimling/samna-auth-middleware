@@ -122,6 +122,7 @@ func GetClaims(ctx echo.Context) error {
 		claims := make([]db.Claim, 0)
 		q := db.Instance().NewSelect().
 			Model(&claims).
+		ExcludeColumn("sa_deleted_at").
 			ExcludeColumn("app_id").
 			Where(db.ClaimWhere(*debugUserID, db.ACCESS_NONE))
 		q = db.ApplyRelations(q, relations)

@@ -63,6 +63,7 @@ func GetSecrets(ctx echo.Context) error {
 		secrets := make([]db.SamnaSecret, 0)
 		q := db.Instance().NewSelect().
 			Model(&secrets).
+		ExcludeColumn("sa_deleted_at").
 			ExcludeColumn("app_id").
 			Where("samna_secret.sa_deleted_at IS NULL").
 			Where("samna_secret.id IN (SELECT id FROM claimius.get_secrets(?, claimius.get_disciple_app_id(), ?))", *debugUserID, db.ACCESS_OWNER)

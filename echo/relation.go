@@ -68,6 +68,7 @@ func GetRelations(ctx echo.Context) error {
 	relations := make([]db.UserRelation, 0)
 	q := db.Instance().NewSelect().
 		Model(&relations).
+		ExcludeColumn("sa_deleted_at").
 		ExcludeColumn("app_id").
 		Where("user_relation.user_id = ?", userID).
 		Where("user_relation.sa_deleted_at IS NULL")

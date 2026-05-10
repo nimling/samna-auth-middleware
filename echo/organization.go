@@ -64,6 +64,7 @@ func GetOrganizations(ctx echo.Context) error {
 		orgs := make([]db.Organization, 0)
 		q := db.Instance().NewSelect().
 			Model(&orgs).
+		ExcludeColumn("sa_deleted_at").
 			ExcludeColumn("app_id").
 			Where(db.ObjectWhere(*debugUserID, db.OBJECT_TYPE_ORGANIZATION, db.ACCESS_NONE))
 		q = db.ApplyRelations(q, relations)
