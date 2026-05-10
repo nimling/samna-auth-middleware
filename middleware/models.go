@@ -12,7 +12,7 @@ const (
 	AccessTokenKey = "access_token"
 )
 
-const authCodeParamKey = "sauth_auth_code"
+const authCodeParamKey = "code"
 
 const (
 	accessTokenCookieKey  = "sauth_access_token"

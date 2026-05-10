@@ -33,7 +33,7 @@ func GetLogin(ctx context.Context, provider *string) (string, error) {
 	if provider != nil && len(*provider) > 0 {
 		path = fmt.Sprintf("api/auth/p/%s/login", *provider)
 	} else {
-		path = "login"
+		path = "api/auth/login"
 	}
 
 	u, err := joinURL(endpoint, path)
