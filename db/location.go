@@ -10,6 +10,7 @@ func (d *DB) GetLocation(ctx context.Context, locationID uuid.UUID, relations ..
 	var loc Location
 	q := d.NewSelect().
 		Model(&loc).
+		ExcludeColumn("sa_deleted_at").
 		Where("id = ?", locationID).
 		Where("sa_deleted_at IS NULL").
 		ExcludeColumn("app_id").
@@ -26,6 +27,7 @@ func (d *DB) GetLocations(ctx context.Context, userID uuid.UUID, requiredAccess 
 	locs := make([]Location, 0)
 	q := d.NewSelect().
 		Model(&locs).
+		ExcludeColumn("sa_deleted_at").
 		ExcludeColumn("app_id").
 		Where(ObjectWhere(userID, OBJECT_TYPE_LOCATION, requiredAccess))
 	q = ApplyRelations(q, relations)
@@ -100,6 +102,7 @@ func (d *DB) GetLocationAudit(ctx context.Context, locationID uuid.UUID) ([]Audi
 	audits := make([]Audit, 0)
 	err := d.NewSelect().
 		Model(&audits).
+		ExcludeColumn("sa_deleted_at").
 		Where("object_id = ?", locationID).
 		Where("object_type = ?", OBJECT_TYPE_LOCATION).
 		ExcludeColumn("app_id").

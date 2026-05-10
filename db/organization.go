@@ -10,6 +10,7 @@ func (d *DB) GetOrganization(ctx context.Context, orgID uuid.UUID, relations ...
 	var org Organization
 	q := d.NewSelect().
 		Model(&org).
+		ExcludeColumn("sa_deleted_at").
 		Where("id = ?", orgID).
 		Where("sa_deleted_at IS NULL").
 		ExcludeColumn("app_id").
@@ -26,6 +27,7 @@ func (d *DB) GetOrganizations(ctx context.Context, userID uuid.UUID, requiredAcc
 	orgs := make([]Organization, 0)
 	q := d.NewSelect().
 		Model(&orgs).
+		ExcludeColumn("sa_deleted_at").
 		ExcludeColumn("app_id").
 		Where(ObjectWhere(userID, OBJECT_TYPE_ORGANIZATION, requiredAccess))
 	q = ApplyRelations(q, relations)
@@ -100,6 +102,7 @@ func (d *DB) GetOrganizationAudit(ctx context.Context, orgID uuid.UUID) ([]Audit
 	audits := make([]Audit, 0)
 	err := d.NewSelect().
 		Model(&audits).
+		ExcludeColumn("sa_deleted_at").
 		Where("object_id = ?", orgID).
 		Where("object_type = ?", OBJECT_TYPE_ORGANIZATION).
 		ExcludeColumn("app_id").

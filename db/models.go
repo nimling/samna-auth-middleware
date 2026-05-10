@@ -107,7 +107,7 @@ type SamnaUser struct {
 	Status     *string          `bun:"status,default:'active'" json:"status"`
 	Type       *string          `bun:"type,default:'user'" json:"type"`
 	Config    *json.RawMessage `bun:"config" json:"config"`
-	DeletedAt *time.Time       `bun:"sa_deleted_at" json:"deleted_at,omitempty"`
+	DeletedAt *time.Time       `bun:"sa_deleted_at" json:"deleted_at,omitzero"`
 	CreatedAt time.Time        `bun:"sa_created_at,default:now()" json:"created_at"`
 	UpdatedAt time.Time        `bun:"sa_updated_at,default:now()" json:"updated_at"`
 }
@@ -134,7 +134,7 @@ type NotrustIdentity struct {
 	Data       json.RawMessage `bun:"data,notnull,type:jsonb" json:"data"`
 	OwnerID    uuid.UUID       `bun:"sa_owner_id,notnull,type:uuid" json:"owner_id"`
 	CreatedBy  uuid.UUID       `bun:"sa_created_by,notnull,type:uuid" json:"created_by"`
-	DeletedAt  *time.Time      `bun:"sa_deleted_at" json:"deleted_at,omitempty"`
+	DeletedAt  *time.Time      `bun:"sa_deleted_at" json:"deleted_at,omitzero"`
 	CreatedAt  time.Time       `bun:"sa_created_at,default:now()" json:"created_at"`
 	UpdatedAt  time.Time       `bun:"sa_updated_at,default:now()" json:"updated_at"`
 }
@@ -154,7 +154,7 @@ type Organization struct {
 	ExternalID  *string          `bun:"external_id" json:"external_id,omitempty"`
 	ProviderID  *uuid.UUID       `bun:"provider_id" json:"-"`
 	CreatedBy   uuid.UUID        `bun:"sa_created_by" json:"created_by"`
-	DeletedAt   *time.Time       `bun:"sa_deleted_at" json:"deleted_at,omitempty"`
+	DeletedAt   *time.Time       `bun:"sa_deleted_at" json:"deleted_at,omitzero"`
 	CreatedAt   time.Time        `bun:"sa_created_at,default:now()" json:"created_at"`
 	UpdatedAt   time.Time        `bun:"sa_updated_at,default:now()" json:"updated_at"`
 	Parent      *Organization    `bun:"rel:belongs-to,join:sa_owner_id=id" json:"parent,omitempty"`
@@ -179,7 +179,7 @@ type Location struct {
 	ExternalID  *string       `bun:"external_id" json:"external_id,omitempty"`
 	ProviderID  *uuid.UUID    `bun:"provider_id" json:"-"`
 	CreatedBy   uuid.UUID     `bun:"sa_created_by" json:"created_by"`
-	DeletedAt   *time.Time    `bun:"sa_deleted_at" json:"deleted_at,omitempty"`
+	DeletedAt   *time.Time    `bun:"sa_deleted_at" json:"deleted_at,omitzero"`
 	CreatedAt   time.Time     `bun:"sa_created_at,default:now()" json:"created_at"`
 	UpdatedAt   time.Time     `bun:"sa_updated_at,default:now()" json:"updated_at"`
 	Owner       *Organization `bun:"rel:belongs-to,join:sa_owner_id=id" json:"owner,omitempty"`
@@ -198,7 +198,7 @@ type Claim struct {
 	OwnerID      uuid.UUID     `bun:"sa_owner_id" json:"owner_id"`
 	RootID       uuid.UUID     `bun:"sa_root_id" json:"root_id"`
 	CreatedBy    *uuid.UUID    `bun:"sa_created_by" json:"created_by"`
-	DeletedAt    *time.Time    `bun:"sa_deleted_at" json:"deleted_at,omitempty"`
+	DeletedAt    *time.Time    `bun:"sa_deleted_at" json:"deleted_at,omitzero"`
 	CreatedAt    time.Time     `bun:"sa_created_at,default:now()" json:"created_at"`
 	UpdatedAt    time.Time     `bun:"sa_updated_at,default:now()" json:"updated_at"`
 	ClaimObjects []ClaimObject `bun:"rel:has-many,join:id=claim_id" json:"claim_objects,omitempty"`
@@ -218,7 +218,7 @@ type UserClaim struct {
 	EndsAt    *time.Time    `bun:"ends_at" json:"ends_at"`
 	OwnerID   uuid.UUID     `bun:"sa_owner_id" json:"owner_id"`
 	CreatedBy uuid.UUID     `bun:"sa_created_by" json:"created_by"`
-	DeletedAt *time.Time    `bun:"sa_deleted_at" json:"deleted_at,omitempty"`
+	DeletedAt *time.Time    `bun:"sa_deleted_at" json:"deleted_at,omitzero"`
 	CreatedAt time.Time     `bun:"sa_created_at,default:now()" json:"created_at"`
 	UpdatedAt time.Time     `bun:"sa_updated_at,default:now()" json:"updated_at"`
 	Owner     *Organization `bun:"rel:belongs-to,join:sa_owner_id=id" json:"owner,omitempty"`
@@ -241,7 +241,7 @@ type ClaimObject struct {
 	OwnerID    uuid.UUID        `bun:"sa_owner_id" json:"owner_id"`
 	RootID     uuid.UUID        `bun:"sa_root_id" json:"root_id"`
 	CreatedBy  *uuid.UUID       `bun:"sa_created_by" json:"created_by"`
-	DeletedAt  *time.Time       `bun:"sa_deleted_at" json:"deleted_at,omitempty"`
+	DeletedAt  *time.Time       `bun:"sa_deleted_at" json:"deleted_at,omitzero"`
 	CreatedAt  time.Time        `bun:"sa_created_at,default:now()" json:"created_at"`
 	UpdatedAt  time.Time        `bun:"sa_updated_at,default:now()" json:"updated_at"`
 	Owner      *Organization    `bun:"rel:belongs-to,join:sa_owner_id=id" json:"owner,omitempty"`
@@ -271,7 +271,7 @@ type Asset struct {
 	Index       int        `bun:"column:index" json:"index"`
 	BlobURL     *string    `bun:"blob_url,default:null" json:"-"`
 	AssetURL    string     `bun:"-" json:"asset_url,omitempty"`
-	DeletedAt   *time.Time `bun:"sa_deleted_at" json:"deleted_at,omitempty"`
+	DeletedAt   *time.Time `bun:"sa_deleted_at" json:"deleted_at,omitzero"`
 	CreatedAt   time.Time  `bun:"sa_created_at" json:"created_at"`
 	UpdatedAt   time.Time  `bun:"sa_updated_at" json:"updated_at"`
 }
@@ -297,7 +297,7 @@ type SamnaClient struct {
 	ExpiresAt   *time.Time `bun:"expires_at" json:"expires_at"`
 	OwnerID     uuid.UUID  `bun:"sa_owner_id" json:"owner_id"`
 	CreatedBy   *uuid.UUID `bun:"sa_created_by" json:"created_by"`
-	DeletedAt   *time.Time `bun:"sa_deleted_at" json:"deleted_at,omitempty"`
+	DeletedAt   *time.Time `bun:"sa_deleted_at" json:"deleted_at,omitzero"`
 	CreatedAt   time.Time  `bun:"sa_created_at,default:now()" json:"created_at"`
 	UpdatedAt   time.Time  `bun:"sa_updated_at,default:now()" json:"updated_at"`
 }
@@ -312,7 +312,7 @@ type SamnaSecret struct {
 	ExpiresAt *time.Time `bun:"expires_at" json:"expires_at"`
 	OwnerID   uuid.UUID  `bun:"sa_owner_id" json:"owner_id"`
 	CreatedBy *uuid.UUID `bun:"sa_created_by" json:"created_by"`
-	DeletedAt *time.Time `bun:"sa_deleted_at" json:"deleted_at,omitempty"`
+	DeletedAt *time.Time `bun:"sa_deleted_at" json:"deleted_at,omitzero"`
 	CreatedAt time.Time  `bun:"sa_created_at,default:now()" json:"created_at"`
 	UpdatedAt time.Time  `bun:"sa_updated_at,default:now()" json:"updated_at"`
 }
@@ -338,7 +338,7 @@ type SamnaApp struct {
 	Style         *json.RawMessage `bun:"style,type:jsonb" json:"style"`
 	OwnerID       uuid.UUID        `bun:"sa_owner_id" json:"owner_id"`
 	CreatedBy     uuid.UUID        `bun:"sa_created_by" json:"created_by"`
-	DeletedAt     *time.Time       `bun:"sa_deleted_at" json:"deleted_at,omitempty"`
+	DeletedAt     *time.Time       `bun:"sa_deleted_at" json:"deleted_at,omitzero"`
 	CreatedAt     time.Time        `bun:"sa_created_at,default:now()" json:"created_at"`
 	UpdatedAt     time.Time        `bun:"sa_updated_at,default:now()" json:"updated_at"`
 }
@@ -356,7 +356,7 @@ type ObjectField struct {
 	Value       *string          `bun:"value" json:"value"`
 	OwnerID     uuid.UUID        `bun:"sa_owner_id" json:"owner_id"`
 	CreatedBy   *uuid.UUID       `bun:"sa_created_by" json:"created_by"`
-	DeletedAt   *time.Time       `bun:"sa_deleted_at" json:"deleted_at,omitempty"`
+	DeletedAt   *time.Time       `bun:"sa_deleted_at" json:"deleted_at,omitzero"`
 	CreatedAt   time.Time        `bun:"sa_created_at,default:now()" json:"created_at"`
 	UpdatedAt   time.Time        `bun:"sa_updated_at,default:now()" json:"updated_at"`
 }
@@ -371,7 +371,7 @@ type UserField struct {
 	Value     *string    `bun:"value" json:"value"`
 	OwnerID   uuid.UUID  `bun:"sa_owner_id" json:"owner_id"`
 	CreatedBy *uuid.UUID `bun:"sa_created_by" json:"created_by"`
-	DeletedAt *time.Time `bun:"sa_deleted_at" json:"deleted_at,omitempty"`
+	DeletedAt *time.Time `bun:"sa_deleted_at" json:"deleted_at,omitzero"`
 	CreatedAt time.Time  `bun:"sa_created_at,default:now()" json:"created_at"`
 	UpdatedAt time.Time  `bun:"sa_updated_at,default:now()" json:"updated_at"`
 }
@@ -388,7 +388,7 @@ type UserRelation struct {
 	Pinned      *int       `bun:"pinned" json:"pinned"`
 	Priority    *int       `bun:"priority" json:"priority"`
 	UsedAt      *time.Time `bun:"used_at,default:now()" json:"used_at"`
-	DeletedAt   *time.Time `bun:"sa_deleted_at" json:"deleted_at,omitempty"`
+	DeletedAt   *time.Time `bun:"sa_deleted_at" json:"deleted_at,omitzero"`
 	CreatedAt   time.Time  `bun:"sa_created_at,default:now()" json:"created_at"`
 	UpdatedAt   time.Time  `bun:"sa_updated_at,default:now()" json:"updated_at"`
 }

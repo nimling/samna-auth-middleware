@@ -12,6 +12,7 @@ func (d *DB) GetClient(ctx context.Context, clientID uuid.UUID) (*SamnaClient, e
 	var client SamnaClient
 	err := d.NewSelect().
 		Model(&client).
+		ExcludeColumn("sa_deleted_at").
 		ExcludeColumn("app_id").
 		Where("client_id = ?", clientID).
 		Where("sa_deleted_at IS NULL").
@@ -28,6 +29,7 @@ func (d *DB) GetClientClaims(ctx context.Context, clientID uuid.UUID) ([]UserCla
 	claims := make([]UserClaim, 0)
 	err := d.NewSelect().
 		Model(&claims).
+		ExcludeColumn("sa_deleted_at").
 		ExcludeColumn("app_id").
 		Where("user_id = ?", clientID).
 		Where("sa_deleted_at IS NULL").

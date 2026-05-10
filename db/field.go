@@ -10,6 +10,7 @@ func (d *DB) GetObjectFields(ctx context.Context) ([]ObjectField, error) {
 	fields := make([]ObjectField, 0)
 	err := d.NewSelect().
 		Model(&fields).
+		ExcludeColumn("sa_deleted_at").
 		ExcludeColumn("app_id").
 		Where("sa_deleted_at IS NULL").
 		Scan(ctx)
@@ -23,6 +24,7 @@ func (d *DB) GetObjectField(ctx context.Context, fieldID uuid.UUID) (*ObjectFiel
 	var field ObjectField
 	err := d.NewSelect().
 		Model(&field).
+		ExcludeColumn("sa_deleted_at").
 		ExcludeColumn("app_id").
 		Where("id = ?", fieldID).
 		Where("sa_deleted_at IS NULL").
@@ -38,6 +40,7 @@ func (d *DB) GetUserFields(ctx context.Context, fieldID uuid.UUID) ([]UserField,
 	fields := make([]UserField, 0)
 	err := d.NewSelect().
 		Model(&fields).
+		ExcludeColumn("sa_deleted_at").
 		ExcludeColumn("app_id").
 		Where("field_id = ?", fieldID).
 		Where("sa_deleted_at IS NULL").

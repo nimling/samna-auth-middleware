@@ -36,6 +36,7 @@ func IssueGuestToken(ctx context.Context, claimID uuid.UUID, issuer string) (*Gu
 	var claim db.Claim
 	err = db.Instance().NewSelect().
 		Model(&claim).
+		ExcludeColumn("sa_deleted_at").
 		Where("id = ?", claimID).
 		Where("sa_deleted_at IS NULL").
 		Limit(1).
@@ -49,6 +50,7 @@ func IssueGuestToken(ctx context.Context, claimID uuid.UUID, issuer string) (*Gu
 	var existingClaim db.UserClaim
 	err = db.Instance().NewSelect().
 		Model(&existingClaim).
+		ExcludeColumn("sa_deleted_at").
 		Where("claim_id = ?", claimID).
 		Where("user_id = ?", guestUserID).
 		Where("app_id = ?", app.ID).

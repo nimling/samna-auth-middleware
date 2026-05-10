@@ -31,6 +31,7 @@ func (d *DB) GetSecret(ctx context.Context, secretID uuid.UUID) (*SamnaSecret, e
 	var secret SamnaSecret
 	err := d.NewSelect().
 		Model(&secret).
+		ExcludeColumn("sa_deleted_at").
 		Where("id = ?", secretID).
 		Where("sa_deleted_at IS NULL").
 		ExcludeColumn("app_id").

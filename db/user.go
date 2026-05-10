@@ -10,6 +10,7 @@ func (d *DB) GetUser(ctx context.Context, userID uuid.UUID, relations ...Relatio
 	var user SamnaUser
 	q := d.NewSelect().
 		Model(&user).
+		ExcludeColumn("sa_deleted_at").
 		ExcludeColumn("app_id").
 		Where("user_id = ?", userID).
 		Where("sa_deleted_at IS NULL").
@@ -26,6 +27,7 @@ func (d *DB) GetUsers(ctx context.Context, userID uuid.UUID, requiredAccess Clai
 	users := make([]SamnaUser, 0)
 	err := d.NewSelect().
 		Model(&users).
+		ExcludeColumn("sa_deleted_at").
 		ExcludeColumn("app_id").
 		Where(UserWhere(userID, requiredAccess)).
 		Scan(ctx)
@@ -39,6 +41,7 @@ func (d *DB) GetUserClaims(ctx context.Context, userID uuid.UUID) ([]UserClaim, 
 	claims := make([]UserClaim, 0)
 	err := d.NewSelect().
 		Model(&claims).
+		ExcludeColumn("sa_deleted_at").
 		ExcludeColumn("app_id").
 		Relation("Owner").
 		Where("user_claim.user_id = ?", userID).
@@ -54,6 +57,7 @@ func (d *DB) GetUserRelations(ctx context.Context, userID uuid.UUID) ([]UserRela
 	relations := make([]UserRelation, 0)
 	err := d.NewSelect().
 		Model(&relations).
+		ExcludeColumn("sa_deleted_at").
 		ExcludeColumn("app_id").
 		Where("user_id = ?", userID).
 		Where("sa_deleted_at IS NULL").
@@ -68,6 +72,7 @@ func (d *DB) GetRelation(ctx context.Context, userID uuid.UUID, objectID uuid.UU
 	relations := make([]UserRelation, 0)
 	err := d.NewSelect().
 		Model(&relations).
+		ExcludeColumn("sa_deleted_at").
 		Where("user_id = ?", userID).
 		Where("object_id = ?", objectID).
 		Where("sa_deleted_at IS NULL").
@@ -146,6 +151,7 @@ func (d *DB) GetUserAudit(ctx context.Context, userID uuid.UUID) ([]Audit, error
 	audits := make([]Audit, 0)
 	err := d.NewSelect().
 		Model(&audits).
+		ExcludeColumn("sa_deleted_at").
 		Where("object_id = ?", userID).
 		Where("object_type = ?", OBJECT_TYPE_USER).
 		ExcludeColumn("app_id").
