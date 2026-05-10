@@ -346,14 +346,9 @@ CREATE INDEX IF NOT EXISTS idx_user_claim_sa_owner_id ON claimius.user_claim (sa
 CREATE INDEX IF NOT EXISTS idx_user_claim_sa_deleted_at ON claimius.user_claim (sa_deleted_at);
 
 -- claim_object
--- Binds a claim. With object_id and object_type the binding targets that
--- object, polymorphically via (object_type, object_id), and the scope
--- jsonb keys enumerate field names of the object that the claim covers
--- (NULL scope means the whole object). With object_id and object_type
--- both NULL the binding has no object and the scope jsonb keys are freeform;
--- the implementation end decides what the keys mean.
--- When inherits is true, an object scoped binding cascades through
--- hierarchy walks.
+-- Binds a claim. With (object_type, object_id) the binding targets that
+-- object; scope keys are field names. With both NULL the binding has no
+-- object; scope keys are custom.
 CREATE TABLE IF NOT EXISTS claimius.claim_object (
                                                      id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
                                                      app_id          UUID NOT NULL REFERENCES claimius.samna_app(id),
@@ -377,9 +372,9 @@ CREATE TABLE IF NOT EXISTS claimius.claim_object (
                                                      )
 );
 
-COMMENT ON TABLE claimius.claim_object IS 'Binds a claim. With (object_type, object_id) the binding targets that object and scope keys are field names. Without them the binding has no object and scope keys are freeform, interpreted by the implementation end.';
+COMMENT ON TABLE claimius.claim_object IS 'Binds a claim. With (object_type, object_id) scope keys are field names; without them scope keys are custom.';
 COMMENT ON COLUMN claimius.claim_object.sa_access IS 'Bitwise access mask. Bits: 0x01 owner, 0x02 write, 0x04 read, 0x08 execute, 0x10 deny.';
-COMMENT ON COLUMN claimius.claim_object.scope IS 'Object scoped binding: jsonb keys are field names on the object. NULL means the whole object. Object-less binding (object_id IS NULL): jsonb keys are freeform, interpreted by the implementation end. NULL means the binding grants nothing.';
+COMMENT ON COLUMN claimius.claim_object.scope IS 'Object scoped: keys are field names, NULL means whole object. Object-less: keys are custom, NULL means no grant.';
 
 CREATE INDEX IF NOT EXISTS idx_claim_object_app_id ON claimius.claim_object (app_id);
 CREATE INDEX IF NOT EXISTS idx_claim_object_claim_id ON claimius.claim_object (claim_id);

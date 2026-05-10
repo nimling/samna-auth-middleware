@@ -433,15 +433,9 @@ COMMENT ON FUNCTION claimius.get_claims(UUID, UUID, UUID, TEXT) IS 'All claims t
 
 -- ----------------------------------------------------------------------------
 -- get_access (overload: scope key form)
--- Resolves the strongest active claim_object binding the user holds on this
--- app where the row has no object (object_id IS NULL) and the scope contains
--- the given key. The key string is freeform; the implementation end decides
--- what it means.
---
--- Returns the same actor token shape as the object form (user_claim_id,
--- claim_id, sa_access, scope), minus object-bound columns. The caller
--- decides what to do with the returned scope; this function does not
--- perform any redaction.
+-- Strongest active object-less binding whose scope contains p_scope_key and
+-- whose mask covers p_required_access. Returns user_claim_id, claim_id,
+-- sa_access, scope.
 -- ----------------------------------------------------------------------------
 
 CREATE OR REPLACE FUNCTION claimius.get_access(
@@ -488,7 +482,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius.get_access(UUID, UUID, TEXT, INTEGER) IS 'Strongest active object-less binding the user holds whose scope contains p_scope_key and whose mask covers p_required_access. Returns scope so the caller can read further keys.';
+COMMENT ON FUNCTION claimius.get_access(UUID, UUID, TEXT, INTEGER) IS 'Strongest active object-less binding whose scope contains p_scope_key and whose mask covers p_required_access.';
 
 -- ----------------------------------------------------------------------------
 -- get_audit
@@ -1386,7 +1380,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius.assign_claim_object IS 'Binds a claim. With (object_type, object_id) the binding targets that object and p_scope keys are field names. Without them the binding has no object and p_scope keys are freeform, interpreted by the implementation end. p_sa_access is a bitwise mask.';
+COMMENT ON FUNCTION claimius.assign_claim_object IS 'Binds a claim. With (object_type, object_id) p_scope keys are field names; without them p_scope keys are custom. p_sa_access is a bitwise mask.';
 
 -- update_claim_object
 DROP FUNCTION IF EXISTS claimius.update_claim_object(UUID, TEXT, BOOLEAN);
