@@ -1058,7 +1058,8 @@ BEGIN
                c.name::TEXT         AS label,
                v_user_row_id        AS parent_id,
                jsonb_build_object(
-                   'access_level', NULL::INTEGER,
+                   'access', NULL::INTEGER,
+                   'scope', NULL::JSONB,
                    'level', NULL::INTEGER,
                    'claim_id', uc.claim_id,
                    'starts_at', uc.starts_at,

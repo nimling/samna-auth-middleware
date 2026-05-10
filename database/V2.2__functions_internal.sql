@@ -855,7 +855,7 @@ CREATE OR REPLACE FUNCTION claimius.recompute_user_object(
 DECLARE
     v_grants        JSONB;
     v_direct        BOOLEAN;
-    v_id            TEXT;
+    v_id            UUID;
     v_eff_access    INTEGER;
     v_eff_scope     JSONB;
     v_grant_obj     JSONB;
