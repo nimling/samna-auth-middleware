@@ -6,24 +6,19 @@
 -- ============================================================================
 
 -- composite_id
--- Joins arbitrary string parts with ":" to form a deterministic composite id.
--- Same inputs produce the same id on every node, so prophet and disciple
--- converge on the same row identity.
+-- Hashes the joined input parts into a deterministic UUID. Same inputs
+-- produce the same id on every node, so prophet and disciple converge on
+-- the same row identity without coordinating writes. Used for the row id
+-- of materialization tables (user_object, object_users, user_users,
+-- reconcile_queue) and for the cascaded_from anchor key inside grants
+-- jsonb where two parts (object_type, object_id) collapse into a single
+-- comparable identifier.
 CREATE OR REPLACE FUNCTION claimius.composite_id(VARIADIC parts TEXT[])
-    RETURNS TEXT AS $$
-SELECT array_to_string(parts, ':');
+    RETURNS UUID AS $$
+SELECT md5(array_to_string(parts, ':'))::UUID;
 $$ LANGUAGE sql IMMUTABLE;
 
-COMMENT ON FUNCTION claimius.composite_id(TEXT[]) IS 'Deterministic colon joined id. Same inputs always produce same id.';
-
--- decompose_id
--- Splits a composite id back into its parts. Inverse of composite_id.
-CREATE OR REPLACE FUNCTION claimius.decompose_id(p_id TEXT)
-    RETURNS TEXT[] AS $$
-SELECT string_to_array(p_id, ':');
-$$ LANGUAGE sql IMMUTABLE;
-
-COMMENT ON FUNCTION claimius.decompose_id(TEXT) IS 'Inverse of composite_id. Splits on colon.';
+COMMENT ON FUNCTION claimius.composite_id(TEXT[]) IS 'Deterministic UUID hash of the joined parts. Same inputs always produce same id.';
 
 -- split_object_type
 -- Splits a schema-qualified table name like 'claimius.samna_app' into
@@ -163,3 +158,23 @@ END;
 $$ LANGUAGE plpgsql STABLE;
 
 COMMENT ON FUNCTION claimius.get_subtree IS 'Returns (object_type, object_id) descendants under a start node in a tree, self-edge included.';
+
+-- _popcount
+-- Counts the number of bits set in an integer access mask. Used to rank
+-- grants whose mask covers the required access bits, so callers can pick
+-- the strongest grant when several survive.
+CREATE OR REPLACE FUNCTION claimius._popcount(p INTEGER)
+    RETURNS INTEGER AS $$
+DECLARE
+    v INTEGER := coalesce(p, 0);
+    n INTEGER := 0;
+BEGIN
+    WHILE v <> 0 LOOP
+        v := v & (v - 1);
+        n := n + 1;
+    END LOOP;
+    RETURN n;
+END;
+$$ LANGUAGE plpgsql IMMUTABLE PARALLEL SAFE;
+
+COMMENT ON FUNCTION claimius._popcount(INTEGER) IS 'Bit count of an integer access mask. Used for ranking grants.';

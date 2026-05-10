@@ -189,9 +189,8 @@ func upsertClaim(ctx context.Context, tx bun.Tx, raw json.RawMessage) error {
 		Set("app_id = EXCLUDED.app_id").
 		Set("name = EXCLUDED.name").
 		Set("description = EXCLUDED.description").
-		Set("sa_access_level = EXCLUDED.sa_access_level").
+		Set("sa_access = EXCLUDED.sa_access").
 		Set("inherits = EXCLUDED.inherits").
-		Set("is_deny = EXCLUDED.is_deny").
 		Set("type = EXCLUDED.type").
 		Set("sa_owner_id = EXCLUDED.sa_owner_id").
 		Set("sa_root_id = EXCLUDED.sa_root_id").
@@ -235,8 +234,8 @@ func upsertClaimObject(ctx context.Context, tx bun.Tx, raw json.RawMessage) erro
 		Set("object_id = EXCLUDED.object_id").
 		Set("object_type = EXCLUDED.object_type").
 		Set("reason = EXCLUDED.reason").
-		Set("function = EXCLUDED.function").
-		Set("sa_level = EXCLUDED.sa_level").
+		Set("scope = EXCLUDED.scope").
+		Set("sa_access = EXCLUDED.sa_access").
 		Set("inherits = EXCLUDED.inherits").
 		Set("ref_id = EXCLUDED.ref_id").
 		Set("sa_owner_id = EXCLUDED.sa_owner_id").
@@ -412,7 +411,8 @@ func upsertUserObject(ctx context.Context, tx bun.Tx, raw json.RawMessage) error
 		Set("user_id = EXCLUDED.user_id").
 		Set("object_id = EXCLUDED.object_id").
 		Set("object_type = EXCLUDED.object_type").
-		Set("sa_access_level = EXCLUDED.sa_access_level").
+		Set("sa_access = EXCLUDED.sa_access").
+		Set("scope = EXCLUDED.scope").
 		Set("grants = EXCLUDED.grants").
 		Set("direct_grant = EXCLUDED.direct_grant").
 		Set("sa_owner_id = EXCLUDED.sa_owner_id").

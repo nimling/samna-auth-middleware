@@ -15,7 +15,7 @@ import (
 // GetClaimGraph returns the claim graph containing claims, user claims,
 // users, organizations, and typed object references for the authenticated user.
 func GetClaimGraph(ctx echo.Context) error {
-	startID, depth, level, err := parseGraphQuery(ctx, db.ACCESS_LEVEL_GUEST)
+	startID, depth, level, err := parseGraphQuery(ctx, db.ACCESS_NONE)
 	if err != nil {
 		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
@@ -38,7 +38,7 @@ func GetClaimGraph(ctx echo.Context) error {
 	return ctx.Stream(http.StatusOK, "application/json", body)
 }
 
-func parseGraphQuery(ctx echo.Context, defaultLevel db.ClaimAccessLevel) (*uuid.UUID, int, db.ClaimAccessLevel, error) {
+func parseGraphQuery(ctx echo.Context, defaultAccess db.ClaimAccess) (*uuid.UUID, int, db.ClaimAccess, error) {
 	var startID *uuid.UUID
 	if raw := ctx.QueryParam("start_id"); raw != "" {
 		parsed, err := uuid.Parse(raw)
@@ -57,16 +57,16 @@ func parseGraphQuery(ctx echo.Context, defaultLevel db.ClaimAccessLevel) (*uuid.
 		depth = parsed
 	}
 
-	level := defaultLevel
-	if raw := ctx.QueryParam("min_level"); raw != "" {
+	requiredAccess := defaultAccess
+	if raw := ctx.QueryParam("required_access"); raw != "" {
 		parsed, err := strconv.Atoi(raw)
 		if err != nil {
 			return nil, 0, 0, err
 		}
-		level = db.ClaimAccessLevel(parsed)
+		requiredAccess = db.ClaimAccess(parsed)
 	}
 
-	return startID, depth, level, nil
+	return startID, depth, requiredAccess, nil
 }
 
 func GetClaims(ctx echo.Context) error {
@@ -123,7 +123,7 @@ func GetClaims(ctx echo.Context) error {
 		q := db.Instance().NewSelect().
 			Model(&claims).
 			ExcludeColumn("app_id").
-			Where(db.ClaimWhere(*debugUserID, db.ACCESS_LEVEL_GUEST))
+			Where(db.ClaimWhere(*debugUserID, db.ACCESS_NONE))
 		q = db.ApplyRelations(q, relations)
 
 		if len(orgIDs) > 0 {
@@ -160,7 +160,7 @@ func GetClaim(ctx echo.Context) error {
 
 	if debugUserID := getDebugUserID(); debugUserID != nil {
 		relations := db.ParseWithRelations(ctx.QueryParam("with"), db.ClaimRelations())
-		claim, err := db.Instance().GetClaim(ctx.Request().Context(), *debugUserID, claimID, db.ACCESS_LEVEL_GUEST, relations...)
+		claim, err := db.Instance().GetClaim(ctx.Request().Context(), *debugUserID, claimID, db.ACCESS_NONE, relations...)
 		if err != nil {
 			ctx.Logger().Errorf("GetClaim: %v", err)
 			return respondError(ctx, http.StatusNotFound, "Not found")
@@ -210,7 +210,7 @@ func PostClaim(ctx echo.Context) error {
 	if claim.Type == db.CLAIM_TYPE_SYSTEM {
 		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
-	if claim.AccessLevel == int(db.ACCESS_LEVEL_SYSTEM) {
+	if claim.Access == 0 {
 		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
 	if claim.OwnerID == (uuid.UUID{}) {
@@ -218,7 +218,7 @@ func PostClaim(ctx echo.Context) error {
 	}
 
 	if debugUserID := getDebugUserID(); debugUserID != nil {
-		ac, err := db.Instance().GetAccess(ctx.Request().Context(), *debugUserID, claim.OwnerID, db.OBJECT_TYPE_ORGANIZATION, db.ACCESS_LEVEL_ADMIN)
+		ac, err := db.Instance().GetAccess(ctx.Request().Context(), *debugUserID, claim.OwnerID, db.OBJECT_TYPE_ORGANIZATION, db.ACCESS_OWNER)
 		if err != nil {
 			ctx.Logger().Errorf("PostClaim GetAccess: %v", err)
 			return respondError(ctx, http.StatusForbidden, "Forbidden")
@@ -237,10 +237,12 @@ func PostClaim(ctx echo.Context) error {
 			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 		}
 		if ac.ClaimID != nil {
+			objectID := out.ID
+			objectType := db.ObjectType(db.OBJECT_TYPE_CLAIM)
 			_, coErr := db.Instance().PostClaimObject(ctx.Request().Context(), *ac.ClaimID, db.ClaimObject{
 				ClaimID:    *ac.ClaimID,
-				ObjectID:   out.ID,
-				ObjectType: db.OBJECT_TYPE_CLAIM,
+				ObjectID:   &objectID,
+				ObjectType: &objectType,
 				OwnerID:    claim.OwnerID,
 				RootID:     ac.RootID,
 				CreatedBy:  ac.UserClaimID,
@@ -274,12 +276,12 @@ func PutClaim(ctx echo.Context) error {
 	if claim.Type == db.CLAIM_TYPE_SYSTEM {
 		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
-	if claim.AccessLevel == int(db.ACCESS_LEVEL_SYSTEM) {
+	if claim.Access == 0 {
 		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
 
 	if debugUserID := getDebugUserID(); debugUserID != nil {
-		ac, err := db.Instance().GetAccess(ctx.Request().Context(), *debugUserID, claimID, db.OBJECT_TYPE_CLAIM, db.ACCESS_LEVEL_ADMIN)
+		ac, err := db.Instance().GetAccess(ctx.Request().Context(), *debugUserID, claimID, db.OBJECT_TYPE_CLAIM, db.ACCESS_OWNER)
 		if err != nil {
 			return respondError(ctx, http.StatusForbidden, "Forbidden")
 		}
@@ -312,7 +314,7 @@ func DeleteClaim(ctx echo.Context) error {
 	}
 
 	if debugUserID := getDebugUserID(); debugUserID != nil {
-		ac, err := db.Instance().GetAccess(ctx.Request().Context(), *debugUserID, claimID, db.OBJECT_TYPE_CLAIM, db.ACCESS_LEVEL_ADMIN)
+		ac, err := db.Instance().GetAccess(ctx.Request().Context(), *debugUserID, claimID, db.OBJECT_TYPE_CLAIM, db.ACCESS_OWNER)
 		if err != nil {
 			return respondError(ctx, http.StatusForbidden, "Forbidden")
 		}
@@ -349,7 +351,7 @@ func PostClaimObject(ctx echo.Context) error {
 	}
 
 	if debugUserID := getDebugUserID(); debugUserID != nil {
-		ac, err := db.Instance().GetAccess(ctx.Request().Context(), *debugUserID, claimID, db.OBJECT_TYPE_CLAIM, db.ACCESS_LEVEL_ADMIN)
+		ac, err := db.Instance().GetAccess(ctx.Request().Context(), *debugUserID, claimID, db.OBJECT_TYPE_CLAIM, db.ACCESS_OWNER)
 		if err != nil {
 			return respondError(ctx, http.StatusForbidden, "Forbidden")
 		}
@@ -390,7 +392,7 @@ func DeleteClaimObject(ctx echo.Context) error {
 	}
 
 	if debugUserID := getDebugUserID(); debugUserID != nil {
-		ac, err := db.Instance().GetAccess(ctx.Request().Context(), *debugUserID, claimID, db.OBJECT_TYPE_CLAIM, db.ACCESS_LEVEL_ADMIN)
+		ac, err := db.Instance().GetAccess(ctx.Request().Context(), *debugUserID, claimID, db.OBJECT_TYPE_CLAIM, db.ACCESS_OWNER)
 		if err != nil {
 			return respondError(ctx, http.StatusForbidden, "Forbidden")
 		}
@@ -427,7 +429,7 @@ func PostClaimUser(ctx echo.Context) error {
 	}
 
 	if debugUserID := getDebugUserID(); debugUserID != nil {
-		ac, err := db.Instance().GetAccess(ctx.Request().Context(), *debugUserID, claimID, db.OBJECT_TYPE_CLAIM, db.ACCESS_LEVEL_ADMIN)
+		ac, err := db.Instance().GetAccess(ctx.Request().Context(), *debugUserID, claimID, db.OBJECT_TYPE_CLAIM, db.ACCESS_OWNER)
 		if err != nil {
 			return respondError(ctx, http.StatusForbidden, "Forbidden")
 		}
@@ -467,7 +469,7 @@ func DeleteClaimUser(ctx echo.Context) error {
 	}
 
 	if debugUserID := getDebugUserID(); debugUserID != nil {
-		ac, err := db.Instance().GetAccess(ctx.Request().Context(), *debugUserID, claimID, db.OBJECT_TYPE_CLAIM, db.ACCESS_LEVEL_ADMIN)
+		ac, err := db.Instance().GetAccess(ctx.Request().Context(), *debugUserID, claimID, db.OBJECT_TYPE_CLAIM, db.ACCESS_OWNER)
 		if err != nil {
 			return respondError(ctx, http.StatusForbidden, "Forbidden")
 		}

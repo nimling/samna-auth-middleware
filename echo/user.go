@@ -13,7 +13,7 @@ import (
 
 func GetUsers(ctx echo.Context) error {
 	if debugUserID := getDebugUserID(); debugUserID != nil {
-		users, err := db.Instance().GetUsers(ctx.Request().Context(), *debugUserID, db.ACCESS_LEVEL_GUEST)
+		users, err := db.Instance().GetUsers(ctx.Request().Context(), *debugUserID, db.ACCESS_NONE)
 		if err != nil {
 			ctx.Logger().Errorf("GetUsers: %v", err)
 			return respondError(ctx, http.StatusInternalServerError, "Internal server error")

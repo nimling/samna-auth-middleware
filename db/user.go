@@ -22,12 +22,12 @@ func (d *DB) GetUser(ctx context.Context, userID uuid.UUID, relations ...Relatio
 	return &user, nil
 }
 
-func (d *DB) GetUsers(ctx context.Context, userID uuid.UUID, accessLevel ClaimAccessLevel) ([]SamnaUser, error) {
+func (d *DB) GetUsers(ctx context.Context, userID uuid.UUID, requiredAccess ClaimAccess) ([]SamnaUser, error) {
 	users := make([]SamnaUser, 0)
 	err := d.NewSelect().
 		Model(&users).
 		ExcludeColumn("app_id").
-		Where(UserWhere(userID, accessLevel)).
+		Where(UserWhere(userID, requiredAccess)).
 		Scan(ctx)
 	if err != nil {
 		return nil, err

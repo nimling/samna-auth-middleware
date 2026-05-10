@@ -22,12 +22,12 @@ func (d *DB) GetLocation(ctx context.Context, locationID uuid.UUID, relations ..
 	return &loc, nil
 }
 
-func (d *DB) GetLocations(ctx context.Context, userID uuid.UUID, accessLevel ClaimAccessLevel, relations ...RelationFunc) ([]Location, error) {
+func (d *DB) GetLocations(ctx context.Context, userID uuid.UUID, requiredAccess ClaimAccess, relations ...RelationFunc) ([]Location, error) {
 	locs := make([]Location, 0)
 	q := d.NewSelect().
 		Model(&locs).
 		ExcludeColumn("app_id").
-		Where(ObjectWhere(userID, OBJECT_TYPE_LOCATION, accessLevel))
+		Where(ObjectWhere(userID, OBJECT_TYPE_LOCATION, requiredAccess))
 	q = ApplyRelations(q, relations)
 	err := q.Scan(ctx)
 	if err != nil {

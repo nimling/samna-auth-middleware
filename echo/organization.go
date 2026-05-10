@@ -65,7 +65,7 @@ func GetOrganizations(ctx echo.Context) error {
 		q := db.Instance().NewSelect().
 			Model(&orgs).
 			ExcludeColumn("app_id").
-			Where(db.ObjectWhere(*debugUserID, db.OBJECT_TYPE_ORGANIZATION, db.ACCESS_LEVEL_GUEST))
+			Where(db.ObjectWhere(*debugUserID, db.OBJECT_TYPE_ORGANIZATION, db.ACCESS_NONE))
 		q = db.ApplyRelations(q, relations)
 
 		if len(orgIDs) > 0 {
@@ -77,7 +77,7 @@ func GetOrganizations(ctx echo.Context) error {
 		if len(usrIDs) > 0 {
 			q.WhereGroup(" AND ", func(qq *bun.SelectQuery) *bun.SelectQuery {
 				for _, uid := range usrIDs {
-					qq = qq.WhereOr("organization.id IN (SELECT id FROM claimius.get_organizations(?, claimius.get_disciple_app_id(), ?))", uid, db.ACCESS_LEVEL_GUEST)
+					qq = qq.WhereOr("organization.id IN (SELECT id FROM claimius.get_organizations(?, claimius.get_disciple_app_id(), ?))", uid, db.ACCESS_NONE)
 				}
 				return qq
 			})
@@ -106,7 +106,7 @@ func GetOrganization(ctx echo.Context) error {
 	}
 
 	if debugUserID := getDebugUserID(); debugUserID != nil {
-		ac, err := db.Instance().GetAccess(ctx.Request().Context(), *debugUserID, orgID, db.OBJECT_TYPE_ORGANIZATION, db.ACCESS_LEVEL_GUEST)
+		ac, err := db.Instance().GetAccess(ctx.Request().Context(), *debugUserID, orgID, db.OBJECT_TYPE_ORGANIZATION, db.ACCESS_NONE)
 		if err != nil {
 			return respondError(ctx, http.StatusNotFound, "Not found")
 		}
@@ -135,7 +135,7 @@ func GetOrganization(ctx echo.Context) error {
 }
 
 func GetOrganizationGraph(ctx echo.Context) error {
-	startID, depth, level, err := parseGraphQuery(ctx, db.ACCESS_LEVEL_MEMBER)
+	startID, depth, level, err := parseGraphQuery(ctx, db.ACCESS_READ)
 	if err != nil {
 		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
@@ -209,7 +209,7 @@ func PostOrganization(ctx echo.Context) error {
 		if org.Type == db.ORGANIZATION_TYPE_SYSTEM {
 			return respondError(ctx, http.StatusBadRequest, "Bad request")
 		}
-		ac, err := db.Instance().GetAccess(ctx.Request().Context(), *debugUserID, org.OwnerID, db.OBJECT_TYPE_ORGANIZATION, db.ACCESS_LEVEL_WRITE)
+		ac, err := db.Instance().GetAccess(ctx.Request().Context(), *debugUserID, org.OwnerID, db.OBJECT_TYPE_ORGANIZATION, db.ACCESS_WRITE)
 		if err != nil {
 			ctx.Logger().Errorf("PostOrganization GetAccess: %v", err)
 			return respondError(ctx, http.StatusForbidden, "Forbidden")
@@ -260,7 +260,7 @@ func PutOrganization(ctx echo.Context) error {
 		if err != nil {
 			return respondError(ctx, http.StatusNotFound, "Not found")
 		}
-		ac, err := db.Instance().GetAccess(ctx.Request().Context(), *debugUserID, existing.OwnerID, db.OBJECT_TYPE_ORGANIZATION, db.ACCESS_LEVEL_WRITE)
+		ac, err := db.Instance().GetAccess(ctx.Request().Context(), *debugUserID, existing.OwnerID, db.OBJECT_TYPE_ORGANIZATION, db.ACCESS_WRITE)
 		if err != nil {
 			return respondError(ctx, http.StatusForbidden, "Forbidden")
 		}
@@ -310,7 +310,7 @@ func DeleteOrganization(ctx echo.Context) error {
 		if err != nil {
 			return respondError(ctx, http.StatusNotFound, "Not found")
 		}
-		ac, err := db.Instance().GetAccess(ctx.Request().Context(), *debugUserID, existing.OwnerID, db.OBJECT_TYPE_ORGANIZATION, db.ACCESS_LEVEL_WRITE)
+		ac, err := db.Instance().GetAccess(ctx.Request().Context(), *debugUserID, existing.OwnerID, db.OBJECT_TYPE_ORGANIZATION, db.ACCESS_WRITE)
 		if err != nil {
 			return respondError(ctx, http.StatusForbidden, "Forbidden")
 		}

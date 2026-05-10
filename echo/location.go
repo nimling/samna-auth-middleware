@@ -12,7 +12,7 @@ import (
 func GetLocations(ctx echo.Context) error {
 	if debugUserID := getDebugUserID(); debugUserID != nil {
 		relations := db.ParseWithRelations(ctx.QueryParam("with"), db.LocationRelations())
-		locs, err := db.Instance().GetLocations(ctx.Request().Context(), *debugUserID, db.ACCESS_LEVEL_MEMBER, relations...)
+		locs, err := db.Instance().GetLocations(ctx.Request().Context(), *debugUserID, db.ACCESS_READ, relations...)
 		if err != nil {
 			ctx.Logger().Errorf("GetLocations: %v", err)
 			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
@@ -36,7 +36,7 @@ func GetLocation(ctx echo.Context) error {
 	}
 
 	if debugUserID := getDebugUserID(); debugUserID != nil {
-		ac, err := db.Instance().GetAccess(ctx.Request().Context(), *debugUserID, locationID, db.OBJECT_TYPE_LOCATION, db.ACCESS_LEVEL_MEMBER)
+		ac, err := db.Instance().GetAccess(ctx.Request().Context(), *debugUserID, locationID, db.OBJECT_TYPE_LOCATION, db.ACCESS_READ)
 		if err != nil {
 			return respondError(ctx, http.StatusNotFound, "Not found")
 		}
@@ -109,7 +109,7 @@ func PostLocation(ctx echo.Context) error {
 		if err := ctx.Bind(&loc); err != nil {
 			return respondError(ctx, http.StatusBadRequest, "Bad request")
 		}
-		ac, err := db.Instance().GetAccess(ctx.Request().Context(), *debugUserID, loc.OwnerID, db.OBJECT_TYPE_ORGANIZATION, db.ACCESS_LEVEL_WRITE)
+		ac, err := db.Instance().GetAccess(ctx.Request().Context(), *debugUserID, loc.OwnerID, db.OBJECT_TYPE_ORGANIZATION, db.ACCESS_WRITE)
 		if err != nil {
 			ctx.Logger().Errorf("PostLocation GetAccess: %v", err)
 			return respondError(ctx, http.StatusForbidden, "Forbidden")
@@ -152,7 +152,7 @@ func PutLocation(ctx echo.Context) error {
 	}
 
 	if debugUserID := getDebugUserID(); debugUserID != nil {
-		ac, err := db.Instance().GetAccess(ctx.Request().Context(), *debugUserID, locationID, db.OBJECT_TYPE_LOCATION, db.ACCESS_LEVEL_WRITE)
+		ac, err := db.Instance().GetAccess(ctx.Request().Context(), *debugUserID, locationID, db.OBJECT_TYPE_LOCATION, db.ACCESS_WRITE)
 		if err != nil {
 			return respondError(ctx, http.StatusForbidden, "Forbidden")
 		}
@@ -192,7 +192,7 @@ func DeleteLocation(ctx echo.Context) error {
 	}
 
 	if debugUserID := getDebugUserID(); debugUserID != nil {
-		ac, err := db.Instance().GetAccess(ctx.Request().Context(), *debugUserID, locationID, db.OBJECT_TYPE_LOCATION, db.ACCESS_LEVEL_WRITE)
+		ac, err := db.Instance().GetAccess(ctx.Request().Context(), *debugUserID, locationID, db.OBJECT_TYPE_LOCATION, db.ACCESS_WRITE)
 		if err != nil {
 			return respondError(ctx, http.StatusForbidden, "Forbidden")
 		}

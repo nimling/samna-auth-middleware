@@ -17,9 +17,9 @@ type BodySecret struct {
 	ExpiresAt *time.Time `json:"expires_at"`
 }
 
-func (d *DB) GetSecrets(ctx context.Context, userID uuid.UUID, accessLevel ClaimAccessLevel) ([]SamnaSecret, error) {
+func (d *DB) GetSecrets(ctx context.Context, userID uuid.UUID, requiredAccess ClaimAccess) ([]SamnaSecret, error) {
 	secrets := make([]SamnaSecret, 0)
-	err := d.NewRaw("SELECT * FROM claimius.get_secrets(?, claimius.get_disciple_app_id(), ?)", userID, accessLevel).
+	err := d.NewRaw("SELECT * FROM claimius.get_secrets(?, claimius.get_disciple_app_id(), ?)", userID, requiredAccess).
 		Scan(ctx, &secrets)
 	if err != nil {
 		return nil, err
@@ -79,10 +79,17 @@ func (d *DB) PostSecret(ctx context.Context, body BodySecret, ownerID, createdBy
 		}
 		if _, err := tx.NewRaw(`
 			SELECT claimius.assign_claim_object(
-				claimius.get_disciple_app_id(),
-				?, ?, 'claimius.samna_secret', ?, ?, ?, ?, TRUE
+				p_app_id        := claimius.get_disciple_app_id(),
+				p_claim_id      := ?,
+				p_sa_owner_id   := ?,
+				p_sa_root_id    := ?,
+				p_sa_created_by := ?,
+				p_object_id     := ?,
+				p_object_type   := 'claimius.samna_secret',
+				p_sa_access     := ?,
+				p_inherits      := TRUE
 			)
-		`, claimID, secret.ID, ownerID, rootID, createdBy, int(ACCESS_LEVEL_ADMIN)).Exec(ctx); err != nil {
+		`, claimID, ownerID, rootID, createdBy, secret.ID, int(ACCESS_OWNER|ACCESS_WRITE|ACCESS_READ)).Exec(ctx); err != nil {
 			return fmt.Errorf("assign claim object: %w", err)
 		}
 		return nil

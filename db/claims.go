@@ -4,12 +4,13 @@ import (
 	"context"
 
 	"github.com/google/uuid"
+	"github.com/lib/pq"
 )
 
-func (d *DB) GetAccess(ctx context.Context, userID, objectID uuid.UUID, objectType string, accessLevel ClaimAccessLevel) (*AccessClaim, error) {
+func (d *DB) GetAccess(ctx context.Context, userID, objectID uuid.UUID, objectType string, requiredAccess ClaimAccess) (*AccessClaim, error) {
 	claims := make([]AccessClaim, 0)
 	err := d.NewSelect().
-		TableExpr("claimius.get_access(?, claimius.get_disciple_app_id(), ?, ?, ?) AS claim", userID, objectID, objectType, accessLevel).
+		TableExpr("claimius.get_access(?, claimius.get_disciple_app_id(), ?, ?, ?) AS claim", userID, objectID, objectType, requiredAccess).
 		Column("claim.*").
 		Scan(ctx, &claims)
 	if err != nil {
@@ -19,6 +20,45 @@ func (d *DB) GetAccess(ctx context.Context, userID, objectID uuid.UUID, objectTy
 		return nil, nil
 	}
 	return &claims[0], nil
+}
+
+func (d *DB) GetAccessFunction(ctx context.Context, userID uuid.UUID, function string, requiredAccess ClaimAccess) (*AccessClaim, error) {
+	claims := make([]AccessClaim, 0)
+	err := d.NewSelect().
+		TableExpr("claimius.get_access(?, claimius.get_disciple_app_id(), ?::text, ?) AS claim", userID, function, requiredAccess).
+		Column("claim.*").
+		Scan(ctx, &claims)
+	if err != nil {
+		return nil, err
+	}
+	if len(claims) == 0 {
+		return nil, nil
+	}
+	return &claims[0], nil
+}
+
+func (d *DB) GetFunctions(ctx context.Context, userID uuid.UUID) ([]string, error) {
+	functions := make([]string, 0)
+	err := d.NewRaw(
+		"SELECT * FROM claimius.get_functions(?, claimius.get_disciple_app_id())",
+		userID,
+	).Scan(ctx, &functions)
+	if err != nil {
+		return nil, err
+	}
+	return functions, nil
+}
+
+func (d *DB) HasAnyFunction(ctx context.Context, userID uuid.UUID, functions []string) (bool, error) {
+	var found bool
+	err := d.NewRaw(
+		"SELECT claimius.has_any_function(?, claimius.get_disciple_app_id(), ?)",
+		userID, pq.Array(functions),
+	).Scan(ctx, &found)
+	if err != nil {
+		return false, err
+	}
+	return found, nil
 }
 
 func (d *DB) GetDirectAccess(ctx context.Context, userID, objectID uuid.UUID, objectType string) (*AccessClaim, error) {
@@ -36,13 +76,13 @@ func (d *DB) GetDirectAccess(ctx context.Context, userID, objectID uuid.UUID, ob
 	return &claims[0], nil
 }
 
-func (d *DB) GetClaim(ctx context.Context, userID, claimID uuid.UUID, accessLevel ClaimAccessLevel, relations ...RelationFunc) (*Claim, error) {
+func (d *DB) GetClaim(ctx context.Context, userID, claimID uuid.UUID, requiredAccess ClaimAccess, relations ...RelationFunc) (*Claim, error) {
 	var claim Claim
 	q := d.NewSelect().
 		Model(&claim).
 		ExcludeColumn("app_id").
 		Where("claim.id = ?", claimID).
-		Where("EXISTS (SELECT 1 FROM claimius.get_access(?, claimius.get_disciple_app_id(), claim.id, ?, ?))", userID, OBJECT_TYPE_CLAIM, accessLevel).
+		Where("EXISTS (SELECT 1 FROM claimius.get_access(?, claimius.get_disciple_app_id(), claim.id, ?, ?))", userID, OBJECT_TYPE_CLAIM, requiredAccess).
 		Limit(1)
 	q = ApplyRelations(q, relations)
 	err := q.Scan(ctx)
@@ -52,12 +92,12 @@ func (d *DB) GetClaim(ctx context.Context, userID, claimID uuid.UUID, accessLeve
 	return &claim, nil
 }
 
-func (d *DB) GetClaims(ctx context.Context, userID uuid.UUID, accessLevel ClaimAccessLevel, relations ...RelationFunc) ([]Claim, error) {
+func (d *DB) GetClaims(ctx context.Context, userID uuid.UUID, requiredAccess ClaimAccess, relations ...RelationFunc) ([]Claim, error) {
 	claims := make([]Claim, 0)
 	q := d.NewSelect().
 		Model(&claims).
 		ExcludeColumn("app_id").
-		Where("claim.id IN (SELECT id FROM claimius.get_claims(?, claimius.get_disciple_app_id(), ?))", userID, accessLevel)
+		Where("claim.id IN (SELECT id FROM claimius.get_claims(?, claimius.get_disciple_app_id(), ?))", userID, requiredAccess)
 	q = ApplyRelations(q, relations)
 	err := q.Scan(ctx)
 	if err != nil {
@@ -81,11 +121,11 @@ func (d *DB) GetClaimAudit(ctx context.Context, claimID uuid.UUID) ([]Audit, err
 	return audits, nil
 }
 
-func (d *DB) Search(ctx context.Context, userID uuid.UUID, query string, objectTypes []string, accessLevel ClaimAccessLevel, limit int, offset int) ([]SearchResult, error) {
+func (d *DB) Search(ctx context.Context, userID uuid.UUID, query string, objectTypes []string, requiredAccess ClaimAccess, limit int, offset int) ([]SearchResult, error) {
 	results := make([]SearchResult, 0)
 	err := d.NewRaw(
 		`SELECT * FROM claimius.search(?, claimius.get_disciple_app_id(), ?, ?::text[], ?, ?, ?)`,
-		userID, query, objectTypes, accessLevel, limit, offset,
+		userID, query, objectTypes, requiredAccess, limit, offset,
 	).Scan(ctx, &results)
 	if err != nil {
 		return nil, err
@@ -93,10 +133,10 @@ func (d *DB) Search(ctx context.Context, userID uuid.UUID, query string, objectT
 	return results, nil
 }
 
-func (d *DB) GetAudit(ctx context.Context, userID uuid.UUID, accessLevel ClaimAccessLevel) ([]Audit, error) {
+func (d *DB) GetAudit(ctx context.Context, userID uuid.UUID, requiredAccess ClaimAccess) ([]Audit, error) {
 	audits := make([]Audit, 0)
 	err := d.NewSelect().
-		TableExpr("claimius.get_audit(?, claimius.get_disciple_app_id(), ?) AS audit", userID, accessLevel).
+		TableExpr("claimius.get_audit(?, claimius.get_disciple_app_id(), ?) AS audit", userID, requiredAccess).
 		Column("audit.*").
 		Scan(ctx, &audits)
 	if err != nil {
@@ -105,8 +145,8 @@ func (d *DB) GetAudit(ctx context.Context, userID uuid.UUID, accessLevel ClaimAc
 	return audits, nil
 }
 
-func (d *DB) HasAccess(ctx context.Context, userID, objectID uuid.UUID, objectType string, accessLevel ClaimAccessLevel) bool {
-	claim, err := d.GetAccess(ctx, userID, objectID, objectType, accessLevel)
+func (d *DB) HasAccess(ctx context.Context, userID, objectID uuid.UUID, objectType string, requiredAccess ClaimAccess) bool {
+	claim, err := d.GetAccess(ctx, userID, objectID, objectType, requiredAccess)
 	return err == nil && claim != nil
 }
 
@@ -120,19 +160,19 @@ func (d *DB) GetObjectClaims(ctx context.Context, userID, objectID uuid.UUID, ob
 	return claims, err
 }
 
-func (d *DB) GetOwnerGraph(ctx context.Context, userID uuid.UUID, startID *uuid.UUID, depth int, accessLevel ClaimAccessLevel) ([]GraphNode, error) {
+func (d *DB) GetOwnerGraph(ctx context.Context, userID uuid.UUID, startID *uuid.UUID, depth int, requiredAccess ClaimAccess) ([]GraphNode, error) {
 	nodes := make([]GraphNode, 0)
 	err := d.NewSelect().
-		TableExpr("claimius.get_owner_graph(p_user_id := ?, p_app_id := claimius.get_disciple_app_id(), p_start_id := ?, p_depth := ?, p_min_level := ?) AS graph", userID, startID, depth, accessLevel).
+		TableExpr("claimius.get_owner_graph(p_user_id := ?, p_app_id := claimius.get_disciple_app_id(), p_start_id := ?, p_depth := ?, p_required_access := ?) AS graph", userID, startID, depth, requiredAccess).
 		Column("graph.*").
 		Scan(ctx, &nodes)
 	return nodes, err
 }
 
-func (d *DB) GetClaimGraph(ctx context.Context, userID uuid.UUID, startID *uuid.UUID, depth int, accessLevel ClaimAccessLevel) ([]GraphNode, error) {
+func (d *DB) GetClaimGraph(ctx context.Context, userID uuid.UUID, startID *uuid.UUID, depth int, requiredAccess ClaimAccess) ([]GraphNode, error) {
 	nodes := make([]GraphNode, 0)
 	err := d.NewSelect().
-		TableExpr("claimius.get_claim_graph(p_user_id := ?, p_app_id := claimius.get_disciple_app_id(), p_start_id := ?, p_depth := ?, p_min_level := ?) AS graph", userID, startID, depth, accessLevel).
+		TableExpr("claimius.get_claim_graph(p_user_id := ?, p_app_id := claimius.get_disciple_app_id(), p_start_id := ?, p_depth := ?, p_required_access := ?) AS graph", userID, startID, depth, requiredAccess).
 		Column("graph.*").
 		Scan(ctx, &nodes)
 	return nodes, err
@@ -143,10 +183,10 @@ func (d *DB) PostClaim(ctx context.Context, in Claim) (*Claim, error) {
 	err := d.NewRaw(`
 		SELECT (claimius.create_claim(
 			claimius.get_disciple_app_id(),
-			?, ?, ?, ?, ?, ?, ?, ?, ?::claimius.claim_type
+			?, ?, ?, ?, ?, ?, ?, ?::claimius.claim_type
 		) -> 'claim' ->> 'id')::uuid
-	`, in.Name, in.Description, in.AccessLevel, in.OwnerID, in.RootID, in.CreatedBy,
-		in.Inherits, in.IsDeny, string(in.Type)).Scan(ctx, &id)
+	`, in.Name, in.Description, in.Access, in.OwnerID, in.RootID, in.CreatedBy,
+		in.Inherits, string(in.Type)).Scan(ctx, &id)
 	if err != nil {
 		return nil, err
 	}
@@ -159,8 +199,8 @@ func (d *DB) PostClaim(ctx context.Context, in Claim) (*Claim, error) {
 
 func (d *DB) PutClaim(ctx context.Context, claimID uuid.UUID, in Claim) (*Claim, error) {
 	_, err := d.NewRaw(`
-		SELECT claimius.update_claim(?, ?, ?, ?, ?, ?)
-	`, claimID, in.Name, in.Description, in.AccessLevel, in.Inherits, in.IsDeny).Exec(ctx)
+		SELECT claimius.update_claim(?, ?, ?, ?, ?)
+	`, claimID, in.Name, in.Description, in.Access, in.Inherits).Exec(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -180,11 +220,21 @@ func (d *DB) PostClaimObject(ctx context.Context, claimID uuid.UUID, in ClaimObj
 	var id uuid.UUID
 	err := d.NewRaw(`
 		SELECT (claimius.assign_claim_object(
-			claimius.get_disciple_app_id(),
-			?, ?, ?, ?, ?, ?, ?, ?, ?, NULL::uuid, ?
+			p_app_id        := claimius.get_disciple_app_id(),
+			p_claim_id      := ?,
+			p_sa_owner_id   := ?,
+			p_sa_root_id    := ?,
+			p_sa_created_by := ?,
+			p_object_id     := ?,
+			p_object_type   := ?,
+			p_sa_access     := ?,
+			p_inherits      := ?,
+			p_reason        := ?,
+			p_ref_id        := NULL::uuid,
+			p_scope         := ?
 		) -> 'claim_object' ->> 'id')::uuid
-	`, claimID, in.ObjectID, in.ObjectType, in.OwnerID, in.RootID, in.CreatedBy,
-		in.Level, in.Inherits, in.Reason, in.Function).Scan(ctx, &id)
+	`, claimID, in.OwnerID, in.RootID, in.CreatedBy,
+		in.ObjectID, in.ObjectType, in.Access, in.Inherits, in.Reason, in.Scope).Scan(ctx, &id)
 	if err != nil {
 		return nil, err
 	}

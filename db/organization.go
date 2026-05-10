@@ -22,12 +22,12 @@ func (d *DB) GetOrganization(ctx context.Context, orgID uuid.UUID, relations ...
 	return &org, nil
 }
 
-func (d *DB) GetOrganizations(ctx context.Context, userID uuid.UUID, accessLevel ClaimAccessLevel, relations ...RelationFunc) ([]Organization, error) {
+func (d *DB) GetOrganizations(ctx context.Context, userID uuid.UUID, requiredAccess ClaimAccess, relations ...RelationFunc) ([]Organization, error) {
 	orgs := make([]Organization, 0)
 	q := d.NewSelect().
 		Model(&orgs).
 		ExcludeColumn("app_id").
-		Where(ObjectWhere(userID, OBJECT_TYPE_ORGANIZATION, accessLevel))
+		Where(ObjectWhere(userID, OBJECT_TYPE_ORGANIZATION, requiredAccess))
 	q = ApplyRelations(q, relations)
 	err := q.Scan(ctx)
 	if err != nil {

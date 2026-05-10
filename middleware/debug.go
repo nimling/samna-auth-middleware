@@ -117,18 +117,22 @@ func ensureDebugUser(ctx context.Context, userID uuid.UUID) error {
 				?, ?, ?, ?, ?, ?
 			) -> 'claim' ->> 'id')::uuid
 		`, "Owner", "Owner of debug organization",
-			int(db.ACCESS_LEVEL_OWNER), preOrgID, preOrgID, userID,
+			int(db.ACCESS_ALL), preOrgID, preOrgID, userID,
 		).Scan(ctx, &claimID); err != nil {
 			return fmt.Errorf("create_claim: %w", err)
 		}
 
 		if _, err := tx.NewRaw(`
 			SELECT claimius.assign_claim_object(
-				claimius.get_disciple_app_id(),
-				?, ?, ?, ?, ?, ?
+				p_app_id        := claimius.get_disciple_app_id(),
+				p_claim_id      := ?,
+				p_sa_owner_id   := ?,
+				p_sa_root_id    := ?,
+				p_sa_created_by := ?,
+				p_object_id     := ?,
+				p_object_type   := ?
 			)
-		`, claimID, preOrgID, db.OBJECT_TYPE_ORGANIZATION,
-			preOrgID, preOrgID, userID,
+		`, claimID, preOrgID, preOrgID, userID, preOrgID, db.OBJECT_TYPE_ORGANIZATION,
 		).Exec(ctx); err != nil {
 			return fmt.Errorf("assign_claim_object: %w", err)
 		}

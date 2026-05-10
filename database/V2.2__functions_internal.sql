@@ -562,19 +562,20 @@ DECLARE
     v_grants        JSONB := '[]'::JSONB;
     v_denies        JSONB := '[]'::JSONB;
     v_row           RECORD;
-    v_min_deny      INTEGER;
-    v_grant_obj     JSONB;
-    v_path_min_deny INTEGER;
+    v_grant_bits    INTEGER;
+    v_deny_bits     INTEGER;
+    v_is_deny       BOOLEAN;
 BEGIN
     -- Step 1: collect every claim_object binding that could grant this user
     -- access to this object, via any path. Each row carries the claim, its
-    -- access_level, is_deny, and the cascaded_from anchor (the object the
+    -- bitwise access mask (which encodes the deny flag in bit 0x10), the
+    -- per binding scope jsonb, and the cascaded_from anchor (the object the
     -- claim_object was bound to). For non inherited bindings, cascaded_from
     -- equals the object itself.
 
     FOR v_row IN
         WITH user_claims AS (
-            SELECT uc.claim_id, c.sa_access_level, c.is_deny, c.inherits, c.sa_deleted_at
+            SELECT uc.claim_id, c.sa_access AS claim_access, c.inherits, c.sa_deleted_at
             FROM claimius.user_claim uc
                      JOIN claimius.claim c ON c.id = uc.claim_id
             WHERE uc.user_id = p_user_id
@@ -588,8 +589,8 @@ BEGIN
                         p_object_type AS cascaded_from_type,
                         p_object_id   AS cascaded_from_id,
                         'direct'::TEXT AS tree_type,
-                        uc.sa_access_level,
-                        uc.is_deny
+                        (uc.claim_access | co.sa_access) AS sa_access,
+                        co.scope
                  FROM claimius.claim_object co
                           JOIN user_claims uc ON uc.claim_id = co.claim_id
                  WHERE co.object_type = p_object_type
@@ -605,8 +606,8 @@ BEGIN
                         co.object_type AS cascaded_from_type,
                         co.object_id   AS cascaded_from_id,
                         e.tree_type::TEXT AS tree_type,
-                        uc.sa_access_level,
-                        uc.is_deny
+                        (uc.claim_access | co.sa_access) AS sa_access,
+                        co.scope
                  FROM claimius.claim_object co
                           JOIN user_claims uc ON uc.claim_id = co.claim_id AND uc.inherits = TRUE
                           JOIN claimius.inheritance_info e
@@ -623,28 +624,33 @@ BEGIN
         UNION ALL
         SELECT * FROM cascaded_bindings
         LOOP
-            IF v_row.is_deny THEN
+            v_is_deny := (v_row.sa_access & 16) <> 0;
+            IF v_is_deny THEN
+                v_deny_bits := v_row.sa_access & 15;
                 v_denies := v_denies || jsonb_build_array(jsonb_build_object(
                         'claim_id', v_row.claim_id,
-                        'level', v_row.sa_access_level,
-                        'cascaded_from', claimius.composite_id(v_row.cascaded_from_type, v_row.cascaded_from_id::TEXT),
+                        'access', v_deny_bits,
+                        'scope', v_row.scope,
+                        'cascaded_from', jsonb_build_object('type', v_row.cascaded_from_type, 'id', v_row.cascaded_from_id),
                         'tree_type', v_row.tree_type
                                                           ));
             ELSE
+                v_grant_bits := v_row.sa_access & 15;
                 v_grants := v_grants || jsonb_build_array(jsonb_build_object(
                         'claim_id', v_row.claim_id,
-                        'level', v_row.sa_access_level,
-                        'cascaded_from', claimius.composite_id(v_row.cascaded_from_type, v_row.cascaded_from_id::TEXT),
+                        'access', v_grant_bits,
+                        'scope', v_row.scope,
+                        'cascaded_from', jsonb_build_object('type', v_row.cascaded_from_type, 'id', v_row.cascaded_from_id),
                         'tree_type', v_row.tree_type
                                                           ));
             END IF;
         END LOOP;
 
-    -- Step 2: filter grants by deny rules. A deny at level N on path P
-    -- erases grants on path P at level <= N. Paths are identified by
-    -- (cascaded_from, tree_type). Direct denies (tree_type = 'direct',
-    -- cascaded_from = the object itself) erase all grants regardless of
-    -- path.
+    -- Step 2: subtract deny bits from grants on the same path. A deny on
+    -- path P with bits B clears those bits from every grant on path P.
+    -- Paths are identified by (cascaded_from, tree_type). Direct denies
+    -- (tree_type = 'direct', cascaded_from = the object itself) subtract
+    -- bits from all grants regardless of path.
     IF jsonb_array_length(v_denies) > 0 THEN
         v_grants := claimius._apply_denies(v_grants, v_denies, p_object_type, p_object_id);
     END IF;
@@ -653,11 +659,12 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius._build_grants_for_object IS 'Computes grants jsonb for a (user, object) pair, applying deny semantics.';
+COMMENT ON FUNCTION claimius._build_grants_for_object IS 'Computes grants jsonb for a (user, object) pair, with bitwise deny subtraction.';
 
 -- _apply_denies
--- Filters grants by deny rules. Returns a new jsonb array containing only
--- grants that survive all applicable denies.
+-- Subtracts deny bits from each grant on the same path. Returns a new
+-- jsonb array of grants. Grants whose access mask becomes 0 after
+-- subtraction are dropped.
 CREATE OR REPLACE FUNCTION claimius._apply_denies(
     p_grants        JSONB,
     p_denies        JSONB,
@@ -668,36 +675,30 @@ DECLARE
     v_result        JSONB := '[]'::JSONB;
     v_grant         JSONB;
     v_deny          JSONB;
-    v_object_key    TEXT;
-    v_blocked       BOOLEAN;
+    v_object_key    JSONB;
+    v_grant_bits    INTEGER;
+    v_deny_bits     INTEGER;
 BEGIN
-    v_object_key := claimius.composite_id(p_object_type, p_object_id::TEXT);
+    v_object_key := jsonb_build_object('type', p_object_type, 'id', p_object_id);
 
-    -- Deny semantics: deny at level N erases grants at level <= N on the
-    -- same path. Lower level number = stronger access. So deny at level 3
-    -- (admin) erases admin and stronger; level 8 (guest) deny erases all.
     FOR v_grant IN SELECT * FROM jsonb_array_elements(p_grants) LOOP
-            v_blocked := FALSE;
+            v_grant_bits := (v_grant ->> 'access')::INTEGER;
             FOR v_deny IN SELECT * FROM jsonb_array_elements(p_denies) LOOP
-                -- A direct deny on the object itself blocks any grant on any path
-                -- at level <= deny.level.
-                    IF (v_deny ->> 'tree_type') = 'direct' AND (v_deny ->> 'cascaded_from') = v_object_key THEN
-                        IF (v_grant ->> 'level')::INTEGER <= (v_deny ->> 'level')::INTEGER THEN
-                            v_blocked := TRUE;
-                            EXIT;
-                        END IF;
-                        -- A deny on the same (tree_type, cascaded_from) path blocks
-                        -- grants on that same path at level <= deny.level.
-                    ELSIF (v_deny ->> 'tree_type') = (v_grant ->> 'tree_type')
-                        AND (v_deny ->> 'cascaded_from') = (v_grant ->> 'cascaded_from') THEN
-                        IF (v_grant ->> 'level')::INTEGER <= (v_deny ->> 'level')::INTEGER THEN
-                            v_blocked := TRUE;
-                            EXIT;
-                        END IF;
-                    END IF;
-                END LOOP;
-            IF NOT v_blocked THEN
-                v_result := v_result || jsonb_build_array(v_grant);
+                v_deny_bits := (v_deny ->> 'access')::INTEGER;
+                -- A direct deny on the object itself subtracts from any
+                -- grant on any path.
+                IF (v_deny ->> 'tree_type') = 'direct' AND (v_deny -> 'cascaded_from') = v_object_key THEN
+                    v_grant_bits := v_grant_bits & ~v_deny_bits;
+                -- A deny on the same (tree_type, cascaded_from) path
+                -- subtracts from grants on that same path.
+                ELSIF (v_deny ->> 'tree_type') = (v_grant ->> 'tree_type')
+                    AND (v_deny -> 'cascaded_from') = (v_grant -> 'cascaded_from') THEN
+                    v_grant_bits := v_grant_bits & ~v_deny_bits;
+                END IF;
+                EXIT WHEN v_grant_bits = 0;
+            END LOOP;
+            IF v_grant_bits <> 0 THEN
+                v_result := v_result || jsonb_build_array(jsonb_set(v_grant, '{access}', to_jsonb(v_grant_bits)));
             END IF;
         END LOOP;
 
@@ -705,7 +706,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql IMMUTABLE;
 
-COMMENT ON FUNCTION claimius._apply_denies IS 'Filters grants by deny rules, returning only surviving grants.';
+COMMENT ON FUNCTION claimius._apply_denies IS 'Subtracts deny bits from grants on matching paths. Drops grants whose mask becomes 0.';
 
 -- _direct_grant_for_object
 -- Determines whether the given user holds direct grant on the given object
@@ -755,7 +756,10 @@ BEGIN
         END IF;
     END IF;
 
-    -- check for level 0 deny on this object
+    -- A direct creator's grant is wiped only by a deny that subtracts the
+    -- owner bit. Any binding (claim or claim_object) whose effective mask
+    -- has the deny bit (0x10) and the owner bit (0x01) on this object or
+    -- any of its inherited ancestors revokes the direct grant.
     SELECT EXISTS (
         SELECT 1
         FROM claimius.user_claim uc
@@ -764,11 +768,11 @@ BEGIN
         WHERE uc.user_id = p_user_id
           AND uc.app_id = p_app_id
           AND uc.sa_deleted_at IS NULL
-          AND c.is_deny = TRUE
-          AND c.sa_access_level <= 0
           AND c.sa_deleted_at IS NULL
           AND co.app_id = p_app_id
           AND co.sa_deleted_at IS NULL
+          AND ((c.sa_access | co.sa_access) & 16) <> 0
+          AND ((c.sa_access | co.sa_access) & 1)  <> 0
           AND (
             (co.object_type = p_object_type AND co.object_id = p_object_id)
                 OR (co.inherits = TRUE AND c.inherits = TRUE AND EXISTS (
@@ -786,7 +790,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius._direct_grant_for_object IS 'Determines if user has direct (creator) grant, accounting for level 0 denies.';
+COMMENT ON FUNCTION claimius._direct_grant_for_object IS 'Determines if user has direct (creator) grant, accounting for owner bit denies.';
 
 -- _denormalize_object
 -- Reads the registered row's name, description, sa_owner_id, sa_location_id,
@@ -852,8 +856,10 @@ DECLARE
     v_grants        JSONB;
     v_direct        BOOLEAN;
     v_id            TEXT;
-    v_eff_level     INTEGER;
-    v_levels        INTEGER[];
+    v_eff_access    INTEGER;
+    v_eff_scope     JSONB;
+    v_grant_obj     JSONB;
+    v_any_unbounded BOOLEAN;
     v_norm          RECORD;
     v_search_vec    TSVECTOR;
 BEGIN
@@ -872,13 +878,36 @@ BEGIN
         RETURN;
     END IF;
 
-    -- Compute effective level
+    -- Effective access mask: bitwise OR over all surviving grants. Direct
+    -- creator contributes the full operator mask (owner | write | read |
+    -- execute). Deny semantics already applied in _build_grants_for_object.
     IF v_direct THEN
-        v_eff_level := 0;
+        v_eff_access := 15;
     ELSE
-        SELECT array_agg((g ->> 'level')::INTEGER) INTO v_levels
-        FROM jsonb_array_elements(v_grants) g;
-        v_eff_level := (SELECT min(x) FROM unnest(v_levels) AS x);
+        v_eff_access := 0;
+    END IF;
+    FOR v_grant_obj IN SELECT * FROM jsonb_array_elements(v_grants) LOOP
+        v_eff_access := v_eff_access | (v_grant_obj ->> 'access')::INTEGER;
+    END LOOP;
+
+    -- Effective scope: any grant without a scope grants the whole object,
+    -- so the merged scope is NULL. Otherwise union the keys of every
+    -- grant's scope object.
+    v_any_unbounded := v_direct;
+    v_eff_scope := NULL;
+    IF NOT v_any_unbounded THEN
+        FOR v_grant_obj IN SELECT * FROM jsonb_array_elements(v_grants) LOOP
+            IF (v_grant_obj -> 'scope') IS NULL OR jsonb_typeof(v_grant_obj -> 'scope') = 'null' THEN
+                v_any_unbounded := TRUE;
+                EXIT;
+            END IF;
+        END LOOP;
+    END IF;
+    IF NOT v_any_unbounded THEN
+        v_eff_scope := '{}'::jsonb;
+        FOR v_grant_obj IN SELECT * FROM jsonb_array_elements(v_grants) LOOP
+            v_eff_scope := v_eff_scope || coalesce(v_grant_obj -> 'scope', '{}'::jsonb);
+        END LOOP;
     END IF;
 
     -- Pull denormalized fields
@@ -890,17 +919,18 @@ BEGIN
 
     INSERT INTO claimius.user_object (
         id, app_id, user_id, object_id, object_type,
-        sa_access_level, grants, direct_grant,
+        sa_access, scope, grants, direct_grant,
         sa_owner_id, sa_location_id, sa_root_id,
         sa_name, sa_description, sa_link, search_vector
     ) VALUES (
                  v_id, p_app_id, p_user_id, p_object_id, p_object_type,
-                 v_eff_level, v_grants, v_direct,
+                 v_eff_access, v_eff_scope, v_grants, v_direct,
                  v_norm.sa_owner_id, v_norm.sa_location_id, v_norm.sa_root_id,
                  v_norm.sa_name, v_norm.sa_description, v_norm.sa_link, v_search_vec
              )
     ON CONFLICT (id) DO UPDATE SET
-                                   sa_access_level = EXCLUDED.sa_access_level,
+                                   sa_access = EXCLUDED.sa_access,
+                                   scope = EXCLUDED.scope,
                                    grants = EXCLUDED.grants,
                                    direct_grant = EXCLUDED.direct_grant,
                                    sa_owner_id = EXCLUDED.sa_owner_id,

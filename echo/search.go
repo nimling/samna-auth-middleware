@@ -39,7 +39,7 @@ func GetSearch(ctx echo.Context) error {
 	}
 
 	if debugUserID := getDebugUserID(); debugUserID != nil {
-		results, err := db.Instance().Search(ctx.Request().Context(), *debugUserID, query, objectTypes, db.ACCESS_LEVEL_GUEST, limit, offset)
+		results, err := db.Instance().Search(ctx.Request().Context(), *debugUserID, query, objectTypes, db.ACCESS_NONE, limit, offset)
 		if err != nil {
 			ctx.Logger().Errorf("GetSearch: %v", err)
 			return respondError(ctx, http.StatusInternalServerError, "Internal server error")

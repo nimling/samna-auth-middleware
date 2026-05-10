@@ -64,7 +64,7 @@ func GetMeClaims(ctx echo.Context) error {
 
 	if getDebugUserID() != nil {
 		relations := db.ParseWithRelations(ctx.QueryParam("with"), db.ClaimRelations())
-		claims, err := db.Instance().GetClaims(ctx.Request().Context(), userID, db.ACCESS_LEVEL_GUEST, relations...)
+		claims, err := db.Instance().GetClaims(ctx.Request().Context(), userID, db.ACCESS_NONE, relations...)
 		if err != nil {
 			ctx.Logger().Errorf("GetMeClaims: %v", err)
 			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
@@ -107,7 +107,7 @@ func GetMeOrganizations(ctx echo.Context) error {
 
 	if getDebugUserID() != nil {
 		relations := db.ParseWithRelations(ctx.QueryParam("with"), db.OrganizationRelations())
-		orgs, err := db.Instance().GetOrganizations(ctx.Request().Context(), userID, db.ACCESS_LEVEL_GUEST, relations...)
+		orgs, err := db.Instance().GetOrganizations(ctx.Request().Context(), userID, db.ACCESS_NONE, relations...)
 		if err != nil {
 			ctx.Logger().Errorf("GetMeOrganizations: %v", err)
 			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
@@ -129,7 +129,7 @@ func GetMeLocations(ctx echo.Context) error {
 
 	if getDebugUserID() != nil {
 		relations := db.ParseWithRelations(ctx.QueryParam("with"), db.LocationRelations())
-		locs, err := db.Instance().GetLocations(ctx.Request().Context(), userID, db.ACCESS_LEVEL_MEMBER, relations...)
+		locs, err := db.Instance().GetLocations(ctx.Request().Context(), userID, db.ACCESS_READ, relations...)
 		if err != nil {
 			ctx.Logger().Errorf("GetMeLocations: %v", err)
 			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
