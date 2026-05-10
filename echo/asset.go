@@ -195,11 +195,12 @@ func DeleteAsset(ctx echo.Context) error {
 	}
 
 	if getDebugUserID() != nil {
-		if err := db.Instance().DeleteAsset(ctx.Request().Context(), assetID); err != nil {
+		asset, err := db.Instance().DeleteAsset(ctx.Request().Context(), assetID)
+		if err != nil {
 			ctx.Logger().Errorf("DeleteAsset: %v", err)
 			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 		}
-		return ctx.NoContent(http.StatusOK)
+		return respondJSON(ctx, http.StatusOK, asset, 0)
 	}
 
 	result, err := client.DeleteAsset(ctx.Request().Context(), assetID)

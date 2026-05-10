@@ -86,12 +86,12 @@ func (d *DB) GetRelation(ctx context.Context, userID uuid.UUID, objectID uuid.UU
 }
 
 func (d *DB) PostRelation(ctx context.Context, in *UserRelation) error {
-	q := d.NewInsert().
+	_, err := d.NewInsert().
 		Model(in).
 		ExcludeColumn("id", "sa_created_at", "sa_updated_at", "sa_deleted_at").
 		Value("app_id", "claimius.get_disciple_app_id()").
-		Returning("*")
-	_, err := q.Exec(ctx)
+		Returning("*").
+		Exec(ctx, in)
 	return err
 }
 
@@ -102,18 +102,24 @@ func (d *DB) PutRelation(ctx context.Context, relationID uuid.UUID, in *UserRela
 		Where("sa_deleted_at IS NULL").
 		ExcludeColumn("app_id").
 		OmitZero().
-		Exec(ctx)
+		Returning("*").
+		Exec(ctx, in)
 	return err
 }
 
-func (d *DB) DeleteRelation(ctx context.Context, relationID uuid.UUID) error {
+func (d *DB) DeleteRelation(ctx context.Context, relationID uuid.UUID) (*UserRelation, error) {
+	var relation UserRelation
 	_, err := d.NewUpdate().
-		Model((*UserRelation)(nil)).
+		Model(&relation).
 		Where("id = ?", relationID).
 		Where("sa_deleted_at IS NULL").
 		Set("sa_deleted_at = NOW()").
-		Exec(ctx)
-	return err
+		Returning("*").
+		Exec(ctx, &relation)
+	if err != nil {
+		return nil, err
+	}
+	return &relation, nil
 }
 
 func (d *DB) PostUser(ctx context.Context, in SamnaUser) (*SamnaUser, error) {
@@ -134,18 +140,24 @@ func (d *DB) PutUser(ctx context.Context, userID uuid.UUID, user *SamnaUser) err
 		Where("sa_deleted_at IS NULL").
 		Value("app_id", "claimius.get_disciple_app_id()").
 		OmitZero().
-		Exec(ctx)
+		Returning("*").
+		Exec(ctx, user)
 	return err
 }
 
-func (d *DB) DeleteUser(ctx context.Context, userID uuid.UUID) error {
+func (d *DB) DeleteUser(ctx context.Context, userID uuid.UUID) (*SamnaUser, error) {
+	var user SamnaUser
 	_, err := d.NewUpdate().
-		Model((*SamnaUser)(nil)).
+		Model(&user).
 		Where("user_id = ?", userID).
 		Where("sa_deleted_at IS NULL").
 		Set("sa_deleted_at = NOW()").
-		Exec(ctx)
-	return err
+		Returning("*").
+		Exec(ctx, &user)
+	if err != nil {
+		return nil, err
+	}
+	return &user, nil
 }
 
 func (d *DB) GetUserAudit(ctx context.Context, userID uuid.UUID) ([]Audit, error) {

@@ -251,11 +251,12 @@ func DeleteUser(ctx echo.Context) error {
 	}
 
 	if getDebugUserID() != nil {
-		if err := db.Instance().DeleteUser(ctx.Request().Context(), userID); err != nil {
+		user, err := db.Instance().DeleteUser(ctx.Request().Context(), userID)
+		if err != nil {
 			ctx.Logger().Errorf("DeleteUser: %v", err)
 			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 		}
-		return ctx.NoContent(http.StatusOK)
+		return respondJSON(ctx, http.StatusOK, user, 0)
 	}
 
 	result, err := client.DeleteUser(ctx.Request().Context(), userID)

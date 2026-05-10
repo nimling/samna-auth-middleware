@@ -54,7 +54,7 @@ func (d *DB) PostAsset(ctx context.Context, asset *Asset) error {
 		Model(asset).
 		ExcludeColumn("id", "sa_created_at", "sa_updated_at", "sa_deleted_at").
 		Returning("*").
-		Exec(ctx)
+		Exec(ctx, asset)
 	return err
 }
 
@@ -64,16 +64,22 @@ func (d *DB) PutAsset(ctx context.Context, assetID uuid.UUID, asset *Asset) erro
 		Where("id = ?", assetID).
 		Where("sa_deleted_at IS NULL").
 		OmitZero().
-		Exec(ctx)
+		Returning("*").
+		Exec(ctx, asset)
 	return err
 }
 
-func (d *DB) DeleteAsset(ctx context.Context, assetID uuid.UUID) error {
+func (d *DB) DeleteAsset(ctx context.Context, assetID uuid.UUID) (*Asset, error) {
+	var asset Asset
 	_, err := d.NewUpdate().
-		Model((*Asset)(nil)).
+		Model(&asset).
 		Set("sa_deleted_at = NOW()").
 		Where("id = ?", assetID).
 		Where("sa_deleted_at IS NULL").
-		Exec(ctx)
-	return err
+		Returning("*").
+		Exec(ctx, &asset)
+	if err != nil {
+		return nil, err
+	}
+	return &asset, nil
 }

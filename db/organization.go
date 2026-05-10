@@ -89,14 +89,19 @@ func (d *DB) PutOrganization(ctx context.Context, orgID uuid.UUID, org *Organiza
 	return err
 }
 
-func (d *DB) DeleteOrganization(ctx context.Context, orgID uuid.UUID) error {
+func (d *DB) DeleteOrganization(ctx context.Context, orgID uuid.UUID) (*Organization, error) {
+	var org Organization
 	_, err := d.NewUpdate().
-		Model((*Organization)(nil)).
+		Model(&org).
 		Where("id = ?", orgID).
 		Where("sa_deleted_at IS NULL").
 		Set("sa_deleted_at = NOW()").
-		Exec(ctx)
-	return err
+		Returning("*").
+		Exec(ctx, &org)
+	if err != nil {
+		return nil, err
+	}
+	return &org, nil
 }
 
 func (d *DB) GetOrganizationAudit(ctx context.Context, orgID uuid.UUID) ([]Audit, error) {

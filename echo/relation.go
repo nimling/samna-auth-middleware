@@ -171,11 +171,12 @@ func DeleteRelation(ctx echo.Context) error {
 	}
 
 	if getDebugUserID() != nil {
-		if err := db.Instance().DeleteRelation(ctx.Request().Context(), relationID); err != nil {
+		relation, err := db.Instance().DeleteRelation(ctx.Request().Context(), relationID)
+		if err != nil {
 			ctx.Logger().Errorf("DeleteRelation: %v", err)
 			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 		}
-		return ctx.NoContent(http.StatusOK)
+		return respondJSON(ctx, http.StatusOK, relation, 1)
 	}
 
 	result, err := client.DeleteRelation(ctx.Request().Context(), relationID)

@@ -321,11 +321,12 @@ func DeleteOrganization(ctx echo.Context) error {
 				return respondError(ctx, http.StatusForbidden, "Forbidden")
 			}
 		}
-		if err := db.Instance().DeleteOrganization(ctx.Request().Context(), orgID); err != nil {
+		org, err := db.Instance().DeleteOrganization(ctx.Request().Context(), orgID)
+		if err != nil {
 			ctx.Logger().Errorf("DeleteOrganization: %v", err)
 			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 		}
-		return ctx.NoContent(http.StatusOK)
+		return respondJSON(ctx, http.StatusOK, org, 0)
 	}
 
 	result, err := client.DeleteOrganization(ctx.Request().Context(), orgID)

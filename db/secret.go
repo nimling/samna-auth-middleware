@@ -75,7 +75,7 @@ func (d *DB) PostSecret(ctx context.Context, body BodySecret, ownerID, createdBy
 			ExcludeColumn("id", "sa_created_at", "sa_updated_at", "sa_deleted_at").
 			Value("app_id", "claimius.get_disciple_app_id()").
 			Returning("*").
-			Exec(ctx); err != nil {
+			Exec(ctx, &secret); err != nil {
 			return fmt.Errorf("insert secret: %w", err)
 		}
 		if _, err := tx.NewRaw(`
@@ -134,21 +134,26 @@ func (d *DB) PutSecret(ctx context.Context, secretID uuid.UUID, body BodySecret)
 		OmitZero().
 		ExcludeColumn("app_id").
 		Returning("*").
-		Exec(ctx)
+		Exec(ctx, secret)
 	if err != nil {
 		return nil, fmt.Errorf("update secret: %w", err)
 	}
 	return secret, nil
 }
 
-func (d *DB) DeleteSecret(ctx context.Context, secretID uuid.UUID) error {
+func (d *DB) DeleteSecret(ctx context.Context, secretID uuid.UUID) (*SamnaSecret, error) {
+	var secret SamnaSecret
 	_, err := d.NewUpdate().
-		Model((*SamnaSecret)(nil)).
+		Model(&secret).
 		Where("id = ?", secretID).
 		Where("sa_deleted_at IS NULL").
 		Set("sa_deleted_at = NOW()").
-		Exec(ctx)
-	return err
+		Returning("*").
+		Exec(ctx, &secret)
+	if err != nil {
+		return nil, err
+	}
+	return &secret, nil
 }
 
 func (d *DB) ResolveSecret(ctx context.Context, secretID uuid.UUID) (string, error) {

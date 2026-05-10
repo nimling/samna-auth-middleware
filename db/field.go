@@ -57,7 +57,7 @@ func (d *DB) PostObjectField(ctx context.Context, field *ObjectField) error {
 		ExcludeColumn("id", "sa_created_at", "sa_updated_at", "sa_deleted_at").
 		Value("app_id", "claimius.get_disciple_app_id()").
 		Returning("*").
-		Exec(ctx)
+		Exec(ctx, field)
 	return err
 }
 
@@ -67,18 +67,24 @@ func (d *DB) PutObjectField(ctx context.Context, fieldID uuid.UUID, field *Objec
 		Where("id = ?", fieldID).
 		Where("sa_deleted_at IS NULL").
 		OmitZero().
-		Exec(ctx)
+		Returning("*").
+		Exec(ctx, field)
 	return err
 }
 
-func (d *DB) DeleteObjectField(ctx context.Context, fieldID uuid.UUID) error {
+func (d *DB) DeleteObjectField(ctx context.Context, fieldID uuid.UUID) (*ObjectField, error) {
+	var field ObjectField
 	_, err := d.NewUpdate().
-		Model((*ObjectField)(nil)).
+		Model(&field).
 		Where("id = ?", fieldID).
 		Set("sa_deleted_at = NOW()").
 		Where("sa_deleted_at IS NULL").
-		Exec(ctx)
-	return err
+		Returning("*").
+		Exec(ctx, &field)
+	if err != nil {
+		return nil, err
+	}
+	return &field, nil
 }
 
 func (d *DB) PostUserField(ctx context.Context, field *UserField) error {
@@ -87,7 +93,7 @@ func (d *DB) PostUserField(ctx context.Context, field *UserField) error {
 		ExcludeColumn("id", "sa_created_at", "sa_updated_at", "sa_deleted_at").
 		Value("app_id", "claimius.get_disciple_app_id()").
 		Returning("*").
-		Exec(ctx)
+		Exec(ctx, field)
 	return err
 }
 
@@ -97,16 +103,22 @@ func (d *DB) PutUserField(ctx context.Context, valueID uuid.UUID, field *UserFie
 		Where("id = ?", valueID).
 		Where("sa_deleted_at IS NULL").
 		OmitZero().
-		Exec(ctx)
+		Returning("*").
+		Exec(ctx, field)
 	return err
 }
 
-func (d *DB) DeleteUserField(ctx context.Context, valueID uuid.UUID) error {
+func (d *DB) DeleteUserField(ctx context.Context, valueID uuid.UUID) (*UserField, error) {
+	var field UserField
 	_, err := d.NewUpdate().
-		Model((*UserField)(nil)).
+		Model(&field).
 		Where("id = ?", valueID).
 		Where("sa_deleted_at IS NULL").
 		Set("sa_deleted_at = NOW()").
-		Exec(ctx)
-	return err
+		Returning("*").
+		Exec(ctx, &field)
+	if err != nil {
+		return nil, err
+	}
+	return &field, nil
 }

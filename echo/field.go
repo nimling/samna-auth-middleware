@@ -107,11 +107,12 @@ func DeleteObjectField(ctx echo.Context) error {
 	}
 
 	if getDebugUserID() != nil {
-		if err := db.Instance().DeleteObjectField(ctx.Request().Context(), fieldID); err != nil {
+		field, err := db.Instance().DeleteObjectField(ctx.Request().Context(), fieldID)
+		if err != nil {
 			ctx.Logger().Errorf("DeleteObjectField: %v", err)
 			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 		}
-		return ctx.NoContent(http.StatusOK)
+		return respondJSON(ctx, http.StatusOK, field, 0)
 	}
 
 	result, err := client.DeleteObjectField(ctx.Request().Context(), fieldID)
@@ -218,11 +219,12 @@ func DeleteUserField(ctx echo.Context) error {
 	}
 
 	if getDebugUserID() != nil {
-		if err := db.Instance().DeleteUserField(ctx.Request().Context(), valueID); err != nil {
+		field, err := db.Instance().DeleteUserField(ctx.Request().Context(), valueID)
+		if err != nil {
 			ctx.Logger().Errorf("DeleteUserField: %v", err)
 			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 		}
-		return ctx.NoContent(http.StatusOK)
+		return respondJSON(ctx, http.StatusOK, field, 0)
 	}
 
 	result, err := client.DeleteUserField(ctx.Request().Context(), fieldID, valueID)

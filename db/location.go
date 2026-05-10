@@ -89,14 +89,19 @@ func (d *DB) PutLocation(ctx context.Context, locationID uuid.UUID, loc *Locatio
 	return err
 }
 
-func (d *DB) DeleteLocation(ctx context.Context, locationID uuid.UUID) error {
+func (d *DB) DeleteLocation(ctx context.Context, locationID uuid.UUID) (*Location, error) {
+	var loc Location
 	_, err := d.NewUpdate().
-		Model((*Location)(nil)).
+		Model(&loc).
 		Where("id = ?", locationID).
 		Where("sa_deleted_at IS NULL").
 		Set("sa_deleted_at = NOW()").
-		Exec(ctx)
-	return err
+		Returning("*").
+		Exec(ctx, &loc)
+	if err != nil {
+		return nil, err
+	}
+	return &loc, nil
 }
 
 func (d *DB) GetLocationAudit(ctx context.Context, locationID uuid.UUID) ([]Audit, error) {

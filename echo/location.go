@@ -202,11 +202,12 @@ func DeleteLocation(ctx echo.Context) error {
 				return respondError(ctx, http.StatusForbidden, "Forbidden")
 			}
 		}
-		if err := db.Instance().DeleteLocation(ctx.Request().Context(), locationID); err != nil {
+		loc, err := db.Instance().DeleteLocation(ctx.Request().Context(), locationID)
+		if err != nil {
 			ctx.Logger().Errorf("DeleteLocation: %v", err)
 			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 		}
-		return ctx.NoContent(http.StatusOK)
+		return respondJSON(ctx, http.StatusOK, loc, 0)
 	}
 
 	result, err := client.DeleteLocation(ctx.Request().Context(), locationID)

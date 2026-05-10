@@ -229,11 +229,12 @@ func DeleteSecret(ctx echo.Context) error {
 				return respondError(ctx, http.StatusForbidden, "Forbidden")
 			}
 		}
-		if err := db.Instance().DeleteSecret(ctx.Request().Context(), secretID); err != nil {
+		secret, err := db.Instance().DeleteSecret(ctx.Request().Context(), secretID)
+		if err != nil {
 			ctx.Logger().Errorf("DeleteSecret: %v", err)
 			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 		}
-		return ctx.NoContent(http.StatusOK)
+		return respondJSON(ctx, http.StatusOK, secret, 0)
 	}
 
 	body, err := client.DeleteSecret(ctx.Request().Context(), secretID)
