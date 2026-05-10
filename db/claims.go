@@ -55,6 +55,7 @@ func (d *DB) GetClaim(ctx context.Context, userID, claimID uuid.UUID, requiredAc
 	var claim Claim
 	q := d.NewSelect().
 		Model(&claim).
+		Where("sa_deleted_at IS NULL").
 		ExcludeColumn("sa_deleted_at").
 		ExcludeColumn("app_id").
 		Where("claim.id = ?", claimID).
@@ -72,6 +73,7 @@ func (d *DB) GetClaims(ctx context.Context, userID uuid.UUID, requiredAccess Cla
 	claims := make([]Claim, 0)
 	q := d.NewSelect().
 		Model(&claims).
+		Where("sa_deleted_at IS NULL").
 		ExcludeColumn("sa_deleted_at").
 		ExcludeColumn("app_id").
 		Where("claim.id IN (SELECT id FROM claimius.get_claims(?, claimius.get_disciple_app_id(), ?))", userID, requiredAccess)
@@ -132,6 +134,7 @@ func (d *DB) GetObjectClaims(ctx context.Context, userID, objectID uuid.UUID, ob
 	claims := make([]Claim, 0)
 	err := d.NewSelect().
 		Model(&claims).
+		Where("sa_deleted_at IS NULL").
 		ExcludeColumn("sa_deleted_at").
 		ExcludeColumn("app_id").
 		Where("claim.id IN (SELECT id FROM claimius.get_claims(?, claimius.get_disciple_app_id(), ?, ?))", userID, objectID, objectType).
@@ -171,6 +174,7 @@ func (d *DB) PostClaim(ctx context.Context, in Claim) (*Claim, error) {
 	}
 	out := Claim{}
 	if err := d.NewSelect().Model(&out).
+		Where("sa_deleted_at IS NULL").
 		ExcludeColumn("sa_deleted_at").ExcludeColumn("app_id").Where("id = ?", id).Scan(ctx); err != nil {
 		return nil, err
 	}
@@ -186,6 +190,7 @@ func (d *DB) PutClaim(ctx context.Context, claimID uuid.UUID, in Claim) (*Claim,
 	}
 	out := Claim{}
 	if err := d.NewSelect().Model(&out).
+		Where("sa_deleted_at IS NULL").
 		ExcludeColumn("sa_deleted_at").ExcludeColumn("app_id").Where("id = ?", claimID).Scan(ctx); err != nil {
 		return nil, err
 	}
@@ -221,6 +226,7 @@ func (d *DB) PostClaimObject(ctx context.Context, claimID uuid.UUID, in ClaimObj
 	}
 	out := ClaimObject{}
 	if err := d.NewSelect().Model(&out).
+		Where("sa_deleted_at IS NULL").
 		ExcludeColumn("sa_deleted_at").ExcludeColumn("app_id").Where("id = ?", id).Scan(ctx); err != nil {
 		return nil, err
 	}
@@ -249,6 +255,7 @@ func (d *DB) PostClaimUser(ctx context.Context, claimID uuid.UUID, in UserClaim)
 	}
 	out := UserClaim{}
 	if err := d.NewSelect().Model(&out).
+		Where("sa_deleted_at IS NULL").
 		ExcludeColumn("sa_deleted_at").ExcludeColumn("app_id").Where("id = ?", id).Scan(ctx); err != nil {
 		return nil, err
 	}

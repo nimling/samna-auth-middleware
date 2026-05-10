@@ -27,6 +27,7 @@ func (d *DB) GetUsers(ctx context.Context, userID uuid.UUID, requiredAccess Clai
 	users := make([]SamnaUser, 0)
 	err := d.NewSelect().
 		Model(&users).
+		Where("sa_deleted_at IS NULL").
 		ExcludeColumn("sa_deleted_at").
 		ExcludeColumn("app_id").
 		Where(UserWhere(userID, requiredAccess)).

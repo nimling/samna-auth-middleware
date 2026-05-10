@@ -99,7 +99,8 @@ func deleteByTextID(ctx context.Context, tx bun.Tx, model any, id json.RawMessag
 	if err := json.Unmarshal(id, &key); err != nil {
 		return fmt.Errorf("unmarshal id as string: %w", err)
 	}
-	_, err := tx.NewDelete().Model(model).Where("id = ?", key).Exec(ctx)
+	_, err := tx.NewDelete().Model(model).
+		Where("sa_deleted_at IS NULL").Where("id = ?", key).Exec(ctx)
 	return err
 }
 
@@ -462,6 +463,7 @@ func upsertUserUsers(ctx context.Context, tx bun.Tx, raw json.RawMessage) error 
 func UpdateSeq(ctx context.Context, seq int64) error {
 	count, err := db.Instance().NewSelect().ExcludeColumn("app_id").
 		Model((*db.DiscipleState)(nil)).
+		Where("sa_deleted_at IS NULL").
 		ExcludeColumn("sa_deleted_at").
 		Count(ctx)
 	if err != nil {
@@ -480,6 +482,7 @@ func UpdateSeq(ctx context.Context, seq int64) error {
 
 	_, err = db.Instance().NewUpdate().
 		Model((*db.DiscipleState)(nil)).
+		Where("sa_deleted_at IS NULL").
 		Set("last_applied_seq = ?", seq).
 		Set("sa_updated_at = ?", time.Now()).
 		Where("TRUE").
@@ -491,6 +494,7 @@ func GetSeq(ctx context.Context) (int64, error) {
 	var state db.DiscipleState
 	err := db.Instance().NewSelect().ExcludeColumn("app_id").
 		Model(&state).
+		Where("sa_deleted_at IS NULL").
 		ExcludeColumn("sa_deleted_at").
 		Limit(1).
 		Scan(ctx)

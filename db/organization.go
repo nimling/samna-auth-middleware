@@ -27,6 +27,7 @@ func (d *DB) GetOrganizations(ctx context.Context, userID uuid.UUID, requiredAcc
 	orgs := make([]Organization, 0)
 	q := d.NewSelect().
 		Model(&orgs).
+		Where("sa_deleted_at IS NULL").
 		ExcludeColumn("sa_deleted_at").
 		ExcludeColumn("app_id").
 		Where(ObjectWhere(userID, OBJECT_TYPE_ORGANIZATION, requiredAccess))

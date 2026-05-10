@@ -27,6 +27,7 @@ func (d *DB) GetLocations(ctx context.Context, userID uuid.UUID, requiredAccess 
 	locs := make([]Location, 0)
 	q := d.NewSelect().
 		Model(&locs).
+		Where("sa_deleted_at IS NULL").
 		ExcludeColumn("sa_deleted_at").
 		ExcludeColumn("app_id").
 		Where(ObjectWhere(userID, OBJECT_TYPE_LOCATION, requiredAccess))

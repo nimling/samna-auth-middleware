@@ -129,6 +129,7 @@ func (d *DB) PutSecret(ctx context.Context, secretID uuid.UUID, body BodySecret)
 	}
 	_, err = d.NewUpdate().
 		Model(secret).
+		Where("sa_deleted_at IS NULL").
 		Where("id = ?", secretID).
 		OmitZero().
 		ExcludeColumn("app_id").
