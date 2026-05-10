@@ -4,7 +4,6 @@ import (
 	"context"
 
 	"github.com/google/uuid"
-	"github.com/lib/pq"
 )
 
 func (d *DB) GetAccess(ctx context.Context, userID, objectID uuid.UUID, objectType string, requiredAccess ClaimAccess) (*AccessClaim, error) {
@@ -22,10 +21,10 @@ func (d *DB) GetAccess(ctx context.Context, userID, objectID uuid.UUID, objectTy
 	return &claims[0], nil
 }
 
-func (d *DB) GetAccessFunction(ctx context.Context, userID uuid.UUID, function string, requiredAccess ClaimAccess) (*AccessClaim, error) {
+func (d *DB) GetScopeAccess(ctx context.Context, userID uuid.UUID, scopeKey string, requiredAccess ClaimAccess) (*AccessClaim, error) {
 	claims := make([]AccessClaim, 0)
 	err := d.NewSelect().
-		TableExpr("claimius.get_access(?, claimius.get_disciple_app_id(), ?::text, ?) AS claim", userID, function, requiredAccess).
+		TableExpr("claimius.get_access(?, claimius.get_disciple_app_id(), ?::text, ?) AS claim", userID, scopeKey, requiredAccess).
 		Column("claim.*").
 		Scan(ctx, &claims)
 	if err != nil {
@@ -35,30 +34,6 @@ func (d *DB) GetAccessFunction(ctx context.Context, userID uuid.UUID, function s
 		return nil, nil
 	}
 	return &claims[0], nil
-}
-
-func (d *DB) GetFunctions(ctx context.Context, userID uuid.UUID) ([]string, error) {
-	functions := make([]string, 0)
-	err := d.NewRaw(
-		"SELECT * FROM claimius.get_functions(?, claimius.get_disciple_app_id())",
-		userID,
-	).Scan(ctx, &functions)
-	if err != nil {
-		return nil, err
-	}
-	return functions, nil
-}
-
-func (d *DB) HasAnyFunction(ctx context.Context, userID uuid.UUID, functions []string) (bool, error) {
-	var found bool
-	err := d.NewRaw(
-		"SELECT claimius.has_any_function(?, claimius.get_disciple_app_id(), ?)",
-		userID, pq.Array(functions),
-	).Scan(ctx, &found)
-	if err != nil {
-		return false, err
-	}
-	return found, nil
 }
 
 func (d *DB) GetDirectAccess(ctx context.Context, userID, objectID uuid.UUID, objectType string) (*AccessClaim, error) {

@@ -432,10 +432,11 @@ $$ LANGUAGE plpgsql;
 COMMENT ON FUNCTION claimius.get_claims(UUID, UUID, UUID, TEXT) IS 'All claims the user holds against one object.';
 
 -- ----------------------------------------------------------------------------
--- get_access (overload: function form)
--- Resolves the strongest active claim_object binding that grants the named
--- function to the user on this app. Function bindings live on rows with
--- object_id IS NULL; the function name is a key of co.scope.
+-- get_access (overload: scope key form)
+-- Resolves the strongest active claim_object binding the user holds on this
+-- app where the row has no object (object_id IS NULL) and the scope contains
+-- the given key. The key string is freeform; the implementation end decides
+-- what it means.
 --
 -- Returns the same actor token shape as the object form (user_claim_id,
 -- claim_id, sa_access, scope), minus object-bound columns. The caller
@@ -446,7 +447,7 @@ COMMENT ON FUNCTION claimius.get_claims(UUID, UUID, UUID, TEXT) IS 'All claims t
 CREATE OR REPLACE FUNCTION claimius.get_access(
     p_user_id          UUID,
     p_app_id           UUID,
-    p_function         TEXT,
+    p_scope_key        TEXT,
     p_required_access  INTEGER DEFAULT 0
 ) RETURNS TABLE (
                     user_claim_id   UUID,
@@ -479,7 +480,7 @@ BEGIN
           AND (uc.starts_at IS NULL OR uc.starts_at <= now())
           AND (uc.ends_at  IS NULL OR uc.ends_at  >  now())
           AND co.object_id IS NULL
-          AND co.scope ? p_function
+          AND co.scope ? p_scope_key
           AND ((c.sa_access | co.sa_access) & 16) = 0
           AND (((c.sa_access | co.sa_access) & 15) & p_required_access) = p_required_access
         ORDER BY claimius._popcount(((c.sa_access | co.sa_access) & 15)) DESC
@@ -487,92 +488,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius.get_access(UUID, UUID, TEXT, INTEGER) IS 'Strongest active functional binding granting p_function to the user. Returns scope so the caller can read further keys.';
-
--- ----------------------------------------------------------------------------
--- get_functions
--- Returns the function names the calling user can invoke against this app.
--- Function names live as keys in claim_object.scope on bindings whose
--- object_id is NULL. Distinct across all surviving bindings.
--- ----------------------------------------------------------------------------
-
-CREATE OR REPLACE FUNCTION claimius.get_functions(
-    p_user_id   UUID,
-    p_app_id    UUID
-) RETURNS SETOF TEXT AS $$
-BEGIN
-    PERFORM claimius.reconcile_if_pending(p_app_id, p_user_id);
-
-    IF NOT claimius.check_user_active(p_app_id, p_user_id) THEN
-        RETURN;
-    END IF;
-
-    RETURN QUERY
-        SELECT DISTINCT key
-        FROM claimius.user_claim uc
-                 JOIN claimius.claim c ON c.id = uc.claim_id
-                 JOIN claimius.claim_object co
-                      ON co.claim_id = uc.claim_id
-                     AND co.app_id = uc.app_id
-                 CROSS JOIN LATERAL jsonb_object_keys(co.scope) AS key
-        WHERE uc.user_id = p_user_id
-          AND uc.app_id = p_app_id
-          AND uc.sa_deleted_at IS NULL
-          AND c.sa_deleted_at IS NULL
-          AND co.sa_deleted_at IS NULL
-          AND (uc.starts_at IS NULL OR uc.starts_at <= now())
-          AND (uc.ends_at  IS NULL OR uc.ends_at  >  now())
-          AND co.object_id IS NULL
-          AND co.scope     IS NOT NULL
-          AND ((c.sa_access | co.sa_access) & 16) = 0;
-END;
-$$ LANGUAGE plpgsql;
-
-COMMENT ON FUNCTION claimius.get_functions(UUID, UUID) IS 'Distinct function names the calling user can invoke against this app.';
-
--- ----------------------------------------------------------------------------
--- has_any_function
--- True when the user has at least one of p_functions in any active functional
--- scope on this app. Convenience for route gating middleware.
--- ----------------------------------------------------------------------------
-
-CREATE OR REPLACE FUNCTION claimius.has_any_function(
-    p_user_id   UUID,
-    p_app_id    UUID,
-    p_functions TEXT[]
-) RETURNS BOOLEAN AS $$
-DECLARE
-    v_found BOOLEAN;
-BEGIN
-    PERFORM claimius.reconcile_if_pending(p_app_id, p_user_id);
-
-    IF NOT claimius.check_user_active(p_app_id, p_user_id) THEN
-        RETURN FALSE;
-    END IF;
-
-    SELECT EXISTS (
-        SELECT 1
-        FROM claimius.user_claim uc
-                 JOIN claimius.claim c ON c.id = uc.claim_id
-                 JOIN claimius.claim_object co
-                      ON co.claim_id = uc.claim_id
-                     AND co.app_id = uc.app_id
-        WHERE uc.user_id = p_user_id
-          AND uc.app_id = p_app_id
-          AND uc.sa_deleted_at IS NULL
-          AND c.sa_deleted_at IS NULL
-          AND co.sa_deleted_at IS NULL
-          AND (uc.starts_at IS NULL OR uc.starts_at <= now())
-          AND (uc.ends_at  IS NULL OR uc.ends_at  >  now())
-          AND co.object_id IS NULL
-          AND co.scope ?| p_functions
-          AND ((c.sa_access | co.sa_access) & 16) = 0
-    ) INTO v_found;
-    RETURN v_found;
-END;
-$$ LANGUAGE plpgsql;
-
-COMMENT ON FUNCTION claimius.has_any_function(UUID, UUID, TEXT[]) IS 'True when the user has at least one of p_functions in any active functional scope on this app.';
+COMMENT ON FUNCTION claimius.get_access(UUID, UUID, TEXT, INTEGER) IS 'Strongest active object-less binding the user holds whose scope contains p_scope_key and whose mask covers p_required_access. Returns scope so the caller can read further keys.';
 
 -- ----------------------------------------------------------------------------
 -- get_audit
@@ -1470,7 +1386,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius.assign_claim_object IS 'Binds a claim. With (object_type, object_id) the binding targets that object and p_scope keys are field names. Without them the binding is functional and p_scope keys are function names. p_sa_access is a bitwise mask.';
+COMMENT ON FUNCTION claimius.assign_claim_object IS 'Binds a claim. With (object_type, object_id) the binding targets that object and p_scope keys are field names. Without them the binding has no object and p_scope keys are freeform, interpreted by the implementation end. p_sa_access is a bitwise mask.';
 
 -- update_claim_object
 DROP FUNCTION IF EXISTS claimius.update_claim_object(UUID, TEXT, BOOLEAN);

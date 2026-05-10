@@ -350,8 +350,8 @@ CREATE INDEX IF NOT EXISTS idx_user_claim_sa_deleted_at ON claimius.user_claim (
 -- object, polymorphically via (object_type, object_id), and the scope
 -- jsonb keys enumerate field names of the object that the claim covers
 -- (NULL scope means the whole object). With object_id and object_type
--- both NULL the binding targets functional access and the scope jsonb
--- keys enumerate function names.
+-- both NULL the binding has no object and the scope jsonb keys are freeform;
+-- the implementation end decides what the keys mean.
 -- When inherits is true, an object scoped binding cascades through
 -- hierarchy walks.
 CREATE TABLE IF NOT EXISTS claimius.claim_object (
@@ -377,14 +377,14 @@ CREATE TABLE IF NOT EXISTS claimius.claim_object (
                                                      )
 );
 
-COMMENT ON TABLE claimius.claim_object IS 'Binds a claim. With (object_type, object_id) the binding targets that object and scope keys are field names. Without them the binding is functional and scope keys are function names.';
+COMMENT ON TABLE claimius.claim_object IS 'Binds a claim. With (object_type, object_id) the binding targets that object and scope keys are field names. Without them the binding has no object and scope keys are freeform, interpreted by the implementation end.';
 COMMENT ON COLUMN claimius.claim_object.sa_access IS 'Bitwise access mask. Bits: 0x01 owner, 0x02 write, 0x04 read, 0x08 execute, 0x10 deny.';
-COMMENT ON COLUMN claimius.claim_object.scope IS 'Object scoped binding: jsonb keys are field names on the object. NULL means the whole object. Functional binding (object_id IS NULL): jsonb keys are function names. NULL means no functions.';
+COMMENT ON COLUMN claimius.claim_object.scope IS 'Object scoped binding: jsonb keys are field names on the object. NULL means the whole object. Object-less binding (object_id IS NULL): jsonb keys are freeform, interpreted by the implementation end. NULL means the binding grants nothing.';
 
 CREATE INDEX IF NOT EXISTS idx_claim_object_app_id ON claimius.claim_object (app_id);
 CREATE INDEX IF NOT EXISTS idx_claim_object_claim_id ON claimius.claim_object (claim_id);
 CREATE INDEX IF NOT EXISTS idx_claim_object_object ON claimius.claim_object (object_type, object_id) WHERE object_id IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_claim_object_function ON claimius.claim_object (claim_id) WHERE object_id IS NULL AND sa_deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_claim_object_no_object ON claimius.claim_object (claim_id) WHERE object_id IS NULL AND sa_deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_claim_object_sa_owner_id ON claimius.claim_object (sa_owner_id);
 CREATE INDEX IF NOT EXISTS idx_claim_object_sa_deleted_at ON claimius.claim_object (sa_deleted_at);
 CREATE INDEX IF NOT EXISTS idx_claim_object_lookup
