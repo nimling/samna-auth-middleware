@@ -85,16 +85,15 @@ func (d *DB) GetClaims(ctx context.Context, userID uuid.UUID, requiredAccess Cla
 	return claims, nil
 }
 
-func (d *DB) GetClaimAudit(ctx context.Context, claimID uuid.UUID) ([]Audit, error) {
+func (d *DB) GetClaimAudit(ctx context.Context, actorID, claimID uuid.UUID, requiredAccess ClaimAccess) ([]Audit, error) {
 	audits := make([]Audit, 0)
 	err := d.NewSelect().
-		Model(&audits).
-		ExcludeColumn("sa_deleted_at").
-		ExcludeColumn("app_id").
-		Where("object_type = ?", OBJECT_TYPE_CLAIM).
-		Where("object_id = ?", claimID).
-		OrderExpr("sa_created_at DESC").
-		Scan(ctx)
+		TableExpr("claimius.get_audit(?, claimius.get_disciple_app_id(), ?) AS audit", actorID, requiredAccess).
+		Column("audit.*").
+		Where("audit.object_type = ?", OBJECT_TYPE_CLAIM).
+		Where("audit.object_id = ?", claimID).
+		OrderExpr("audit.sa_created_at DESC").
+		Scan(ctx, &audits)
 	if err != nil {
 		return nil, err
 	}

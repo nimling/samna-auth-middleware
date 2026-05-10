@@ -9,6 +9,7 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/nimling/samna-auth-middleware/client"
 	"github.com/nimling/samna-auth-middleware/db"
+	"github.com/nimling/samna-auth-middleware/middleware"
 	"github.com/uptrace/bun"
 )
 
@@ -185,12 +186,13 @@ func GetClaimAudit(ctx echo.Context) error {
 	}
 
 	if getDebugUserID() != nil {
-		results, err := db.Instance().GetClaimAudit(ctx.Request().Context(), claimID)
+		actorID := ctx.Get(middleware.UserIDKey).(uuid.UUID)
+		results, err := db.Instance().GetClaimAudit(ctx.Request().Context(), actorID, claimID, db.ACCESS_READ)
 		if err != nil {
 			ctx.Logger().Errorf("GetClaimAudit: %v", err)
 			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 		}
-		return respondJSON(ctx, http.StatusOK, results, 0)
+		return respondJSON(ctx, http.StatusOK, results, len(results))
 	}
 
 	body, err := client.GetClaimAudit(ctx.Request().Context(), claimID)

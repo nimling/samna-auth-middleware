@@ -104,16 +104,15 @@ func (d *DB) DeleteLocation(ctx context.Context, locationID uuid.UUID) (*Locatio
 	return &loc, nil
 }
 
-func (d *DB) GetLocationAudit(ctx context.Context, locationID uuid.UUID) ([]Audit, error) {
+func (d *DB) GetLocationAudit(ctx context.Context, actorID, locationID uuid.UUID, requiredAccess ClaimAccess) ([]Audit, error) {
 	audits := make([]Audit, 0)
 	err := d.NewSelect().
-		Model(&audits).
-		ExcludeColumn("sa_deleted_at").
-		Where("object_id = ?", locationID).
-		Where("object_type = ?", OBJECT_TYPE_LOCATION).
-		ExcludeColumn("app_id").
-		OrderExpr("sa_created_at DESC").
-		Scan(ctx)
+		TableExpr("claimius.get_audit(?, claimius.get_disciple_app_id(), ?) AS audit", actorID, requiredAccess).
+		Column("audit.*").
+		Where("audit.object_id = ?", locationID).
+		Where("audit.object_type = ?", OBJECT_TYPE_LOCATION).
+		OrderExpr("audit.sa_created_at DESC").
+		Scan(ctx, &audits)
 	if err != nil {
 		return nil, err
 	}

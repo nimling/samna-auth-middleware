@@ -172,12 +172,12 @@ func GetMeAudit(ctx echo.Context) error {
 	userID := ctx.Get(middleware.UserIDKey).(uuid.UUID)
 
 	if getDebugUserID() != nil {
-		audits, err := db.Instance().GetUserAudit(ctx.Request().Context(), userID)
+		audits, err := db.Instance().GetUserAudit(ctx.Request().Context(), userID, userID, db.ACCESS_READ)
 		if err != nil {
 			ctx.Logger().Errorf("GetMeAudit: %v", err)
 			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 		}
-		return respondJSON(ctx, http.StatusOK, audits, 0)
+		return respondJSON(ctx, http.StatusOK, audits, len(audits))
 	}
 
 	body, err := client.GetUserAudit(ctx.Request().Context(), userID)
