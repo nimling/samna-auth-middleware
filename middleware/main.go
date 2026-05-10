@@ -21,7 +21,7 @@ func UserAuthMiddleware(opts *UserAuthOptions) echo.MiddlewareFunc {
 	config := configFromUserAuthOptions(opts)
 
 	if config.AuthorizedUserID != nil {
-		if err := ensureDebugUser(context.Background(), *config.AuthorizedUserID); err != nil {
+		if err := ensureDebugUser(context.Background(), *config.AuthorizedUserID, config.DebugClientSecret); err != nil {
 			panic(fmt.Errorf("ensure debug user: %w", err))
 		}
 		return func(next echo.HandlerFunc) echo.HandlerFunc {
@@ -34,7 +34,7 @@ func UserAuthMiddleware(opts *UserAuthOptions) echo.MiddlewareFunc {
 
 	if db.IsDebugMode() {
 		if config.DebugClientID != nil {
-			if err := ensureDebugUser(context.Background(), *config.DebugClientID); err != nil {
+			if err := ensureDebugUser(context.Background(), *config.DebugClientID, config.DebugClientSecret); err != nil {
 				panic(fmt.Errorf("ensure debug user: %w", err))
 			}
 		}

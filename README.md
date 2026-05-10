@@ -100,7 +100,7 @@ e.Use(middleware.Auth(&middleware.AuthOptions{
 
 ### Combined Authentication
 
-`Auth` chains user and client authentication. If client headers (`SAuth-Client-Key`, `SAuth-Client-Secret`) are present and no `Authorization` header exists, the request is authenticated as a client. Otherwise it falls through to user authentication.
+`Auth` chains user and client authentication. Client credentials are read per OAuth 2.1: `Authorization: Basic base64(client_id:client_secret)` or form fields `client_id` and `client_secret`. Bearer tokens take precedence; if no bearer token is present, client credentials are evaluated.
 
 ```go
 e.Use(middleware.Auth(nil))

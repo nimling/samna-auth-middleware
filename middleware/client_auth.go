@@ -1,9 +1,11 @@
 package middleware
 
 import (
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
@@ -37,37 +39,49 @@ func ClientAuthMiddleware() echo.MiddlewareFunc {
 }
 
 func authenticateClient(ctx echo.Context, debugID *uuid.UUID, debugSecret string) error {
-	keyHeader := ctx.Request().Header.Get("SAuth-Client-Key")
-	secretHeader := ctx.Request().Header.Get("SAuth-Client-Secret")
-
-	if keyHeader == "" || secretHeader == "" {
+	clientID, clientSecret := readClientCredentials(ctx)
+	if clientID == "" || clientSecret == "" {
 		return ErrorCredentialMissing
 	}
 
 	if debugID != nil && debugSecret != "" {
-		if keyHeader == debugID.String() && secretHeader == debugSecret {
+		if clientID == debugID.String() && clientSecret == debugSecret {
 			ctx.Set(UserIDKey, *debugID)
 			return nil
 		}
 		return fmt.Errorf("debug client bypass mismatch: %w", ErrorUnauthorized)
 	}
 
-	clientKey, err := uuid.Parse(keyHeader)
+	clientUUID, err := uuid.Parse(clientID)
 	if err != nil {
-		return fmt.Errorf("parse client key: %w: %w", err, ErrorUnauthorized)
+		return fmt.Errorf("parse client_id: %w: %w", err, ErrorUnauthorized)
 	}
 
-	samnaClient, err := db.Instance().GetClient(ctx.Request().Context(), clientKey)
+	samnaClient, err := db.Instance().GetClient(ctx.Request().Context(), clientUUID)
 	if err != nil {
 		return fmt.Errorf("lookup client: %w: %w", err, ErrorUnauthorized)
 	}
 
-	if err := bcrypt.CompareHashAndPassword([]byte(samnaClient.SecretHash), []byte(secretHeader)); err != nil {
-		return fmt.Errorf("verify client secret: %w: %w", err, ErrorUnauthorized)
+	if err := bcrypt.CompareHashAndPassword([]byte(samnaClient.SecretHash), []byte(clientSecret)); err != nil {
+		return fmt.Errorf("verify client_secret: %w: %w", err, ErrorUnauthorized)
 	}
 
-	ctx.Set(UserIDKey, samnaClient.ID)
+	ctx.Set(UserIDKey, samnaClient.ClientID)
 	return nil
+}
+
+func readClientCredentials(ctx echo.Context) (string, string) {
+	auth := ctx.Request().Header.Get(echo.HeaderAuthorization)
+	if strings.HasPrefix(auth, "Basic ") {
+		payload, err := base64.StdEncoding.DecodeString(strings.TrimPrefix(auth, "Basic "))
+		if err == nil {
+			parts := strings.SplitN(string(payload), ":", 2)
+			if len(parts) == 2 {
+				return parts[0], parts[1]
+			}
+		}
+	}
+	return ctx.FormValue("client_id"), ctx.FormValue("client_secret")
 }
 
 func forwardUserToken(ctx echo.Context) error {
