@@ -1,6 +1,7 @@
 package db
 
 import (
+	"database/sql/driver"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -28,6 +29,13 @@ func QualifyObjectTypeWith(s string, defaultSchema string) string {
 
 func (o ObjectType) MarshalJSON() ([]byte, error) {
 	return json.Marshal(StripObjectSchema(string(o)))
+}
+
+func (o ObjectType) Value() (driver.Value, error) {
+	if o == "" {
+		return nil, nil
+	}
+	return string(o), nil
 }
 
 func (o *ObjectType) UnmarshalJSON(data []byte) error {
