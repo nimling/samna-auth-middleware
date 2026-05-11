@@ -190,13 +190,11 @@ func (d *DB) DeleteUser(ctx context.Context, ac *AccessClaim, userID uuid.UUID) 
 	return &user, nil
 }
 
-func (d *DB) GetUserAudit(ctx context.Context, actorID, targetUserID uuid.UUID, requiredAccess ClaimAccess) ([]Audit, error) {
+func (d *DB) GetUserAudit(ctx context.Context, userID uuid.UUID, requiredAccess ClaimAccess) ([]Audit, error) {
 	audits := make([]Audit, 0)
 	err := d.NewSelect().
-		TableExpr("claimius.get_audit(?, claimius.get_disciple_app_id(), ?) AS audit", actorID, requiredAccess).
+		TableExpr("claimius.get_audit(?, claimius.get_disciple_app_id(), ?) AS audit", userID, requiredAccess).
 		Column("audit.*").
-		Where("audit.object_id = ?", targetUserID).
-		Where("audit.object_type = ?", OBJECT_TYPE_USER).
 		OrderExpr("audit.sa_created_at DESC").
 		Scan(ctx, &audits)
 	if err != nil {

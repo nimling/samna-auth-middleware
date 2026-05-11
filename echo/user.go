@@ -71,10 +71,44 @@ func GetUserAudit(ctx echo.Context) error {
 	if err != nil {
 		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
+	rctx := ctx.Request().Context()
+	actorID := ctx.Get(middleware.UserIDKey).(uuid.UUID)
 
 	if db.GetDebugMode() != db.DebugModeNone {
-		userID := ctx.Get(middleware.UserIDKey).(uuid.UUID)
-		audits, err := db.Instance().GetUserAudit(ctx.Request().Context(), userID, targetUserID, db.ACCESS_READ)
+		ac, err := db.Instance().MutationAccess(rctx, actorID, targetUserID, db.OBJECT_TYPE_USER, db.ACCESS_OWNER)
+		if err != nil && !errors.Is(err, db.ErrNoAccess) {
+			ctx.Logger().Errorf("GetUserAudit MutationAccess user: %v", err)
+			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
+		}
+		if ac == nil {
+			orgIDs := make([]uuid.UUID, 0)
+			err = db.Instance().NewSelect().
+				Table("claimius.user_claim").
+				ColumnExpr("DISTINCT sa_owner_id").
+				Where("user_id = ?", targetUserID).
+				Where("app_id = claimius.get_disciple_app_id()").
+				Where("sa_deleted_at IS NULL").
+				Scan(rctx, &orgIDs)
+			if err != nil {
+				ctx.Logger().Errorf("GetUserAudit user_claim scan: %v", err)
+				return respondError(ctx, http.StatusInternalServerError, "Internal server error")
+			}
+			for _, orgID := range orgIDs {
+				ac, err = db.Instance().MutationAccess(rctx, actorID, orgID, db.OBJECT_TYPE_ORGANIZATION, db.ACCESS_OWNER)
+				if err != nil && !errors.Is(err, db.ErrNoAccess) {
+					ctx.Logger().Errorf("GetUserAudit MutationAccess organization: %v", err)
+					return respondError(ctx, http.StatusInternalServerError, "Internal server error")
+				}
+				if ac != nil {
+					break
+				}
+			}
+			if ac == nil {
+				return respondError(ctx, http.StatusForbidden, "Forbidden")
+			}
+		}
+
+		audits, err := db.Instance().GetUserAudit(rctx, targetUserID, db.ACCESS_READ)
 		if err != nil {
 			ctx.Logger().Errorf("GetUserAudit: %v", err)
 			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
@@ -82,7 +116,7 @@ func GetUserAudit(ctx echo.Context) error {
 		return respondJSON(ctx, http.StatusOK, audits, len(audits))
 	}
 
-	body, err := client.GetUserAudit(ctx.Request().Context(), targetUserID)
+	body, err := client.GetUserAudit(rctx, targetUserID)
 	if err != nil {
 		ctx.Logger().Errorf("GetUserAudit: %v", err)
 		return respondError(ctx, http.StatusInternalServerError, "Internal server error")

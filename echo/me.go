@@ -227,7 +227,7 @@ func GetMeAudit(ctx echo.Context) error {
 	userID := ctx.Get(middleware.UserIDKey).(uuid.UUID)
 
 	if db.GetDebugMode() != db.DebugModeNone {
-		audits, err := db.Instance().GetUserAudit(ctx.Request().Context(), userID, userID, db.ACCESS_READ)
+		audits, err := db.Instance().GetUserAudit(ctx.Request().Context(), userID, db.ACCESS_READ)
 		if err != nil {
 			ctx.Logger().Errorf("GetMeAudit: %v", err)
 			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
