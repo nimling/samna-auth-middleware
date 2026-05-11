@@ -734,25 +734,32 @@ BEGIN
     v_schema := v_parts[1];
     v_table := v_parts[2];
 
-    -- pull the row's sa_created_by
-    v_sql := format('SELECT sa_created_by FROM %I.%I WHERE id = $1 AND sa_deleted_at IS NULL', v_schema, v_table);
-    EXECUTE v_sql INTO v_creator_uc_id USING p_object_id;
-
-    IF v_creator_uc_id IS NULL THEN
-        RETURN FALSE;
-    END IF;
-
-    -- bootstrap path: sa_created_by may be a samna_user.user_id during init
-    -- (no user_claim exists yet). Match directly first.
-    IF v_creator_uc_id = p_user_id THEN
-        -- still need to check for deny at level 0
-    ELSE
-        SELECT uc.user_id, uc.app_id INTO v_creator_user, v_creator_app
-        FROM claimius.user_claim uc
-        WHERE uc.id = v_creator_uc_id AND uc.sa_deleted_at IS NULL;
-
-        IF v_creator_user IS NULL OR v_creator_user <> p_user_id OR v_creator_app <> p_app_id THEN
+    IF p_object_type = 'claimius.samna_user' THEN
+        IF NOT EXISTS (
+            SELECT 1 FROM claimius.samna_user
+            WHERE id = p_object_id
+              AND user_id = p_user_id
+              AND app_id = p_app_id
+              AND sa_deleted_at IS NULL
+        ) THEN
             RETURN FALSE;
+        END IF;
+    ELSE
+        v_sql := format('SELECT sa_created_by FROM %I.%I WHERE id = $1 AND sa_deleted_at IS NULL', v_schema, v_table);
+        EXECUTE v_sql INTO v_creator_uc_id USING p_object_id;
+
+        IF v_creator_uc_id IS NULL THEN
+            RETURN FALSE;
+        END IF;
+
+        IF v_creator_uc_id <> p_user_id THEN
+            SELECT uc.user_id, uc.app_id INTO v_creator_user, v_creator_app
+            FROM claimius.user_claim uc
+            WHERE uc.id = v_creator_uc_id AND uc.sa_deleted_at IS NULL;
+
+            IF v_creator_user IS NULL OR v_creator_user <> p_user_id OR v_creator_app <> p_app_id THEN
+                RETURN FALSE;
+            END IF;
         END IF;
     END IF;
 

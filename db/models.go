@@ -141,7 +141,7 @@ type SamnaUser struct {
 	Email      string           `bun:"email" json:"email"`
 	ExternalID *string          `bun:"external_id" json:"external_id,omitempty"`
 	Status     *string          `bun:"status,default:'active'" json:"status"`
-	Type       *string          `bun:"type,default:'user'" json:"type"`
+	Type       *string          `bun:"type,default:'user'" json:"-"`
 	Config    *json.RawMessage `bun:"config" json:"config,omitzero"`
 	DeletedAt *time.Time       `bun:"sa_deleted_at" json:"deleted_at,omitzero"`
 	CreatedAt time.Time        `bun:"sa_created_at,default:now()" json:"created_at"`
