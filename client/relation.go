@@ -30,72 +30,68 @@ func GetRelation(ctx context.Context, relationID uuid.UUID) (io.ReadCloser, erro
 	return c.client.Get(ctx, u)
 }
 
-func PostRelation(ctx context.Context, relation db.UserRelation) (db.UserRelation, error) {
-	if getDebugUserID() != nil {
-		if err := db.Instance().PostRelation(ctx, &relation); err != nil {
-			return db.UserRelation{}, err
-		}
-		return relation, nil
-	}
+func PostRelation(ctx context.Context, relation db.UserRelation) (*db.UserRelation, error) {
 	c := newClient()
 	u, err := joinURL(c.apiURL, "relation")
 	if err != nil {
-		return db.UserRelation{}, fmt.Errorf("build url: %w", err)
+		return nil, fmt.Errorf("build url: %w", err)
 	}
 	result, err := DecodeJSON[db.UserRelation](c.client.Post(ctx, requestBody(relation, true), u))
 	if err != nil {
-		return result, err
+		return nil, err
 	}
-	_, err = db.Instance().NewInsert().Model(&result).On("CONFLICT (id) DO UPDATE").Set("sa_updated_at = EXCLUDED.sa_updated_at").Set("sa_deleted_at = EXCLUDED.sa_deleted_at").Exec(ctx)
+	_, err = db.Instance().NewInsert().
+		Model(&result).
+		On("CONFLICT (id) DO UPDATE").
+		Set("sa_updated_at = EXCLUDED.sa_updated_at").
+		Set("sa_deleted_at = EXCLUDED.sa_deleted_at").
+		Exec(ctx)
 	if err != nil {
-		return result, err
+		return nil, err
 	}
-	return result, nil
+	return &result, nil
 }
 
-func PutRelation(ctx context.Context, relationID uuid.UUID, relation db.UserRelation) (db.UserRelation, error) {
-	if getDebugUserID() != nil {
-		if err := db.Instance().PutRelation(ctx, relationID, &relation); err != nil {
-			return db.UserRelation{}, err
-		}
-		return relation, nil
-	}
+func PutRelation(ctx context.Context, relationID uuid.UUID, relation db.UserRelation) (*db.UserRelation, error) {
 	c := newClient()
 	u, err := joinURL(c.apiURL, "relation", relationID.String())
 	if err != nil {
-		return db.UserRelation{}, fmt.Errorf("build url: %w", err)
+		return nil, fmt.Errorf("build url: %w", err)
 	}
 	result, err := DecodeJSON[db.UserRelation](c.client.Put(ctx, requestBody(relation, false), u))
 	if err != nil {
-		return result, err
+		return nil, err
 	}
-	_, err = db.Instance().NewInsert().Model(&result).On("CONFLICT (id) DO UPDATE").Set("sa_updated_at = EXCLUDED.sa_updated_at").Set("sa_deleted_at = EXCLUDED.sa_deleted_at").Exec(ctx)
+	_, err = db.Instance().NewInsert().
+		Model(&result).
+		On("CONFLICT (id) DO UPDATE").
+		Set("sa_updated_at = EXCLUDED.sa_updated_at").
+		Set("sa_deleted_at = EXCLUDED.sa_deleted_at").
+		Exec(ctx)
 	if err != nil {
-		return result, err
+		return nil, err
 	}
-	return result, nil
+	return &result, nil
 }
 
-func DeleteRelation(ctx context.Context, relationID uuid.UUID) (db.UserRelation, error) {
-	if getDebugUserID() != nil {
-		out, err := db.Instance().DeleteRelation(ctx, relationID)
-		if err != nil {
-			return db.UserRelation{}, err
-		}
-		return *out, nil
-	}
+func DeleteRelation(ctx context.Context, relationID uuid.UUID) (*db.UserRelation, error) {
 	c := newClient()
 	u, err := joinURL(c.apiURL, "relation", relationID.String())
 	if err != nil {
-		return db.UserRelation{}, fmt.Errorf("build url: %w", err)
+		return nil, fmt.Errorf("build url: %w", err)
 	}
 	result, err := DecodeJSON[db.UserRelation](c.client.Delete(ctx, u))
 	if err != nil {
-		return result, err
+		return nil, err
 	}
-	_, err = db.Instance().NewInsert().Model(&result).On("CONFLICT (id) DO UPDATE").Set("sa_updated_at = EXCLUDED.sa_updated_at").Set("sa_deleted_at = EXCLUDED.sa_deleted_at").Exec(ctx)
+	_, err = db.Instance().NewInsert().
+		Model(&result).
+		On("CONFLICT (id) DO UPDATE").
+		Set("sa_updated_at = EXCLUDED.sa_updated_at").
+		Set("sa_deleted_at = EXCLUDED.sa_deleted_at").
+		Exec(ctx)
 	if err != nil {
-		return result, err
+		return nil, err
 	}
-	return result, nil
+	return &result, nil
 }

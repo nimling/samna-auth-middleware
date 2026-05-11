@@ -1,6 +1,7 @@
 package echo
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/google/uuid"
@@ -52,25 +53,34 @@ func GetObjectField(ctx echo.Context) error {
 }
 
 func PostObjectField(ctx echo.Context) error {
-	var field db.ObjectField
-	if err := ctx.Bind(&field); err != nil {
+	field := &db.ObjectField{}
+	if err := ctx.Bind(field); err != nil {
 		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
 
-	if getDebugUserID() != nil {
-		if err := db.Instance().PostObjectField(ctx.Request().Context(), &field); err != nil {
+	if debugUserID := getDebugUserID(); debugUserID != nil {
+		ac, err := db.Instance().MutationAccess(ctx.Request().Context(), *debugUserID, *debugUserID, db.OBJECT_TYPE_USER, db.ACCESS_OWNER)
+		if err != nil {
+			if errors.Is(err, db.ErrNoAccess) {
+				return respondError(ctx, http.StatusForbidden, "Forbidden")
+			}
+			ctx.Logger().Errorf("PostObjectField MutationAccess: %v", err)
+			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
+		}
+		field, err = db.Instance().PostObjectField(ctx.Request().Context(), ac, field)
+		if err != nil {
 			ctx.Logger().Errorf("PostObjectField: %v", err)
 			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 		}
 		return respondJSON(ctx, http.StatusCreated, field, 1)
 	}
 
-	result, err := client.PostObjectField(ctx.Request().Context(), field)
+	result, err := client.PostObjectField(ctx.Request().Context(), *field)
 	if err != nil {
 		ctx.Logger().Errorf("PostObjectField: %v", err)
 		return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 	}
-	return respondJSON(ctx, http.StatusCreated, result, 0)
+	return respondJSON(ctx, http.StatusCreated, result, 1)
 }
 
 func PutObjectField(ctx echo.Context) error {
@@ -79,25 +89,34 @@ func PutObjectField(ctx echo.Context) error {
 		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
 
-	var field db.ObjectField
-	if err := ctx.Bind(&field); err != nil {
+	field := &db.ObjectField{}
+	if err := ctx.Bind(field); err != nil {
 		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
 
-	if getDebugUserID() != nil {
-		if err := db.Instance().PutObjectField(ctx.Request().Context(), fieldID, &field); err != nil {
+	if debugUserID := getDebugUserID(); debugUserID != nil {
+		ac, err := db.Instance().MutationAccess(ctx.Request().Context(), *debugUserID, *debugUserID, db.OBJECT_TYPE_USER, db.ACCESS_OWNER)
+		if err != nil {
+			if errors.Is(err, db.ErrNoAccess) {
+				return respondError(ctx, http.StatusForbidden, "Forbidden")
+			}
+			ctx.Logger().Errorf("PutObjectField MutationAccess: %v", err)
+			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
+		}
+		field, err = db.Instance().PutObjectField(ctx.Request().Context(), ac, fieldID, field)
+		if err != nil {
 			ctx.Logger().Errorf("PutObjectField: %v", err)
 			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 		}
 		return respondJSON(ctx, http.StatusOK, field, 1)
 	}
 
-	result, err := client.PutObjectField(ctx.Request().Context(), fieldID, field)
+	result, err := client.PutObjectField(ctx.Request().Context(), fieldID, *field)
 	if err != nil {
 		ctx.Logger().Errorf("PutObjectField: %v", err)
 		return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 	}
-	return respondJSON(ctx, http.StatusOK, result, 0)
+	return respondJSON(ctx, http.StatusOK, result, 1)
 }
 
 func DeleteObjectField(ctx echo.Context) error {
@@ -106,13 +125,21 @@ func DeleteObjectField(ctx echo.Context) error {
 		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
 
-	if getDebugUserID() != nil {
-		field, err := db.Instance().DeleteObjectField(ctx.Request().Context(), fieldID)
+	if debugUserID := getDebugUserID(); debugUserID != nil {
+		ac, err := db.Instance().MutationAccess(ctx.Request().Context(), *debugUserID, *debugUserID, db.OBJECT_TYPE_USER, db.ACCESS_OWNER)
+		if err != nil {
+			if errors.Is(err, db.ErrNoAccess) {
+				return respondError(ctx, http.StatusForbidden, "Forbidden")
+			}
+			ctx.Logger().Errorf("DeleteObjectField MutationAccess: %v", err)
+			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
+		}
+		field, err := db.Instance().DeleteObjectField(ctx.Request().Context(), ac, fieldID)
 		if err != nil {
 			ctx.Logger().Errorf("DeleteObjectField: %v", err)
 			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 		}
-		return respondJSON(ctx, http.StatusOK, field, 0)
+		return respondJSON(ctx, http.StatusOK, field, 1)
 	}
 
 	result, err := client.DeleteObjectField(ctx.Request().Context(), fieldID)
@@ -120,7 +147,7 @@ func DeleteObjectField(ctx echo.Context) error {
 		ctx.Logger().Errorf("DeleteObjectField: %v", err)
 		return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 	}
-	return respondJSON(ctx, http.StatusOK, result, 0)
+	return respondJSON(ctx, http.StatusOK, result, 1)
 }
 
 func GetUserFields(ctx echo.Context) error {
@@ -153,26 +180,35 @@ func PostUserField(ctx echo.Context) error {
 		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
 
-	var field db.UserField
-	if err := ctx.Bind(&field); err != nil {
+	field := &db.UserField{}
+	if err := ctx.Bind(field); err != nil {
 		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
 	field.FieldID = fieldID
 
-	if getDebugUserID() != nil {
-		if err := db.Instance().PostUserField(ctx.Request().Context(), &field); err != nil {
+	if debugUserID := getDebugUserID(); debugUserID != nil {
+		ac, err := db.Instance().MutationAccess(ctx.Request().Context(), *debugUserID, field.UserID, db.OBJECT_TYPE_USER, db.ACCESS_WRITE)
+		if err != nil {
+			if errors.Is(err, db.ErrNoAccess) {
+				return respondError(ctx, http.StatusForbidden, "Forbidden")
+			}
+			ctx.Logger().Errorf("PostUserField MutationAccess: %v", err)
+			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
+		}
+		field, err = db.Instance().PostUserField(ctx.Request().Context(), ac, field)
+		if err != nil {
 			ctx.Logger().Errorf("PostUserField: %v", err)
 			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 		}
 		return respondJSON(ctx, http.StatusCreated, field, 1)
 	}
 
-	result, err := client.PostUserField(ctx.Request().Context(), fieldID, field)
+	result, err := client.PostUserField(ctx.Request().Context(), fieldID, *field)
 	if err != nil {
 		ctx.Logger().Errorf("PostUserField: %v", err)
 		return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 	}
-	return respondJSON(ctx, http.StatusCreated, result, 0)
+	return respondJSON(ctx, http.StatusCreated, result, 1)
 }
 
 func PutUserField(ctx echo.Context) error {
@@ -186,25 +222,34 @@ func PutUserField(ctx echo.Context) error {
 		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
 
-	var field db.UserField
-	if err := ctx.Bind(&field); err != nil {
+	field := &db.UserField{}
+	if err := ctx.Bind(field); err != nil {
 		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
 
-	if getDebugUserID() != nil {
-		if err := db.Instance().PutUserField(ctx.Request().Context(), valueID, &field); err != nil {
+	if debugUserID := getDebugUserID(); debugUserID != nil {
+		ac, err := db.Instance().MutationAccess(ctx.Request().Context(), *debugUserID, field.UserID, db.OBJECT_TYPE_USER, db.ACCESS_WRITE)
+		if err != nil {
+			if errors.Is(err, db.ErrNoAccess) {
+				return respondError(ctx, http.StatusForbidden, "Forbidden")
+			}
+			ctx.Logger().Errorf("PutUserField MutationAccess: %v", err)
+			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
+		}
+		field, err = db.Instance().PutUserField(ctx.Request().Context(), ac, valueID, field)
+		if err != nil {
 			ctx.Logger().Errorf("PutUserField: %v", err)
 			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 		}
 		return respondJSON(ctx, http.StatusOK, field, 1)
 	}
 
-	result, err := client.PutUserField(ctx.Request().Context(), fieldID, valueID, field)
+	result, err := client.PutUserField(ctx.Request().Context(), fieldID, valueID, *field)
 	if err != nil {
 		ctx.Logger().Errorf("PutUserField: %v", err)
 		return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 	}
-	return respondJSON(ctx, http.StatusOK, result, 0)
+	return respondJSON(ctx, http.StatusOK, result, 1)
 }
 
 func DeleteUserField(ctx echo.Context) error {
@@ -218,13 +263,32 @@ func DeleteUserField(ctx echo.Context) error {
 		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
 
-	if getDebugUserID() != nil {
-		field, err := db.Instance().DeleteUserField(ctx.Request().Context(), valueID)
+	if debugUserID := getDebugUserID(); debugUserID != nil {
+		existing := &db.UserField{}
+		err := db.Instance().NewSelect().
+			Model(existing).
+			Column("user_id").
+			Where("id = ?", valueID).
+			Where("sa_deleted_at IS NULL").
+			Limit(1).
+			Scan(ctx.Request().Context())
+		if err != nil {
+			return respondError(ctx, http.StatusNotFound, "Not found")
+		}
+		ac, err := db.Instance().MutationAccess(ctx.Request().Context(), *debugUserID, existing.UserID, db.OBJECT_TYPE_USER, db.ACCESS_WRITE)
+		if err != nil {
+			if errors.Is(err, db.ErrNoAccess) {
+				return respondError(ctx, http.StatusForbidden, "Forbidden")
+			}
+			ctx.Logger().Errorf("DeleteUserField MutationAccess: %v", err)
+			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
+		}
+		field, err := db.Instance().DeleteUserField(ctx.Request().Context(), ac, valueID)
 		if err != nil {
 			ctx.Logger().Errorf("DeleteUserField: %v", err)
 			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 		}
-		return respondJSON(ctx, http.StatusOK, field, 0)
+		return respondJSON(ctx, http.StatusOK, field, 1)
 	}
 
 	result, err := client.DeleteUserField(ctx.Request().Context(), fieldID, valueID)
@@ -232,5 +296,5 @@ func DeleteUserField(ctx echo.Context) error {
 		ctx.Logger().Errorf("DeleteUserField: %v", err)
 		return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 	}
-	return respondJSON(ctx, http.StatusOK, result, 0)
+	return respondJSON(ctx, http.StatusOK, result, 1)
 }

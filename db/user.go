@@ -91,29 +91,44 @@ func (d *DB) GetRelation(ctx context.Context, userID uuid.UUID, objectID uuid.UU
 	return relations, nil
 }
 
-func (d *DB) PostRelation(ctx context.Context, in *UserRelation) error {
+func (d *DB) PostRelation(ctx context.Context, ac *AccessClaim, relation *UserRelation) (*UserRelation, error) {
+	if ac == nil {
+		return nil, ErrNoAccess
+	}
 	_, err := d.NewInsert().
-		Model(in).
+		Model(relation).
 		ExcludeColumn("id", "sa_created_at", "sa_updated_at", "sa_deleted_at").
 		Value("app_id", "claimius.get_disciple_app_id()").
 		Returning("*").
-		Exec(ctx, in)
-	return err
+		Exec(ctx, relation)
+	if err != nil {
+		return nil, err
+	}
+	return relation, nil
 }
 
-func (d *DB) PutRelation(ctx context.Context, relationID uuid.UUID, in *UserRelation) error {
+func (d *DB) PutRelation(ctx context.Context, ac *AccessClaim, relationID uuid.UUID, relation *UserRelation) (*UserRelation, error) {
+	if ac == nil {
+		return nil, ErrNoAccess
+	}
 	_, err := d.NewUpdate().
-		Model(in).
+		Model(relation).
 		Where("id = ?", relationID).
 		Where("sa_deleted_at IS NULL").
 		ExcludeColumn("app_id").
 		OmitZero().
 		Returning("*").
-		Exec(ctx, in)
-	return err
+		Exec(ctx, relation)
+	if err != nil {
+		return nil, err
+	}
+	return relation, nil
 }
 
-func (d *DB) DeleteRelation(ctx context.Context, relationID uuid.UUID) (*UserRelation, error) {
+func (d *DB) DeleteRelation(ctx context.Context, ac *AccessClaim, relationID uuid.UUID) (*UserRelation, error) {
+	if ac == nil {
+		return nil, ErrNoAccess
+	}
 	var relation UserRelation
 	_, err := d.NewUpdate().
 		Model(&relation).
@@ -139,7 +154,10 @@ func (d *DB) PostUser(ctx context.Context, in SamnaUser) (*SamnaUser, error) {
 	return d.GetUser(ctx, userID)
 }
 
-func (d *DB) PutUser(ctx context.Context, userID uuid.UUID, user *SamnaUser) error {
+func (d *DB) PutUser(ctx context.Context, ac *AccessClaim, userID uuid.UUID, user *SamnaUser) (*SamnaUser, error) {
+	if ac == nil {
+		return nil, ErrNoAccess
+	}
 	_, err := d.NewUpdate().
 		Model(user).
 		Where("user_id = ?", userID).
@@ -148,10 +166,16 @@ func (d *DB) PutUser(ctx context.Context, userID uuid.UUID, user *SamnaUser) err
 		OmitZero().
 		Returning("*").
 		Exec(ctx, user)
-	return err
+	if err != nil {
+		return nil, err
+	}
+	return user, nil
 }
 
-func (d *DB) DeleteUser(ctx context.Context, userID uuid.UUID) (*SamnaUser, error) {
+func (d *DB) DeleteUser(ctx context.Context, ac *AccessClaim, userID uuid.UUID) (*SamnaUser, error) {
+	if ac == nil {
+		return nil, ErrNoAccess
+	}
 	var user SamnaUser
 	_, err := d.NewUpdate().
 		Model(&user).

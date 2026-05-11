@@ -44,7 +44,7 @@ func GetSearch(ctx echo.Context) error {
 			ctx.Logger().Errorf("GetSearch: %v", err)
 			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 		}
-		return respondJSON(ctx, http.StatusOK, results, 0)
+		return respondJSON(ctx, http.StatusOK, results, len(results))
 	}
 
 	body, err := client.GetSearch(ctx.Request().Context(), query, objectTypes, limit, offset)

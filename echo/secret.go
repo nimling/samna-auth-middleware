@@ -1,6 +1,7 @@
 package echo
 
 import (
+	"errors"
 	"net/http"
 	"strings"
 
@@ -133,7 +134,7 @@ func GetSecret(ctx echo.Context) error {
 }
 
 func PostSecret(ctx echo.Context) error {
-	var reqBody db.BodySecret
+	reqBody := db.BodySecret{}
 	if err := ctx.Bind(&reqBody); err != nil {
 		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
@@ -142,21 +143,15 @@ func PostSecret(ctx echo.Context) error {
 	}
 
 	if debugUserID := getDebugUserID(); debugUserID != nil {
-		ac, err := db.Instance().GetAccess(ctx.Request().Context(), *debugUserID, *reqBody.OwnerID, db.OBJECT_TYPE_ORGANIZATION, db.ACCESS_OWNER)
+		ac, err := db.Instance().MutationAccess(ctx.Request().Context(), *debugUserID, *reqBody.OwnerID, db.OBJECT_TYPE_ORGANIZATION, db.ACCESS_OWNER)
 		if err != nil {
-			ctx.Logger().Errorf("PostSecret GetAccess: %v", err)
-			return respondError(ctx, http.StatusForbidden, "Forbidden")
-		}
-		if ac == nil {
-			ac, err = db.Instance().GetDirectAccess(ctx.Request().Context(), *debugUserID, *reqBody.OwnerID, db.OBJECT_TYPE_ORGANIZATION)
-			if err != nil || ac == nil {
+			if errors.Is(err, db.ErrNoAccess) {
 				return respondError(ctx, http.StatusForbidden, "Forbidden")
 			}
+			ctx.Logger().Errorf("PostSecret MutationAccess: %v", err)
+			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 		}
-		if ac.UserClaimID == nil || ac.ClaimID == nil {
-			return respondError(ctx, http.StatusForbidden, "Forbidden")
-		}
-		secret, err := db.Instance().PostSecret(ctx.Request().Context(), reqBody, *reqBody.OwnerID, *ac.UserClaimID, ac.RootID, *ac.ClaimID)
+		secret, err := db.Instance().PostSecret(ctx.Request().Context(), ac, reqBody)
 		if err != nil {
 			ctx.Logger().Errorf("PostSecret: %v", err)
 			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
@@ -179,23 +174,21 @@ func PutSecret(ctx echo.Context) error {
 		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
 
-	var reqBody db.BodySecret
+	reqBody := db.BodySecret{}
 	if err := ctx.Bind(&reqBody); err != nil {
 		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
 
 	if debugUserID := getDebugUserID(); debugUserID != nil {
-		ac, err := db.Instance().GetAccess(ctx.Request().Context(), *debugUserID, secretID, db.OBJECT_TYPE_SAMNA_SECRET, db.ACCESS_OWNER)
+		ac, err := db.Instance().MutationAccess(ctx.Request().Context(), *debugUserID, secretID, db.OBJECT_TYPE_SAMNA_SECRET, db.ACCESS_OWNER)
 		if err != nil {
-			return respondError(ctx, http.StatusForbidden, "Forbidden")
-		}
-		if ac == nil {
-			ac, err = db.Instance().GetDirectAccess(ctx.Request().Context(), *debugUserID, secretID, db.OBJECT_TYPE_SAMNA_SECRET)
-			if err != nil || ac == nil {
+			if errors.Is(err, db.ErrNoAccess) {
 				return respondError(ctx, http.StatusForbidden, "Forbidden")
 			}
+			ctx.Logger().Errorf("PutSecret MutationAccess: %v", err)
+			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 		}
-		secret, err := db.Instance().PutSecret(ctx.Request().Context(), secretID, reqBody)
+		secret, err := db.Instance().PutSecret(ctx.Request().Context(), ac, secretID, reqBody)
 		if err != nil {
 			ctx.Logger().Errorf("PutSecret: %v", err)
 			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
@@ -219,22 +212,20 @@ func DeleteSecret(ctx echo.Context) error {
 	}
 
 	if debugUserID := getDebugUserID(); debugUserID != nil {
-		ac, err := db.Instance().GetAccess(ctx.Request().Context(), *debugUserID, secretID, db.OBJECT_TYPE_SAMNA_SECRET, db.ACCESS_OWNER)
+		ac, err := db.Instance().MutationAccess(ctx.Request().Context(), *debugUserID, secretID, db.OBJECT_TYPE_SAMNA_SECRET, db.ACCESS_OWNER)
 		if err != nil {
-			return respondError(ctx, http.StatusForbidden, "Forbidden")
-		}
-		if ac == nil {
-			ac, err = db.Instance().GetDirectAccess(ctx.Request().Context(), *debugUserID, secretID, db.OBJECT_TYPE_SAMNA_SECRET)
-			if err != nil || ac == nil {
+			if errors.Is(err, db.ErrNoAccess) {
 				return respondError(ctx, http.StatusForbidden, "Forbidden")
 			}
+			ctx.Logger().Errorf("DeleteSecret MutationAccess: %v", err)
+			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 		}
-		secret, err := db.Instance().DeleteSecret(ctx.Request().Context(), secretID)
+		secret, err := db.Instance().DeleteSecret(ctx.Request().Context(), ac, secretID)
 		if err != nil {
 			ctx.Logger().Errorf("DeleteSecret: %v", err)
 			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 		}
-		return respondJSON(ctx, http.StatusOK, secret, 0)
+		return respondJSON(ctx, http.StatusOK, secret, 1)
 	}
 
 	body, err := client.DeleteSecret(ctx.Request().Context(), secretID)

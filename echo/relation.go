@@ -1,6 +1,7 @@
 package echo
 
 import (
+	"errors"
 	"net/http"
 	"strings"
 
@@ -106,7 +107,7 @@ func GetRelation(ctx echo.Context) error {
 		ctx.Logger().Errorf("GetRelation: %v", err)
 		return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 	}
-	return respondJSON(ctx, http.StatusOK, relations, 0)
+	return respondJSON(ctx, http.StatusOK, relations, len(relations))
 }
 
 func PostRelation(ctx echo.Context) error {
@@ -115,21 +116,30 @@ func PostRelation(ctx echo.Context) error {
 		return respondError(ctx, http.StatusUnauthorized, "Unauthorized")
 	}
 
-	var relation db.UserRelation
-	if err := ctx.Bind(&relation); err != nil {
+	relation := &db.UserRelation{}
+	if err := ctx.Bind(relation); err != nil {
 		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
 	relation.UserID = userID
 
-	if getDebugUserID() != nil {
-		if err := db.Instance().PostRelation(ctx.Request().Context(), &relation); err != nil {
+	if debugUserID := getDebugUserID(); debugUserID != nil {
+		ac, err := db.Instance().MutationAccess(ctx.Request().Context(), *debugUserID, relation.UserID, db.OBJECT_TYPE_USER, db.ACCESS_WRITE)
+		if err != nil {
+			if errors.Is(err, db.ErrNoAccess) {
+				return respondError(ctx, http.StatusForbidden, "Forbidden")
+			}
+			ctx.Logger().Errorf("PostRelation MutationAccess: %v", err)
+			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
+		}
+		relation, err = db.Instance().PostRelation(ctx.Request().Context(), ac, relation)
+		if err != nil {
 			ctx.Logger().Errorf("PostRelation: %v", err)
 			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 		}
 		return respondJSON(ctx, http.StatusCreated, relation, 1)
 	}
 
-	result, err := client.PostRelation(ctx.Request().Context(), relation)
+	result, err := client.PostRelation(ctx.Request().Context(), *relation)
 	if err != nil {
 		ctx.Logger().Errorf("PostRelation: %v", err)
 		return respondError(ctx, http.StatusInternalServerError, "Internal server error")
@@ -143,20 +153,29 @@ func PutRelation(ctx echo.Context) error {
 		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
 
-	var relation db.UserRelation
-	if err := ctx.Bind(&relation); err != nil {
+	relation := &db.UserRelation{}
+	if err := ctx.Bind(relation); err != nil {
 		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
 
-	if getDebugUserID() != nil {
-		if err := db.Instance().PutRelation(ctx.Request().Context(), relationID, &relation); err != nil {
+	if debugUserID := getDebugUserID(); debugUserID != nil {
+		ac, err := db.Instance().MutationAccess(ctx.Request().Context(), *debugUserID, relation.UserID, db.OBJECT_TYPE_USER, db.ACCESS_WRITE)
+		if err != nil {
+			if errors.Is(err, db.ErrNoAccess) {
+				return respondError(ctx, http.StatusForbidden, "Forbidden")
+			}
+			ctx.Logger().Errorf("PutRelation MutationAccess: %v", err)
+			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
+		}
+		relation, err = db.Instance().PutRelation(ctx.Request().Context(), ac, relationID, relation)
+		if err != nil {
 			ctx.Logger().Errorf("PutRelation: %v", err)
 			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 		}
 		return respondJSON(ctx, http.StatusOK, relation, 1)
 	}
 
-	result, err := client.PutRelation(ctx.Request().Context(), relationID, relation)
+	result, err := client.PutRelation(ctx.Request().Context(), relationID, *relation)
 	if err != nil {
 		ctx.Logger().Errorf("PutRelation: %v", err)
 		return respondError(ctx, http.StatusInternalServerError, "Internal server error")
@@ -171,7 +190,16 @@ func DeleteRelation(ctx echo.Context) error {
 	}
 
 	if getDebugUserID() != nil {
-		relation, err := db.Instance().DeleteRelation(ctx.Request().Context(), relationID)
+		actorID := ctx.Get(middleware.UserIDKey).(uuid.UUID)
+		ac, err := db.Instance().MutationAccess(ctx.Request().Context(), actorID, actorID, db.OBJECT_TYPE_USER, db.ACCESS_WRITE)
+		if err != nil {
+			if errors.Is(err, db.ErrNoAccess) {
+				return respondError(ctx, http.StatusForbidden, "Forbidden")
+			}
+			ctx.Logger().Errorf("DeleteRelation MutationAccess: %v", err)
+			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
+		}
+		relation, err := db.Instance().DeleteRelation(ctx.Request().Context(), ac, relationID)
 		if err != nil {
 			ctx.Logger().Errorf("DeleteRelation: %v", err)
 			return respondError(ctx, http.StatusInternalServerError, "Internal server error")

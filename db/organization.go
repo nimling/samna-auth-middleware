@@ -72,7 +72,10 @@ func (d *DB) GetParentOrganizations(ctx context.Context, startID uuid.UUID) ([]u
 	return ids, err
 }
 
-func (d *DB) PostOrganization(ctx context.Context, ac *AccessClaim, org *Organization) error {
+func (d *DB) PostOrganization(ctx context.Context, ac *AccessClaim, org *Organization) (*Organization, error) {
+	if ac == nil {
+		return nil, ErrNoAccess
+	}
 	org.CreatedBy = *ac.UserClaimID
 	org.RootID = ac.RootID
 	_, err := d.NewInsert().
@@ -81,10 +84,16 @@ func (d *DB) PostOrganization(ctx context.Context, ac *AccessClaim, org *Organiz
 		Value("app_id", "claimius.get_disciple_app_id()").
 		Returning("*").
 		Exec(ctx, org)
-	return err
+	if err != nil {
+		return nil, err
+	}
+	return org, nil
 }
 
-func (d *DB) PutOrganization(ctx context.Context, ac *AccessClaim, orgID uuid.UUID, org *Organization) error {
+func (d *DB) PutOrganization(ctx context.Context, ac *AccessClaim, orgID uuid.UUID, org *Organization) (*Organization, error) {
+	if ac == nil {
+		return nil, ErrNoAccess
+	}
 	_, err := d.NewUpdate().
 		Model(org).
 		Where("id = ?", orgID).
@@ -93,10 +102,16 @@ func (d *DB) PutOrganization(ctx context.Context, ac *AccessClaim, orgID uuid.UU
 		OmitZero().
 		Returning("*").
 		Exec(ctx, org)
-	return err
+	if err != nil {
+		return nil, err
+	}
+	return org, nil
 }
 
 func (d *DB) DeleteOrganization(ctx context.Context, ac *AccessClaim, orgID uuid.UUID) (*Organization, error) {
+	if ac == nil {
+		return nil, ErrNoAccess
+	}
 	var org Organization
 	_, err := d.NewUpdate().
 		Model(&org).

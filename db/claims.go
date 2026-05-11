@@ -175,49 +175,100 @@ func (d *DB) GetClaimGraph(ctx context.Context, userID uuid.UUID, startID *uuid.
 	return nodes, err
 }
 
-func (d *DB) PostClaim(ctx context.Context, in Claim) (*Claim, error) {
+func (d *DB) PostClaim(ctx context.Context, ac *AccessClaim, claim *Claim) (*Claim, error) {
+	if ac == nil {
+		return nil, ErrNoAccess
+	}
+	claim.CreatedBy = ac.UserClaimID
+	claim.RootID = ac.RootID
 	var id uuid.UUID
 	err := d.NewRaw(`
 		SELECT (claimius.create_claim(
 			claimius.get_disciple_app_id(),
 			?, ?, ?, ?, ?, ?, ?, ?::claimius.claim_type
 		) -> 'claim' ->> 'id')::uuid
-	`, in.Name, in.Description, in.Access, in.OwnerID, in.RootID, in.CreatedBy,
-		in.Inherits, string(in.Type)).Scan(ctx, &id)
+	`,
+		claim.Name,
+		claim.Description,
+		claim.Access,
+		claim.OwnerID,
+		claim.RootID,
+		claim.CreatedBy,
+		claim.Inherits,
+		string(claim.Type),
+	).Scan(ctx, &id)
 	if err != nil {
 		return nil, err
 	}
-	out := Claim{}
-	if err := d.NewSelect().Model(&out).
+	err = d.NewSelect().
+		Model(claim).
 		Where("sa_deleted_at IS NULL").
-		ExcludeColumn("sa_deleted_at").ExcludeColumn("app_id").Where("id = ?", id).Scan(ctx); err != nil {
+		ExcludeColumn("sa_deleted_at").
+		ExcludeColumn("app_id").
+		Where("id = ?", id).
+		Scan(ctx)
+	if err != nil {
 		return nil, err
 	}
-	return &out, nil
+	return claim, nil
 }
 
-func (d *DB) PutClaim(ctx context.Context, claimID uuid.UUID, in Claim) (*Claim, error) {
+func (d *DB) PutClaim(ctx context.Context, ac *AccessClaim, claimID uuid.UUID, claim *Claim) (*Claim, error) {
+	if ac == nil {
+		return nil, ErrNoAccess
+	}
 	_, err := d.NewRaw(`
 		SELECT claimius.update_claim(?, ?, ?, ?, ?)
-	`, claimID, in.Name, in.Description, in.Access, in.Inherits).Exec(ctx)
+	`,
+		claimID,
+		claim.Name,
+		claim.Description,
+		claim.Access,
+		claim.Inherits,
+	).Exec(ctx)
 	if err != nil {
 		return nil, err
 	}
-	out := Claim{}
-	if err := d.NewSelect().Model(&out).
+	err = d.NewSelect().
+		Model(claim).
 		Where("sa_deleted_at IS NULL").
-		ExcludeColumn("sa_deleted_at").ExcludeColumn("app_id").Where("id = ?", claimID).Scan(ctx); err != nil {
+		ExcludeColumn("sa_deleted_at").
+		ExcludeColumn("app_id").
+		Where("id = ?", claimID).
+		Scan(ctx)
+	if err != nil {
 		return nil, err
 	}
-	return &out, nil
+	return claim, nil
 }
 
-func (d *DB) DeleteClaim(ctx context.Context, claimID, deletedBy uuid.UUID) error {
-	_, err := d.NewRaw(`SELECT claimius.remove_claim(?, ?)`, claimID, deletedBy).Exec(ctx)
-	return err
+func (d *DB) DeleteClaim(ctx context.Context, ac *AccessClaim, claimID uuid.UUID) (*Claim, error) {
+	if ac == nil || ac.UserClaimID == nil {
+		return nil, ErrNoAccess
+	}
+	_, err := d.NewRaw(`SELECT claimius.remove_claim(?, ?)`, claimID, *ac.UserClaimID).Exec(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var claim Claim
+	err = d.NewSelect().
+		Model(&claim).
+		ExcludeColumn("app_id").
+		Where("id = ?", claimID).
+		Scan(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return &claim, nil
 }
 
-func (d *DB) PostClaimObject(ctx context.Context, claimID uuid.UUID, in ClaimObject) (*ClaimObject, error) {
+func (d *DB) PostClaimObject(ctx context.Context, ac *AccessClaim, claimID uuid.UUID, co *ClaimObject) (*ClaimObject, error) {
+	if ac == nil {
+		return nil, ErrNoAccess
+	}
+	co.OwnerID = ac.OwnerID
+	co.RootID = ac.RootID
+	co.CreatedBy = ac.UserClaimID
 	var id uuid.UUID
 	err := d.NewRaw(`
 		SELECT (claimius.assign_claim_object(
@@ -234,54 +285,115 @@ func (d *DB) PostClaimObject(ctx context.Context, claimID uuid.UUID, in ClaimObj
 			p_ref_id        := NULL::uuid,
 			p_scope         := ?
 		) -> 'claim_object' ->> 'id')::uuid
-	`, claimID, in.OwnerID, in.RootID, in.CreatedBy,
-		in.ObjectID, in.ObjectType, in.Access, in.Inherits, in.Reason, in.Scope).Scan(ctx, &id)
+	`,
+		claimID,
+		co.OwnerID,
+		co.RootID,
+		co.CreatedBy,
+		co.ObjectID,
+		co.ObjectType,
+		co.Access,
+		co.Inherits,
+		co.Reason,
+		co.Scope,
+	).Scan(ctx, &id)
 	if err != nil {
 		return nil, err
 	}
-	out := ClaimObject{}
-	if err := d.NewSelect().Model(&out).
+	err = d.NewSelect().
+		Model(co).
 		Where("sa_deleted_at IS NULL").
-		ExcludeColumn("sa_deleted_at").ExcludeColumn("app_id").Where("id = ?", id).Scan(ctx); err != nil {
+		ExcludeColumn("sa_deleted_at").
+		ExcludeColumn("app_id").
+		Where("id = ?", id).
+		Scan(ctx)
+	if err != nil {
 		return nil, err
 	}
-	return &out, nil
+	return co, nil
 }
 
-func (d *DB) DeleteClaimObject(ctx context.Context, claimID, objectID, deletedBy uuid.UUID) error {
-	_, err := d.NewRaw(`
-		SELECT claimius.remove_claim_object(co.id, ?)
-		FROM claimius.claim_object co
-		WHERE co.claim_id = ? AND co.object_id = ? AND co.sa_deleted_at IS NULL
-	`, deletedBy, claimID, objectID).Exec(ctx)
-	return err
+func (d *DB) DeleteClaimObject(ctx context.Context, ac *AccessClaim, claimID, objectID uuid.UUID) (*ClaimObject, error) {
+	if ac == nil || ac.UserClaimID == nil {
+		return nil, ErrNoAccess
+	}
+	var co ClaimObject
+	err := d.NewSelect().
+		Model(&co).
+		ExcludeColumn("app_id").
+		Where("claim_id = ?", claimID).
+		Where("object_id = ?", objectID).
+		Where("sa_deleted_at IS NULL").
+		Scan(ctx)
+	if err != nil {
+		return nil, err
+	}
+	_, err = d.NewRaw(`
+		SELECT claimius.remove_claim_object(?, ?)
+	`, co.ID, *ac.UserClaimID).Exec(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return &co, nil
 }
 
-func (d *DB) PostClaimUser(ctx context.Context, claimID uuid.UUID, in UserClaim) (*UserClaim, error) {
+func (d *DB) PostClaimUser(ctx context.Context, ac *AccessClaim, claimID uuid.UUID, uc *UserClaim) (*UserClaim, error) {
+	if ac == nil || ac.UserClaimID == nil {
+		return nil, ErrNoAccess
+	}
+	uc.OwnerID = ac.OwnerID
+	uc.CreatedBy = *ac.UserClaimID
 	var id uuid.UUID
 	err := d.NewRaw(`
 		SELECT (claimius.assign_claim_user(
 			claimius.get_disciple_app_id(),
 			?, ?, ?, ?, ?, ?, ?
 		) -> 'user_claim' ->> 'id')::uuid
-	`, claimID, in.UserID, in.OwnerID, in.CreatedBy, in.Reason, in.StartsAt, in.EndsAt).Scan(ctx, &id)
+	`,
+		claimID,
+		uc.UserID,
+		uc.OwnerID,
+		uc.CreatedBy,
+		uc.Reason,
+		uc.StartsAt,
+		uc.EndsAt,
+	).Scan(ctx, &id)
 	if err != nil {
 		return nil, err
 	}
-	out := UserClaim{}
-	if err := d.NewSelect().Model(&out).
+	err = d.NewSelect().
+		Model(uc).
 		Where("sa_deleted_at IS NULL").
-		ExcludeColumn("sa_deleted_at").ExcludeColumn("app_id").Where("id = ?", id).Scan(ctx); err != nil {
+		ExcludeColumn("sa_deleted_at").
+		ExcludeColumn("app_id").
+		Where("id = ?", id).
+		Scan(ctx)
+	if err != nil {
 		return nil, err
 	}
-	return &out, nil
+	return uc, nil
 }
 
-func (d *DB) DeleteClaimUser(ctx context.Context, claimID, userID, deletedBy uuid.UUID) error {
-	_, err := d.NewRaw(`
-		SELECT claimius.remove_user_claim(uc.id, ?)
-		FROM claimius.user_claim uc
-		WHERE uc.claim_id = ? AND uc.user_id = ? AND uc.sa_deleted_at IS NULL
-	`, deletedBy, claimID, userID).Exec(ctx)
-	return err
+func (d *DB) DeleteClaimUser(ctx context.Context, ac *AccessClaim, claimID, userID uuid.UUID) (*UserClaim, error) {
+	if ac == nil || ac.UserClaimID == nil {
+		return nil, ErrNoAccess
+	}
+	var uc UserClaim
+	err := d.NewSelect().
+		Model(&uc).
+		ExcludeColumn("app_id").
+		Where("claim_id = ?", claimID).
+		Where("user_id = ?", userID).
+		Where("sa_deleted_at IS NULL").
+		Scan(ctx)
+	if err != nil {
+		return nil, err
+	}
+	_, err = d.NewRaw(`
+		SELECT claimius.remove_user_claim(?, ?)
+	`, uc.ID, *ac.UserClaimID).Exec(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return &uc, nil
 }

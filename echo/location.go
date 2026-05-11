@@ -33,7 +33,7 @@ func GetLocations(ctx echo.Context) error {
 			ctx.Logger().Errorf("GetLocations: %v", err)
 			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 		}
-		return respondJSON(ctx, http.StatusOK, locs, 0)
+		return respondJSON(ctx, http.StatusOK, locs, len(locs))
 	}
 
 	body, err := client.GetLocations(ctx.Request().Context())
@@ -82,7 +82,7 @@ func GetLocation(ctx echo.Context) error {
 			ctx.Logger().Errorf("GetLocation: %v", err)
 			return respondError(ctx, http.StatusNotFound, "Not found")
 		}
-		return respondJSON(ctx, http.StatusOK, loc, 0)
+		return respondJSON(ctx, http.StatusOK, loc, 1)
 	}
 
 	body, err := client.GetLocation(ctx.Request().Context(), locationID)
@@ -136,32 +136,24 @@ func GetLocationAssets(ctx echo.Context) error {
 
 func PostLocation(ctx echo.Context) error {
 	if debugUserID := getDebugUserID(); debugUserID != nil {
-		var loc db.Location
-		if err := ctx.Bind(&loc); err != nil {
+		loc := &db.Location{}
+		if err := ctx.Bind(loc); err != nil {
 			return respondError(ctx, http.StatusBadRequest, "Bad request")
 		}
-		ac, err := db.Instance().GetAccess(ctx.Request().Context(), *debugUserID, loc.OwnerID, db.OBJECT_TYPE_ORGANIZATION, db.ACCESS_WRITE)
+		ac, err := db.Instance().MutationAccess(ctx.Request().Context(), *debugUserID, loc.OwnerID, db.OBJECT_TYPE_ORGANIZATION, db.ACCESS_WRITE)
 		if err != nil {
-			ctx.Logger().Errorf("PostLocation GetAccess: %v", err)
-			return respondError(ctx, http.StatusForbidden, "Forbidden")
-		}
-		if ac == nil {
-			ac, err = db.Instance().GetDirectAccess(ctx.Request().Context(), *debugUserID, loc.OwnerID, db.OBJECT_TYPE_ORGANIZATION)
-			if err != nil {
-				ctx.Logger().Errorf("PostLocation GetDirectAccess: %v", err)
+			if errors.Is(err, db.ErrNoAccess) {
 				return respondError(ctx, http.StatusForbidden, "Forbidden")
 			}
+			ctx.Logger().Errorf("PostLocation MutationAccess: %v", err)
+			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 		}
-		if ac == nil {
-			return respondError(ctx, http.StatusForbidden, "Forbidden")
-		}
-		loc.ID = uuid.UUID{}
-		loc.CreatedBy = *ac.UserClaimID
-		if err := db.Instance().PostLocation(ctx.Request().Context(), &loc); err != nil {
+		loc, err = db.Instance().PostLocation(ctx.Request().Context(), ac, loc)
+		if err != nil {
 			ctx.Logger().Errorf("PostLocation: %v", err)
 			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 		}
-		return respondJSON(ctx, http.StatusCreated, loc, 0)
+		return respondJSON(ctx, http.StatusCreated, loc, 1)
 	}
 
 	var loc db.Location
@@ -173,7 +165,7 @@ func PostLocation(ctx echo.Context) error {
 		ctx.Logger().Errorf("PostLocation: %v", err)
 		return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 	}
-	return respondJSON(ctx, http.StatusCreated, result, 0)
+	return respondJSON(ctx, http.StatusCreated, result, 1)
 }
 
 func PutLocation(ctx echo.Context) error {
@@ -183,25 +175,24 @@ func PutLocation(ctx echo.Context) error {
 	}
 
 	if debugUserID := getDebugUserID(); debugUserID != nil {
-		ac, err := db.Instance().GetAccess(ctx.Request().Context(), *debugUserID, locationID, db.OBJECT_TYPE_LOCATION, db.ACCESS_WRITE)
+		ac, err := db.Instance().MutationAccess(ctx.Request().Context(), *debugUserID, locationID, db.OBJECT_TYPE_LOCATION, db.ACCESS_WRITE)
 		if err != nil {
-			return respondError(ctx, http.StatusForbidden, "Forbidden")
-		}
-		if ac == nil {
-			ac, err = db.Instance().GetDirectAccess(ctx.Request().Context(), *debugUserID, locationID, db.OBJECT_TYPE_LOCATION)
-			if err != nil || ac == nil {
+			if errors.Is(err, db.ErrNoAccess) {
 				return respondError(ctx, http.StatusForbidden, "Forbidden")
 			}
+			ctx.Logger().Errorf("PutLocation MutationAccess: %v", err)
+			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 		}
-		var loc db.Location
-		if err := ctx.Bind(&loc); err != nil {
+		loc := &db.Location{}
+		if err := ctx.Bind(loc); err != nil {
 			return respondError(ctx, http.StatusBadRequest, "Bad request")
 		}
-		if err := db.Instance().PutLocation(ctx.Request().Context(), locationID, &loc); err != nil {
+		loc, err = db.Instance().PutLocation(ctx.Request().Context(), ac, locationID, loc)
+		if err != nil {
 			ctx.Logger().Errorf("PutLocation: %v", err)
 			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 		}
-		return respondJSON(ctx, http.StatusOK, loc, 0)
+		return respondJSON(ctx, http.StatusOK, loc, 1)
 	}
 
 	var loc db.Location
@@ -213,7 +204,7 @@ func PutLocation(ctx echo.Context) error {
 		ctx.Logger().Errorf("PutLocation: %v", err)
 		return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 	}
-	return respondJSON(ctx, http.StatusOK, result, 0)
+	return respondJSON(ctx, http.StatusOK, result, 1)
 }
 
 func DeleteLocation(ctx echo.Context) error {
@@ -223,22 +214,20 @@ func DeleteLocation(ctx echo.Context) error {
 	}
 
 	if debugUserID := getDebugUserID(); debugUserID != nil {
-		ac, err := db.Instance().GetAccess(ctx.Request().Context(), *debugUserID, locationID, db.OBJECT_TYPE_LOCATION, db.ACCESS_WRITE)
+		ac, err := db.Instance().MutationAccess(ctx.Request().Context(), *debugUserID, locationID, db.OBJECT_TYPE_LOCATION, db.ACCESS_WRITE)
 		if err != nil {
-			return respondError(ctx, http.StatusForbidden, "Forbidden")
-		}
-		if ac == nil {
-			ac, err = db.Instance().GetDirectAccess(ctx.Request().Context(), *debugUserID, locationID, db.OBJECT_TYPE_LOCATION)
-			if err != nil || ac == nil {
+			if errors.Is(err, db.ErrNoAccess) {
 				return respondError(ctx, http.StatusForbidden, "Forbidden")
 			}
+			ctx.Logger().Errorf("DeleteLocation MutationAccess: %v", err)
+			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 		}
-		loc, err := db.Instance().DeleteLocation(ctx.Request().Context(), locationID)
+		loc, err := db.Instance().DeleteLocation(ctx.Request().Context(), ac, locationID)
 		if err != nil {
 			ctx.Logger().Errorf("DeleteLocation: %v", err)
 			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 		}
-		return respondJSON(ctx, http.StatusOK, loc, 0)
+		return respondJSON(ctx, http.StatusOK, loc, 1)
 	}
 
 	result, err := client.DeleteLocation(ctx.Request().Context(), locationID)
@@ -246,5 +235,5 @@ func DeleteLocation(ctx echo.Context) error {
 		ctx.Logger().Errorf("DeleteLocation: %v", err)
 		return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 	}
-	return respondJSON(ctx, http.StatusOK, result, 0)
+	return respondJSON(ctx, http.StatusOK, result, 1)
 }

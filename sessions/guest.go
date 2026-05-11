@@ -61,26 +61,42 @@ func IssueGuestToken(ctx context.Context, claimID uuid.UUID, issuer string) (*Gu
 	if errors.Is(err, sql.ErrNoRows) {
 		guestType := "guest"
 		guestFirst := "Guest"
-		_, postErr := client.PostUser(ctx, db.SamnaUser{
+		guestUser := db.SamnaUser{
 			UserID:    guestUserID,
 			AppID:     app.ID,
 			FirstName: &guestFirst,
 			Type:      &guestType,
-		})
-		if postErr != nil {
-			return nil, fmt.Errorf("upsert guest user: %w", postErr)
 		}
-
-		newClaim, postClaimErr := client.PostUserClaim(ctx, claimID, db.UserClaim{
+		guestClaim := db.UserClaim{
 			AppID:   app.ID,
 			ClaimID: claimID,
 			UserID:  guestUserID,
 			OwnerID: claim.OwnerID,
-		})
-		if postClaimErr != nil {
-			return nil, fmt.Errorf("assign guest claim: %w", postClaimErr)
 		}
-		existingClaim = newClaim
+
+		if debugUserID := db.GetDebugUserID(); debugUserID != nil {
+			if _, postErr := db.Instance().PostUser(ctx, guestUser); postErr != nil {
+				return nil, fmt.Errorf("upsert guest user: %w", postErr)
+			}
+			ac, accErr := db.Instance().MutationAccess(ctx, *debugUserID, claimID, db.OBJECT_TYPE_CLAIM, db.ACCESS_OWNER)
+			if accErr != nil {
+				return nil, fmt.Errorf("guest claim access: %w", accErr)
+			}
+			newClaim, postClaimErr := db.Instance().PostClaimUser(ctx, ac, claimID, &guestClaim)
+			if postClaimErr != nil {
+				return nil, fmt.Errorf("assign guest claim: %w", postClaimErr)
+			}
+			existingClaim = *newClaim
+		} else {
+			if _, postErr := client.PostUser(ctx, guestUser); postErr != nil {
+				return nil, fmt.Errorf("upsert guest user: %w", postErr)
+			}
+			newClaim, postClaimErr := client.PostUserClaim(ctx, claimID, guestClaim)
+			if postClaimErr != nil {
+				return nil, fmt.Errorf("assign guest claim: %w", postClaimErr)
+			}
+			existingClaim = *newClaim
+		}
 	} else if err != nil {
 		return nil, fmt.Errorf("read user_claim: %w", err)
 	}

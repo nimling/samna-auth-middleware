@@ -72,7 +72,10 @@ func (d *DB) GetParentLocations(ctx context.Context, startID uuid.UUID) ([]uuid.
 	return ids, err
 }
 
-func (d *DB) PostLocation(ctx context.Context, ac *AccessClaim, loc *Location) error {
+func (d *DB) PostLocation(ctx context.Context, ac *AccessClaim, loc *Location) (*Location, error) {
+	if ac == nil {
+		return nil, ErrNoAccess
+	}
 	loc.CreatedBy = *ac.UserClaimID
 	loc.RootID = ac.RootID
 	_, err := d.NewInsert().
@@ -81,10 +84,16 @@ func (d *DB) PostLocation(ctx context.Context, ac *AccessClaim, loc *Location) e
 		Value("app_id", "claimius.get_disciple_app_id()").
 		Returning("*").
 		Exec(ctx, loc)
-	return err
+	if err != nil {
+		return nil, err
+	}
+	return loc, nil
 }
 
-func (d *DB) PutLocation(ctx context.Context, ac *AccessClaim, locationID uuid.UUID, loc *Location) error {
+func (d *DB) PutLocation(ctx context.Context, ac *AccessClaim, locationID uuid.UUID, loc *Location) (*Location, error) {
+	if ac == nil {
+		return nil, ErrNoAccess
+	}
 	_, err := d.NewUpdate().
 		Model(loc).
 		Where("id = ?", locationID).
@@ -93,10 +102,16 @@ func (d *DB) PutLocation(ctx context.Context, ac *AccessClaim, locationID uuid.U
 		OmitZero().
 		Returning("*").
 		Exec(ctx, loc)
-	return err
+	if err != nil {
+		return nil, err
+	}
+	return loc, nil
 }
 
 func (d *DB) DeleteLocation(ctx context.Context, ac *AccessClaim, locationID uuid.UUID) (*Location, error) {
+	if ac == nil {
+		return nil, ErrNoAccess
+	}
 	var loc Location
 	_, err := d.NewUpdate().
 		Model(&loc).

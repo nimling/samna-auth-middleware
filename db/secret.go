@@ -43,7 +43,13 @@ func (d *DB) GetSecret(ctx context.Context, secretID uuid.UUID) (*SamnaSecret, e
 	return &secret, nil
 }
 
-func (d *DB) PostSecret(ctx context.Context, body BodySecret, ownerID, createdBy, rootID, claimID uuid.UUID) (*SamnaSecret, error) {
+func (d *DB) PostSecret(ctx context.Context, ac *AccessClaim, body BodySecret) (*SamnaSecret, error) {
+	if ac == nil {
+		return nil, ErrNoAccess
+	}
+	if ac.ClaimID == nil {
+		return nil, ErrNoAccess
+	}
 	if body.Key == nil || *body.Key == "" {
 		return nil, fmt.Errorf("key is required")
 	}
@@ -66,8 +72,8 @@ func (d *DB) PostSecret(ctx context.Context, body BodySecret, ownerID, createdBy
 		Key:       *body.Key,
 		Value:     hex.EncodeToString(encrypted),
 		ExpiresAt: body.ExpiresAt,
-		OwnerID:   ownerID,
-		CreatedBy: &createdBy,
+		OwnerID:   ac.OwnerID,
+		CreatedBy: ac.UserClaimID,
 	}
 	err = d.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
 		if _, err := tx.NewInsert().
@@ -90,7 +96,7 @@ func (d *DB) PostSecret(ctx context.Context, body BodySecret, ownerID, createdBy
 				p_sa_access     := ?,
 				p_inherits      := TRUE
 			)
-		`, claimID, ownerID, rootID, createdBy, secret.ID, int(ACCESS_OWNER|ACCESS_WRITE|ACCESS_READ)).Exec(ctx); err != nil {
+		`, *ac.ClaimID, ac.OwnerID, ac.RootID, *ac.UserClaimID, secret.ID, int(ACCESS_OWNER|ACCESS_WRITE|ACCESS_READ)).Exec(ctx); err != nil {
 			return fmt.Errorf("assign claim object: %w", err)
 		}
 		return nil
@@ -101,7 +107,10 @@ func (d *DB) PostSecret(ctx context.Context, body BodySecret, ownerID, createdBy
 	return &secret, nil
 }
 
-func (d *DB) PutSecret(ctx context.Context, secretID uuid.UUID, body BodySecret) (*SamnaSecret, error) {
+func (d *DB) PutSecret(ctx context.Context, ac *AccessClaim, secretID uuid.UUID, body BodySecret) (*SamnaSecret, error) {
+	if ac == nil {
+		return nil, ErrNoAccess
+	}
 	secret, err := d.GetSecret(ctx, secretID)
 	if err != nil {
 		return nil, err
@@ -141,7 +150,10 @@ func (d *DB) PutSecret(ctx context.Context, secretID uuid.UUID, body BodySecret)
 	return secret, nil
 }
 
-func (d *DB) DeleteSecret(ctx context.Context, secretID uuid.UUID) (*SamnaSecret, error) {
+func (d *DB) DeleteSecret(ctx context.Context, ac *AccessClaim, secretID uuid.UUID) (*SamnaSecret, error) {
+	if ac == nil {
+		return nil, ErrNoAccess
+	}
 	var secret SamnaSecret
 	_, err := d.NewUpdate().
 		Model(&secret).

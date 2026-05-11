@@ -1,6 +1,7 @@
 package echo
 
 import (
+	"errors"
 	"io"
 	"net/http"
 
@@ -8,6 +9,7 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/nimling/samna-auth-middleware/client"
 	"github.com/nimling/samna-auth-middleware/db"
+	"github.com/nimling/samna-auth-middleware/middleware"
 )
 
 func GetAssets(ctx echo.Context) error {
@@ -97,26 +99,35 @@ func GetAssetData(ctx echo.Context) error {
 }
 
 func PostAsset(ctx echo.Context) error {
-	var asset db.Asset
-	if err := ctx.Bind(&asset); err != nil {
+	asset := &db.Asset{}
+	if err := ctx.Bind(asset); err != nil {
 		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
 
 	if getDebugUserID() != nil {
-		asset.ID = uuid.UUID{}
-		if err := db.Instance().PostAsset(ctx.Request().Context(), &asset); err != nil {
+		actorID := ctx.Get(middleware.UserIDKey).(uuid.UUID)
+		ac, err := db.Instance().MutationAccess(ctx.Request().Context(), actorID, asset.UserID, db.OBJECT_TYPE_USER, db.ACCESS_WRITE)
+		if err != nil {
+			if errors.Is(err, db.ErrNoAccess) {
+				return respondError(ctx, http.StatusForbidden, "Forbidden")
+			}
+			ctx.Logger().Errorf("PostAsset MutationAccess: %v", err)
+			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
+		}
+		asset, err = db.Instance().PostAsset(ctx.Request().Context(), ac, asset)
+		if err != nil {
 			ctx.Logger().Errorf("PostAsset: %v", err)
 			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 		}
 		return respondJSON(ctx, http.StatusCreated, asset, 1)
 	}
 
-	result, err := client.PostAsset(ctx.Request().Context(), asset)
+	result, err := client.PostAsset(ctx.Request().Context(), *asset)
 	if err != nil {
 		ctx.Logger().Errorf("PostAsset: %v", err)
 		return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 	}
-	return respondJSON(ctx, http.StatusCreated, result, 0)
+	return respondJSON(ctx, http.StatusCreated, result, 1)
 }
 
 func PostAssetData(ctx echo.Context) error {
@@ -167,25 +178,39 @@ func PutAsset(ctx echo.Context) error {
 		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
 
-	var asset db.Asset
-	if err := ctx.Bind(&asset); err != nil {
+	asset := &db.Asset{}
+	if err := ctx.Bind(asset); err != nil {
 		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
 
 	if getDebugUserID() != nil {
-		if err := db.Instance().PutAsset(ctx.Request().Context(), assetID, &asset); err != nil {
+		actorID := ctx.Get(middleware.UserIDKey).(uuid.UUID)
+		existing, err := db.Instance().GetAsset(ctx.Request().Context(), assetID)
+		if err != nil {
+			return respondError(ctx, http.StatusNotFound, "Not found")
+		}
+		ac, err := db.Instance().MutationAccess(ctx.Request().Context(), actorID, existing.UserID, db.OBJECT_TYPE_USER, db.ACCESS_WRITE)
+		if err != nil {
+			if errors.Is(err, db.ErrNoAccess) {
+				return respondError(ctx, http.StatusForbidden, "Forbidden")
+			}
+			ctx.Logger().Errorf("PutAsset MutationAccess: %v", err)
+			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
+		}
+		asset, err = db.Instance().PutAsset(ctx.Request().Context(), ac, assetID, asset)
+		if err != nil {
 			ctx.Logger().Errorf("PutAsset: %v", err)
 			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 		}
 		return respondJSON(ctx, http.StatusOK, asset, 1)
 	}
 
-	result, err := client.PutAsset(ctx.Request().Context(), assetID, asset)
+	result, err := client.PutAsset(ctx.Request().Context(), assetID, *asset)
 	if err != nil {
 		ctx.Logger().Errorf("PutAsset: %v", err)
 		return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 	}
-	return respondJSON(ctx, http.StatusOK, result, 0)
+	return respondJSON(ctx, http.StatusOK, result, 1)
 }
 
 func DeleteAsset(ctx echo.Context) error {
@@ -195,12 +220,25 @@ func DeleteAsset(ctx echo.Context) error {
 	}
 
 	if getDebugUserID() != nil {
-		asset, err := db.Instance().DeleteAsset(ctx.Request().Context(), assetID)
+		actorID := ctx.Get(middleware.UserIDKey).(uuid.UUID)
+		existing, err := db.Instance().GetAsset(ctx.Request().Context(), assetID)
+		if err != nil {
+			return respondError(ctx, http.StatusNotFound, "Not found")
+		}
+		ac, err := db.Instance().MutationAccess(ctx.Request().Context(), actorID, existing.UserID, db.OBJECT_TYPE_USER, db.ACCESS_WRITE)
+		if err != nil {
+			if errors.Is(err, db.ErrNoAccess) {
+				return respondError(ctx, http.StatusForbidden, "Forbidden")
+			}
+			ctx.Logger().Errorf("DeleteAsset MutationAccess: %v", err)
+			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
+		}
+		asset, err := db.Instance().DeleteAsset(ctx.Request().Context(), ac, assetID)
 		if err != nil {
 			ctx.Logger().Errorf("DeleteAsset: %v", err)
 			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 		}
-		return respondJSON(ctx, http.StatusOK, asset, 0)
+		return respondJSON(ctx, http.StatusOK, asset, 1)
 	}
 
 	result, err := client.DeleteAsset(ctx.Request().Context(), assetID)
@@ -208,5 +246,5 @@ func DeleteAsset(ctx echo.Context) error {
 		ctx.Logger().Errorf("DeleteAsset: %v", err)
 		return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 	}
-	return respondJSON(ctx, http.StatusOK, result, 0)
+	return respondJSON(ctx, http.StatusOK, result, 1)
 }

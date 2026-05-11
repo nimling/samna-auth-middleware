@@ -49,16 +49,25 @@ func (d *DB) GetUserAssets(ctx context.Context, userID uuid.UUID) ([]Asset, erro
 	return assets, nil
 }
 
-func (d *DB) PostAsset(ctx context.Context, asset *Asset) error {
+func (d *DB) PostAsset(ctx context.Context, ac *AccessClaim, asset *Asset) (*Asset, error) {
+	if ac == nil {
+		return nil, ErrNoAccess
+	}
 	_, err := d.NewInsert().
 		Model(asset).
 		ExcludeColumn("id", "sa_created_at", "sa_updated_at", "sa_deleted_at").
 		Returning("*").
 		Exec(ctx, asset)
-	return err
+	if err != nil {
+		return nil, err
+	}
+	return asset, nil
 }
 
-func (d *DB) PutAsset(ctx context.Context, assetID uuid.UUID, asset *Asset) error {
+func (d *DB) PutAsset(ctx context.Context, ac *AccessClaim, assetID uuid.UUID, asset *Asset) (*Asset, error) {
+	if ac == nil {
+		return nil, ErrNoAccess
+	}
 	_, err := d.NewUpdate().
 		Model(asset).
 		Where("id = ?", assetID).
@@ -66,10 +75,16 @@ func (d *DB) PutAsset(ctx context.Context, assetID uuid.UUID, asset *Asset) erro
 		OmitZero().
 		Returning("*").
 		Exec(ctx, asset)
-	return err
+	if err != nil {
+		return nil, err
+	}
+	return asset, nil
 }
 
-func (d *DB) DeleteAsset(ctx context.Context, assetID uuid.UUID) (*Asset, error) {
+func (d *DB) DeleteAsset(ctx context.Context, ac *AccessClaim, assetID uuid.UUID) (*Asset, error) {
+	if ac == nil {
+		return nil, ErrNoAccess
+	}
 	var asset Asset
 	_, err := d.NewUpdate().
 		Model(&asset).

@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 	"github.com/uptrace/bun"
 	"github.com/uptrace/bun/dialect/pgdialect"
@@ -155,6 +156,28 @@ func Init(logger echo.Logger) {
 
 func IsDebugMode() bool {
 	return os.Getenv("SAUTH_DEBUG_USER_ID") != "" || (os.Getenv("SAUTH_DEBUG_CLIENT_ID") != "" && os.Getenv("SAUTH_DEBUG_CLIENT_SECRET") != "")
+}
+
+func GetDebugUserID() *uuid.UUID {
+	if id := parseEnvUUID("SAUTH_DEBUG_USER_ID"); id != nil {
+		return id
+	}
+	if os.Getenv("SAUTH_DEBUG_CLIENT_SECRET") == "" {
+		return nil
+	}
+	return parseEnvUUID("SAUTH_DEBUG_CLIENT_ID")
+}
+
+func parseEnvUUID(key string) *uuid.UUID {
+	val := os.Getenv(key)
+	if val == "" {
+		return nil
+	}
+	id, err := uuid.Parse(val)
+	if err != nil {
+		return nil
+	}
+	return &id
 }
 
 func Instance() *DB {

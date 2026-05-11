@@ -98,7 +98,7 @@ func GetOrganizations(ctx echo.Context) error {
 			ctx.Logger().Errorf("GetOrganizations: %v", err)
 			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 		}
-		return respondJSON(ctx, http.StatusOK, orgs, 0)
+		return respondJSON(ctx, http.StatusOK, orgs, len(orgs))
 	}
 
 	body, err := client.GetOrganizations(ctx.Request().Context(), ctx.QueryString())
@@ -147,7 +147,7 @@ func GetOrganization(ctx echo.Context) error {
 			ctx.Logger().Errorf("GetOrganization: %v", err)
 			return respondError(ctx, http.StatusNotFound, "Not found")
 		}
-		return respondJSON(ctx, http.StatusOK, org, 0)
+		return respondJSON(ctx, http.StatusOK, org, 1)
 	}
 
 	body, err := client.GetOrganization(ctx.Request().Context(), orgID)
@@ -171,7 +171,7 @@ func GetOrganizationGraph(ctx echo.Context) error {
 			ctx.Logger().Errorf("GetOrganizationGraph: %v", err)
 			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 		}
-		return respondJSON(ctx, http.StatusOK, nodes, 0)
+		return respondJSON(ctx, http.StatusOK, nodes, len(nodes))
 	}
 
 	body, err := client.GetOrganizationGraph(ctx.Request().Context(), startID, depth, level)
@@ -225,8 +225,8 @@ func GetOrganizationAssets(ctx echo.Context) error {
 
 func PostOrganization(ctx echo.Context) error {
 	if debugUserID := getDebugUserID(); debugUserID != nil {
-		var org db.Organization
-		if err := ctx.Bind(&org); err != nil {
+		org := &db.Organization{}
+		if err := ctx.Bind(org); err != nil {
 			return respondError(ctx, http.StatusBadRequest, "Bad request")
 		}
 		if org.OwnerID == (uuid.UUID{}) {
@@ -243,12 +243,12 @@ func PostOrganization(ctx echo.Context) error {
 			ctx.Logger().Errorf("PostOrganization MutationAccess: %v", err)
 			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 		}
-		org.ID = uuid.UUID{}
-		if err := db.Instance().PostOrganization(ctx.Request().Context(), ac, &org); err != nil {
+		org, err = db.Instance().PostOrganization(ctx.Request().Context(), ac, org)
+		if err != nil {
 			ctx.Logger().Errorf("PostOrganization: %v", err)
 			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 		}
-		return respondJSON(ctx, http.StatusCreated, org, 0)
+		return respondJSON(ctx, http.StatusCreated, org, 1)
 	}
 
 	var org db.Organization
@@ -263,7 +263,7 @@ func PostOrganization(ctx echo.Context) error {
 		ctx.Logger().Errorf("PostOrganization: %v", err)
 		return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 	}
-	return respondJSON(ctx, http.StatusCreated, result, 0)
+	return respondJSON(ctx, http.StatusCreated, result, 1)
 }
 
 func PutOrganization(ctx echo.Context) error {
@@ -285,18 +285,19 @@ func PutOrganization(ctx echo.Context) error {
 			ctx.Logger().Errorf("PutOrganization MutationAccess: %v", err)
 			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 		}
-		var org db.Organization
-		if err := ctx.Bind(&org); err != nil {
+		org := &db.Organization{}
+		if err := ctx.Bind(org); err != nil {
 			return respondError(ctx, http.StatusBadRequest, "Bad request")
 		}
 		if org.Type == db.ORGANIZATION_TYPE_SYSTEM {
 			return respondError(ctx, http.StatusBadRequest, "Bad request")
 		}
-		if err := db.Instance().PutOrganization(ctx.Request().Context(), ac, orgID, &org); err != nil {
+		org, err = db.Instance().PutOrganization(ctx.Request().Context(), ac, orgID, org)
+		if err != nil {
 			ctx.Logger().Errorf("PutOrganization: %v", err)
 			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 		}
-		return respondJSON(ctx, http.StatusOK, org, 0)
+		return respondJSON(ctx, http.StatusOK, org, 1)
 	}
 
 	var org db.Organization
@@ -311,7 +312,7 @@ func PutOrganization(ctx echo.Context) error {
 		ctx.Logger().Errorf("PutOrganization: %v", err)
 		return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 	}
-	return respondJSON(ctx, http.StatusOK, result, 0)
+	return respondJSON(ctx, http.StatusOK, result, 1)
 }
 
 func DeleteOrganization(ctx echo.Context) error {
@@ -338,7 +339,7 @@ func DeleteOrganization(ctx echo.Context) error {
 			ctx.Logger().Errorf("DeleteOrganization: %v", err)
 			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 		}
-		return respondJSON(ctx, http.StatusOK, org, 0)
+		return respondJSON(ctx, http.StatusOK, org, 1)
 	}
 
 	result, err := client.DeleteOrganization(ctx.Request().Context(), orgID)
@@ -346,5 +347,5 @@ func DeleteOrganization(ctx echo.Context) error {
 		ctx.Logger().Errorf("DeleteOrganization: %v", err)
 		return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 	}
-	return respondJSON(ctx, http.StatusOK, result, 0)
+	return respondJSON(ctx, http.StatusOK, result, 1)
 }

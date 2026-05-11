@@ -54,84 +54,68 @@ func GetLocationClaims(ctx context.Context, locationID uuid.UUID) (io.ReadCloser
 	return c.client.Get(ctx, u)
 }
 
-func PostLocation(ctx context.Context, loc db.Location) (db.Location, error) {
-	if getDebugUserID() != nil {
-		ac, err := db.Instance().MutationAccess(ctx, *getDebugUserID(), loc.OwnerID, db.OBJECT_TYPE_ORGANIZATION, db.ACCESS_WRITE)
-		if err != nil {
-			return db.Location{}, err
-		}
-		if err := db.Instance().PostLocation(ctx, ac, &loc); err != nil {
-			return db.Location{}, err
-		}
-		return loc, nil
-	}
+func PostLocation(ctx context.Context, loc db.Location) (*db.Location, error) {
 	c := newClient()
 	u, err := joinURL(c.apiURL, "location")
 	if err != nil {
-		return db.Location{}, fmt.Errorf("build url: %w", err)
+		return nil, fmt.Errorf("build url: %w", err)
 	}
 	result, err := DecodeJSON[db.Location](c.client.Post(ctx, requestBody(loc, true), u))
 	if err != nil {
-		return result, err
+		return nil, err
 	}
-	_, err = db.Instance().NewInsert().Model(&result).On("CONFLICT (id) DO UPDATE").Set("sa_updated_at = EXCLUDED.sa_updated_at").Set("sa_deleted_at = EXCLUDED.sa_deleted_at").Exec(ctx)
+	_, err = db.Instance().NewInsert().
+		Model(&result).
+		On("CONFLICT (id) DO UPDATE").
+		Set("sa_updated_at = EXCLUDED.sa_updated_at").
+		Set("sa_deleted_at = EXCLUDED.sa_deleted_at").
+		Exec(ctx)
 	if err != nil {
-		return result, err
+		return nil, err
 	}
-	return result, nil
+	return &result, nil
 }
 
-func PutLocation(ctx context.Context, locationID uuid.UUID, loc db.Location) (db.Location, error) {
-	if getDebugUserID() != nil {
-		ac, err := db.Instance().MutationAccess(ctx, *getDebugUserID(), locationID, db.OBJECT_TYPE_LOCATION, db.ACCESS_WRITE)
-		if err != nil {
-			return db.Location{}, err
-		}
-		if err := db.Instance().PutLocation(ctx, ac, locationID, &loc); err != nil {
-			return db.Location{}, err
-		}
-		return loc, nil
-	}
+func PutLocation(ctx context.Context, locationID uuid.UUID, loc db.Location) (*db.Location, error) {
 	c := newClient()
 	u, err := joinURL(c.apiURL, "location", locationID.String())
 	if err != nil {
-		return db.Location{}, fmt.Errorf("build url: %w", err)
+		return nil, fmt.Errorf("build url: %w", err)
 	}
 	result, err := DecodeJSON[db.Location](c.client.Put(ctx, requestBody(loc, false), u))
 	if err != nil {
-		return result, err
+		return nil, err
 	}
-	_, err = db.Instance().NewInsert().Model(&result).On("CONFLICT (id) DO UPDATE").Set("sa_updated_at = EXCLUDED.sa_updated_at").Set("sa_deleted_at = EXCLUDED.sa_deleted_at").Exec(ctx)
+	_, err = db.Instance().NewInsert().
+		Model(&result).
+		On("CONFLICT (id) DO UPDATE").
+		Set("sa_updated_at = EXCLUDED.sa_updated_at").
+		Set("sa_deleted_at = EXCLUDED.sa_deleted_at").
+		Exec(ctx)
 	if err != nil {
-		return result, err
+		return nil, err
 	}
-	return result, nil
+	return &result, nil
 }
 
-func DeleteLocation(ctx context.Context, locationID uuid.UUID) (db.Location, error) {
-	if getDebugUserID() != nil {
-		ac, err := db.Instance().MutationAccess(ctx, *getDebugUserID(), locationID, db.OBJECT_TYPE_LOCATION, db.ACCESS_WRITE)
-		if err != nil {
-			return db.Location{}, err
-		}
-		out, err := db.Instance().DeleteLocation(ctx, ac, locationID)
-		if err != nil {
-			return db.Location{}, err
-		}
-		return *out, nil
-	}
+func DeleteLocation(ctx context.Context, locationID uuid.UUID) (*db.Location, error) {
 	c := newClient()
 	u, err := joinURL(c.apiURL, "location", locationID.String())
 	if err != nil {
-		return db.Location{}, fmt.Errorf("build url: %w", err)
+		return nil, fmt.Errorf("build url: %w", err)
 	}
 	result, err := DecodeJSON[db.Location](c.client.Delete(ctx, u))
 	if err != nil {
-		return result, err
+		return nil, err
 	}
-	_, err = db.Instance().NewInsert().Model(&result).On("CONFLICT (id) DO UPDATE").Set("sa_updated_at = EXCLUDED.sa_updated_at").Set("sa_deleted_at = EXCLUDED.sa_deleted_at").Exec(ctx)
+	_, err = db.Instance().NewInsert().
+		Model(&result).
+		On("CONFLICT (id) DO UPDATE").
+		Set("sa_updated_at = EXCLUDED.sa_updated_at").
+		Set("sa_deleted_at = EXCLUDED.sa_deleted_at").
+		Exec(ctx)
 	if err != nil {
-		return result, err
+		return nil, err
 	}
-	return result, nil
+	return &result, nil
 }

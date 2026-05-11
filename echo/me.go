@@ -1,6 +1,7 @@
 package echo
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/google/uuid"
@@ -19,7 +20,7 @@ func GetMe(ctx echo.Context) error {
 			ctx.Logger().Errorf("GetMe: %v", err)
 			return respondError(ctx, http.StatusNotFound, "Not found")
 		}
-		return respondJSON(ctx, http.StatusOK, user, 0)
+		return respondJSON(ctx, http.StatusOK, user, 1)
 	}
 
 	body, err := client.GetUser(ctx.Request().Context(), userID)
@@ -35,15 +36,24 @@ func PutMe(ctx echo.Context) error {
 	userID := ctx.Get(middleware.UserIDKey).(uuid.UUID)
 
 	if getDebugUserID() != nil {
-		var user db.SamnaUser
-		if err := ctx.Bind(&user); err != nil {
+		user := &db.SamnaUser{}
+		if err := ctx.Bind(user); err != nil {
 			return respondError(ctx, http.StatusBadRequest, "Bad request")
 		}
-		if err := db.Instance().PutUser(ctx.Request().Context(), userID, &user); err != nil {
+		ac, err := db.Instance().MutationAccess(ctx.Request().Context(), userID, userID, db.OBJECT_TYPE_USER, db.ACCESS_WRITE)
+		if err != nil {
+			if errors.Is(err, db.ErrNoAccess) {
+				return respondError(ctx, http.StatusForbidden, "Forbidden")
+			}
+			ctx.Logger().Errorf("PutMe MutationAccess: %v", err)
+			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
+		}
+		user, err = db.Instance().PutUser(ctx.Request().Context(), ac, userID, user)
+		if err != nil {
 			ctx.Logger().Errorf("PutMe: %v", err)
 			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 		}
-		return respondJSON(ctx, http.StatusOK, user, 0)
+		return respondJSON(ctx, http.StatusOK, user, 1)
 	}
 
 	var user db.SamnaUser
@@ -55,7 +65,7 @@ func PutMe(ctx echo.Context) error {
 		ctx.Logger().Errorf("PutMe: %v", err)
 		return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 	}
-	return respondJSON(ctx, http.StatusOK, result, 0)
+	return respondJSON(ctx, http.StatusOK, result, 1)
 }
 
 func GetMeClaims(ctx echo.Context) error {
@@ -86,7 +96,7 @@ func GetMeClaims(ctx echo.Context) error {
 			ctx.Logger().Errorf("GetMeClaims: %v", err)
 			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 		}
-		return respondJSON(ctx, http.StatusOK, claims, 0)
+		return respondJSON(ctx, http.StatusOK, claims, len(claims))
 	}
 
 	body, err := client.GetUserClaims(ctx.Request().Context(), userID)
@@ -107,7 +117,7 @@ func GetMeRelations(ctx echo.Context) error {
 			ctx.Logger().Errorf("GetMeRelations: %v", err)
 			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 		}
-		return respondJSON(ctx, http.StatusOK, relations, 0)
+		return respondJSON(ctx, http.StatusOK, relations, len(relations))
 	}
 
 	body, err := client.GetUserConnections(ctx.Request().Context(), userID)
@@ -143,7 +153,7 @@ func GetMeOrganizations(ctx echo.Context) error {
 			ctx.Logger().Errorf("GetMeOrganizations: %v", err)
 			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 		}
-		return respondJSON(ctx, http.StatusOK, orgs, 0)
+		return respondJSON(ctx, http.StatusOK, orgs, len(orgs))
 	}
 
 	body, err := client.GetUserOrganizations(ctx.Request().Context(), userID)
@@ -179,7 +189,7 @@ func GetMeLocations(ctx echo.Context) error {
 			ctx.Logger().Errorf("GetMeLocations: %v", err)
 			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 		}
-		return respondJSON(ctx, http.StatusOK, locs, 0)
+		return respondJSON(ctx, http.StatusOK, locs, len(locs))
 	}
 
 	body, err := client.GetUserLocations(ctx.Request().Context(), userID)

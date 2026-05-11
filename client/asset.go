@@ -37,27 +37,26 @@ func GetAssetData(ctx context.Context, assetID uuid.UUID) (io.ReadCloser, error)
 	return c.client.Get(ctx, u)
 }
 
-func PostAsset(ctx context.Context, asset db.Asset) (db.Asset, error) {
-	if getDebugUserID() != nil {
-		if err := db.Instance().PostAsset(ctx, &asset); err != nil {
-			return db.Asset{}, err
-		}
-		return asset, nil
-	}
+func PostAsset(ctx context.Context, asset db.Asset) (*db.Asset, error) {
 	c := newClient()
 	u, err := joinURL(c.apiURL, "asset")
 	if err != nil {
-		return db.Asset{}, fmt.Errorf("build url: %w", err)
+		return nil, fmt.Errorf("build url: %w", err)
 	}
 	result, err := DecodeJSON[db.Asset](c.client.Post(ctx, requestBody(asset, true), u))
 	if err != nil {
-		return result, err
+		return nil, err
 	}
-	_, err = db.Instance().NewInsert().Model(&result).On("CONFLICT (id) DO UPDATE").Set("sa_updated_at = EXCLUDED.sa_updated_at").Set("sa_deleted_at = EXCLUDED.sa_deleted_at").Exec(ctx)
+	_, err = db.Instance().NewInsert().
+		Model(&result).
+		On("CONFLICT (id) DO UPDATE").
+		Set("sa_updated_at = EXCLUDED.sa_updated_at").
+		Set("sa_deleted_at = EXCLUDED.sa_deleted_at").
+		Exec(ctx)
 	if err != nil {
-		return result, err
+		return nil, err
 	}
-	return result, nil
+	return &result, nil
 }
 
 func PostAssetData(ctx context.Context, assetID uuid.UUID, contentType string, body io.Reader) (io.ReadCloser, error) {
@@ -91,49 +90,36 @@ func PostAssetData(ctx context.Context, assetID uuid.UUID, contentType string, b
 	return resp.Body, nil
 }
 
-func PutAsset(ctx context.Context, assetID uuid.UUID, asset db.Asset) (db.Asset, error) {
-	if getDebugUserID() != nil {
-		if err := db.Instance().PutAsset(ctx, assetID, &asset); err != nil {
-			return db.Asset{}, err
-		}
-		return asset, nil
-	}
+func PutAsset(ctx context.Context, assetID uuid.UUID, asset db.Asset) (*db.Asset, error) {
 	c := newClient()
 	u, err := joinURL(c.apiURL, "asset", assetID.String())
 	if err != nil {
-		return db.Asset{}, fmt.Errorf("build url: %w", err)
+		return nil, fmt.Errorf("build url: %w", err)
 	}
 	result, err := DecodeJSON[db.Asset](c.client.Put(ctx, requestBody(asset, false), u))
 	if err != nil {
-		return result, err
+		return nil, err
 	}
 	_, err = db.Instance().NewInsert().Model(&result).On("CONFLICT (id) DO UPDATE").Set("sa_updated_at = EXCLUDED.sa_updated_at").Set("sa_deleted_at = EXCLUDED.sa_deleted_at").Exec(ctx)
 	if err != nil {
-		return result, err
+		return nil, err
 	}
-	return result, nil
+	return &result, nil
 }
 
-func DeleteAsset(ctx context.Context, assetID uuid.UUID) (db.Asset, error) {
-	if getDebugUserID() != nil {
-		out, err := db.Instance().DeleteAsset(ctx, assetID)
-		if err != nil {
-			return db.Asset{}, err
-		}
-		return *out, nil
-	}
+func DeleteAsset(ctx context.Context, assetID uuid.UUID) (*db.Asset, error) {
 	c := newClient()
 	u, err := joinURL(c.apiURL, "asset", assetID.String())
 	if err != nil {
-		return db.Asset{}, fmt.Errorf("build url: %w", err)
+		return nil, fmt.Errorf("build url: %w", err)
 	}
 	result, err := DecodeJSON[db.Asset](c.client.Delete(ctx, u))
 	if err != nil {
-		return result, err
+		return nil, err
 	}
 	_, err = db.Instance().NewInsert().Model(&result).On("CONFLICT (id) DO UPDATE").Set("sa_updated_at = EXCLUDED.sa_updated_at").Set("sa_deleted_at = EXCLUDED.sa_deleted_at").Exec(ctx)
 	if err != nil {
-		return result, err
+		return nil, err
 	}
-	return result, nil
+	return &result, nil
 }

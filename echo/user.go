@@ -1,6 +1,7 @@
 package echo
 
 import (
+	"errors"
 	"net/http"
 	"strings"
 
@@ -19,7 +20,7 @@ func GetUsers(ctx echo.Context) error {
 			ctx.Logger().Errorf("GetUsers: %v", err)
 			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 		}
-		return respondJSON(ctx, http.StatusOK, users, 0)
+		return respondJSON(ctx, http.StatusOK, users, len(users))
 	}
 
 	body, err := client.GetUsers(ctx.Request().Context())
@@ -43,7 +44,7 @@ func GetUser(ctx echo.Context) error {
 			ctx.Logger().Errorf("GetUser: %v", err)
 			return respondError(ctx, http.StatusNotFound, "Not found")
 		}
-		return respondJSON(ctx, http.StatusOK, user, 0)
+		return respondJSON(ctx, http.StatusOK, user, 1)
 	}
 
 	body, err := client.GetUser(ctx.Request().Context(), userID)
@@ -92,7 +93,7 @@ func GetUserClaims(ctx echo.Context) error {
 			ctx.Logger().Errorf("GetUserClaims: %v", err)
 			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 		}
-		return respondJSON(ctx, http.StatusOK, claims, 0)
+		return respondJSON(ctx, http.StatusOK, claims, len(claims))
 	}
 
 	body, err := client.GetUserClaims(ctx.Request().Context(), userID)
@@ -180,7 +181,7 @@ func GetUserRelations(ctx echo.Context) error {
 			ctx.Logger().Errorf("GetUserRelations: %v", err)
 			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 		}
-		return respondJSON(ctx, http.StatusOK, relations, 0)
+		return respondJSON(ctx, http.StatusOK, relations, len(relations))
 	}
 
 	body, err := client.GetUserConnections(ctx.Request().Context(), userID)
@@ -204,7 +205,7 @@ func PostUser(ctx echo.Context) error {
 			ctx.Logger().Errorf("PostUser: %v", err)
 			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 		}
-		return respondJSON(ctx, http.StatusCreated, out, 0)
+		return respondJSON(ctx, http.StatusCreated, out, 1)
 	}
 
 	result, err := client.PostUser(ctx.Request().Context(), user)
@@ -212,7 +213,7 @@ func PostUser(ctx echo.Context) error {
 		ctx.Logger().Errorf("PostUser: %v", err)
 		return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 	}
-	return respondJSON(ctx, http.StatusCreated, result, 0)
+	return respondJSON(ctx, http.StatusCreated, result, 1)
 }
 
 func PutUser(ctx echo.Context) error {
@@ -221,16 +222,25 @@ func PutUser(ctx echo.Context) error {
 		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
 
-	if getDebugUserID() != nil {
-		var user db.SamnaUser
-		if err := ctx.Bind(&user); err != nil {
+	if debugUserID := getDebugUserID(); debugUserID != nil {
+		user := &db.SamnaUser{}
+		if err := ctx.Bind(user); err != nil {
 			return respondError(ctx, http.StatusBadRequest, "Bad request")
 		}
-		if err := db.Instance().PutUser(ctx.Request().Context(), userID, &user); err != nil {
+		ac, err := db.Instance().MutationAccess(ctx.Request().Context(), *debugUserID, userID, db.OBJECT_TYPE_USER, db.ACCESS_WRITE)
+		if err != nil {
+			if errors.Is(err, db.ErrNoAccess) {
+				return respondError(ctx, http.StatusForbidden, "Forbidden")
+			}
+			ctx.Logger().Errorf("PutUser MutationAccess: %v", err)
+			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
+		}
+		user, err = db.Instance().PutUser(ctx.Request().Context(), ac, userID, user)
+		if err != nil {
 			ctx.Logger().Errorf("PutUser: %v", err)
 			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 		}
-		return respondJSON(ctx, http.StatusOK, user, 0)
+		return respondJSON(ctx, http.StatusOK, user, 1)
 	}
 
 	var user db.SamnaUser
@@ -242,7 +252,7 @@ func PutUser(ctx echo.Context) error {
 		ctx.Logger().Errorf("PutUser: %v", err)
 		return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 	}
-	return respondJSON(ctx, http.StatusOK, result, 0)
+	return respondJSON(ctx, http.StatusOK, result, 1)
 }
 
 func DeleteUser(ctx echo.Context) error {
@@ -251,13 +261,21 @@ func DeleteUser(ctx echo.Context) error {
 		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
 
-	if getDebugUserID() != nil {
-		user, err := db.Instance().DeleteUser(ctx.Request().Context(), userID)
+	if debugUserID := getDebugUserID(); debugUserID != nil {
+		ac, err := db.Instance().MutationAccess(ctx.Request().Context(), *debugUserID, userID, db.OBJECT_TYPE_USER, db.ACCESS_WRITE)
+		if err != nil {
+			if errors.Is(err, db.ErrNoAccess) {
+				return respondError(ctx, http.StatusForbidden, "Forbidden")
+			}
+			ctx.Logger().Errorf("DeleteUser MutationAccess: %v", err)
+			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
+		}
+		user, err := db.Instance().DeleteUser(ctx.Request().Context(), ac, userID)
 		if err != nil {
 			ctx.Logger().Errorf("DeleteUser: %v", err)
 			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 		}
-		return respondJSON(ctx, http.StatusOK, user, 0)
+		return respondJSON(ctx, http.StatusOK, user, 1)
 	}
 
 	result, err := client.DeleteUser(ctx.Request().Context(), userID)
@@ -265,7 +283,7 @@ func DeleteUser(ctx echo.Context) error {
 		ctx.Logger().Errorf("DeleteUser: %v", err)
 		return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 	}
-	return respondJSON(ctx, http.StatusOK, result, 0)
+	return respondJSON(ctx, http.StatusOK, result, 1)
 }
 
 func PostUserToken(ctx echo.Context) error {
@@ -278,7 +296,7 @@ func PostUserToken(ctx echo.Context) error {
 		ctx.Logger().Errorf("PostUserToken: %v", err)
 		return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 	}
-	return respondJSON(ctx, http.StatusCreated, result, 0)
+	return respondJSON(ctx, http.StatusCreated, result, 1)
 }
 
 func PostUserTokenValidate(ctx echo.Context) error {
@@ -293,7 +311,7 @@ func PostUserTokenValidate(ctx echo.Context) error {
 		ctx.Logger().Errorf("PostUserTokenValidate: %v", err)
 		return respondError(ctx, http.StatusUnauthorized, "Unauthorized")
 	}
-	return respondJSON(ctx, http.StatusOK, result, 0)
+	return respondJSON(ctx, http.StatusOK, result, 1)
 }
 
 func GetUserAssets(ctx echo.Context) error {
