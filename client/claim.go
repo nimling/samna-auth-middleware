@@ -50,6 +50,13 @@ func GetClaimAudit(ctx context.Context, claimID uuid.UUID) (io.ReadCloser, error
 }
 
 func PostClaim(ctx context.Context, claim db.Claim) (db.Claim, error) {
+	if getDebugUserID() != nil {
+		out, err := db.Instance().PostClaim(ctx, claim)
+		if err != nil {
+			return db.Claim{}, err
+		}
+		return *out, nil
+	}
 	c := newClient()
 	u, err := joinURL(c.apiURL, "claim")
 	if err != nil {
@@ -67,6 +74,13 @@ func PostClaim(ctx context.Context, claim db.Claim) (db.Claim, error) {
 }
 
 func PutClaim(ctx context.Context, claimID uuid.UUID, claim db.Claim) (db.Claim, error) {
+	if getDebugUserID() != nil {
+		out, err := db.Instance().PutClaim(ctx, claimID, claim)
+		if err != nil {
+			return db.Claim{}, err
+		}
+		return *out, nil
+	}
 	c := newClient()
 	u, err := joinURL(c.apiURL, "claim", claimID.String())
 	if err != nil {
@@ -84,6 +98,23 @@ func PutClaim(ctx context.Context, claimID uuid.UUID, claim db.Claim) (db.Claim,
 }
 
 func DeleteClaim(ctx context.Context, claimID uuid.UUID) (db.Claim, error) {
+	if getDebugUserID() != nil {
+		ac, err := db.Instance().MutationAccess(ctx, *getDebugUserID(), claimID, db.OBJECT_TYPE_CLAIM, db.ACCESS_OWNER)
+		if err != nil {
+			return db.Claim{}, err
+		}
+		if ac == nil || ac.UserClaimID == nil {
+			return db.Claim{}, fmt.Errorf("forbidden")
+		}
+		if err := db.Instance().DeleteClaim(ctx, claimID, *ac.UserClaimID); err != nil {
+			return db.Claim{}, err
+		}
+		out, err := db.Instance().GetClaim(ctx, *getDebugUserID(), claimID, db.ACCESS_NONE)
+		if err != nil || out == nil {
+			return db.Claim{ID: claimID}, nil
+		}
+		return *out, nil
+	}
 	c := newClient()
 	u, err := joinURL(c.apiURL, "claim", claimID.String())
 	if err != nil {
@@ -101,6 +132,13 @@ func DeleteClaim(ctx context.Context, claimID uuid.UUID) (db.Claim, error) {
 }
 
 func PostClaimObject(ctx context.Context, claimID uuid.UUID, co db.ClaimObject) (db.ClaimObject, error) {
+	if getDebugUserID() != nil {
+		out, err := db.Instance().PostClaimObject(ctx, claimID, co)
+		if err != nil {
+			return db.ClaimObject{}, err
+		}
+		return *out, nil
+	}
 	c := newClient()
 	u, err := joinURL(c.apiURL, "claim", claimID.String(), "object")
 	if err != nil {
@@ -118,6 +156,19 @@ func PostClaimObject(ctx context.Context, claimID uuid.UUID, co db.ClaimObject) 
 }
 
 func DeleteClaimObject(ctx context.Context, claimID uuid.UUID, objectID uuid.UUID) (db.ClaimObject, error) {
+	if getDebugUserID() != nil {
+		ac, err := db.Instance().MutationAccess(ctx, *getDebugUserID(), claimID, db.OBJECT_TYPE_CLAIM, db.ACCESS_OWNER)
+		if err != nil {
+			return db.ClaimObject{}, err
+		}
+		if ac == nil || ac.UserClaimID == nil {
+			return db.ClaimObject{}, fmt.Errorf("forbidden")
+		}
+		if err := db.Instance().DeleteClaimObject(ctx, claimID, objectID, *ac.UserClaimID); err != nil {
+			return db.ClaimObject{}, err
+		}
+		return db.ClaimObject{ClaimID: claimID, ObjectID: &objectID}, nil
+	}
 	c := newClient()
 	u, err := joinURL(c.apiURL, "claim", claimID.String(), "object", objectID.String())
 	if err != nil {
@@ -135,6 +186,13 @@ func DeleteClaimObject(ctx context.Context, claimID uuid.UUID, objectID uuid.UUI
 }
 
 func PostUserClaim(ctx context.Context, claimID uuid.UUID, uc db.UserClaim) (db.UserClaim, error) {
+	if getDebugUserID() != nil {
+		out, err := db.Instance().PostClaimUser(ctx, claimID, uc)
+		if err != nil {
+			return db.UserClaim{}, err
+		}
+		return *out, nil
+	}
 	c := newClient()
 	u, err := joinURL(c.apiURL, "claim", claimID.String(), "user")
 	if err != nil {
@@ -152,6 +210,19 @@ func PostUserClaim(ctx context.Context, claimID uuid.UUID, uc db.UserClaim) (db.
 }
 
 func DeleteUserClaim(ctx context.Context, claimID uuid.UUID, userID uuid.UUID) (db.UserClaim, error) {
+	if getDebugUserID() != nil {
+		ac, err := db.Instance().MutationAccess(ctx, *getDebugUserID(), claimID, db.OBJECT_TYPE_CLAIM, db.ACCESS_OWNER)
+		if err != nil {
+			return db.UserClaim{}, err
+		}
+		if ac == nil || ac.UserClaimID == nil {
+			return db.UserClaim{}, fmt.Errorf("forbidden")
+		}
+		if err := db.Instance().DeleteClaimUser(ctx, claimID, userID, *ac.UserClaimID); err != nil {
+			return db.UserClaim{}, err
+		}
+		return db.UserClaim{ClaimID: claimID, UserID: userID}, nil
+	}
 	c := newClient()
 	u, err := joinURL(c.apiURL, "claim", claimID.String(), "user", userID.String())
 	if err != nil {

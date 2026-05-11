@@ -68,6 +68,16 @@ func GetOrganizationClaims(ctx context.Context, orgID uuid.UUID) (io.ReadCloser,
 }
 
 func PostOrganization(ctx context.Context, org db.Organization) (db.Organization, error) {
+	if getDebugUserID() != nil {
+		ac, err := db.Instance().MutationAccess(ctx, *getDebugUserID(), org.OwnerID, db.OBJECT_TYPE_ORGANIZATION, db.ACCESS_WRITE)
+		if err != nil {
+			return db.Organization{}, err
+		}
+		if err := db.Instance().PostOrganization(ctx, ac, &org); err != nil {
+			return db.Organization{}, err
+		}
+		return org, nil
+	}
 	c := newClient()
 	u, err := joinURL(c.apiURL, "organization")
 	if err != nil {
@@ -85,6 +95,16 @@ func PostOrganization(ctx context.Context, org db.Organization) (db.Organization
 }
 
 func PutOrganization(ctx context.Context, orgID uuid.UUID, org db.Organization) (db.Organization, error) {
+	if getDebugUserID() != nil {
+		ac, err := db.Instance().MutationAccess(ctx, *getDebugUserID(), orgID, db.OBJECT_TYPE_ORGANIZATION, db.ACCESS_WRITE)
+		if err != nil {
+			return db.Organization{}, err
+		}
+		if err := db.Instance().PutOrganization(ctx, ac, orgID, &org); err != nil {
+			return db.Organization{}, err
+		}
+		return org, nil
+	}
 	c := newClient()
 	u, err := joinURL(c.apiURL, "organization", orgID.String())
 	if err != nil {
@@ -102,6 +122,17 @@ func PutOrganization(ctx context.Context, orgID uuid.UUID, org db.Organization) 
 }
 
 func DeleteOrganization(ctx context.Context, orgID uuid.UUID) (db.Organization, error) {
+	if getDebugUserID() != nil {
+		ac, err := db.Instance().MutationAccess(ctx, *getDebugUserID(), orgID, db.OBJECT_TYPE_ORGANIZATION, db.ACCESS_WRITE)
+		if err != nil {
+			return db.Organization{}, err
+		}
+		out, err := db.Instance().DeleteOrganization(ctx, ac, orgID)
+		if err != nil {
+			return db.Organization{}, err
+		}
+		return *out, nil
+	}
 	c := newClient()
 	u, err := joinURL(c.apiURL, "organization", orgID.String())
 	if err != nil {

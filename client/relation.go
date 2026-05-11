@@ -31,6 +31,12 @@ func GetRelation(ctx context.Context, relationID uuid.UUID) (io.ReadCloser, erro
 }
 
 func PostRelation(ctx context.Context, relation db.UserRelation) (db.UserRelation, error) {
+	if getDebugUserID() != nil {
+		if err := db.Instance().PostRelation(ctx, &relation); err != nil {
+			return db.UserRelation{}, err
+		}
+		return relation, nil
+	}
 	c := newClient()
 	u, err := joinURL(c.apiURL, "relation")
 	if err != nil {
@@ -48,6 +54,12 @@ func PostRelation(ctx context.Context, relation db.UserRelation) (db.UserRelatio
 }
 
 func PutRelation(ctx context.Context, relationID uuid.UUID, relation db.UserRelation) (db.UserRelation, error) {
+	if getDebugUserID() != nil {
+		if err := db.Instance().PutRelation(ctx, relationID, &relation); err != nil {
+			return db.UserRelation{}, err
+		}
+		return relation, nil
+	}
 	c := newClient()
 	u, err := joinURL(c.apiURL, "relation", relationID.String())
 	if err != nil {
@@ -65,6 +77,13 @@ func PutRelation(ctx context.Context, relationID uuid.UUID, relation db.UserRela
 }
 
 func DeleteRelation(ctx context.Context, relationID uuid.UUID) (db.UserRelation, error) {
+	if getDebugUserID() != nil {
+		out, err := db.Instance().DeleteRelation(ctx, relationID)
+		if err != nil {
+			return db.UserRelation{}, err
+		}
+		return *out, nil
+	}
 	c := newClient()
 	u, err := joinURL(c.apiURL, "relation", relationID.String())
 	if err != nil {

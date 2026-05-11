@@ -72,7 +72,9 @@ func (d *DB) GetParentLocations(ctx context.Context, startID uuid.UUID) ([]uuid.
 	return ids, err
 }
 
-func (d *DB) PostLocation(ctx context.Context, loc *Location) error {
+func (d *DB) PostLocation(ctx context.Context, ac *AccessClaim, loc *Location) error {
+	loc.CreatedBy = *ac.UserClaimID
+	loc.RootID = ac.RootID
 	_, err := d.NewInsert().
 		Model(loc).
 		ExcludeColumn("id", "sa_created_at", "sa_updated_at", "sa_deleted_at").
@@ -82,7 +84,7 @@ func (d *DB) PostLocation(ctx context.Context, loc *Location) error {
 	return err
 }
 
-func (d *DB) PutLocation(ctx context.Context, locationID uuid.UUID, loc *Location) error {
+func (d *DB) PutLocation(ctx context.Context, ac *AccessClaim, locationID uuid.UUID, loc *Location) error {
 	_, err := d.NewUpdate().
 		Model(loc).
 		Where("id = ?", locationID).
@@ -94,7 +96,7 @@ func (d *DB) PutLocation(ctx context.Context, locationID uuid.UUID, loc *Locatio
 	return err
 }
 
-func (d *DB) DeleteLocation(ctx context.Context, locationID uuid.UUID) (*Location, error) {
+func (d *DB) DeleteLocation(ctx context.Context, ac *AccessClaim, locationID uuid.UUID) (*Location, error) {
 	var loc Location
 	_, err := d.NewUpdate().
 		Model(&loc).

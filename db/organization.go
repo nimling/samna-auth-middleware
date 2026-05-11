@@ -72,7 +72,9 @@ func (d *DB) GetParentOrganizations(ctx context.Context, startID uuid.UUID) ([]u
 	return ids, err
 }
 
-func (d *DB) PostOrganization(ctx context.Context, org *Organization) error {
+func (d *DB) PostOrganization(ctx context.Context, ac *AccessClaim, org *Organization) error {
+	org.CreatedBy = *ac.UserClaimID
+	org.RootID = ac.RootID
 	_, err := d.NewInsert().
 		Model(org).
 		ExcludeColumn("id", "sa_created_at", "sa_updated_at", "sa_deleted_at").
@@ -82,7 +84,7 @@ func (d *DB) PostOrganization(ctx context.Context, org *Organization) error {
 	return err
 }
 
-func (d *DB) PutOrganization(ctx context.Context, orgID uuid.UUID, org *Organization) error {
+func (d *DB) PutOrganization(ctx context.Context, ac *AccessClaim, orgID uuid.UUID, org *Organization) error {
 	_, err := d.NewUpdate().
 		Model(org).
 		Where("id = ?", orgID).
@@ -94,7 +96,7 @@ func (d *DB) PutOrganization(ctx context.Context, orgID uuid.UUID, org *Organiza
 	return err
 }
 
-func (d *DB) DeleteOrganization(ctx context.Context, orgID uuid.UUID) (*Organization, error) {
+func (d *DB) DeleteOrganization(ctx context.Context, ac *AccessClaim, orgID uuid.UUID) (*Organization, error) {
 	var org Organization
 	_, err := d.NewUpdate().
 		Model(&org).

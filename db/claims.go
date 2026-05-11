@@ -2,6 +2,8 @@ package db
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 
 	"github.com/google/uuid"
 	"github.com/uptrace/bun"
@@ -14,10 +16,13 @@ func (d *DB) GetAccess(ctx context.Context, userID, objectID uuid.UUID, objectTy
 		Column("claim.*").
 		Scan(ctx, &claims)
 	if err != nil {
-		return nil, err
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNoAccess
+		}
+		return nil, ErrInternalServer
 	}
 	if len(claims) == 0 {
-		return nil, nil
+		return nil, ErrNoAccess
 	}
 	return &claims[0], nil
 }
@@ -29,10 +34,13 @@ func (d *DB) GetScopeAccess(ctx context.Context, userID uuid.UUID, scopeKey stri
 		Column("claim.*").
 		Scan(ctx, &claims)
 	if err != nil {
-		return nil, err
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNoAccess
+		}
+		return nil, ErrInternalServer
 	}
 	if len(claims) == 0 {
-		return nil, nil
+		return nil, ErrNoAccess
 	}
 	return &claims[0], nil
 }
@@ -44,10 +52,13 @@ func (d *DB) GetDirectAccess(ctx context.Context, userID, objectID uuid.UUID, ob
 		Column("claim.*").
 		Scan(ctx, &claims)
 	if err != nil {
-		return nil, err
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNoAccess
+		}
+		return nil, ErrInternalServer
 	}
 	if len(claims) == 0 {
-		return nil, nil
+		return nil, ErrNoAccess
 	}
 	return &claims[0], nil
 }

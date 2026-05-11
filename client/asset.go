@@ -38,6 +38,12 @@ func GetAssetData(ctx context.Context, assetID uuid.UUID) (io.ReadCloser, error)
 }
 
 func PostAsset(ctx context.Context, asset db.Asset) (db.Asset, error) {
+	if getDebugUserID() != nil {
+		if err := db.Instance().PostAsset(ctx, &asset); err != nil {
+			return db.Asset{}, err
+		}
+		return asset, nil
+	}
 	c := newClient()
 	u, err := joinURL(c.apiURL, "asset")
 	if err != nil {
@@ -86,6 +92,12 @@ func PostAssetData(ctx context.Context, assetID uuid.UUID, contentType string, b
 }
 
 func PutAsset(ctx context.Context, assetID uuid.UUID, asset db.Asset) (db.Asset, error) {
+	if getDebugUserID() != nil {
+		if err := db.Instance().PutAsset(ctx, assetID, &asset); err != nil {
+			return db.Asset{}, err
+		}
+		return asset, nil
+	}
 	c := newClient()
 	u, err := joinURL(c.apiURL, "asset", assetID.String())
 	if err != nil {
@@ -103,6 +115,13 @@ func PutAsset(ctx context.Context, assetID uuid.UUID, asset db.Asset) (db.Asset,
 }
 
 func DeleteAsset(ctx context.Context, assetID uuid.UUID) (db.Asset, error) {
+	if getDebugUserID() != nil {
+		out, err := db.Instance().DeleteAsset(ctx, assetID)
+		if err != nil {
+			return db.Asset{}, err
+		}
+		return *out, nil
+	}
 	c := newClient()
 	u, err := joinURL(c.apiURL, "asset", assetID.String())
 	if err != nil {

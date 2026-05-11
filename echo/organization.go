@@ -1,6 +1,7 @@
 package echo
 
 import (
+	"errors"
 	"net/http"
 	"strings"
 
@@ -234,25 +235,16 @@ func PostOrganization(ctx echo.Context) error {
 		if org.Type == db.ORGANIZATION_TYPE_SYSTEM {
 			return respondError(ctx, http.StatusBadRequest, "Bad request")
 		}
-		ac, err := db.Instance().GetAccess(ctx.Request().Context(), *debugUserID, org.OwnerID, db.OBJECT_TYPE_ORGANIZATION, db.ACCESS_WRITE)
+		ac, err := db.Instance().MutationAccess(ctx.Request().Context(), *debugUserID, org.OwnerID, db.OBJECT_TYPE_ORGANIZATION, db.ACCESS_WRITE)
 		if err != nil {
-			ctx.Logger().Errorf("PostOrganization GetAccess: %v", err)
-			return respondError(ctx, http.StatusForbidden, "Forbidden")
-		}
-		if ac == nil {
-			ac, err = db.Instance().GetDirectAccess(ctx.Request().Context(), *debugUserID, org.OwnerID, db.OBJECT_TYPE_ORGANIZATION)
-			if err != nil {
-				ctx.Logger().Errorf("PostOrganization GetDirectAccess: %v", err)
+			if errors.Is(err, db.ErrNoAccess) {
 				return respondError(ctx, http.StatusForbidden, "Forbidden")
 			}
-		}
-		if ac == nil {
-			return respondError(ctx, http.StatusForbidden, "Forbidden")
+			ctx.Logger().Errorf("PostOrganization MutationAccess: %v", err)
+			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 		}
 		org.ID = uuid.UUID{}
-		org.CreatedBy = *ac.UserClaimID
-		org.RootID = ac.RootID
-		if err := db.Instance().PostOrganization(ctx.Request().Context(), &org); err != nil {
+		if err := db.Instance().PostOrganization(ctx.Request().Context(), ac, &org); err != nil {
 			ctx.Logger().Errorf("PostOrganization: %v", err)
 			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 		}
@@ -285,15 +277,13 @@ func PutOrganization(ctx echo.Context) error {
 		if err != nil {
 			return respondError(ctx, http.StatusNotFound, "Not found")
 		}
-		ac, err := db.Instance().GetAccess(ctx.Request().Context(), *debugUserID, existing.OwnerID, db.OBJECT_TYPE_ORGANIZATION, db.ACCESS_WRITE)
+		ac, err := db.Instance().MutationAccess(ctx.Request().Context(), *debugUserID, existing.OwnerID, db.OBJECT_TYPE_ORGANIZATION, db.ACCESS_WRITE)
 		if err != nil {
-			return respondError(ctx, http.StatusForbidden, "Forbidden")
-		}
-		if ac == nil {
-			ac, err = db.Instance().GetDirectAccess(ctx.Request().Context(), *debugUserID, existing.OwnerID, db.OBJECT_TYPE_ORGANIZATION)
-			if err != nil || ac == nil {
+			if errors.Is(err, db.ErrNoAccess) {
 				return respondError(ctx, http.StatusForbidden, "Forbidden")
 			}
+			ctx.Logger().Errorf("PutOrganization MutationAccess: %v", err)
+			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 		}
 		var org db.Organization
 		if err := ctx.Bind(&org); err != nil {
@@ -302,7 +292,7 @@ func PutOrganization(ctx echo.Context) error {
 		if org.Type == db.ORGANIZATION_TYPE_SYSTEM {
 			return respondError(ctx, http.StatusBadRequest, "Bad request")
 		}
-		if err := db.Instance().PutOrganization(ctx.Request().Context(), orgID, &org); err != nil {
+		if err := db.Instance().PutOrganization(ctx.Request().Context(), ac, orgID, &org); err != nil {
 			ctx.Logger().Errorf("PutOrganization: %v", err)
 			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 		}
@@ -335,17 +325,15 @@ func DeleteOrganization(ctx echo.Context) error {
 		if err != nil {
 			return respondError(ctx, http.StatusNotFound, "Not found")
 		}
-		ac, err := db.Instance().GetAccess(ctx.Request().Context(), *debugUserID, existing.OwnerID, db.OBJECT_TYPE_ORGANIZATION, db.ACCESS_WRITE)
+		ac, err := db.Instance().MutationAccess(ctx.Request().Context(), *debugUserID, existing.OwnerID, db.OBJECT_TYPE_ORGANIZATION, db.ACCESS_WRITE)
 		if err != nil {
-			return respondError(ctx, http.StatusForbidden, "Forbidden")
-		}
-		if ac == nil {
-			ac, err = db.Instance().GetDirectAccess(ctx.Request().Context(), *debugUserID, existing.OwnerID, db.OBJECT_TYPE_ORGANIZATION)
-			if err != nil || ac == nil {
+			if errors.Is(err, db.ErrNoAccess) {
 				return respondError(ctx, http.StatusForbidden, "Forbidden")
 			}
+			ctx.Logger().Errorf("DeleteOrganization MutationAccess: %v", err)
+			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 		}
-		org, err := db.Instance().DeleteOrganization(ctx.Request().Context(), orgID)
+		org, err := db.Instance().DeleteOrganization(ctx.Request().Context(), ac, orgID)
 		if err != nil {
 			ctx.Logger().Errorf("DeleteOrganization: %v", err)
 			return respondError(ctx, http.StatusInternalServerError, "Internal server error")

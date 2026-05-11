@@ -55,6 +55,16 @@ func GetLocationClaims(ctx context.Context, locationID uuid.UUID) (io.ReadCloser
 }
 
 func PostLocation(ctx context.Context, loc db.Location) (db.Location, error) {
+	if getDebugUserID() != nil {
+		ac, err := db.Instance().MutationAccess(ctx, *getDebugUserID(), loc.OwnerID, db.OBJECT_TYPE_ORGANIZATION, db.ACCESS_WRITE)
+		if err != nil {
+			return db.Location{}, err
+		}
+		if err := db.Instance().PostLocation(ctx, ac, &loc); err != nil {
+			return db.Location{}, err
+		}
+		return loc, nil
+	}
 	c := newClient()
 	u, err := joinURL(c.apiURL, "location")
 	if err != nil {
@@ -72,6 +82,16 @@ func PostLocation(ctx context.Context, loc db.Location) (db.Location, error) {
 }
 
 func PutLocation(ctx context.Context, locationID uuid.UUID, loc db.Location) (db.Location, error) {
+	if getDebugUserID() != nil {
+		ac, err := db.Instance().MutationAccess(ctx, *getDebugUserID(), locationID, db.OBJECT_TYPE_LOCATION, db.ACCESS_WRITE)
+		if err != nil {
+			return db.Location{}, err
+		}
+		if err := db.Instance().PutLocation(ctx, ac, locationID, &loc); err != nil {
+			return db.Location{}, err
+		}
+		return loc, nil
+	}
 	c := newClient()
 	u, err := joinURL(c.apiURL, "location", locationID.String())
 	if err != nil {
@@ -89,6 +109,17 @@ func PutLocation(ctx context.Context, locationID uuid.UUID, loc db.Location) (db
 }
 
 func DeleteLocation(ctx context.Context, locationID uuid.UUID) (db.Location, error) {
+	if getDebugUserID() != nil {
+		ac, err := db.Instance().MutationAccess(ctx, *getDebugUserID(), locationID, db.OBJECT_TYPE_LOCATION, db.ACCESS_WRITE)
+		if err != nil {
+			return db.Location{}, err
+		}
+		out, err := db.Instance().DeleteLocation(ctx, ac, locationID)
+		if err != nil {
+			return db.Location{}, err
+		}
+		return *out, nil
+	}
 	c := newClient()
 	u, err := joinURL(c.apiURL, "location", locationID.String())
 	if err != nil {
