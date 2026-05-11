@@ -201,10 +201,48 @@ func PostUser(ctx echo.Context) error {
 	}
 
 	if db.GetDebugMode() != db.DebugModeNone {
-		out, err := db.Instance().PostUser(ctx.Request().Context(), user)
+		rctx := ctx.Request().Context()
+		actorID := ctx.Get(middleware.UserIDKey).(uuid.UUID)
+		out, err := db.Instance().PostUser(rctx, user)
 		if err != nil {
 			ctx.Logger().Errorf("PostUser: %v", err)
 			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
+		}
+		ac, accErr := db.Instance().MutationAccess(rctx, actorID, actorID, db.OBJECT_TYPE_USER, db.ACCESS_OWNER)
+		if accErr != nil {
+			ctx.Logger().Warnf("PostUser actor access: %v", accErr)
+		} else {
+			claimName := "user - " + out.UserID.String()
+			claim := db.Claim{
+				Name:    claimName,
+				Access:  int(db.ACCESS_ALL),
+				OwnerID: ac.OwnerID,
+				RootID:  ac.RootID,
+				Type:    db.CLAIM_TYPE_VIRTUAL,
+			}
+			targetObjectType := db.ObjectType(db.OBJECT_TYPE_USER)
+			targetObjectID := out.UserID
+			claimObject := db.ClaimObject{
+				ObjectID:   &targetObjectID,
+				ObjectType: &targetObjectType,
+				Inherits:   false,
+			}
+			userClaim := db.UserClaim{
+				UserID: actorID,
+			}
+			ownerClaim, postErr := db.Instance().PostClaim(rctx, ac, &claim)
+			if postErr != nil {
+				ctx.Logger().Warnf("PostUser virtual claim: %v", postErr)
+			} else {
+				claimObject.ClaimID = ownerClaim.ID
+				userClaim.ClaimID = ownerClaim.ID
+				if _, err := db.Instance().PostClaimObject(rctx, ac, ownerClaim.ID, &claimObject); err != nil {
+					ctx.Logger().Warnf("PostUser claim_object: %v", err)
+				}
+				if _, err := db.Instance().PostClaimUser(rctx, ac, ownerClaim.ID, &userClaim); err != nil {
+					ctx.Logger().Warnf("PostUser user_claim: %v", err)
+				}
+			}
 		}
 		return respondJSON(ctx, http.StatusCreated, out, 1)
 	}
