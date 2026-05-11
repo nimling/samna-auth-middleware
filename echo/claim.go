@@ -14,16 +14,15 @@ import (
 	"github.com/uptrace/bun"
 )
 
-// GetClaimGraph returns the claim graph containing claims, user claims,
-// users, organizations, and typed object references for the authenticated user.
 func GetClaimGraph(ctx echo.Context) error {
 	startID, depth, level, err := parseGraphQuery(ctx, db.ACCESS_NONE)
 	if err != nil {
 		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
 
-	if debugUserID := getDebugUserID(); debugUserID != nil {
-		nodes, err := db.Instance().GetClaimGraph(ctx.Request().Context(), *debugUserID, startID, depth, level)
+	if db.GetDebugMode() != db.DebugModeNone {
+		userID := ctx.Get(middleware.UserIDKey).(uuid.UUID)
+		nodes, err := db.Instance().GetClaimGraph(ctx.Request().Context(), userID, startID, depth, level)
 		if err != nil {
 			ctx.Logger().Errorf("GetClaimGraph: %v", err)
 			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
@@ -119,14 +118,15 @@ func GetClaims(ctx echo.Context) error {
 		}
 	}
 
-	if debugUserID := getDebugUserID(); debugUserID != nil {
+	if db.GetDebugMode() != db.DebugModeNone {
+		userID := ctx.Get(middleware.UserIDKey).(uuid.UUID)
 		with, err := db.QueryWithObject(ctx)
 		if err != nil {
 			ctx.Logger().Warn(err)
 			return respondError(ctx, http.StatusBadRequest, "Bad request")
 		}
 		claims := make([]db.Claim, 0)
-		q := db.Instance().GetClaimsQuery(&claims, *debugUserID, db.ACCESS_NONE)
+		q := db.Instance().GetClaimsQuery(&claims, userID, db.ACCESS_NONE)
 		for _, w := range with {
 			switch w {
 			case db.OBJECT_TYPE_CLAIM_OBJECT:
@@ -173,14 +173,15 @@ func GetClaim(ctx echo.Context) error {
 		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
 
-	if debugUserID := getDebugUserID(); debugUserID != nil {
+	if db.GetDebugMode() != db.DebugModeNone {
+		userID := ctx.Get(middleware.UserIDKey).(uuid.UUID)
 		with, err := db.QueryWithObject(ctx)
 		if err != nil {
 			ctx.Logger().Warn(err)
 			return respondError(ctx, http.StatusBadRequest, "Bad request")
 		}
 		var claim db.Claim
-		q := db.Instance().GetClaimQuery(&claim, *debugUserID, claimID, db.ACCESS_NONE)
+		q := db.Instance().GetClaimQuery(&claim, userID, claimID, db.ACCESS_NONE)
 		for _, w := range with {
 			switch w {
 			case db.OBJECT_TYPE_CLAIM_OBJECT:
@@ -216,9 +217,9 @@ func GetClaimAudit(ctx echo.Context) error {
 		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
 
-	if getDebugUserID() != nil {
-		actorID := ctx.Get(middleware.UserIDKey).(uuid.UUID)
-		results, err := db.Instance().GetClaimAudit(ctx.Request().Context(), actorID, claimID, db.ACCESS_READ)
+	if db.GetDebugMode() != db.DebugModeNone {
+		userID := ctx.Get(middleware.UserIDKey).(uuid.UUID)
+		results, err := db.Instance().GetClaimAudit(ctx.Request().Context(), userID, claimID, db.ACCESS_READ)
 		if err != nil {
 			ctx.Logger().Errorf("GetClaimAudit: %v", err)
 			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
@@ -235,7 +236,6 @@ func GetClaimAudit(ctx echo.Context) error {
 	return ctx.Stream(http.StatusOK, "application/json", body)
 }
 
-
 func PostClaim(ctx echo.Context) error {
 	claim := &db.Claim{}
 	if err := ctx.Bind(claim); err != nil {
@@ -251,8 +251,9 @@ func PostClaim(ctx echo.Context) error {
 		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
 
-	if debugUserID := getDebugUserID(); debugUserID != nil {
-		ac, err := db.Instance().MutationAccess(ctx.Request().Context(), *debugUserID, claim.OwnerID, db.OBJECT_TYPE_ORGANIZATION, db.ACCESS_OWNER)
+	if db.GetDebugMode() != db.DebugModeNone {
+		userID := ctx.Get(middleware.UserIDKey).(uuid.UUID)
+		ac, err := db.Instance().MutationAccess(ctx.Request().Context(), userID, claim.OwnerID, db.OBJECT_TYPE_ORGANIZATION, db.ACCESS_OWNER)
 		if err != nil {
 			if errors.Is(err, db.ErrNoAccess) {
 				return respondError(ctx, http.StatusForbidden, "Forbidden")
@@ -306,8 +307,9 @@ func PutClaim(ctx echo.Context) error {
 		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
 
-	if debugUserID := getDebugUserID(); debugUserID != nil {
-		ac, err := db.Instance().MutationAccess(ctx.Request().Context(), *debugUserID, claimID, db.OBJECT_TYPE_CLAIM, db.ACCESS_OWNER)
+	if db.GetDebugMode() != db.DebugModeNone {
+		userID := ctx.Get(middleware.UserIDKey).(uuid.UUID)
+		ac, err := db.Instance().MutationAccess(ctx.Request().Context(), userID, claimID, db.OBJECT_TYPE_CLAIM, db.ACCESS_OWNER)
 		if err != nil {
 			if errors.Is(err, db.ErrNoAccess) {
 				return respondError(ctx, http.StatusForbidden, "Forbidden")
@@ -337,8 +339,9 @@ func DeleteClaim(ctx echo.Context) error {
 		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
 
-	if debugUserID := getDebugUserID(); debugUserID != nil {
-		ac, err := db.Instance().MutationAccess(ctx.Request().Context(), *debugUserID, claimID, db.OBJECT_TYPE_CLAIM, db.ACCESS_OWNER)
+	if db.GetDebugMode() != db.DebugModeNone {
+		userID := ctx.Get(middleware.UserIDKey).(uuid.UUID)
+		ac, err := db.Instance().MutationAccess(ctx.Request().Context(), userID, claimID, db.OBJECT_TYPE_CLAIM, db.ACCESS_OWNER)
 		if err != nil {
 			if errors.Is(err, db.ErrNoAccess) {
 				return respondError(ctx, http.StatusForbidden, "Forbidden")
@@ -373,8 +376,9 @@ func PostClaimObject(ctx echo.Context) error {
 		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
 
-	if debugUserID := getDebugUserID(); debugUserID != nil {
-		ac, err := db.Instance().MutationAccess(ctx.Request().Context(), *debugUserID, claimID, db.OBJECT_TYPE_CLAIM, db.ACCESS_OWNER)
+	if db.GetDebugMode() != db.DebugModeNone {
+		userID := ctx.Get(middleware.UserIDKey).(uuid.UUID)
+		ac, err := db.Instance().MutationAccess(ctx.Request().Context(), userID, claimID, db.OBJECT_TYPE_CLAIM, db.ACCESS_OWNER)
 		if err != nil {
 			if errors.Is(err, db.ErrNoAccess) {
 				return respondError(ctx, http.StatusForbidden, "Forbidden")
@@ -409,8 +413,9 @@ func DeleteClaimObject(ctx echo.Context) error {
 		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
 
-	if debugUserID := getDebugUserID(); debugUserID != nil {
-		ac, err := db.Instance().MutationAccess(ctx.Request().Context(), *debugUserID, claimID, db.OBJECT_TYPE_CLAIM, db.ACCESS_OWNER)
+	if db.GetDebugMode() != db.DebugModeNone {
+		userID := ctx.Get(middleware.UserIDKey).(uuid.UUID)
+		ac, err := db.Instance().MutationAccess(ctx.Request().Context(), userID, claimID, db.OBJECT_TYPE_CLAIM, db.ACCESS_OWNER)
 		if err != nil {
 			if errors.Is(err, db.ErrNoAccess) {
 				return respondError(ctx, http.StatusForbidden, "Forbidden")
@@ -445,8 +450,9 @@ func PostClaimUser(ctx echo.Context) error {
 		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
 
-	if debugUserID := getDebugUserID(); debugUserID != nil {
-		ac, err := db.Instance().MutationAccess(ctx.Request().Context(), *debugUserID, claimID, db.OBJECT_TYPE_CLAIM, db.ACCESS_OWNER)
+	if db.GetDebugMode() != db.DebugModeNone {
+		userID := ctx.Get(middleware.UserIDKey).(uuid.UUID)
+		ac, err := db.Instance().MutationAccess(ctx.Request().Context(), userID, claimID, db.OBJECT_TYPE_CLAIM, db.ACCESS_OWNER)
 		if err != nil {
 			if errors.Is(err, db.ErrNoAccess) {
 				return respondError(ctx, http.StatusForbidden, "Forbidden")
@@ -476,13 +482,14 @@ func DeleteClaimUser(ctx echo.Context) error {
 		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
 
-	userID, err := uuid.Parse(ctx.Param("user_id"))
+	targetUserID, err := uuid.Parse(ctx.Param("user_id"))
 	if err != nil {
 		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
 
-	if debugUserID := getDebugUserID(); debugUserID != nil {
-		ac, err := db.Instance().MutationAccess(ctx.Request().Context(), *debugUserID, claimID, db.OBJECT_TYPE_CLAIM, db.ACCESS_OWNER)
+	if db.GetDebugMode() != db.DebugModeNone {
+		userID := ctx.Get(middleware.UserIDKey).(uuid.UUID)
+		ac, err := db.Instance().MutationAccess(ctx.Request().Context(), userID, claimID, db.OBJECT_TYPE_CLAIM, db.ACCESS_OWNER)
 		if err != nil {
 			if errors.Is(err, db.ErrNoAccess) {
 				return respondError(ctx, http.StatusForbidden, "Forbidden")
@@ -490,7 +497,7 @@ func DeleteClaimUser(ctx echo.Context) error {
 			ctx.Logger().Errorf("DeleteClaimUser MutationAccess: %v", err)
 			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 		}
-		uc, err := db.Instance().DeleteClaimUser(ctx.Request().Context(), ac, claimID, userID)
+		uc, err := db.Instance().DeleteClaimUser(ctx.Request().Context(), ac, claimID, targetUserID)
 		if err != nil {
 			ctx.Logger().Errorf("DeleteClaimUser: %v", err)
 			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
@@ -498,7 +505,7 @@ func DeleteClaimUser(ctx echo.Context) error {
 		return respondJSON(ctx, http.StatusOK, uc, 1)
 	}
 
-	result, err := client.DeleteUserClaim(ctx.Request().Context(), claimID, userID)
+	result, err := client.DeleteUserClaim(ctx.Request().Context(), claimID, targetUserID)
 	if err != nil {
 		ctx.Logger().Errorf("DeleteClaimUser: %v", err)
 		return respondError(ctx, http.StatusInternalServerError, "Internal server error")

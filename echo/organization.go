@@ -61,14 +61,15 @@ func GetOrganizations(ctx echo.Context) error {
 		}
 	}
 
-	if debugUserID := getDebugUserID(); debugUserID != nil {
+	if db.GetDebugMode() != db.DebugModeNone {
+		userID := ctx.Get(middleware.UserIDKey).(uuid.UUID)
 		with, err := db.QueryWithObject(ctx)
 		if err != nil {
 			ctx.Logger().Warn(err)
 			return respondError(ctx, http.StatusBadRequest, "Bad request")
 		}
 		orgs := make([]db.Organization, 0)
-		q := db.Instance().GetOrganizationsQuery(&orgs, *debugUserID, db.ACCESS_NONE)
+		q := db.Instance().GetOrganizationsQuery(&orgs, userID, db.ACCESS_NONE)
 		for _, w := range with {
 			switch w {
 			case db.OBJECT_TYPE_ORGANIZATION:
@@ -116,13 +117,14 @@ func GetOrganization(ctx echo.Context) error {
 		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
 
-	if debugUserID := getDebugUserID(); debugUserID != nil {
-		ac, err := db.Instance().GetAccess(ctx.Request().Context(), *debugUserID, orgID, db.OBJECT_TYPE_ORGANIZATION, db.ACCESS_NONE)
+	if db.GetDebugMode() != db.DebugModeNone {
+		userID := ctx.Get(middleware.UserIDKey).(uuid.UUID)
+		ac, err := db.Instance().GetAccess(ctx.Request().Context(), userID, orgID, db.OBJECT_TYPE_ORGANIZATION, db.ACCESS_NONE)
 		if err != nil {
 			return respondError(ctx, http.StatusNotFound, "Not found")
 		}
 		if ac == nil {
-			ac, err = db.Instance().GetDirectAccess(ctx.Request().Context(), *debugUserID, orgID, db.OBJECT_TYPE_ORGANIZATION)
+			ac, err = db.Instance().GetDirectAccess(ctx.Request().Context(), userID, orgID, db.OBJECT_TYPE_ORGANIZATION)
 			if err != nil || ac == nil {
 				return respondError(ctx, http.StatusNotFound, "Not found")
 			}
@@ -165,8 +167,9 @@ func GetOrganizationGraph(ctx echo.Context) error {
 		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
 
-	if debugUserID := getDebugUserID(); debugUserID != nil {
-		nodes, err := db.Instance().GetOwnerGraph(ctx.Request().Context(), *debugUserID, startID, depth, level)
+	if db.GetDebugMode() != db.DebugModeNone {
+		userID := ctx.Get(middleware.UserIDKey).(uuid.UUID)
+		nodes, err := db.Instance().GetOwnerGraph(ctx.Request().Context(), userID, startID, depth, level)
 		if err != nil {
 			ctx.Logger().Errorf("GetOrganizationGraph: %v", err)
 			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
@@ -189,9 +192,9 @@ func GetOrganizationAudit(ctx echo.Context) error {
 		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
 
-	if getDebugUserID() != nil {
-		actorID := ctx.Get(middleware.UserIDKey).(uuid.UUID)
-		audits, err := db.Instance().GetOrganizationAudit(ctx.Request().Context(), actorID, orgID, db.ACCESS_READ)
+	if db.GetDebugMode() != db.DebugModeNone {
+		userID := ctx.Get(middleware.UserIDKey).(uuid.UUID)
+		audits, err := db.Instance().GetOrganizationAudit(ctx.Request().Context(), userID, orgID, db.ACCESS_READ)
 		if err != nil {
 			ctx.Logger().Errorf("GetOrganizationAudit: %v", err)
 			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
@@ -224,7 +227,8 @@ func GetOrganizationAssets(ctx echo.Context) error {
 }
 
 func PostOrganization(ctx echo.Context) error {
-	if debugUserID := getDebugUserID(); debugUserID != nil {
+	if db.GetDebugMode() != db.DebugModeNone {
+		userID := ctx.Get(middleware.UserIDKey).(uuid.UUID)
 		org := &db.Organization{}
 		if err := ctx.Bind(org); err != nil {
 			return respondError(ctx, http.StatusBadRequest, "Bad request")
@@ -235,7 +239,7 @@ func PostOrganization(ctx echo.Context) error {
 		if org.Type == db.ORGANIZATION_TYPE_SYSTEM {
 			return respondError(ctx, http.StatusBadRequest, "Bad request")
 		}
-		ac, err := db.Instance().MutationAccess(ctx.Request().Context(), *debugUserID, org.OwnerID, db.OBJECT_TYPE_ORGANIZATION, db.ACCESS_WRITE)
+		ac, err := db.Instance().MutationAccess(ctx.Request().Context(), userID, org.OwnerID, db.OBJECT_TYPE_ORGANIZATION, db.ACCESS_WRITE)
 		if err != nil {
 			if errors.Is(err, db.ErrNoAccess) {
 				return respondError(ctx, http.StatusForbidden, "Forbidden")
@@ -272,12 +276,13 @@ func PutOrganization(ctx echo.Context) error {
 		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
 
-	if debugUserID := getDebugUserID(); debugUserID != nil {
+	if db.GetDebugMode() != db.DebugModeNone {
+		userID := ctx.Get(middleware.UserIDKey).(uuid.UUID)
 		existing, err := db.Instance().GetOrganization(ctx.Request().Context(), orgID)
 		if err != nil {
 			return respondError(ctx, http.StatusNotFound, "Not found")
 		}
-		ac, err := db.Instance().MutationAccess(ctx.Request().Context(), *debugUserID, existing.OwnerID, db.OBJECT_TYPE_ORGANIZATION, db.ACCESS_WRITE)
+		ac, err := db.Instance().MutationAccess(ctx.Request().Context(), userID, existing.OwnerID, db.OBJECT_TYPE_ORGANIZATION, db.ACCESS_WRITE)
 		if err != nil {
 			if errors.Is(err, db.ErrNoAccess) {
 				return respondError(ctx, http.StatusForbidden, "Forbidden")
@@ -321,12 +326,13 @@ func DeleteOrganization(ctx echo.Context) error {
 		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
 
-	if debugUserID := getDebugUserID(); debugUserID != nil {
+	if db.GetDebugMode() != db.DebugModeNone {
+		userID := ctx.Get(middleware.UserIDKey).(uuid.UUID)
 		existing, err := db.Instance().GetOrganization(ctx.Request().Context(), orgID)
 		if err != nil {
 			return respondError(ctx, http.StatusNotFound, "Not found")
 		}
-		ac, err := db.Instance().MutationAccess(ctx.Request().Context(), *debugUserID, existing.OwnerID, db.OBJECT_TYPE_ORGANIZATION, db.ACCESS_WRITE)
+		ac, err := db.Instance().MutationAccess(ctx.Request().Context(), userID, existing.OwnerID, db.OBJECT_TYPE_ORGANIZATION, db.ACCESS_WRITE)
 		if err != nil {
 			if errors.Is(err, db.ErrNoAccess) {
 				return respondError(ctx, http.StatusForbidden, "Forbidden")

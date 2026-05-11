@@ -14,8 +14,9 @@ import (
 )
 
 func GetUsers(ctx echo.Context) error {
-	if debugUserID := getDebugUserID(); debugUserID != nil {
-		users, err := db.Instance().GetUsers(ctx.Request().Context(), *debugUserID, db.ACCESS_NONE)
+	if db.GetDebugMode() != db.DebugModeNone {
+		userID := ctx.Get(middleware.UserIDKey).(uuid.UUID)
+		users, err := db.Instance().GetUsers(ctx.Request().Context(), userID, db.ACCESS_NONE)
 		if err != nil {
 			ctx.Logger().Errorf("GetUsers: %v", err)
 			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
@@ -33,13 +34,13 @@ func GetUsers(ctx echo.Context) error {
 }
 
 func GetUser(ctx echo.Context) error {
-	userID, err := uuid.Parse(ctx.Param("id"))
+	targetUserID, err := uuid.Parse(ctx.Param("id"))
 	if err != nil {
 		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
 
-	if getDebugUserID() != nil {
-		user, err := db.Instance().GetUser(ctx.Request().Context(), userID)
+	if db.GetDebugMode() != db.DebugModeNone {
+		user, err := db.Instance().GetUser(ctx.Request().Context(), targetUserID)
 		if err != nil {
 			ctx.Logger().Errorf("GetUser: %v", err)
 			return respondError(ctx, http.StatusNotFound, "Not found")
@@ -47,7 +48,7 @@ func GetUser(ctx echo.Context) error {
 		return respondJSON(ctx, http.StatusOK, user, 1)
 	}
 
-	body, err := client.GetUser(ctx.Request().Context(), userID)
+	body, err := client.GetUser(ctx.Request().Context(), targetUserID)
 	if err != nil {
 		ctx.Logger().Errorf("GetUser: %v", err)
 		return respondError(ctx, http.StatusNotFound, "Not found")
@@ -57,14 +58,14 @@ func GetUser(ctx echo.Context) error {
 }
 
 func GetUserAudit(ctx echo.Context) error {
-	userID, err := uuid.Parse(ctx.Param("id"))
+	targetUserID, err := uuid.Parse(ctx.Param("id"))
 	if err != nil {
 		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
 
-	if getDebugUserID() != nil {
-		actorID := ctx.Get(middleware.UserIDKey).(uuid.UUID)
-		audits, err := db.Instance().GetUserAudit(ctx.Request().Context(), actorID, userID, db.ACCESS_READ)
+	if db.GetDebugMode() != db.DebugModeNone {
+		userID := ctx.Get(middleware.UserIDKey).(uuid.UUID)
+		audits, err := db.Instance().GetUserAudit(ctx.Request().Context(), userID, targetUserID, db.ACCESS_READ)
 		if err != nil {
 			ctx.Logger().Errorf("GetUserAudit: %v", err)
 			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
@@ -72,7 +73,7 @@ func GetUserAudit(ctx echo.Context) error {
 		return respondJSON(ctx, http.StatusOK, audits, len(audits))
 	}
 
-	body, err := client.GetUserAudit(ctx.Request().Context(), userID)
+	body, err := client.GetUserAudit(ctx.Request().Context(), targetUserID)
 	if err != nil {
 		ctx.Logger().Errorf("GetUserAudit: %v", err)
 		return respondError(ctx, http.StatusInternalServerError, "Internal server error")
@@ -82,13 +83,13 @@ func GetUserAudit(ctx echo.Context) error {
 }
 
 func GetUserClaims(ctx echo.Context) error {
-	userID, err := uuid.Parse(ctx.Param("id"))
+	targetUserID, err := uuid.Parse(ctx.Param("id"))
 	if err != nil {
 		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
 
-	if getDebugUserID() != nil {
-		claims, err := db.Instance().GetUserClaims(ctx.Request().Context(), userID)
+	if db.GetDebugMode() != db.DebugModeNone {
+		claims, err := db.Instance().GetUserClaims(ctx.Request().Context(), targetUserID)
 		if err != nil {
 			ctx.Logger().Errorf("GetUserClaims: %v", err)
 			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
@@ -96,7 +97,7 @@ func GetUserClaims(ctx echo.Context) error {
 		return respondJSON(ctx, http.StatusOK, claims, len(claims))
 	}
 
-	body, err := client.GetUserClaims(ctx.Request().Context(), userID)
+	body, err := client.GetUserClaims(ctx.Request().Context(), targetUserID)
 	if err != nil {
 		ctx.Logger().Errorf("GetUserClaims: %v", err)
 		return respondError(ctx, http.StatusInternalServerError, "Internal server error")
@@ -106,7 +107,7 @@ func GetUserClaims(ctx echo.Context) error {
 }
 
 func GetUserRelations(ctx echo.Context) error {
-	userID, err := uuid.Parse(ctx.Param("id"))
+	targetUserID, err := uuid.Parse(ctx.Param("id"))
 	if err != nil {
 		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
@@ -158,13 +159,13 @@ func GetUserRelations(ctx echo.Context) error {
 		}
 	}
 
-	if getDebugUserID() != nil {
+	if db.GetDebugMode() != db.DebugModeNone {
 		relations := make([]db.UserRelation, 0)
 		q := db.Instance().NewSelect().
 			Model(&relations).
-		ExcludeColumn("sa_deleted_at").
+			ExcludeColumn("sa_deleted_at").
 			ExcludeColumn("app_id").
-			Where("user_relation.user_id = ?", userID).
+			Where("user_relation.user_id = ?", targetUserID).
 			Where("user_relation.sa_deleted_at IS NULL")
 
 		if len(orgIDs) > 0 {
@@ -184,7 +185,7 @@ func GetUserRelations(ctx echo.Context) error {
 		return respondJSON(ctx, http.StatusOK, relations, len(relations))
 	}
 
-	body, err := client.GetUserConnections(ctx.Request().Context(), userID)
+	body, err := client.GetUserConnections(ctx.Request().Context(), targetUserID)
 	if err != nil {
 		ctx.Logger().Errorf("GetUserRelations: %v", err)
 		return respondError(ctx, http.StatusInternalServerError, "Internal server error")
@@ -199,7 +200,7 @@ func PostUser(ctx echo.Context) error {
 		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
 
-	if getDebugUserID() != nil {
+	if db.GetDebugMode() != db.DebugModeNone {
 		out, err := db.Instance().PostUser(ctx.Request().Context(), user)
 		if err != nil {
 			ctx.Logger().Errorf("PostUser: %v", err)
@@ -217,17 +218,18 @@ func PostUser(ctx echo.Context) error {
 }
 
 func PutUser(ctx echo.Context) error {
-	userID, err := uuid.Parse(ctx.Param("id"))
+	targetUserID, err := uuid.Parse(ctx.Param("id"))
 	if err != nil {
 		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
 
-	if debugUserID := getDebugUserID(); debugUserID != nil {
+	if db.GetDebugMode() != db.DebugModeNone {
+		userID := ctx.Get(middleware.UserIDKey).(uuid.UUID)
 		user := &db.SamnaUser{}
 		if err := ctx.Bind(user); err != nil {
 			return respondError(ctx, http.StatusBadRequest, "Bad request")
 		}
-		ac, err := db.Instance().MutationAccess(ctx.Request().Context(), *debugUserID, userID, db.OBJECT_TYPE_USER, db.ACCESS_WRITE)
+		ac, err := db.Instance().MutationAccess(ctx.Request().Context(), userID, targetUserID, db.OBJECT_TYPE_USER, db.ACCESS_WRITE)
 		if err != nil {
 			if errors.Is(err, db.ErrNoAccess) {
 				return respondError(ctx, http.StatusForbidden, "Forbidden")
@@ -235,7 +237,7 @@ func PutUser(ctx echo.Context) error {
 			ctx.Logger().Errorf("PutUser MutationAccess: %v", err)
 			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 		}
-		user, err = db.Instance().PutUser(ctx.Request().Context(), ac, userID, user)
+		user, err = db.Instance().PutUser(ctx.Request().Context(), ac, targetUserID, user)
 		if err != nil {
 			ctx.Logger().Errorf("PutUser: %v", err)
 			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
@@ -247,7 +249,7 @@ func PutUser(ctx echo.Context) error {
 	if err := ctx.Bind(&user); err != nil {
 		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
-	result, err := client.PutUser(ctx.Request().Context(), userID, user)
+	result, err := client.PutUser(ctx.Request().Context(), targetUserID, user)
 	if err != nil {
 		ctx.Logger().Errorf("PutUser: %v", err)
 		return respondError(ctx, http.StatusInternalServerError, "Internal server error")
@@ -256,13 +258,14 @@ func PutUser(ctx echo.Context) error {
 }
 
 func DeleteUser(ctx echo.Context) error {
-	userID, err := uuid.Parse(ctx.Param("id"))
+	targetUserID, err := uuid.Parse(ctx.Param("id"))
 	if err != nil {
 		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
 
-	if debugUserID := getDebugUserID(); debugUserID != nil {
-		ac, err := db.Instance().MutationAccess(ctx.Request().Context(), *debugUserID, userID, db.OBJECT_TYPE_USER, db.ACCESS_WRITE)
+	if db.GetDebugMode() != db.DebugModeNone {
+		userID := ctx.Get(middleware.UserIDKey).(uuid.UUID)
+		ac, err := db.Instance().MutationAccess(ctx.Request().Context(), userID, targetUserID, db.OBJECT_TYPE_USER, db.ACCESS_WRITE)
 		if err != nil {
 			if errors.Is(err, db.ErrNoAccess) {
 				return respondError(ctx, http.StatusForbidden, "Forbidden")
@@ -270,7 +273,7 @@ func DeleteUser(ctx echo.Context) error {
 			ctx.Logger().Errorf("DeleteUser MutationAccess: %v", err)
 			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 		}
-		user, err := db.Instance().DeleteUser(ctx.Request().Context(), ac, userID)
+		user, err := db.Instance().DeleteUser(ctx.Request().Context(), ac, targetUserID)
 		if err != nil {
 			ctx.Logger().Errorf("DeleteUser: %v", err)
 			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
@@ -278,7 +281,7 @@ func DeleteUser(ctx echo.Context) error {
 		return respondJSON(ctx, http.StatusOK, user, 1)
 	}
 
-	result, err := client.DeleteUser(ctx.Request().Context(), userID)
+	result, err := client.DeleteUser(ctx.Request().Context(), targetUserID)
 	if err != nil {
 		ctx.Logger().Errorf("DeleteUser: %v", err)
 		return respondError(ctx, http.StatusInternalServerError, "Internal server error")
@@ -315,13 +318,13 @@ func PostUserTokenValidate(ctx echo.Context) error {
 }
 
 func GetUserAssets(ctx echo.Context) error {
-	userID, err := uuid.Parse(ctx.Param("id"))
+	targetUserID, err := uuid.Parse(ctx.Param("id"))
 	if err != nil {
 		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
 
-	if getDebugUserID() != nil {
-		assets, err := db.Instance().GetUserAssets(ctx.Request().Context(), userID)
+	if db.GetDebugMode() != db.DebugModeNone {
+		assets, err := db.Instance().GetUserAssets(ctx.Request().Context(), targetUserID)
 		if err != nil {
 			ctx.Logger().Errorf("GetUserAssets: %v", err)
 			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
@@ -329,7 +332,7 @@ func GetUserAssets(ctx echo.Context) error {
 		return respondJSON(ctx, http.StatusOK, assets, len(assets))
 	}
 
-	body, err := client.GetUserAssets(ctx.Request().Context(), userID)
+	body, err := client.GetUserAssets(ctx.Request().Context(), targetUserID)
 	if err != nil {
 		ctx.Logger().Errorf("GetUserAssets: %v", err)
 		return respondError(ctx, http.StatusInternalServerError, "Internal server error")
@@ -337,4 +340,3 @@ func GetUserAssets(ctx echo.Context) error {
 	defer body.Close()
 	return ctx.Stream(http.StatusOK, "application/json", body)
 }
-

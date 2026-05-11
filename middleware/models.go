@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"net/url"
+	"time"
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
@@ -27,9 +28,10 @@ func (e AuthError) Error() string {
 }
 
 const (
-	ErrorTokenExpired      AuthError = "Token is expired"
-	ErrorUnauthorized      AuthError = "Unauthorized"
-	ErrorCredentialMissing AuthError = "Credential missing"
+	ErrorTokenExpired           AuthError = "Token is expired"
+	ErrorUnauthorized           AuthError = "Unauthorized"
+	ErrorCredentialMissing      AuthError = "Credential missing"
+	ErrorUserTokenNotRecognized AuthError = "User token not recognized"
 )
 
 type UserType string
@@ -41,6 +43,16 @@ const (
 	USER_TYPE_GUEST  UserType = "guest"
 )
 
+type DebugClient struct {
+	Name         string     `json:"name"`
+	ClientID     uuid.UUID  `json:"client_id"`
+	ClientSecret string     `json:"client_secret"`
+	Description  *string    `json:"description,omitempty"`
+	Status       *string    `json:"status,omitempty"`
+	ExpiresAt    *time.Time `json:"expires_at,omitempty"`
+	OwnerID      *uuid.UUID `json:"owner_id,omitempty"`
+}
+
 type AuthMiddlewareConfig struct {
 	ClientSlug          string
 	ClientSecret        string
@@ -50,9 +62,8 @@ type AuthMiddlewareConfig struct {
 	RedirectURI         string
 	PageRedirectURI     string
 	OpenIDConfigURL     url.URL
-	AuthorizedUserID    *uuid.UUID
-	DebugClientID       *uuid.UUID
-	DebugClientSecret   string
+	DebugUserID         *uuid.UUID
+	DebugClients        map[string]DebugClient
 }
 
 type UserAuthOptions struct {
@@ -60,7 +71,6 @@ type UserAuthOptions struct {
 	ClientSecret    string
 	RedirectURI     string
 	PageRedirectURI string
-	DebugUserID     *uuid.UUID
 }
 
 type UserDetail struct {

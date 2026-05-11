@@ -8,10 +8,11 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/nimling/samna-auth-middleware/client"
 	"github.com/nimling/samna-auth-middleware/db"
+	"github.com/nimling/samna-auth-middleware/middleware"
 )
 
 func GetObjectFields(ctx echo.Context) error {
-	if getDebugUserID() != nil {
+	if db.GetDebugMode() != db.DebugModeNone {
 		fields, err := db.Instance().GetObjectFields(ctx.Request().Context())
 		if err != nil {
 			ctx.Logger().Errorf("GetObjectFields: %v", err)
@@ -35,7 +36,7 @@ func GetObjectField(ctx echo.Context) error {
 		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
 
-	if getDebugUserID() != nil {
+	if db.GetDebugMode() != db.DebugModeNone {
 		field, err := db.Instance().GetObjectField(ctx.Request().Context(), fieldID)
 		if err != nil {
 			return respondError(ctx, http.StatusNotFound, "Not found")
@@ -58,8 +59,9 @@ func PostObjectField(ctx echo.Context) error {
 		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
 
-	if debugUserID := getDebugUserID(); debugUserID != nil {
-		ac, err := db.Instance().MutationAccess(ctx.Request().Context(), *debugUserID, *debugUserID, db.OBJECT_TYPE_USER, db.ACCESS_OWNER)
+	if db.GetDebugMode() != db.DebugModeNone {
+		userID := ctx.Get(middleware.UserIDKey).(uuid.UUID)
+		ac, err := db.Instance().MutationAccess(ctx.Request().Context(), userID, userID, db.OBJECT_TYPE_USER, db.ACCESS_OWNER)
 		if err != nil {
 			if errors.Is(err, db.ErrNoAccess) {
 				return respondError(ctx, http.StatusForbidden, "Forbidden")
@@ -94,8 +96,9 @@ func PutObjectField(ctx echo.Context) error {
 		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
 
-	if debugUserID := getDebugUserID(); debugUserID != nil {
-		ac, err := db.Instance().MutationAccess(ctx.Request().Context(), *debugUserID, *debugUserID, db.OBJECT_TYPE_USER, db.ACCESS_OWNER)
+	if db.GetDebugMode() != db.DebugModeNone {
+		userID := ctx.Get(middleware.UserIDKey).(uuid.UUID)
+		ac, err := db.Instance().MutationAccess(ctx.Request().Context(), userID, userID, db.OBJECT_TYPE_USER, db.ACCESS_OWNER)
 		if err != nil {
 			if errors.Is(err, db.ErrNoAccess) {
 				return respondError(ctx, http.StatusForbidden, "Forbidden")
@@ -125,8 +128,9 @@ func DeleteObjectField(ctx echo.Context) error {
 		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
 
-	if debugUserID := getDebugUserID(); debugUserID != nil {
-		ac, err := db.Instance().MutationAccess(ctx.Request().Context(), *debugUserID, *debugUserID, db.OBJECT_TYPE_USER, db.ACCESS_OWNER)
+	if db.GetDebugMode() != db.DebugModeNone {
+		userID := ctx.Get(middleware.UserIDKey).(uuid.UUID)
+		ac, err := db.Instance().MutationAccess(ctx.Request().Context(), userID, userID, db.OBJECT_TYPE_USER, db.ACCESS_OWNER)
 		if err != nil {
 			if errors.Is(err, db.ErrNoAccess) {
 				return respondError(ctx, http.StatusForbidden, "Forbidden")
@@ -156,7 +160,7 @@ func GetUserFields(ctx echo.Context) error {
 		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
 
-	if getDebugUserID() != nil {
+	if db.GetDebugMode() != db.DebugModeNone {
 		fields, err := db.Instance().GetUserFields(ctx.Request().Context(), fieldID)
 		if err != nil {
 			ctx.Logger().Errorf("GetUserFields: %v", err)
@@ -186,8 +190,9 @@ func PostUserField(ctx echo.Context) error {
 	}
 	field.FieldID = fieldID
 
-	if debugUserID := getDebugUserID(); debugUserID != nil {
-		ac, err := db.Instance().MutationAccess(ctx.Request().Context(), *debugUserID, field.UserID, db.OBJECT_TYPE_USER, db.ACCESS_WRITE)
+	if db.GetDebugMode() != db.DebugModeNone {
+		userID := ctx.Get(middleware.UserIDKey).(uuid.UUID)
+		ac, err := db.Instance().MutationAccess(ctx.Request().Context(), userID, field.UserID, db.OBJECT_TYPE_USER, db.ACCESS_WRITE)
 		if err != nil {
 			if errors.Is(err, db.ErrNoAccess) {
 				return respondError(ctx, http.StatusForbidden, "Forbidden")
@@ -227,8 +232,9 @@ func PutUserField(ctx echo.Context) error {
 		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
 
-	if debugUserID := getDebugUserID(); debugUserID != nil {
-		ac, err := db.Instance().MutationAccess(ctx.Request().Context(), *debugUserID, field.UserID, db.OBJECT_TYPE_USER, db.ACCESS_WRITE)
+	if db.GetDebugMode() != db.DebugModeNone {
+		userID := ctx.Get(middleware.UserIDKey).(uuid.UUID)
+		ac, err := db.Instance().MutationAccess(ctx.Request().Context(), userID, field.UserID, db.OBJECT_TYPE_USER, db.ACCESS_WRITE)
 		if err != nil {
 			if errors.Is(err, db.ErrNoAccess) {
 				return respondError(ctx, http.StatusForbidden, "Forbidden")
@@ -263,7 +269,8 @@ func DeleteUserField(ctx echo.Context) error {
 		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
 
-	if debugUserID := getDebugUserID(); debugUserID != nil {
+	if db.GetDebugMode() != db.DebugModeNone {
+		userID := ctx.Get(middleware.UserIDKey).(uuid.UUID)
 		existing := &db.UserField{}
 		err := db.Instance().NewSelect().
 			Model(existing).
@@ -275,7 +282,7 @@ func DeleteUserField(ctx echo.Context) error {
 		if err != nil {
 			return respondError(ctx, http.StatusNotFound, "Not found")
 		}
-		ac, err := db.Instance().MutationAccess(ctx.Request().Context(), *debugUserID, existing.UserID, db.OBJECT_TYPE_USER, db.ACCESS_WRITE)
+		ac, err := db.Instance().MutationAccess(ctx.Request().Context(), userID, existing.UserID, db.OBJECT_TYPE_USER, db.ACCESS_WRITE)
 		if err != nil {
 			if errors.Is(err, db.ErrNoAccess) {
 				return respondError(ctx, http.StatusForbidden, "Forbidden")

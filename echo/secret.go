@@ -9,6 +9,7 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/nimling/samna-auth-middleware/client"
 	"github.com/nimling/samna-auth-middleware/db"
+	"github.com/nimling/samna-auth-middleware/middleware"
 	"github.com/uptrace/bun"
 )
 
@@ -60,14 +61,15 @@ func GetSecrets(ctx echo.Context) error {
 		}
 	}
 
-	if debugUserID := getDebugUserID(); debugUserID != nil {
+	if db.GetDebugMode() != db.DebugModeNone {
+		userID := ctx.Get(middleware.UserIDKey).(uuid.UUID)
 		secrets := make([]db.SamnaSecret, 0)
 		q := db.Instance().NewSelect().
 			Model(&secrets).
-		ExcludeColumn("sa_deleted_at").
+			ExcludeColumn("sa_deleted_at").
 			ExcludeColumn("app_id").
 			Where("samna_secret.sa_deleted_at IS NULL").
-			Where("samna_secret.id IN (SELECT id FROM claimius.get_secrets(?, claimius.get_disciple_app_id(), ?))", *debugUserID, db.ACCESS_OWNER)
+			Where("samna_secret.id IN (SELECT id FROM claimius.get_secrets(?, claimius.get_disciple_app_id(), ?))", userID, db.ACCESS_OWNER)
 
 		if len(orgIDs) > 0 {
 			q.Where("samna_secret.sa_owner_id IN (?)", bun.In(orgIDs))
@@ -106,13 +108,14 @@ func GetSecret(ctx echo.Context) error {
 		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
 
-	if debugUserID := getDebugUserID(); debugUserID != nil {
-		ac, err := db.Instance().GetAccess(ctx.Request().Context(), *debugUserID, secretID, db.OBJECT_TYPE_SAMNA_SECRET, db.ACCESS_OWNER)
+	if db.GetDebugMode() != db.DebugModeNone {
+		userID := ctx.Get(middleware.UserIDKey).(uuid.UUID)
+		ac, err := db.Instance().GetAccess(ctx.Request().Context(), userID, secretID, db.OBJECT_TYPE_SAMNA_SECRET, db.ACCESS_OWNER)
 		if err != nil {
 			return respondError(ctx, http.StatusNotFound, "Not found")
 		}
 		if ac == nil {
-			ac, err = db.Instance().GetDirectAccess(ctx.Request().Context(), *debugUserID, secretID, db.OBJECT_TYPE_SAMNA_SECRET)
+			ac, err = db.Instance().GetDirectAccess(ctx.Request().Context(), userID, secretID, db.OBJECT_TYPE_SAMNA_SECRET)
 			if err != nil || ac == nil {
 				return respondError(ctx, http.StatusNotFound, "Not found")
 			}
@@ -142,8 +145,9 @@ func PostSecret(ctx echo.Context) error {
 		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
 
-	if debugUserID := getDebugUserID(); debugUserID != nil {
-		ac, err := db.Instance().MutationAccess(ctx.Request().Context(), *debugUserID, *reqBody.OwnerID, db.OBJECT_TYPE_ORGANIZATION, db.ACCESS_OWNER)
+	if db.GetDebugMode() != db.DebugModeNone {
+		userID := ctx.Get(middleware.UserIDKey).(uuid.UUID)
+		ac, err := db.Instance().MutationAccess(ctx.Request().Context(), userID, *reqBody.OwnerID, db.OBJECT_TYPE_ORGANIZATION, db.ACCESS_OWNER)
 		if err != nil {
 			if errors.Is(err, db.ErrNoAccess) {
 				return respondError(ctx, http.StatusForbidden, "Forbidden")
@@ -179,8 +183,9 @@ func PutSecret(ctx echo.Context) error {
 		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
 
-	if debugUserID := getDebugUserID(); debugUserID != nil {
-		ac, err := db.Instance().MutationAccess(ctx.Request().Context(), *debugUserID, secretID, db.OBJECT_TYPE_SAMNA_SECRET, db.ACCESS_OWNER)
+	if db.GetDebugMode() != db.DebugModeNone {
+		userID := ctx.Get(middleware.UserIDKey).(uuid.UUID)
+		ac, err := db.Instance().MutationAccess(ctx.Request().Context(), userID, secretID, db.OBJECT_TYPE_SAMNA_SECRET, db.ACCESS_OWNER)
 		if err != nil {
 			if errors.Is(err, db.ErrNoAccess) {
 				return respondError(ctx, http.StatusForbidden, "Forbidden")
@@ -211,8 +216,9 @@ func DeleteSecret(ctx echo.Context) error {
 		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
 
-	if debugUserID := getDebugUserID(); debugUserID != nil {
-		ac, err := db.Instance().MutationAccess(ctx.Request().Context(), *debugUserID, secretID, db.OBJECT_TYPE_SAMNA_SECRET, db.ACCESS_OWNER)
+	if db.GetDebugMode() != db.DebugModeNone {
+		userID := ctx.Get(middleware.UserIDKey).(uuid.UUID)
+		ac, err := db.Instance().MutationAccess(ctx.Request().Context(), userID, secretID, db.OBJECT_TYPE_SAMNA_SECRET, db.ACCESS_OWNER)
 		if err != nil {
 			if errors.Is(err, db.ErrNoAccess) {
 				return respondError(ctx, http.StatusForbidden, "Forbidden")

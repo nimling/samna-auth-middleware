@@ -14,7 +14,7 @@ import (
 func GetMe(ctx echo.Context) error {
 	userID := ctx.Get(middleware.UserIDKey).(uuid.UUID)
 
-	if getDebugUserID() != nil {
+	if db.GetDebugMode() != db.DebugModeNone {
 		user, err := db.Instance().GetUser(ctx.Request().Context(), userID)
 		if err != nil {
 			ctx.Logger().Errorf("GetMe: %v", err)
@@ -35,7 +35,7 @@ func GetMe(ctx echo.Context) error {
 func PutMe(ctx echo.Context) error {
 	userID := ctx.Get(middleware.UserIDKey).(uuid.UUID)
 
-	if getDebugUserID() != nil {
+	if db.GetDebugMode() != db.DebugModeNone {
 		user := &db.SamnaUser{}
 		if err := ctx.Bind(user); err != nil {
 			return respondError(ctx, http.StatusBadRequest, "Bad request")
@@ -71,7 +71,7 @@ func PutMe(ctx echo.Context) error {
 func GetMeClaims(ctx echo.Context) error {
 	userID := ctx.Get(middleware.UserIDKey).(uuid.UUID)
 
-	if getDebugUserID() != nil {
+	if db.GetDebugMode() != db.DebugModeNone {
 		with, err := db.QueryWithObject(ctx)
 		if err != nil {
 			ctx.Logger().Warn(err)
@@ -111,7 +111,7 @@ func GetMeClaims(ctx echo.Context) error {
 func GetMeRelations(ctx echo.Context) error {
 	userID := ctx.Get(middleware.UserIDKey).(uuid.UUID)
 
-	if getDebugUserID() != nil {
+	if db.GetDebugMode() != db.DebugModeNone {
 		relations, err := db.Instance().GetUserRelations(ctx.Request().Context(), userID)
 		if err != nil {
 			ctx.Logger().Errorf("GetMeRelations: %v", err)
@@ -132,7 +132,7 @@ func GetMeRelations(ctx echo.Context) error {
 func GetMeOrganizations(ctx echo.Context) error {
 	userID := ctx.Get(middleware.UserIDKey).(uuid.UUID)
 
-	if getDebugUserID() != nil {
+	if db.GetDebugMode() != db.DebugModeNone {
 		with, err := db.QueryWithObject(ctx)
 		if err != nil {
 			ctx.Logger().Warn(err)
@@ -168,7 +168,7 @@ func GetMeOrganizations(ctx echo.Context) error {
 func GetMeLocations(ctx echo.Context) error {
 	userID := ctx.Get(middleware.UserIDKey).(uuid.UUID)
 
-	if getDebugUserID() != nil {
+	if db.GetDebugMode() != db.DebugModeNone {
 		with, err := db.QueryWithObject(ctx)
 		if err != nil {
 			ctx.Logger().Warn(err)
@@ -205,7 +205,7 @@ func GetMeLocations(ctx echo.Context) error {
 func GetMeAssets(ctx echo.Context) error {
 	userID := ctx.Get(middleware.UserIDKey).(uuid.UUID)
 
-	if getDebugUserID() != nil {
+	if db.GetDebugMode() != db.DebugModeNone {
 		assets, err := db.Instance().GetUserAssets(ctx.Request().Context(), userID)
 		if err != nil {
 			ctx.Logger().Errorf("GetMeAssets: %v", err)
@@ -226,7 +226,7 @@ func GetMeAssets(ctx echo.Context) error {
 func GetMeAudit(ctx echo.Context) error {
 	userID := ctx.Get(middleware.UserIDKey).(uuid.UUID)
 
-	if getDebugUserID() != nil {
+	if db.GetDebugMode() != db.DebugModeNone {
 		audits, err := db.Instance().GetUserAudit(ctx.Request().Context(), userID, userID, db.ACCESS_READ)
 		if err != nil {
 			ctx.Logger().Errorf("GetMeAudit: %v", err)

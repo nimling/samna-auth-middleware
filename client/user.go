@@ -2,7 +2,9 @@ package client
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 
@@ -135,7 +137,7 @@ func DeleteUser(ctx context.Context, userID uuid.UUID) (db.SamnaUser, error) {
 }
 
 func PostUserToken(ctx context.Context, payload db.SamnaUserToken) (db.SamnaUser, error) {
-	if getDebugUserID() != nil {
+	if db.GetDebugMode() != db.DebugModeNone {
 		return postUserTokenDebug(ctx, payload)
 	}
 	c := newClient()
@@ -223,32 +225,27 @@ func postUserTokenDebug(ctx context.Context, payload db.SamnaUserToken) (db.Samn
 	}
 	user = *fetched
 
-	if payload.AppID != nil && payload.ClaimID != nil {
-		claimsJSON, marshalErr := json.Marshal(claims)
-		if marshalErr != nil {
-			return user, fmt.Errorf("marshal token claims: %w", marshalErr)
-		}
-		notrust := db.NotrustIdentity{
-			AppID:      *payload.AppID,
-			UserID:     user.UserID,
-			ExternalID: externalID,
-			IDClaim:    idClaim,
-			ClaimID:    *payload.ClaimID,
-			Reason:     payload.Reason,
-			Data:       claimsJSON,
-		}
-		_, err := db.Instance().NewInsert().Model(&notrust).
-			On("CONFLICT (app_id, user_id) WHERE sa_deleted_at IS NULL DO UPDATE").
-			Set("external_id = EXCLUDED.external_id").
-			Set("id_claim = EXCLUDED.id_claim").
-			Set("claim_id = EXCLUDED.claim_id").
-			Set("reason = EXCLUDED.reason").
-			Set("data = EXCLUDED.data").
-			Set("sa_updated_at = now()").
-			Exec(ctx)
-		if err != nil {
-			return user, fmt.Errorf("debug upsert notrust_identity: %w", err)
-		}
+	claimsJSON, marshalErr := json.Marshal(claims)
+	if marshalErr != nil {
+		return user, fmt.Errorf("marshal token claims: %w", marshalErr)
+	}
+	token := db.UserToken{
+		AppID:      app.ID,
+		UserID:     user.UserID,
+		IDClaim:    idClaim,
+		ExternalID: externalID,
+		ClaimID:    payload.ClaimID,
+		Data:       claimsJSON,
+		OwnerID:    user.UserID,
+	}
+	if _, err := db.Instance().NewInsert().Model(&token).
+		On("CONFLICT (app_id, id_claim, external_id) WHERE sa_deleted_at IS NULL DO UPDATE").
+		Set("user_id = EXCLUDED.user_id").
+		Set("claim_id = EXCLUDED.claim_id").
+		Set("data = EXCLUDED.data").
+		Set("sa_updated_at = now()").
+		Exec(ctx); err != nil {
+		return user, fmt.Errorf("debug upsert user_token: %w", err)
 	}
 
 	return user, nil
@@ -258,7 +255,7 @@ func PostUserTokenValidate(ctx context.Context, token string) (db.SamnaUser, err
 	if token == "" {
 		return db.SamnaUser{}, fmt.Errorf("token is required")
 	}
-	if getDebugUserID() != nil {
+	if db.GetDebugMode() != db.DebugModeNone {
 		return postUserTokenValidateDebug(ctx, token)
 	}
 	c := newClient()
@@ -290,10 +287,23 @@ func postUserTokenValidateDebug(ctx context.Context, token string) (db.SamnaUser
 	}
 
 	var user db.SamnaUser
-	if err := db.Instance().NewRaw(
-		"SELECT * FROM public.get_notrust_user(?, ?::jsonb)",
-		app.ID, string(claimsJSON),
-	).Scan(ctx, &user); err != nil {
+	err = db.Instance().NewRaw(`
+		SELECT u.*
+		  FROM claimius.samna_user u
+		  JOIN claimius.user_token t
+		    ON t.user_id = u.user_id
+		   AND t.app_id  = u.app_id
+		 WHERE u.app_id        = ?
+		   AND u.sa_deleted_at IS NULL
+		   AND t.sa_deleted_at IS NULL
+		   AND t.external_id   = (?::jsonb ->> t.id_claim)
+		 ORDER BY t.sa_created_at DESC
+		 LIMIT 1
+	`, app.ID, string(claimsJSON)).Scan(ctx, &user)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return db.SamnaUser{}, nil
+		}
 		return db.SamnaUser{}, fmt.Errorf("debug validate token: %w", err)
 	}
 	return user, nil

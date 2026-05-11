@@ -149,19 +149,18 @@ type SamnaUserToken struct {
 	Reason  *string    `json:"reason,omitempty"`
 }
 
-type NotrustIdentity struct {
-	bun.BaseModel `bun:"table:notrust_identity"`
+type UserToken struct {
+	bun.BaseModel `bun:"table:claimius.user_token"`
 
 	ID         uuid.UUID       `bun:"id,pk,default:gen_random_uuid()" json:"id"`
 	AppID      uuid.UUID       `bun:"app_id,notnull,type:uuid,default:claimius.get_disciple_app_id()" json:"app_id"`
 	UserID     uuid.UUID       `bun:"user_id,notnull,type:uuid" json:"user_id"`
-	ExternalID string          `bun:"external_id,notnull" json:"external_id"`
 	IDClaim    string          `bun:"id_claim,notnull,default:'sub'" json:"id_claim"`
-	ClaimID    uuid.UUID       `bun:"claim_id,notnull,type:uuid" json:"claim_id"`
-	Reason     *string         `bun:"reason" json:"reason,omitempty"`
-	Data       json.RawMessage `bun:"data,notnull,type:jsonb" json:"data"`
+	ExternalID string          `bun:"external_id,notnull" json:"external_id"`
+	ClaimID    *uuid.UUID      `bun:"claim_id,type:uuid" json:"claim_id,omitempty"`
+	Data       json.RawMessage `bun:"data,type:jsonb" json:"data,omitempty"`
 	OwnerID    uuid.UUID       `bun:"sa_owner_id,notnull,type:uuid" json:"owner_id"`
-	CreatedBy  uuid.UUID       `bun:"sa_created_by,notnull,type:uuid" json:"created_by"`
+	CreatedBy  *uuid.UUID      `bun:"sa_created_by,type:uuid" json:"created_by,omitempty"`
 	DeletedAt  *time.Time      `bun:"sa_deleted_at" json:"deleted_at,omitzero"`
 	CreatedAt  time.Time       `bun:"sa_created_at,default:now()" json:"created_at"`
 	UpdatedAt  time.Time       `bun:"sa_updated_at,default:now()" json:"updated_at"`

@@ -13,7 +13,7 @@ import (
 )
 
 func GetAssets(ctx echo.Context) error {
-	if getDebugUserID() != nil {
+	if db.GetDebugMode() != db.DebugModeNone {
 		assets, err := db.Instance().GetAssets(ctx.Request().Context())
 		if err != nil {
 			ctx.Logger().Errorf("GetAssets: %v", err)
@@ -37,7 +37,7 @@ func GetAsset(ctx echo.Context) error {
 		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
 
-	if getDebugUserID() != nil {
+	if db.GetDebugMode() != db.DebugModeNone {
 		asset, err := db.Instance().GetAsset(ctx.Request().Context(), assetID)
 		if err != nil {
 			return respondError(ctx, http.StatusNotFound, "Not found")
@@ -60,7 +60,7 @@ func GetAssetData(ctx echo.Context) error {
 		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
 
-	if getDebugUserID() != nil {
+	if db.GetDebugMode() != db.DebugModeNone {
 		asset, err := db.Instance().GetAsset(ctx.Request().Context(), assetID)
 		if err != nil {
 			return respondError(ctx, http.StatusNotFound, "Not found")
@@ -104,9 +104,9 @@ func PostAsset(ctx echo.Context) error {
 		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
 
-	if getDebugUserID() != nil {
-		actorID := ctx.Get(middleware.UserIDKey).(uuid.UUID)
-		ac, err := db.Instance().MutationAccess(ctx.Request().Context(), actorID, asset.UserID, db.OBJECT_TYPE_USER, db.ACCESS_WRITE)
+	if db.GetDebugMode() != db.DebugModeNone {
+		userID := ctx.Get(middleware.UserIDKey).(uuid.UUID)
+		ac, err := db.Instance().MutationAccess(ctx.Request().Context(), userID, asset.UserID, db.OBJECT_TYPE_USER, db.ACCESS_WRITE)
 		if err != nil {
 			if errors.Is(err, db.ErrNoAccess) {
 				return respondError(ctx, http.StatusForbidden, "Forbidden")
@@ -136,7 +136,7 @@ func PostAssetData(ctx echo.Context) error {
 		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
 
-	if getDebugUserID() != nil {
+	if db.GetDebugMode() != db.DebugModeNone {
 		asset, err := db.Instance().GetAsset(ctx.Request().Context(), assetID)
 		if err != nil {
 			return respondError(ctx, http.StatusNotFound, "Not found")
@@ -183,13 +183,13 @@ func PutAsset(ctx echo.Context) error {
 		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
 
-	if getDebugUserID() != nil {
-		actorID := ctx.Get(middleware.UserIDKey).(uuid.UUID)
+	if db.GetDebugMode() != db.DebugModeNone {
+		userID := ctx.Get(middleware.UserIDKey).(uuid.UUID)
 		existing, err := db.Instance().GetAsset(ctx.Request().Context(), assetID)
 		if err != nil {
 			return respondError(ctx, http.StatusNotFound, "Not found")
 		}
-		ac, err := db.Instance().MutationAccess(ctx.Request().Context(), actorID, existing.UserID, db.OBJECT_TYPE_USER, db.ACCESS_WRITE)
+		ac, err := db.Instance().MutationAccess(ctx.Request().Context(), userID, existing.UserID, db.OBJECT_TYPE_USER, db.ACCESS_WRITE)
 		if err != nil {
 			if errors.Is(err, db.ErrNoAccess) {
 				return respondError(ctx, http.StatusForbidden, "Forbidden")
@@ -219,13 +219,13 @@ func DeleteAsset(ctx echo.Context) error {
 		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
 
-	if getDebugUserID() != nil {
-		actorID := ctx.Get(middleware.UserIDKey).(uuid.UUID)
+	if db.GetDebugMode() != db.DebugModeNone {
+		userID := ctx.Get(middleware.UserIDKey).(uuid.UUID)
 		existing, err := db.Instance().GetAsset(ctx.Request().Context(), assetID)
 		if err != nil {
 			return respondError(ctx, http.StatusNotFound, "Not found")
 		}
-		ac, err := db.Instance().MutationAccess(ctx.Request().Context(), actorID, existing.UserID, db.OBJECT_TYPE_USER, db.ACCESS_WRITE)
+		ac, err := db.Instance().MutationAccess(ctx.Request().Context(), userID, existing.UserID, db.OBJECT_TYPE_USER, db.ACCESS_WRITE)
 		if err != nil {
 			if errors.Is(err, db.ErrNoAccess) {
 				return respondError(ctx, http.StatusForbidden, "Forbidden")

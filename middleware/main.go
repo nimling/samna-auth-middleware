@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -20,27 +21,21 @@ import (
 func UserAuthMiddleware(opts *UserAuthOptions) echo.MiddlewareFunc {
 	config := configFromUserAuthOptions(opts)
 
-	if config.AuthorizedUserID != nil {
-		if err := ensureDebugUser(context.Background(), *config.AuthorizedUserID, config.DebugClientSecret); err != nil {
-			panic(fmt.Errorf("ensure debug user: %w", err))
-		}
+	switch db.GetDebugMode() {
+	case db.DebugModeUser:
 		return func(next echo.HandlerFunc) echo.HandlerFunc {
 			return func(ctx echo.Context) error {
-				ctx.Set(UserIDKey, *config.AuthorizedUserID)
+				ctx.Set(UserIDKey, *config.DebugUserID)
+				if forwardErr := forwardUserToken(ctx); forwardErr != nil {
+					return respondAuthError(ctx, forwardErr)
+				}
 				return next(ctx)
 			}
 		}
-	}
-
-	if db.IsDebugMode() {
-		if config.DebugClientID != nil {
-			if err := ensureDebugUser(context.Background(), *config.DebugClientID, config.DebugClientSecret); err != nil {
-				panic(fmt.Errorf("ensure debug user: %w", err))
-			}
-		}
+	case db.DebugModeClients:
 		return func(next echo.HandlerFunc) echo.HandlerFunc {
 			return func(ctx echo.Context) error {
-				clientErr := authenticateClient(ctx, config.DebugClientID, config.DebugClientSecret)
+				clientErr := authenticateClient(ctx, config.DebugClients)
 				if errors.Is(clientErr, ErrorCredentialMissing) {
 					return ctx.String(http.StatusUnauthorized, "Unauthorized")
 				}
@@ -92,7 +87,7 @@ func UserAuthMiddleware(opts *UserAuthOptions) echo.MiddlewareFunc {
 				return next(ctx)
 			}
 
-			if clientErr := authenticateClient(ctx, config.DebugClientID, config.DebugClientSecret); !errors.Is(clientErr, ErrorCredentialMissing) {
+			if clientErr := authenticateClient(ctx, nil); !errors.Is(clientErr, ErrorCredentialMissing) {
 				if clientErr != nil {
 					return respondAuthError(ctx, clientErr)
 				}
@@ -108,6 +103,9 @@ func UserAuthMiddleware(opts *UserAuthOptions) echo.MiddlewareFunc {
 }
 
 func respondAuthError(ctx echo.Context, err error) error {
+	if errors.Is(err, ErrorUserTokenNotRecognized) {
+		return ctx.String(http.StatusNotFound, string(ErrorUserTokenNotRecognized))
+	}
 	if errors.Is(err, ErrorUnauthorized) {
 		return ctx.String(http.StatusUnauthorized, "Unauthorized")
 	}
@@ -128,16 +126,8 @@ func configFromUserAuthOptions(opts *UserAuthOptions) *AuthMiddlewareConfig {
 		opts = &UserAuthOptions{}
 	}
 
-	debugUserID := opts.DebugUserID
-	if debugUserID == nil {
-		debugUserID = getEnvUUID("SAUTH_DEBUG_USER_ID")
-	}
-	debugClientID := getEnvUUID("SAUTH_DEBUG_CLIENT_ID")
-	debugClientSecret := os.Getenv("SAUTH_DEBUG_CLIENT_SECRET")
-
-	if debugUserID != nil && debugClientID != nil && *debugUserID != *debugClientID {
-		panic("SAUTH_DEBUG_USER_ID and SAUTH_DEBUG_CLIENT_ID must hold the same UUID")
-	}
+	debugUserID := getEnvUUID("SAUTH_DEBUG_USER_ID")
+	debugClients := parseDebugClients()
 
 	slug := opts.ClientSlug
 	if slug == "" {
@@ -145,7 +135,7 @@ func configFromUserAuthOptions(opts *UserAuthOptions) *AuthMiddlewareConfig {
 	}
 	secret := opts.ClientSecret
 	if secret == "" {
-		if db.IsDebugMode() {
+		if db.GetDebugMode() != db.DebugModeNone {
 			secret = os.Getenv("SAUTH_APP_SECRET")
 		} else {
 			secret = utils.GetEnv("SAUTH_APP_SECRET")
@@ -167,15 +157,26 @@ func configFromUserAuthOptions(opts *UserAuthOptions) *AuthMiddlewareConfig {
 	}
 
 	return &AuthMiddlewareConfig{
-		ClientSlug:        slug,
-		ClientSecret:      secret,
-		RedirectURI:       redirectURI,
-		PageRedirectURI:   pageRedirectURI,
-		OpenIDConfigURL:   *openIDUrl,
-		AuthorizedUserID:  debugUserID,
-		DebugClientID:     debugClientID,
-		DebugClientSecret: debugClientSecret,
+		ClientSlug:      slug,
+		ClientSecret:    secret,
+		RedirectURI:     redirectURI,
+		PageRedirectURI: pageRedirectURI,
+		OpenIDConfigURL: *openIDUrl,
+		DebugUserID:     debugUserID,
+		DebugClients:    debugClients,
 	}
+}
+
+func parseDebugClients() map[string]DebugClient {
+	raw := os.Getenv("SAUTH_DEBUG_CLIENTS")
+	if raw == "" {
+		return nil
+	}
+	var clients map[string]DebugClient
+	if err := json.Unmarshal([]byte(raw), &clients); err != nil {
+		panic(fmt.Sprintf("Environment variable SAUTH_DEBUG_CLIENTS is not valid JSON: %v", err))
+	}
+	return clients
 }
 
 func getEnvUUID(envKey string) *uuid.UUID {

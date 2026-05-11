@@ -5,9 +5,11 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 	"github.com/nimling/samna-auth-middleware/client"
 	"github.com/nimling/samna-auth-middleware/db"
+	"github.com/nimling/samna-auth-middleware/middleware"
 )
 
 func GetSearch(ctx echo.Context) error {
@@ -38,8 +40,9 @@ func GetSearch(ctx echo.Context) error {
 		}
 	}
 
-	if debugUserID := getDebugUserID(); debugUserID != nil {
-		results, err := db.Instance().Search(ctx.Request().Context(), *debugUserID, query, objectTypes, db.ACCESS_NONE, limit, offset)
+	if db.GetDebugMode() != db.DebugModeNone {
+		userID := ctx.Get(middleware.UserIDKey).(uuid.UUID)
+		results, err := db.Instance().Search(ctx.Request().Context(), userID, query, objectTypes, db.ACCESS_NONE, limit, offset)
 		if err != nil {
 			ctx.Logger().Errorf("GetSearch: %v", err)
 			return respondError(ctx, http.StatusInternalServerError, "Internal server error")

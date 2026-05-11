@@ -99,6 +99,8 @@ COMMENT ON FUNCTION claimius.ensure_uuid_null IS 'Returns NULL when input is NUL
 -- paths inside other triggers.
 -- p_sa_created_by may be NULL for events with no clear actor (system
 -- triggers, replay, denied access attempts).
+DROP FUNCTION IF EXISTS claimius.write_audit(UUID, TEXT, TEXT, TEXT, UUID, UUID, UUID, TEXT);
+
 CREATE OR REPLACE FUNCTION claimius.write_audit(
     p_app_id        UUID,
     p_operation     TEXT,
@@ -108,7 +110,9 @@ CREATE OR REPLACE FUNCTION claimius.write_audit(
     p_sa_owner_id   UUID,
     p_sa_created_by UUID DEFAULT NULL,
     p_message       TEXT DEFAULT ''
-) RETURNS VOID AS $$
+) RETURNS claimius.audit AS $$
+DECLARE
+    v_row claimius.audit;
 BEGIN
     INSERT INTO claimius.audit (
         app_id, operation, type, object_type, object_id,
@@ -116,11 +120,13 @@ BEGIN
     ) VALUES (
                  p_app_id, p_operation, p_type, p_object_type, p_object_id,
                  p_sa_owner_id, p_sa_created_by, p_message
-             );
+             )
+    RETURNING * INTO v_row;
+    RETURN v_row;
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius.write_audit IS 'Inserts a row into the audit log.';
+COMMENT ON FUNCTION claimius.write_audit IS 'Inserts a row into the audit log and returns it.';
 
 -- in_replay_mode
 -- Returns true if claimius.replay_mode is set on this session. Used by

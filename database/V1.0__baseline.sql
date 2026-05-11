@@ -7,7 +7,7 @@
 --   1. Enums                    Type definitions for status / kind columns
 --   2. Identity                 samna_app, samna_user, samna_client, samna_secret
 --   3. Hierarchy roots          organization, location
---   4. Claims and bindings      claim, user_claim, claim_object
+--   4. Claims and bindings      claim, user_claim, claim_object, user_token
 --   5. Registry                 table_info, inheritance_info
 --   6. Materialized access      user_object, object_users, user_users
 --   7. Sync                     sync_event, prophet_state, disciple_state,
@@ -385,6 +385,34 @@ CREATE INDEX IF NOT EXISTS idx_claim_object_sa_deleted_at ON claimius.claim_obje
 CREATE INDEX IF NOT EXISTS idx_claim_object_lookup
     ON claimius.claim_object (claim_id, object_type, object_id)
     WHERE sa_deleted_at IS NULL AND object_id IS NOT NULL;
+
+-- user_token
+-- Debug only bridge from JWT identity (external_id under id_claim) to
+-- claimius.samna_user.user_id. Not synced. Populated by debug
+-- POST /user/token, read by SAuth-User-Token validate.
+CREATE TABLE IF NOT EXISTS claimius.user_token (
+                                                   id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                                                   app_id          UUID NOT NULL REFERENCES claimius.samna_app(id),
+                                                   user_id         UUID NOT NULL,
+                                                   id_claim        TEXT NOT NULL DEFAULT 'sub',
+                                                   external_id     TEXT NOT NULL,
+                                                   claim_id        UUID REFERENCES claimius.claim(id),
+                                                   data            JSONB,
+                                                   sa_owner_id     UUID NOT NULL,
+                                                   sa_created_by   UUID,
+                                                   sa_deleted_at   TIMESTAMPTZ,
+                                                   sa_created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+                                                   sa_updated_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+COMMENT ON TABLE claimius.user_token IS 'Debug only bridge from JWT identity (external_id under id_claim) to claimius.samna_user.user_id. Not synced.';
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_user_token_app_claim_external
+    ON claimius.user_token (app_id, id_claim, external_id) WHERE sa_deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_user_token_user_id ON claimius.user_token (user_id);
+CREATE INDEX IF NOT EXISTS idx_user_token_app_id ON claimius.user_token (app_id);
+CREATE INDEX IF NOT EXISTS idx_user_token_sa_owner_id ON claimius.user_token (sa_owner_id);
+CREATE INDEX IF NOT EXISTS idx_user_token_sa_deleted_at ON claimius.user_token (sa_deleted_at);
 
 -- ----------------------------------------------------------------------------
 -- 5. Registry

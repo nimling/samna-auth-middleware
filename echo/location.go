@@ -12,14 +12,15 @@ import (
 )
 
 func GetLocations(ctx echo.Context) error {
-	if debugUserID := getDebugUserID(); debugUserID != nil {
+	if db.GetDebugMode() != db.DebugModeNone {
+		userID := ctx.Get(middleware.UserIDKey).(uuid.UUID)
 		with, err := db.QueryWithObject(ctx)
 		if err != nil {
 			ctx.Logger().Warn(err)
 			return respondError(ctx, http.StatusBadRequest, "Bad request")
 		}
 		locs := make([]db.Location, 0)
-		q := db.Instance().GetLocationsQuery(&locs, *debugUserID, db.ACCESS_READ)
+		q := db.Instance().GetLocationsQuery(&locs, userID, db.ACCESS_READ)
 		for _, w := range with {
 			switch w {
 			case db.OBJECT_TYPE_ORGANIZATION:
@@ -51,13 +52,14 @@ func GetLocation(ctx echo.Context) error {
 		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
 
-	if debugUserID := getDebugUserID(); debugUserID != nil {
-		ac, err := db.Instance().GetAccess(ctx.Request().Context(), *debugUserID, locationID, db.OBJECT_TYPE_LOCATION, db.ACCESS_READ)
+	if db.GetDebugMode() != db.DebugModeNone {
+		userID := ctx.Get(middleware.UserIDKey).(uuid.UUID)
+		ac, err := db.Instance().GetAccess(ctx.Request().Context(), userID, locationID, db.OBJECT_TYPE_LOCATION, db.ACCESS_READ)
 		if err != nil {
 			return respondError(ctx, http.StatusNotFound, "Not found")
 		}
 		if ac == nil {
-			ac, err = db.Instance().GetDirectAccess(ctx.Request().Context(), *debugUserID, locationID, db.OBJECT_TYPE_LOCATION)
+			ac, err = db.Instance().GetDirectAccess(ctx.Request().Context(), userID, locationID, db.OBJECT_TYPE_LOCATION)
 			if err != nil || ac == nil {
 				return respondError(ctx, http.StatusNotFound, "Not found")
 			}
@@ -100,9 +102,9 @@ func GetLocationAudit(ctx echo.Context) error {
 		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
 
-	if getDebugUserID() != nil {
-		actorID := ctx.Get(middleware.UserIDKey).(uuid.UUID)
-		audits, err := db.Instance().GetLocationAudit(ctx.Request().Context(), actorID, locationID, db.ACCESS_READ)
+	if db.GetDebugMode() != db.DebugModeNone {
+		userID := ctx.Get(middleware.UserIDKey).(uuid.UUID)
+		audits, err := db.Instance().GetLocationAudit(ctx.Request().Context(), userID, locationID, db.ACCESS_READ)
 		if err != nil {
 			ctx.Logger().Errorf("GetLocationAudit: %v", err)
 			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
@@ -135,12 +137,13 @@ func GetLocationAssets(ctx echo.Context) error {
 }
 
 func PostLocation(ctx echo.Context) error {
-	if debugUserID := getDebugUserID(); debugUserID != nil {
+	if db.GetDebugMode() != db.DebugModeNone {
+		userID := ctx.Get(middleware.UserIDKey).(uuid.UUID)
 		loc := &db.Location{}
 		if err := ctx.Bind(loc); err != nil {
 			return respondError(ctx, http.StatusBadRequest, "Bad request")
 		}
-		ac, err := db.Instance().MutationAccess(ctx.Request().Context(), *debugUserID, loc.OwnerID, db.OBJECT_TYPE_ORGANIZATION, db.ACCESS_WRITE)
+		ac, err := db.Instance().MutationAccess(ctx.Request().Context(), userID, loc.OwnerID, db.OBJECT_TYPE_ORGANIZATION, db.ACCESS_WRITE)
 		if err != nil {
 			if errors.Is(err, db.ErrNoAccess) {
 				return respondError(ctx, http.StatusForbidden, "Forbidden")
@@ -174,8 +177,9 @@ func PutLocation(ctx echo.Context) error {
 		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
 
-	if debugUserID := getDebugUserID(); debugUserID != nil {
-		ac, err := db.Instance().MutationAccess(ctx.Request().Context(), *debugUserID, locationID, db.OBJECT_TYPE_LOCATION, db.ACCESS_WRITE)
+	if db.GetDebugMode() != db.DebugModeNone {
+		userID := ctx.Get(middleware.UserIDKey).(uuid.UUID)
+		ac, err := db.Instance().MutationAccess(ctx.Request().Context(), userID, locationID, db.OBJECT_TYPE_LOCATION, db.ACCESS_WRITE)
 		if err != nil {
 			if errors.Is(err, db.ErrNoAccess) {
 				return respondError(ctx, http.StatusForbidden, "Forbidden")
@@ -213,8 +217,9 @@ func DeleteLocation(ctx echo.Context) error {
 		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
 
-	if debugUserID := getDebugUserID(); debugUserID != nil {
-		ac, err := db.Instance().MutationAccess(ctx.Request().Context(), *debugUserID, locationID, db.OBJECT_TYPE_LOCATION, db.ACCESS_WRITE)
+	if db.GetDebugMode() != db.DebugModeNone {
+		userID := ctx.Get(middleware.UserIDKey).(uuid.UUID)
+		ac, err := db.Instance().MutationAccess(ctx.Request().Context(), userID, locationID, db.OBJECT_TYPE_LOCATION, db.ACCESS_WRITE)
 		if err != nil {
 			if errors.Is(err, db.ErrNoAccess) {
 				return respondError(ctx, http.StatusForbidden, "Forbidden")

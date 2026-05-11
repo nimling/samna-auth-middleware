@@ -74,11 +74,12 @@ func IssueGuestToken(ctx context.Context, claimID uuid.UUID, issuer string) (*Gu
 			OwnerID: claim.OwnerID,
 		}
 
-		if debugUserID := db.GetDebugUserID(); debugUserID != nil {
+		if db.GetDebugMode() != db.DebugModeNone {
+			userID, _ := ctx.Value("user_id").(uuid.UUID)
 			if _, postErr := db.Instance().PostUser(ctx, guestUser); postErr != nil {
 				return nil, fmt.Errorf("upsert guest user: %w", postErr)
 			}
-			ac, accErr := db.Instance().MutationAccess(ctx, *debugUserID, claimID, db.OBJECT_TYPE_CLAIM, db.ACCESS_OWNER)
+			ac, accErr := db.Instance().MutationAccess(ctx, userID, claimID, db.OBJECT_TYPE_CLAIM, db.ACCESS_OWNER)
 			if accErr != nil {
 				return nil, fmt.Errorf("guest claim access: %w", accErr)
 			}

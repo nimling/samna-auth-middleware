@@ -138,6 +138,32 @@ BEGIN
         RETURN;
     END IF;
 
+    IF p_object_type = 'claimius.samna_user' AND p_object_id = p_user_id THEN
+        RETURN QUERY
+            SELECT
+                claimius.composite_id(p_app_id::TEXT, p_user_id::TEXT, p_object_type, p_object_id::TEXT),
+                uc.id,
+                uc.claim_id,
+                15,
+                NULL::JSONB,
+                uc.sa_owner_id,
+                c.sa_root_id,
+                NULL::UUID,
+                TRUE
+            FROM claimius.user_claim uc
+            JOIN claimius.claim c
+              ON c.id = uc.claim_id
+             AND c.sa_deleted_at IS NULL
+            WHERE uc.user_id = p_user_id
+              AND uc.app_id = p_app_id
+              AND uc.sa_deleted_at IS NULL
+              AND (uc.starts_at IS NULL OR uc.starts_at <= now())
+              AND (uc.ends_at IS NULL OR uc.ends_at > now())
+            ORDER BY uc.sa_created_at ASC
+            LIMIT 1;
+        RETURN;
+    END IF;
+
     RETURN QUERY
         SELECT
             claimius.composite_id(p_app_id::TEXT, p_user_id::TEXT, p_object_type, p_object_id::TEXT),

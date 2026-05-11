@@ -9,7 +9,6 @@ import (
 	"reflect"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 	"github.com/uptrace/bun"
 	"github.com/uptrace/bun/dialect/pgdialect"
@@ -18,6 +17,7 @@ import (
 
 type DB struct {
 	*bun.DB
+	Logger echo.Logger
 }
 
 var instance *DB
@@ -93,7 +93,7 @@ func Init(logger echo.Logger) {
 		return
 	}
 
-	instance = &DB{bunDB}
+	instance = &DB{DB: bunDB, Logger: logger}
 
 	instance.SetMaxOpenConns(25)
 	instance.SetMaxIdleConns(25)
@@ -122,9 +122,10 @@ func Init(logger echo.Logger) {
 		(*ObjectUsers)(nil),
 		(*SyncEvent)(nil),
 		(*DiscipleState)(nil),
+		(*UserToken)(nil),
 	)
 
-	if IsDebugMode() {
+	if GetDebugMode() != DebugModeNone {
 		logger.Info("Debug mode active, skipping initial sync")
 		return
 	}
@@ -154,30 +155,22 @@ func Init(logger echo.Logger) {
 	}
 }
 
-func IsDebugMode() bool {
-	return os.Getenv("SAUTH_DEBUG_USER_ID") != "" || (os.Getenv("SAUTH_DEBUG_CLIENT_ID") != "" && os.Getenv("SAUTH_DEBUG_CLIENT_SECRET") != "")
-}
+type DebugMode string
 
-func GetDebugUserID() *uuid.UUID {
-	if id := parseEnvUUID("SAUTH_DEBUG_USER_ID"); id != nil {
-		return id
-	}
-	if os.Getenv("SAUTH_DEBUG_CLIENT_SECRET") == "" {
-		return nil
-	}
-	return parseEnvUUID("SAUTH_DEBUG_CLIENT_ID")
-}
+const (
+	DebugModeNone    DebugMode = "none"
+	DebugModeUser    DebugMode = "user"
+	DebugModeClients DebugMode = "clients"
+)
 
-func parseEnvUUID(key string) *uuid.UUID {
-	val := os.Getenv(key)
-	if val == "" {
-		return nil
+func GetDebugMode() DebugMode {
+	if os.Getenv("SAUTH_DEBUG_USER_ID") != "" {
+		return DebugModeUser
 	}
-	id, err := uuid.Parse(val)
-	if err != nil {
-		return nil
+	if os.Getenv("SAUTH_DEBUG_CLIENTS") != "" {
+		return DebugModeClients
 	}
-	return &id
+	return DebugModeNone
 }
 
 func Instance() *DB {

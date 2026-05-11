@@ -6,24 +6,32 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 	"github.com/nimling/samna-auth-middleware/client"
 	"github.com/nimling/samna-auth-middleware/db"
-	"github.com/nimling/samna-auth-middleware/utils"
 	"golang.org/x/crypto/bcrypt"
 )
 
 const userTokenHeader = "SAuth-User-Token"
 
 func ClientAuthMiddleware() echo.MiddlewareFunc {
-	debugID := utils.GetEnvUUIDOptional("SAUTH_DEBUG_CLIENT_ID")
-	debugSecret := utils.GetEnvOptional("SAUTH_DEBUG_CLIENT_SECRET")
+	debugUserID := getEnvUUID("SAUTH_DEBUG_USER_ID")
+	debugClients := parseDebugClients()
 
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(ctx echo.Context) error {
-			err := authenticateClient(ctx, debugID, debugSecret)
+			if debugUserID != nil {
+				ctx.Set(UserIDKey, *debugUserID)
+				if forwardErr := forwardUserToken(ctx); forwardErr != nil {
+					return respondAuthError(ctx, forwardErr)
+				}
+				return next(ctx)
+			}
+
+			err := authenticateClient(ctx, debugClients)
 			if errors.Is(err, ErrorCredentialMissing) {
 				return ctx.String(http.StatusUnauthorized, "Unauthorized")
 			}
@@ -38,18 +46,26 @@ func ClientAuthMiddleware() echo.MiddlewareFunc {
 	}
 }
 
-func authenticateClient(ctx echo.Context, debugID *uuid.UUID, debugSecret string) error {
+func authenticateClient(ctx echo.Context, debugClients map[string]DebugClient) error {
 	clientID, clientSecret := readClientCredentials(ctx)
 	if clientID == "" || clientSecret == "" {
 		return ErrorCredentialMissing
 	}
 
-	if debugID != nil && debugSecret != "" {
-		if clientID == debugID.String() && clientSecret == debugSecret {
-			ctx.Set(UserIDKey, *debugID)
-			return nil
+	if len(debugClients) > 0 {
+		for _, dc := range debugClients {
+			if dc.Status != nil && *dc.Status != "" && *dc.Status != "active" {
+				continue
+			}
+			if dc.ExpiresAt != nil && time.Now().After(*dc.ExpiresAt) {
+				continue
+			}
+			if clientID == dc.ClientID.String() && clientSecret == dc.ClientSecret {
+				ctx.Set(UserIDKey, dc.ClientID)
+				return nil
+			}
 		}
-		return fmt.Errorf("debug client bypass mismatch: %w", ErrorUnauthorized)
+		return fmt.Errorf("debug client basic auth mismatch: %w", ErrorUnauthorized)
 	}
 
 	clientUUID, err := uuid.Parse(clientID)
@@ -91,10 +107,10 @@ func forwardUserToken(ctx echo.Context) error {
 	}
 	user, err := client.PostUserTokenValidate(ctx.Request().Context(), token)
 	if err != nil {
-		return fmt.Errorf("validate forwarded user token: %w: %w", err, ErrorUnauthorized)
+		return fmt.Errorf("validate forwarded user token: %w: %w", err, ErrorUserTokenNotRecognized)
 	}
 	if user.UserID == uuid.Nil {
-		return ErrorUnauthorized
+		return ErrorUserTokenNotRecognized
 	}
 	ctx.Set(UserIDKey, user.UserID)
 	return nil
