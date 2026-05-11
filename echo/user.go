@@ -1,6 +1,7 @@
 package echo
 
 import (
+	"database/sql"
 	"errors"
 	"net/http"
 	"strings"
@@ -42,16 +43,24 @@ func GetUser(ctx echo.Context) error {
 	if db.GetDebugMode() != db.DebugModeNone {
 		user, err := db.Instance().GetUser(ctx.Request().Context(), targetUserID)
 		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				ctx.Logger().Infof("GetUser: not found %s", targetUserID)
+				return respondError(ctx, http.StatusNotFound, "Not found")
+			}
 			ctx.Logger().Errorf("GetUser: %v", err)
-			return respondError(ctx, http.StatusNotFound, "Not found")
+			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 		}
 		return respondJSON(ctx, http.StatusOK, user, 1)
 	}
 
 	body, err := client.GetUser(ctx.Request().Context(), targetUserID)
 	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			ctx.Logger().Infof("GetUser: not found %s", targetUserID)
+			return respondError(ctx, http.StatusNotFound, "Not found")
+		}
 		ctx.Logger().Errorf("GetUser: %v", err)
-		return respondError(ctx, http.StatusNotFound, "Not found")
+		return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 	}
 	defer body.Close()
 	return ctx.Stream(http.StatusOK, "application/json", body)
