@@ -6,6 +6,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
+	"github.com/nimling/samna-auth-middleware/audit"
 	"github.com/nimling/samna-auth-middleware/client"
 	"github.com/nimling/samna-auth-middleware/db"
 	"github.com/nimling/samna-auth-middleware/middleware"
@@ -156,6 +157,11 @@ func PostLocation(ctx echo.Context) error {
 			ctx.Logger().Errorf("PostLocation: %v", err)
 			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 		}
+		locName := ""
+		if loc.Name != nil {
+			locName = *loc.Name
+		}
+		audit.Write("PostLocation", "create", db.OBJECT_TYPE_LOCATION, loc.ID, loc.OwnerID, ac.UserClaimID, "Created location "+locName)
 		return respondJSON(ctx, http.StatusCreated, loc, 1)
 	}
 
@@ -196,6 +202,11 @@ func PutLocation(ctx echo.Context) error {
 			ctx.Logger().Errorf("PutLocation: %v", err)
 			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 		}
+		locName := ""
+		if loc.Name != nil {
+			locName = *loc.Name
+		}
+		audit.Write("PutLocation", "update", db.OBJECT_TYPE_LOCATION, loc.ID, loc.OwnerID, ac.UserClaimID, "Updated location "+locName)
 		return respondJSON(ctx, http.StatusOK, loc, 1)
 	}
 
@@ -232,6 +243,11 @@ func DeleteLocation(ctx echo.Context) error {
 			ctx.Logger().Errorf("DeleteLocation: %v", err)
 			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 		}
+		locName := ""
+		if loc.Name != nil {
+			locName = *loc.Name
+		}
+		audit.Write("DeleteLocation", "delete", db.OBJECT_TYPE_LOCATION, loc.ID, loc.OwnerID, ac.UserClaimID, "Deleted location "+locName)
 		return respondJSON(ctx, http.StatusOK, loc, 1)
 	}
 

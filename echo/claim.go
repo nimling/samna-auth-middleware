@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
+	"github.com/nimling/samna-auth-middleware/audit"
 	"github.com/nimling/samna-auth-middleware/client"
 	"github.com/nimling/samna-auth-middleware/db"
 	"github.com/nimling/samna-auth-middleware/middleware"
@@ -266,6 +267,7 @@ func PostClaim(ctx echo.Context) error {
 			ctx.Logger().Errorf("PostClaim: %v", err)
 			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 		}
+		audit.Write("PostClaim", "create", db.OBJECT_TYPE_CLAIM, claim.ID, claim.OwnerID, ac.UserClaimID, "Created claim "+claim.Name)
 		if ac.ClaimID != nil {
 			objectID := claim.ID
 			objectType := db.ObjectType(db.OBJECT_TYPE_CLAIM)
@@ -322,6 +324,7 @@ func PutClaim(ctx echo.Context) error {
 			ctx.Logger().Errorf("PutClaim: %v", err)
 			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 		}
+		audit.Write("PutClaim", "update", db.OBJECT_TYPE_CLAIM, claim.ID, claim.OwnerID, ac.UserClaimID, "Updated claim "+claim.Name)
 		return respondJSON(ctx, http.StatusOK, claim, 1)
 	}
 
@@ -354,6 +357,7 @@ func DeleteClaim(ctx echo.Context) error {
 			ctx.Logger().Errorf("DeleteClaim: %v", err)
 			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 		}
+		audit.Write("DeleteClaim", "delete", db.OBJECT_TYPE_CLAIM, claim.ID, claim.OwnerID, ac.UserClaimID, "Deleted claim "+claim.Name)
 		return respondJSON(ctx, http.StatusOK, claim, 1)
 	}
 
@@ -391,6 +395,7 @@ func PostClaimObject(ctx echo.Context) error {
 			ctx.Logger().Errorf("PostClaimObject: %v", err)
 			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 		}
+		audit.Write("PostClaimObject", "create", db.OBJECT_TYPE_CLAIM_OBJECT, co.ID, co.OwnerID, ac.UserClaimID, "Bound claim to object")
 		return respondJSON(ctx, http.StatusCreated, co, 1)
 	}
 
@@ -428,6 +433,7 @@ func DeleteClaimObject(ctx echo.Context) error {
 			ctx.Logger().Errorf("DeleteClaimObject: %v", err)
 			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 		}
+		audit.Write("DeleteClaimObject", "delete", db.OBJECT_TYPE_CLAIM_OBJECT, co.ID, co.OwnerID, ac.UserClaimID, "Unbound claim from object")
 		return respondJSON(ctx, http.StatusOK, co, 1)
 	}
 
@@ -465,6 +471,7 @@ func PostClaimUser(ctx echo.Context) error {
 			ctx.Logger().Errorf("PostClaimUser: %v", err)
 			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 		}
+		audit.Write("PostClaimUser", "create", db.OBJECT_TYPE_USER_CLAIM, uc.ID, uc.OwnerID, ac.UserClaimID, "Granted claim to user")
 		return respondJSON(ctx, http.StatusCreated, uc, 1)
 	}
 
@@ -502,6 +509,7 @@ func DeleteClaimUser(ctx echo.Context) error {
 			ctx.Logger().Errorf("DeleteClaimUser: %v", err)
 			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 		}
+		audit.Write("DeleteClaimUser", "delete", db.OBJECT_TYPE_USER_CLAIM, uc.ID, uc.OwnerID, ac.UserClaimID, "Revoked claim from user")
 		return respondJSON(ctx, http.StatusOK, uc, 1)
 	}
 

@@ -77,30 +77,6 @@ CREATE TRIGGER tg_update_timestamp BEFORE UPDATE ON claimius.table_info
     FOR EACH ROW EXECUTE FUNCTION claimius.update_timestamp();
 
 -- ----------------------------------------------------------------------------
--- Audit triggers: organization, location, claim, claim_object, user_claim
--- ----------------------------------------------------------------------------
-
-DROP TRIGGER IF EXISTS tg_audit ON claimius.organization;
-CREATE TRIGGER tg_audit AFTER INSERT OR UPDATE ON claimius.organization
-    FOR EACH ROW EXECUTE FUNCTION claimius.audit_trigger();
-
-DROP TRIGGER IF EXISTS tg_audit ON claimius.location;
-CREATE TRIGGER tg_audit AFTER INSERT OR UPDATE ON claimius.location
-    FOR EACH ROW EXECUTE FUNCTION claimius.audit_trigger();
-
-DROP TRIGGER IF EXISTS tg_audit ON claimius.claim;
-CREATE TRIGGER tg_audit AFTER INSERT OR UPDATE ON claimius.claim
-    FOR EACH ROW EXECUTE FUNCTION claimius.audit_trigger();
-
-DROP TRIGGER IF EXISTS tg_audit ON claimius.claim_object;
-CREATE TRIGGER tg_audit AFTER INSERT OR UPDATE ON claimius.claim_object
-    FOR EACH ROW EXECUTE FUNCTION claimius.audit_trigger();
-
-DROP TRIGGER IF EXISTS tg_audit ON claimius.user_claim;
-CREATE TRIGGER tg_audit AFTER INSERT OR UPDATE ON claimius.user_claim
-    FOR EACH ROW EXECUTE FUNCTION claimius.audit_trigger();
-
--- ----------------------------------------------------------------------------
 -- Claim mutation triggers: maintain user_object when claim/binding/grant changes
 -- ----------------------------------------------------------------------------
 

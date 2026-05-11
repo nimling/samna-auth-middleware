@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
+	"github.com/nimling/samna-auth-middleware/audit"
 	"github.com/nimling/samna-auth-middleware/client"
 	"github.com/nimling/samna-auth-middleware/db"
 	"github.com/nimling/samna-auth-middleware/middleware"
@@ -252,6 +253,7 @@ func PostOrganization(ctx echo.Context) error {
 			ctx.Logger().Errorf("PostOrganization: %v", err)
 			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 		}
+		audit.Write("PostOrganization", "create", db.OBJECT_TYPE_ORGANIZATION, org.ID, org.OwnerID, ac.UserClaimID, "Created organization "+org.Name)
 		return respondJSON(ctx, http.StatusCreated, org, 1)
 	}
 
@@ -302,6 +304,7 @@ func PutOrganization(ctx echo.Context) error {
 			ctx.Logger().Errorf("PutOrganization: %v", err)
 			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 		}
+		audit.Write("PutOrganization", "update", db.OBJECT_TYPE_ORGANIZATION, org.ID, org.OwnerID, ac.UserClaimID, "Updated organization "+org.Name)
 		return respondJSON(ctx, http.StatusOK, org, 1)
 	}
 
@@ -345,6 +348,7 @@ func DeleteOrganization(ctx echo.Context) error {
 			ctx.Logger().Errorf("DeleteOrganization: %v", err)
 			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 		}
+		audit.Write("DeleteOrganization", "delete", db.OBJECT_TYPE_ORGANIZATION, org.ID, org.OwnerID, ac.UserClaimID, "Deleted organization "+org.Name)
 		return respondJSON(ctx, http.StatusOK, org, 1)
 	}
 
