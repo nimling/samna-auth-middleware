@@ -75,7 +75,7 @@ func (d *DB) GetClaim(ctx context.Context, userID, claimID uuid.UUID, requiredAc
 func (d *DB) GetClaimQuery(claim *Claim, userID, claimID uuid.UUID, requiredAccess ClaimAccess) *bun.SelectQuery {
 	return d.NewSelect().
 		Model(claim).
-		Where("sa_deleted_at IS NULL").
+		Where("claim.sa_deleted_at IS NULL").
 		ExcludeColumn("sa_deleted_at").
 		ExcludeColumn("app_id").
 		Where("claim.id = ?", claimID).
@@ -95,7 +95,7 @@ func (d *DB) GetClaims(ctx context.Context, userID uuid.UUID, requiredAccess Cla
 func (d *DB) GetClaimsQuery(claims *[]Claim, userID uuid.UUID, requiredAccess ClaimAccess) *bun.SelectQuery {
 	return d.NewSelect().
 		Model(claims).
-		Where("sa_deleted_at IS NULL").
+		Where("claim.sa_deleted_at IS NULL").
 		ExcludeColumn("sa_deleted_at").
 		ExcludeColumn("app_id").
 		Where("claim.id IN (SELECT id FROM claimius.get_claims(?, claimius.get_disciple_app_id(), ?))", userID, requiredAccess)

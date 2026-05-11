@@ -21,8 +21,8 @@ func (d *DB) GetUserQuery(user *SamnaUser, userID uuid.UUID) *bun.SelectQuery {
 		Model(user).
 		ExcludeColumn("sa_deleted_at").
 		ExcludeColumn("app_id").
-		Where("user_id = ?", userID).
-		Where("sa_deleted_at IS NULL").
+		Where("samna_user.user_id = ?", userID).
+		Where("samna_user.sa_deleted_at IS NULL").
 		Limit(1)
 }
 
@@ -38,7 +38,7 @@ func (d *DB) GetUsers(ctx context.Context, userID uuid.UUID, requiredAccess Clai
 func (d *DB) GetUsersQuery(users *[]SamnaUser, userID uuid.UUID, requiredAccess ClaimAccess) *bun.SelectQuery {
 	return d.NewSelect().
 		Model(users).
-		Where("sa_deleted_at IS NULL").
+		Where("samna_user.sa_deleted_at IS NULL").
 		ExcludeColumn("sa_deleted_at").
 		ExcludeColumn("app_id").
 		Where(UserWhere(userID, requiredAccess))

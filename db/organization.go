@@ -20,8 +20,8 @@ func (d *DB) GetOrganizationQuery(org *Organization, orgID uuid.UUID) *bun.Selec
 	return d.NewSelect().
 		Model(org).
 		ExcludeColumn("sa_deleted_at").
-		Where("id = ?", orgID).
-		Where("sa_deleted_at IS NULL").
+		Where("organization.id = ?", orgID).
+		Where("organization.sa_deleted_at IS NULL").
 		ExcludeColumn("app_id").
 		Limit(1)
 }
@@ -38,7 +38,7 @@ func (d *DB) GetOrganizations(ctx context.Context, userID uuid.UUID, requiredAcc
 func (d *DB) GetOrganizationsQuery(orgs *[]Organization, userID uuid.UUID, requiredAccess ClaimAccess) *bun.SelectQuery {
 	return d.NewSelect().
 		Model(orgs).
-		Where("sa_deleted_at IS NULL").
+		Where("organization.sa_deleted_at IS NULL").
 		ExcludeColumn("sa_deleted_at").
 		ExcludeColumn("app_id").
 		Where(ObjectWhere(userID, OBJECT_TYPE_ORGANIZATION, requiredAccess))

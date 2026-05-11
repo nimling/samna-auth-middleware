@@ -20,8 +20,8 @@ func (d *DB) GetLocationQuery(loc *Location, locationID uuid.UUID) *bun.SelectQu
 	return d.NewSelect().
 		Model(loc).
 		ExcludeColumn("sa_deleted_at").
-		Where("id = ?", locationID).
-		Where("sa_deleted_at IS NULL").
+		Where("location.id = ?", locationID).
+		Where("location.sa_deleted_at IS NULL").
 		ExcludeColumn("app_id").
 		Limit(1)
 }
@@ -38,7 +38,7 @@ func (d *DB) GetLocations(ctx context.Context, userID uuid.UUID, requiredAccess 
 func (d *DB) GetLocationsQuery(locs *[]Location, userID uuid.UUID, requiredAccess ClaimAccess) *bun.SelectQuery {
 	return d.NewSelect().
 		Model(locs).
-		Where("sa_deleted_at IS NULL").
+		Where("location.sa_deleted_at IS NULL").
 		ExcludeColumn("sa_deleted_at").
 		ExcludeColumn("app_id").
 		Where(ObjectWhere(userID, OBJECT_TYPE_LOCATION, requiredAccess))
