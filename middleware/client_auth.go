@@ -105,12 +105,18 @@ func forwardUserToken(ctx echo.Context) error {
 	if token == "" {
 		return nil
 	}
-	user, err := client.PostUserTokenValidate(ctx.Request().Context(), token)
+	user, ownerID, err := client.PostUserTokenValidate(ctx.Request().Context(), token)
 	if err != nil {
 		return fmt.Errorf("validate forwarded user token: %w: %w", err, ErrorUserTokenNotRecognized)
 	}
 	if user.UserID == uuid.Nil {
 		return ErrorUserTokenNotRecognized
+	}
+	if ownerID != uuid.Nil {
+		clientID, _ := ctx.Get(UserIDKey).(uuid.UUID)
+		if !db.Instance().HasAccess(ctx.Request().Context(), clientID, ownerID, db.OBJECT_TYPE_ORGANIZATION, db.ACCESS_READ) {
+			return ErrorUserTokenNotRecognized
+		}
 	}
 	ctx.Set(UserIDKey, user.UserID)
 	return nil

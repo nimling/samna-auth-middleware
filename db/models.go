@@ -149,6 +149,7 @@ type SamnaUser struct {
 	DeletedAt *time.Time       `bun:"sa_deleted_at" json:"deleted_at,omitzero"`
 	CreatedAt time.Time        `bun:"sa_created_at,default:now()" json:"created_at"`
 	UpdatedAt time.Time        `bun:"sa_updated_at,default:now()" json:"updated_at"`
+	OwnerID   *uuid.UUID       `bun:"-" json:"owner_id,omitempty"`
 }
 
 type SamnaUserToken struct {
@@ -158,6 +159,7 @@ type SamnaUserToken struct {
 	ClaimID *uuid.UUID `json:"claim_id"`
 	AppID   *uuid.UUID `json:"app_id"`
 	Reason  *string    `json:"reason,omitempty"`
+	OwnerID *uuid.UUID `json:"owner_id,omitempty"`
 }
 
 type UserToken struct {

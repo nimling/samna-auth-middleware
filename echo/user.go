@@ -1,6 +1,7 @@
 package echo
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"net/http"
@@ -246,12 +247,20 @@ func PostUser(ctx echo.Context) error {
 	if db.GetDebugMode() != db.DebugModeNone {
 		rctx := ctx.Request().Context()
 		actorID := ctx.Get(middleware.UserIDKey).(uuid.UUID)
+		ownerID, oerr := resolveTargetOwner(rctx, actorID, user.OwnerID)
+		if oerr != nil {
+			if errors.Is(oerr, db.ErrNoAccess) {
+				return respondError(ctx, http.StatusForbidden, "Forbidden")
+			}
+			ctx.Logger().Errorf("PostUser resolve owner: %v", oerr)
+			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
+		}
 		out, err := db.Instance().PostUser(rctx, user)
 		if err != nil {
 			ctx.Logger().Errorf("PostUser: %v", err)
 			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 		}
-		ac, accErr := db.Instance().MutationAccess(rctx, actorID, actorID, db.OBJECT_TYPE_USER, db.ACCESS_OWNER)
+		ac, accErr := db.Instance().MutationAccess(rctx, actorID, ownerID, db.OBJECT_TYPE_ORGANIZATION, db.ACCESS_WRITE)
 		if accErr != nil {
 			ctx.Logger().Warnf("PostUser actor access: %v", accErr)
 		} else {
@@ -370,11 +379,46 @@ func DeleteUser(ctx echo.Context) error {
 	return respondJSON(ctx, http.StatusOK, result, 1)
 }
 
+
+func resolveTargetOwner(ctx context.Context, actorID uuid.UUID, requested *uuid.UUID) (uuid.UUID, error) {
+	if requested != nil && *requested != uuid.Nil {
+		ac, err := db.Instance().MutationAccess(ctx, actorID, *requested, db.OBJECT_TYPE_ORGANIZATION, db.ACCESS_WRITE)
+		if err != nil {
+			return uuid.Nil, err
+		}
+		if ac == nil {
+			return uuid.Nil, db.ErrNoAccess
+		}
+		return *requested, nil
+	}
+	if sc, err := db.Instance().GetClient(ctx, actorID); err == nil {
+		return sc.OwnerID, nil
+	}
+	orgs, err := db.Instance().GetOrganizations(ctx, actorID, db.ACCESS_WRITE)
+	if err != nil {
+		return uuid.Nil, err
+	}
+	if len(orgs) == 0 {
+		return uuid.Nil, db.ErrNoAccess
+	}
+	return orgs[0].ID, nil
+}
+
 func PostUserToken(ctx echo.Context) error {
 	var payload db.SamnaUserToken
 	if err := ctx.Bind(&payload); err != nil {
 		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
+	actorID := ctx.Get(middleware.UserIDKey).(uuid.UUID)
+	ownerID, oerr := resolveTargetOwner(ctx.Request().Context(), actorID, payload.OwnerID)
+	if oerr != nil {
+		if errors.Is(oerr, db.ErrNoAccess) {
+			return respondError(ctx, http.StatusForbidden, "Forbidden")
+		}
+		ctx.Logger().Errorf("PostUserToken resolve owner: %v", oerr)
+		return respondError(ctx, http.StatusInternalServerError, "Internal server error")
+	}
+	payload.OwnerID = &ownerID
 	result, err := client.PostUserToken(ctx.Request().Context(), payload)
 	if err != nil {
 		ctx.Logger().Errorf("PostUserToken: %v", err)
@@ -390,7 +434,7 @@ func PostUserTokenValidate(ctx echo.Context) error {
 	if err := ctx.Bind(&body); err != nil {
 		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
-	result, err := client.PostUserTokenValidate(ctx.Request().Context(), body.Token)
+	result, _, err := client.PostUserTokenValidate(ctx.Request().Context(), body.Token)
 	if err != nil {
 		ctx.Logger().Errorf("PostUserTokenValidate: %v", err)
 		return respondError(ctx, http.StatusUnauthorized, "Unauthorized")

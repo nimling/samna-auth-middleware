@@ -229,6 +229,10 @@ func postUserTokenDebug(ctx context.Context, payload db.SamnaUserToken) (db.Samn
 	if marshalErr != nil {
 		return user, fmt.Errorf("marshal token claims: %w", marshalErr)
 	}
+	tokenOwnerID := user.UserID
+	if payload.OwnerID != nil && *payload.OwnerID != uuid.Nil {
+		tokenOwnerID = *payload.OwnerID
+	}
 	token := db.UserToken{
 		AppID:      app.ID,
 		UserID:     user.UserID,
@@ -236,10 +240,10 @@ func postUserTokenDebug(ctx context.Context, payload db.SamnaUserToken) (db.Samn
 		ExternalID: externalID,
 		ClaimID:    payload.ClaimID,
 		Data:       claimsJSON,
-		OwnerID:    user.UserID,
+		OwnerID:    tokenOwnerID,
 	}
 	if _, err := db.Instance().NewInsert().Model(&token).
-		On("CONFLICT (app_id, id_claim, external_id) WHERE sa_deleted_at IS NULL DO UPDATE").
+		On("CONFLICT (app_id, sa_owner_id, id_claim, external_id) WHERE sa_deleted_at IS NULL DO UPDATE").
 		Set("user_id = EXCLUDED.user_id").
 		Set("claim_id = EXCLUDED.claim_id").
 		Set("data = EXCLUDED.data").
@@ -251,9 +255,9 @@ func postUserTokenDebug(ctx context.Context, payload db.SamnaUserToken) (db.Samn
 	return user, nil
 }
 
-func PostUserTokenValidate(ctx context.Context, token string) (db.SamnaUser, error) {
+func PostUserTokenValidate(ctx context.Context, token string) (db.SamnaUser, uuid.UUID, error) {
 	if token == "" {
-		return db.SamnaUser{}, fmt.Errorf("token is required")
+		return db.SamnaUser{}, uuid.Nil, fmt.Errorf("token is required")
 	}
 	if db.GetDebugMode() != db.DebugModeNone {
 		return postUserTokenValidateDebug(ctx, token)
@@ -261,51 +265,56 @@ func PostUserTokenValidate(ctx context.Context, token string) (db.SamnaUser, err
 	c := newClient()
 	u, err := joinURL(c.apiURL, "user", "token", "validate")
 	if err != nil {
-		return db.SamnaUser{}, fmt.Errorf("build url: %w", err)
+		return db.SamnaUser{}, uuid.Nil, fmt.Errorf("build url: %w", err)
 	}
 	body := map[string]string{"token": token}
-	return DecodeJSON[db.SamnaUser](c.client.Post(ctx, requestBody(body, true), u))
+	user, err := DecodeJSON[db.SamnaUser](c.client.Post(ctx, requestBody(body, true), u))
+	return user, uuid.Nil, err
 }
 
-func postUserTokenValidateDebug(ctx context.Context, token string) (db.SamnaUser, error) {
+func postUserTokenValidateDebug(ctx context.Context, token string) (db.SamnaUser, uuid.UUID, error) {
 	parsed, _, err := jwt.NewParser().ParseUnverified(token, jwt.MapClaims{})
 	if err != nil {
-		return db.SamnaUser{}, fmt.Errorf("parse token: %w", err)
+		return db.SamnaUser{}, uuid.Nil, fmt.Errorf("parse token: %w", err)
 	}
 	claims, ok := parsed.Claims.(jwt.MapClaims)
 	if !ok {
-		return db.SamnaUser{}, fmt.Errorf("invalid token claims")
+		return db.SamnaUser{}, uuid.Nil, fmt.Errorf("invalid token claims")
 	}
 	claimsJSON, err := json.Marshal(claims)
 	if err != nil {
-		return db.SamnaUser{}, fmt.Errorf("marshal claims: %w", err)
+		return db.SamnaUser{}, uuid.Nil, fmt.Errorf("marshal claims: %w", err)
 	}
 
 	app, err := db.Instance().GetApp(ctx)
 	if err != nil {
-		return db.SamnaUser{}, err
+		return db.SamnaUser{}, uuid.Nil, err
 	}
 
 	var user db.SamnaUser
+	var ownerID uuid.UUID
 	err = db.Instance().NewRaw(`
-		SELECT u.*
-		  FROM claimius.samna_user u
-		  JOIN claimius.user_token t
-		    ON t.user_id = u.user_id
-		   AND t.app_id  = u.app_id
-		 WHERE u.app_id        = ?
-		   AND u.sa_deleted_at IS NULL
+		SELECT t.user_id, t.sa_owner_id
+		  FROM claimius.user_token t
+		 WHERE t.app_id        = ?
 		   AND t.sa_deleted_at IS NULL
 		   AND t.external_id   = (?::jsonb ->> t.id_claim)
 		 ORDER BY t.sa_created_at DESC
 		 LIMIT 1
-	`, app.ID, string(claimsJSON)).Scan(ctx, &user)
+	`, app.ID, string(claimsJSON)).Scan(ctx, &user.UserID, &ownerID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return db.SamnaUser{}, nil
+			return db.SamnaUser{}, uuid.Nil, nil
 		}
-		return db.SamnaUser{}, fmt.Errorf("debug validate token: %w", err)
+		return db.SamnaUser{}, uuid.Nil, fmt.Errorf("debug validate token: %w", err)
 	}
-	return user, nil
+	fetched, ferr := db.Instance().GetUser(ctx, user.UserID)
+	if ferr != nil {
+		if errors.Is(ferr, sql.ErrNoRows) {
+			return db.SamnaUser{}, uuid.Nil, nil
+		}
+		return db.SamnaUser{}, uuid.Nil, fmt.Errorf("debug fetch samna_user: %w", ferr)
+	}
+	return *fetched, ownerID, nil
 }
 
