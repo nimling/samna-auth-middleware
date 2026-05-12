@@ -1386,7 +1386,7 @@ CREATE OR REPLACE FUNCTION claimius.assign_claim_object(
     p_sa_created_by UUID,
     p_object_id     UUID DEFAULT NULL,
     p_object_type   TEXT DEFAULT NULL,
-    p_sa_access     INTEGER DEFAULT 0,
+    p_sa_access     INTEGER DEFAULT NULL,
     p_inherits      BOOLEAN DEFAULT TRUE,
     p_reason        TEXT DEFAULT NULL,
     p_ref_id        UUID DEFAULT NULL,

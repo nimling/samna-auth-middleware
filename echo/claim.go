@@ -319,12 +319,6 @@ func PutClaim(ctx echo.Context) error {
 			ctx.Logger().Errorf("PutClaim MutationAccess: %v", err)
 			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 		}
-		if ac == nil {
-			ac, err = db.Instance().GetDirectAccess(ctx.Request().Context(), userID, claimID, db.OBJECT_TYPE_CLAIM)
-			if err != nil || ac == nil {
-				return respondError(ctx, http.StatusForbidden, "Forbidden")
-			}
-		}
 		claim, err = db.Instance().PutClaim(ctx.Request().Context(), ac, claimID, claim)
 		if err != nil {
 			ctx.Logger().Errorf("PutClaim: %v", err)

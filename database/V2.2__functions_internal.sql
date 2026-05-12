@@ -589,7 +589,7 @@ BEGIN
                         p_object_type AS cascaded_from_type,
                         p_object_id   AS cascaded_from_id,
                         'direct'::TEXT AS tree_type,
-                        (uc.claim_access | co.sa_access) AS sa_access,
+                        (uc.claim_access | COALESCE(co.sa_access, uc.claim_access)) AS sa_access,
                         co.scope
                  FROM claimius.claim_object co
                           JOIN user_claims uc ON uc.claim_id = co.claim_id
@@ -606,7 +606,7 @@ BEGIN
                         co.object_type AS cascaded_from_type,
                         co.object_id   AS cascaded_from_id,
                         e.tree_type::TEXT AS tree_type,
-                        (uc.claim_access | co.sa_access) AS sa_access,
+                        (uc.claim_access | COALESCE(co.sa_access, uc.claim_access)) AS sa_access,
                         co.scope
                  FROM claimius.claim_object co
                           JOIN user_claims uc ON uc.claim_id = co.claim_id AND uc.inherits = TRUE

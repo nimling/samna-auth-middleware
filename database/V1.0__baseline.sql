@@ -357,7 +357,7 @@ CREATE TABLE IF NOT EXISTS claimius.claim_object (
                                                      object_type     TEXT,
                                                      reason          TEXT,
                                                      scope           JSONB,
-                                                     sa_access       INTEGER NOT NULL DEFAULT 0,
+                                                     sa_access       INTEGER,
                                                      inherits        BOOLEAN NOT NULL DEFAULT TRUE,
                                                      ref_id          UUID,
                                                      sa_owner_id     UUID NOT NULL REFERENCES claimius.organization(id),
@@ -373,7 +373,7 @@ CREATE TABLE IF NOT EXISTS claimius.claim_object (
 );
 
 COMMENT ON TABLE claimius.claim_object IS 'Binds a claim. With (object_type, object_id) scope keys are field names; without them scope keys are custom.';
-COMMENT ON COLUMN claimius.claim_object.sa_access IS 'Bitwise access mask. Bits: 0x01 owner, 0x02 write, 0x04 read, 0x08 execute, 0x10 deny.';
+COMMENT ON COLUMN claimius.claim_object.sa_access IS 'Bitwise access mask with bits 0x01 owner, 0x02 write, 0x04 read, 0x08 execute, 0x10 deny; NULL means inherit the claim sa_access at read time.';
 COMMENT ON COLUMN claimius.claim_object.scope IS 'Object scoped: keys are field names, NULL means whole object. Object-less: keys are custom, NULL means no grant.';
 
 CREATE INDEX IF NOT EXISTS idx_claim_object_app_id ON claimius.claim_object (app_id);
