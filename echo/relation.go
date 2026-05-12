@@ -1,6 +1,7 @@
 package echo
 
 import (
+	"database/sql"
 	"errors"
 	"net/http"
 	"strings"
@@ -102,12 +103,15 @@ func GetRelation(ctx echo.Context) error {
 		return respondError(ctx, http.StatusUnauthorized, "Unauthorized")
 	}
 
-	relations, err := db.Instance().GetRelation(ctx.Request().Context(), userID, relationID)
+	relation, err := db.Instance().GetRelation(ctx.Request().Context(), userID, relationID)
 	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return respondError(ctx, http.StatusNotFound, "Not found")
+		}
 		ctx.Logger().Errorf("GetRelation: %v", err)
 		return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 	}
-	return respondJSON(ctx, http.StatusOK, relations, len(relations))
+	return respondJSON(ctx, http.StatusOK, relation, 1)
 }
 
 func PostRelation(ctx echo.Context) error {
@@ -160,7 +164,15 @@ func PutRelation(ctx echo.Context) error {
 
 	if db.GetDebugMode() != db.DebugModeNone {
 		userID := ctx.Get(middleware.UserIDKey).(uuid.UUID)
-		ac, err := db.Instance().MutationAccess(ctx.Request().Context(), userID, relation.UserID, db.OBJECT_TYPE_USER, db.ACCESS_WRITE)
+		existing, err := db.Instance().GetRelation(ctx.Request().Context(), userID, relationID)
+		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return respondError(ctx, http.StatusNotFound, "Not found")
+			}
+			ctx.Logger().Errorf("PutRelation GetRelation: %v", err)
+			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
+		}
+		ac, err := db.Instance().MutationAccess(ctx.Request().Context(), userID, existing.UserID, db.OBJECT_TYPE_USER, db.ACCESS_WRITE)
 		if err != nil {
 			if errors.Is(err, db.ErrNoAccess) {
 				return respondError(ctx, http.StatusForbidden, "Forbidden")

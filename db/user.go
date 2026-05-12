@@ -75,20 +75,21 @@ func (d *DB) GetUserRelations(ctx context.Context, userID uuid.UUID) ([]UserRela
 	return relations, nil
 }
 
-func (d *DB) GetRelation(ctx context.Context, userID uuid.UUID, objectID uuid.UUID) ([]UserRelation, error) {
-	relations := make([]UserRelation, 0)
+func (d *DB) GetRelation(ctx context.Context, userID uuid.UUID, relationID uuid.UUID) (*UserRelation, error) {
+	var relation UserRelation
 	err := d.NewSelect().
-		Model(&relations).
+		Model(&relation).
 		ExcludeColumn("sa_deleted_at").
-		Where("user_id = ?", userID).
-		Where("object_id = ?", objectID).
-		Where("sa_deleted_at IS NULL").
 		ExcludeColumn("app_id").
+		Where("user_relation.id = ?", relationID).
+		Where("user_relation.user_id = ?", userID).
+		Where("user_relation.sa_deleted_at IS NULL").
+		Limit(1).
 		Scan(ctx)
 	if err != nil {
 		return nil, err
 	}
-	return relations, nil
+	return &relation, nil
 }
 
 func (d *DB) PostRelation(ctx context.Context, ac *AccessClaim, relation *UserRelation) (*UserRelation, error) {
