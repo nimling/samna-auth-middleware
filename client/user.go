@@ -233,6 +233,9 @@ func postUserTokenDebug(ctx context.Context, payload db.SamnaUserToken) (db.Samn
 	if payload.OwnerID != nil && *payload.OwnerID != uuid.Nil {
 		tokenOwnerID = *payload.OwnerID
 	}
+	if rootErr := db.Instance().AssertUserTokenSingleRoot(ctx, externalID, idClaim, tokenOwnerID); rootErr != nil {
+		return user, rootErr
+	}
 	token := db.UserToken{
 		AppID:      app.ID,
 		UserID:     user.UserID,

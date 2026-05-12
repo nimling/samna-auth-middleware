@@ -10,6 +10,7 @@ import (
 var (
 	ErrNoAccess       = errors.New("no access")
 	ErrInternalServer = errors.New("internal server error")
+	ErrRootConflict   = errors.New("identity already registered under a different root")
 )
 
 func (d *DB) MutationAccess(ctx context.Context, userID, objectID uuid.UUID, objectType string, requiredAccess ClaimAccess) (*AccessClaim, error) {

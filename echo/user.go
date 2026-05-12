@@ -255,6 +255,13 @@ func PostUser(ctx echo.Context) error {
 			ctx.Logger().Errorf("PostUser resolve owner: %v", oerr)
 			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 		}
+		if rootErr := db.Instance().AssertUserSingleRoot(rctx, user.UserID, ownerID); rootErr != nil {
+			if errors.Is(rootErr, db.ErrRootConflict) {
+				return respondError(ctx, http.StatusUnauthorized, "Unauthorized")
+			}
+			ctx.Logger().Errorf("PostUser root check: %v", rootErr)
+			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
+		}
 		out, err := db.Instance().PostUser(rctx, user)
 		if err != nil {
 			ctx.Logger().Errorf("PostUser: %v", err)
@@ -421,6 +428,9 @@ func PostUserToken(ctx echo.Context) error {
 	payload.OwnerID = &ownerID
 	result, err := client.PostUserToken(ctx.Request().Context(), payload)
 	if err != nil {
+		if errors.Is(err, db.ErrRootConflict) {
+			return respondError(ctx, http.StatusUnauthorized, "Unauthorized")
+		}
 		ctx.Logger().Errorf("PostUserToken: %v", err)
 		return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 	}

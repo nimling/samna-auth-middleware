@@ -203,3 +203,57 @@ func (d *DB) GetUserAudit(ctx context.Context, userID uuid.UUID, requiredAccess 
 	}
 	return audits, nil
 }
+
+func (d *DB) AssertUserSingleRoot(ctx context.Context, userID uuid.UUID, targetOwnerID uuid.UUID) error {
+	if userID == uuid.Nil || targetOwnerID == uuid.Nil {
+		return nil
+	}
+	var conflict bool
+	err := d.NewRaw(`
+		SELECT EXISTS (
+			SELECT 1
+			FROM claimius.user_claim uc
+			JOIN claimius.claim c ON c.id = uc.claim_id
+			JOIN claimius.organization t ON t.id = ?
+			WHERE uc.user_id = ?
+			  AND uc.app_id = claimius.get_disciple_app_id()
+			  AND uc.sa_deleted_at IS NULL
+			  AND c.sa_deleted_at IS NULL
+			  AND c.sa_root_id <> t.sa_root_id
+		)
+	`, targetOwnerID, userID).Scan(ctx, &conflict)
+	if err != nil {
+		return err
+	}
+	if conflict {
+		return ErrRootConflict
+	}
+	return nil
+}
+
+func (d *DB) AssertUserTokenSingleRoot(ctx context.Context, externalID, idClaim string, targetOwnerID uuid.UUID) error {
+	if externalID == "" || idClaim == "" || targetOwnerID == uuid.Nil {
+		return nil
+	}
+	var conflict bool
+	err := d.NewRaw(`
+		SELECT EXISTS (
+			SELECT 1
+			FROM claimius.user_token ut
+			JOIN claimius.organization existing ON existing.id = ut.sa_owner_id
+			JOIN claimius.organization target ON target.id = ?
+			WHERE ut.external_id = ?
+			  AND ut.id_claim = ?
+			  AND ut.app_id = claimius.get_disciple_app_id()
+			  AND ut.sa_deleted_at IS NULL
+			  AND existing.sa_root_id <> target.sa_root_id
+		)
+	`, targetOwnerID, externalID, idClaim).Scan(ctx, &conflict)
+	if err != nil {
+		return err
+	}
+	if conflict {
+		return ErrRootConflict
+	}
+	return nil
+}
