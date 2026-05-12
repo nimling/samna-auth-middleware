@@ -163,14 +163,14 @@ func GetOrganization(ctx echo.Context) error {
 }
 
 func GetOrganizationGraph(ctx echo.Context) error {
-	startID, depth, level, err := parseGraphQuery(ctx, db.ACCESS_READ)
+	startID, depth, level, limit, err := parseGraphQuery(ctx, db.ACCESS_READ)
 	if err != nil {
 		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
 
 	if db.GetDebugMode() != db.DebugModeNone {
 		userID := ctx.Get(middleware.UserIDKey).(uuid.UUID)
-		nodes, err := db.Instance().GetOwnerGraph(ctx.Request().Context(), userID, startID, depth, level)
+		nodes, err := db.Instance().GetOwnerGraph(ctx.Request().Context(), userID, startID, depth, level, limit)
 		if err != nil {
 			ctx.Logger().Errorf("GetOrganizationGraph: %v", err)
 			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
@@ -178,7 +178,7 @@ func GetOrganizationGraph(ctx echo.Context) error {
 		return respondJSON(ctx, http.StatusOK, nodes, len(nodes))
 	}
 
-	body, err := client.GetOrganizationGraph(ctx.Request().Context(), startID, depth, level)
+	body, err := client.GetOrganizationGraph(ctx.Request().Context(), startID, depth, level, limit)
 	if err != nil {
 		ctx.Logger().Errorf("GetOrganizationGraph: %v", err)
 		return respondError(ctx, http.StatusInternalServerError, "Internal server error")

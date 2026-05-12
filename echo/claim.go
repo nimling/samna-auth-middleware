@@ -16,14 +16,14 @@ import (
 )
 
 func GetClaimGraph(ctx echo.Context) error {
-	startID, depth, level, err := parseGraphQuery(ctx, db.ACCESS_NONE)
+	startID, depth, level, limit, err := parseGraphQuery(ctx, db.ACCESS_NONE)
 	if err != nil {
 		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
 
 	if db.GetDebugMode() != db.DebugModeNone {
 		userID := ctx.Get(middleware.UserIDKey).(uuid.UUID)
-		nodes, err := db.Instance().GetClaimGraph(ctx.Request().Context(), userID, startID, depth, level)
+		nodes, err := db.Instance().GetClaimGraph(ctx.Request().Context(), userID, startID, depth, level, limit)
 		if err != nil {
 			ctx.Logger().Errorf("GetClaimGraph: %v", err)
 			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
@@ -31,7 +31,7 @@ func GetClaimGraph(ctx echo.Context) error {
 		return respondJSON(ctx, http.StatusOK, nodes, len(nodes))
 	}
 
-	body, err := client.GetClaimGraph(ctx.Request().Context(), startID, depth, level)
+	body, err := client.GetClaimGraph(ctx.Request().Context(), startID, depth, level, limit)
 	if err != nil {
 		ctx.Logger().Errorf("GetClaimGraph: %v", err)
 		return respondError(ctx, http.StatusInternalServerError, "Internal server error")
@@ -40,12 +40,12 @@ func GetClaimGraph(ctx echo.Context) error {
 	return ctx.Stream(http.StatusOK, "application/json", body)
 }
 
-func parseGraphQuery(ctx echo.Context, defaultAccess db.ClaimAccess) (*uuid.UUID, int, db.ClaimAccess, error) {
+func parseGraphQuery(ctx echo.Context, defaultAccess db.ClaimAccess) (*uuid.UUID, int, db.ClaimAccess, int, error) {
 	var startID *uuid.UUID
 	if raw := ctx.QueryParam("start_id"); raw != "" {
 		parsed, err := uuid.Parse(raw)
 		if err != nil {
-			return nil, 0, 0, err
+			return nil, 0, 0, 0, err
 		}
 		startID = &parsed
 	}
@@ -54,7 +54,7 @@ func parseGraphQuery(ctx echo.Context, defaultAccess db.ClaimAccess) (*uuid.UUID
 	if raw := ctx.QueryParam("depth"); raw != "" {
 		parsed, err := strconv.Atoi(raw)
 		if err != nil {
-			return nil, 0, 0, err
+			return nil, 0, 0, 0, err
 		}
 		depth = parsed
 	}
@@ -63,12 +63,21 @@ func parseGraphQuery(ctx echo.Context, defaultAccess db.ClaimAccess) (*uuid.UUID
 	if raw := ctx.QueryParam("required_access"); raw != "" {
 		parsed, err := strconv.Atoi(raw)
 		if err != nil {
-			return nil, 0, 0, err
+			return nil, 0, 0, 0, err
 		}
 		requiredAccess = db.ClaimAccess(parsed)
 	}
 
-	return startID, depth, requiredAccess, nil
+	limit := 0
+	if raw := ctx.QueryParam("limit"); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil {
+			return nil, 0, 0, 0, err
+		}
+		limit = parsed
+	}
+
+	return startID, depth, requiredAccess, limit, nil
 }
 
 func GetClaims(ctx echo.Context) error {

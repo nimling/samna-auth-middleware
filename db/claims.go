@@ -157,22 +157,26 @@ func (d *DB) GetObjectClaims(ctx context.Context, userID, objectID uuid.UUID, ob
 	return claims, err
 }
 
-func (d *DB) GetOwnerGraph(ctx context.Context, userID uuid.UUID, startID *uuid.UUID, depth int, requiredAccess ClaimAccess) ([]GraphNode, error) {
+func (d *DB) GetOwnerGraph(ctx context.Context, userID uuid.UUID, startID *uuid.UUID, depth int, requiredAccess ClaimAccess, limit int) ([]GraphNode, error) {
 	nodes := make([]GraphNode, 0)
-	err := d.NewSelect().
+	q := d.NewSelect().
 		TableExpr("claimius.get_owner_graph(p_user_id := ?, p_app_id := claimius.get_disciple_app_id(), p_start_id := ?, p_depth := ?, p_required_access := ?) AS graph", userID, startID, depth, requiredAccess).
-		Column("graph.*").
-		Scan(ctx, &nodes)
-	return nodes, err
+		Column("graph.*")
+	if limit > 0 {
+		q = q.Limit(limit)
+	}
+	return nodes, q.Scan(ctx, &nodes)
 }
 
-func (d *DB) GetClaimGraph(ctx context.Context, userID uuid.UUID, startID *uuid.UUID, depth int, requiredAccess ClaimAccess) ([]GraphNode, error) {
+func (d *DB) GetClaimGraph(ctx context.Context, userID uuid.UUID, startID *uuid.UUID, depth int, requiredAccess ClaimAccess, limit int) ([]GraphNode, error) {
 	nodes := make([]GraphNode, 0)
-	err := d.NewSelect().
+	q := d.NewSelect().
 		TableExpr("claimius.get_claim_graph(p_user_id := ?, p_app_id := claimius.get_disciple_app_id(), p_start_id := ?, p_depth := ?, p_required_access := ?) AS graph", userID, startID, depth, requiredAccess).
-		Column("graph.*").
-		Scan(ctx, &nodes)
-	return nodes, err
+		Column("graph.*")
+	if limit > 0 {
+		q = q.Limit(limit)
+	}
+	return nodes, q.Scan(ctx, &nodes)
 }
 
 func (d *DB) PostClaim(ctx context.Context, ac *AccessClaim, claim *Claim) (*Claim, error) {

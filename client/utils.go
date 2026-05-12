@@ -71,7 +71,7 @@ func joinURL(baseURL string, segments ...string) (string, error) {
 	return base.String(), nil
 }
 
-func appendGraphQuery(u string, startID *uuid.UUID, depth int, requiredAccess db.ClaimAccess) string {
+func appendGraphQuery(u string, startID *uuid.UUID, depth int, requiredAccess db.ClaimAccess, limit int) string {
 	q := url.Values{}
 	if startID != nil {
 		q.Set("start_id", startID.String())
@@ -80,6 +80,9 @@ func appendGraphQuery(u string, startID *uuid.UUID, depth int, requiredAccess db
 		q.Set("depth", strconv.Itoa(depth))
 	}
 	q.Set("required_access", strconv.Itoa(int(requiredAccess)))
+	if limit > 0 {
+		q.Set("limit", strconv.Itoa(limit))
+	}
 	encoded := q.Encode()
 	if encoded == "" {
 		return u

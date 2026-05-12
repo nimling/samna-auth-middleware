@@ -48,13 +48,13 @@ func GetOrganization(ctx context.Context, orgID uuid.UUID) (io.ReadCloser, error
 	return c.client.Get(ctx, u)
 }
 
-func GetOrganizationGraph(ctx context.Context, startID *uuid.UUID, depth int, requiredAccess db.ClaimAccess) (io.ReadCloser, error) {
+func GetOrganizationGraph(ctx context.Context, startID *uuid.UUID, depth int, requiredAccess db.ClaimAccess, limit int) (io.ReadCloser, error) {
 	c := newClient()
 	u, err := joinURL(c.apiURL, "organization", "graph")
 	if err != nil {
 		return nil, fmt.Errorf("build url: %w", err)
 	}
-	u = appendGraphQuery(u, startID, depth, requiredAccess)
+	u = appendGraphQuery(u, startID, depth, requiredAccess, limit)
 	return c.client.Get(ctx, u)
 }
 
