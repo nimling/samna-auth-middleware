@@ -311,13 +311,19 @@ func PutClaim(ctx echo.Context) error {
 
 	if db.GetDebugMode() != db.DebugModeNone {
 		userID := ctx.Get(middleware.UserIDKey).(uuid.UUID)
-		ac, err := db.Instance().MutationAccess(ctx.Request().Context(), userID, claimID, db.OBJECT_TYPE_CLAIM, db.ACCESS_OWNER)
+		ac, err := db.Instance().MutationAccess(ctx.Request().Context(), userID, claimID, db.OBJECT_TYPE_CLAIM, db.ACCESS_WRITE)
 		if err != nil {
 			if errors.Is(err, db.ErrNoAccess) {
 				return respondError(ctx, http.StatusForbidden, "Forbidden")
 			}
 			ctx.Logger().Errorf("PutClaim MutationAccess: %v", err)
 			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
+		}
+		if ac == nil {
+			ac, err = db.Instance().GetDirectAccess(ctx.Request().Context(), userID, claimID, db.OBJECT_TYPE_CLAIM)
+			if err != nil || ac == nil {
+				return respondError(ctx, http.StatusForbidden, "Forbidden")
+			}
 		}
 		claim, err = db.Instance().PutClaim(ctx.Request().Context(), ac, claimID, claim)
 		if err != nil {
