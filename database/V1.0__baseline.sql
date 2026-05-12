@@ -408,7 +408,7 @@ CREATE TABLE IF NOT EXISTS claimius.user_token (
 COMMENT ON TABLE claimius.user_token IS 'Debug only bridge from JWT identity (external_id under id_claim) to claimius.samna_user.user_id. Not synced.';
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_user_token_app_claim_external
-    ON claimius.user_token (app_id, id_claim, external_id) WHERE sa_deleted_at IS NULL;
+    ON claimius.user_token (app_id, sa_owner_id, id_claim, external_id) WHERE sa_deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_user_token_user_id ON claimius.user_token (user_id);
 CREATE INDEX IF NOT EXISTS idx_user_token_app_id ON claimius.user_token (app_id);
 CREATE INDEX IF NOT EXISTS idx_user_token_sa_owner_id ON claimius.user_token (sa_owner_id);
