@@ -15,6 +15,9 @@ import (
 func GetSearch(ctx echo.Context) error {
 	query := ctx.QueryParam("q")
 	if query == "" {
+		query = ctx.QueryParam("query")
+	}
+	if query == "" {
 		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
 
