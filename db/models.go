@@ -67,15 +67,18 @@ var bareObjectTypes = map[string]ObjectType{
 	StripObjectSchema(OBJECT_TYPE_SAMNA_SECRET): OBJECT_TYPE_SAMNA_SECRET,
 }
 
-// ResolveObjectType returns the qualified ObjectType for a bare or qualified claimius input, erroring on unknown.
+// ResolveObjectType returns a qualified ObjectType. Bare claimius types resolve to claimius.X. Unknown bare names default to public.X. Already qualified strings pass through.
 func ResolveObjectType(s string) (ObjectType, error) {
+	if s == "" {
+		return "", fmt.Errorf("object_type is required")
+	}
 	if q, ok := bareObjectTypes[s]; ok {
 		return q, nil
 	}
-	if q, ok := bareObjectTypes[StripObjectSchema(s)]; ok {
-		return q, nil
+	if strings.IndexByte(s, '.') >= 0 {
+		return ObjectType(s), nil
 	}
-	return "", fmt.Errorf("unknown object_type: %q", s)
+	return ObjectType("public." + s), nil
 }
 
 type ClaimAccess int
@@ -270,7 +273,7 @@ type ClaimObject struct {
 	ObjectType *ObjectType      `bun:"object_type" json:"object_type"`
 	Reason     *string          `bun:"reason" json:"reason"`
 	Scope      *json.RawMessage `bun:"scope,type:jsonb" json:"scope"`
-	Access     int              `bun:"sa_access,default:0" json:"access"`
+	Access     *int             `bun:"sa_access,nullzero" json:"access,omitempty"`
 	Inherits   bool             `bun:"inherits,default:true" json:"inherits"`
 	RefID      *uuid.UUID       `bun:"ref_id" json:"ref_id"`
 	OwnerID    uuid.UUID        `bun:"sa_owner_id" json:"owner_id"`

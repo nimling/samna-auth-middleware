@@ -130,6 +130,10 @@ DROP TRIGGER IF EXISTS tg_calc_access ON claimius.object_field;
 CREATE TRIGGER tg_calc_access AFTER INSERT OR UPDATE OR DELETE ON claimius.object_field
     FOR EACH ROW EXECUTE FUNCTION claimius.calc_object_access();
 
+DROP TRIGGER IF EXISTS tg_calc_access ON claimius.claim;
+CREATE TRIGGER tg_calc_access AFTER INSERT OR UPDATE OR DELETE ON claimius.claim
+    FOR EACH ROW EXECUTE FUNCTION claimius.calc_object_access();
+
 -- ----------------------------------------------------------------------------
 -- Sync event publishers
 -- ----------------------------------------------------------------------------

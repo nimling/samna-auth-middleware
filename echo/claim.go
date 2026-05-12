@@ -379,6 +379,9 @@ func PostClaimObject(ctx echo.Context) error {
 	if err := ctx.Bind(co); err != nil {
 		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
+	if co.ObjectID == nil || co.ObjectType == nil || *co.ObjectType == "" {
+		return respondError(ctx, http.StatusBadRequest, "object_id and object_type are required")
+	}
 
 	if db.GetDebugMode() != db.DebugModeNone {
 		userID := ctx.Get(middleware.UserIDKey).(uuid.UUID)
