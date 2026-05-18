@@ -56,6 +56,9 @@ func (d *DB) PostSecret(ctx context.Context, ac *AccessClaim, body BodySecret) (
 	if body.Value == nil || *body.Value == "" {
 		return nil, fmt.Errorf("value is required")
 	}
+	if body.OwnerID == nil || *body.OwnerID == uuid.Nil {
+		return nil, fmt.Errorf("owner_id is required")
+	}
 	app, err := d.GetApp(ctx)
 	if err != nil {
 		return nil, err
@@ -72,7 +75,7 @@ func (d *DB) PostSecret(ctx context.Context, ac *AccessClaim, body BodySecret) (
 		Key:       *body.Key,
 		Value:     hex.EncodeToString(encrypted),
 		ExpiresAt: body.ExpiresAt,
-		OwnerID:   ac.OwnerID,
+		OwnerID:   *body.OwnerID,
 		CreatedBy: ac.UserClaimID,
 	}
 	err = d.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
