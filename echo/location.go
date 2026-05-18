@@ -199,12 +199,24 @@ func PutLocation(ctx echo.Context) error {
 			ctx.Logger().Errorf("PutLocation MutationAccess: %v", err)
 			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 		}
+		existing, err := db.Instance().GetLocation(ctx.Request().Context(), locationID)
+		if err != nil {
+			return respondError(ctx, http.StatusNotFound, "Not found")
+		}
 		loc := &db.Location{}
 		if err := ctx.Bind(loc); err != nil {
 			return respondError(ctx, http.StatusBadRequest, "Bad request")
 		}
 		if err := loc.ValidatePut(); err != nil {
 			return respondError(ctx, http.StatusBadRequest, err.Error())
+		}
+		if loc.OwnerID != uuid.Nil && loc.OwnerID != existing.OwnerID {
+			if newAC, accErr := db.Instance().MutationAccess(ctx.Request().Context(), userID, loc.OwnerID, db.OBJECT_TYPE_ORGANIZATION, db.ACCESS_WRITE); accErr != nil || newAC == nil {
+				if accErr != nil {
+					ctx.Logger().Warn(accErr)
+				}
+				return respondError(ctx, http.StatusForbidden, "Forbidden")
+			}
 		}
 		loc, err = db.Instance().PutLocation(ctx.Request().Context(), ac, locationID, loc)
 		if err != nil {

@@ -301,6 +301,14 @@ func PutOrganization(ctx echo.Context) error {
 		if err := org.ValidatePut(); err != nil {
 			return respondError(ctx, http.StatusBadRequest, err.Error())
 		}
+		if org.OwnerID != uuid.Nil && org.OwnerID != existing.OwnerID {
+			if newAC, accErr := db.Instance().MutationAccess(ctx.Request().Context(), userID, org.OwnerID, db.OBJECT_TYPE_ORGANIZATION, db.ACCESS_WRITE); accErr != nil || newAC == nil {
+				if accErr != nil {
+					ctx.Logger().Warn(accErr)
+				}
+				return respondError(ctx, http.StatusForbidden, "Forbidden")
+			}
+		}
 		org, err = db.Instance().PutOrganization(ctx.Request().Context(), ac, orgID, org)
 		if err != nil {
 			ctx.Logger().Errorf("PutOrganization: %v", err)
