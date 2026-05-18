@@ -141,10 +141,16 @@ func (a *Asset) ValidatePost() error {
 }
 
 func (l *Location) ValidatePut() error {
+	if l.Name == nil && l.Description == nil && l.Type == "" && l.ParentID == nil && l.Longitude == nil && l.Latitude == nil && l.Level == 0 && l.CodeType == nil && l.Code == nil && l.ExternalID == nil {
+		return errors.New("no fields to update")
+	}
 	return nil
 }
 
 func (o *Organization) ValidatePut() error {
+	if o.Name == "" && o.Description == nil && o.Type == "" && o.LocationID == nil && o.Level == 0 && o.ExternalID == nil {
+		return errors.New("no fields to update")
+	}
 	switch o.Type {
 	case "", ORGANIZATION_TYPE_COMPANY, ORGANIZATION_TYPE_CHILD:
 	case ORGANIZATION_TYPE_SYSTEM:
@@ -156,6 +162,9 @@ func (o *Organization) ValidatePut() error {
 }
 
 func (u *SamnaUser) ValidatePut() error {
+	if u.FirstName == nil && u.LastName == nil && u.UserName == nil && u.UserImage == nil && u.Phone == nil && u.Email == "" && u.ExternalID == nil && u.Status == nil && u.Config == nil {
+		return errors.New("no fields to update")
+	}
 	if u.Status != nil {
 		switch UserStatus(*u.Status) {
 		case USER_STATUS_ACTIVE, USER_STATUS_PENDING, USER_STATUS_SUSPENDED, USER_STATUS_INACTIVE:
@@ -167,6 +176,9 @@ func (u *SamnaUser) ValidatePut() error {
 }
 
 func (c *Claim) ValidatePut() error {
+	if c.Name == "" && c.Description == nil && c.Access == 0 && c.Type == "" {
+		return errors.New("no fields to update")
+	}
 	switch c.Type {
 	case "", CLAIM_TYPE_USER, CLAIM_TYPE_SERVICE, CLAIM_TYPE_VIRTUAL:
 	case CLAIM_TYPE_SYSTEM:
@@ -178,14 +190,23 @@ func (c *Claim) ValidatePut() error {
 }
 
 func (co *ClaimObject) ValidatePut() error {
+	if (co.ObjectID == nil || *co.ObjectID == uuid.Nil) && (co.ObjectType == nil || *co.ObjectType == "") && co.Scope == nil && co.Reason == nil && co.Access == nil {
+		return errors.New("no fields to update")
+	}
 	return nil
 }
 
 func (uc *UserClaim) ValidatePut() error {
+	if uc.Reason == nil && uc.StartsAt == nil && uc.EndsAt == nil {
+		return errors.New("no fields to update")
+	}
 	return nil
 }
 
 func (b *BodySecret) ValidatePut() error {
+	if b.Key == nil && b.Value == nil {
+		return errors.New("no fields to update")
+	}
 	if b.Key != nil && *b.Key == "" {
 		return errors.New("key cannot be empty")
 	}
@@ -196,17 +217,29 @@ func (b *BodySecret) ValidatePut() error {
 }
 
 func (f *ObjectField) ValidatePut() error {
+	if f.Name == "" && f.Description == nil && f.Value == nil && f.JsonSchema == nil {
+		return errors.New("no fields to update")
+	}
 	return nil
 }
 
 func (f *UserField) ValidatePut() error {
+	if f.Value == nil {
+		return errors.New("no fields to update")
+	}
 	return nil
 }
 
 func (r *UserRelation) ValidatePut() error {
+	if r.Description == nil && r.ObjectType == "" && r.ObjectID == uuid.Nil && r.Pinned == nil && r.Priority == nil {
+		return errors.New("no fields to update")
+	}
 	return nil
 }
 
 func (a *Asset) ValidatePut() error {
+	if a.Name == "" && a.Description == nil && a.MimeType == "" && a.Status == "" {
+		return errors.New("no fields to update")
+	}
 	return nil
 }
