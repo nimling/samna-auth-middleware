@@ -176,6 +176,13 @@ func GetClaim(ctx echo.Context) error {
 
 	if db.GetDebugMode() != db.DebugModeNone {
 		userID := ctx.Get(middleware.UserIDKey).(uuid.UUID)
+		ac, err := db.Instance().GetAccess(ctx.Request().Context(), userID, claimID, db.OBJECT_TYPE_CLAIM, db.ACCESS_READ)
+		if err != nil || ac == nil {
+			if err != nil && !errors.Is(err, db.ErrNoAccess) {
+				ctx.Logger().Warn(err)
+			}
+			return respondError(ctx, http.StatusForbidden, "Forbidden")
+		}
 		with, err := db.QueryWithObject(ctx)
 		if err != nil {
 			ctx.Logger().Warn(err)
@@ -206,7 +213,7 @@ func GetClaim(ctx echo.Context) error {
 	body, err := client.GetClaim(ctx.Request().Context(), claimID)
 	if err != nil {
 		ctx.Logger().Errorf("GetClaim: %v", err)
-		return respondError(ctx, http.StatusNotFound, "Not found")
+		return respondError(ctx, http.StatusForbidden, "Forbidden")
 	}
 	defer body.Close()
 	return ctx.Stream(http.StatusOK, "application/json", body)
