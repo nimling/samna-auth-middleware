@@ -85,7 +85,12 @@ func GetOrganizations(ctx echo.Context) error {
 			q.Where("organization.id IN (?)", bun.In(orgIDs))
 		}
 		if len(locIDs) > 0 {
-			q.Where("organization.id IN (SELECT sa_owner_id FROM claimius.location WHERE sa_deleted_at IS NULL AND id IN (?))", bun.In(locIDs))
+			q.WhereGroup(" AND ", func(qq *bun.SelectQuery) *bun.SelectQuery {
+				for _, locID := range locIDs {
+					qq = qq.WhereOr("organization.id IN (SELECT a.object_id FROM claimius.get_location_ancestors(?, ?) a WHERE a.object_type = ?)", db.OBJECT_TYPE_LOCATION, locID, db.OBJECT_TYPE_ORGANIZATION)
+				}
+				return qq
+			})
 		}
 		if len(usrIDs) > 0 {
 			q.WhereGroup(" AND ", func(qq *bun.SelectQuery) *bun.SelectQuery {
