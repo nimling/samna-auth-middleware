@@ -124,12 +124,6 @@ const (
 
 type LocationType string
 
-const (
-	LOCATION_TYPE_USER     LocationType = "user"
-	LOCATION_TYPE_LOCATION LocationType = "location"
-	LOCATION_TYPE_BOOKABLE LocationType = "bookable"
-)
-
 type UserType string
 
 const (
