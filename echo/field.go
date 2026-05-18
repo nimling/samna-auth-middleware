@@ -98,6 +98,9 @@ func PutObjectField(ctx echo.Context) error {
 	if err := ctx.Bind(field); err != nil {
 		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
+	if err := field.ValidatePut(); err != nil {
+		return respondError(ctx, http.StatusBadRequest, err.Error())
+	}
 
 	if db.GetDebugMode() != db.DebugModeNone {
 		userID := ctx.Get(middleware.UserIDKey).(uuid.UUID)
@@ -236,6 +239,9 @@ func PutUserField(ctx echo.Context) error {
 	field := &db.UserField{}
 	if err := ctx.Bind(field); err != nil {
 		return respondError(ctx, http.StatusBadRequest, "Bad request")
+	}
+	if err := field.ValidatePut(); err != nil {
+		return respondError(ctx, http.StatusBadRequest, err.Error())
 	}
 
 	if db.GetDebugMode() != db.DebugModeNone {

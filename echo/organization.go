@@ -298,8 +298,8 @@ func PutOrganization(ctx echo.Context) error {
 		if err := ctx.Bind(org); err != nil {
 			return respondError(ctx, http.StatusBadRequest, "Bad request")
 		}
-		if org.Type == db.ORGANIZATION_TYPE_SYSTEM {
-			return respondError(ctx, http.StatusBadRequest, "Bad request")
+		if err := org.ValidatePut(); err != nil {
+			return respondError(ctx, http.StatusBadRequest, err.Error())
 		}
 		org, err = db.Instance().PutOrganization(ctx.Request().Context(), ac, orgID, org)
 		if err != nil {
@@ -314,8 +314,8 @@ func PutOrganization(ctx echo.Context) error {
 	if err := ctx.Bind(&org); err != nil {
 		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
-	if org.Type == db.ORGANIZATION_TYPE_SYSTEM {
-		return respondError(ctx, http.StatusBadRequest, "Bad request")
+	if err := org.ValidatePut(); err != nil {
+		return respondError(ctx, http.StatusBadRequest, err.Error())
 	}
 	result, err := client.PutOrganization(ctx.Request().Context(), orgID, org)
 	if err != nil {

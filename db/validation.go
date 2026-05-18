@@ -139,3 +139,74 @@ func (a *Asset) ValidatePost() error {
 	}
 	return nil
 }
+
+func (l *Location) ValidatePut() error {
+	return nil
+}
+
+func (o *Organization) ValidatePut() error {
+	switch o.Type {
+	case "", ORGANIZATION_TYPE_COMPANY, ORGANIZATION_TYPE_CHILD:
+	case ORGANIZATION_TYPE_SYSTEM:
+		return errors.New("type cannot be system")
+	default:
+		return errors.New("invalid type")
+	}
+	return nil
+}
+
+func (u *SamnaUser) ValidatePut() error {
+	if u.Status != nil {
+		switch UserStatus(*u.Status) {
+		case USER_STATUS_ACTIVE, USER_STATUS_PENDING, USER_STATUS_SUSPENDED, USER_STATUS_INACTIVE:
+		default:
+			return errors.New("invalid status")
+		}
+	}
+	return nil
+}
+
+func (c *Claim) ValidatePut() error {
+	switch c.Type {
+	case "", CLAIM_TYPE_USER, CLAIM_TYPE_SERVICE, CLAIM_TYPE_VIRTUAL:
+	case CLAIM_TYPE_SYSTEM:
+		return errors.New("type cannot be system")
+	default:
+		return errors.New("invalid type")
+	}
+	return nil
+}
+
+func (co *ClaimObject) ValidatePut() error {
+	return nil
+}
+
+func (uc *UserClaim) ValidatePut() error {
+	return nil
+}
+
+func (b *BodySecret) ValidatePut() error {
+	if b.Key != nil && *b.Key == "" {
+		return errors.New("key cannot be empty")
+	}
+	if b.Value != nil && *b.Value == "" {
+		return errors.New("value cannot be empty")
+	}
+	return nil
+}
+
+func (f *ObjectField) ValidatePut() error {
+	return nil
+}
+
+func (f *UserField) ValidatePut() error {
+	return nil
+}
+
+func (r *UserRelation) ValidatePut() error {
+	return nil
+}
+
+func (a *Asset) ValidatePut() error {
+	return nil
+}

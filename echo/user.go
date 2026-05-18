@@ -329,6 +329,9 @@ func PutUser(ctx echo.Context) error {
 		if err := ctx.Bind(user); err != nil {
 			return respondError(ctx, http.StatusBadRequest, "Bad request")
 		}
+		if err := user.ValidatePut(); err != nil {
+			return respondError(ctx, http.StatusBadRequest, err.Error())
+		}
 		ac, err := db.Instance().MutationAccess(ctx.Request().Context(), userID, targetUserID, db.OBJECT_TYPE_USER, db.ACCESS_WRITE)
 		if err != nil {
 			if errors.Is(err, db.ErrNoAccess) {
@@ -348,6 +351,9 @@ func PutUser(ctx echo.Context) error {
 	var user db.SamnaUser
 	if err := ctx.Bind(&user); err != nil {
 		return respondError(ctx, http.StatusBadRequest, "Bad request")
+	}
+	if err := user.ValidatePut(); err != nil {
+		return respondError(ctx, http.StatusBadRequest, err.Error())
 	}
 	result, err := client.PutUser(ctx.Request().Context(), targetUserID, user)
 	if err != nil {

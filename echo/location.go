@@ -203,6 +203,9 @@ func PutLocation(ctx echo.Context) error {
 		if err := ctx.Bind(loc); err != nil {
 			return respondError(ctx, http.StatusBadRequest, "Bad request")
 		}
+		if err := loc.ValidatePut(); err != nil {
+			return respondError(ctx, http.StatusBadRequest, err.Error())
+		}
 		loc, err = db.Instance().PutLocation(ctx.Request().Context(), ac, locationID, loc)
 		if err != nil {
 			ctx.Logger().Errorf("PutLocation: %v", err)
@@ -219,6 +222,9 @@ func PutLocation(ctx echo.Context) error {
 	var loc db.Location
 	if err := ctx.Bind(&loc); err != nil {
 		return respondError(ctx, http.StatusBadRequest, "Bad request")
+	}
+	if err := loc.ValidatePut(); err != nil {
+		return respondError(ctx, http.StatusBadRequest, err.Error())
 	}
 	result, err := client.PutLocation(ctx.Request().Context(), locationID, loc)
 	if err != nil {

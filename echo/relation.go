@@ -164,6 +164,9 @@ func PutRelation(ctx echo.Context) error {
 	if err := ctx.Bind(relation); err != nil {
 		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
+	if err := relation.ValidatePut(); err != nil {
+		return respondError(ctx, http.StatusBadRequest, err.Error())
+	}
 
 	if db.GetDebugMode() != db.DebugModeNone {
 		userID := ctx.Get(middleware.UserIDKey).(uuid.UUID)
