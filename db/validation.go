@@ -173,11 +173,36 @@ func (o *Organization) ValidatePut() error {
 }
 
 func (u *SamnaUser) ValidatePut() error {
+	if u.Email == "" {
+		return errors.New("email is required")
+	}
+	if _, err := mail.ParseAddress(u.Email); err != nil {
+		return errors.New("invalid email")
+	}
+	if u.Status != nil {
+		switch UserStatus(*u.Status) {
+		case USER_STATUS_ACTIVE, USER_STATUS_PENDING, USER_STATUS_SUSPENDED, USER_STATUS_INACTIVE:
+		default:
+			return errors.New("invalid status")
+		}
+	}
+	return nil
+}
+
+func (u *SamnaUser) ValidatePatch() error {
 	if u.IsEmpty() {
 		return errors.New("no fields to update")
 	}
 	if !hasAnyJSONKey(u) {
 		return errors.New("no fields to update")
+	}
+	if u.HasKey("email") {
+		if u.Email == "" {
+			return errors.New("email is required")
+		}
+		if _, err := mail.ParseAddress(u.Email); err != nil {
+			return errors.New("invalid email")
+		}
 	}
 	if u.Status != nil {
 		switch UserStatus(*u.Status) {

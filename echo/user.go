@@ -358,6 +358,46 @@ func PutUser(ctx echo.Context) error {
 	return respondJSON(ctx, http.StatusOK, result, 1)
 }
 
+func PatchUser(ctx echo.Context) error {
+	targetUserID, err := uuid.Parse(ctx.Param("id"))
+	if err != nil {
+		return respondError(ctx, http.StatusBadRequest, "Bad request")
+	}
+
+	user := &db.SamnaUser{}
+	if err := user.Bind(ctx); err != nil {
+		return respondError(ctx, http.StatusBadRequest, "Bad request")
+	}
+	if err := user.ValidatePatch(); err != nil {
+		return respondError(ctx, http.StatusBadRequest, err.Error())
+	}
+
+	if db.GetDebugMode() != db.DebugModeNone {
+		userID := ctx.Get(middleware.UserIDKey).(uuid.UUID)
+		ac, err := db.Instance().UserAccess(ctx.Request().Context(), userID, targetUserID, db.ACCESS_WRITE)
+		if err != nil {
+			if errors.Is(err, db.ErrNoAccess) {
+				return respondError(ctx, http.StatusForbidden, "Forbidden")
+			}
+			ctx.Logger().Errorf("PatchUser UserAccess: %v", err)
+			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
+		}
+		user, err = db.Instance().PatchUser(ctx.Request().Context(), ac, targetUserID, user)
+		if err != nil {
+			ctx.Logger().Errorf("PatchUser: %v", err)
+			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
+		}
+		return respondJSON(ctx, http.StatusOK, user, 1)
+	}
+
+	result, err := client.PatchUser(ctx.Request().Context(), targetUserID, *user)
+	if err != nil {
+		ctx.Logger().Errorf("PatchUser: %v", err)
+		return respondError(ctx, http.StatusInternalServerError, "Internal server error")
+	}
+	return respondJSON(ctx, http.StatusOK, result, 1)
+}
+
 func DeleteUser(ctx echo.Context) error {
 	targetUserID, err := uuid.Parse(ctx.Param("id"))
 	if err != nil {

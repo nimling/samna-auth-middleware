@@ -160,6 +160,24 @@ func (d *DB) PutUser(ctx context.Context, ac *AccessClaim, userID uuid.UUID, use
 	if ac == nil {
 		return nil, ErrNoAccess
 	}
+	_, err := d.NewUpdate().
+		Model(user).
+		Where("user_id = ?", userID).
+		Where("sa_deleted_at IS NULL").
+		ExcludeColumn("id", "user_id", "app_id", "type", "sa_created_at", "sa_updated_at", "sa_deleted_at").
+		Value("app_id", "claimius.get_disciple_app_id()").
+		Returning("*").
+		Exec(ctx, user)
+	if err != nil {
+		return nil, err
+	}
+	return user, nil
+}
+
+func (d *DB) PatchUser(ctx context.Context, ac *AccessClaim, userID uuid.UUID, user *SamnaUser) (*SamnaUser, error) {
+	if ac == nil {
+		return nil, ErrNoAccess
+	}
 	q := d.NewUpdate().
 		Model(user).
 		Where("user_id = ?", userID).
@@ -167,7 +185,7 @@ func (d *DB) PutUser(ctx context.Context, ac *AccessClaim, userID uuid.UUID, use
 		Value("app_id", "claimius.get_disciple_app_id()").
 		OmitZero().
 		Returning("*")
-	for _, column := range user.PutNulls() {
+	for _, column := range user.PatchNulls() {
 		q = q.Set("? = NULL", bun.Ident(column))
 	}
 	_, err := q.Exec(ctx, user)

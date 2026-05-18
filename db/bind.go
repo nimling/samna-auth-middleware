@@ -92,6 +92,6 @@ func (u *SamnaUser) Bind(ctx echo.Context) error {
 	return u.Body.Bound(ctx, u)
 }
 
-func (u *SamnaUser) PutNulls() []string {
+func (u *SamnaUser) PatchNulls() []string {
 	return bunNullColumns(u)
 }

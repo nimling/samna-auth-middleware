@@ -53,6 +53,10 @@ func (e *httpClient) Put(ctx context.Context, body any, url string) (io.ReadClos
 	return e.execute(ctx, http.MethodPut, http.StatusOK, body, url)
 }
 
+func (e *httpClient) Patch(ctx context.Context, body any, url string) (io.ReadCloser, error) {
+	return e.execute(ctx, http.MethodPatch, http.StatusOK, body, url)
+}
+
 func (e *httpClient) Delete(ctx context.Context, url string) (io.ReadCloser, error) {
 	return e.execute(ctx, http.MethodDelete, http.StatusOK, nil, url)
 }
