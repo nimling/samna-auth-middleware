@@ -242,14 +242,8 @@ func PostClaim(ctx echo.Context) error {
 	if err := ctx.Bind(claim); err != nil {
 		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
-	if claim.Type == db.CLAIM_TYPE_SYSTEM {
-		return respondError(ctx, http.StatusBadRequest, "Bad request")
-	}
-	if claim.Access == 0 {
-		return respondError(ctx, http.StatusBadRequest, "Bad request")
-	}
-	if claim.OwnerID == (uuid.UUID{}) {
-		return respondError(ctx, http.StatusBadRequest, "Bad request")
+	if err := claim.ValidatePost(); err != nil {
+		return respondError(ctx, http.StatusBadRequest, err.Error())
 	}
 
 	if db.GetDebugMode() != db.DebugModeNone {
@@ -379,8 +373,8 @@ func PostClaimObject(ctx echo.Context) error {
 	if err := ctx.Bind(co); err != nil {
 		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
-	if co.ObjectID == nil || co.ObjectType == nil || *co.ObjectType == "" {
-		return respondError(ctx, http.StatusBadRequest, "object_id and object_type are required")
+	if err := co.ValidatePost(); err != nil {
+		return respondError(ctx, http.StatusBadRequest, err.Error())
 	}
 
 	if db.GetDebugMode() != db.DebugModeNone {
@@ -457,6 +451,9 @@ func PostClaimUser(ctx echo.Context) error {
 	uc := &db.UserClaim{}
 	if err := ctx.Bind(uc); err != nil {
 		return respondError(ctx, http.StatusBadRequest, "Bad request")
+	}
+	if err := uc.ValidatePost(); err != nil {
+		return respondError(ctx, http.StatusBadRequest, err.Error())
 	}
 
 	if db.GetDebugMode() != db.DebugModeNone {

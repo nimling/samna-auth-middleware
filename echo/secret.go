@@ -141,8 +141,8 @@ func PostSecret(ctx echo.Context) error {
 	if err := ctx.Bind(&reqBody); err != nil {
 		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
-	if reqBody.OwnerID == nil || *reqBody.OwnerID == (uuid.UUID{}) {
-		return respondError(ctx, http.StatusBadRequest, "Bad request")
+	if err := reqBody.ValidatePost(); err != nil {
+		return respondError(ctx, http.StatusBadRequest, err.Error())
 	}
 
 	if db.GetDebugMode() != db.DebugModeNone {

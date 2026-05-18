@@ -103,6 +103,9 @@ func PostAsset(ctx echo.Context) error {
 	if err := ctx.Bind(asset); err != nil {
 		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
+	if err := asset.ValidatePost(); err != nil {
+		return respondError(ctx, http.StatusBadRequest, err.Error())
+	}
 
 	if db.GetDebugMode() != db.DebugModeNone {
 		userID := ctx.Get(middleware.UserIDKey).(uuid.UUID)

@@ -234,11 +234,8 @@ func PostOrganization(ctx echo.Context) error {
 		if err := ctx.Bind(org); err != nil {
 			return respondError(ctx, http.StatusBadRequest, "Bad request")
 		}
-		if org.OwnerID == (uuid.UUID{}) {
-			return respondError(ctx, http.StatusBadRequest, "Bad request")
-		}
-		if org.Type == db.ORGANIZATION_TYPE_SYSTEM {
-			return respondError(ctx, http.StatusBadRequest, "Bad request")
+		if err := org.ValidatePost(); err != nil {
+			return respondError(ctx, http.StatusBadRequest, err.Error())
 		}
 		ac, err := db.Instance().MutationAccess(ctx.Request().Context(), userID, org.OwnerID, db.OBJECT_TYPE_ORGANIZATION, db.ACCESS_WRITE)
 		if err != nil {
@@ -261,8 +258,8 @@ func PostOrganization(ctx echo.Context) error {
 	if err := ctx.Bind(&org); err != nil {
 		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
-	if org.Type == db.ORGANIZATION_TYPE_SYSTEM {
-		return respondError(ctx, http.StatusBadRequest, "Bad request")
+	if err := org.ValidatePost(); err != nil {
+		return respondError(ctx, http.StatusBadRequest, err.Error())
 	}
 	result, err := client.PostOrganization(ctx.Request().Context(), org)
 	if err != nil {

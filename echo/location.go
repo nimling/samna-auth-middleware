@@ -144,6 +144,9 @@ func PostLocation(ctx echo.Context) error {
 		if err := ctx.Bind(loc); err != nil {
 			return respondError(ctx, http.StatusBadRequest, "Bad request")
 		}
+		if err := loc.ValidatePost(); err != nil {
+			return respondError(ctx, http.StatusBadRequest, err.Error())
+		}
 		ac, err := db.Instance().MutationAccess(ctx.Request().Context(), userID, loc.OwnerID, db.OBJECT_TYPE_ORGANIZATION, db.ACCESS_WRITE)
 		if err != nil {
 			if errors.Is(err, db.ErrNoAccess) {
@@ -168,6 +171,9 @@ func PostLocation(ctx echo.Context) error {
 	var loc db.Location
 	if err := ctx.Bind(&loc); err != nil {
 		return respondError(ctx, http.StatusBadRequest, "Bad request")
+	}
+	if err := loc.ValidatePost(); err != nil {
+		return respondError(ctx, http.StatusBadRequest, err.Error())
 	}
 	result, err := client.PostLocation(ctx.Request().Context(), loc)
 	if err != nil {

@@ -243,6 +243,9 @@ func PostUser(ctx echo.Context) error {
 	if err := ctx.Bind(&user); err != nil {
 		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
+	if err := user.ValidatePost(); err != nil {
+		return respondError(ctx, http.StatusBadRequest, err.Error())
+	}
 
 	if db.GetDebugMode() != db.DebugModeNone {
 		rctx := ctx.Request().Context()

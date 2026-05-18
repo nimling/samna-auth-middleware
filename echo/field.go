@@ -58,6 +58,9 @@ func PostObjectField(ctx echo.Context) error {
 	if err := ctx.Bind(field); err != nil {
 		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
+	if err := field.ValidatePost(); err != nil {
+		return respondError(ctx, http.StatusBadRequest, err.Error())
+	}
 
 	if db.GetDebugMode() != db.DebugModeNone {
 		userID := ctx.Get(middleware.UserIDKey).(uuid.UUID)
@@ -189,6 +192,9 @@ func PostUserField(ctx echo.Context) error {
 		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
 	field.FieldID = fieldID
+	if err := field.ValidatePost(); err != nil {
+		return respondError(ctx, http.StatusBadRequest, err.Error())
+	}
 
 	if db.GetDebugMode() != db.DebugModeNone {
 		userID := ctx.Get(middleware.UserIDKey).(uuid.UUID)

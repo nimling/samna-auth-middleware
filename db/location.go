@@ -77,10 +77,9 @@ func (d *DB) PostLocation(ctx context.Context, ac *AccessClaim, loc *Location) (
 		return nil, ErrNoAccess
 	}
 	loc.CreatedBy = *ac.UserClaimID
-	loc.RootID = ac.RootID
 	_, err := d.NewInsert().
 		Model(loc).
-		ExcludeColumn("id", "sa_created_at", "sa_updated_at", "sa_deleted_at").
+		ExcludeColumn("id", "sa_root_id", "sa_created_at", "sa_updated_at", "sa_deleted_at").
 		Value("app_id", "claimius.get_disciple_app_id()").
 		Returning("*").
 		Exec(ctx, loc)

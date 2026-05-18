@@ -125,6 +125,9 @@ func PostRelation(ctx echo.Context) error {
 		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
 	relation.UserID = userID
+	if err := relation.ValidatePost(); err != nil {
+		return respondError(ctx, http.StatusBadRequest, err.Error())
+	}
 
 	if db.GetDebugMode() != db.DebugModeNone {
 		ac, err := db.Instance().MutationAccess(ctx.Request().Context(), userID, relation.UserID, db.OBJECT_TYPE_USER, db.ACCESS_WRITE)
