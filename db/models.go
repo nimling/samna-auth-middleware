@@ -195,6 +195,7 @@ type UserToken struct {
 
 type Organization struct {
 	bun.BaseModel `bun:"table:claimius.organization"`
+	nimbody.Body  `bun:"-" json:"-"`
 
 	ID          uuid.UUID        `bun:"id,pk,default:gen_random_uuid()" json:"id"`
 	AppID       uuid.UUID        `bun:"app_id,notnull,type:uuid,default:claimius.get_disciple_app_id()" json:"-"`

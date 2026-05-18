@@ -111,6 +111,28 @@ func PutOrganization(ctx context.Context, orgID uuid.UUID, org db.Organization) 
 	return &result, nil
 }
 
+func PatchOrganization(ctx context.Context, orgID uuid.UUID, org db.Organization) (*db.Organization, error) {
+	c := newClient()
+	u, err := joinURL(c.apiURL, "organization", orgID.String())
+	if err != nil {
+		return nil, fmt.Errorf("build url: %w", err)
+	}
+	result, err := DecodeJSON[db.Organization](c.client.Patch(ctx, requestBody(org, false), u))
+	if err != nil {
+		return nil, err
+	}
+	_, err = db.Instance().NewInsert().
+		Model(&result).
+		On("CONFLICT (id) DO UPDATE").
+		Set("sa_updated_at = EXCLUDED.sa_updated_at").
+		Set("sa_deleted_at = EXCLUDED.sa_deleted_at").
+		Exec(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
 func DeleteOrganization(ctx context.Context, orgID uuid.UUID) (*db.Organization, error) {
 	c := newClient()
 	u, err := joinURL(c.apiURL, "organization", orgID.String())

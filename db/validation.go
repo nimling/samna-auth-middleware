@@ -159,15 +159,39 @@ func (l *Location) ValidatePut() error {
 }
 
 func (o *Organization) ValidatePut() error {
-	if o.Name == "" && o.Description == nil && o.Type == "" && o.LocationID == nil && o.Level == 0 && o.ExternalID == nil {
-		return errors.New("no fields to update")
+	if o.Name == "" {
+		return errors.New("name is required")
 	}
 	switch o.Type {
-	case "", ORGANIZATION_TYPE_COMPANY, ORGANIZATION_TYPE_CHILD:
+	case ORGANIZATION_TYPE_COMPANY, ORGANIZATION_TYPE_CHILD:
+	case "":
+		return errors.New("type is required")
 	case ORGANIZATION_TYPE_SYSTEM:
 		return errors.New("type cannot be system")
 	default:
 		return errors.New("invalid type")
+	}
+	return nil
+}
+
+func (o *Organization) ValidatePatch() error {
+	if o.IsEmpty() {
+		return errors.New("no fields to update")
+	}
+	if !hasAnyJSONKey(o) {
+		return errors.New("no fields to update")
+	}
+	if o.HasKey("name") && o.Name == "" {
+		return errors.New("name is required")
+	}
+	if o.HasKey("type") {
+		switch o.Type {
+		case ORGANIZATION_TYPE_COMPANY, ORGANIZATION_TYPE_CHILD:
+		case ORGANIZATION_TYPE_SYSTEM:
+			return errors.New("type cannot be system")
+		default:
+			return errors.New("invalid type")
+		}
 	}
 	return nil
 }

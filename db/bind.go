@@ -95,3 +95,11 @@ func (u *SamnaUser) Bind(ctx echo.Context) error {
 func (u *SamnaUser) PatchNulls() []string {
 	return bunNullColumns(u)
 }
+
+func (o *Organization) Bind(ctx echo.Context) error {
+	return o.Body.Bound(ctx, o)
+}
+
+func (o *Organization) PatchNulls() []string {
+	return bunNullColumns(o)
+}

@@ -295,6 +295,14 @@ func PutOrganization(ctx echo.Context) error {
 		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
 
+	org := &db.Organization{}
+	if err := org.Bind(ctx); err != nil {
+		return respondError(ctx, http.StatusBadRequest, "Bad request")
+	}
+	if err := org.ValidatePut(); err != nil {
+		return respondError(ctx, http.StatusBadRequest, err.Error())
+	}
+
 	if db.GetDebugMode() != db.DebugModeNone {
 		userID := ctx.Get(middleware.UserIDKey).(uuid.UUID)
 		existing, err := db.Instance().GetOrganization(ctx.Request().Context(), orgID)
@@ -309,40 +317,63 @@ func PutOrganization(ctx echo.Context) error {
 			ctx.Logger().Errorf("PutOrganization MutationAccess: %v", err)
 			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 		}
-		org := &db.Organization{}
-		if err := ctx.Bind(org); err != nil {
-			return respondError(ctx, http.StatusBadRequest, "Bad request")
-		}
-		if err := org.ValidatePut(); err != nil {
-			return respondError(ctx, http.StatusBadRequest, err.Error())
-		}
-		if org.OwnerID != uuid.Nil && org.OwnerID != existing.OwnerID {
-			if newAC, accErr := db.Instance().MutationAccess(ctx.Request().Context(), userID, org.OwnerID, db.OBJECT_TYPE_ORGANIZATION, db.ACCESS_WRITE); accErr != nil || newAC == nil {
-				if accErr != nil {
-					ctx.Logger().Warn(accErr)
-				}
-				return respondError(ctx, http.StatusForbidden, "Forbidden")
-			}
-		}
 		org, err = db.Instance().PutOrganization(ctx.Request().Context(), ac, orgID, org)
 		if err != nil {
 			ctx.Logger().Errorf("PutOrganization: %v", err)
 			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 		}
-		audit.Write("PutOrganization", "update", db.OBJECT_TYPE_ORGANIZATION, org.ID, org.OwnerID, ac.UserClaimID, "Updated organization "+org.Name)
+		audit.Write("PutOrganization", "update", db.OBJECT_TYPE_ORGANIZATION, org.ID, org.OwnerID, ac.UserClaimID, "Replaced organization "+org.Name)
 		return respondJSON(ctx, http.StatusOK, org, 1)
 	}
 
-	var org db.Organization
-	if err := ctx.Bind(&org); err != nil {
-		return respondError(ctx, http.StatusBadRequest, "Bad request")
-	}
-	if err := org.ValidatePut(); err != nil {
-		return respondError(ctx, http.StatusBadRequest, err.Error())
-	}
-	result, err := client.PutOrganization(ctx.Request().Context(), orgID, org)
+	result, err := client.PutOrganization(ctx.Request().Context(), orgID, *org)
 	if err != nil {
 		ctx.Logger().Errorf("PutOrganization: %v", err)
+		return respondError(ctx, http.StatusInternalServerError, "Internal server error")
+	}
+	return respondJSON(ctx, http.StatusOK, result, 1)
+}
+
+func PatchOrganization(ctx echo.Context) error {
+	orgID, err := uuid.Parse(ctx.Param("id"))
+	if err != nil {
+		return respondError(ctx, http.StatusBadRequest, "Bad request")
+	}
+
+	org := &db.Organization{}
+	if err := org.Bind(ctx); err != nil {
+		return respondError(ctx, http.StatusBadRequest, "Bad request")
+	}
+	if err := org.ValidatePatch(); err != nil {
+		return respondError(ctx, http.StatusBadRequest, err.Error())
+	}
+
+	if db.GetDebugMode() != db.DebugModeNone {
+		userID := ctx.Get(middleware.UserIDKey).(uuid.UUID)
+		existing, err := db.Instance().GetOrganization(ctx.Request().Context(), orgID)
+		if err != nil {
+			return respondError(ctx, http.StatusNotFound, "Not found")
+		}
+		ac, err := db.Instance().MutationAccess(ctx.Request().Context(), userID, existing.OwnerID, db.OBJECT_TYPE_ORGANIZATION, db.ACCESS_WRITE)
+		if err != nil {
+			if errors.Is(err, db.ErrNoAccess) {
+				return respondError(ctx, http.StatusForbidden, "Forbidden")
+			}
+			ctx.Logger().Errorf("PatchOrganization MutationAccess: %v", err)
+			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
+		}
+		org, err = db.Instance().PatchOrganization(ctx.Request().Context(), ac, orgID, org)
+		if err != nil {
+			ctx.Logger().Errorf("PatchOrganization: %v", err)
+			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
+		}
+		audit.Write("PatchOrganization", "update", db.OBJECT_TYPE_ORGANIZATION, org.ID, org.OwnerID, ac.UserClaimID, "Patched organization "+org.Name)
+		return respondJSON(ctx, http.StatusOK, org, 1)
+	}
+
+	result, err := client.PatchOrganization(ctx.Request().Context(), orgID, *org)
+	if err != nil {
+		ctx.Logger().Errorf("PatchOrganization: %v", err)
 		return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 	}
 	return respondJSON(ctx, http.StatusOK, result, 1)

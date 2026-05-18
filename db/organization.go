@@ -129,10 +129,30 @@ func (d *DB) PutOrganization(ctx context.Context, ac *AccessClaim, orgID uuid.UU
 		Model(org).
 		Where("id = ?", orgID).
 		Where("sa_deleted_at IS NULL").
-		ExcludeColumn("id", "app_id", "sa_created_at", "sa_updated_at", "sa_deleted_at").
-		OmitZero().
+		ExcludeColumn("id", "app_id", "sa_owner_id", "sa_root_id", "sa_created_by", "provider_id", "sa_created_at", "sa_updated_at", "sa_deleted_at").
 		Returning("*").
 		Exec(ctx, org)
+	if err != nil {
+		return nil, err
+	}
+	return org, nil
+}
+
+func (d *DB) PatchOrganization(ctx context.Context, ac *AccessClaim, orgID uuid.UUID, org *Organization) (*Organization, error) {
+	if ac == nil {
+		return nil, ErrNoAccess
+	}
+	q := d.NewUpdate().
+		Model(org).
+		Where("id = ?", orgID).
+		Where("sa_deleted_at IS NULL").
+		ExcludeColumn("id", "app_id", "sa_owner_id", "sa_root_id", "sa_created_by", "provider_id", "sa_created_at", "sa_updated_at", "sa_deleted_at").
+		OmitZero().
+		Returning("*")
+	for _, column := range org.PatchNulls() {
+		q = q.Set("? = NULL", bun.Ident(column))
+	}
+	_, err := q.Exec(ctx, org)
 	if err != nil {
 		return nil, err
 	}
