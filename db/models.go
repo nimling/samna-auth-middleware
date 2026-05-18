@@ -150,14 +150,14 @@ type SamnaUser struct {
 	ID        uuid.UUID        `bun:"id,pk,default:gen_random_uuid()" json:"id"`
 	UserID    uuid.UUID        `bun:"user_id,default:gen_random_uuid()" json:"user_id"`
 	AppID     uuid.UUID        `bun:"app_id,notnull,type:uuid,default:claimius.get_disciple_app_id()" json:"-"`
-	FirstName *string          `bun:"first_name" json:"first_name"`
-	LastName  *string          `bun:"last_name" json:"last_name"`
-	UserName  *string          `bun:"user_name" json:"user_name"`
-	UserImage *string          `bun:"user_image" json:"user_image"`
-	Phone      *string          `bun:"phone" json:"phone"`
+	FirstName *string          `bun:"first_name" json:"first_name,omitempty"`
+	LastName  *string          `bun:"last_name" json:"last_name,omitempty"`
+	UserName  *string          `bun:"user_name" json:"user_name,omitempty"`
+	UserImage *string          `bun:"user_image" json:"user_image,omitempty"`
+	Phone      *string          `bun:"phone" json:"phone,omitempty"`
 	Email      string           `bun:"email" json:"email"`
 	ExternalID *string          `bun:"external_id" json:"external_id,omitempty"`
-	Status     *string          `bun:"status,default:'active'" json:"status"`
+	Status     *string          `bun:"status,default:'active'" json:"status,omitempty"`
 	Type       *string          `bun:"type,default:'user'" json:"-"`
 	Config    *json.RawMessage `bun:"config" json:"config,omitzero"`
 	DeletedAt *time.Time       `bun:"sa_deleted_at" json:"deleted_at,omitzero"`
