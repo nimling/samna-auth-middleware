@@ -17,9 +17,6 @@ func (o *Organization) ValidatePost() error {
 	if o.Name == "" {
 		return errors.New("name is required")
 	}
-	if o.OwnerID == uuid.Nil {
-		return errors.New("owner_id is required")
-	}
 	switch o.Type {
 	case "", ORGANIZATION_TYPE_COMPANY, ORGANIZATION_TYPE_CHILD:
 	case ORGANIZATION_TYPE_SYSTEM:
@@ -40,6 +37,16 @@ func (u *SamnaUser) ValidatePost() error {
 		default:
 			return errors.New("invalid status")
 		}
+	}
+	return nil
+}
+
+func (t *SamnaUserToken) ValidatePost() error {
+	if t.Token == "" {
+		return errors.New("token is required")
+	}
+	if t.User != nil && t.User.ExternalID != nil && *t.User.ExternalID != "" {
+		return errors.New("user.external_id is not accepted; it is derived from the token claim")
 	}
 	return nil
 }

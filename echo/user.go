@@ -425,6 +425,9 @@ func PostUserToken(ctx echo.Context) error {
 	if err := ctx.Bind(&payload); err != nil {
 		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
+	if err := payload.ValidatePost(); err != nil {
+		return respondError(ctx, http.StatusBadRequest, err.Error())
+	}
 	actorID := ctx.Get(middleware.UserIDKey).(uuid.UUID)
 	ownerID, oerr := resolveTargetOwner(ctx.Request().Context(), actorID, payload.OwnerID)
 	if oerr != nil {

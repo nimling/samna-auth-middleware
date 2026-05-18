@@ -242,6 +242,23 @@ func PostOrganization(ctx echo.Context) error {
 		if err := org.ValidatePost(); err != nil {
 			return respondError(ctx, http.StatusBadRequest, err.Error())
 		}
+		if org.OwnerID == uuid.Nil {
+			ac, err := db.Instance().RootAccess(ctx.Request().Context(), userID, db.ACCESS_OWNER)
+			if err != nil {
+				if errors.Is(err, db.ErrNoAccess) {
+					return respondError(ctx, http.StatusForbidden, "Forbidden")
+				}
+				ctx.Logger().Errorf("PostOrganization RootAccess: %v", err)
+				return respondError(ctx, http.StatusInternalServerError, "Internal server error")
+			}
+			org, err = db.Instance().PostRootOrganization(ctx.Request().Context(), ac, org)
+			if err != nil {
+				ctx.Logger().Errorf("PostRootOrganization: %v", err)
+				return respondError(ctx, http.StatusInternalServerError, "Internal server error")
+			}
+			audit.Write("PostOrganization", "create", db.OBJECT_TYPE_ORGANIZATION, org.ID, org.ID, ac.UserClaimID, "Created root organization "+org.Name)
+			return respondJSON(ctx, http.StatusCreated, org, 1)
+		}
 		ac, err := db.Instance().MutationAccess(ctx.Request().Context(), userID, org.OwnerID, db.OBJECT_TYPE_ORGANIZATION, db.ACCESS_WRITE)
 		if err != nil {
 			if errors.Is(err, db.ErrNoAccess) {

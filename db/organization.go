@@ -90,6 +90,37 @@ func (d *DB) PostOrganization(ctx context.Context, ac *AccessClaim, org *Organiz
 	return org, nil
 }
 
+func (d *DB) PostRootOrganization(ctx context.Context, ac *AccessClaim, org *Organization) (*Organization, error) {
+	if ac == nil || ac.UserClaimID == nil {
+		return nil, ErrNoAccess
+	}
+	var id uuid.UUID
+	err := d.NewRaw(`
+		SELECT (claimius.create_root_organization(
+			claimius.get_disciple_app_id(), ?, ?, ?, ?, ?
+		) -> 'organization' ->> 'id')::uuid
+	`,
+		org.Name,
+		*ac.UserClaimID,
+		org.Description,
+		org.Type,
+		org.ID,
+	).Scan(ctx, &id)
+	if err != nil {
+		return nil, err
+	}
+	err = d.NewSelect().
+		Model(org).
+		ExcludeColumn("sa_deleted_at").
+		ExcludeColumn("app_id").
+		Where("id = ?", id).
+		Scan(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return org, nil
+}
+
 func (d *DB) PutOrganization(ctx context.Context, ac *AccessClaim, orgID uuid.UUID, org *Organization) (*Organization, error) {
 	if ac == nil {
 		return nil, ErrNoAccess
