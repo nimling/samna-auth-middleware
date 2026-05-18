@@ -130,6 +130,24 @@ const (
 	LOCATION_TYPE_BOOKABLE LocationType = "bookable"
 )
 
+type UserType string
+
+const (
+	USER_TYPE_USER   UserType = "user"
+	USER_TYPE_CLIENT UserType = "client"
+	USER_TYPE_SYSTEM UserType = "system"
+	USER_TYPE_GUEST  UserType = "guest"
+)
+
+type UserStatus string
+
+const (
+	USER_STATUS_ACTIVE    UserStatus = "active"
+	USER_STATUS_PENDING   UserStatus = "pending"
+	USER_STATUS_SUSPENDED UserStatus = "suspended"
+	USER_STATUS_INACTIVE  UserStatus = "inactive"
+)
+
 type SamnaUser struct {
 	bun.BaseModel `bun:"table:claimius.samna_user"`
 

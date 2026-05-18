@@ -20,8 +20,12 @@ func (o *Organization) ValidatePost() error {
 	if o.OwnerID == uuid.Nil {
 		return errors.New("owner_id is required")
 	}
-	if o.Type == ORGANIZATION_TYPE_SYSTEM {
+	switch o.Type {
+	case "", ORGANIZATION_TYPE_COMPANY, ORGANIZATION_TYPE_CHILD:
+	case ORGANIZATION_TYPE_SYSTEM:
 		return errors.New("type cannot be system")
+	default:
+		return errors.New("invalid type")
 	}
 	return nil
 }
@@ -29,6 +33,13 @@ func (o *Organization) ValidatePost() error {
 func (u *SamnaUser) ValidatePost() error {
 	if u.Email == "" {
 		return errors.New("email is required")
+	}
+	if u.Status != nil {
+		switch UserStatus(*u.Status) {
+		case USER_STATUS_ACTIVE, USER_STATUS_PENDING, USER_STATUS_SUSPENDED, USER_STATUS_INACTIVE:
+		default:
+			return errors.New("invalid status")
+		}
 	}
 	return nil
 }
@@ -43,8 +54,12 @@ func (c *Claim) ValidatePost() error {
 	if c.Access == 0 {
 		return errors.New("access is required")
 	}
-	if c.Type == CLAIM_TYPE_SYSTEM {
+	switch c.Type {
+	case "", CLAIM_TYPE_USER, CLAIM_TYPE_SERVICE, CLAIM_TYPE_VIRTUAL:
+	case CLAIM_TYPE_SYSTEM:
 		return errors.New("type cannot be system")
+	default:
+		return errors.New("invalid type")
 	}
 	return nil
 }
