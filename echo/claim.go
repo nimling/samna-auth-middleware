@@ -176,10 +176,11 @@ func GetClaim(ctx echo.Context) error {
 
 	if db.GetDebugMode() != db.DebugModeNone {
 		userID := ctx.Get(middleware.UserIDKey).(uuid.UUID)
-		ac, err := db.Instance().GetAccess(ctx.Request().Context(), userID, claimID, db.OBJECT_TYPE_CLAIM, db.ACCESS_READ)
+		ac, err := db.Instance().MutationAccess(ctx.Request().Context(), userID, claimID, db.OBJECT_TYPE_CLAIM, db.ACCESS_READ)
 		if err != nil || ac == nil {
 			if err != nil && !errors.Is(err, db.ErrNoAccess) {
-				ctx.Logger().Warn(err)
+				ctx.Logger().Errorf("GetClaim MutationAccess: %v", err)
+				return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 			}
 			return respondError(ctx, http.StatusForbidden, "Forbidden")
 		}

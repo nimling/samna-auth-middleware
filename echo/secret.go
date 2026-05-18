@@ -110,18 +110,17 @@ func GetSecret(ctx echo.Context) error {
 
 	if db.GetDebugMode() != db.DebugModeNone {
 		userID := ctx.Get(middleware.UserIDKey).(uuid.UUID)
-		ac, err := db.Instance().GetAccess(ctx.Request().Context(), userID, secretID, db.OBJECT_TYPE_SAMNA_SECRET, db.ACCESS_OWNER)
-		if err != nil {
-			return respondError(ctx, http.StatusNotFound, "Not found")
-		}
-		if ac == nil {
-			ac, err = db.Instance().GetDirectAccess(ctx.Request().Context(), userID, secretID, db.OBJECT_TYPE_SAMNA_SECRET)
-			if err != nil || ac == nil {
-				return respondError(ctx, http.StatusNotFound, "Not found")
+		ac, err := db.Instance().MutationAccess(ctx.Request().Context(), userID, secretID, db.OBJECT_TYPE_SAMNA_SECRET, db.ACCESS_OWNER)
+		if err != nil || ac == nil {
+			if err != nil && !errors.Is(err, db.ErrNoAccess) {
+				ctx.Logger().Errorf("GetSecret MutationAccess: %v", err)
+				return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 			}
+			return respondError(ctx, http.StatusForbidden, "Forbidden")
 		}
 		secret, err := db.Instance().GetSecret(ctx.Request().Context(), secretID)
 		if err != nil {
+			ctx.Logger().Errorf("GetSecret: %v", err)
 			return respondError(ctx, http.StatusNotFound, "Not found")
 		}
 		return respondJSON(ctx, http.StatusOK, secret, 1)
@@ -130,7 +129,7 @@ func GetSecret(ctx echo.Context) error {
 	body, err := client.GetSecret(ctx.Request().Context(), secretID)
 	if err != nil {
 		ctx.Logger().Errorf("GetSecret: %v", err)
-		return respondError(ctx, http.StatusNotFound, "Not found")
+		return respondError(ctx, http.StatusForbidden, "Forbidden")
 	}
 	defer body.Close()
 	return ctx.Stream(http.StatusOK, "application/json", body)

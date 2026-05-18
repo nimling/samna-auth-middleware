@@ -125,15 +125,13 @@ func GetOrganization(ctx echo.Context) error {
 
 	if db.GetDebugMode() != db.DebugModeNone {
 		userID := ctx.Get(middleware.UserIDKey).(uuid.UUID)
-		ac, err := db.Instance().GetAccess(ctx.Request().Context(), userID, orgID, db.OBJECT_TYPE_ORGANIZATION, db.ACCESS_NONE)
-		if err != nil {
-			return respondError(ctx, http.StatusNotFound, "Not found")
-		}
-		if ac == nil {
-			ac, err = db.Instance().GetDirectAccess(ctx.Request().Context(), userID, orgID, db.OBJECT_TYPE_ORGANIZATION)
-			if err != nil || ac == nil {
-				return respondError(ctx, http.StatusNotFound, "Not found")
+		ac, err := db.Instance().MutationAccess(ctx.Request().Context(), userID, orgID, db.OBJECT_TYPE_ORGANIZATION, db.ACCESS_NONE)
+		if err != nil || ac == nil {
+			if err != nil && !errors.Is(err, db.ErrNoAccess) {
+				ctx.Logger().Errorf("GetOrganization MutationAccess: %v", err)
+				return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 			}
+			return respondError(ctx, http.StatusForbidden, "Forbidden")
 		}
 		with, err := db.QueryWithObject(ctx)
 		if err != nil {
@@ -161,7 +159,7 @@ func GetOrganization(ctx echo.Context) error {
 	body, err := client.GetOrganization(ctx.Request().Context(), orgID)
 	if err != nil {
 		ctx.Logger().Errorf("GetOrganization: %v", err)
-		return respondError(ctx, http.StatusNotFound, "Not found")
+		return respondError(ctx, http.StatusForbidden, "Forbidden")
 	}
 	defer body.Close()
 	return ctx.Stream(http.StatusOK, "application/json", body)
