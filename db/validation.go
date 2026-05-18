@@ -2,6 +2,7 @@ package db
 
 import (
 	"errors"
+	"net/mail"
 
 	"github.com/google/uuid"
 )
@@ -30,6 +31,9 @@ func (o *Organization) ValidatePost() error {
 func (u *SamnaUser) ValidatePost() error {
 	if u.Email == "" {
 		return errors.New("email is required")
+	}
+	if _, err := mail.ParseAddress(u.Email); err != nil {
+		return errors.New("email must be a valid address")
 	}
 	if u.Status != nil {
 		switch UserStatus(*u.Status) {
