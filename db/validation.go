@@ -173,7 +173,10 @@ func (o *Organization) ValidatePut() error {
 }
 
 func (u *SamnaUser) ValidatePut() error {
-	if u.FirstName == nil && u.LastName == nil && u.UserName == nil && u.UserImage == nil && u.Phone == nil && u.Email == "" && u.ExternalID == nil && u.Status == nil && u.Config == nil {
+	if u.IsEmpty() {
+		return errors.New("no fields to update")
+	}
+	if !hasAnyJSONKey(u) {
 		return errors.New("no fields to update")
 	}
 	if u.Status != nil {

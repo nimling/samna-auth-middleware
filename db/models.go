@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/nimling/nimbody"
 	"github.com/uptrace/bun"
 )
 
@@ -144,6 +145,7 @@ const (
 
 type SamnaUser struct {
 	bun.BaseModel `bun:"table:claimius.samna_user"`
+	nimbody.Body  `bun:"-" json:"-"`
 
 	ID        uuid.UUID        `bun:"id,pk,default:gen_random_uuid()" json:"id"`
 	UserID    uuid.UUID        `bun:"user_id,default:gen_random_uuid()" json:"user_id"`

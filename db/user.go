@@ -160,14 +160,17 @@ func (d *DB) PutUser(ctx context.Context, ac *AccessClaim, userID uuid.UUID, use
 	if ac == nil {
 		return nil, ErrNoAccess
 	}
-	_, err := d.NewUpdate().
+	q := d.NewUpdate().
 		Model(user).
 		Where("user_id = ?", userID).
 		Where("sa_deleted_at IS NULL").
 		Value("app_id", "claimius.get_disciple_app_id()").
 		OmitZero().
-		Returning("*").
-		Exec(ctx, user)
+		Returning("*")
+	for _, column := range user.PutNulls() {
+		q = q.Set("? = NULL", bun.Ident(column))
+	}
+	_, err := q.Exec(ctx, user)
 	if err != nil {
 		return nil, err
 	}

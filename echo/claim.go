@@ -355,7 +355,7 @@ func DeleteClaim(ctx echo.Context) error {
 
 	if db.GetDebugMode() != db.DebugModeNone {
 		userID := ctx.Get(middleware.UserIDKey).(uuid.UUID)
-		ac, err := db.Instance().MutationAccess(ctx.Request().Context(), userID, claimID, db.OBJECT_TYPE_CLAIM, db.ACCESS_OWNER)
+		ac, err := db.Instance().MutationAccess(ctx.Request().Context(), userID, claimID, db.OBJECT_TYPE_CLAIM, db.ACCESS_WRITE)
 		if err != nil {
 			if errors.Is(err, db.ErrNoAccess) {
 				return respondError(ctx, http.StatusForbidden, "Forbidden")
@@ -434,7 +434,7 @@ func DeleteClaimObject(ctx echo.Context) error {
 
 	if db.GetDebugMode() != db.DebugModeNone {
 		userID := ctx.Get(middleware.UserIDKey).(uuid.UUID)
-		ac, err := db.Instance().MutationAccess(ctx.Request().Context(), userID, claimID, db.OBJECT_TYPE_CLAIM, db.ACCESS_OWNER)
+		ac, err := db.Instance().MutationAccess(ctx.Request().Context(), userID, claimID, db.OBJECT_TYPE_CLAIM, db.ACCESS_WRITE)
 		if err != nil {
 			if errors.Is(err, db.ErrNoAccess) {
 				return respondError(ctx, http.StatusForbidden, "Forbidden")
@@ -513,7 +513,7 @@ func DeleteClaimUser(ctx echo.Context) error {
 
 	if db.GetDebugMode() != db.DebugModeNone {
 		userID := ctx.Get(middleware.UserIDKey).(uuid.UUID)
-		ac, err := db.Instance().MutationAccess(ctx.Request().Context(), userID, claimID, db.OBJECT_TYPE_CLAIM, db.ACCESS_OWNER)
+		ac, err := db.Instance().MutationAccess(ctx.Request().Context(), userID, claimID, db.OBJECT_TYPE_CLAIM, db.ACCESS_WRITE)
 		if err != nil {
 			if errors.Is(err, db.ErrNoAccess) {
 				return respondError(ctx, http.StatusForbidden, "Forbidden")

@@ -360,7 +360,7 @@ func DeleteOrganization(ctx echo.Context) error {
 		if err != nil {
 			return respondError(ctx, http.StatusNotFound, "Not found")
 		}
-		ac, err := db.Instance().MutationAccess(ctx.Request().Context(), userID, existing.OwnerID, db.OBJECT_TYPE_ORGANIZATION, db.ACCESS_WRITE)
+		ac, err := db.Instance().MutationAccess(ctx.Request().Context(), userID, existing.OwnerID, db.OBJECT_TYPE_ORGANIZATION, db.ACCESS_OWNER)
 		if err != nil {
 			if errors.Is(err, db.ErrNoAccess) {
 				return respondError(ctx, http.StatusForbidden, "Forbidden")

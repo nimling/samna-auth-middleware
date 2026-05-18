@@ -324,15 +324,16 @@ func PutUser(ctx echo.Context) error {
 		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
 
+	user := &db.SamnaUser{}
+	if err := user.Bind(ctx); err != nil {
+		return respondError(ctx, http.StatusBadRequest, "Bad request")
+	}
+	if err := user.ValidatePut(); err != nil {
+		return respondError(ctx, http.StatusBadRequest, err.Error())
+	}
+
 	if db.GetDebugMode() != db.DebugModeNone {
 		userID := ctx.Get(middleware.UserIDKey).(uuid.UUID)
-		user := &db.SamnaUser{}
-		if err := ctx.Bind(user); err != nil {
-			return respondError(ctx, http.StatusBadRequest, "Bad request")
-		}
-		if err := user.ValidatePut(); err != nil {
-			return respondError(ctx, http.StatusBadRequest, err.Error())
-		}
 		ac, err := db.Instance().UserAccess(ctx.Request().Context(), userID, targetUserID, db.ACCESS_WRITE)
 		if err != nil {
 			if errors.Is(err, db.ErrNoAccess) {
@@ -349,14 +350,7 @@ func PutUser(ctx echo.Context) error {
 		return respondJSON(ctx, http.StatusOK, user, 1)
 	}
 
-	var user db.SamnaUser
-	if err := ctx.Bind(&user); err != nil {
-		return respondError(ctx, http.StatusBadRequest, "Bad request")
-	}
-	if err := user.ValidatePut(); err != nil {
-		return respondError(ctx, http.StatusBadRequest, err.Error())
-	}
-	result, err := client.PutUser(ctx.Request().Context(), targetUserID, user)
+	result, err := client.PutUser(ctx.Request().Context(), targetUserID, *user)
 	if err != nil {
 		ctx.Logger().Errorf("PutUser: %v", err)
 		return respondError(ctx, http.StatusInternalServerError, "Internal server error")
