@@ -7,22 +7,23 @@ import (
 	"github.com/uptrace/bun"
 )
 
-func (d *DB) GetUser(ctx context.Context, userID uuid.UUID) (*SamnaUser, error) {
+func (d *DB) GetUser(ctx context.Context, actorID, userID uuid.UUID) (*SamnaUser, error) {
 	var user SamnaUser
-	err := d.GetUserQuery(&user, userID).Scan(ctx)
+	err := d.GetUserQuery(&user, actorID, userID).Scan(ctx)
 	if err != nil {
 		return nil, err
 	}
 	return &user, nil
 }
 
-func (d *DB) GetUserQuery(user *SamnaUser, userID uuid.UUID) *bun.SelectQuery {
+func (d *DB) GetUserQuery(user *SamnaUser, actorID, userID uuid.UUID) *bun.SelectQuery {
 	return d.NewSelect().
 		Model(user).
 		ExcludeColumn("sa_deleted_at").
 		ExcludeColumn("app_id").
 		Where("samna_user.user_id = ?", userID).
 		Where("samna_user.sa_deleted_at IS NULL").
+		Where(UserWhere(actorID, ACCESS_READ)).
 		Limit(1)
 }
 
@@ -152,7 +153,7 @@ func (d *DB) PostUser(ctx context.Context, in SamnaUser) (*SamnaUser, error) {
 	if err != nil {
 		return nil, err
 	}
-	return d.GetUser(ctx, userID)
+	return d.GetUser(ctx, userID, userID)
 }
 
 func (d *DB) PutUser(ctx context.Context, ac *AccessClaim, userID uuid.UUID, user *SamnaUser) (*SamnaUser, error) {

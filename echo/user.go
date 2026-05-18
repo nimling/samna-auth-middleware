@@ -42,7 +42,8 @@ func GetUser(ctx echo.Context) error {
 	}
 
 	if db.GetDebugMode() != db.DebugModeNone {
-		user, err := db.Instance().GetUser(ctx.Request().Context(), targetUserID)
+		actorID := ctx.Get(middleware.UserIDKey).(uuid.UUID)
+		user, err := db.Instance().GetUser(ctx.Request().Context(), actorID, targetUserID)
 		if err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
 				ctx.Logger().Infof("GetUser: not found %s", targetUserID)
@@ -332,12 +333,12 @@ func PutUser(ctx echo.Context) error {
 		if err := user.ValidatePut(); err != nil {
 			return respondError(ctx, http.StatusBadRequest, err.Error())
 		}
-		ac, err := db.Instance().MutationAccess(ctx.Request().Context(), userID, targetUserID, db.OBJECT_TYPE_USER, db.ACCESS_WRITE)
+		ac, err := db.Instance().UserAccess(ctx.Request().Context(), userID, targetUserID, db.ACCESS_WRITE)
 		if err != nil {
 			if errors.Is(err, db.ErrNoAccess) {
 				return respondError(ctx, http.StatusForbidden, "Forbidden")
 			}
-			ctx.Logger().Errorf("PutUser MutationAccess: %v", err)
+			ctx.Logger().Errorf("PutUser UserAccess: %v", err)
 			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 		}
 		user, err = db.Instance().PutUser(ctx.Request().Context(), ac, targetUserID, user)

@@ -219,7 +219,7 @@ func postUserTokenDebug(ctx context.Context, payload db.SamnaUserToken) (db.Samn
 		return user, fmt.Errorf("debug ensure_app_user: %w", err)
 	}
 
-	fetched, err := db.Instance().GetUser(ctx, user.UserID)
+	fetched, err := db.Instance().GetUser(ctx, user.UserID, user.UserID)
 	if err != nil {
 		return user, fmt.Errorf("debug fetch samna_user: %w", err)
 	}
@@ -311,7 +311,7 @@ func postUserTokenValidateDebug(ctx context.Context, token string) (db.SamnaUser
 		}
 		return db.SamnaUser{}, uuid.Nil, fmt.Errorf("debug validate token: %w", err)
 	}
-	fetched, ferr := db.Instance().GetUser(ctx, user.UserID)
+	fetched, ferr := db.Instance().GetUser(ctx, user.UserID, user.UserID)
 	if ferr != nil {
 		if errors.Is(ferr, sql.ErrNoRows) {
 			return db.SamnaUser{}, uuid.Nil, nil

@@ -15,7 +15,7 @@ func GetMe(ctx echo.Context) error {
 	userID := ctx.Get(middleware.UserIDKey).(uuid.UUID)
 
 	if db.GetDebugMode() != db.DebugModeNone {
-		user, err := db.Instance().GetUser(ctx.Request().Context(), userID)
+		user, err := db.Instance().GetUser(ctx.Request().Context(), userID, userID)
 		if err != nil {
 			ctx.Logger().Errorf("GetMe: %v", err)
 			return respondError(ctx, http.StatusNotFound, "Not found")
