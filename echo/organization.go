@@ -387,11 +387,7 @@ func DeleteOrganization(ctx echo.Context) error {
 
 	if db.GetDebugMode() != db.DebugModeNone {
 		userID := ctx.Get(middleware.UserIDKey).(uuid.UUID)
-		existing, err := db.Instance().GetOrganization(ctx.Request().Context(), orgID)
-		if err != nil {
-			return respondError(ctx, http.StatusNotFound, "Not found")
-		}
-		ac, err := db.Instance().MutationAccess(ctx.Request().Context(), userID, existing.OwnerID, db.OBJECT_TYPE_ORGANIZATION, db.ACCESS_OWNER)
+		ac, err := db.Instance().MutationAccess(ctx.Request().Context(), userID, orgID, db.OBJECT_TYPE_ORGANIZATION, db.ACCESS_OWNER)
 		if err != nil {
 			if errors.Is(err, db.ErrNoAccess) {
 				return respondError(ctx, http.StatusForbidden, "Forbidden")
