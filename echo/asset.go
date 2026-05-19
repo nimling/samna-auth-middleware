@@ -182,7 +182,7 @@ func PutAsset(ctx echo.Context) error {
 	}
 
 	asset := &db.Asset{}
-	if err := ctx.Bind(asset); err != nil {
+	if err := asset.Bind(ctx); err != nil {
 		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
 	if err := asset.ValidatePut(); err != nil {

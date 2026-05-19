@@ -97,8 +97,7 @@ func (d *DB) PutLocation(ctx context.Context, ac *AccessClaim, locationID uuid.U
 		Model(loc).
 		Where("id = ?", locationID).
 		Where("sa_deleted_at IS NULL").
-		ExcludeColumn("id", "app_id", "sa_created_at", "sa_updated_at", "sa_deleted_at").
-		OmitZero().
+		ExcludeColumn("id", "app_id", "sa_owner_id", "sa_root_id", "sa_parent_id", "sa_created_by", "provider_id", "sa_created_at", "sa_updated_at", "sa_deleted_at").
 		Returning("*").
 		Exec(ctx, loc)
 	if err != nil {

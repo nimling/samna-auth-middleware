@@ -301,7 +301,7 @@ func PutClaim(ctx echo.Context) error {
 	}
 
 	claim := &db.Claim{}
-	if err := ctx.Bind(claim); err != nil {
+	if err := claim.Bind(ctx); err != nil {
 		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
 	if err := claim.ValidatePut(); err != nil {

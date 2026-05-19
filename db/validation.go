@@ -152,8 +152,14 @@ func (a *Asset) ValidatePost() error {
 }
 
 func (l *Location) ValidatePut() error {
-	if l.Name == nil && l.Description == nil && l.Type == "" && l.ParentID == nil && l.Longitude == nil && l.Latitude == nil && l.Level == 0 && l.CodeType == nil && l.Code == nil && l.ExternalID == nil {
-		return errors.New("no fields to update")
+	if err := RejectImmutableKeys(l); err != nil {
+		return err
+	}
+	if l.Name == nil || *l.Name == "" {
+		return errors.New("name is required")
+	}
+	if l.Type == "" {
+		return errors.New("type is required")
 	}
 	return nil
 }
@@ -267,11 +273,16 @@ func (u *SamnaUser) ValidatePatch() error {
 }
 
 func (c *Claim) ValidatePut() error {
-	if c.Name == "" && c.Description == nil && c.Access == 0 && c.Type == "" {
-		return errors.New("no fields to update")
+	if err := RejectImmutableKeys(c); err != nil {
+		return err
+	}
+	if c.Name == "" {
+		return errors.New("name is required")
 	}
 	switch c.Type {
-	case "", CLAIM_TYPE_USER, CLAIM_TYPE_SERVICE, CLAIM_TYPE_VIRTUAL:
+	case CLAIM_TYPE_USER, CLAIM_TYPE_SERVICE, CLAIM_TYPE_VIRTUAL:
+	case "":
+		return errors.New("type is required")
 	case CLAIM_TYPE_SYSTEM:
 		return errors.New("type cannot be system")
 	default:
@@ -333,8 +344,14 @@ func (b *BodySecret) ValidatePut() error {
 }
 
 func (f *ObjectField) ValidatePut() error {
-	if f.Name == "" && f.Description == nil && f.Value == nil && f.JsonSchema == nil {
-		return errors.New("no fields to update")
+	if err := RejectImmutableKeys(f); err != nil {
+		return err
+	}
+	if f.Name == "" {
+		return errors.New("name is required")
+	}
+	if f.ObjectType == "" {
+		return errors.New("object_type is required")
 	}
 	return nil
 }
@@ -359,8 +376,11 @@ func (f *ObjectField) ValidatePatch() error {
 }
 
 func (f *UserField) ValidatePut() error {
+	if err := RejectImmutableKeys(f, "field_id"); err != nil {
+		return err
+	}
 	if f.Value == nil {
-		return errors.New("no fields to update")
+		return errors.New("value is required")
 	}
 	return nil
 }
@@ -379,8 +399,14 @@ func (f *UserField) ValidatePatch() error {
 }
 
 func (r *UserRelation) ValidatePut() error {
-	if r.Description == nil && r.ObjectType == "" && r.ObjectID == uuid.Nil && r.Pinned == nil && r.Priority == nil {
-		return errors.New("no fields to update")
+	if err := RejectImmutableKeys(r); err != nil {
+		return err
+	}
+	if r.ObjectType == "" {
+		return errors.New("object_type is required")
+	}
+	if r.ObjectID == uuid.Nil {
+		return errors.New("object_id is required")
 	}
 	return nil
 }
@@ -405,8 +431,14 @@ func (r *UserRelation) ValidatePatch() error {
 }
 
 func (a *Asset) ValidatePut() error {
-	if a.Name == "" && a.Description == nil && a.MimeType == "" && a.Status == "" {
-		return errors.New("no fields to update")
+	if err := RejectImmutableKeys(a); err != nil {
+		return err
+	}
+	if a.Name == "" {
+		return errors.New("name is required")
+	}
+	if a.MimeType == "" {
+		return errors.New("mime_type is required")
 	}
 	return nil
 }

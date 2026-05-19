@@ -73,7 +73,7 @@ func (d *DB) PutAsset(ctx context.Context, ac *AccessClaim, assetID uuid.UUID, a
 		Model(asset).
 		Where("id = ?", assetID).
 		Where("sa_deleted_at IS NULL").
-		OmitZero().
+		ExcludeColumn("id", "user_id", "blob_url", "sa_created_at", "sa_updated_at", "sa_deleted_at").
 		Returning("*").
 		Exec(ctx, asset)
 	if err != nil {

@@ -117,8 +117,7 @@ func (d *DB) PutRelation(ctx context.Context, ac *AccessClaim, relationID uuid.U
 		Model(relation).
 		Where("id = ?", relationID).
 		Where("sa_deleted_at IS NULL").
-		ExcludeColumn("app_id").
-		OmitZero().
+		ExcludeColumn("id", "app_id", "user_id", "sa_created_at", "sa_updated_at", "sa_deleted_at").
 		Returning("*").
 		Exec(ctx, relation)
 	if err != nil {

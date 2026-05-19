@@ -78,7 +78,7 @@ func (d *DB) PutObjectField(ctx context.Context, ac *AccessClaim, fieldID uuid.U
 		Model(field).
 		Where("id = ?", fieldID).
 		Where("sa_deleted_at IS NULL").
-		OmitZero().
+		ExcludeColumn("id", "app_id", "sa_owner_id", "sa_created_by", "sa_created_at", "sa_updated_at", "sa_deleted_at").
 		Returning("*").
 		Exec(ctx, field)
 	if err != nil {
@@ -152,7 +152,7 @@ func (d *DB) PutUserField(ctx context.Context, ac *AccessClaim, valueID uuid.UUI
 		Model(field).
 		Where("id = ?", valueID).
 		Where("sa_deleted_at IS NULL").
-		OmitZero().
+		ExcludeColumn("id", "app_id", "field_id", "user_id", "sa_owner_id", "sa_created_by", "sa_created_at", "sa_updated_at", "sa_deleted_at").
 		Returning("*").
 		Exec(ctx, field)
 	if err != nil {

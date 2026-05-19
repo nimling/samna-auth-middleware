@@ -161,7 +161,7 @@ func PutRelation(ctx echo.Context) error {
 	}
 
 	relation := &db.UserRelation{}
-	if err := ctx.Bind(relation); err != nil {
+	if err := relation.Bind(ctx); err != nil {
 		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
 	if err := relation.ValidatePut(); err != nil {

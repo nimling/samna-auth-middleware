@@ -95,7 +95,7 @@ func PutObjectField(ctx echo.Context) error {
 	}
 
 	field := &db.ObjectField{}
-	if err := ctx.Bind(field); err != nil {
+	if err := field.Bind(ctx); err != nil {
 		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
 	if err := field.ValidatePut(); err != nil {
@@ -277,7 +277,7 @@ func PutUserField(ctx echo.Context) error {
 	}
 
 	field := &db.UserField{}
-	if err := ctx.Bind(field); err != nil {
+	if err := field.Bind(ctx); err != nil {
 		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
 	if err := field.ValidatePut(); err != nil {
