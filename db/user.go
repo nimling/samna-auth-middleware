@@ -2,6 +2,8 @@ package db
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 
 	"github.com/google/uuid"
 	"github.com/uptrace/bun"
@@ -147,7 +149,7 @@ func (d *DB) PatchRelation(ctx context.Context, ac *AccessClaim, relationID uuid
 	return relation, nil
 }
 
-func (d *DB) DeleteRelation(ctx context.Context, ac *AccessClaim, relationID uuid.UUID) (*UserRelation, error) {
+func (d *DB) DeleteRelation(ctx context.Context, ac *AccessClaim, userID, relationID uuid.UUID) (*UserRelation, error) {
 	if ac == nil {
 		return nil, ErrNoAccess
 	}
@@ -155,11 +157,15 @@ func (d *DB) DeleteRelation(ctx context.Context, ac *AccessClaim, relationID uui
 	_, err := d.NewUpdate().
 		Model(&relation).
 		Where("id = ?", relationID).
+		Where("user_id = ?", userID).
 		Where("sa_deleted_at IS NULL").
 		Set("sa_deleted_at = NOW()").
 		Returning("*").
 		Exec(ctx, &relation)
 	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNoAccess
+		}
 		return nil, err
 	}
 	return &relation, nil

@@ -266,8 +266,11 @@ func DeleteRelation(ctx echo.Context) error {
 			ctx.Logger().Errorf("DeleteRelation MutationAccess: %v", err)
 			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 		}
-		relation, err := db.Instance().DeleteRelation(ctx.Request().Context(), ac, relationID)
+		relation, err := db.Instance().DeleteRelation(ctx.Request().Context(), ac, userID, relationID)
 		if err != nil {
+			if errors.Is(err, db.ErrNoAccess) {
+				return respondError(ctx, http.StatusForbidden, "Forbidden")
+			}
 			ctx.Logger().Errorf("DeleteRelation: %v", err)
 			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 		}
