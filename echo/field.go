@@ -128,6 +128,46 @@ func PutObjectField(ctx echo.Context) error {
 	return respondJSON(ctx, http.StatusOK, result, 1)
 }
 
+func PatchObjectField(ctx echo.Context) error {
+	fieldID, err := uuid.Parse(ctx.Param("id"))
+	if err != nil {
+		return respondError(ctx, http.StatusBadRequest, "Bad request")
+	}
+
+	field := &db.ObjectField{}
+	if err := field.Bind(ctx); err != nil {
+		return respondError(ctx, http.StatusBadRequest, "Bad request")
+	}
+	if err := field.ValidatePatch(); err != nil {
+		return respondError(ctx, http.StatusBadRequest, err.Error())
+	}
+
+	if db.GetDebugMode() != db.DebugModeNone {
+		userID := ctx.Get(middleware.UserIDKey).(uuid.UUID)
+		ac, err := db.Instance().MutationAccess(ctx.Request().Context(), userID, userID, db.OBJECT_TYPE_USER, db.ACCESS_OWNER)
+		if err != nil {
+			if errors.Is(err, db.ErrNoAccess) {
+				return respondError(ctx, http.StatusForbidden, "Forbidden")
+			}
+			ctx.Logger().Errorf("PatchObjectField MutationAccess: %v", err)
+			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
+		}
+		field, err = db.Instance().PatchObjectField(ctx.Request().Context(), ac, fieldID, field)
+		if err != nil {
+			ctx.Logger().Errorf("PatchObjectField: %v", err)
+			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
+		}
+		return respondJSON(ctx, http.StatusOK, field, 1)
+	}
+
+	result, err := client.PatchObjectField(ctx.Request().Context(), fieldID, *field)
+	if err != nil {
+		ctx.Logger().Errorf("PatchObjectField: %v", err)
+		return respondError(ctx, http.StatusInternalServerError, "Internal server error")
+	}
+	return respondJSON(ctx, http.StatusOK, result, 1)
+}
+
 func DeleteObjectField(ctx echo.Context) error {
 	fieldID, err := uuid.Parse(ctx.Param("id"))
 	if err != nil {
@@ -265,6 +305,51 @@ func PutUserField(ctx echo.Context) error {
 	result, err := client.PutUserField(ctx.Request().Context(), fieldID, valueID, *field)
 	if err != nil {
 		ctx.Logger().Errorf("PutUserField: %v", err)
+		return respondError(ctx, http.StatusInternalServerError, "Internal server error")
+	}
+	return respondJSON(ctx, http.StatusOK, result, 1)
+}
+
+func PatchUserField(ctx echo.Context) error {
+	fieldID, err := uuid.Parse(ctx.Param("id"))
+	if err != nil {
+		return respondError(ctx, http.StatusBadRequest, "Bad request")
+	}
+
+	valueID, err := uuid.Parse(ctx.Param("value_id"))
+	if err != nil {
+		return respondError(ctx, http.StatusBadRequest, "Bad request")
+	}
+
+	field := &db.UserField{}
+	if err := field.Bind(ctx); err != nil {
+		return respondError(ctx, http.StatusBadRequest, "Bad request")
+	}
+	if err := field.ValidatePatch(); err != nil {
+		return respondError(ctx, http.StatusBadRequest, err.Error())
+	}
+
+	if db.GetDebugMode() != db.DebugModeNone {
+		userID := ctx.Get(middleware.UserIDKey).(uuid.UUID)
+		ac, err := db.Instance().MutationAccess(ctx.Request().Context(), userID, field.UserID, db.OBJECT_TYPE_USER, db.ACCESS_WRITE)
+		if err != nil {
+			if errors.Is(err, db.ErrNoAccess) {
+				return respondError(ctx, http.StatusForbidden, "Forbidden")
+			}
+			ctx.Logger().Errorf("PatchUserField MutationAccess: %v", err)
+			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
+		}
+		field, err = db.Instance().PatchUserField(ctx.Request().Context(), ac, valueID, field)
+		if err != nil {
+			ctx.Logger().Errorf("PatchUserField: %v", err)
+			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
+		}
+		return respondJSON(ctx, http.StatusOK, field, 1)
+	}
+
+	result, err := client.PatchUserField(ctx.Request().Context(), fieldID, valueID, *field)
+	if err != nil {
+		ctx.Logger().Errorf("PatchUserField: %v", err)
 		return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 	}
 	return respondJSON(ctx, http.StatusOK, result, 1)

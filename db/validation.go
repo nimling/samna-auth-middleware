@@ -162,6 +162,9 @@ func (l *Location) ValidatePatch() error {
 	if l.IsEmpty() {
 		return errors.New("no fields to update")
 	}
+	if err := RejectImmutableKeys(l); err != nil {
+		return err
+	}
 	if !hasAnyJSONKey(l) {
 		return errors.New("no fields to update")
 	}
@@ -172,6 +175,9 @@ func (l *Location) ValidatePatch() error {
 }
 
 func (o *Organization) ValidatePut() error {
+	if err := RejectImmutableKeys(o); err != nil {
+		return err
+	}
 	if o.Name == "" {
 		return errors.New("name is required")
 	}
@@ -190,6 +196,9 @@ func (o *Organization) ValidatePut() error {
 func (o *Organization) ValidatePatch() error {
 	if o.IsEmpty() {
 		return errors.New("no fields to update")
+	}
+	if err := RejectImmutableKeys(o); err != nil {
+		return err
 	}
 	if !hasAnyJSONKey(o) {
 		return errors.New("no fields to update")
@@ -210,6 +219,9 @@ func (o *Organization) ValidatePatch() error {
 }
 
 func (u *SamnaUser) ValidatePut() error {
+	if err := RejectImmutableKeys(u); err != nil {
+		return err
+	}
 	if u.Email == "" {
 		return errors.New("email is required")
 	}
@@ -229,6 +241,9 @@ func (u *SamnaUser) ValidatePut() error {
 func (u *SamnaUser) ValidatePatch() error {
 	if u.IsEmpty() {
 		return errors.New("no fields to update")
+	}
+	if err := RejectImmutableKeys(u); err != nil {
+		return err
 	}
 	if !hasAnyJSONKey(u) {
 		return errors.New("no fields to update")
@@ -268,6 +283,9 @@ func (c *Claim) ValidatePut() error {
 func (c *Claim) ValidatePatch() error {
 	if c.IsEmpty() {
 		return errors.New("no fields to update")
+	}
+	if err := RejectImmutableKeys(c); err != nil {
+		return err
 	}
 	if !hasAnyJSONKey(c) {
 		return errors.New("no fields to update")
@@ -325,6 +343,9 @@ func (f *ObjectField) ValidatePatch() error {
 	if f.IsEmpty() {
 		return errors.New("no fields to update")
 	}
+	if err := RejectImmutableKeys(f); err != nil {
+		return err
+	}
 	if !hasAnyJSONKey(f) {
 		return errors.New("no fields to update")
 	}
@@ -348,6 +369,9 @@ func (f *UserField) ValidatePatch() error {
 	if f.IsEmpty() {
 		return errors.New("no fields to update")
 	}
+	if err := RejectImmutableKeys(f, "field_id"); err != nil {
+		return err
+	}
 	if !hasAnyJSONKey(f) {
 		return errors.New("no fields to update")
 	}
@@ -364,6 +388,9 @@ func (r *UserRelation) ValidatePut() error {
 func (r *UserRelation) ValidatePatch() error {
 	if r.IsEmpty() {
 		return errors.New("no fields to update")
+	}
+	if err := RejectImmutableKeys(r); err != nil {
+		return err
 	}
 	if !hasAnyJSONKey(r) {
 		return errors.New("no fields to update")
@@ -387,6 +414,9 @@ func (a *Asset) ValidatePut() error {
 func (a *Asset) ValidatePatch() error {
 	if a.IsEmpty() {
 		return errors.New("no fields to update")
+	}
+	if err := RejectImmutableKeys(a); err != nil {
+		return err
 	}
 	if !hasAnyJSONKey(a) {
 		return errors.New("no fields to update")

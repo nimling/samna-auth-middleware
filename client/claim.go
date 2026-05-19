@@ -93,6 +93,28 @@ func PutClaim(ctx context.Context, claimID uuid.UUID, claim db.Claim) (*db.Claim
 	return &result, nil
 }
 
+func PatchClaim(ctx context.Context, claimID uuid.UUID, claim db.Claim) (*db.Claim, error) {
+	c := newClient()
+	u, err := joinURL(c.apiURL, "claim", claimID.String())
+	if err != nil {
+		return nil, fmt.Errorf("build url: %w", err)
+	}
+	result, err := DecodeJSON[db.Claim](c.client.Patch(ctx, requestBody(claim, false), u))
+	if err != nil {
+		return nil, err
+	}
+	_, err = db.Instance().NewInsert().
+		Model(&result).
+		On("CONFLICT (id) DO UPDATE").
+		Set("sa_updated_at = EXCLUDED.sa_updated_at").
+		Set("sa_deleted_at = EXCLUDED.sa_deleted_at").
+		Exec(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
 func DeleteClaim(ctx context.Context, claimID uuid.UUID) (*db.Claim, error) {
 	c := newClient()
 	u, err := joinURL(c.apiURL, "claim", claimID.String())

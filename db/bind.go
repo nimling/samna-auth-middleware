@@ -1,12 +1,44 @@
 package db
 
 import (
+	"fmt"
 	"reflect"
 	"strings"
 
 	"github.com/labstack/echo/v4"
 	"github.com/nimling/nimbody"
 )
+
+var defaultImmutableKeys = []string{
+	"id",
+	"app_id",
+	"user_id",
+	"owner_id",
+	"root_id",
+	"parent_id",
+	"created_by",
+	"created_at",
+	"updated_at",
+	"deleted_at",
+}
+
+func RejectImmutableKeys(model any, extra ...string) error {
+	bv := validatorOf(model)
+	if bv == nil {
+		return nil
+	}
+	for _, k := range defaultImmutableKeys {
+		if bv.HasKey(k) {
+			return fmt.Errorf("%s cannot be set via body", k)
+		}
+	}
+	for _, k := range extra {
+		if bv.HasKey(k) {
+			return fmt.Errorf("%s cannot be set via body", k)
+		}
+	}
+	return nil
+}
 
 func hasAnyJSONKey(model any) bool {
 	bv := validatorOf(model)

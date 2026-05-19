@@ -74,6 +74,28 @@ func PutRelation(ctx context.Context, relationID uuid.UUID, relation db.UserRela
 	return &result, nil
 }
 
+func PatchRelation(ctx context.Context, relationID uuid.UUID, relation db.UserRelation) (*db.UserRelation, error) {
+	c := newClient()
+	u, err := joinURL(c.apiURL, "relation", relationID.String())
+	if err != nil {
+		return nil, fmt.Errorf("build url: %w", err)
+	}
+	result, err := DecodeJSON[db.UserRelation](c.client.Patch(ctx, requestBody(relation, false), u))
+	if err != nil {
+		return nil, err
+	}
+	_, err = db.Instance().NewInsert().
+		Model(&result).
+		On("CONFLICT (id) DO UPDATE").
+		Set("sa_updated_at = EXCLUDED.sa_updated_at").
+		Set("sa_deleted_at = EXCLUDED.sa_deleted_at").
+		Exec(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
 func DeleteRelation(ctx context.Context, relationID uuid.UUID) (*db.UserRelation, error) {
 	c := newClient()
 	u, err := joinURL(c.apiURL, "relation", relationID.String())

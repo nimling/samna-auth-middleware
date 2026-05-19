@@ -244,6 +244,51 @@ func PutLocation(ctx echo.Context) error {
 	return respondJSON(ctx, http.StatusOK, result, 1)
 }
 
+func PatchLocation(ctx echo.Context) error {
+	locationID, err := uuid.Parse(ctx.Param("id"))
+	if err != nil {
+		return respondError(ctx, http.StatusBadRequest, "Bad request")
+	}
+
+	loc := &db.Location{}
+	if err := loc.Bind(ctx); err != nil {
+		return respondError(ctx, http.StatusBadRequest, "Bad request")
+	}
+	if err := loc.ValidatePatch(); err != nil {
+		return respondError(ctx, http.StatusBadRequest, err.Error())
+	}
+
+	if db.GetDebugMode() != db.DebugModeNone {
+		userID := ctx.Get(middleware.UserIDKey).(uuid.UUID)
+		ac, err := db.Instance().MutationAccess(ctx.Request().Context(), userID, locationID, db.OBJECT_TYPE_LOCATION, db.ACCESS_WRITE)
+		if err != nil {
+			if errors.Is(err, db.ErrNoAccess) {
+				return respondError(ctx, http.StatusForbidden, "Forbidden")
+			}
+			ctx.Logger().Errorf("PatchLocation MutationAccess: %v", err)
+			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
+		}
+		loc, err = db.Instance().PatchLocation(ctx.Request().Context(), ac, locationID, loc)
+		if err != nil {
+			ctx.Logger().Errorf("PatchLocation: %v", err)
+			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
+		}
+		locName := ""
+		if loc.Name != nil {
+			locName = *loc.Name
+		}
+		audit.Write("PatchLocation", "update", db.OBJECT_TYPE_LOCATION, loc.ID, loc.OwnerID, ac.UserClaimID, "Patched location "+locName)
+		return respondJSON(ctx, http.StatusOK, loc, 1)
+	}
+
+	result, err := client.PatchLocation(ctx.Request().Context(), locationID, *loc)
+	if err != nil {
+		ctx.Logger().Errorf("PatchLocation: %v", err)
+		return respondError(ctx, http.StatusInternalServerError, "Internal server error")
+	}
+	return respondJSON(ctx, http.StatusOK, result, 1)
+}
+
 func DeleteLocation(ctx echo.Context) error {
 	locationID, err := uuid.Parse(ctx.Param("id"))
 	if err != nil {

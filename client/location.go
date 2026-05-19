@@ -98,6 +98,28 @@ func PutLocation(ctx context.Context, locationID uuid.UUID, loc db.Location) (*d
 	return &result, nil
 }
 
+func PatchLocation(ctx context.Context, locationID uuid.UUID, loc db.Location) (*db.Location, error) {
+	c := newClient()
+	u, err := joinURL(c.apiURL, "location", locationID.String())
+	if err != nil {
+		return nil, fmt.Errorf("build url: %w", err)
+	}
+	result, err := DecodeJSON[db.Location](c.client.Patch(ctx, requestBody(loc, false), u))
+	if err != nil {
+		return nil, err
+	}
+	_, err = db.Instance().NewInsert().
+		Model(&result).
+		On("CONFLICT (id) DO UPDATE").
+		Set("sa_updated_at = EXCLUDED.sa_updated_at").
+		Set("sa_deleted_at = EXCLUDED.sa_deleted_at").
+		Exec(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
 func DeleteLocation(ctx context.Context, locationID uuid.UUID) (*db.Location, error) {
 	c := newClient()
 	u, err := joinURL(c.apiURL, "location", locationID.String())

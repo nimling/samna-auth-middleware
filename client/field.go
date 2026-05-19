@@ -45,6 +45,15 @@ func PutObjectField(ctx context.Context, fieldID uuid.UUID, field db.ObjectField
 	return DecodeJSON[db.ObjectField](c.client.Put(ctx, requestBody(field, false), u))
 }
 
+func PatchObjectField(ctx context.Context, fieldID uuid.UUID, field db.ObjectField) (db.ObjectField, error) {
+	c := newClient()
+	u, err := joinURL(c.apiURL, "field", fieldID.String())
+	if err != nil {
+		return db.ObjectField{}, fmt.Errorf("build url: %w", err)
+	}
+	return DecodeJSON[db.ObjectField](c.client.Patch(ctx, requestBody(field, false), u))
+}
+
 func DeleteObjectField(ctx context.Context, fieldID uuid.UUID) (db.ObjectField, error) {
 	c := newClient()
 	u, err := joinURL(c.apiURL, "field", fieldID.String())
@@ -79,6 +88,15 @@ func PutUserField(ctx context.Context, fieldID uuid.UUID, valueID uuid.UUID, fie
 		return db.UserField{}, fmt.Errorf("build url: %w", err)
 	}
 	return DecodeJSON[db.UserField](c.client.Put(ctx, requestBody(field, false), u))
+}
+
+func PatchUserField(ctx context.Context, fieldID uuid.UUID, valueID uuid.UUID, field db.UserField) (db.UserField, error) {
+	c := newClient()
+	u, err := joinURL(c.apiURL, "field", fieldID.String(), "value", valueID.String())
+	if err != nil {
+		return db.UserField{}, fmt.Errorf("build url: %w", err)
+	}
+	return DecodeJSON[db.UserField](c.client.Patch(ctx, requestBody(field, false), u))
 }
 
 func DeleteUserField(ctx context.Context, fieldID uuid.UUID, valueID uuid.UUID) (db.UserField, error) {

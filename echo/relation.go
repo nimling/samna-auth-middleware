@@ -202,6 +202,54 @@ func PutRelation(ctx echo.Context) error {
 	return respondJSON(ctx, http.StatusOK, result, 1)
 }
 
+func PatchRelation(ctx echo.Context) error {
+	relationID, err := uuid.Parse(ctx.Param("id"))
+	if err != nil {
+		return respondError(ctx, http.StatusBadRequest, "Bad request")
+	}
+
+	relation := &db.UserRelation{}
+	if err := relation.Bind(ctx); err != nil {
+		return respondError(ctx, http.StatusBadRequest, "Bad request")
+	}
+	if err := relation.ValidatePatch(); err != nil {
+		return respondError(ctx, http.StatusBadRequest, err.Error())
+	}
+
+	if db.GetDebugMode() != db.DebugModeNone {
+		userID := ctx.Get(middleware.UserIDKey).(uuid.UUID)
+		existing, err := db.Instance().GetRelation(ctx.Request().Context(), userID, relationID)
+		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return respondError(ctx, http.StatusNotFound, "Not found")
+			}
+			ctx.Logger().Errorf("PatchRelation GetRelation: %v", err)
+			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
+		}
+		ac, err := db.Instance().MutationAccess(ctx.Request().Context(), userID, existing.UserID, db.OBJECT_TYPE_USER, db.ACCESS_WRITE)
+		if err != nil {
+			if errors.Is(err, db.ErrNoAccess) {
+				return respondError(ctx, http.StatusForbidden, "Forbidden")
+			}
+			ctx.Logger().Errorf("PatchRelation MutationAccess: %v", err)
+			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
+		}
+		relation, err = db.Instance().PatchRelation(ctx.Request().Context(), ac, relationID, relation)
+		if err != nil {
+			ctx.Logger().Errorf("PatchRelation: %v", err)
+			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
+		}
+		return respondJSON(ctx, http.StatusOK, relation, 1)
+	}
+
+	result, err := client.PatchRelation(ctx.Request().Context(), relationID, *relation)
+	if err != nil {
+		ctx.Logger().Errorf("PatchRelation: %v", err)
+		return respondError(ctx, http.StatusInternalServerError, "Internal server error")
+	}
+	return respondJSON(ctx, http.StatusOK, result, 1)
+}
+
 func DeleteRelation(ctx echo.Context) error {
 	relationID, err := uuid.Parse(ctx.Param("id"))
 	if err != nil {

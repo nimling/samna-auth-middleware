@@ -219,6 +219,50 @@ func PutAsset(ctx echo.Context) error {
 	return respondJSON(ctx, http.StatusOK, result, 1)
 }
 
+func PatchAsset(ctx echo.Context) error {
+	assetID, err := uuid.Parse(ctx.Param("id"))
+	if err != nil {
+		return respondError(ctx, http.StatusBadRequest, "Bad request")
+	}
+
+	asset := &db.Asset{}
+	if err := asset.Bind(ctx); err != nil {
+		return respondError(ctx, http.StatusBadRequest, "Bad request")
+	}
+	if err := asset.ValidatePatch(); err != nil {
+		return respondError(ctx, http.StatusBadRequest, err.Error())
+	}
+
+	if db.GetDebugMode() != db.DebugModeNone {
+		userID := ctx.Get(middleware.UserIDKey).(uuid.UUID)
+		existing, err := db.Instance().GetAsset(ctx.Request().Context(), assetID)
+		if err != nil {
+			return respondError(ctx, http.StatusNotFound, "Not found")
+		}
+		ac, err := db.Instance().MutationAccess(ctx.Request().Context(), userID, existing.UserID, db.OBJECT_TYPE_USER, db.ACCESS_WRITE)
+		if err != nil {
+			if errors.Is(err, db.ErrNoAccess) {
+				return respondError(ctx, http.StatusForbidden, "Forbidden")
+			}
+			ctx.Logger().Errorf("PatchAsset MutationAccess: %v", err)
+			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
+		}
+		asset, err = db.Instance().PatchAsset(ctx.Request().Context(), ac, assetID, asset)
+		if err != nil {
+			ctx.Logger().Errorf("PatchAsset: %v", err)
+			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
+		}
+		return respondJSON(ctx, http.StatusOK, asset, 1)
+	}
+
+	result, err := client.PatchAsset(ctx.Request().Context(), assetID, *asset)
+	if err != nil {
+		ctx.Logger().Errorf("PatchAsset: %v", err)
+		return respondError(ctx, http.StatusInternalServerError, "Internal server error")
+	}
+	return respondJSON(ctx, http.StatusOK, result, 1)
+}
+
 func DeleteAsset(ctx echo.Context) error {
 	assetID, err := uuid.Parse(ctx.Param("id"))
 	if err != nil {

@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/google/uuid"
+	"github.com/uptrace/bun"
 )
 
 func (d *DB) GetAssets(ctx context.Context) ([]Asset, error) {
@@ -75,6 +76,27 @@ func (d *DB) PutAsset(ctx context.Context, ac *AccessClaim, assetID uuid.UUID, a
 		OmitZero().
 		Returning("*").
 		Exec(ctx, asset)
+	if err != nil {
+		return nil, err
+	}
+	return asset, nil
+}
+
+func (d *DB) PatchAsset(ctx context.Context, ac *AccessClaim, assetID uuid.UUID, asset *Asset) (*Asset, error) {
+	if ac == nil {
+		return nil, ErrNoAccess
+	}
+	q := d.NewUpdate().
+		Model(asset).
+		Where("id = ?", assetID).
+		Where("sa_deleted_at IS NULL").
+		ExcludeColumn("id", "user_id", "sa_created_at", "sa_updated_at", "sa_deleted_at").
+		OmitZero().
+		Returning("*")
+	for _, column := range asset.PatchNulls() {
+		q = q.Set("? = NULL", bun.Ident(column))
+	}
+	_, err := q.Exec(ctx, asset)
 	if err != nil {
 		return nil, err
 	}

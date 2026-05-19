@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/google/uuid"
+	"github.com/uptrace/bun"
 )
 
 func (d *DB) GetObjectFields(ctx context.Context) ([]ObjectField, error) {
@@ -86,6 +87,27 @@ func (d *DB) PutObjectField(ctx context.Context, ac *AccessClaim, fieldID uuid.U
 	return field, nil
 }
 
+func (d *DB) PatchObjectField(ctx context.Context, ac *AccessClaim, fieldID uuid.UUID, field *ObjectField) (*ObjectField, error) {
+	if ac == nil {
+		return nil, ErrNoAccess
+	}
+	q := d.NewUpdate().
+		Model(field).
+		Where("id = ?", fieldID).
+		Where("sa_deleted_at IS NULL").
+		ExcludeColumn("id", "app_id", "sa_owner_id", "sa_created_by", "sa_created_at", "sa_updated_at", "sa_deleted_at").
+		OmitZero().
+		Returning("*")
+	for _, column := range field.PatchNulls() {
+		q = q.Set("? = NULL", bun.Ident(column))
+	}
+	_, err := q.Exec(ctx, field)
+	if err != nil {
+		return nil, err
+	}
+	return field, nil
+}
+
 func (d *DB) DeleteObjectField(ctx context.Context, ac *AccessClaim, fieldID uuid.UUID) (*ObjectField, error) {
 	if ac == nil {
 		return nil, ErrNoAccess
@@ -133,6 +155,27 @@ func (d *DB) PutUserField(ctx context.Context, ac *AccessClaim, valueID uuid.UUI
 		OmitZero().
 		Returning("*").
 		Exec(ctx, field)
+	if err != nil {
+		return nil, err
+	}
+	return field, nil
+}
+
+func (d *DB) PatchUserField(ctx context.Context, ac *AccessClaim, valueID uuid.UUID, field *UserField) (*UserField, error) {
+	if ac == nil {
+		return nil, ErrNoAccess
+	}
+	q := d.NewUpdate().
+		Model(field).
+		Where("id = ?", valueID).
+		Where("sa_deleted_at IS NULL").
+		ExcludeColumn("id", "app_id", "field_id", "user_id", "sa_owner_id", "sa_created_by", "sa_created_at", "sa_updated_at", "sa_deleted_at").
+		OmitZero().
+		Returning("*")
+	for _, column := range field.PatchNulls() {
+		q = q.Set("? = NULL", bun.Ident(column))
+	}
+	_, err := q.Exec(ctx, field)
 	if err != nil {
 		return nil, err
 	}

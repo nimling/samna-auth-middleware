@@ -212,6 +212,47 @@ func PutSecret(ctx echo.Context) error {
 	return ctx.Stream(http.StatusOK, "application/json", body)
 }
 
+func PatchSecret(ctx echo.Context) error {
+	secretID, err := uuid.Parse(ctx.Param("id"))
+	if err != nil {
+		return respondError(ctx, http.StatusBadRequest, "Bad request")
+	}
+
+	reqBody := db.BodySecret{}
+	if err := ctx.Bind(&reqBody); err != nil {
+		return respondError(ctx, http.StatusBadRequest, "Bad request")
+	}
+	if err := reqBody.ValidatePut(); err != nil {
+		return respondError(ctx, http.StatusBadRequest, err.Error())
+	}
+
+	if db.GetDebugMode() != db.DebugModeNone {
+		userID := ctx.Get(middleware.UserIDKey).(uuid.UUID)
+		ac, err := db.Instance().MutationAccess(ctx.Request().Context(), userID, secretID, db.OBJECT_TYPE_SAMNA_SECRET, db.ACCESS_OWNER)
+		if err != nil {
+			if errors.Is(err, db.ErrNoAccess) {
+				return respondError(ctx, http.StatusForbidden, "Forbidden")
+			}
+			ctx.Logger().Errorf("PatchSecret MutationAccess: %v", err)
+			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
+		}
+		secret, err := db.Instance().PatchSecret(ctx.Request().Context(), ac, secretID, reqBody)
+		if err != nil {
+			ctx.Logger().Errorf("PatchSecret: %v", err)
+			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
+		}
+		return respondJSON(ctx, http.StatusOK, secret, 1)
+	}
+
+	body, err := client.PatchSecret(ctx.Request().Context(), secretID, reqBody)
+	if err != nil {
+		ctx.Logger().Errorf("PatchSecret: %v", err)
+		return respondError(ctx, http.StatusInternalServerError, "Internal server error")
+	}
+	defer body.Close()
+	return ctx.Stream(http.StatusOK, "application/json", body)
+}
+
 func DeleteSecret(ctx echo.Context) error {
 	secretID, err := uuid.Parse(ctx.Param("id"))
 	if err != nil {

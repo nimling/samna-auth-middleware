@@ -347,6 +347,47 @@ func PutClaim(ctx echo.Context) error {
 	return respondJSON(ctx, http.StatusOK, result, 1)
 }
 
+func PatchClaim(ctx echo.Context) error {
+	claimID, err := uuid.Parse(ctx.Param("id"))
+	if err != nil {
+		return respondError(ctx, http.StatusBadRequest, "Bad request")
+	}
+
+	claim := &db.Claim{}
+	if err := claim.Bind(ctx); err != nil {
+		return respondError(ctx, http.StatusBadRequest, "Bad request")
+	}
+	if err := claim.ValidatePatch(); err != nil {
+		return respondError(ctx, http.StatusBadRequest, err.Error())
+	}
+
+	if db.GetDebugMode() != db.DebugModeNone {
+		userID := ctx.Get(middleware.UserIDKey).(uuid.UUID)
+		ac, err := db.Instance().MutationAccess(ctx.Request().Context(), userID, claimID, db.OBJECT_TYPE_CLAIM, db.ACCESS_WRITE)
+		if err != nil {
+			if errors.Is(err, db.ErrNoAccess) {
+				return respondError(ctx, http.StatusForbidden, "Forbidden")
+			}
+			ctx.Logger().Errorf("PatchClaim MutationAccess: %v", err)
+			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
+		}
+		claim, err = db.Instance().PatchClaim(ctx.Request().Context(), ac, claimID, claim)
+		if err != nil {
+			ctx.Logger().Errorf("PatchClaim: %v", err)
+			return respondError(ctx, http.StatusInternalServerError, "Internal server error")
+		}
+		audit.Write("PatchClaim", "update", db.OBJECT_TYPE_CLAIM, claim.ID, claim.OwnerID, ac.UserClaimID, "Patched claim "+claim.Name)
+		return respondJSON(ctx, http.StatusOK, claim, 1)
+	}
+
+	result, err := client.PatchClaim(ctx.Request().Context(), claimID, *claim)
+	if err != nil {
+		ctx.Logger().Errorf("PatchClaim: %v", err)
+		return respondError(ctx, http.StatusInternalServerError, "Internal server error")
+	}
+	return respondJSON(ctx, http.StatusOK, result, 1)
+}
+
 func DeleteClaim(ctx echo.Context) error {
 	claimID, err := uuid.Parse(ctx.Param("id"))
 	if err != nil {

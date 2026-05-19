@@ -153,6 +153,10 @@ func (d *DB) PutSecret(ctx context.Context, ac *AccessClaim, secretID uuid.UUID,
 	return secret, nil
 }
 
+func (d *DB) PatchSecret(ctx context.Context, ac *AccessClaim, secretID uuid.UUID, body BodySecret) (*SamnaSecret, error) {
+	return d.PutSecret(ctx, ac, secretID, body)
+}
+
 func (d *DB) DeleteSecret(ctx context.Context, ac *AccessClaim, secretID uuid.UUID) (*SamnaSecret, error) {
 	if ac == nil {
 		return nil, ErrNoAccess

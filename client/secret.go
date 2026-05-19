@@ -48,6 +48,15 @@ func PutSecret(ctx context.Context, secretID uuid.UUID, body db.BodySecret) (io.
 	return c.client.Put(ctx, body, u)
 }
 
+func PatchSecret(ctx context.Context, secretID uuid.UUID, body db.BodySecret) (io.ReadCloser, error) {
+	c := newClient()
+	u, err := joinURL(c.apiURL, "secret", secretID.String())
+	if err != nil {
+		return nil, fmt.Errorf("build url: %w", err)
+	}
+	return c.client.Patch(ctx, body, u)
+}
+
 func DeleteSecret(ctx context.Context, secretID uuid.UUID) (io.ReadCloser, error) {
 	c := newClient()
 	u, err := joinURL(c.apiURL, "secret", secretID.String())

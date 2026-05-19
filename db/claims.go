@@ -242,6 +242,10 @@ func (d *DB) PutClaim(ctx context.Context, ac *AccessClaim, claimID uuid.UUID, c
 	return claim, nil
 }
 
+func (d *DB) PatchClaim(ctx context.Context, ac *AccessClaim, claimID uuid.UUID, claim *Claim) (*Claim, error) {
+	return d.PutClaim(ctx, ac, claimID, claim)
+}
+
 func (d *DB) DeleteClaim(ctx context.Context, ac *AccessClaim, claimID uuid.UUID) (*Claim, error) {
 	if ac == nil || ac.UserClaimID == nil {
 		return nil, ErrNoAccess

@@ -107,6 +107,23 @@ func PutAsset(ctx context.Context, assetID uuid.UUID, asset db.Asset) (*db.Asset
 	return &result, nil
 }
 
+func PatchAsset(ctx context.Context, assetID uuid.UUID, asset db.Asset) (*db.Asset, error) {
+	c := newClient()
+	u, err := joinURL(c.apiURL, "asset", assetID.String())
+	if err != nil {
+		return nil, fmt.Errorf("build url: %w", err)
+	}
+	result, err := DecodeJSON[db.Asset](c.client.Patch(ctx, requestBody(asset, false), u))
+	if err != nil {
+		return nil, err
+	}
+	_, err = db.Instance().NewInsert().Model(&result).On("CONFLICT (id) DO UPDATE").Set("sa_updated_at = EXCLUDED.sa_updated_at").Set("sa_deleted_at = EXCLUDED.sa_deleted_at").Exec(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
 func DeleteAsset(ctx context.Context, assetID uuid.UUID) (*db.Asset, error) {
 	c := newClient()
 	u, err := joinURL(c.apiURL, "asset", assetID.String())

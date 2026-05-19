@@ -127,6 +127,27 @@ func (d *DB) PutRelation(ctx context.Context, ac *AccessClaim, relationID uuid.U
 	return relation, nil
 }
 
+func (d *DB) PatchRelation(ctx context.Context, ac *AccessClaim, relationID uuid.UUID, relation *UserRelation) (*UserRelation, error) {
+	if ac == nil {
+		return nil, ErrNoAccess
+	}
+	q := d.NewUpdate().
+		Model(relation).
+		Where("id = ?", relationID).
+		Where("sa_deleted_at IS NULL").
+		ExcludeColumn("id", "app_id", "user_id", "sa_created_at", "sa_updated_at", "sa_deleted_at").
+		OmitZero().
+		Returning("*")
+	for _, column := range relation.PatchNulls() {
+		q = q.Set("? = NULL", bun.Ident(column))
+	}
+	_, err := q.Exec(ctx, relation)
+	if err != nil {
+		return nil, err
+	}
+	return relation, nil
+}
+
 func (d *DB) DeleteRelation(ctx context.Context, ac *AccessClaim, relationID uuid.UUID) (*UserRelation, error) {
 	if ac == nil {
 		return nil, ErrNoAccess
