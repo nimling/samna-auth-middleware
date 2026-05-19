@@ -217,14 +217,32 @@ func (d *DB) PutClaim(ctx context.Context, ac *AccessClaim, claimID uuid.UUID, c
 	if ac == nil {
 		return nil, ErrNoAccess
 	}
+	var (
+		name        interface{}
+		description interface{}
+		access      interface{}
+		inherits    interface{}
+	)
+	if claim.HasKey("name") {
+		name = claim.Name
+	}
+	if claim.HasKey("description") {
+		description = claim.Description
+	}
+	if claim.HasKey("access") {
+		access = claim.Access
+	}
+	if claim.HasKey("inherits") {
+		inherits = claim.Inherits
+	}
 	_, err := d.NewRaw(`
 		SELECT claimius.update_claim(?, ?, ?, ?, ?)
 	`,
 		claimID,
-		claim.Name,
-		claim.Description,
-		claim.Access,
-		claim.Inherits,
+		name,
+		description,
+		access,
+		inherits,
 	).Exec(ctx)
 	if err != nil {
 		return nil, err
