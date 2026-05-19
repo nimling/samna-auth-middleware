@@ -103,3 +103,59 @@ func (o *Organization) Bind(ctx echo.Context) error {
 func (o *Organization) PatchNulls() []string {
 	return bunNullColumns(o)
 }
+
+func (l *Location) Bind(ctx echo.Context) error {
+	return l.Body.Bound(ctx, l)
+}
+
+func (l *Location) PatchNulls() []string {
+	return bunNullColumns(l)
+}
+
+func (c *Claim) Bind(ctx echo.Context) error {
+	return c.Body.Bound(ctx, c)
+}
+
+func (c *Claim) PatchNulls() []string {
+	return bunNullColumns(c)
+}
+
+func (a *Asset) Bind(ctx echo.Context) error {
+	return a.Body.Bound(ctx, a)
+}
+
+func (a *Asset) PatchNulls() []string {
+	return bunNullColumns(a)
+}
+
+func (s *SamnaSecret) Bind(ctx echo.Context) error {
+	return s.Body.Bound(ctx, s)
+}
+
+func (s *SamnaSecret) PatchNulls() []string {
+	return bunNullColumns(s)
+}
+
+func (f *ObjectField) Bind(ctx echo.Context) error {
+	return f.Body.Bound(ctx, f)
+}
+
+func (f *ObjectField) PatchNulls() []string {
+	return bunNullColumns(f)
+}
+
+func (f *UserField) Bind(ctx echo.Context) error {
+	return f.Body.Bound(ctx, f)
+}
+
+func (f *UserField) PatchNulls() []string {
+	return bunNullColumns(f)
+}
+
+func (r *UserRelation) Bind(ctx echo.Context) error {
+	return r.Body.Bound(ctx, r)
+}
+
+func (r *UserRelation) PatchNulls() []string {
+	return bunNullColumns(r)
+}

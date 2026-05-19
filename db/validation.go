@@ -158,6 +158,19 @@ func (l *Location) ValidatePut() error {
 	return nil
 }
 
+func (l *Location) ValidatePatch() error {
+	if l.IsEmpty() {
+		return errors.New("no fields to update")
+	}
+	if !hasAnyJSONKey(l) {
+		return errors.New("no fields to update")
+	}
+	if l.HasKey("name") && (l.Name == nil || *l.Name == "") {
+		return errors.New("name is required")
+	}
+	return nil
+}
+
 func (o *Organization) ValidatePut() error {
 	if o.Name == "" {
 		return errors.New("name is required")
@@ -252,6 +265,28 @@ func (c *Claim) ValidatePut() error {
 	return nil
 }
 
+func (c *Claim) ValidatePatch() error {
+	if c.IsEmpty() {
+		return errors.New("no fields to update")
+	}
+	if !hasAnyJSONKey(c) {
+		return errors.New("no fields to update")
+	}
+	if c.HasKey("name") && c.Name == "" {
+		return errors.New("name is required")
+	}
+	if c.HasKey("type") {
+		switch c.Type {
+		case CLAIM_TYPE_USER, CLAIM_TYPE_SERVICE, CLAIM_TYPE_VIRTUAL:
+		case CLAIM_TYPE_SYSTEM:
+			return errors.New("type cannot be system")
+		default:
+			return errors.New("invalid type")
+		}
+	}
+	return nil
+}
+
 func (co *ClaimObject) ValidatePut() error {
 	if (co.ObjectID == nil || *co.ObjectID == uuid.Nil) && (co.ObjectType == nil || *co.ObjectType == "") && co.Scope == nil && co.Reason == nil && co.Access == nil {
 		return errors.New("no fields to update")
@@ -286,8 +321,34 @@ func (f *ObjectField) ValidatePut() error {
 	return nil
 }
 
+func (f *ObjectField) ValidatePatch() error {
+	if f.IsEmpty() {
+		return errors.New("no fields to update")
+	}
+	if !hasAnyJSONKey(f) {
+		return errors.New("no fields to update")
+	}
+	if f.HasKey("name") && f.Name == "" {
+		return errors.New("name is required")
+	}
+	if f.HasKey("object_type") && f.ObjectType == "" {
+		return errors.New("object_type is required")
+	}
+	return nil
+}
+
 func (f *UserField) ValidatePut() error {
 	if f.Value == nil {
+		return errors.New("no fields to update")
+	}
+	return nil
+}
+
+func (f *UserField) ValidatePatch() error {
+	if f.IsEmpty() {
+		return errors.New("no fields to update")
+	}
+	if !hasAnyJSONKey(f) {
 		return errors.New("no fields to update")
 	}
 	return nil
@@ -300,9 +361,41 @@ func (r *UserRelation) ValidatePut() error {
 	return nil
 }
 
+func (r *UserRelation) ValidatePatch() error {
+	if r.IsEmpty() {
+		return errors.New("no fields to update")
+	}
+	if !hasAnyJSONKey(r) {
+		return errors.New("no fields to update")
+	}
+	if r.HasKey("object_type") && r.ObjectType == "" {
+		return errors.New("object_type is required")
+	}
+	if r.HasKey("object_id") && r.ObjectID == uuid.Nil {
+		return errors.New("object_id is required")
+	}
+	return nil
+}
+
 func (a *Asset) ValidatePut() error {
 	if a.Name == "" && a.Description == nil && a.MimeType == "" && a.Status == "" {
 		return errors.New("no fields to update")
+	}
+	return nil
+}
+
+func (a *Asset) ValidatePatch() error {
+	if a.IsEmpty() {
+		return errors.New("no fields to update")
+	}
+	if !hasAnyJSONKey(a) {
+		return errors.New("no fields to update")
+	}
+	if a.HasKey("name") && a.Name == "" {
+		return errors.New("name is required")
+	}
+	if a.HasKey("mime_type") && a.MimeType == "" {
+		return errors.New("mime_type is required")
 	}
 	return nil
 }

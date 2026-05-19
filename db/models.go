@@ -217,6 +217,7 @@ type Organization struct {
 
 type Location struct {
 	bun.BaseModel `bun:"table:claimius.location"`
+	nimbody.Body  `bun:"-" json:"-"`
 
 	ID          uuid.UUID     `bun:"id,pk,default:gen_random_uuid()" json:"id"`
 	AppID       uuid.UUID     `bun:"app_id,notnull,type:uuid,default:claimius.get_disciple_app_id()" json:"-"`
@@ -242,6 +243,7 @@ type Location struct {
 
 type Claim struct {
 	bun.BaseModel `bun:"table:claimius.claim"`
+	nimbody.Body  `bun:"-" json:"-"`
 
 	ID           uuid.UUID     `bun:"id,pk,default:gen_random_uuid()" json:"id"`
 	AppID        uuid.UUID     `bun:"app_id,notnull,type:uuid,default:claimius.get_disciple_app_id()" json:"-"`
@@ -316,6 +318,7 @@ type AccessClaim struct {
 
 type Asset struct {
 	bun.BaseModel `bun:"table:asset" json:"-"`
+	nimbody.Body  `bun:"-" json:"-"`
 
 	ID          uuid.UUID  `bun:"id,pk" json:"id"`
 	Name        string     `bun:"column:name" json:"name"`
@@ -359,6 +362,7 @@ type SamnaClient struct {
 
 type SamnaSecret struct {
 	bun.BaseModel `bun:"table:claimius.samna_secret"`
+	nimbody.Body  `bun:"-" json:"-"`
 
 	ID        uuid.UUID  `bun:"id,pk,default:gen_random_uuid()" json:"id"`
 	AppID     uuid.UUID  `bun:"app_id,notnull,type:uuid,default:claimius.get_disciple_app_id()" json:"-"`
@@ -400,6 +404,7 @@ type SamnaApp struct {
 
 type ObjectField struct {
 	bun.BaseModel `bun:"table:claimius.object_field"`
+	nimbody.Body  `bun:"-" json:"-"`
 
 	ID          uuid.UUID        `bun:"id,pk,default:gen_random_uuid()" json:"id"`
 	AppID       uuid.UUID        `bun:"app_id,notnull,type:uuid,default:claimius.get_disciple_app_id()" json:"-"`
@@ -418,6 +423,7 @@ type ObjectField struct {
 
 type UserField struct {
 	bun.BaseModel `bun:"table:claimius.user_field"`
+	nimbody.Body  `bun:"-" json:"-"`
 
 	ID        uuid.UUID  `bun:"id,pk,default:gen_random_uuid()" json:"id"`
 	AppID     uuid.UUID  `bun:"app_id,notnull,type:uuid,default:claimius.get_disciple_app_id()" json:"-"`
@@ -433,6 +439,7 @@ type UserField struct {
 
 type UserRelation struct {
 	bun.BaseModel `bun:"table:claimius.user_relation" json:"-"`
+	nimbody.Body  `bun:"-" json:"-"`
 
 	ID          uuid.UUID  `bun:"id,pk,default:gen_random_uuid()" json:"id"`
 	AppID       uuid.UUID  `bun:"app_id,notnull,type:uuid,default:claimius.get_disciple_app_id()" json:"-"`
