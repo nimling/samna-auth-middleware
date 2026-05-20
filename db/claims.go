@@ -272,7 +272,7 @@ func (d *DB) DeleteClaim(ctx context.Context, ac *AccessClaim, claimID uuid.UUID
 	err := d.NewSelect().
 		Model(&claim).
 		ExcludeColumn("app_id").
-		TableExpr("claimius.remove_claim(?, ?) AS claim", claimID, *ac.UserClaimID).
+		ModelTableExpr("claimius.remove_claim(?, ?) AS claim", claimID, *ac.UserClaimID).
 		Scan(ctx)
 	if err != nil {
 		return nil, err
@@ -350,7 +350,7 @@ func (d *DB) DeleteClaimObject(ctx context.Context, ac *AccessClaim, claimID, ob
 	err = d.NewSelect().
 		Model(&co).
 		ExcludeColumn("app_id").
-		TableExpr("claimius.remove_claim_object(?, ?) AS claim_object", rowID, *ac.UserClaimID).
+		ModelTableExpr("claimius.remove_claim_object(?, ?) AS claim_object", rowID, *ac.UserClaimID).
 		Scan(ctx)
 	if err != nil {
 		return nil, err
@@ -414,7 +414,7 @@ func (d *DB) DeleteClaimUser(ctx context.Context, ac *AccessClaim, claimID, user
 	err = d.NewSelect().
 		Model(&uc).
 		ExcludeColumn("app_id").
-		TableExpr("claimius.remove_user_claim(?, ?) AS user_claim", rowID, *ac.UserClaimID).
+		ModelTableExpr("claimius.remove_user_claim(?, ?) AS user_claim", rowID, *ac.UserClaimID).
 		Scan(ctx)
 	if err != nil {
 		return nil, err
