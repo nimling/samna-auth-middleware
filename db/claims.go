@@ -268,15 +268,11 @@ func (d *DB) DeleteClaim(ctx context.Context, ac *AccessClaim, claimID uuid.UUID
 	if ac == nil || ac.UserClaimID == nil {
 		return nil, ErrNoAccess
 	}
-	_, err := d.NewRaw(`SELECT claimius.remove_claim(?, ?)`, claimID, *ac.UserClaimID).Exec(ctx)
-	if err != nil {
-		return nil, err
-	}
 	var claim Claim
-	err = d.NewSelect().
+	err := d.NewSelect().
 		Model(&claim).
 		ExcludeColumn("app_id").
-		Where("id = ?", claimID).
+		TableExpr("claimius.remove_claim(?, ?) AS claim", claimID, *ac.UserClaimID).
 		Scan(ctx)
 	if err != nil {
 		return nil, err
@@ -339,20 +335,23 @@ func (d *DB) DeleteClaimObject(ctx context.Context, ac *AccessClaim, claimID, ob
 	if ac == nil || ac.UserClaimID == nil {
 		return nil, ErrNoAccess
 	}
-	var co ClaimObject
+	var rowID uuid.UUID
 	err := d.NewSelect().
-		Model(&co).
-		ExcludeColumn("app_id").
+		ColumnExpr("id").
+		Table("claimius.claim_object").
 		Where("claim_id = ?", claimID).
 		Where("object_id = ?", objectID).
 		Where("sa_deleted_at IS NULL").
-		Scan(ctx)
+		Scan(ctx, &rowID)
 	if err != nil {
 		return nil, err
 	}
-	_, err = d.NewRaw(`
-		SELECT claimius.remove_claim_object(?, ?)
-	`, co.ID, *ac.UserClaimID).Exec(ctx)
+	var co ClaimObject
+	err = d.NewSelect().
+		Model(&co).
+		ExcludeColumn("app_id").
+		TableExpr("claimius.remove_claim_object(?, ?) AS claim_object", rowID, *ac.UserClaimID).
+		Scan(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -400,20 +399,23 @@ func (d *DB) DeleteClaimUser(ctx context.Context, ac *AccessClaim, claimID, user
 	if ac == nil || ac.UserClaimID == nil {
 		return nil, ErrNoAccess
 	}
-	var uc UserClaim
+	var rowID uuid.UUID
 	err := d.NewSelect().
-		Model(&uc).
-		ExcludeColumn("app_id").
+		ColumnExpr("id").
+		Table("claimius.user_claim").
 		Where("claim_id = ?", claimID).
 		Where("user_id = ?", userID).
 		Where("sa_deleted_at IS NULL").
-		Scan(ctx)
+		Scan(ctx, &rowID)
 	if err != nil {
 		return nil, err
 	}
-	_, err = d.NewRaw(`
-		SELECT claimius.remove_user_claim(?, ?)
-	`, uc.ID, *ac.UserClaimID).Exec(ctx)
+	var uc UserClaim
+	err = d.NewSelect().
+		Model(&uc).
+		ExcludeColumn("app_id").
+		TableExpr("claimius.remove_user_claim(?, ?) AS user_claim", rowID, *ac.UserClaimID).
+		Scan(ctx)
 	if err != nil {
 		return nil, err
 	}
