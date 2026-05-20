@@ -1,9 +1,11 @@
 package db
 
 import (
+	"context"
 	"database/sql/driver"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"strings"
 	"time"
 
@@ -261,6 +263,75 @@ type Claim struct {
 	ClaimObjects []ClaimObject `bun:"rel:has-many,join:id=claim_id" json:"claim_objects,omitempty"`
 	ClaimUsers   []UserClaim   `bun:"rel:has-many,join:id=claim_id" json:"claim_users,omitempty"`
 	Owner        *Organization `bun:"rel:belongs-to,join:sa_owner_id=id" json:"owner,omitempty"`
+
+	sessionCtx   context.Context
+	sessionActor *AccessClaim
+	sessionDB    *DB
+}
+
+type CreateClaimParams struct {
+	Name        string
+	Description *string
+	Access      ClaimAccess
+	Inherits    *bool
+	Type        ClaimType
+}
+
+type ReCreateForOptions struct {
+	Name      *string
+	CopyUsers bool
+}
+
+func ObjectTypeOf(model any) (ObjectType, error) {
+	t := reflect.TypeOf(model)
+	if t == nil {
+		return "", fmt.Errorf("model is nil")
+	}
+	if t.Kind() == reflect.Ptr {
+		t = t.Elem()
+	}
+	if t.Kind() != reflect.Struct {
+		return "", fmt.Errorf("model must be a struct or pointer to struct")
+	}
+	bm, ok := t.FieldByName("BaseModel")
+	if !ok {
+		return "", fmt.Errorf("model has no embedded bun.BaseModel")
+	}
+	for _, part := range strings.Split(bm.Tag.Get("bun"), ",") {
+		part = strings.TrimSpace(part)
+		if strings.HasPrefix(part, "table:") {
+			return ResolveObjectType(strings.TrimPrefix(part, "table:"))
+		}
+	}
+	return "", fmt.Errorf("bun.BaseModel has no table tag")
+}
+
+func extractModelID(model any) (uuid.UUID, error) {
+	v := reflect.ValueOf(model)
+	if !v.IsValid() {
+		return uuid.Nil, fmt.Errorf("model is nil")
+	}
+	if v.Kind() == reflect.Ptr {
+		if v.IsNil() {
+			return uuid.Nil, fmt.Errorf("model is nil")
+		}
+		v = v.Elem()
+	}
+	if v.Kind() != reflect.Struct {
+		return uuid.Nil, fmt.Errorf("model must be a struct or pointer to struct")
+	}
+	f := v.FieldByName("ID")
+	if !f.IsValid() {
+		return uuid.Nil, fmt.Errorf("model has no ID field")
+	}
+	id, ok := f.Interface().(uuid.UUID)
+	if !ok {
+		return uuid.Nil, fmt.Errorf("model.ID is not uuid.UUID")
+	}
+	if id == uuid.Nil {
+		return uuid.Nil, fmt.Errorf("model.ID is zero")
+	}
+	return id, nil
 }
 
 type UserClaim struct {
