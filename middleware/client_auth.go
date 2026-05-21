@@ -10,7 +10,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
-	"github.com/nimling/samna-auth-middleware/client"
 	"github.com/nimling/samna-auth-middleware/db"
 	"golang.org/x/crypto/bcrypt"
 )
@@ -105,11 +104,11 @@ func forwardUserToken(ctx echo.Context) error {
 	if token == "" {
 		return nil
 	}
-	user, ownerID, err := client.PostUserTokenValidate(ctx.Request().Context(), token)
+	user, ownerID, err := db.Instance().ValidateToken(ctx.Request().Context(), token)
 	if err != nil {
 		return fmt.Errorf("validate forwarded user token: %w: %w", err, ErrorUserTokenNotRecognized)
 	}
-	if user.UserID == uuid.Nil {
+	if user == nil || user.UserID == uuid.Nil {
 		return ErrorUserTokenNotRecognized
 	}
 	if ownerID != uuid.Nil {

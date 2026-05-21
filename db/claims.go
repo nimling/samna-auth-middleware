@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"fmt"
 
 	"github.com/google/uuid"
 	"github.com/uptrace/bun"
@@ -176,7 +175,7 @@ func (d *DB) GetClaimGraph(ctx context.Context, userID uuid.UUID, startID *uuid.
 	return nodes, err
 }
 
-func (d *DB) PostClaim(ctx context.Context, ac *AccessClaim, claim *Claim) (*Claim, error) {
+func (d *DB) insertClaim(ctx context.Context, ac *AccessClaim, claim *Claim) (*Claim, error) {
 	if ac == nil {
 		return nil, ErrNoAccess
 	}
@@ -214,7 +213,7 @@ func (d *DB) PostClaim(ctx context.Context, ac *AccessClaim, claim *Claim) (*Cla
 	return claim, nil
 }
 
-func (d *DB) PutClaim(ctx context.Context, ac *AccessClaim, claimID uuid.UUID, claim *Claim) (*Claim, error) {
+func (d *DB) updateClaim(ctx context.Context, ac *AccessClaim, claimID uuid.UUID, claim *Claim) (*Claim, error) {
 	if ac == nil {
 		return nil, ErrNoAccess
 	}
@@ -261,11 +260,7 @@ func (d *DB) PutClaim(ctx context.Context, ac *AccessClaim, claimID uuid.UUID, c
 	return claim, nil
 }
 
-func (d *DB) PatchClaim(ctx context.Context, ac *AccessClaim, claimID uuid.UUID, claim *Claim) (*Claim, error) {
-	return d.PutClaim(ctx, ac, claimID, claim)
-}
-
-func (d *DB) DeleteClaim(ctx context.Context, ac *AccessClaim, claimID uuid.UUID) (*Claim, error) {
+func (d *DB) deleteClaim(ctx context.Context, ac *AccessClaim, claimID uuid.UUID) (*Claim, error) {
 	if ac == nil || ac.UserClaimID == nil {
 		return nil, ErrNoAccess
 	}
@@ -281,7 +276,7 @@ func (d *DB) DeleteClaim(ctx context.Context, ac *AccessClaim, claimID uuid.UUID
 	return &claim, nil
 }
 
-func (d *DB) PostClaimObject(ctx context.Context, ac *AccessClaim, claimID uuid.UUID, co *ClaimObject) (*ClaimObject, error) {
+func (d *DB) insertClaimObject(ctx context.Context, ac *AccessClaim, claimID uuid.UUID, co *ClaimObject) (*ClaimObject, error) {
 	if ac == nil {
 		return nil, ErrNoAccess
 	}
@@ -333,7 +328,7 @@ func (d *DB) PostClaimObject(ctx context.Context, ac *AccessClaim, claimID uuid.
 	return co, nil
 }
 
-func (d *DB) DeleteClaimObject(ctx context.Context, ac *AccessClaim, claimID, objectID uuid.UUID) (*ClaimObject, error) {
+func (d *DB) deleteClaimObject(ctx context.Context, ac *AccessClaim, claimID, objectID uuid.UUID) (*ClaimObject, error) {
 	if ac == nil || ac.UserClaimID == nil {
 		return nil, ErrNoAccess
 	}
@@ -360,7 +355,7 @@ func (d *DB) DeleteClaimObject(ctx context.Context, ac *AccessClaim, claimID, ob
 	return &co, nil
 }
 
-func (d *DB) PostClaimUser(ctx context.Context, ac *AccessClaim, claimID uuid.UUID, uc *UserClaim) (*UserClaim, error) {
+func (d *DB) insertClaimUser(ctx context.Context, ac *AccessClaim, claimID uuid.UUID, uc *UserClaim) (*UserClaim, error) {
 	if ac == nil || ac.UserClaimID == nil {
 		return nil, ErrNoAccess
 	}
@@ -397,7 +392,7 @@ func (d *DB) PostClaimUser(ctx context.Context, ac *AccessClaim, claimID uuid.UU
 	return uc, nil
 }
 
-func (d *DB) DeleteClaimUser(ctx context.Context, ac *AccessClaim, claimID, userID uuid.UUID) (*UserClaim, error) {
+func (d *DB) deleteClaimUser(ctx context.Context, ac *AccessClaim, claimID, userID uuid.UUID) (*UserClaim, error) {
 	if ac == nil || ac.UserClaimID == nil {
 		return nil, ErrNoAccess
 	}
@@ -424,198 +419,3 @@ func (d *DB) DeleteClaimUser(ctx context.Context, ac *AccessClaim, claimID, user
 	return &uc, nil
 }
 
-func (d *DB) CreateClaim(ctx context.Context, ac *AccessClaim, p CreateClaimParams) (*Claim, error) {
-	if ac == nil {
-		return nil, ErrNoAccess
-	}
-	if p.Name == "" {
-		return nil, fmt.Errorf("claim name is required")
-	}
-	claimType := p.Type
-	if claimType == "" {
-		claimType = CLAIM_TYPE_VIRTUAL
-	}
-	inherits := true
-	if p.Inherits != nil {
-		inherits = *p.Inherits
-	}
-	claim := &Claim{
-		Name:        p.Name,
-		Description: p.Description,
-		Access:      int(p.Access),
-		Inherits:    inherits,
-		Type:        claimType,
-		OwnerID:     ac.OwnerID,
-	}
-	created, err := d.PostClaim(ctx, ac, claim)
-	if err != nil {
-		return nil, err
-	}
-	return created.With(ctx, ac, d), nil
-}
-
-func (c *Claim) With(ctx context.Context, ac *AccessClaim, d *DB) *Claim {
-	c.sessionCtx = ctx
-	c.sessionActor = ac
-	c.sessionDB = d
-	return c
-}
-
-func (c *Claim) requireSession() error {
-	if c == nil {
-		return fmt.Errorf("claim is nil")
-	}
-	if c.sessionDB == nil || c.sessionActor == nil || c.sessionCtx == nil {
-		return fmt.Errorf("claim session not attached, call With(ctx, ac, d) first")
-	}
-	return nil
-}
-
-func (c *Claim) AssignObject(target any) (*ClaimObject, error) {
-	if err := c.requireSession(); err != nil {
-		return nil, err
-	}
-	var co ClaimObject
-	switch v := target.(type) {
-	case *ClaimObject:
-		if v == nil {
-			return nil, fmt.Errorf("target ClaimObject is nil")
-		}
-		co = *v
-		if co.ObjectType != nil {
-			qualified, err := ResolveObjectType(string(*co.ObjectType))
-			if err != nil {
-				return nil, err
-			}
-			co.ObjectType = &qualified
-		}
-	default:
-		otype, err := ObjectTypeOf(target)
-		if err != nil {
-			return nil, err
-		}
-		id, err := extractModelID(target)
-		if err != nil {
-			return nil, err
-		}
-		co.ObjectID = &id
-		co.ObjectType = &otype
-		co.Inherits = true
-	}
-	return c.sessionDB.PostClaimObject(c.sessionCtx, c.sessionActor, c.ID, &co)
-}
-
-func (c *Claim) AssignUser(userIDs ...uuid.UUID) ([]UserClaim, error) {
-	if err := c.requireSession(); err != nil {
-		return nil, err
-	}
-	results := make([]UserClaim, 0, len(userIDs))
-	for _, uid := range userIDs {
-		if uid == uuid.Nil {
-			continue
-		}
-		var existing UserClaim
-		err := c.sessionDB.NewSelect().
-			Model(&existing).
-			ExcludeColumn("app_id").
-			Where("claim_id = ?", c.ID).
-			Where("user_id = ?", uid).
-			Where("app_id = claimius.get_disciple_app_id()").
-			Where("sa_deleted_at IS NULL").
-			Limit(1).
-			Scan(c.sessionCtx)
-		if err == nil {
-			results = append(results, existing)
-			continue
-		}
-		if !errors.Is(err, sql.ErrNoRows) {
-			return results, err
-		}
-		uc := UserClaim{UserID: uid}
-		created, err := c.sessionDB.PostClaimUser(c.sessionCtx, c.sessionActor, c.ID, &uc)
-		if err != nil {
-			return results, err
-		}
-		results = append(results, *created)
-	}
-	return results, nil
-}
-
-func (c *Claim) ReCreateFor(access ClaimAccess, opts ReCreateForOptions, userIDs ...uuid.UUID) (*Claim, error) {
-	if err := c.requireSession(); err != nil {
-		return nil, err
-	}
-	name := c.Name
-	if opts.Name != nil {
-		name = *opts.Name
-	}
-	inherits := c.Inherits
-	params := CreateClaimParams{
-		Name:        name,
-		Description: c.Description,
-		Access:      access,
-		Inherits:    &inherits,
-		Type:        c.Type,
-	}
-	newClaim, err := c.sessionDB.CreateClaim(c.sessionCtx, c.sessionActor, params)
-	if err != nil {
-		return nil, err
-	}
-
-	bindings := c.ClaimObjects
-	if len(bindings) == 0 {
-		err := c.sessionDB.NewSelect().
-			Model(&bindings).
-			ExcludeColumn("app_id").
-			Where("claim_id = ?", c.ID).
-			Where("sa_deleted_at IS NULL").
-			Scan(c.sessionCtx)
-		if err != nil && !errors.Is(err, sql.ErrNoRows) {
-			return nil, err
-		}
-	}
-	for i := range bindings {
-		src := bindings[i]
-		clone := ClaimObject{
-			ObjectID:   src.ObjectID,
-			ObjectType: src.ObjectType,
-			Reason:     src.Reason,
-			Scope:      src.Scope,
-			RefID:      src.RefID,
-			Inherits:   src.Inherits,
-			Access:     src.Access,
-		}
-		if _, err := newClaim.AssignObject(&clone); err != nil {
-			return nil, err
-		}
-	}
-
-	if opts.CopyUsers {
-		existingUsers := make([]UserClaim, 0)
-		err := c.sessionDB.NewSelect().
-			Model(&existingUsers).
-			ExcludeColumn("app_id").
-			Where("claim_id = ?", c.ID).
-			Where("sa_deleted_at IS NULL").
-			Scan(c.sessionCtx)
-		if err != nil && !errors.Is(err, sql.ErrNoRows) {
-			return nil, err
-		}
-		copyIDs := make([]uuid.UUID, 0, len(existingUsers))
-		for _, u := range existingUsers {
-			copyIDs = append(copyIDs, u.UserID)
-		}
-		if len(copyIDs) > 0 {
-			if _, err := newClaim.AssignUser(copyIDs...); err != nil {
-				return nil, err
-			}
-		}
-	}
-
-	if len(userIDs) > 0 {
-		if _, err := newClaim.AssignUser(userIDs...); err != nil {
-			return nil, err
-		}
-	}
-	return newClaim, nil
-}

@@ -50,11 +50,11 @@ func (d *DB) GetUserAssets(ctx context.Context, userID uuid.UUID) ([]Asset, erro
 	return assets, nil
 }
 
-func (d *DB) PostAsset(ctx context.Context, ac *AccessClaim, asset *Asset) (*Asset, error) {
+func (d *DB) insertAsset(ctx context.Context, ac *AccessClaim, asset *Asset) (*Asset, error) {
 	if ac == nil {
 		return nil, ErrNoAccess
 	}
-	_, err := d.NewInsert().
+	_, err := d.DB.NewInsert().
 		Model(asset).
 		ExcludeColumn("id", "sa_created_at", "sa_updated_at", "sa_deleted_at").
 		Returning("*").
@@ -65,32 +65,15 @@ func (d *DB) PostAsset(ctx context.Context, ac *AccessClaim, asset *Asset) (*Ass
 	return asset, nil
 }
 
-func (d *DB) PutAsset(ctx context.Context, ac *AccessClaim, assetID uuid.UUID, asset *Asset) (*Asset, error) {
+func (d *DB) updateAsset(ctx context.Context, ac *AccessClaim, assetID uuid.UUID, asset *Asset) (*Asset, error) {
 	if ac == nil {
 		return nil, ErrNoAccess
 	}
-	_, err := d.NewUpdate().
+	q := d.DB.NewUpdate().
 		Model(asset).
 		Where("id = ?", assetID).
 		Where("sa_deleted_at IS NULL").
 		ExcludeColumn("id", "user_id", "blob_url", "sa_created_at", "sa_updated_at", "sa_deleted_at").
-		Returning("*").
-		Exec(ctx, asset)
-	if err != nil {
-		return nil, err
-	}
-	return asset, nil
-}
-
-func (d *DB) PatchAsset(ctx context.Context, ac *AccessClaim, assetID uuid.UUID, asset *Asset) (*Asset, error) {
-	if ac == nil {
-		return nil, ErrNoAccess
-	}
-	q := d.NewUpdate().
-		Model(asset).
-		Where("id = ?", assetID).
-		Where("sa_deleted_at IS NULL").
-		ExcludeColumn("id", "user_id", "sa_created_at", "sa_updated_at", "sa_deleted_at").
 		OmitZero().
 		Returning("*")
 	for _, column := range asset.PatchNulls() {
@@ -103,12 +86,12 @@ func (d *DB) PatchAsset(ctx context.Context, ac *AccessClaim, assetID uuid.UUID,
 	return asset, nil
 }
 
-func (d *DB) DeleteAsset(ctx context.Context, ac *AccessClaim, assetID uuid.UUID) (*Asset, error) {
+func (d *DB) deleteAsset(ctx context.Context, ac *AccessClaim, assetID uuid.UUID) (*Asset, error) {
 	if ac == nil {
 		return nil, ErrNoAccess
 	}
 	var asset Asset
-	_, err := d.NewUpdate().
+	_, err := d.DB.NewUpdate().
 		Model(&asset).
 		Set("sa_deleted_at = NOW()").
 		Where("id = ?", assetID).

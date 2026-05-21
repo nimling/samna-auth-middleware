@@ -306,7 +306,7 @@ func ObjectTypeOf(model any) (ObjectType, error) {
 	return "", fmt.Errorf("bun.BaseModel has no table tag")
 }
 
-func extractModelID(model any) (uuid.UUID, error) {
+func ModelID(model any) (uuid.UUID, error) {
 	v := reflect.ValueOf(model)
 	if !v.IsValid() {
 		return uuid.Nil, fmt.Errorf("model is nil")

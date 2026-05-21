@@ -105,3 +105,86 @@ func (e *httpClient) execute(ctx context.Context, method string, expectedStatus 
 		return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
 	}
 }
+
+func decodeInto(body io.ReadCloser, out any) error {
+	defer body.Close()
+	if out == nil {
+		return nil
+	}
+	var envelope ResponseEnvelope
+	if err := json.NewDecoder(body).Decode(&envelope); err != nil {
+		return fmt.Errorf("decode envelope: %w", err)
+	}
+	if len(envelope.Data) == 0 {
+		return nil
+	}
+	if err := json.Unmarshal(envelope.Data, out); err != nil {
+		return fmt.Errorf("decode data: %w", err)
+	}
+	return nil
+}
+
+func Get(ctx context.Context, path string, out any) error {
+	c := newClient()
+	u, err := joinURL(c.apiURL, path)
+	if err != nil {
+		return fmt.Errorf("build url: %w", err)
+	}
+	body, err := c.client.Get(ctx, u)
+	if err != nil {
+		return err
+	}
+	return decodeInto(body, out)
+}
+
+func Post(ctx context.Context, path string, payload any, out any) error {
+	c := newClient()
+	u, err := joinURL(c.apiURL, path)
+	if err != nil {
+		return fmt.Errorf("build url: %w", err)
+	}
+	body, err := c.client.Post(ctx, payload, u)
+	if err != nil {
+		return err
+	}
+	return decodeInto(body, out)
+}
+
+func Put(ctx context.Context, path string, payload any, out any) error {
+	c := newClient()
+	u, err := joinURL(c.apiURL, path)
+	if err != nil {
+		return fmt.Errorf("build url: %w", err)
+	}
+	body, err := c.client.Put(ctx, payload, u)
+	if err != nil {
+		return err
+	}
+	return decodeInto(body, out)
+}
+
+func Patch(ctx context.Context, path string, payload any, out any) error {
+	c := newClient()
+	u, err := joinURL(c.apiURL, path)
+	if err != nil {
+		return fmt.Errorf("build url: %w", err)
+	}
+	body, err := c.client.Patch(ctx, payload, u)
+	if err != nil {
+		return err
+	}
+	return decodeInto(body, out)
+}
+
+func Delete(ctx context.Context, path string, out any) error {
+	c := newClient()
+	u, err := joinURL(c.apiURL, path)
+	if err != nil {
+		return fmt.Errorf("build url: %w", err)
+	}
+	body, err := c.client.Delete(ctx, u)
+	if err != nil {
+		return err
+	}
+	return decodeInto(body, out)
+}

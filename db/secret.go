@@ -43,7 +43,7 @@ func (d *DB) GetSecret(ctx context.Context, secretID uuid.UUID) (*SamnaSecret, e
 	return &secret, nil
 }
 
-func (d *DB) PostSecret(ctx context.Context, ac *AccessClaim, body BodySecret) (*SamnaSecret, error) {
+func (d *DB) insertSecret(ctx context.Context, ac *AccessClaim, body BodySecret) (*SamnaSecret, error) {
 	if ac == nil {
 		return nil, ErrNoAccess
 	}
@@ -110,7 +110,7 @@ func (d *DB) PostSecret(ctx context.Context, ac *AccessClaim, body BodySecret) (
 	return &secret, nil
 }
 
-func (d *DB) PutSecret(ctx context.Context, ac *AccessClaim, secretID uuid.UUID, body BodySecret) (*SamnaSecret, error) {
+func (d *DB) updateSecret(ctx context.Context, ac *AccessClaim, secretID uuid.UUID, body BodySecret) (*SamnaSecret, error) {
 	if ac == nil {
 		return nil, ErrNoAccess
 	}
@@ -139,7 +139,7 @@ func (d *DB) PutSecret(ctx context.Context, ac *AccessClaim, secretID uuid.UUID,
 	if body.ExpiresAt != nil {
 		secret.ExpiresAt = body.ExpiresAt
 	}
-	_, err = d.NewUpdate().
+	_, err = d.DB.NewUpdate().
 		Model(secret).
 		Where("sa_deleted_at IS NULL").
 		Where("id = ?", secretID).
@@ -153,16 +153,12 @@ func (d *DB) PutSecret(ctx context.Context, ac *AccessClaim, secretID uuid.UUID,
 	return secret, nil
 }
 
-func (d *DB) PatchSecret(ctx context.Context, ac *AccessClaim, secretID uuid.UUID, body BodySecret) (*SamnaSecret, error) {
-	return d.PutSecret(ctx, ac, secretID, body)
-}
-
-func (d *DB) DeleteSecret(ctx context.Context, ac *AccessClaim, secretID uuid.UUID) (*SamnaSecret, error) {
+func (d *DB) deleteSecret(ctx context.Context, ac *AccessClaim, secretID uuid.UUID) (*SamnaSecret, error) {
 	if ac == nil {
 		return nil, ErrNoAccess
 	}
 	var secret SamnaSecret
-	_, err := d.NewUpdate().
+	_, err := d.DB.NewUpdate().
 		Model(&secret).
 		Where("id = ?", secretID).
 		Where("sa_deleted_at IS NULL").

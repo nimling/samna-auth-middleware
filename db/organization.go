@@ -72,13 +72,13 @@ func (d *DB) GetParentOrganizations(ctx context.Context, startID uuid.UUID) ([]u
 	return ids, err
 }
 
-func (d *DB) PostOrganization(ctx context.Context, ac *AccessClaim, org *Organization) (*Organization, error) {
+func (d *DB) insertOrganization(ctx context.Context, ac *AccessClaim, org *Organization) (*Organization, error) {
 	if ac == nil {
 		return nil, ErrNoAccess
 	}
 	org.CreatedBy = *ac.UserClaimID
 	org.RootID = ac.RootID
-	_, err := d.NewInsert().
+	_, err := d.DB.NewInsert().
 		Model(org).
 		ExcludeColumn("id", "sa_created_at", "sa_updated_at", "sa_deleted_at").
 		Value("app_id", "claimius.get_disciple_app_id()").
@@ -121,28 +121,11 @@ func (d *DB) PostRootOrganization(ctx context.Context, ac *AccessClaim, org *Org
 	return org, nil
 }
 
-func (d *DB) PutOrganization(ctx context.Context, ac *AccessClaim, orgID uuid.UUID, org *Organization) (*Organization, error) {
+func (d *DB) updateOrganization(ctx context.Context, ac *AccessClaim, orgID uuid.UUID, org *Organization) (*Organization, error) {
 	if ac == nil {
 		return nil, ErrNoAccess
 	}
-	_, err := d.NewUpdate().
-		Model(org).
-		Where("id = ?", orgID).
-		Where("sa_deleted_at IS NULL").
-		ExcludeColumn("id", "app_id", "sa_owner_id", "sa_root_id", "sa_created_by", "provider_id", "sa_created_at", "sa_updated_at", "sa_deleted_at").
-		Returning("*").
-		Exec(ctx, org)
-	if err != nil {
-		return nil, err
-	}
-	return org, nil
-}
-
-func (d *DB) PatchOrganization(ctx context.Context, ac *AccessClaim, orgID uuid.UUID, org *Organization) (*Organization, error) {
-	if ac == nil {
-		return nil, ErrNoAccess
-	}
-	q := d.NewUpdate().
+	q := d.DB.NewUpdate().
 		Model(org).
 		Where("id = ?", orgID).
 		Where("sa_deleted_at IS NULL").
@@ -159,12 +142,12 @@ func (d *DB) PatchOrganization(ctx context.Context, ac *AccessClaim, orgID uuid.
 	return org, nil
 }
 
-func (d *DB) DeleteOrganization(ctx context.Context, ac *AccessClaim, orgID uuid.UUID) (*Organization, error) {
+func (d *DB) deleteOrganization(ctx context.Context, ac *AccessClaim, orgID uuid.UUID) (*Organization, error) {
 	if ac == nil {
 		return nil, ErrNoAccess
 	}
 	var org Organization
-	_, err := d.NewUpdate().
+	_, err := d.DB.NewUpdate().
 		Model(&org).
 		Where("id = ?", orgID).
 		Where("sa_deleted_at IS NULL").

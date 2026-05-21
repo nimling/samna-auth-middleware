@@ -72,12 +72,12 @@ func (d *DB) GetParentLocations(ctx context.Context, startID uuid.UUID) ([]uuid.
 	return ids, err
 }
 
-func (d *DB) PostLocation(ctx context.Context, ac *AccessClaim, loc *Location) (*Location, error) {
+func (d *DB) insertLocation(ctx context.Context, ac *AccessClaim, loc *Location) (*Location, error) {
 	if ac == nil {
 		return nil, ErrNoAccess
 	}
 	loc.CreatedBy = *ac.UserClaimID
-	_, err := d.NewInsert().
+	_, err := d.DB.NewInsert().
 		Model(loc).
 		ExcludeColumn("id", "sa_root_id", "sa_created_at", "sa_updated_at", "sa_deleted_at").
 		Value("app_id", "claimius.get_disciple_app_id()").
@@ -89,28 +89,11 @@ func (d *DB) PostLocation(ctx context.Context, ac *AccessClaim, loc *Location) (
 	return loc, nil
 }
 
-func (d *DB) PutLocation(ctx context.Context, ac *AccessClaim, locationID uuid.UUID, loc *Location) (*Location, error) {
+func (d *DB) updateLocation(ctx context.Context, ac *AccessClaim, locationID uuid.UUID, loc *Location) (*Location, error) {
 	if ac == nil {
 		return nil, ErrNoAccess
 	}
-	_, err := d.NewUpdate().
-		Model(loc).
-		Where("id = ?", locationID).
-		Where("sa_deleted_at IS NULL").
-		ExcludeColumn("id", "app_id", "sa_owner_id", "sa_root_id", "sa_parent_id", "sa_created_by", "provider_id", "sa_created_at", "sa_updated_at", "sa_deleted_at").
-		Returning("*").
-		Exec(ctx, loc)
-	if err != nil {
-		return nil, err
-	}
-	return loc, nil
-}
-
-func (d *DB) PatchLocation(ctx context.Context, ac *AccessClaim, locationID uuid.UUID, loc *Location) (*Location, error) {
-	if ac == nil {
-		return nil, ErrNoAccess
-	}
-	q := d.NewUpdate().
+	q := d.DB.NewUpdate().
 		Model(loc).
 		Where("id = ?", locationID).
 		Where("sa_deleted_at IS NULL").
@@ -127,12 +110,12 @@ func (d *DB) PatchLocation(ctx context.Context, ac *AccessClaim, locationID uuid
 	return loc, nil
 }
 
-func (d *DB) DeleteLocation(ctx context.Context, ac *AccessClaim, locationID uuid.UUID) (*Location, error) {
+func (d *DB) deleteLocation(ctx context.Context, ac *AccessClaim, locationID uuid.UUID) (*Location, error) {
 	if ac == nil {
 		return nil, ErrNoAccess
 	}
 	var loc Location
-	_, err := d.NewUpdate().
+	_, err := d.DB.NewUpdate().
 		Model(&loc).
 		Where("id = ?", locationID).
 		Where("sa_deleted_at IS NULL").

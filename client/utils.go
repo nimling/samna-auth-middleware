@@ -11,7 +11,6 @@ import (
 	"strconv"
 
 	"github.com/google/uuid"
-	"github.com/nimling/samna-auth-middleware/db"
 )
 
 func jsonReader(v any) (io.ReadCloser, error) {
@@ -71,7 +70,7 @@ func joinURL(baseURL string, segments ...string) (string, error) {
 	return base.String(), nil
 }
 
-func appendGraphQuery(u string, startID *uuid.UUID, depth int, requiredAccess db.ClaimAccess) string {
+func AppendGraphQuery(u string, startID *uuid.UUID, depth int, requiredAccess int) string {
 	q := url.Values{}
 	if startID != nil {
 		q.Set("start_id", startID.String())
@@ -79,7 +78,7 @@ func appendGraphQuery(u string, startID *uuid.UUID, depth int, requiredAccess db
 	if depth != 0 {
 		q.Set("depth", strconv.Itoa(depth))
 	}
-	q.Set("required_access", strconv.Itoa(int(requiredAccess)))
+	q.Set("required_access", strconv.Itoa(requiredAccess))
 	encoded := q.Encode()
 	if encoded == "" {
 		return u

@@ -52,13 +52,13 @@ func (d *DB) GetUserFields(ctx context.Context, fieldID uuid.UUID) ([]UserField,
 	return fields, nil
 }
 
-func (d *DB) PostObjectField(ctx context.Context, ac *AccessClaim, field *ObjectField) (*ObjectField, error) {
+func (d *DB) insertObjectField(ctx context.Context, ac *AccessClaim, field *ObjectField) (*ObjectField, error) {
 	if ac == nil {
 		return nil, ErrNoAccess
 	}
 	field.CreatedBy = ac.UserClaimID
 	field.OwnerID = ac.OwnerID
-	_, err := d.NewInsert().
+	_, err := d.DB.NewInsert().
 		Model(field).
 		ExcludeColumn("id", "sa_created_at", "sa_updated_at", "sa_deleted_at").
 		Value("app_id", "claimius.get_disciple_app_id()").
@@ -70,28 +70,11 @@ func (d *DB) PostObjectField(ctx context.Context, ac *AccessClaim, field *Object
 	return field, nil
 }
 
-func (d *DB) PutObjectField(ctx context.Context, ac *AccessClaim, fieldID uuid.UUID, field *ObjectField) (*ObjectField, error) {
+func (d *DB) updateObjectField(ctx context.Context, ac *AccessClaim, fieldID uuid.UUID, field *ObjectField) (*ObjectField, error) {
 	if ac == nil {
 		return nil, ErrNoAccess
 	}
-	_, err := d.NewUpdate().
-		Model(field).
-		Where("id = ?", fieldID).
-		Where("sa_deleted_at IS NULL").
-		ExcludeColumn("id", "app_id", "sa_owner_id", "sa_created_by", "sa_created_at", "sa_updated_at", "sa_deleted_at").
-		Returning("*").
-		Exec(ctx, field)
-	if err != nil {
-		return nil, err
-	}
-	return field, nil
-}
-
-func (d *DB) PatchObjectField(ctx context.Context, ac *AccessClaim, fieldID uuid.UUID, field *ObjectField) (*ObjectField, error) {
-	if ac == nil {
-		return nil, ErrNoAccess
-	}
-	q := d.NewUpdate().
+	q := d.DB.NewUpdate().
 		Model(field).
 		Where("id = ?", fieldID).
 		Where("sa_deleted_at IS NULL").
@@ -108,12 +91,12 @@ func (d *DB) PatchObjectField(ctx context.Context, ac *AccessClaim, fieldID uuid
 	return field, nil
 }
 
-func (d *DB) DeleteObjectField(ctx context.Context, ac *AccessClaim, fieldID uuid.UUID) (*ObjectField, error) {
+func (d *DB) deleteObjectField(ctx context.Context, ac *AccessClaim, fieldID uuid.UUID) (*ObjectField, error) {
 	if ac == nil {
 		return nil, ErrNoAccess
 	}
 	var field ObjectField
-	_, err := d.NewUpdate().
+	_, err := d.DB.NewUpdate().
 		Model(&field).
 		Where("id = ?", fieldID).
 		Set("sa_deleted_at = NOW()").
@@ -126,13 +109,13 @@ func (d *DB) DeleteObjectField(ctx context.Context, ac *AccessClaim, fieldID uui
 	return &field, nil
 }
 
-func (d *DB) PostUserField(ctx context.Context, ac *AccessClaim, field *UserField) (*UserField, error) {
+func (d *DB) insertUserField(ctx context.Context, ac *AccessClaim, field *UserField) (*UserField, error) {
 	if ac == nil {
 		return nil, ErrNoAccess
 	}
 	field.CreatedBy = ac.UserClaimID
 	field.OwnerID = ac.OwnerID
-	_, err := d.NewInsert().
+	_, err := d.DB.NewInsert().
 		Model(field).
 		ExcludeColumn("id", "sa_created_at", "sa_updated_at", "sa_deleted_at").
 		Value("app_id", "claimius.get_disciple_app_id()").
@@ -144,28 +127,11 @@ func (d *DB) PostUserField(ctx context.Context, ac *AccessClaim, field *UserFiel
 	return field, nil
 }
 
-func (d *DB) PutUserField(ctx context.Context, ac *AccessClaim, valueID uuid.UUID, field *UserField) (*UserField, error) {
+func (d *DB) updateUserField(ctx context.Context, ac *AccessClaim, valueID uuid.UUID, field *UserField) (*UserField, error) {
 	if ac == nil {
 		return nil, ErrNoAccess
 	}
-	_, err := d.NewUpdate().
-		Model(field).
-		Where("id = ?", valueID).
-		Where("sa_deleted_at IS NULL").
-		ExcludeColumn("id", "app_id", "field_id", "user_id", "sa_owner_id", "sa_created_by", "sa_created_at", "sa_updated_at", "sa_deleted_at").
-		Returning("*").
-		Exec(ctx, field)
-	if err != nil {
-		return nil, err
-	}
-	return field, nil
-}
-
-func (d *DB) PatchUserField(ctx context.Context, ac *AccessClaim, valueID uuid.UUID, field *UserField) (*UserField, error) {
-	if ac == nil {
-		return nil, ErrNoAccess
-	}
-	q := d.NewUpdate().
+	q := d.DB.NewUpdate().
 		Model(field).
 		Where("id = ?", valueID).
 		Where("sa_deleted_at IS NULL").
@@ -182,12 +148,12 @@ func (d *DB) PatchUserField(ctx context.Context, ac *AccessClaim, valueID uuid.U
 	return field, nil
 }
 
-func (d *DB) DeleteUserField(ctx context.Context, ac *AccessClaim, valueID uuid.UUID) (*UserField, error) {
+func (d *DB) deleteUserField(ctx context.Context, ac *AccessClaim, valueID uuid.UUID) (*UserField, error) {
 	if ac == nil {
 		return nil, ErrNoAccess
 	}
 	var field UserField
-	_, err := d.NewUpdate().
+	_, err := d.DB.NewUpdate().
 		Model(&field).
 		Where("id = ?", valueID).
 		Where("sa_deleted_at IS NULL").

@@ -12,7 +12,6 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 
-	"github.com/nimling/samna-auth-middleware/client"
 	"github.com/nimling/samna-auth-middleware/db"
 	"github.com/nimling/samna-auth-middleware/pkg/encryption"
 )
@@ -74,30 +73,18 @@ func IssueGuestToken(ctx context.Context, claimID uuid.UUID, issuer string) (*Gu
 			OwnerID: claim.OwnerID,
 		}
 
-		if db.GetDebugMode() != db.DebugModeNone {
-			userID, _ := ctx.Value("user_id").(uuid.UUID)
-			if _, postErr := db.Instance().PostUser(ctx, guestUser); postErr != nil {
-				return nil, fmt.Errorf("upsert guest user: %w", postErr)
-			}
-			ac, accErr := db.Instance().MutationAccess(ctx, userID, claimID, db.OBJECT_TYPE_CLAIM, db.ACCESS_OWNER)
-			if accErr != nil {
-				return nil, fmt.Errorf("guest claim access: %w", accErr)
-			}
-			newClaim, postClaimErr := db.Instance().PostClaimUser(ctx, ac, claimID, &guestClaim)
-			if postClaimErr != nil {
-				return nil, fmt.Errorf("assign guest claim: %w", postClaimErr)
-			}
-			existingClaim = *newClaim
-		} else {
-			if _, postErr := client.PostUser(ctx, guestUser); postErr != nil {
-				return nil, fmt.Errorf("upsert guest user: %w", postErr)
-			}
-			newClaim, postClaimErr := client.PostUserClaim(ctx, claimID, guestClaim)
-			if postClaimErr != nil {
-				return nil, fmt.Errorf("assign guest claim: %w", postClaimErr)
-			}
-			existingClaim = *newClaim
+		userID, _ := ctx.Value("user_id").(uuid.UUID)
+		if err := db.Instance().NewInsert().Model(&guestUser).Scan(ctx, &guestUser); err != nil {
+			return nil, fmt.Errorf("upsert guest user: %w", err)
 		}
+		ac, accErr := db.Instance().MutationAccess(ctx, userID, claimID, db.OBJECT_TYPE_CLAIM, db.ACCESS_OWNER)
+		if accErr != nil {
+			return nil, fmt.Errorf("guest claim access: %w", accErr)
+		}
+		if err := db.Instance().NewInsert().Model(&guestClaim).With(ac).Parent("claim", claimID).Scan(ctx, &guestClaim); err != nil {
+			return nil, fmt.Errorf("assign guest claim: %w", err)
+		}
+		existingClaim = guestClaim
 	} else if err != nil {
 		return nil, fmt.Errorf("read user_claim: %w", err)
 	}
