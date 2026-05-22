@@ -171,15 +171,14 @@ func (d *DB) deleteSecret(ctx context.Context, ac *AccessClaim, secretID uuid.UU
 	return &secret, nil
 }
 
-func (d *DB) ResolveSecret(ctx context.Context, secretID uuid.UUID) (string, error) {
-	secret, err := d.GetSecret(ctx, secretID)
-	if err != nil {
-		return "", err
+func (s *SamnaSecret) Resolve(ctx context.Context) (string, error) {
+	if s == nil {
+		return "", fmt.Errorf("secret is nil")
 	}
-	if secret.ExpiresAt != nil && !secret.ExpiresAt.After(time.Now()) {
+	if s.ExpiresAt != nil && !s.ExpiresAt.After(time.Now()) {
 		return "", ErrSecretExpired
 	}
-	app, err := d.GetApp(ctx)
+	app, err := instance.GetApp(ctx)
 	if err != nil {
 		return "", err
 	}
@@ -187,7 +186,7 @@ func (d *DB) ResolveSecret(ctx context.Context, secretID uuid.UUID) (string, err
 	if err != nil {
 		return "", err
 	}
-	ciphertext, err := hex.DecodeString(secret.Value)
+	ciphertext, err := hex.DecodeString(s.Value)
 	if err != nil {
 		return "", err
 	}

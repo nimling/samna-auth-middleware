@@ -302,6 +302,14 @@ func (q *InsertQuery) execClaimius(ctx context.Context, dest ...any) (bool, erro
 		}
 		*m = *result
 		return true, dispatchScan(m, dest...)
+	case *SamnaSecret:
+		body := BodySecret{Key: &m.Key, Value: &m.Value, OwnerID: &m.OwnerID, ExpiresAt: m.ExpiresAt}
+		result, err := q.db.insertSecret(ctx, q.actor, body)
+		if err != nil {
+			return true, err
+		}
+		*m = *result
+		return true, dispatchScan(m, dest...)
 	}
 	return false, nil
 }
@@ -491,6 +499,14 @@ func (q *UpdateQuery) execClaimius(ctx context.Context, dest ...any) (bool, erro
 		return true, dispatchScan(m, dest...)
 	case *UserRelation:
 		result, err := q.db.updateRelation(ctx, q.actor, q.recordID, m)
+		if err != nil {
+			return true, err
+		}
+		*m = *result
+		return true, dispatchScan(m, dest...)
+	case *SamnaSecret:
+		body := BodySecret{Key: &m.Key, Value: &m.Value, OwnerID: &m.OwnerID, ExpiresAt: m.ExpiresAt}
+		result, err := q.db.updateSecret(ctx, q.actor, q.recordID, body)
 		if err != nil {
 			return true, err
 		}
@@ -707,6 +723,13 @@ func (q *DeleteQuery) execClaimius(ctx context.Context, dest ...any) (bool, erro
 			return true, fmt.Errorf("delete user_relation: user parent id required")
 		}
 		result, err := q.db.deleteRelation(ctx, q.actor, userID, q.recordID)
+		if err != nil {
+			return true, err
+		}
+		*m = *result
+		return true, dispatchScan(m, dest...)
+	case *SamnaSecret:
+		result, err := q.db.deleteSecret(ctx, q.actor, q.recordID)
 		if err != nil {
 			return true, err
 		}
