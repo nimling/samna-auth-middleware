@@ -275,12 +275,11 @@ func (q *InsertQuery) execClaimius(ctx context.Context, dest ...any) (bool, erro
 		*m = *result
 		return true, dispatchScan(m, dest...)
 	case *SamnaUser:
-		result, err := q.db.insertUser(ctx, *m)
-		if err != nil {
-			return true, err
-		}
-		*m = *result
-		return true, dispatchScan(m, dest...)
+		_ = m
+		return true, fmt.Errorf("samna_user creation reserved; use IssueUserToken")
+	case *UserToken:
+		_ = m
+		return true, fmt.Errorf("user_token creation reserved; use IssueUserToken")
 	case *Organization:
 		result, err := q.db.insertOrganization(ctx, q.actor, m)
 		if err != nil {
@@ -697,12 +696,8 @@ func (q *DeleteQuery) execClaimius(ctx context.Context, dest ...any) (bool, erro
 		*m = *result
 		return true, dispatchScan(m, dest...)
 	case *SamnaUser:
-		result, err := q.db.deleteUser(ctx, q.actor, q.recordID)
-		if err != nil {
-			return true, err
-		}
-		*m = *result
-		return true, dispatchScan(m, dest...)
+		_ = m
+		return true, fmt.Errorf("samna_user deletion reserved; use RemoveUser")
 	case *Organization:
 		result, err := q.db.deleteOrganization(ctx, q.actor, q.recordID)
 		if err != nil {

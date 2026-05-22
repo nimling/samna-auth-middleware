@@ -3,8 +3,11 @@ package db
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
+	"fmt"
 
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 	"github.com/uptrace/bun"
 )
@@ -270,4 +273,110 @@ func (d *DB) AssertUserTokenSingleRoot(ctx context.Context, externalID, idClaim 
 		return ErrRootConflict
 	}
 	return nil
+}
+
+func (d *DB) IssueUserToken(ctx context.Context, payload SamnaUserToken) (*SamnaUser, error) {
+	if payload.Token == "" {
+		return nil, fmt.Errorf("token is required")
+	}
+	parsed, _, err := jwt.NewParser().ParseUnverified(payload.Token, jwt.MapClaims{})
+	if err != nil {
+		return nil, fmt.Errorf("parse token: %w", err)
+	}
+	claims, ok := parsed.Claims.(jwt.MapClaims)
+	if !ok {
+		return nil, fmt.Errorf("invalid token claims")
+	}
+
+	idClaim := "sub"
+	if payload.IDClaim != nil && *payload.IDClaim != "" {
+		idClaim = *payload.IDClaim
+	}
+	rawID, present := claims[idClaim]
+	if !present {
+		return nil, fmt.Errorf("id claim missing in token")
+	}
+	tokenID, ok := rawID.(string)
+	if !ok || tokenID == "" {
+		return nil, fmt.Errorf("id claim not a string")
+	}
+
+	var userID uuid.UUID
+	if payload.User != nil && payload.User.UserID != uuid.Nil {
+		userID = payload.User.UserID
+	} else if parsedID, parseErr := uuid.Parse(tokenID); parseErr == nil {
+		userID = parsedID
+	}
+
+	externalID := tokenID
+	if payload.User != nil && payload.User.ExternalID != nil && *payload.User.ExternalID != "" {
+		externalID = *payload.User.ExternalID
+	}
+
+	app, err := d.GetApp(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	user := SamnaUser{
+		UserID:     userID,
+		AppID:      app.ID,
+		ExternalID: &externalID,
+	}
+	if payload.User != nil {
+		user.FirstName = payload.User.FirstName
+		user.LastName = payload.User.LastName
+		user.UserName = payload.User.UserName
+		user.UserImage = payload.User.UserImage
+		user.Phone = payload.User.Phone
+		user.Email = payload.User.Email
+	}
+
+	if err := d.NewRaw(`
+		SELECT (claimius.ensure_app_user(?, claimius.get_disciple_app_id(), ?, ?, ?, ?, ?, ?, ?) -> 'samna_user' ->> 'user_id')::uuid
+	`, user.UserID, user.FirstName, user.LastName, user.UserName, user.UserImage, user.Email, user.Phone, user.ExternalID).Scan(ctx, &user.UserID); err != nil {
+		return nil, fmt.Errorf("ensure_app_user: %w", err)
+	}
+
+	fetched, err := d.GetUser(ctx, user.UserID, user.UserID)
+	if err != nil {
+		return nil, fmt.Errorf("fetch samna_user: %w", err)
+	}
+	user = *fetched
+
+	claimsJSON, marshalErr := json.Marshal(claims)
+	if marshalErr != nil {
+		return &user, fmt.Errorf("marshal token claims: %w", marshalErr)
+	}
+	tokenOwnerID := user.UserID
+	if payload.OwnerID != nil && *payload.OwnerID != uuid.Nil {
+		tokenOwnerID = *payload.OwnerID
+	}
+	if rootErr := d.AssertUserTokenSingleRoot(ctx, externalID, idClaim, tokenOwnerID); rootErr != nil {
+		return &user, rootErr
+	}
+	token := UserToken{
+		AppID:      app.ID,
+		UserID:     user.UserID,
+		IDClaim:    idClaim,
+		ExternalID: externalID,
+		ClaimID:    payload.ClaimID,
+		Data:       claimsJSON,
+		OwnerID:    tokenOwnerID,
+	}
+	if _, err := d.DB.NewInsert().Model(&token).
+		On("CONFLICT (app_id, sa_owner_id, id_claim, external_id) WHERE sa_deleted_at IS NULL DO UPDATE").
+		Set("user_id = EXCLUDED.user_id").
+		Set("claim_id = EXCLUDED.claim_id").
+		Set("data = EXCLUDED.data").
+		Set("sa_updated_at = now()").
+		Exec(ctx); err != nil {
+		return &user, fmt.Errorf("upsert user_token: %w", err)
+	}
+
+	return &user, nil
+}
+
+func (d *DB) RemoveUser(ctx context.Context, ac *AccessClaim, userID uuid.UUID) (*SamnaUser, error) {
+	return d.deleteUser(ctx, ac, userID)
 }
