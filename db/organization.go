@@ -77,7 +77,6 @@ func (d *DB) insertOrganization(ctx context.Context, ac *AccessClaim, org *Organ
 		return nil, ErrNoAccess
 	}
 	org.CreatedBy = *ac.UserClaimID
-	org.RootID = ac.RootID
 	_, err := d.DB.NewInsert().
 		Model(org).
 		ExcludeColumn("id", "sa_created_at", "sa_updated_at", "sa_deleted_at").

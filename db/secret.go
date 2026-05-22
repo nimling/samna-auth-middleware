@@ -50,15 +50,6 @@ func (d *DB) insertSecret(ctx context.Context, ac *AccessClaim, body BodySecret)
 	if ac.ClaimID == nil {
 		return nil, ErrNoAccess
 	}
-	if body.Key == nil || *body.Key == "" {
-		return nil, fmt.Errorf("key is required")
-	}
-	if body.Value == nil || *body.Value == "" {
-		return nil, fmt.Errorf("value is required")
-	}
-	if body.OwnerID == nil || *body.OwnerID == uuid.Nil {
-		return nil, fmt.Errorf("owner_id is required")
-	}
 	app, err := d.GetApp(ctx)
 	if err != nil {
 		return nil, err
