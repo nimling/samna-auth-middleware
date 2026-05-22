@@ -190,7 +190,7 @@ func (d *DB) updateUser(ctx context.Context, ac *AccessClaim, userID uuid.UUID, 
 	return user, nil
 }
 
-func (d *DB) deleteUser(ctx context.Context, ac *AccessClaim, userID uuid.UUID) (*SamnaUser, error) {
+func (d *DB) DeleteUser(ctx context.Context, ac *AccessClaim, userID uuid.UUID) (*SamnaUser, error) {
 	if ac == nil {
 		return nil, ErrNoAccess
 	}
@@ -377,6 +377,3 @@ func (d *DB) IssueUserToken(ctx context.Context, payload SamnaUserToken) (*Samna
 	return &user, nil
 }
 
-func (d *DB) RemoveUser(ctx context.Context, ac *AccessClaim, userID uuid.UUID) (*SamnaUser, error) {
-	return d.deleteUser(ctx, ac, userID)
-}

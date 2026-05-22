@@ -697,7 +697,7 @@ func (q *DeleteQuery) execClaimius(ctx context.Context, dest ...any) (bool, erro
 		return true, dispatchScan(m, dest...)
 	case *SamnaUser:
 		_ = m
-		return true, fmt.Errorf("samna_user deletion reserved; use RemoveUser")
+		return true, fmt.Errorf("samna_user deletion reserved; use DeleteUser")
 	case *Organization:
 		result, err := q.db.deleteOrganization(ctx, q.actor, q.recordID)
 		if err != nil {
