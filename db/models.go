@@ -520,6 +520,8 @@ type UserRelation struct {
 	ObjectID    uuid.UUID  `bun:"object_id" json:"object_id"`
 	Pinned      *int       `bun:"pinned" json:"pinned"`
 	Priority    *int       `bun:"priority" json:"priority"`
+	ParentID    *uuid.UUID `bun:"parent_id" json:"parent_id"`
+	SiblingID   *uuid.UUID `bun:"sibling_id" json:"sibling_id"`
 	UsedAt      *time.Time `bun:"used_at,default:now()" json:"used_at"`
 	DeletedAt   *time.Time `bun:"sa_deleted_at" json:"deleted_at,omitzero"`
 	CreatedAt   time.Time  `bun:"sa_created_at,default:now()" json:"created_at"`

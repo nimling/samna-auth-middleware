@@ -66,19 +66,66 @@ func (d *DB) GetUserClaims(ctx context.Context, userID uuid.UUID) ([]UserClaim, 
 	return claims, nil
 }
 
+type UserRelationFilters struct {
+	OrgIDs      []uuid.UUID
+	LocIDs      []uuid.UUID
+	UsrIDs      []uuid.UUID
+	ObjectTypes []ObjectType
+	ObjectIDs   []uuid.UUID
+	Pinned      *int
+	Priority    *int
+	ParentID    *uuid.UUID
+	SiblingID   *uuid.UUID
+	Description *string
+}
+
 func (d *DB) GetUserRelations(ctx context.Context, userID uuid.UUID) ([]UserRelation, error) {
 	relations := make([]UserRelation, 0)
-	err := d.NewSelect().
-		Model(&relations).
-		ExcludeColumn("sa_deleted_at").
-		ExcludeColumn("app_id").
-		Where("user_id = ?", userID).
-		Where("sa_deleted_at IS NULL").
-		Scan(ctx)
+	err := d.GetUserRelationsQuery(&relations, userID, UserRelationFilters{}).Scan(ctx)
 	if err != nil {
 		return nil, err
 	}
 	return relations, nil
+}
+
+func (d *DB) GetUserRelationsQuery(relations *[]UserRelation, userID uuid.UUID, f UserRelationFilters) *bun.SelectQuery {
+	q := d.NewSelect().
+		Model(relations).
+		ExcludeColumn("sa_deleted_at").
+		ExcludeColumn("app_id").
+		Where("user_relation.user_id = ?", userID).
+		Where("user_relation.sa_deleted_at IS NULL")
+	if len(f.OrgIDs) > 0 {
+		q = q.Where("user_relation.object_type = ? AND user_relation.object_id IN (?)", OBJECT_TYPE_ORGANIZATION, bun.In(f.OrgIDs))
+	}
+	if len(f.LocIDs) > 0 {
+		q = q.Where("user_relation.object_type = ? AND user_relation.object_id IN (?)", OBJECT_TYPE_LOCATION, bun.In(f.LocIDs))
+	}
+	if len(f.UsrIDs) > 0 {
+		q = q.Where("user_relation.object_type = ? AND user_relation.object_id IN (?)", OBJECT_TYPE_USER, bun.In(f.UsrIDs))
+	}
+	if len(f.ObjectTypes) > 0 {
+		q = q.Where("user_relation.object_type IN (?)", bun.In(f.ObjectTypes))
+	}
+	if len(f.ObjectIDs) > 0 {
+		q = q.Where("user_relation.object_id IN (?)", bun.In(f.ObjectIDs))
+	}
+	if f.Pinned != nil {
+		q = q.Where("user_relation.pinned = ?", *f.Pinned)
+	}
+	if f.Priority != nil {
+		q = q.Where("user_relation.priority = ?", *f.Priority)
+	}
+	if f.ParentID != nil {
+		q = q.Where("user_relation.parent_id = ?", *f.ParentID)
+	}
+	if f.SiblingID != nil {
+		q = q.Where("user_relation.sibling_id = ?", *f.SiblingID)
+	}
+	if f.Description != nil && *f.Description != "" {
+		q = q.Where("user_relation.description ILIKE ?", "%"+*f.Description+"%")
+	}
+	return q
 }
 
 func (d *DB) GetRelation(ctx context.Context, userID uuid.UUID, relationID uuid.UUID) (*UserRelation, error) {
