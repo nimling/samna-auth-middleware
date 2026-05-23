@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 
 	"github.com/google/uuid"
@@ -181,12 +182,12 @@ func (d *DB) insertClaim(ctx context.Context, ac *AccessClaim, claim *Claim) (*C
 	}
 	claim.CreatedBy = ac.UserClaimID
 	claim.RootID = ac.RootID
-	var id uuid.UUID
+	var payload []byte
 	err := d.NewRaw(`
 		SELECT (claimius.create_claim(
 			claimius.get_disciple_app_id(),
 			?, ?, ?, ?, ?, ?, ?, ?::claimius.claim_type
-		) -> 'claim' ->> 'id')::uuid
+		) -> 'claim')::jsonb
 	`,
 		claim.Name,
 		claim.Description,
@@ -196,18 +197,11 @@ func (d *DB) insertClaim(ctx context.Context, ac *AccessClaim, claim *Claim) (*C
 		claim.CreatedBy,
 		claim.Inherits,
 		string(claim.Type),
-	).Scan(ctx, &id)
+	).Scan(ctx, &payload)
 	if err != nil {
 		return nil, err
 	}
-	err = d.NewSelect().
-		Model(claim).
-		Where("sa_deleted_at IS NULL").
-		ExcludeColumn("sa_deleted_at").
-		ExcludeColumn("app_id").
-		Where("id = ?", id).
-		Scan(ctx)
-	if err != nil {
+	if err := json.Unmarshal(payload, claim); err != nil {
 		return nil, err
 	}
 	return claim, nil
@@ -235,26 +229,20 @@ func (d *DB) updateClaim(ctx context.Context, ac *AccessClaim, claimID uuid.UUID
 	if claim.HasKey("inherits") {
 		inherits = claim.Inherits
 	}
-	_, err := d.NewRaw(`
-		SELECT claimius.update_claim(?, ?, ?, ?, ?)
+	var payload []byte
+	err := d.NewRaw(`
+		SELECT (claimius.update_claim(?, ?, ?, ?, ?) -> 'claim')::jsonb
 	`,
 		claimID,
 		name,
 		description,
 		access,
 		inherits,
-	).Exec(ctx)
+	).Scan(ctx, &payload)
 	if err != nil {
 		return nil, err
 	}
-	err = d.NewSelect().
-		Model(claim).
-		Where("sa_deleted_at IS NULL").
-		ExcludeColumn("sa_deleted_at").
-		ExcludeColumn("app_id").
-		Where("id = ?", claimID).
-		Scan(ctx)
-	if err != nil {
+	if err := json.Unmarshal(payload, claim); err != nil {
 		return nil, err
 	}
 	return claim, nil
@@ -283,7 +271,7 @@ func (d *DB) insertClaimObject(ctx context.Context, ac *AccessClaim, claimID uui
 	co.OwnerID = ac.OwnerID
 	co.RootID = ac.RootID
 	co.CreatedBy = ac.UserClaimID
-	var id uuid.UUID
+	var payload []byte
 	err := d.NewRaw(`
 		SELECT (claimius.assign_claim_object(
 			p_app_id        := claimius.get_disciple_app_id(),
@@ -298,7 +286,7 @@ func (d *DB) insertClaimObject(ctx context.Context, ac *AccessClaim, claimID uui
 			p_reason        := ?,
 			p_ref_id        := ?,
 			p_scope         := ?
-		) -> 'claim_object' ->> 'id')::uuid
+		) -> 'claim_object')::jsonb
 	`,
 		claimID,
 		co.OwnerID,
@@ -311,18 +299,11 @@ func (d *DB) insertClaimObject(ctx context.Context, ac *AccessClaim, claimID uui
 		co.Reason,
 		co.RefID,
 		co.Scope,
-	).Scan(ctx, &id)
+	).Scan(ctx, &payload)
 	if err != nil {
 		return nil, err
 	}
-	err = d.NewSelect().
-		Model(co).
-		Where("sa_deleted_at IS NULL").
-		ExcludeColumn("sa_deleted_at").
-		ExcludeColumn("app_id").
-		Where("id = ?", id).
-		Scan(ctx)
-	if err != nil {
+	if err := json.Unmarshal(payload, co); err != nil {
 		return nil, err
 	}
 	return co, nil
@@ -361,12 +342,12 @@ func (d *DB) insertClaimUser(ctx context.Context, ac *AccessClaim, claimID uuid.
 	}
 	uc.OwnerID = ac.OwnerID
 	uc.CreatedBy = *ac.UserClaimID
-	var id uuid.UUID
+	var payload []byte
 	err := d.NewRaw(`
 		SELECT (claimius.assign_claim_user(
 			claimius.get_disciple_app_id(),
 			?, ?, ?, ?, ?, ?, ?
-		) -> 'user_claim' ->> 'id')::uuid
+		) -> 'user_claim')::jsonb
 	`,
 		claimID,
 		uc.UserID,
@@ -375,18 +356,11 @@ func (d *DB) insertClaimUser(ctx context.Context, ac *AccessClaim, claimID uuid.
 		uc.Reason,
 		uc.StartsAt,
 		uc.EndsAt,
-	).Scan(ctx, &id)
+	).Scan(ctx, &payload)
 	if err != nil {
 		return nil, err
 	}
-	err = d.NewSelect().
-		Model(uc).
-		Where("sa_deleted_at IS NULL").
-		ExcludeColumn("sa_deleted_at").
-		ExcludeColumn("app_id").
-		Where("id = ?", id).
-		Scan(ctx)
-	if err != nil {
+	if err := json.Unmarshal(payload, uc); err != nil {
 		return nil, err
 	}
 	return uc, nil

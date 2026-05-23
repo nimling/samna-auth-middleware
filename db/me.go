@@ -39,21 +39,6 @@ func (d *DB) UpdateMe(ctx echo.Context, user *SamnaUser) (*SamnaUser, error) {
 	return user, nil
 }
 
-func (d *DB) PatchMe(ctx echo.Context, user *SamnaUser) (*SamnaUser, error) {
-	userID, err := meUserID(ctx)
-	if err != nil {
-		return nil, err
-	}
-	ac, err := d.MutationAccess(ctx.Request().Context(), userID, userID, OBJECT_TYPE_USER, ACCESS_WRITE)
-	if err != nil {
-		return nil, err
-	}
-	if err := d.NewUpdate().Model(user).With(ac).ID(userID).Scan(ctx.Request().Context(), user); err != nil {
-		return nil, err
-	}
-	return user, nil
-}
-
 func (d *DB) GetMeClaims(ctx echo.Context) ([]Claim, error) {
 	userID, err := meUserID(ctx)
 	if err != nil {

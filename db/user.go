@@ -157,15 +157,19 @@ func (d *DB) deleteRelation(ctx context.Context, ac *AccessClaim, userID, relati
 	return &relation, nil
 }
 
-func (d *DB) insertUser(ctx context.Context, in SamnaUser) (*SamnaUser, error) {
-	var userID uuid.UUID
+func (d *DB) InsertUser(ctx context.Context, in *SamnaUser) (*SamnaUser, error) {
+	var payload []byte
 	err := d.NewRaw(`
-		SELECT (claimius.ensure_app_user(?, claimius.get_disciple_app_id(), ?, ?, ?, ?, ?, ?, ?) -> 'samna_user' ->> 'user_id')::uuid
-	`, in.UserID, in.FirstName, in.LastName, in.UserName, in.UserImage, in.Email, in.Phone, in.ExternalID).Scan(ctx, &userID)
+		SELECT (claimius.ensure_app_user(?, claimius.get_disciple_app_id(), ?, ?, ?, ?, ?, ?, ?) -> 'samna_user')::jsonb
+	`, in.UserID, in.FirstName, in.LastName, in.UserName, in.UserImage, in.Email, in.Phone, in.ExternalID).Scan(ctx, &payload)
 	if err != nil {
 		return nil, err
 	}
-	return d.GetUser(ctx, userID, userID)
+	var out SamnaUser
+	if err := json.Unmarshal(payload, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
 }
 
 func (d *DB) updateUser(ctx context.Context, ac *AccessClaim, userID uuid.UUID, user *SamnaUser) (*SamnaUser, error) {
@@ -332,17 +336,15 @@ func (d *DB) IssueUserToken(ctx context.Context, payload SamnaUserToken) (*Samna
 		user.Email = payload.User.Email
 	}
 
+	var userPayload []byte
 	if err := d.NewRaw(`
-		SELECT (claimius.ensure_app_user(?, claimius.get_disciple_app_id(), ?, ?, ?, ?, ?, ?, ?) -> 'samna_user' ->> 'user_id')::uuid
-	`, user.UserID, user.FirstName, user.LastName, user.UserName, user.UserImage, user.Email, user.Phone, user.ExternalID).Scan(ctx, &user.UserID); err != nil {
+		SELECT (claimius.ensure_app_user(?, claimius.get_disciple_app_id(), ?, ?, ?, ?, ?, ?, ?) -> 'samna_user')::jsonb
+	`, user.UserID, user.FirstName, user.LastName, user.UserName, user.UserImage, user.Email, user.Phone, user.ExternalID).Scan(ctx, &userPayload); err != nil {
 		return nil, fmt.Errorf("ensure_app_user: %w", err)
 	}
-
-	fetched, err := d.GetUser(ctx, user.UserID, user.UserID)
-	if err != nil {
-		return nil, fmt.Errorf("fetch samna_user: %w", err)
+	if err := json.Unmarshal(userPayload, &user); err != nil {
+		return nil, fmt.Errorf("unmarshal samna_user: %w", err)
 	}
-	user = *fetched
 
 	claimsJSON, marshalErr := json.Marshal(claims)
 	if marshalErr != nil {

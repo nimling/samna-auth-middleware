@@ -45,7 +45,7 @@ func PatchMe(ctx echo.Context) error {
 	if err := user.ValidatePatch(); err != nil {
 		return respondError(ctx, http.StatusBadRequest, err.Error())
 	}
-	updated, err := db.Instance().PatchMe(ctx, user)
+	updated, err := db.Instance().UpdateMe(ctx, user)
 	if err != nil {
 		if errors.Is(err, db.ErrNoAccess) {
 			return respondError(ctx, http.StatusForbidden, "Forbidden")
