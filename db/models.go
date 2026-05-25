@@ -93,6 +93,7 @@ const (
 	ACCESS_READ    ClaimAccess = 1 << 2
 	ACCESS_EXECUTE ClaimAccess = 1 << 3
 	ACCESS_DENY    ClaimAccess = 1 << 4
+	ACCESS_MEMBER  ClaimAccess = 1 << 5
 	ACCESS_ALL     ClaimAccess = ACCESS_OWNER | ACCESS_WRITE | ACCESS_READ | ACCESS_EXECUTE
 )
 

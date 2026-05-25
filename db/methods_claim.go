@@ -129,6 +129,19 @@ func (c *Claim) AssignUser(userIDs ...uuid.UUID) ([]UserClaim, error) {
 	return results, nil
 }
 
+func expandAccess(a ClaimAccess) ClaimAccess {
+	if a&ACCESS_OWNER == ACCESS_OWNER {
+		a |= ACCESS_WRITE | ACCESS_READ | ACCESS_EXECUTE
+	}
+	if a&ACCESS_WRITE == ACCESS_WRITE {
+		a |= ACCESS_READ | ACCESS_EXECUTE
+	}
+	if a&ACCESS_EXECUTE == ACCESS_EXECUTE {
+		a |= ACCESS_READ
+	}
+	return a
+}
+
 func (c *Claim) ReCreateFor(access ClaimAccess, opts ReCreateForOptions, userIDs ...uuid.UUID) (*Claim, error) {
 	if err := c.requireSession(); err != nil {
 		return nil, err
@@ -138,17 +151,6 @@ func (c *Claim) ReCreateFor(access ClaimAccess, opts ReCreateForOptions, userIDs
 		name = *opts.Name
 	}
 	inherits := c.Inherits
-	params := CreateClaimParams{
-		Name:        name,
-		Description: c.Description,
-		Access:      access,
-		Inherits:    &inherits,
-		Type:        c.Type,
-	}
-	newClaim, err := c.sessionDB.CreateClaim(c.sessionCtx, c.sessionActor, params)
-	if err != nil {
-		return nil, err
-	}
 
 	bindings := c.ClaimObjects
 	if len(bindings) == 0 {
@@ -162,6 +164,55 @@ func (c *Claim) ReCreateFor(access ClaimAccess, opts ReCreateForOptions, userIDs
 			return nil, err
 		}
 	}
+
+	expanded := expandAccess(access)
+	if len(bindings) > 0 {
+		primary := bindings[0]
+		existing := &Claim{}
+		err := c.sessionDB.NewSelect().
+			Model(existing).
+			ExcludeColumn("app_id").
+			Where("claim.sa_deleted_at IS NULL").
+			Where("claim.type = ?", c.Type).
+			Where("claim.sa_access = ?", int(expanded)).
+			Where("claim.inherits = ?", inherits).
+			Where("claim.name = ?", name).
+			Where("claim.sa_owner_id = ?", c.OwnerID).
+			Where(`EXISTS (
+				SELECT 1 FROM claimius.claim_object co
+				WHERE co.claim_id = claim.id
+				  AND co.sa_deleted_at IS NULL
+				  AND co.object_id = ?
+				  AND co.object_type = ?
+			)`, primary.ObjectID, primary.ObjectType).
+			Limit(1).
+			Scan(c.sessionCtx)
+		if err == nil {
+			existing.With(c.sessionCtx, c.sessionActor, c.sessionDB)
+			if len(userIDs) > 0 {
+				if _, err := existing.AssignUser(userIDs...); err != nil {
+					return nil, err
+				}
+			}
+			return existing, nil
+		}
+		if !errors.Is(err, sql.ErrNoRows) {
+			return nil, err
+		}
+	}
+
+	params := CreateClaimParams{
+		Name:        name,
+		Description: c.Description,
+		Access:      access,
+		Inherits:    &inherits,
+		Type:        c.Type,
+	}
+	newClaim, err := c.sessionDB.CreateClaim(c.sessionCtx, c.sessionActor, params)
+	if err != nil {
+		return nil, err
+	}
+
 	for i := range bindings {
 		src := bindings[i]
 		clone := ClaimObject{
