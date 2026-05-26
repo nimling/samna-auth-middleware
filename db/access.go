@@ -14,6 +14,16 @@ var (
 	ErrRootConflict   = errors.New("identity already registered under a different root")
 )
 
+func selfAccessClaim(userID uuid.UUID, requiredAccess ClaimAccess) *AccessClaim {
+	return &AccessClaim{
+		UserObjectID: userID,
+		Access:       int(requiredAccess),
+		OwnerID:      userID,
+		RootID:       userID,
+		DirectGrant:  true,
+	}
+}
+
 func (d *DB) MutationAccess(ctx context.Context, userID, objectID uuid.UUID, objectType string, requiredAccess ClaimAccess) (*AccessClaim, error) {
 	uc, err := d.GetAccess(ctx, userID, objectID, objectType, requiredAccess)
 	if err != nil && !errors.Is(err, ErrNoAccess) {
@@ -37,7 +47,7 @@ func (d *DB) MutationAccess(ctx context.Context, userID, objectID uuid.UUID, obj
 
 func (d *DB) UserAccess(ctx context.Context, actorID, targetUserID uuid.UUID, requiredAccess ClaimAccess) (*AccessClaim, error) {
 	if actorID == targetUserID {
-		return d.RootAccess(ctx, actorID, requiredAccess)
+		return selfAccessClaim(actorID, requiredAccess), nil
 	}
 	var visible bool
 	err := d.NewRaw(`

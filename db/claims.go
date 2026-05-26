@@ -11,6 +11,9 @@ import (
 )
 
 func (d *DB) GetAccess(ctx context.Context, userID, objectID uuid.UUID, objectType string, requiredAccess ClaimAccess) (*AccessClaim, error) {
+	if objectType == OBJECT_TYPE_USER && userID == objectID {
+		return selfAccessClaim(userID, requiredAccess), nil
+	}
 	claims := make([]AccessClaim, 0)
 	err := d.NewSelect().
 		TableExpr("claimius.get_access(?, claimius.get_disciple_app_id(), ?, ?, ?) AS claim", userID, objectID, objectType, requiredAccess).
@@ -47,6 +50,9 @@ func (d *DB) GetScopeAccess(ctx context.Context, userID uuid.UUID, scopeKey stri
 }
 
 func (d *DB) GetDirectAccess(ctx context.Context, userID, objectID uuid.UUID, objectType string) (*AccessClaim, error) {
+	if objectType == OBJECT_TYPE_USER && userID == objectID {
+		return selfAccessClaim(userID, ACCESS_ALL), nil
+	}
 	claims := make([]AccessClaim, 0)
 	err := d.NewSelect().
 		TableExpr("claimius.get_direct_access(?, claimius.get_disciple_app_id(), ?, ?) AS claim", userID, objectID, objectType).
