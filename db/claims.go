@@ -31,24 +31,6 @@ func (d *DB) GetAccess(ctx context.Context, userID, objectID uuid.UUID, objectTy
 	return &claims[0], nil
 }
 
-func (d *DB) GetScopeAccess(ctx context.Context, userID uuid.UUID, scopeKey string, requiredAccess ClaimAccess) (*AccessClaim, error) {
-	claims := make([]AccessClaim, 0)
-	err := d.NewSelect().
-		TableExpr("claimius.get_access(?, claimius.get_disciple_app_id(), ?::text, ?) AS claim", userID, scopeKey, requiredAccess).
-		Column("claim.*").
-		Scan(ctx, &claims)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, ErrNoAccess
-		}
-		return nil, ErrInternalServer
-	}
-	if len(claims) == 0 {
-		return nil, ErrNoAccess
-	}
-	return &claims[0], nil
-}
-
 func (d *DB) GetDirectAccess(ctx context.Context, userID, objectID uuid.UUID, objectType string) (*AccessClaim, error) {
 	if objectType == OBJECT_TYPE_USER && userID == objectID {
 		return selfAccessClaim(userID, ACCESS_ALL), nil
