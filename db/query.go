@@ -60,6 +60,25 @@ func ObjectWhere(userID uuid.UUID, objectType string, requiredAccess ClaimAccess
 	)
 }
 
+func ApplyWithAccess(q *bun.SelectQuery, userID uuid.UUID, objectType string, requiredAccess ClaimAccess) *bun.SelectQuery {
+	parts := strings.SplitN(objectType, ".", 2)
+	table := parts[len(parts)-1]
+	join := fmt.Sprintf(
+		`JOIN claimius.get_objects('%[1]s', claimius.get_disciple_app_id(), '%[2]s', %[3]d) ga ON ga.object_id = %[4]s.id`,
+		userID, objectType, requiredAccess, table,
+	)
+	return q.
+		Join(join).
+		ColumnExpr("?TableAlias.*").
+		ColumnExpr("ga.user_claim_id AS access_user_claim_id").
+		ColumnExpr("ga.sa_access AS access_sa_access").
+		ColumnExpr("ga.scope AS access_scope").
+		ColumnExpr("ga.sa_owner_id AS access_sa_owner_id").
+		ColumnExpr("ga.sa_root_id AS access_sa_root_id").
+		ColumnExpr("ga.sa_location_id AS access_sa_location_id").
+		ColumnExpr("ga.direct_grant AS access_direct_grant")
+}
+
 func AuditWhere(userID uuid.UUID, requiredAccess ClaimAccess) string {
 	return fmt.Sprintf(
 		`audit.id IN (SELECT id FROM claimius.get_audit('%[1]s', claimius.get_disciple_app_id(), %[2]d))`,
