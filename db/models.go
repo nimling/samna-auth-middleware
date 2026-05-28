@@ -377,15 +377,15 @@ type ClaimObject struct {
 }
 
 type AccessClaim struct {
-	UserObjectID uuid.UUID        `bun:"user_object_id" json:"user_object_id"`
-	UserClaimID  *uuid.UUID       `bun:"user_claim_id" json:"user_claim_id"`
-	ClaimID      *uuid.UUID       `bun:"claim_id" json:"claim_id"`
-	Access       int              `bun:"sa_access" json:"access"`
-	Scope        *json.RawMessage `bun:"scope,type:jsonb" json:"scope"`
-	OwnerID      uuid.UUID        `bun:"sa_owner_id" json:"owner_id"`
-	RootID       uuid.UUID        `bun:"sa_root_id" json:"root_id"`
-	LocationID   *uuid.UUID       `bun:"sa_location_id" json:"location_id"`
-	DirectGrant  bool             `bun:"direct_grant" json:"direct_grant"`
+	UserObjectID uuid.UUID        `bun:"user_object_id,scanonly" json:"user_object_id"`
+	UserClaimID  *uuid.UUID       `bun:"user_claim_id,scanonly" json:"user_claim_id"`
+	ClaimID      *uuid.UUID       `bun:"claim_id,scanonly" json:"claim_id"`
+	Access       int              `bun:"sa_access,scanonly" json:"access"`
+	Scope        *json.RawMessage `bun:"scope,type:jsonb,scanonly" json:"scope"`
+	OwnerID      uuid.UUID        `bun:"sa_owner_id,scanonly" json:"owner_id"`
+	RootID       uuid.UUID        `bun:"sa_root_id,scanonly" json:"root_id"`
+	LocationID   *uuid.UUID       `bun:"sa_location_id,scanonly" json:"location_id"`
+	DirectGrant  bool             `bun:"direct_grant,scanonly" json:"direct_grant"`
 }
 
 type Asset struct {
