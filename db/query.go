@@ -79,6 +79,23 @@ func ApplyWithAccess(q *bun.SelectQuery, userID uuid.UUID, objectType string, re
 		ColumnExpr("ga.direct_grant AS access_direct_grant")
 }
 
+func ApplyWithCreator(q *bun.SelectQuery, objectType string) *bun.SelectQuery {
+	parts := strings.SplitN(objectType, ".", 2)
+	table := parts[len(parts)-1]
+	return q.
+		ColumnExpr("?TableAlias.*").
+		Join(fmt.Sprintf(`LEFT JOIN claimius.user_claim AS creator_uc ON creator_uc.id = %s.sa_created_by`, table)).
+		Join(`LEFT JOIN claimius.samna_user AS creator_su ON creator_su.user_id = creator_uc.user_id AND creator_su.app_id = claimius.get_disciple_app_id()`).
+		ColumnExpr("creator_su.id AS creator_id").
+		ColumnExpr("creator_su.user_id AS creator_user_id").
+		ColumnExpr("creator_su.first_name AS creator_first_name").
+		ColumnExpr("creator_su.last_name AS creator_last_name").
+		ColumnExpr("creator_su.user_name AS creator_user_name").
+		ColumnExpr("creator_su.user_image AS creator_user_image").
+		ColumnExpr("creator_su.phone AS creator_phone").
+		ColumnExpr("creator_su.email AS creator_email")
+}
+
 func AuditWhere(userID uuid.UUID, requiredAccess ClaimAccess) string {
 	return fmt.Sprintf(
 		`audit.id IN (SELECT id FROM claimius.get_audit('%[1]s', claimius.get_disciple_app_id(), %[2]d))`,
