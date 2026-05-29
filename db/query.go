@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"strings"
 
 	"github.com/google/uuid"
@@ -13,6 +14,45 @@ import (
 
 	"github.com/nimling/samna-auth-middleware/client"
 )
+
+func modelTableName(db *DB, model any) string {
+	if db == nil || model == nil {
+		return ""
+	}
+	t := reflect.TypeOf(model)
+	if t.Kind() == reflect.Ptr {
+		t = t.Elem()
+	}
+	if t.Kind() != reflect.Struct {
+		return ""
+	}
+	table := db.DB.Dialect().Tables().Get(t)
+	if table == nil {
+		return ""
+	}
+	return string(table.Name)
+}
+
+func embeddedPtr(model any, target reflect.Type) any {
+	v := reflect.ValueOf(model)
+	if !v.IsValid() || v.Kind() != reflect.Ptr || v.IsNil() {
+		return nil
+	}
+	if v.Type().Elem() == target {
+		return model
+	}
+	elem := v.Elem()
+	if elem.Kind() != reflect.Struct {
+		return nil
+	}
+	for i := 0; i < elem.NumField(); i++ {
+		f := elem.Field(i)
+		if f.Type() == target && f.CanAddr() {
+			return f.Addr().Interface()
+		}
+	}
+	return nil
+}
 
 func QueryWithObject(ctx echo.Context) ([]ObjectType, error) {
 	seen := make(map[ObjectType]struct{})
@@ -285,15 +325,23 @@ func (q *InsertQuery) Scan(ctx context.Context, dest ...any) error {
 }
 
 func (q *InsertQuery) execClaimius(ctx context.Context, dest ...any) (bool, error) {
-	switch m := q.model.(type) {
-	case *Claim:
+	switch modelTableName(q.db, q.model) {
+	case "claimius.claim":
+		m, ok := embeddedPtr(q.model, reflect.TypeOf(Claim{})).(*Claim)
+		if !ok {
+			return false, nil
+		}
 		result, err := q.db.insertClaim(ctx, q.actor, m)
 		if err != nil {
 			return true, err
 		}
 		*m = *result
-		return true, dispatchScan(m, dest...)
-	case *ClaimObject:
+		return true, dispatchScan(q.model, dest...)
+	case "claimius.claim_object":
+		m, ok := embeddedPtr(q.model, reflect.TypeOf(ClaimObject{})).(*ClaimObject)
+		if !ok {
+			return false, nil
+		}
 		claimID, ok := q.parents["claim"]
 		if !ok {
 			return true, fmt.Errorf("insert claim_object: claim parent id required")
@@ -303,8 +351,12 @@ func (q *InsertQuery) execClaimius(ctx context.Context, dest ...any) (bool, erro
 			return true, err
 		}
 		*m = *result
-		return true, dispatchScan(m, dest...)
-	case *UserClaim:
+		return true, dispatchScan(q.model, dest...)
+	case "claimius.user_claim":
+		m, ok := embeddedPtr(q.model, reflect.TypeOf(UserClaim{})).(*UserClaim)
+		if !ok {
+			return false, nil
+		}
 		claimID, ok := q.parents["claim"]
 		if !ok {
 			return true, fmt.Errorf("insert user_claim: claim parent id required")
@@ -314,46 +366,65 @@ func (q *InsertQuery) execClaimius(ctx context.Context, dest ...any) (bool, erro
 			return true, err
 		}
 		*m = *result
-		return true, dispatchScan(m, dest...)
-	case *SamnaUser:
+		return true, dispatchScan(q.model, dest...)
+	case "claimius.samna_user":
+		m, ok := embeddedPtr(q.model, reflect.TypeOf(SamnaUser{})).(*SamnaUser)
+		if !ok {
+			return false, nil
+		}
 		result, err := q.db.InsertUser(ctx, m)
 		if err != nil {
 			return true, err
 		}
 		*m = *result
-		return true, dispatchScan(m, dest...)
-	case *UserToken:
-		_ = m
+		return true, dispatchScan(q.model, dest...)
+	case "claimius.user_token":
 		return true, fmt.Errorf("user_token creation reserved; use IssueUserToken")
-	case *Organization:
+	case "claimius.organization":
+		m, ok := embeddedPtr(q.model, reflect.TypeOf(Organization{})).(*Organization)
+		if !ok {
+			return false, nil
+		}
 		result, err := q.db.insertOrganization(ctx, q.actor, m)
 		if err != nil {
 			return true, err
 		}
 		*m = *result
-		return true, dispatchScan(m, dest...)
-	case *Location:
+		return true, dispatchScan(q.model, dest...)
+	case "claimius.location":
+		m, ok := embeddedPtr(q.model, reflect.TypeOf(Location{})).(*Location)
+		if !ok {
+			return false, nil
+		}
 		result, err := q.db.insertLocation(ctx, q.actor, m)
 		if err != nil {
 			return true, err
 		}
 		*m = *result
-		return true, dispatchScan(m, dest...)
-	case *UserRelation:
+		return true, dispatchScan(q.model, dest...)
+	case "claimius.user_relation":
+		m, ok := embeddedPtr(q.model, reflect.TypeOf(UserRelation{})).(*UserRelation)
+		if !ok {
+			return false, nil
+		}
 		result, err := q.db.insertRelation(ctx, q.actor, m)
 		if err != nil {
 			return true, err
 		}
 		*m = *result
-		return true, dispatchScan(m, dest...)
-	case *SamnaSecret:
+		return true, dispatchScan(q.model, dest...)
+	case "claimius.samna_secret":
+		m, ok := embeddedPtr(q.model, reflect.TypeOf(SamnaSecret{})).(*SamnaSecret)
+		if !ok {
+			return false, nil
+		}
 		body := BodySecret{Key: &m.Key, Value: &m.Value, OwnerID: &m.OwnerID, ExpiresAt: m.ExpiresAt}
 		result, err := q.db.insertSecret(ctx, q.actor, body)
 		if err != nil {
 			return true, err
 		}
 		*m = *result
-		return true, dispatchScan(m, dest...)
+		return true, dispatchScan(q.model, dest...)
 	}
 	return false, nil
 }
@@ -512,50 +583,74 @@ func (q *UpdateQuery) execClaimius(ctx context.Context, dest ...any) (bool, erro
 	if q.recordID == uuid.Nil {
 		return false, nil
 	}
-	switch m := q.model.(type) {
-	case *Claim:
+	switch modelTableName(q.db, q.model) {
+	case "claimius.claim":
+		m, ok := embeddedPtr(q.model, reflect.TypeOf(Claim{})).(*Claim)
+		if !ok {
+			return false, nil
+		}
 		result, err := q.db.updateClaim(ctx, q.actor, q.recordID, m)
 		if err != nil {
 			return true, err
 		}
 		*m = *result
-		return true, dispatchScan(m, dest...)
-	case *SamnaUser:
+		return true, dispatchScan(q.model, dest...)
+	case "claimius.samna_user":
+		m, ok := embeddedPtr(q.model, reflect.TypeOf(SamnaUser{})).(*SamnaUser)
+		if !ok {
+			return false, nil
+		}
 		result, err := q.db.updateUser(ctx, q.actor, q.recordID, m)
 		if err != nil {
 			return true, err
 		}
 		*m = *result
-		return true, dispatchScan(m, dest...)
-	case *Organization:
+		return true, dispatchScan(q.model, dest...)
+	case "claimius.organization":
+		m, ok := embeddedPtr(q.model, reflect.TypeOf(Organization{})).(*Organization)
+		if !ok {
+			return false, nil
+		}
 		result, err := q.db.updateOrganization(ctx, q.actor, q.recordID, m)
 		if err != nil {
 			return true, err
 		}
 		*m = *result
-		return true, dispatchScan(m, dest...)
-	case *Location:
+		return true, dispatchScan(q.model, dest...)
+	case "claimius.location":
+		m, ok := embeddedPtr(q.model, reflect.TypeOf(Location{})).(*Location)
+		if !ok {
+			return false, nil
+		}
 		result, err := q.db.updateLocation(ctx, q.actor, q.recordID, m)
 		if err != nil {
 			return true, err
 		}
 		*m = *result
-		return true, dispatchScan(m, dest...)
-	case *UserRelation:
+		return true, dispatchScan(q.model, dest...)
+	case "claimius.user_relation":
+		m, ok := embeddedPtr(q.model, reflect.TypeOf(UserRelation{})).(*UserRelation)
+		if !ok {
+			return false, nil
+		}
 		result, err := q.db.updateRelation(ctx, q.actor, q.recordID, m)
 		if err != nil {
 			return true, err
 		}
 		*m = *result
-		return true, dispatchScan(m, dest...)
-	case *SamnaSecret:
+		return true, dispatchScan(q.model, dest...)
+	case "claimius.samna_secret":
+		m, ok := embeddedPtr(q.model, reflect.TypeOf(SamnaSecret{})).(*SamnaSecret)
+		if !ok {
+			return false, nil
+		}
 		body := BodySecret{Key: &m.Key, Value: &m.Value, OwnerID: &m.OwnerID, ExpiresAt: m.ExpiresAt}
 		result, err := q.db.updateSecret(ctx, q.actor, q.recordID, body)
 		if err != nil {
 			return true, err
 		}
 		*m = *result
-		return true, dispatchScan(m, dest...)
+		return true, dispatchScan(q.model, dest...)
 	}
 	return false, nil
 }
@@ -710,15 +805,23 @@ func (q *DeleteQuery) execClaimius(ctx context.Context, dest ...any) (bool, erro
 	if q.recordID == uuid.Nil {
 		return false, nil
 	}
-	switch m := q.model.(type) {
-	case *Claim:
+	switch modelTableName(q.db, q.model) {
+	case "claimius.claim":
+		m, ok := embeddedPtr(q.model, reflect.TypeOf(Claim{})).(*Claim)
+		if !ok {
+			return false, nil
+		}
 		result, err := q.db.deleteClaim(ctx, q.actor, q.recordID)
 		if err != nil {
 			return true, err
 		}
 		*m = *result
-		return true, dispatchScan(m, dest...)
-	case *ClaimObject:
+		return true, dispatchScan(q.model, dest...)
+	case "claimius.claim_object":
+		m, ok := embeddedPtr(q.model, reflect.TypeOf(ClaimObject{})).(*ClaimObject)
+		if !ok {
+			return false, nil
+		}
 		claimID, ok := q.parents["claim"]
 		if !ok {
 			return true, fmt.Errorf("delete claim_object: claim parent id required")
@@ -728,8 +831,12 @@ func (q *DeleteQuery) execClaimius(ctx context.Context, dest ...any) (bool, erro
 			return true, err
 		}
 		*m = *result
-		return true, dispatchScan(m, dest...)
-	case *UserClaim:
+		return true, dispatchScan(q.model, dest...)
+	case "claimius.user_claim":
+		m, ok := embeddedPtr(q.model, reflect.TypeOf(UserClaim{})).(*UserClaim)
+		if !ok {
+			return false, nil
+		}
 		claimID, ok := q.parents["claim"]
 		if !ok {
 			return true, fmt.Errorf("delete user_claim: claim parent id required")
@@ -739,25 +846,36 @@ func (q *DeleteQuery) execClaimius(ctx context.Context, dest ...any) (bool, erro
 			return true, err
 		}
 		*m = *result
-		return true, dispatchScan(m, dest...)
-	case *SamnaUser:
-		_ = m
+		return true, dispatchScan(q.model, dest...)
+	case "claimius.samna_user":
 		return true, fmt.Errorf("samna_user deletion reserved; use DeleteUser")
-	case *Organization:
+	case "claimius.organization":
+		m, ok := embeddedPtr(q.model, reflect.TypeOf(Organization{})).(*Organization)
+		if !ok {
+			return false, nil
+		}
 		result, err := q.db.deleteOrganization(ctx, q.actor, q.recordID)
 		if err != nil {
 			return true, err
 		}
 		*m = *result
-		return true, dispatchScan(m, dest...)
-	case *Location:
+		return true, dispatchScan(q.model, dest...)
+	case "claimius.location":
+		m, ok := embeddedPtr(q.model, reflect.TypeOf(Location{})).(*Location)
+		if !ok {
+			return false, nil
+		}
 		result, err := q.db.deleteLocation(ctx, q.actor, q.recordID)
 		if err != nil {
 			return true, err
 		}
 		*m = *result
-		return true, dispatchScan(m, dest...)
-	case *UserRelation:
+		return true, dispatchScan(q.model, dest...)
+	case "claimius.user_relation":
+		m, ok := embeddedPtr(q.model, reflect.TypeOf(UserRelation{})).(*UserRelation)
+		if !ok {
+			return false, nil
+		}
 		userID, ok := q.parents["user"]
 		if !ok {
 			return true, fmt.Errorf("delete user_relation: user parent id required")
@@ -767,14 +885,18 @@ func (q *DeleteQuery) execClaimius(ctx context.Context, dest ...any) (bool, erro
 			return true, err
 		}
 		*m = *result
-		return true, dispatchScan(m, dest...)
-	case *SamnaSecret:
+		return true, dispatchScan(q.model, dest...)
+	case "claimius.samna_secret":
+		m, ok := embeddedPtr(q.model, reflect.TypeOf(SamnaSecret{})).(*SamnaSecret)
+		if !ok {
+			return false, nil
+		}
 		result, err := q.db.deleteSecret(ctx, q.actor, q.recordID)
 		if err != nil {
 			return true, err
 		}
 		*m = *result
-		return true, dispatchScan(m, dest...)
+		return true, dispatchScan(q.model, dest...)
 	}
 	return false, nil
 }
