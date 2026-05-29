@@ -45,35 +45,30 @@ func RegisterSyncFunc(fn func(ctx context.Context) error) {
 	syncFunc = fn
 }
 
-func Init(logger echo.Logger) {
+func Init(logger echo.Logger) (*DB, error) {
 	pgHost, exists := os.LookupEnv("PGHOST")
 	if !exists {
-		logger.Fatal("PGHOST not set")
-		return
+		return nil, errors.New("PGHOST not set")
 	}
 
 	pgDatabase, exists := os.LookupEnv("PGDATABASE")
 	if !exists {
-		logger.Fatal("PGDATABASE not set")
-		return
+		return nil, errors.New("PGDATABASE not set")
 	}
 
 	pgPort, exists := os.LookupEnv("PGPORT")
 	if !exists {
-		logger.Fatal("PGPORT not set")
-		return
+		return nil, errors.New("PGPORT not set")
 	}
 
 	pgUser, exists := os.LookupEnv("PGUSER")
 	if !exists {
-		logger.Fatal("PGUSER not set")
-		return
+		return nil, errors.New("PGUSER not set")
 	}
 
 	pgPass, exists := os.LookupEnv("PGPASSWORD")
 	if !exists {
-		logger.Fatal("PGPASSWORD not set")
-		return
+		return nil, errors.New("PGPASSWORD not set")
 	}
 
 	sslMode := os.Getenv("PGSSLMODE")
@@ -89,8 +84,7 @@ func Init(logger echo.Logger) {
 	bunDB := bun.NewDB(sqlDB, pgdialect.New())
 
 	if bunDB == nil {
-		logger.Fatal("Failed to initialize db")
-		return
+		return nil, errors.New("failed to initialize db")
 	}
 
 	instance = &DB{DB: bunDB, Logger: logger}
@@ -100,8 +94,7 @@ func Init(logger echo.Logger) {
 	instance.SetConnMaxLifetime(5 * time.Minute)
 
 	if err := instance.Ping(); err != nil {
-		logger.Fatal(err)
-		return
+		return nil, fmt.Errorf("ping: %w", err)
 	}
 
 	instance.RegisterModel(
@@ -127,12 +120,12 @@ func Init(logger echo.Logger) {
 
 	if GetDebugMode() != DebugModeNone {
 		logger.Info("Debug mode active, skipping initial sync")
-		return
+		return instance, nil
 	}
 
 	if syncFunc == nil {
 		logger.Warn("No sync function registered, skipping initial sync")
-		return
+		return instance, nil
 	}
 
 	maxRetries := 5
@@ -141,11 +134,11 @@ func Init(logger echo.Logger) {
 		if err := syncFunc(context.Background()); err != nil {
 			if errors.Is(err, ErrSyncUnreachable) {
 				logger.Warnf("Initial sync skipped: %v", err)
-				return
+				return instance, nil
 			}
 			logger.Errorf("Initial sync attempt %d failed: %v", attempt, err)
 			if attempt == maxRetries {
-				panic(fmt.Sprintf("initial sync failed after %d attempts: %v", maxRetries, err))
+				return nil, fmt.Errorf("initial sync failed after %d attempts: %w", maxRetries, err)
 			}
 			time.Sleep(time.Duration(attempt) * 2 * time.Second)
 			continue
@@ -153,6 +146,8 @@ func Init(logger echo.Logger) {
 		logger.Info("Initial sync completed")
 		break
 	}
+
+	return instance, nil
 }
 
 type DebugMode string
