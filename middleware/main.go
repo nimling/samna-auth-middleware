@@ -29,6 +29,9 @@ func UserAuthMiddleware(opts *UserAuthOptions) echo.MiddlewareFunc {
 				if forwardErr := forwardUserToken(ctx); forwardErr != nil {
 					return respondAuthError(ctx, forwardErr)
 				}
+				if forwardErr := forwardUserExternal(ctx); forwardErr != nil {
+					return respondAuthError(ctx, forwardErr)
+				}
 				return next(ctx)
 			}
 		}
@@ -43,6 +46,9 @@ func UserAuthMiddleware(opts *UserAuthOptions) echo.MiddlewareFunc {
 					return respondAuthError(ctx, clientErr)
 				}
 				if forwardErr := forwardUserToken(ctx); forwardErr != nil {
+					return respondAuthError(ctx, forwardErr)
+				}
+				if forwardErr := forwardUserExternal(ctx); forwardErr != nil {
 					return respondAuthError(ctx, forwardErr)
 				}
 				return next(ctx)
@@ -92,6 +98,9 @@ func UserAuthMiddleware(opts *UserAuthOptions) echo.MiddlewareFunc {
 					return respondAuthError(ctx, clientErr)
 				}
 				if forwardErr := forwardUserToken(ctx); forwardErr != nil {
+					return respondAuthError(ctx, forwardErr)
+				}
+				if forwardErr := forwardUserExternal(ctx); forwardErr != nil {
 					return respondAuthError(ctx, forwardErr)
 				}
 				return next(ctx)
