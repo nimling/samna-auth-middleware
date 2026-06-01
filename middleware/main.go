@@ -115,6 +115,9 @@ func respondAuthError(ctx echo.Context, err error) error {
 	if errors.Is(err, ErrorUserTokenNotRecognized) {
 		return ctx.String(http.StatusNotFound, string(ErrorUserTokenNotRecognized))
 	}
+	if errors.Is(err, ErrorUserExternalNotRecognized) {
+		return ctx.String(http.StatusNotFound, string(ErrorUserExternalNotRecognized))
+	}
 	if errors.Is(err, ErrorUnauthorized) {
 		return ctx.String(http.StatusUnauthorized, "Unauthorized")
 	}
