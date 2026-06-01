@@ -81,3 +81,44 @@ func (d *DB) validateTokenDebug(ctx context.Context, token string) (*SamnaUser, 
 	}
 	return fetched, ownerID, nil
 }
+
+func (d *DB) ResolveExternalUser(ctx context.Context, callerID uuid.UUID, externalID string) (*SamnaUser, error) {
+	if externalID == "" {
+		return nil, fmt.Errorf("external_id is required")
+	}
+	app, err := d.GetApp(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var userID uuid.UUID
+	var ownerID uuid.UUID
+	err = d.NewRaw(`
+		SELECT t.user_id, t.sa_owner_id
+		  FROM claimius.user_token t
+		 WHERE t.app_id        = ?
+		   AND t.type          = 'external'
+		   AND t.external_id   = ?
+		   AND t.sa_deleted_at IS NULL
+		 ORDER BY t.sa_created_at DESC
+		 LIMIT 1
+	`, app.ID, externalID).Scan(ctx, &userID, &ownerID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("resolve external user: %w", err)
+	}
+	if ownerID != uuid.Nil && callerID != uuid.Nil {
+		if !d.HasAccess(ctx, callerID, ownerID, OBJECT_TYPE_ORGANIZATION, ACCESS_READ) {
+			return nil, nil
+		}
+	}
+	fetched, ferr := d.GetUser(ctx, userID, userID)
+	if ferr != nil {
+		if errors.Is(ferr, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("fetch samna_user: %w", ferr)
+	}
+	return fetched, nil
+}

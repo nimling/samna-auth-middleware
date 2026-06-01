@@ -31,7 +31,8 @@ const (
 	ErrorTokenExpired           AuthError = "Token is expired"
 	ErrorUnauthorized           AuthError = "Unauthorized"
 	ErrorCredentialMissing      AuthError = "Credential missing"
-	ErrorUserTokenNotRecognized AuthError = "User token not recognized"
+	ErrorUserTokenNotRecognized    AuthError = "User token not recognized"
+	ErrorUserExternalNotRecognized AuthError = "User external id not recognized"
 )
 
 type UserType string

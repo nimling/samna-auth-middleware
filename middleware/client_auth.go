@@ -14,7 +14,10 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
-const userTokenHeader = "SAuth-User-Token"
+const (
+	userTokenHeader    = "SAuth-User-Token"
+	userExternalHeader = "SAuth-User-ID"
+)
 
 func ClientAuthMiddleware() echo.MiddlewareFunc {
 	debugUserID := getEnvUUID("SAUTH_DEBUG_USER_ID")
@@ -25,6 +28,9 @@ func ClientAuthMiddleware() echo.MiddlewareFunc {
 			if debugUserID != nil {
 				ctx.Set(UserIDKey, *debugUserID)
 				if forwardErr := forwardUserToken(ctx); forwardErr != nil {
+					return respondAuthError(ctx, forwardErr)
+				}
+				if forwardErr := forwardUserExternal(ctx); forwardErr != nil {
 					return respondAuthError(ctx, forwardErr)
 				}
 				return next(ctx)
@@ -38,6 +44,9 @@ func ClientAuthMiddleware() echo.MiddlewareFunc {
 				return respondAuthError(ctx, err)
 			}
 			if forwardErr := forwardUserToken(ctx); forwardErr != nil {
+				return respondAuthError(ctx, forwardErr)
+			}
+			if forwardErr := forwardUserExternal(ctx); forwardErr != nil {
 				return respondAuthError(ctx, forwardErr)
 			}
 			return next(ctx)
@@ -116,6 +125,23 @@ func forwardUserToken(ctx echo.Context) error {
 		if !db.Instance().HasAccess(ctx.Request().Context(), clientID, ownerID, db.OBJECT_TYPE_ORGANIZATION, db.ACCESS_READ) {
 			return ErrorUserTokenNotRecognized
 		}
+	}
+	ctx.Set(UserIDKey, user.UserID)
+	return nil
+}
+
+func forwardUserExternal(ctx echo.Context) error {
+	externalID := ctx.Request().Header.Get(userExternalHeader)
+	if externalID == "" {
+		return nil
+	}
+	clientID, _ := ctx.Get(UserIDKey).(uuid.UUID)
+	user, err := db.Instance().ResolveExternalUser(ctx.Request().Context(), clientID, externalID)
+	if err != nil {
+		return fmt.Errorf("resolve external user id: %w: %w", err, ErrorUserExternalNotRecognized)
+	}
+	if user == nil || user.UserID == uuid.Nil {
+		return ErrorUserExternalNotRecognized
 	}
 	ctx.Set(UserIDKey, user.UserID)
 	return nil

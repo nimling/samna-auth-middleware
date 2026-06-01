@@ -167,10 +167,20 @@ type SamnaUser struct {
 	CreatedAt time.Time        `bun:"sa_created_at,default:now()" json:"created_at"`
 	UpdatedAt time.Time        `bun:"sa_updated_at,default:now()" json:"updated_at"`
 	OwnerID   *uuid.UUID       `bun:"-" json:"owner_id,omitempty"`
+	ClaimID   *uuid.UUID       `bun:"-" json:"claim_id,omitempty"`
 }
 
 type SamnaUserToken struct {
 	Token   string     `json:"token"`
+	IDClaim *string    `json:"id_claim,omitempty"`
+	User    *SamnaUser `json:"user,omitempty"`
+	ClaimID *uuid.UUID `json:"claim_id"`
+	AppID   *uuid.UUID `json:"app_id"`
+	Reason  *string    `json:"reason,omitempty"`
+	OwnerID *uuid.UUID `json:"owner_id,omitempty"`
+}
+
+type SamnaUserExternal struct {
 	IDClaim *string    `json:"id_claim,omitempty"`
 	User    *SamnaUser `json:"user,omitempty"`
 	ClaimID *uuid.UUID `json:"claim_id"`
@@ -189,6 +199,7 @@ type UserToken struct {
 	ExternalID string          `bun:"external_id,notnull" json:"external_id"`
 	ClaimID    *uuid.UUID      `bun:"claim_id,type:uuid" json:"claim_id,omitempty"`
 	Data       json.RawMessage `bun:"data,type:jsonb" json:"data,omitempty"`
+	Type       string          `bun:"type,notnull,default:'token'" json:"type"`
 	OwnerID    uuid.UUID       `bun:"sa_owner_id,notnull,type:uuid" json:"owner_id"`
 	CreatedBy  *uuid.UUID      `bun:"sa_created_by,type:uuid" json:"created_by,omitempty"`
 	DeletedAt  *time.Time      `bun:"sa_deleted_at" json:"deleted_at,omitzero"`

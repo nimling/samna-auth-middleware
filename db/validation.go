@@ -35,6 +35,12 @@ func (u *SamnaUser) ValidatePost() error {
 	if _, err := mail.ParseAddress(u.Email); err != nil {
 		return errors.New("email invalid")
 	}
+	if u.OwnerID == nil || *u.OwnerID == uuid.Nil {
+		return errors.New("owner_id required")
+	}
+	if u.ClaimID == nil || *u.ClaimID == uuid.Nil {
+		return errors.New("claim_id required")
+	}
 	if u.Status != nil {
 		switch UserStatus(*u.Status) {
 		case USER_STATUS_ACTIVE, USER_STATUS_PENDING, USER_STATUS_SUSPENDED, USER_STATUS_INACTIVE:
@@ -49,8 +55,30 @@ func (t *SamnaUserToken) ValidatePost() error {
 	if t.Token == "" {
 		return errors.New("token required")
 	}
+	if t.OwnerID == nil || *t.OwnerID == uuid.Nil {
+		return errors.New("owner_id required")
+	}
+	if t.ClaimID == nil || *t.ClaimID == uuid.Nil {
+		return errors.New("claim_id required")
+	}
 	if t.User != nil && t.User.ExternalID != nil && *t.User.ExternalID != "" {
 		return errors.New("user.external_id not allowed")
+	}
+	return nil
+}
+
+func (e *SamnaUserExternal) ValidatePost() error {
+	if e.OwnerID == nil || *e.OwnerID == uuid.Nil {
+		return errors.New("owner_id required")
+	}
+	if e.ClaimID == nil || *e.ClaimID == uuid.Nil {
+		return errors.New("claim_id required")
+	}
+	if e.User == nil {
+		return errors.New("user required")
+	}
+	if e.User.ExternalID == nil || *e.User.ExternalID == "" {
+		return errors.New("user.external_id required")
 	}
 	return nil
 }

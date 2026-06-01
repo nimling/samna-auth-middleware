@@ -326,9 +326,58 @@ func (d *DB) AssertUserTokenSingleRoot(ctx context.Context, externalID, idClaim 
 	return nil
 }
 
-func (d *DB) IssueUserToken(ctx context.Context, payload SamnaUserToken) (*SamnaUser, error) {
+func (d *DB) CreateOrganizationUser(ctx context.Context, ac *AccessClaim, in *SamnaUser) (*SamnaUser, error) {
+	if ac == nil || ac.UserClaimID == nil || ac.ClaimID == nil {
+		return nil, ErrNoAccess
+	}
+	if in == nil {
+		return nil, fmt.Errorf("user required")
+	}
+	if in.OwnerID == nil || *in.OwnerID == uuid.Nil {
+		return nil, fmt.Errorf("owner_id required")
+	}
+	if in.ClaimID == nil || *in.ClaimID == uuid.Nil {
+		return nil, fmt.Errorf("claim_id required")
+	}
+	userJSON, err := json.Marshal(in)
+	if err != nil {
+		return nil, fmt.Errorf("marshal user: %w", err)
+	}
+	return d.callCreateOrganizationUser(ctx, d.DB, ac, *in.OwnerID, userJSON)
+}
+
+func (d *DB) callCreateOrganizationUser(ctx context.Context, idb bun.IDB, ac *AccessClaim, ownerID uuid.UUID, userJSON []byte) (*SamnaUser, error) {
+	var payload []byte
+	err := idb.NewRaw(`
+		SELECT claimius.create_organization_user(?, ?, ?, ?::jsonb)
+	`, *ac.UserClaimID, *ac.ClaimID, ownerID, string(userJSON)).Scan(ctx, &payload)
+	if err != nil {
+		return nil, fmt.Errorf("create_organization_user: %w", err)
+	}
+	var wrapped struct {
+		SamnaUser *SamnaUser `json:"samna_user"`
+	}
+	if err := json.Unmarshal(payload, &wrapped); err != nil {
+		return nil, fmt.Errorf("unmarshal create_organization_user: %w", err)
+	}
+	if wrapped.SamnaUser == nil {
+		return nil, fmt.Errorf("create_organization_user returned no samna_user")
+	}
+	return wrapped.SamnaUser, nil
+}
+
+func (d *DB) IssueUserToken(ctx context.Context, ac *AccessClaim, payload SamnaUserToken) (*SamnaUser, error) {
+	if ac == nil || ac.UserClaimID == nil || ac.ClaimID == nil {
+		return nil, ErrNoAccess
+	}
 	if payload.Token == "" {
 		return nil, fmt.Errorf("token is required")
+	}
+	if payload.OwnerID == nil || *payload.OwnerID == uuid.Nil {
+		return nil, fmt.Errorf("owner_id required")
+	}
+	if payload.ClaimID == nil || *payload.ClaimID == uuid.Nil {
+		return nil, fmt.Errorf("claim_id required")
 	}
 	parsed, _, err := jwt.NewParser().ParseUnverified(payload.Token, jwt.MapClaims{})
 	if err != nil {
@@ -360,19 +409,12 @@ func (d *DB) IssueUserToken(ctx context.Context, payload SamnaUserToken) (*Samna
 	}
 
 	externalID := tokenID
-	if payload.User != nil && payload.User.ExternalID != nil && *payload.User.ExternalID != "" {
-		externalID = *payload.User.ExternalID
-	}
-
-	app, err := d.GetApp(ctx)
-	if err != nil {
-		return nil, err
-	}
 
 	user := SamnaUser{
 		UserID:     userID,
-		AppID:      app.ID,
 		ExternalID: &externalID,
+		OwnerID:    payload.OwnerID,
+		ClaimID:    payload.ClaimID,
 	}
 	if payload.User != nil {
 		user.FirstName = payload.User.FirstName
@@ -383,46 +425,123 @@ func (d *DB) IssueUserToken(ctx context.Context, payload SamnaUserToken) (*Samna
 		user.Email = payload.User.Email
 	}
 
-	var userPayload []byte
-	if err := d.NewRaw(`
-		SELECT (claimius.ensure_app_user(?, claimius.get_disciple_app_id(), ?, ?, ?, ?, ?, ?, ?) -> 'samna_user')::jsonb
-	`, user.UserID, user.FirstName, user.LastName, user.UserName, user.UserImage, user.Email, user.Phone, user.ExternalID).Scan(ctx, &userPayload); err != nil {
-		return nil, fmt.Errorf("ensure_app_user: %w", err)
-	}
-	if err := json.Unmarshal(userPayload, &user); err != nil {
-		return nil, fmt.Errorf("unmarshal samna_user: %w", err)
+	claimsJSON, err := json.Marshal(claims)
+	if err != nil {
+		return nil, fmt.Errorf("marshal token claims: %w", err)
 	}
 
-	claimsJSON, marshalErr := json.Marshal(claims)
-	if marshalErr != nil {
-		return &user, fmt.Errorf("marshal token claims: %w", marshalErr)
-	}
-	tokenOwnerID := user.UserID
-	if payload.OwnerID != nil && *payload.OwnerID != uuid.Nil {
-		tokenOwnerID = *payload.OwnerID
-	}
-	if rootErr := d.AssertUserTokenSingleRoot(ctx, externalID, idClaim, tokenOwnerID); rootErr != nil {
-		return &user, rootErr
-	}
-	token := UserToken{
-		AppID:      app.ID,
-		UserID:     user.UserID,
-		IDClaim:    idClaim,
-		ExternalID: externalID,
-		ClaimID:    payload.ClaimID,
-		Data:       claimsJSON,
-		OwnerID:    tokenOwnerID,
-	}
-	if _, err := d.DB.NewInsert().Model(&token).
-		On("CONFLICT (app_id, sa_owner_id, id_claim, external_id) WHERE sa_deleted_at IS NULL DO UPDATE").
-		Set("user_id = EXCLUDED.user_id").
-		Set("claim_id = EXCLUDED.claim_id").
-		Set("data = EXCLUDED.data").
-		Set("sa_updated_at = now()").
-		Exec(ctx); err != nil {
-		return &user, fmt.Errorf("upsert user_token: %w", err)
+	if rootErr := d.AssertUserTokenSingleRoot(ctx, externalID, idClaim, *payload.OwnerID); rootErr != nil {
+		return nil, rootErr
 	}
 
-	return &user, nil
+	userJSON, err := json.Marshal(user)
+	if err != nil {
+		return nil, fmt.Errorf("marshal user: %w", err)
+	}
+
+	var result *SamnaUser
+	err = d.DB.RunInTx(ctx, &sql.TxOptions{}, func(ctx context.Context, tx bun.Tx) error {
+		out, terr := d.callCreateOrganizationUser(ctx, tx, ac, *payload.OwnerID, userJSON)
+		if terr != nil {
+			return terr
+		}
+		token := UserToken{
+			UserID:     out.UserID,
+			IDClaim:    idClaim,
+			ExternalID: externalID,
+			ClaimID:    payload.ClaimID,
+			Data:       claimsJSON,
+			Type:       "token",
+			OwnerID:    *payload.OwnerID,
+			CreatedBy:  ac.UserClaimID,
+		}
+		if _, err := tx.NewInsert().Model(&token).
+			On("CONFLICT (app_id, sa_owner_id, id_claim, external_id) WHERE sa_deleted_at IS NULL DO UPDATE").
+			Set("user_id = EXCLUDED.user_id").
+			Set("claim_id = EXCLUDED.claim_id").
+			Set("data = EXCLUDED.data").
+			Set("type = EXCLUDED.type").
+			Set("sa_updated_at = now()").
+			Exec(ctx); err != nil {
+			return fmt.Errorf("upsert user_token: %w", err)
+		}
+		result = out
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+func (d *DB) UpsertUserExternal(ctx context.Context, ac *AccessClaim, payload SamnaUserExternal) (*SamnaUser, error) {
+	if ac == nil || ac.UserClaimID == nil || ac.ClaimID == nil {
+		return nil, ErrNoAccess
+	}
+	if payload.OwnerID == nil || *payload.OwnerID == uuid.Nil {
+		return nil, fmt.Errorf("owner_id required")
+	}
+	if payload.ClaimID == nil || *payload.ClaimID == uuid.Nil {
+		return nil, fmt.Errorf("claim_id required")
+	}
+	if payload.User == nil {
+		return nil, fmt.Errorf("user required")
+	}
+	if payload.User.ExternalID == nil || *payload.User.ExternalID == "" {
+		return nil, fmt.Errorf("user.external_id required")
+	}
+
+	idClaim := "external"
+	if payload.IDClaim != nil && *payload.IDClaim != "" {
+		idClaim = *payload.IDClaim
+	}
+	externalID := *payload.User.ExternalID
+
+	user := *payload.User
+	user.OwnerID = payload.OwnerID
+	user.ClaimID = payload.ClaimID
+
+	if rootErr := d.AssertUserTokenSingleRoot(ctx, externalID, idClaim, *payload.OwnerID); rootErr != nil {
+		return nil, rootErr
+	}
+
+	userJSON, err := json.Marshal(user)
+	if err != nil {
+		return nil, fmt.Errorf("marshal user: %w", err)
+	}
+
+	var result *SamnaUser
+	err = d.DB.RunInTx(ctx, &sql.TxOptions{}, func(ctx context.Context, tx bun.Tx) error {
+		out, terr := d.callCreateOrganizationUser(ctx, tx, ac, *payload.OwnerID, userJSON)
+		if terr != nil {
+			return terr
+		}
+		token := UserToken{
+			UserID:     out.UserID,
+			IDClaim:    idClaim,
+			ExternalID: externalID,
+			ClaimID:    payload.ClaimID,
+			Data:       json.RawMessage(`{}`),
+			Type:       "external",
+			OwnerID:    *payload.OwnerID,
+			CreatedBy:  ac.UserClaimID,
+		}
+		if _, err := tx.NewInsert().Model(&token).
+			On("CONFLICT (app_id, sa_owner_id, id_claim, external_id) WHERE sa_deleted_at IS NULL DO UPDATE").
+			Set("user_id = EXCLUDED.user_id").
+			Set("claim_id = EXCLUDED.claim_id").
+			Set("data = EXCLUDED.data").
+			Set("type = EXCLUDED.type").
+			Set("sa_updated_at = now()").
+			Exec(ctx); err != nil {
+			return fmt.Errorf("upsert user_token: %w", err)
+		}
+		result = out
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return result, nil
 }
 
