@@ -326,6 +326,14 @@ func (d *DB) AssertUserTokenSingleRoot(ctx context.Context, externalID, idClaim 
 	return nil
 }
 
+type OrganizationUserResult struct {
+	SamnaUser       *SamnaUser   `json:"samna_user"`
+	UserClaim       *UserClaim   `json:"user_claim"`
+	VirtualClaim    *Claim       `json:"virtual_claim"`
+	ClaimObject     *ClaimObject `json:"claim_object"`
+	CallerUserClaim *UserClaim   `json:"caller_user_claim"`
+}
+
 func (d *DB) CreateOrganizationUser(ctx context.Context, ac *AccessClaim, in *SamnaUser) (*SamnaUser, error) {
 	if ac == nil || ac.UserClaimID == nil || ac.ClaimID == nil {
 		return nil, ErrNoAccess
@@ -343,10 +351,14 @@ func (d *DB) CreateOrganizationUser(ctx context.Context, ac *AccessClaim, in *Sa
 	if err != nil {
 		return nil, fmt.Errorf("marshal user: %w", err)
 	}
-	return d.callCreateOrganizationUser(ctx, d.DB, ac, *in.OwnerID, userJSON)
+	result, err := d.callCreateOrganizationUser(ctx, d.DB, ac, *in.OwnerID, userJSON)
+	if err != nil {
+		return nil, err
+	}
+	return result.SamnaUser, nil
 }
 
-func (d *DB) callCreateOrganizationUser(ctx context.Context, idb bun.IDB, ac *AccessClaim, ownerID uuid.UUID, userJSON []byte) (*SamnaUser, error) {
+func (d *DB) callCreateOrganizationUser(ctx context.Context, idb bun.IDB, ac *AccessClaim, ownerID uuid.UUID, userJSON []byte) (*OrganizationUserResult, error) {
 	var payload []byte
 	err := idb.NewRaw(`
 		SELECT claimius.create_organization_user(?, ?, ?, ?::jsonb)
@@ -354,16 +366,14 @@ func (d *DB) callCreateOrganizationUser(ctx context.Context, idb bun.IDB, ac *Ac
 	if err != nil {
 		return nil, fmt.Errorf("create_organization_user: %w", err)
 	}
-	var wrapped struct {
-		SamnaUser *SamnaUser `json:"samna_user"`
-	}
-	if err := json.Unmarshal(payload, &wrapped); err != nil {
+	var result OrganizationUserResult
+	if err := json.Unmarshal(payload, &result); err != nil {
 		return nil, fmt.Errorf("unmarshal create_organization_user: %w", err)
 	}
-	if wrapped.SamnaUser == nil {
+	if result.SamnaUser == nil {
 		return nil, fmt.Errorf("create_organization_user returned no samna_user")
 	}
-	return wrapped.SamnaUser, nil
+	return &result, nil
 }
 
 func (d *DB) IssueUserToken(ctx context.Context, ac *AccessClaim, payload SamnaUserToken) (*SamnaUser, error) {
@@ -439,14 +449,14 @@ func (d *DB) IssueUserToken(ctx context.Context, ac *AccessClaim, payload SamnaU
 		return nil, fmt.Errorf("marshal user: %w", err)
 	}
 
-	var result *SamnaUser
+	var result *OrganizationUserResult
 	err = d.DB.RunInTx(ctx, &sql.TxOptions{}, func(ctx context.Context, tx bun.Tx) error {
 		out, terr := d.callCreateOrganizationUser(ctx, tx, ac, *payload.OwnerID, userJSON)
 		if terr != nil {
 			return terr
 		}
 		token := UserToken{
-			UserID:     out.UserID,
+			UserID:     out.SamnaUser.UserID,
 			IDClaim:    idClaim,
 			ExternalID: externalID,
 			ClaimID:    payload.ClaimID,
@@ -471,7 +481,7 @@ func (d *DB) IssueUserToken(ctx context.Context, ac *AccessClaim, payload SamnaU
 	if err != nil {
 		return nil, err
 	}
-	return result, nil
+	return result.SamnaUser, nil
 }
 
 func (d *DB) UpsertUserExternal(ctx context.Context, ac *AccessClaim, payload SamnaUserExternal) (*SamnaUser, error) {
@@ -510,14 +520,14 @@ func (d *DB) UpsertUserExternal(ctx context.Context, ac *AccessClaim, payload Sa
 		return nil, fmt.Errorf("marshal user: %w", err)
 	}
 
-	var result *SamnaUser
+	var result *OrganizationUserResult
 	err = d.DB.RunInTx(ctx, &sql.TxOptions{}, func(ctx context.Context, tx bun.Tx) error {
 		out, terr := d.callCreateOrganizationUser(ctx, tx, ac, *payload.OwnerID, userJSON)
 		if terr != nil {
 			return terr
 		}
 		token := UserToken{
-			UserID:     out.UserID,
+			UserID:     out.SamnaUser.UserID,
 			IDClaim:    idClaim,
 			ExternalID: externalID,
 			ClaimID:    payload.ClaimID,
@@ -542,6 +552,6 @@ func (d *DB) UpsertUserExternal(ctx context.Context, ac *AccessClaim, payload Sa
 	if err != nil {
 		return nil, err
 	}
-	return result, nil
+	return result.SamnaUser, nil
 }
 
