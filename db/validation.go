@@ -8,6 +8,9 @@ import (
 )
 
 func (l *Location) ValidatePost() error {
+	if l.Name == nil || *l.Name == "" {
+		return errors.New("name required")
+	}
 	if l.OwnerID == uuid.Nil {
 		return errors.New("owner_id required")
 	}
