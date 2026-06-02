@@ -399,6 +399,17 @@ type AccessClaim struct {
 	DirectGrant  bool             `bun:"direct_grant,scanonly" json:"direct_grant"`
 }
 
+type AccessUser struct {
+	TargetUserID uuid.UUID  `bun:"target_user_id,scanonly" json:"target_user_id"`
+	Access       int        `bun:"access,scanonly" json:"access"`
+	UserClaimID  *uuid.UUID `bun:"user_claim_id,scanonly" json:"user_claim_id"`
+	ClaimID      *uuid.UUID `bun:"claim_id,scanonly" json:"claim_id"`
+	OwnerID      *uuid.UUID `bun:"owner_id,scanonly" json:"owner_id"`
+	RootID       *uuid.UUID `bun:"root_id,scanonly" json:"root_id"`
+	LocationID   *uuid.UUID `bun:"location_id,scanonly" json:"location_id"`
+	DirectGrant  bool       `bun:"direct_grant,scanonly" json:"direct_grant"`
+}
+
 type Asset struct {
 	bun.BaseModel `bun:"table:asset" json:"-"`
 	nimbody.Body  `bun:"-" json:"-"`

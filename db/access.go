@@ -45,28 +45,23 @@ func (d *DB) MutationAccess(ctx context.Context, userID, objectID uuid.UUID, obj
 	return uc, nil
 }
 
-func (d *DB) UserAccess(ctx context.Context, actorID, targetUserID uuid.UUID, requiredAccess ClaimAccess) (*AccessClaim, error) {
-	if actorID == targetUserID {
-		return selfAccessClaim(actorID, requiredAccess), nil
-	}
-	var visible bool
-	err := d.NewRaw(`
-		SELECT EXISTS (
-			SELECT 1
-			FROM claimius.get_users(?, claimius.get_disciple_app_id(), ?)
-			WHERE user_id = ?
-		)
-	`, actorID, requiredAccess, targetUserID).Scan(ctx, &visible)
+func (d *DB) UserAccess(ctx context.Context, actorID, targetUserID uuid.UUID, requiredAccess ClaimAccess) (*AccessUser, error) {
+	users := make([]AccessUser, 0)
+	err := d.NewSelect().
+		TableExpr(`claimius.get_user_access(?, claimius.get_disciple_app_id(), ?, ?) AS u`,
+			actorID, targetUserID, requiredAccess).
+		Column("u.*").
+		Scan(ctx, &users)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNoAccess
 		}
 		return nil, ErrInternalServer
 	}
-	if !visible {
+	if len(users) == 0 {
 		return nil, ErrNoAccess
 	}
-	return d.RootAccess(ctx, actorID, requiredAccess)
+	return &users[0], nil
 }
 
 func (d *DB) RootAccess(ctx context.Context, userID uuid.UUID, requiredAccess ClaimAccess) (*AccessClaim, error) {
