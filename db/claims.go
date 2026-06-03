@@ -381,3 +381,67 @@ func (d *DB) deleteClaimUser(ctx context.Context, ac *AccessClaim, claimID, user
 	return &uc, nil
 }
 
+type CreateVirtualClaimParams struct {
+	Name         string
+	Description  *string
+	Access       ClaimAccess
+	OwnerID      uuid.UUID
+	RootID       uuid.UUID
+	ObjectID     uuid.UUID
+	ObjectType   string
+	TargetUserID uuid.UUID
+}
+
+func (d *DB) CreateVirtualClaim(ctx context.Context, ac *AccessClaim, p CreateVirtualClaimParams) (*AccessClaim, error) {
+	if ac == nil || ac.UserClaimID == nil {
+		return nil, ErrNoAccess
+	}
+	var result AccessClaim
+	err := d.NewRaw(`
+		SELECT
+			NULL::uuid AS user_object_id,
+			((granted_user.data ->> 'id')::uuid) AS user_claim_id,
+			((created_claim.data ->> 'id')::uuid) AS claim_id,
+			((created_claim.data ->> 'sa_access')::int) AS sa_access,
+			NULL::jsonb AS scope,
+			((created_claim.data ->> 'sa_owner_id')::uuid) AS sa_owner_id,
+			((created_claim.data ->> 'sa_root_id')::uuid) AS sa_root_id,
+			NULL::uuid AS sa_location_id,
+			FALSE AS direct_grant
+		FROM (
+			SELECT claimius.create_claim(
+				claimius.get_disciple_app_id(),
+				?, ?, ?, ?, ?, ?, TRUE, 'virtual'::claimius.claim_type
+			) -> 'claim' AS data
+		) created_claim
+		CROSS JOIN LATERAL (
+			SELECT claimius.assign_claim_object(
+				p_app_id        := claimius.get_disciple_app_id(),
+				p_claim_id      := ((created_claim.data ->> 'id')::uuid),
+				p_sa_owner_id   := ?,
+				p_sa_root_id    := ?,
+				p_sa_created_by := ?,
+				p_object_id     := ?,
+				p_object_type   := ?,
+				p_sa_access     := NULL,
+				p_inherits      := FALSE
+			) -> 'claim_object' AS data
+		) bound_object
+		CROSS JOIN LATERAL (
+			SELECT claimius.assign_claim_user(
+				claimius.get_disciple_app_id(),
+				((created_claim.data ->> 'id')::uuid),
+				?, ?, ?
+			) -> 'user_claim' AS data
+		) granted_user
+	`,
+		p.Name, p.Description, int(p.Access), p.OwnerID, p.RootID, *ac.UserClaimID,
+		p.OwnerID, p.RootID, *ac.UserClaimID, p.ObjectID, p.ObjectType,
+		p.TargetUserID, p.OwnerID, *ac.UserClaimID,
+	).Scan(ctx, &result)
+	if err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
