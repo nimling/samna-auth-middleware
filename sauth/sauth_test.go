@@ -312,3 +312,171 @@ func TestMap_StarStringNotNilKept(t *testing.T) {
 		t.Fatalf("non-nil *string must be present, got %#v", m)
 	}
 }
+
+type emptyKinds struct {
+	Slice []string         `json:"slice,omitempty"`
+	Map   map[string]int   `json:"map,omitempty"`
+	Array [2]int           `json:"array,omitempty"`
+	Bool  bool             `json:"bool,omitempty"`
+	Uint  uint64           `json:"uint,omitempty"`
+	Float float64          `json:"float,omitempty"`
+	Iface any              `json:"iface,omitempty"`
+	Chan  chan int         `json:"chan,omitempty"`
+	Func  func()           `json:"func,omitempty"`
+	NC    nonComparable    `json:"nc,omitempty"`
+}
+
+type nonComparable struct {
+	Items []int
+}
+
+func TestMap_OmitemptySliceMapArrayBoolUintFloat(t *testing.T) {
+	m, err := Map(emptyKinds{})
+	if err != nil {
+		t.Fatalf("Map: %v", err)
+	}
+	for _, k := range []string{"slice", "map", "bool", "uint", "float", "iface"} {
+		if _, ok := m[k]; ok {
+			t.Fatalf("zero %s must be omitted, got %#v", k, m)
+		}
+	}
+	if _, ok := m["array"]; !ok {
+		t.Fatalf("zero [2]int has Len=2 so isEmpty returns false; it must NOT be omitted, got %#v", m)
+	}
+}
+
+func TestMap_KeepsNonZeroSliceMapBoolUintFloat(t *testing.T) {
+	m, err := Map(emptyKinds{
+		Slice: []string{"a"},
+		Map:   map[string]int{"a": 1},
+		Bool:  true,
+		Uint:  3,
+		Float: 1.5,
+		Iface: "x",
+	})
+	if err != nil {
+		t.Fatalf("Map: %v", err)
+	}
+	for _, k := range []string{"slice", "map", "bool", "uint", "float", "iface"} {
+		if _, ok := m[k]; !ok {
+			t.Fatalf("non-zero %s must be kept, got %#v", k, m)
+		}
+	}
+}
+
+func TestMap_NonComparableStructFallthrough(t *testing.T) {
+	m, err := Map(emptyKinds{NC: nonComparable{}})
+	if err != nil {
+		t.Fatalf("Map: %v", err)
+	}
+	if _, ok := m["nc"]; !ok {
+		t.Fatalf("non-comparable struct must fall through isEmpty and stay in map, got %#v", m)
+	}
+}
+
+func TestMap_DefaultKindFallthroughKept(t *testing.T) {
+	m, err := Map(emptyKinds{Chan: make(chan int), Func: func() {}})
+	if err != nil {
+		t.Fatalf("Map: %v", err)
+	}
+	for _, k := range []string{"chan", "func"} {
+		if _, ok := m[k]; !ok {
+			t.Fatalf("kind without isEmpty branch must stay in map, got %#v", m)
+		}
+	}
+}
+
+type tagEdge struct {
+	A string `json:",omitempty"`
+	B string `sauth:",omitempty"`
+	C string `sauth:"-,omitempty"`
+}
+
+func TestFieldKey_EmptyNameFallsBackToGoFieldName(t *testing.T) {
+	m, err := Map(tagEdge{A: "a", B: "b"})
+	if err != nil {
+		t.Fatalf("Map: %v", err)
+	}
+	if m["A"] != "a" {
+		t.Fatalf("json tag with empty name must use Go field name A, got %#v", m)
+	}
+	if m["B"] != "b" {
+		t.Fatalf("sauth tag with empty name must use Go field name B, got %#v", m)
+	}
+}
+
+func TestFieldKey_DashWithOptionsStillSkips(t *testing.T) {
+	m, err := Map(tagEdge{C: "c"})
+	if err != nil {
+		t.Fatalf("Map: %v", err)
+	}
+	if _, ok := m["C"]; ok {
+		t.Fatalf("first part \"-\" must skip the field, got %#v", m)
+	}
+}
+
+func TestMarshal_PropagatesMapError(t *testing.T) {
+	if _, err := Marshal(42); err == nil {
+		t.Fatalf("Marshal of non-struct must error")
+	}
+}
+
+func TestUnmarshal_BadEnvelopeErrors(t *testing.T) {
+	var m model
+	if err := Unmarshal([]byte("not json"), &m); err == nil {
+		t.Fatalf("Unmarshal must error on bad envelope")
+	}
+}
+
+func TestUnmarshal_PerFieldDecodeErrorPropagates(t *testing.T) {
+	var m model
+	if err := Unmarshal([]byte(`{"count": "not-an-int"}`), &m); err == nil {
+		t.Fatalf("Unmarshal must propagate per-field decode error")
+	}
+}
+
+func TestUnmarshal_PointerToInterfaceErrors(t *testing.T) {
+	var iface any
+	if err := Unmarshal([]byte(`{}`), &iface); err == nil {
+		t.Fatalf("Unmarshal must reject pointer to interface")
+	}
+}
+
+type point struct {
+	X int
+	Y int
+}
+
+type comparableStruct struct {
+	P point `json:"p,omitempty"`
+}
+
+func TestMap_ComparableStructZeroOmitted(t *testing.T) {
+	m, err := Map(comparableStruct{})
+	if err != nil {
+		t.Fatalf("Map: %v", err)
+	}
+	if _, ok := m["p"]; ok {
+		t.Fatalf("zero comparable struct must be omitted, got %#v", m)
+	}
+}
+
+func TestMap_ComparableStructNonZeroKept(t *testing.T) {
+	m, err := Map(comparableStruct{P: point{X: 1}})
+	if err != nil {
+		t.Fatalf("Map: %v", err)
+	}
+	if _, ok := m["p"]; !ok {
+		t.Fatalf("non-zero comparable struct must be kept, got %#v", m)
+	}
+}
+
+func TestMap_ArrayZeroKept(t *testing.T) {
+	m, err := Map(emptyKinds{})
+	if err != nil {
+		t.Fatalf("Map: %v", err)
+	}
+	if _, ok := m["array"]; !ok {
+		t.Fatalf("[2]int has Len=2 so isEmpty must return false and keep the field, got %#v", m)
+	}
+}
