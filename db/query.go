@@ -13,6 +13,7 @@ import (
 	"github.com/uptrace/bun"
 
 	"github.com/nimling/samna-auth-middleware/client"
+	"github.com/nimling/samna-auth-middleware/sauth"
 )
 
 func modelTableName(db *DB, model any) string {
@@ -443,7 +444,7 @@ func (q *InsertQuery) execHTTP(ctx context.Context, dest ...any) (sql.Result, er
 		return nil, err
 	}
 	if len(raw) > 0 {
-		if err := json.Unmarshal(raw, q.model); err != nil {
+		if err := sauth.Unmarshal(raw, q.model); err != nil {
 			return nil, fmt.Errorf("decode insert response: %w", err)
 		}
 		if err := upsertLocal(ctx, q.model); err != nil {
@@ -462,13 +463,9 @@ func (q *InsertQuery) execHTTP(ctx context.Context, dest ...any) (sql.Result, er
 }
 
 func payloadForInsert(model any, excludes []string) (map[string]any, error) {
-	data, err := json.Marshal(model)
+	m, err := sauth.Map(model)
 	if err != nil {
-		return nil, fmt.Errorf("marshal model: %w", err)
-	}
-	var m map[string]any
-	if err := json.Unmarshal(data, &m); err != nil {
-		return nil, fmt.Errorf("unmarshal model: %w", err)
+		return nil, err
 	}
 	delete(m, "id")
 	delete(m, "created_at")
@@ -672,7 +669,7 @@ func (q *UpdateQuery) execHTTP(ctx context.Context, dest ...any) (sql.Result, er
 		return nil, err
 	}
 	if len(raw) > 0 {
-		if err := json.Unmarshal(raw, q.model); err != nil {
+		if err := sauth.Unmarshal(raw, q.model); err != nil {
 			return nil, fmt.Errorf("decode update response: %w", err)
 		}
 		if err := upsertLocal(ctx, q.model); err != nil {
@@ -702,13 +699,9 @@ func payloadForUpdate(model any, setCols []conflictSet, excludes []string) (map[
 		}
 		return out, nil
 	}
-	data, err := json.Marshal(model)
+	m, err := sauth.Map(model)
 	if err != nil {
-		return nil, fmt.Errorf("marshal model: %w", err)
-	}
-	var m map[string]any
-	if err := json.Unmarshal(data, &m); err != nil {
-		return nil, fmt.Errorf("unmarshal model: %w", err)
+		return nil, err
 	}
 	delete(m, "id")
 	delete(m, "created_at")
@@ -914,7 +907,7 @@ func (q *DeleteQuery) execHTTP(ctx context.Context, dest ...any) (sql.Result, er
 		return nil, err
 	}
 	if len(raw) > 0 {
-		if err := json.Unmarshal(raw, q.model); err != nil {
+		if err := sauth.Unmarshal(raw, q.model); err != nil {
 			return nil, fmt.Errorf("decode delete response: %w", err)
 		}
 		if err := upsertLocal(ctx, q.model); err != nil {
