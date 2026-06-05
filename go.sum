@@ -41,10 +41,8 @@ github.com/mattn/go-colorable v0.1.14 h1:9A9LHSqF/7dyVVX6g0U9cwm9pG3kP9gSzcuIPHP
 github.com/mattn/go-colorable v0.1.14/go.mod h1:6LmQG8QLFO4G5z1gPvYEzlUgJ2wF+stgPZH1UqBm1s8=
 github.com/mattn/go-isatty v0.0.20 h1:xfD0iDuEKnDkl03q4limB+vH+GxLEtL/jb4xVJSWWEY=
 github.com/mattn/go-isatty v0.0.20/go.mod h1:W+V8PltTTMOvKvAeJH7IuucS94S2C6jfK/D7dTCTo3Y=
-github.com/nimling/nimbody v1.0.1 h1:ggfnbm0mJ3Rr4BZg8CU10mMag4+sHF4f5/9dYQfQle4=
-github.com/nimling/nimbody v1.0.1/go.mod h1:P+qiBlOF+jkBGDnXgmnV00jlZ11KPpY11TcRQp9ycFw=
-github.com/nimling/nimbody v1.0.2 h1:heA+wFZt8ML3oItPtwnPRmBNrXdy1rHnbCzFucuBlrQ=
-github.com/nimling/nimbody v1.0.2/go.mod h1:P+qiBlOF+jkBGDnXgmnV00jlZ11KPpY11TcRQp9ycFw=
+github.com/nimling/nimbody v1.0.3 h1:R0PBJHy3jI5U4BVxvHuUBXc+3kPrJR842/YzwKquyHo=
+github.com/nimling/nimbody v1.0.3/go.mod h1:P+qiBlOF+jkBGDnXgmnV00jlZ11KPpY11TcRQp9ycFw=
 github.com/pmezard/go-difflib v1.0.0 h1:4DBwDE0NGyQoBHbLQYPwSUPoCMWR5BEzIk/f1lZbAQM=
 github.com/pmezard/go-difflib v1.0.0/go.mod h1:iKH77koFhYxTK1pcRnkKkqfTogsbg7gZNVY4sRDYZ/4=
 github.com/puzpuzpuz/xsync/v3 v3.5.1 h1:GJYJZwO6IdxN/IKbneznS6yPkVC+c3zyY/j19c++5Fg=

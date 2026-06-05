@@ -8,6 +8,9 @@ import (
 )
 
 func (l *Location) ValidatePost() error {
+	if unknown := l.GetUnknown(); len(unknown) > 0 {
+		return errors.New(unknown[0] + " not allowed")
+	}
 	if l.Name == nil || *l.Name == "" {
 		return errors.New("name required")
 	}
@@ -18,6 +21,9 @@ func (l *Location) ValidatePost() error {
 }
 
 func (o *Organization) ValidatePost() error {
+	if unknown := o.GetUnknown(); len(unknown) > 0 {
+		return errors.New(unknown[0] + " not allowed")
+	}
 	if o.Name == "" {
 		return errors.New("name required")
 	}
@@ -32,6 +38,9 @@ func (o *Organization) ValidatePost() error {
 }
 
 func (u *SamnaUser) ValidatePost() error {
+	if unknown := u.GetUnknown(); len(unknown) > 0 {
+		return errors.New(unknown[0] + " not allowed")
+	}
 	if u.Email == "" {
 		return errors.New("email required")
 	}
@@ -87,6 +96,9 @@ func (e *SamnaUserExternal) ValidatePost() error {
 }
 
 func (c *Claim) ValidatePost() error {
+	if unknown := c.GetUnknown(); len(unknown) > 0 {
+		return errors.New(unknown[0] + " not allowed")
+	}
 	if c.Name == "" {
 		return errors.New("name required")
 	}
@@ -124,6 +136,9 @@ func (uc *UserClaim) ValidatePost() error {
 }
 
 func (s *SamnaSecret) ValidatePost() error {
+	if unknown := s.GetUnknown(); len(unknown) > 0 {
+		return errors.New(unknown[0] + " not allowed")
+	}
 	if s.Key == "" {
 		return errors.New("key required")
 	}
@@ -137,6 +152,9 @@ func (s *SamnaSecret) ValidatePost() error {
 }
 
 func (s *SamnaSecret) ValidatePut() error {
+	if unknown := s.GetUnknown(); len(unknown) > 0 {
+		return errors.New(unknown[0] + " not allowed")
+	}
 	if s.HasKey("id") {
 		return errors.New("id not allowed")
 	}
@@ -171,6 +189,9 @@ func (s *SamnaSecret) ValidatePatch() error {
 	if s.IsEmpty() {
 		return errors.New("no fields to update")
 	}
+	if unknown := s.GetUnknown(); len(unknown) > 0 {
+		return errors.New(unknown[0] + " not allowed")
+	}
 	if s.HasKey("id") {
 		return errors.New("id not allowed")
 	}
@@ -202,6 +223,9 @@ func (s *SamnaSecret) ValidatePatch() error {
 }
 
 func (r *UserRelation) ValidatePost() error {
+	if unknown := r.GetUnknown(); len(unknown) > 0 {
+		return errors.New(unknown[0] + " not allowed")
+	}
 	if r.ObjectType == "" {
 		return errors.New("object_type required")
 	}
@@ -212,6 +236,9 @@ func (r *UserRelation) ValidatePost() error {
 }
 
 func (a *Asset) ValidatePost() error {
+	if unknown := a.GetUnknown(); len(unknown) > 0 {
+		return errors.New(unknown[0] + " not allowed")
+	}
 	if a.Name == "" {
 		return errors.New("name required")
 	}
@@ -222,6 +249,9 @@ func (a *Asset) ValidatePost() error {
 }
 
 func (l *Location) ValidatePut() error {
+	if unknown := l.GetUnknown(); len(unknown) > 0 {
+		return errors.New(unknown[0] + " not allowed")
+	}
 	if l.HasKey("id") {
 		return errors.New("id not allowed")
 	}
@@ -262,6 +292,9 @@ func (l *Location) ValidatePatch() error {
 	if l.IsEmpty() {
 		return errors.New("no fields to update")
 	}
+	if unknown := l.GetUnknown(); len(unknown) > 0 {
+		return errors.New(unknown[0] + " not allowed")
+	}
 	if l.HasKey("id") {
 		return errors.New("id not allowed")
 	}
@@ -296,6 +329,9 @@ func (l *Location) ValidatePatch() error {
 }
 
 func (o *Organization) ValidatePut() error {
+	if unknown := o.GetUnknown(); len(unknown) > 0 {
+		return errors.New(unknown[0] + " not allowed")
+	}
 	if o.HasKey("id") {
 		return errors.New("id not allowed")
 	}
@@ -339,6 +375,9 @@ func (o *Organization) ValidatePatch() error {
 	if o.IsEmpty() {
 		return errors.New("no fields to update")
 	}
+	if unknown := o.GetUnknown(); len(unknown) > 0 {
+		return errors.New(unknown[0] + " not allowed")
+	}
 	if o.HasKey("id") {
 		return errors.New("id not allowed")
 	}
@@ -379,6 +418,9 @@ func (o *Organization) ValidatePatch() error {
 }
 
 func (u *SamnaUser) ValidatePut() error {
+	if unknown := u.GetUnknown(); len(unknown) > 0 {
+		return errors.New(unknown[0] + " not allowed")
+	}
 	if u.HasKey("id") {
 		return errors.New("id not allowed")
 	}
@@ -426,6 +468,9 @@ func (u *SamnaUser) ValidatePatch() error {
 	if u.IsEmpty() {
 		return errors.New("no fields to update")
 	}
+	if unknown := u.GetUnknown(); len(unknown) > 0 {
+		return errors.New(unknown[0] + " not allowed")
+	}
 	if u.HasKey("id") {
 		return errors.New("id not allowed")
 	}
@@ -472,6 +517,9 @@ func (u *SamnaUser) ValidatePatch() error {
 }
 
 func (c *Claim) ValidatePut() error {
+	if unknown := c.GetUnknown(); len(unknown) > 0 {
+		return errors.New(unknown[0] + " not allowed")
+	}
 	if c.HasKey("id") {
 		return errors.New("id not allowed")
 	}
@@ -515,6 +563,9 @@ func (c *Claim) ValidatePatch() error {
 	if c.IsEmpty() {
 		return errors.New("no fields to update")
 	}
+	if unknown := c.GetUnknown(); len(unknown) > 0 {
+		return errors.New(unknown[0] + " not allowed")
+	}
 	if c.HasKey("id") {
 		return errors.New("id not allowed")
 	}
@@ -555,6 +606,9 @@ func (c *Claim) ValidatePatch() error {
 }
 
 func (r *UserRelation) ValidatePut() error {
+	if unknown := r.GetUnknown(); len(unknown) > 0 {
+		return errors.New(unknown[0] + " not allowed")
+	}
 	if r.HasKey("id") {
 		return errors.New("id not allowed")
 	}
@@ -592,6 +646,9 @@ func (r *UserRelation) ValidatePatch() error {
 	if r.IsEmpty() {
 		return errors.New("no fields to update")
 	}
+	if unknown := r.GetUnknown(); len(unknown) > 0 {
+		return errors.New(unknown[0] + " not allowed")
+	}
 	if r.HasKey("id") {
 		return errors.New("id not allowed")
 	}
@@ -626,6 +683,9 @@ func (r *UserRelation) ValidatePatch() error {
 }
 
 func (a *Asset) ValidatePut() error {
+	if unknown := a.GetUnknown(); len(unknown) > 0 {
+		return errors.New(unknown[0] + " not allowed")
+	}
 	if a.HasKey("id") {
 		return errors.New("id not allowed")
 	}
@@ -662,6 +722,9 @@ func (a *Asset) ValidatePut() error {
 func (a *Asset) ValidatePatch() error {
 	if a.IsEmpty() {
 		return errors.New("no fields to update")
+	}
+	if unknown := a.GetUnknown(); len(unknown) > 0 {
+		return errors.New(unknown[0] + " not allowed")
 	}
 	if a.HasKey("id") {
 		return errors.New("id not allowed")
