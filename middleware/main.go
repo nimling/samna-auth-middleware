@@ -140,29 +140,33 @@ func configFromUserAuthOptions(opts *UserAuthOptions) *AuthMiddlewareConfig {
 
 	debugUserID := getEnvUUID("SAUTH_DEBUG_USER_ID")
 	debugClients := parseDebugClients()
+	debugMode := db.GetDebugMode()
+
+	getEnvLenient := func(key string) string {
+		if debugMode != db.DebugModeNone {
+			return os.Getenv(key)
+		}
+		return utils.GetEnv(key)
+	}
 
 	slug := opts.ClientSlug
 	if slug == "" {
-		slug = utils.GetEnv("SAUTH_APP_SLUG")
+		slug = getEnvLenient("SAUTH_APP_SLUG")
 	}
 	secret := opts.ClientSecret
 	if secret == "" {
-		if db.GetDebugMode() != db.DebugModeNone {
-			secret = os.Getenv("SAUTH_APP_SECRET")
-		} else {
-			secret = utils.GetEnv("SAUTH_APP_SECRET")
-		}
+		secret = getEnvLenient("SAUTH_APP_SECRET")
 	}
 	redirectURI := opts.RedirectURI
 	if redirectURI == "" {
-		redirectURI = utils.GetEnv("SAUTH_REDIRECT_URI")
+		redirectURI = getEnvLenient("SAUTH_REDIRECT_URI")
 	}
 	pageRedirectURI := opts.PageRedirectURI
 	if pageRedirectURI == "" {
-		pageRedirectURI = utils.GetEnv("SAUTH_PAGE_REDIRECT")
+		pageRedirectURI = getEnvLenient("SAUTH_PAGE_REDIRECT")
 	}
 
-	openIDUrlStr := utils.GetEnv("SAUTH_ENDPOINT") + "/api/app/" + slug + "/.well-known/openid-configuration"
+	openIDUrlStr := getEnvLenient("SAUTH_ENDPOINT") + "/api/app/" + slug + "/.well-known/openid-configuration"
 	openIDUrl, err := url.Parse(openIDUrlStr)
 	if err != nil {
 		panic(fmt.Errorf("failed to parse openid configuration URL: %v", err))
