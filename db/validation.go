@@ -64,6 +64,9 @@ func (u *SamnaUser) ValidatePost() error {
 }
 
 func (t *SamnaUserToken) ValidatePost() error {
+	if unknown := t.GetUnknown(); len(unknown) > 0 {
+		return errors.New(unknown[0] + " not allowed")
+	}
 	if t.Token == "" {
 		return errors.New("token required")
 	}
@@ -80,6 +83,9 @@ func (t *SamnaUserToken) ValidatePost() error {
 }
 
 func (e *SamnaUserExternal) ValidatePost() error {
+	if unknown := e.GetUnknown(); len(unknown) > 0 {
+		return errors.New(unknown[0] + " not allowed")
+	}
 	if e.OwnerID == nil || *e.OwnerID == uuid.Nil {
 		return errors.New("owner_id required")
 	}
@@ -119,6 +125,9 @@ func (c *Claim) ValidatePost() error {
 }
 
 func (co *ClaimObject) ValidatePost() error {
+	if unknown := co.GetUnknown(); len(unknown) > 0 {
+		return errors.New(unknown[0] + " not allowed")
+	}
 	if co.ObjectID == nil || *co.ObjectID == uuid.Nil {
 		return errors.New("object_id required")
 	}
@@ -129,6 +138,9 @@ func (co *ClaimObject) ValidatePost() error {
 }
 
 func (uc *UserClaim) ValidatePost() error {
+	if unknown := uc.GetUnknown(); len(unknown) > 0 {
+		return errors.New(unknown[0] + " not allowed")
+	}
 	if uc.UserID == uuid.Nil {
 		return errors.New("user_id required")
 	}

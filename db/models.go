@@ -171,22 +171,24 @@ type SamnaUser struct {
 }
 
 type SamnaUserToken struct {
-	Token   string     `json:"token"`
-	IDClaim *string    `json:"id_claim,omitempty"`
-	User    *SamnaUser `json:"user,omitempty"`
-	ClaimID *uuid.UUID `json:"claim_id"`
-	AppID   *uuid.UUID `json:"app_id"`
-	Reason  *string    `json:"reason,omitempty"`
-	OwnerID *uuid.UUID `json:"owner_id,omitempty"`
+	nimbody.Body `json:"-"`
+	Token        string     `json:"token"`
+	IDClaim      *string    `json:"id_claim,omitempty"`
+	User         *SamnaUser `json:"user,omitempty"`
+	ClaimID      *uuid.UUID `json:"claim_id"`
+	AppID        *uuid.UUID `json:"app_id"`
+	Reason       *string    `json:"reason,omitempty"`
+	OwnerID      *uuid.UUID `json:"owner_id,omitempty"`
 }
 
 type SamnaUserExternal struct {
-	IDClaim *string    `json:"id_claim,omitempty"`
-	User    *SamnaUser `json:"user,omitempty"`
-	ClaimID *uuid.UUID `json:"claim_id"`
-	AppID   *uuid.UUID `json:"app_id"`
-	Reason  *string    `json:"reason,omitempty"`
-	OwnerID *uuid.UUID `json:"owner_id,omitempty"`
+	nimbody.Body `json:"-"`
+	IDClaim      *string    `json:"id_claim,omitempty"`
+	User         *SamnaUser `json:"user,omitempty"`
+	ClaimID      *uuid.UUID `json:"claim_id"`
+	AppID        *uuid.UUID `json:"app_id"`
+	Reason       *string    `json:"reason,omitempty"`
+	OwnerID      *uuid.UUID `json:"owner_id,omitempty"`
 }
 
 type UserToken struct {
@@ -348,6 +350,7 @@ func ModelID(model any) (uuid.UUID, error) {
 
 type UserClaim struct {
 	bun.BaseModel `bun:"table:claimius.user_claim"`
+	nimbody.Body  `bun:"-" json:"-"`
 
 	ID        uuid.UUID     `bun:"id,pk,default:gen_random_uuid()" json:"id"`
 	AppID     uuid.UUID     `bun:"app_id,notnull,type:uuid,default:claimius.get_disciple_app_id()" json:"-" sauth:"app_id"`
@@ -367,6 +370,7 @@ type UserClaim struct {
 
 type ClaimObject struct {
 	bun.BaseModel `bun:"table:claimius.claim_object"`
+	nimbody.Body  `bun:"-" json:"-"`
 
 	ID         uuid.UUID        `bun:"id,pk,default:gen_random_uuid()" json:"id"`
 	AppID      uuid.UUID        `bun:"app_id,notnull,type:uuid,default:claimius.get_disciple_app_id()" json:"-" sauth:"app_id"`

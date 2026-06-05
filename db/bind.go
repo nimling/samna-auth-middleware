@@ -143,3 +143,19 @@ func (r *UserRelation) Bind(ctx echo.Context) error {
 func (r *UserRelation) PatchNulls() []string {
 	return bunNullColumns(r)
 }
+
+func (t *SamnaUserToken) Bind(ctx echo.Context) error {
+	return t.Body.Bound(ctx, t)
+}
+
+func (e *SamnaUserExternal) Bind(ctx echo.Context) error {
+	return e.Body.Bound(ctx, e)
+}
+
+func (uc *UserClaim) Bind(ctx echo.Context) error {
+	return uc.Body.Bound(ctx, uc)
+}
+
+func (co *ClaimObject) Bind(ctx echo.Context) error {
+	return co.Body.Bound(ctx, co)
+}
