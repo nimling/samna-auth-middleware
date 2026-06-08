@@ -9,8 +9,8 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
-	"github.com/lib/pq"
 	"github.com/uptrace/bun"
+	"github.com/uptrace/bun/driver/pgdriver"
 )
 
 func (d *DB) GetUser(ctx context.Context, actorID, userID uuid.UUID) (*SamnaUser, error) {
@@ -364,8 +364,8 @@ func (d *DB) callCreateOrganizationUser(ctx context.Context, idb bun.IDB, ac *Ac
 		SELECT claimius.create_organization_user(?, ?, ?, ?::jsonb, ?)
 	`, *ac.UserClaimID, *ac.ClaimID, ownerID, string(userJSON), upsert).Scan(ctx, &payload)
 	if err != nil {
-		var pqErr *pq.Error
-		if errors.As(err, &pqErr) && pqErr.Code == "23505" {
+		var pgErr pgdriver.Error
+		if errors.As(err, &pgErr) && pgErr.Field('C') == "23505" {
 			return nil, ErrUserAlreadyExists
 		}
 		return nil, fmt.Errorf("create_organization_user: %w", err)
