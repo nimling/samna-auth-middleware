@@ -38,6 +38,9 @@ func (o *Organization) ValidatePost() error {
 }
 
 func (u *SamnaUser) ValidatePost() error {
+	if u.HasKey("type") {
+		return errors.New("type not allowed")
+	}
 	if unknown := u.GetUnknown(); len(unknown) > 0 {
 		return errors.New(unknown[0] + " not allowed")
 	}
@@ -430,6 +433,9 @@ func (o *Organization) ValidatePatch() error {
 }
 
 func (u *SamnaUser) ValidatePut() error {
+	if u.HasKey("type") {
+		return errors.New("type not allowed")
+	}
 	if unknown := u.GetUnknown(); len(unknown) > 0 {
 		return errors.New(unknown[0] + " not allowed")
 	}
@@ -479,6 +485,9 @@ func (u *SamnaUser) ValidatePut() error {
 func (u *SamnaUser) ValidatePatch() error {
 	if u.IsEmpty() {
 		return errors.New("no fields to update")
+	}
+	if u.HasKey("type") {
+		return errors.New("type not allowed")
 	}
 	if unknown := u.GetUnknown(); len(unknown) > 0 {
 		return errors.New(unknown[0] + " not allowed")
