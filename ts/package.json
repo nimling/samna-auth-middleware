@@ -1,0 +1,42 @@
+{
+  "name": "@nimling/samna-auth-edge",
+  "version": "0.0.0",
+  "description": "Session auth edge client for samna_auth, mirroring the Go middleware's session validation surface only",
+  "author": "nimling",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/nimling/samna_auth_middleware.git",
+    "directory": "ts"
+  },
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "jose": "^5.9.6"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "~5.9.3",
+    "vitest": "^3.2.4"
+  },
+  "publishConfig": {
+    "access": "restricted",
+    "registry": "https://npm.pkg.github.com"
+  }
+}
