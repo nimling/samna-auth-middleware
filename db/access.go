@@ -10,9 +10,10 @@ import (
 )
 
 var (
-	ErrNoAccess       = errors.New("no access")
-	ErrInternalServer = errors.New("internal server error")
-	ErrRootConflict   = errors.New("identity already registered under a different root")
+	ErrNoAccess          = errors.New("no access")
+	ErrInternalServer    = errors.New("internal server error")
+	ErrRootConflict      = errors.New("identity already registered under a different root")
+	ErrUserAlreadyExists = errors.New("user already exists")
 )
 
 func selfAccessClaim(userID uuid.UUID, requiredAccess ClaimAccess) *AccessClaim {

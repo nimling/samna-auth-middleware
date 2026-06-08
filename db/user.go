@@ -9,6 +9,7 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
+	"github.com/lib/pq"
 	"github.com/uptrace/bun"
 )
 
@@ -350,19 +351,23 @@ func (d *DB) CreateOrganizationUser(ctx context.Context, ac *AccessClaim, in *Sa
 	if err != nil {
 		return nil, fmt.Errorf("marshal user: %w", err)
 	}
-	result, err := d.callCreateOrganizationUser(ctx, d.DB, ac, *in.OwnerID, userJSON)
+	result, err := d.callCreateOrganizationUser(ctx, d.DB, ac, *in.OwnerID, userJSON, false)
 	if err != nil {
 		return nil, err
 	}
 	return result.SamnaUser, nil
 }
 
-func (d *DB) callCreateOrganizationUser(ctx context.Context, idb bun.IDB, ac *AccessClaim, ownerID uuid.UUID, userJSON []byte) (*OrganizationUserResult, error) {
+func (d *DB) callCreateOrganizationUser(ctx context.Context, idb bun.IDB, ac *AccessClaim, ownerID uuid.UUID, userJSON []byte, upsert bool) (*OrganizationUserResult, error) {
 	var payload []byte
 	err := idb.NewRaw(`
-		SELECT claimius.create_organization_user(?, ?, ?, ?::jsonb)
-	`, *ac.UserClaimID, *ac.ClaimID, ownerID, string(userJSON)).Scan(ctx, &payload)
+		SELECT claimius.create_organization_user(?, ?, ?, ?::jsonb, ?)
+	`, *ac.UserClaimID, *ac.ClaimID, ownerID, string(userJSON), upsert).Scan(ctx, &payload)
 	if err != nil {
+		var pqErr *pq.Error
+		if errors.As(err, &pqErr) && pqErr.Code == "23505" {
+			return nil, ErrUserAlreadyExists
+		}
 		return nil, fmt.Errorf("create_organization_user: %w", err)
 	}
 	var result OrganizationUserResult
@@ -464,7 +469,7 @@ func (d *DB) IssueUserToken(ctx context.Context, ac *AccessClaim, payload SamnaU
 		if marshalErr != nil {
 			return fmt.Errorf("marshal user: %w", marshalErr)
 		}
-		out, terr := d.callCreateOrganizationUser(ctx, tx, ac, *payload.OwnerID, userJSON)
+		out, terr := d.callCreateOrganizationUser(ctx, tx, ac, *payload.OwnerID, userJSON, true)
 		if terr != nil {
 			return terr
 		}
@@ -550,7 +555,7 @@ func (d *DB) UpsertUserExternal(ctx context.Context, ac *AccessClaim, payload Sa
 		if marshalErr != nil {
 			return fmt.Errorf("marshal user: %w", marshalErr)
 		}
-		out, terr := d.callCreateOrganizationUser(ctx, tx, ac, *payload.OwnerID, userJSON)
+		out, terr := d.callCreateOrganizationUser(ctx, tx, ac, *payload.OwnerID, userJSON, true)
 		if terr != nil {
 			return terr
 		}
