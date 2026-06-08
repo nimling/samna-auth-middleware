@@ -5,7 +5,7 @@ default:
     @just --list
 
 deploy:
-    ../sbump/sbump.sh patch --env APP_VERSION --json ts/package.json@.version --push-version
+    ../sbump/sbump.sh patch --env APP_VERSION --json ts/package.json@.version --push-version --auto --workflow
 
 build:
     go build ./...
