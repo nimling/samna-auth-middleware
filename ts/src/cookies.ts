@@ -1,4 +1,4 @@
-import { DEFAULT_COOKIE_NAMES } from './types'
+import { ACCESS_TOKEN_COOKIE } from './types'
 
 export function parseCookies(header: string): Record<string, string> {
   const out: Record<string, string> = {}
@@ -20,7 +20,7 @@ export function parseCookies(header: string): Record<string, string> {
 }
 
 export function readAccessTokenFromDocument(
-  cookieName: string = DEFAULT_COOKIE_NAMES.accessToken
+  cookieName: string = ACCESS_TOKEN_COOKIE
 ): string | null {
   if (typeof document === 'undefined') return null
   const cookies = parseCookies(document.cookie)

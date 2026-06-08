@@ -1,4 +1,4 @@
-import { AuthError } from './types'
+import { ErrUnauthorized } from './types'
 
 export function createAuthFetch(baseUrl: string): typeof fetch {
   const base = baseUrl.replace(/\/$/, '')
@@ -14,7 +14,7 @@ export function createAuthFetch(baseUrl: string): typeof fetch {
         ...((init?.headers as Record<string, string>) ?? {})
       }
     })
-    if (res.status === 401) throw new AuthError(401, 'Unauthorized')
+    if (res.status === 401) throw ErrUnauthorized
     return res
   }
 }

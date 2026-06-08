@@ -1,30 +1,25 @@
-import { fetchOIDCConfiguration, getJWKS } from './oidc'
-import { validateAccessToken } from './validate'
+import { getJWKS, getOpenIDConfiguration, getLogin } from './client'
+import { validateToken } from './token'
 import { readAccessTokenFromDocument } from './cookies'
-import { DEFAULT_COOKIE_NAMES } from './types'
-import type { EdgeConfig, SessionUser } from './types'
+import { ACCESS_TOKEN_COOKIE } from './types'
+import type { ClaimUser, OpenIDConfiguration } from './types'
 
-let oidcCache: { issuer: string; jwksUri: string; authorizationEndpoint?: string } | null = null
-
-async function getOIDC(config: EdgeConfig) {
-  if (oidcCache) return oidcCache
-  const oidc = await fetchOIDCConfiguration(config.endpoint, config.clientSlug)
-  oidcCache = {
-    issuer: oidc.issuer,
-    jwksUri: oidc.jwks_uri,
-    authorizationEndpoint: oidc.authorization_endpoint
+export interface EdgeConfig {
+  endpoint: string
+  clientSlug: string
+  cookieNames?: {
+    accessToken?: string
+    refreshToken?: string
+    csrfToken?: string
   }
-  return oidcCache
 }
 
-export function configureEdge(config: EdgeConfig) {
+let edgeConfig: EdgeConfig = { endpoint: '', clientSlug: '' }
+let oidcCache: OpenIDConfiguration | null = null
+
+export function configureEdge(config: EdgeConfig): void {
   edgeConfig = config
   oidcCache = null
-}
-
-let edgeConfig: EdgeConfig = {
-  endpoint: '',
-  clientSlug: ''
 }
 
 export function getEdgeConfig(): EdgeConfig {
@@ -39,36 +34,43 @@ export function getAuthEndpoint(): string {
   return edgeConfig.endpoint.replace(/\/$/, '')
 }
 
-export function getLoginUrl(provider?: string, returnTo?: string): string {
-  const params = new URLSearchParams()
-  params.set('app', edgeConfig.clientSlug)
-  if (provider) params.set('provider', provider)
-  if (returnTo) params.set('next', returnTo)
-  return `${getAuthEndpoint()}/api/auth/login?${params.toString()}`
+async function loadOIDC(): Promise<OpenIDConfiguration> {
+  if (oidcCache) return oidcCache
+  const url = `${getAuthEndpoint()}/api/app/${edgeConfig.clientSlug}/.well-known/openid-configuration`
+  oidcCache = await getOpenIDConfiguration(url)
+  return oidcCache
 }
 
-export function getLogoutUrl(returnTo?: string): string {
-  const params = new URLSearchParams()
-  params.set('app', edgeConfig.clientSlug)
-  if (returnTo) params.set('next', returnTo)
-  return `${getAuthEndpoint()}/api/auth/logout?${params.toString()}`
-}
-
-export async function readSessionFromDocument(): Promise<SessionUser | null> {
+export async function readSessionFromDocument(): Promise<ClaimUser | null> {
   if (!edgeConfig.endpoint || !edgeConfig.clientSlug) return null
-  const cookieName = edgeConfig.cookieNames?.accessToken ?? DEFAULT_COOKIE_NAMES.accessToken
+  const cookieName = edgeConfig.cookieNames?.accessToken ?? ACCESS_TOKEN_COOKIE
   const token = readAccessTokenFromDocument(cookieName)
   if (!token) return null
   try {
-    const { issuer, jwksUri } = await getOIDC(edgeConfig)
-    const jwks = await getJWKS(jwksUri)
-    return await validateAccessToken(token, issuer, jwks)
+    const oidc = await loadOIDC()
+    const jwks = await getJWKS(oidc.jwks_uri)
+    return await validateToken(token, oidc.issuer, jwks)
   } catch {
     return null
   }
 }
 
-export function startLogin(provider?: string, returnTo?: string) {
+export function getLoginUrl(provider?: string, returnTo?: string): string {
+  const base = getLogin(getAuthEndpoint(), edgeConfig.clientSlug, provider)
+  if (!returnTo) return base
+  const url = new URL(base)
+  url.searchParams.set('next', returnTo)
+  return url.toString()
+}
+
+export function getLogoutUrl(returnTo?: string): string {
+  const url = new URL(`${getAuthEndpoint()}/api/auth/logout`)
+  url.searchParams.set('client_slug', edgeConfig.clientSlug)
+  if (returnTo) url.searchParams.set('next', returnTo)
+  return url.toString()
+}
+
+export function startLogin(provider?: string, returnTo?: string): void {
   if (!edgeConfig.endpoint) return
   window.location.href = getLoginUrl(provider, returnTo)
 }

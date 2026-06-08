@@ -1,22 +1,25 @@
-export { fetchOIDCConfiguration, getJWKS, clearJWKSCache } from './oidc'
-export { validateAccessToken } from './validate'
+export * from './types'
+export { validateToken, claimsFromTokenUnsafe } from './token'
+export {
+  getOpenIDConfiguration,
+  getJWKS,
+  clearJWKSCache,
+  getLogin,
+  getLogout,
+  postAuthCode,
+  postRefreshToken
+} from './client'
 export { parseCookies, readAccessTokenFromDocument } from './cookies'
 export {
   configureEdge,
   getEdgeConfig,
   getAppSlug,
   getAuthEndpoint,
+  readSessionFromDocument,
   getLoginUrl,
   getLogoutUrl,
-  readSessionFromDocument,
   startLogin,
   endSession
 } from './session'
+export type { EdgeConfig } from './session'
 export { createAuthFetch } from './fetch'
-export { AuthError, DEFAULT_COOKIE_NAMES } from './types'
-export type {
-  SessionUser,
-  UserType,
-  OIDCConfiguration,
-  EdgeConfig
-} from './types'
