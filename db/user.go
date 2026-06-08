@@ -299,8 +299,8 @@ func (d *DB) AssertUserSingleRoot(ctx context.Context, userID uuid.UUID, targetO
 	return nil
 }
 
-func (d *DB) AssertUserTokenSingleRoot(ctx context.Context, externalID, idClaim string, targetOwnerID uuid.UUID) error {
-	if externalID == "" || idClaim == "" || targetOwnerID == uuid.Nil {
+func (d *DB) AssertUserTokenSingleRoot(ctx context.Context, externalID string, targetOwnerID uuid.UUID) error {
+	if externalID == "" || targetOwnerID == uuid.Nil {
 		return nil
 	}
 	var conflict bool
@@ -311,12 +311,11 @@ func (d *DB) AssertUserTokenSingleRoot(ctx context.Context, externalID, idClaim 
 			JOIN claimius.organization existing ON existing.id = ut.sa_owner_id
 			JOIN claimius.organization target ON target.id = ?
 			WHERE ut.external_id = ?
-			  AND ut.id_claim = ?
 			  AND ut.app_id = claimius.get_disciple_app_id()
 			  AND ut.sa_deleted_at IS NULL
 			  AND existing.sa_root_id <> target.sa_root_id
 		)
-	`, targetOwnerID, externalID, idClaim).Scan(ctx, &conflict)
+	`, targetOwnerID, externalID).Scan(ctx, &conflict)
 	if err != nil {
 		return err
 	}
@@ -440,17 +439,31 @@ func (d *DB) IssueUserToken(ctx context.Context, ac *AccessClaim, payload SamnaU
 		return nil, fmt.Errorf("marshal token claims: %w", err)
 	}
 
-	if rootErr := d.AssertUserTokenSingleRoot(ctx, externalID, idClaim, *payload.OwnerID); rootErr != nil {
+	if rootErr := d.AssertUserTokenSingleRoot(ctx, externalID, *payload.OwnerID); rootErr != nil {
 		return nil, rootErr
-	}
-
-	userJSON, err := json.Marshal(user)
-	if err != nil {
-		return nil, fmt.Errorf("marshal user: %w", err)
 	}
 
 	var result *OrganizationUserResult
 	err = d.DB.RunInTx(ctx, &sql.TxOptions{}, func(ctx context.Context, tx bun.Tx) error {
+		var existingUserID uuid.UUID
+		lookupErr := tx.NewRaw(`
+			SELECT user_id FROM claimius.user_token
+			WHERE app_id = claimius.get_disciple_app_id()
+			  AND sa_owner_id = ?
+			  AND external_id = ?
+			  AND sa_deleted_at IS NULL
+			LIMIT 1
+		`, *payload.OwnerID, externalID).Scan(ctx, &existingUserID)
+		if lookupErr != nil && !errors.Is(lookupErr, sql.ErrNoRows) {
+			return fmt.Errorf("lookup user_token: %w", lookupErr)
+		}
+		if existingUserID != uuid.Nil {
+			user.UserID = existingUserID
+		}
+		userJSON, marshalErr := json.Marshal(user)
+		if marshalErr != nil {
+			return fmt.Errorf("marshal user: %w", marshalErr)
+		}
 		out, terr := d.callCreateOrganizationUser(ctx, tx, ac, *payload.OwnerID, userJSON)
 		if terr != nil {
 			return terr
@@ -466,8 +479,9 @@ func (d *DB) IssueUserToken(ctx context.Context, ac *AccessClaim, payload SamnaU
 			CreatedBy:  ac.UserClaimID,
 		}
 		if _, err := tx.NewInsert().Model(&token).
-			On("CONFLICT (app_id, sa_owner_id, id_claim, external_id) WHERE sa_deleted_at IS NULL DO UPDATE").
+			On("CONFLICT (app_id, sa_owner_id, external_id) WHERE sa_deleted_at IS NULL DO UPDATE").
 			Set("user_id = EXCLUDED.user_id").
+			Set("id_claim = EXCLUDED.id_claim").
 			Set("claim_id = EXCLUDED.claim_id").
 			Set("data = EXCLUDED.data").
 			Set("type = EXCLUDED.type").
@@ -511,17 +525,31 @@ func (d *DB) UpsertUserExternal(ctx context.Context, ac *AccessClaim, payload Sa
 	user.OwnerID = payload.OwnerID
 	user.ClaimID = payload.ClaimID
 
-	if rootErr := d.AssertUserTokenSingleRoot(ctx, externalID, idClaim, *payload.OwnerID); rootErr != nil {
+	if rootErr := d.AssertUserTokenSingleRoot(ctx, externalID, *payload.OwnerID); rootErr != nil {
 		return nil, rootErr
 	}
 
-	userJSON, err := json.Marshal(user)
-	if err != nil {
-		return nil, fmt.Errorf("marshal user: %w", err)
-	}
-
 	var result *OrganizationUserResult
-	err = d.DB.RunInTx(ctx, &sql.TxOptions{}, func(ctx context.Context, tx bun.Tx) error {
+	err := d.DB.RunInTx(ctx, &sql.TxOptions{}, func(ctx context.Context, tx bun.Tx) error {
+		var existingUserID uuid.UUID
+		lookupErr := tx.NewRaw(`
+			SELECT user_id FROM claimius.user_token
+			WHERE app_id = claimius.get_disciple_app_id()
+			  AND sa_owner_id = ?
+			  AND external_id = ?
+			  AND sa_deleted_at IS NULL
+			LIMIT 1
+		`, *payload.OwnerID, externalID).Scan(ctx, &existingUserID)
+		if lookupErr != nil && !errors.Is(lookupErr, sql.ErrNoRows) {
+			return fmt.Errorf("lookup user_token: %w", lookupErr)
+		}
+		if existingUserID != uuid.Nil {
+			user.UserID = existingUserID
+		}
+		userJSON, marshalErr := json.Marshal(user)
+		if marshalErr != nil {
+			return fmt.Errorf("marshal user: %w", marshalErr)
+		}
 		out, terr := d.callCreateOrganizationUser(ctx, tx, ac, *payload.OwnerID, userJSON)
 		if terr != nil {
 			return terr
@@ -537,8 +565,9 @@ func (d *DB) UpsertUserExternal(ctx context.Context, ac *AccessClaim, payload Sa
 			CreatedBy:  ac.UserClaimID,
 		}
 		if _, err := tx.NewInsert().Model(&token).
-			On("CONFLICT (app_id, sa_owner_id, id_claim, external_id) WHERE sa_deleted_at IS NULL DO UPDATE").
+			On("CONFLICT (app_id, sa_owner_id, external_id) WHERE sa_deleted_at IS NULL DO UPDATE").
 			Set("user_id = EXCLUDED.user_id").
+			Set("id_claim = EXCLUDED.id_claim").
 			Set("claim_id = EXCLUDED.claim_id").
 			Set("data = EXCLUDED.data").
 			Set("type = EXCLUDED.type").
