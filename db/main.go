@@ -80,7 +80,12 @@ func Init(logger echo.Logger) (*DB, error) {
 	redactedDSN := fmt.Sprintf("postgres://%s:*********@%s:%s/%s?sslmode=%s", pgUser, pgHost, pgPort, pgDatabase, sslMode)
 
 	logger.Info("DSN:", redactedDSN)
-	sqlDB := sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dsn)))
+	sqlDB := sql.OpenDB(pgdriver.NewConnector(
+		pgdriver.WithDSN(dsn),
+		pgdriver.WithReadTimeout(120*time.Second),
+		pgdriver.WithWriteTimeout(120*time.Second),
+		pgdriver.WithDialTimeout(30*time.Second),
+	))
 	bunDB := bun.NewDB(sqlDB, pgdialect.New())
 
 	if bunDB == nil {
