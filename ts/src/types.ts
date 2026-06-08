@@ -10,6 +10,7 @@ export interface SessionUser {
   email?: string
   location?: string
   claims: string[]
+  scopes: string[]
 }
 
 export interface OIDCConfiguration {

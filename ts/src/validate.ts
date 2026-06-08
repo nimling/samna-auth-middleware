@@ -11,6 +11,17 @@ interface TokenPayload extends JWTPayload {
   email?: string
   location?: string
   claims?: string[]
+  scope?: string | string[]
+  scopes?: string[]
+}
+
+function parseScopes(payload: TokenPayload): string[] {
+  if (Array.isArray(payload.scopes)) return payload.scopes
+  if (Array.isArray(payload.scope)) return payload.scope
+  if (typeof payload.scope === 'string') {
+    return payload.scope.split(/\s+/).filter(Boolean)
+  }
+  return []
 }
 
 export async function validateAccessToken(
@@ -33,7 +44,8 @@ export async function validateAccessToken(
       phone: payload.phone,
       email: payload.email,
       location: payload.location,
-      claims: payload.claims ?? []
+      claims: payload.claims ?? [],
+      scopes: parseScopes(payload)
     }
   } catch {
     return null
