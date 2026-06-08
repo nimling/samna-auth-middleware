@@ -4,12 +4,16 @@ import { readAccessTokenFromDocument } from './cookies'
 import { DEFAULT_COOKIE_NAMES } from './types'
 import type { EdgeConfig, SessionUser } from './types'
 
-let oidcCache: { issuer: string; jwksUri: string } | null = null
+let oidcCache: { issuer: string; jwksUri: string; authorizationEndpoint?: string } | null = null
 
 async function getOIDC(config: EdgeConfig) {
   if (oidcCache) return oidcCache
   const oidc = await fetchOIDCConfiguration(config.endpoint, config.clientSlug)
-  oidcCache = { issuer: oidc.issuer, jwksUri: oidc.jwks_uri }
+  oidcCache = {
+    issuer: oidc.issuer,
+    jwksUri: oidc.jwks_uri,
+    authorizationEndpoint: oidc.authorization_endpoint
+  }
   return oidcCache
 }
 
@@ -21,6 +25,33 @@ export function configureEdge(config: EdgeConfig) {
 let edgeConfig: EdgeConfig = {
   endpoint: '',
   clientSlug: ''
+}
+
+export function getEdgeConfig(): EdgeConfig {
+  return edgeConfig
+}
+
+export function getAppSlug(): string {
+  return edgeConfig.clientSlug
+}
+
+export function getAuthEndpoint(): string {
+  return edgeConfig.endpoint.replace(/\/$/, '')
+}
+
+export function getLoginUrl(provider?: string, returnTo?: string): string {
+  const params = new URLSearchParams()
+  params.set('app', edgeConfig.clientSlug)
+  if (provider) params.set('provider', provider)
+  if (returnTo) params.set('next', returnTo)
+  return `${getAuthEndpoint()}/api/auth/login?${params.toString()}`
+}
+
+export function getLogoutUrl(returnTo?: string): string {
+  const params = new URLSearchParams()
+  params.set('app', edgeConfig.clientSlug)
+  if (returnTo) params.set('next', returnTo)
+  return `${getAuthEndpoint()}/api/auth/logout?${params.toString()}`
 }
 
 export async function readSessionFromDocument(): Promise<SessionUser | null> {
@@ -39,17 +70,13 @@ export async function readSessionFromDocument(): Promise<SessionUser | null> {
 
 export function startLogin(provider?: string, returnTo?: string) {
   if (!edgeConfig.endpoint) return
-  const params = new URLSearchParams()
-  if (provider) params.set('provider', provider)
-  if (returnTo) params.set('next', returnTo)
-  const qs = params.toString()
-  window.location.href = `${edgeConfig.endpoint.replace(/\/$/, '')}/api/auth/login${qs ? '?' + qs : ''}`
+  window.location.href = getLoginUrl(provider, returnTo)
 }
 
-export async function endSession(): Promise<void> {
+export async function endSession(returnTo?: string): Promise<void> {
   if (!edgeConfig.endpoint) return
   try {
-    await fetch(`${edgeConfig.endpoint.replace(/\/$/, '')}/api/auth/logout`, {
+    await fetch(getLogoutUrl(returnTo), {
       method: 'POST',
       credentials: 'include'
     })

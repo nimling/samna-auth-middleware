@@ -1,5 +1,11 @@
+set dotenv-load
+set export
+
+default:
+    @just --list
+
 deploy:
-    ../sbump/sbump.sh patch --env APP_VERSION --push-version
+    ../sbump/sbump.sh patch --env APP_VERSION --json ts/package.json@.version --push-version
 
 build:
     go build ./...

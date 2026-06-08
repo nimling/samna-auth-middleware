@@ -1,43 +1,96 @@
-# @nimling/samna-auth-edge
+# @nimling/samna-auth-middleware
 
-Session auth edge client for `samna_auth`.
+TypeScript caller for `samna_auth`. Reads OIDC discovery, builds login and logout redirect URLs, reads the active session cookie, and validates access tokens with `jose`. The Go middleware in this same repo remains the canonical implementation; this package surfaces a focused subset that fits browser and edge runtimes.
 
-This package mirrors a strict subset of the Go middleware: session validation only. It is meant for browsers and edge contexts that hold no database and no client secret.
+## Roles by runtime
 
-## In scope
+Capabilities split on whether the runtime can hold a confidential client secret. Browsers cannot. Node servers and edge runtimes can.
 
-1. Fetch OIDC configuration and JWKS from a samna_auth prophet
+### Always available, browser and server
 
-2. Validate access tokens signed by the prophet
+1. Read the OIDC discovery document and JWKS from a samna_auth host.
 
-3. Read the active session from `document.cookie` and validate it
+2. Validate an access token signed by samna_auth.
 
-4. Trigger login redirect and logout
+3. Read the `sauth_access_token` cookie from `document.cookie` and validate it.
 
-5. Wrap `fetch` to include credentials and surface 401s as typed errors
+4. Build redirect URLs:
 
-## Out of scope
+4.1. `getLoginUrl(provider?, returnTo?)` returns `${endpoint}/api/auth/login?app=${slug}&...`.
 
-1. Schema sync (snapshot, incremental, replay). That is what the Go disciple does.
+4.2. `getLogoutUrl(returnTo?)` returns the matching logout URL.
 
-2. JWKS rotation polling. The cached JWKS is refreshed on validation failure only.
+5. Drive the redirect: `startLogin` and `endSession` call those URLs from the browser.
 
-3. Auth code or refresh token exchange. Those flows hold `client_secret` and must run on the prophet, not on the edge.
+6. Wrap `fetch` to include credentials and raise a typed `AuthError` on 401.
 
-4. Cookie writing. Cookies are issued by the prophet on successful login.
+### Requires `client_id` and `client_secret`, server only
+
+These flows hold a confidential secret and must run on a first-party backend. They are not implemented in this package today; the Go middleware in `client/auth.go` is the canonical source.
+
+1. Authorization code exchange at `/oauth/token`.
+
+2. Refresh token exchange at `/oauth/token`.
+
+3. Service-to-service client credentials grant.
+
+4. Local schema sync. The Go middleware's `sync.PullSnapshot` is the only implementation; a browser cannot hold the resulting database.
+
+## Best practice: never ship client credentials to a plain frontend
+
+This matches what the Go middleware in this repo documents and what `samna_auth` enforces. A `client_id` and `client_secret` represent the application, not the user. A frontend bundle is public by construction, so any secret embedded in it is the same as no secret at all.
+
+When a flow needs the secret:
+
+1. A first-party backend holds the secret in an environment variable.
+
+2. The browser starts the login by being redirected to `samna_auth` through `getLoginUrl` or `startLogin`.
+
+3. `samna_auth` redirects back to the first-party backend's callback URL with an authorization code.
+
+4. The backend exchanges that code with its secret to obtain tokens, then sets the `sauth_access_token` cookie on the user's response.
+
+5. From that point the browser only carries the cookie. The session is read with `readSessionFromDocument`. The browser never sees the secret.
+
+The pattern matches the existing Go middleware's authentication flow. See the repo's top-level `README.md` for the canonical sequence.
 
 ## API
 
-1. `fetchOIDCConfiguration(endpoint, clientSlug)` returns `{ issuer, token_endpoint, jwks_uri }`
+```ts
+import {
+  configureEdge,
+  getLoginUrl,
+  getLogoutUrl,
+  getAppSlug,
+  getAuthEndpoint,
+  readSessionFromDocument,
+  startLogin,
+  endSession,
+  createAuthFetch,
+  validateAccessToken,
+  fetchOIDCConfiguration,
+  getJWKS,
+  type SessionUser
+} from '@nimling/samna-auth-middleware'
 
-2. `getJWKS(jwksUri)` returns the parsed key set
+configureEdge({
+  endpoint: 'https://auth.example.com',
+  clientSlug: 'docs'
+})
 
-3. `validateAccessToken(token, expectedIssuer, jwks)` returns a `SessionUser` or `null`
+const user: SessionUser | null = await readSessionFromDocument()
 
-4. `readSessionFromDocument()` reads `sauth_access_token` from `document.cookie`, validates it, returns a `SessionUser` or `null`
+startLogin('microsoft', window.location.pathname)
 
-5. `startLogin(provider?, returnTo?)` redirects the browser to the prophet's `/api/auth/login`
+const url = getLoginUrl(undefined, '/protected')
+```
 
-6. `endSession()` calls the prophet's `/api/auth/logout` with `credentials: 'include'`
+## Build and publish
 
-7. `createAuthFetch(baseUrl)` returns a `fetch` wrapper that includes credentials and throws `AuthError` on 401
+```bash
+pnpm install
+pnpm build
+pnpm test
+```
+
+The repo's GitHub Actions workflow `typescript-publish.yml` builds and ships this package to GitHub Packages when a `v*` tag is pushed. The Go release workflow handles the Go module independently.

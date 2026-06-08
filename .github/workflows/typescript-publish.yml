@@ -1,0 +1,55 @@
+name: Build and publish typescript
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Version tag (e.g., v1.2.3)'
+        required: true
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v2
+        with:
+          version: 8
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          registry-url: "https://npm.pkg.github.com"
+          cache: "pnpm"
+          cache-dependency-path: "./ts/pnpm-lock.yaml"
+
+      - name: Install dependencies
+        working-directory: ./ts
+        run: pnpm install
+
+      - name: Build
+        working-directory: ./ts
+        run: pnpm build
+
+      - name: Publish
+        working-directory: ./ts
+        run: |
+          if [[ "${{ github.event_name }}" == "push" ]]; then
+            VERSION=${GITHUB_REF#refs/tags/v}
+          else
+            VERSION=${{ github.event.inputs.tag }}
+            VERSION=${VERSION#v}
+          fi
+
+          npm version $VERSION --no-git-tag-version --allow-same-version
+          pnpm publish --no-git-checks
+        env:
+          GITHUB_TOKEN: ${{secrets.NODE_PUBLISH_TOKEN}}

@@ -1,7 +1,7 @@
 {
-  "name": "@nimling/samna-auth-edge",
+  "name": "@nimling/samna-auth-middleware",
   "version": "0.0.0",
-  "description": "Session auth edge client for samna_auth, mirroring the Go middleware's session validation surface only",
+  "description": "TypeScript caller for samna_auth. Reads OIDC discovery, builds login and logout redirect URLs, validates session tokens. Confidential flows are server-only.",
   "author": "nimling",
   "license": "MIT",
   "repository": {
@@ -24,14 +24,17 @@
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
+    "clean": "rimraf dist",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "prepare": "pnpm run build"
   },
   "dependencies": {
     "jose": "^5.9.6"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
+    "rimraf": "^6.0.1",
     "typescript": "~5.9.3",
     "vitest": "^3.2.4"
   },

@@ -3,6 +3,11 @@ export { validateAccessToken } from './validate'
 export { parseCookies, readAccessTokenFromDocument } from './cookies'
 export {
   configureEdge,
+  getEdgeConfig,
+  getAppSlug,
+  getAuthEndpoint,
+  getLoginUrl,
+  getLogoutUrl,
   readSessionFromDocument,
   startLogin,
   endSession
