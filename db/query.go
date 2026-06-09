@@ -113,6 +113,8 @@ func ApplyWithAccess(userID uuid.UUID, objectType string, requiredAccess ClaimAc
 			Join(join).
 			ColumnExpr("?TableAlias.*").
 			ColumnExpr("ga.user_claim_id AS access_user_claim_id").
+			ColumnExpr("ga.claim_id AS access_claim_id").
+			ColumnExpr("ga.claim_name AS access_claim_name").
 			ColumnExpr("ga.sa_access AS access_sa_access").
 			ColumnExpr("ga.scope AS access_scope").
 			ColumnExpr("ga.sa_owner_id AS access_sa_owner_id").

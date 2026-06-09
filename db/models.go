@@ -395,6 +395,7 @@ type AccessClaim struct {
 	UserObjectID uuid.UUID        `bun:"user_object_id,scanonly" json:"user_object_id"`
 	UserClaimID  *uuid.UUID       `bun:"user_claim_id,scanonly" json:"user_claim_id"`
 	ClaimID      *uuid.UUID       `bun:"claim_id,scanonly" json:"claim_id"`
+	ClaimName    *string          `bun:"claim_name,scanonly" json:"claim_name,omitempty"`
 	Access       int              `bun:"sa_access,scanonly" json:"access"`
 	Scope        *json.RawMessage `bun:"scope,type:jsonb,scanonly" json:"scope"`
 	OwnerID      uuid.UUID        `bun:"sa_owner_id,scanonly" json:"owner_id"`
@@ -408,6 +409,7 @@ type AccessUser struct {
 	Access       int        `bun:"access,scanonly" json:"access"`
 	UserClaimID  *uuid.UUID `bun:"user_claim_id,scanonly" json:"user_claim_id"`
 	ClaimID      *uuid.UUID `bun:"claim_id,scanonly" json:"claim_id"`
+	ClaimName    *string    `bun:"claim_name,scanonly" json:"claim_name,omitempty"`
 	OwnerID      *uuid.UUID `bun:"owner_id,scanonly" json:"owner_id"`
 	RootID       *uuid.UUID `bun:"root_id,scanonly" json:"root_id"`
 	LocationID   *uuid.UUID `bun:"location_id,scanonly" json:"location_id"`
