@@ -347,6 +347,11 @@ func (d *DB) CreateOrganizationUser(ctx context.Context, ac *AccessClaim, in *Sa
 	if in.ClaimID == nil || *in.ClaimID == uuid.Nil {
 		return nil, fmt.Errorf("claim_id required")
 	}
+	if in.UserID != uuid.Nil {
+		if rootErr := d.AssertUserSingleRoot(ctx, in.UserID, *in.OwnerID); rootErr != nil {
+			return nil, rootErr
+		}
+	}
 	userJSON, err := json.Marshal(in)
 	if err != nil {
 		return nil, fmt.Errorf("marshal user: %w", err)
