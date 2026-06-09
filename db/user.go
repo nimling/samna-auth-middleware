@@ -247,13 +247,27 @@ func (d *DB) DeleteUser(ctx context.Context, ac *AccessClaim, userID uuid.UUID) 
 		return nil, ErrNoAccess
 	}
 	var user SamnaUser
-	_, err := d.DB.NewUpdate().
-		Model(&user).
-		Where("user_id = ?", userID).
-		Where("sa_deleted_at IS NULL").
-		Set("sa_deleted_at = NOW()").
-		Returning("*").
-		Exec(ctx, &user)
+	err := d.DB.RunInTx(ctx, &sql.TxOptions{}, func(ctx context.Context, tx bun.Tx) error {
+		if _, err := tx.NewUpdate().
+			Model(&user).
+			Where("user_id = ?", userID).
+			Where("sa_deleted_at IS NULL").
+			Set("sa_deleted_at = NOW()").
+			Returning("*").
+			Exec(ctx, &user); err != nil {
+			return err
+		}
+		if _, err := tx.NewRaw(`
+			UPDATE claimius.user_token
+			SET sa_deleted_at = NOW()
+			WHERE user_id = ?
+			  AND app_id = claimius.get_disciple_app_id()
+			  AND sa_deleted_at IS NULL
+		`, userID).Exec(ctx); err != nil {
+			return err
+		}
+		return nil
+	})
 	if err != nil {
 		return nil, err
 	}
