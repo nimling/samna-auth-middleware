@@ -112,6 +112,7 @@ func (d *DB) MutationAccessMany(ctx context.Context, requests []AccessRequest) (
 			g.user_object_id,
 			g.user_claim_id,
 			g.claim_id,
+			g.claim_name,
 			g.sa_access,
 			g.scope,
 			g.sa_owner_id,
