@@ -425,7 +425,7 @@ func (d *DB) CreateVirtualClaim(ctx context.Context, ac *AccessClaim, p CreateVi
 				p_object_id     := ?,
 				p_object_type   := ?,
 				p_sa_access     := NULL,
-				p_inherits      := FALSE
+				p_inherits      := TRUE
 			) -> 'claim_object' AS data
 		) bound_object
 		CROSS JOIN LATERAL (
