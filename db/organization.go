@@ -74,16 +74,36 @@ func (d *DB) GetParentOrganizations(ctx context.Context, startID uuid.UUID) ([]u
 }
 
 func (d *DB) insertOrganization(ctx context.Context, ac *AccessClaim, org *Organization) (*Organization, error) {
-	if ac == nil {
+	if ac == nil || ac.ClaimID == nil || ac.UserClaimID == nil {
 		return nil, ErrNoAccess
 	}
 	org.CreatedBy = *ac.UserClaimID
-	_, err := d.DB.NewInsert().
-		Model(org).
-		ExcludeColumn("id", "sa_created_at", "sa_updated_at", "sa_deleted_at").
-		Value("app_id", "claimius.get_disciple_app_id()").
-		Returning("*").
-		Exec(ctx, org)
+	err := d.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
+		if _, err := tx.NewInsert().
+			Model(org).
+			ExcludeColumn("id", "sa_created_at", "sa_updated_at", "sa_deleted_at").
+			Value("app_id", "claimius.get_disciple_app_id()").
+			Returning("*").
+			Exec(ctx, org); err != nil {
+			return err
+		}
+		if _, err := tx.NewRaw(`
+			SELECT claimius.assign_claim_object(
+				p_app_id        := claimius.get_disciple_app_id(),
+				p_claim_id      := ?,
+				p_sa_owner_id   := ?,
+				p_sa_root_id    := ?,
+				p_sa_created_by := ?,
+				p_object_id     := ?,
+				p_object_type   := 'claimius.organization',
+				p_sa_access     := ?,
+				p_inherits      := TRUE
+			)
+		`, *ac.ClaimID, ac.OwnerID, ac.RootID, *ac.UserClaimID, org.ID, int(ACCESS_OWNER|ACCESS_WRITE|ACCESS_READ)).Exec(ctx); err != nil {
+			return err
+		}
+		return nil
+	})
 	if err != nil {
 		return nil, err
 	}

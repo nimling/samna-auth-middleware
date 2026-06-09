@@ -73,16 +73,36 @@ func (d *DB) GetParentLocations(ctx context.Context, startID uuid.UUID) ([]uuid.
 }
 
 func (d *DB) insertLocation(ctx context.Context, ac *AccessClaim, loc *Location) (*Location, error) {
-	if ac == nil {
+	if ac == nil || ac.ClaimID == nil || ac.UserClaimID == nil {
 		return nil, ErrNoAccess
 	}
 	loc.CreatedBy = *ac.UserClaimID
-	_, err := d.DB.NewInsert().
-		Model(loc).
-		ExcludeColumn("id", "sa_root_id", "sa_created_at", "sa_updated_at", "sa_deleted_at").
-		Value("app_id", "claimius.get_disciple_app_id()").
-		Returning("*").
-		Exec(ctx, loc)
+	err := d.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
+		if _, err := tx.NewInsert().
+			Model(loc).
+			ExcludeColumn("id", "sa_root_id", "sa_created_at", "sa_updated_at", "sa_deleted_at").
+			Value("app_id", "claimius.get_disciple_app_id()").
+			Returning("*").
+			Exec(ctx, loc); err != nil {
+			return err
+		}
+		if _, err := tx.NewRaw(`
+			SELECT claimius.assign_claim_object(
+				p_app_id        := claimius.get_disciple_app_id(),
+				p_claim_id      := ?,
+				p_sa_owner_id   := ?,
+				p_sa_root_id    := ?,
+				p_sa_created_by := ?,
+				p_object_id     := ?,
+				p_object_type   := 'claimius.location',
+				p_sa_access     := ?,
+				p_inherits      := TRUE
+			)
+		`, *ac.ClaimID, ac.OwnerID, ac.RootID, *ac.UserClaimID, loc.ID, int(ACCESS_OWNER|ACCESS_WRITE|ACCESS_READ)).Exec(ctx); err != nil {
+			return err
+		}
+		return nil
+	})
 	if err != nil {
 		return nil, err
 	}
