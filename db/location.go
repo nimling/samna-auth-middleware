@@ -77,6 +77,10 @@ func (d *DB) insertLocation(ctx context.Context, ac *AccessClaim, loc *Location)
 		return nil, ErrNoAccess
 	}
 	loc.CreatedBy = *ac.UserClaimID
+	bindingOwnerID := loc.OwnerID
+	if bindingOwnerID == uuid.Nil {
+		bindingOwnerID = ac.OwnerID
+	}
 	err := d.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
 		if _, err := tx.NewInsert().
 			Model(loc).
@@ -84,6 +88,10 @@ func (d *DB) insertLocation(ctx context.Context, ac *AccessClaim, loc *Location)
 			Value("app_id", "claimius.get_disciple_app_id()").
 			Returning("*").
 			Exec(ctx, loc); err != nil {
+			return err
+		}
+		var bindingRootID uuid.UUID
+		if err := tx.NewRaw(`SELECT sa_root_id FROM claimius.organization WHERE id = ? AND sa_deleted_at IS NULL`, bindingOwnerID).Scan(ctx, &bindingRootID); err != nil {
 			return err
 		}
 		if _, err := tx.NewRaw(`
@@ -98,7 +106,7 @@ func (d *DB) insertLocation(ctx context.Context, ac *AccessClaim, loc *Location)
 				p_sa_access     := ?,
 				p_inherits      := TRUE
 			)
-		`, *ac.ClaimID, ac.OwnerID, ac.RootID, *ac.UserClaimID, loc.ID, int(ACCESS_OWNER|ACCESS_WRITE|ACCESS_READ)).Exec(ctx); err != nil {
+		`, *ac.ClaimID, bindingOwnerID, bindingRootID, *ac.UserClaimID, loc.ID, int(ACCESS_OWNER|ACCESS_WRITE|ACCESS_READ)).Exec(ctx); err != nil {
 			return err
 		}
 		return nil

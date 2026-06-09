@@ -78,6 +78,10 @@ func (d *DB) insertOrganization(ctx context.Context, ac *AccessClaim, org *Organ
 		return nil, ErrNoAccess
 	}
 	org.CreatedBy = *ac.UserClaimID
+	bindingOwnerID := org.OwnerID
+	if bindingOwnerID == uuid.Nil {
+		bindingOwnerID = ac.OwnerID
+	}
 	err := d.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
 		if _, err := tx.NewInsert().
 			Model(org).
@@ -85,6 +89,10 @@ func (d *DB) insertOrganization(ctx context.Context, ac *AccessClaim, org *Organ
 			Value("app_id", "claimius.get_disciple_app_id()").
 			Returning("*").
 			Exec(ctx, org); err != nil {
+			return err
+		}
+		var bindingRootID uuid.UUID
+		if err := tx.NewRaw(`SELECT sa_root_id FROM claimius.organization WHERE id = ? AND sa_deleted_at IS NULL`, bindingOwnerID).Scan(ctx, &bindingRootID); err != nil {
 			return err
 		}
 		if _, err := tx.NewRaw(`
@@ -99,7 +107,7 @@ func (d *DB) insertOrganization(ctx context.Context, ac *AccessClaim, org *Organ
 				p_sa_access     := ?,
 				p_inherits      := TRUE
 			)
-		`, *ac.ClaimID, ac.OwnerID, ac.RootID, *ac.UserClaimID, org.ID, int(ACCESS_OWNER|ACCESS_WRITE|ACCESS_READ)).Exec(ctx); err != nil {
+		`, *ac.ClaimID, bindingOwnerID, bindingRootID, *ac.UserClaimID, org.ID, int(ACCESS_OWNER|ACCESS_WRITE|ACCESS_READ)).Exec(ctx); err != nil {
 			return err
 		}
 		return nil
