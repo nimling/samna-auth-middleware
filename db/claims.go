@@ -402,6 +402,7 @@ func (d *DB) CreateVirtualClaim(ctx context.Context, ac *AccessClaim, p CreateVi
 			NULL::uuid AS user_object_id,
 			((granted_user.data ->> 'id')::uuid) AS user_claim_id,
 			((created_claim.data ->> 'id')::uuid) AS claim_id,
+			(created_claim.data ->> 'name') AS claim_name,
 			((created_claim.data ->> 'sa_access')::int) AS sa_access,
 			NULL::jsonb AS scope,
 			((created_claim.data ->> 'sa_owner_id')::uuid) AS sa_owner_id,

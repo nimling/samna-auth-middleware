@@ -2,7 +2,6 @@ package db
 
 import (
 	"context"
-	"encoding/json"
 
 	"github.com/google/uuid"
 	"github.com/uptrace/bun"
@@ -122,22 +121,26 @@ func (d *DB) InsertRootOrganization(ctx context.Context, ac *AccessClaim, org *O
 	if ac == nil || ac.UserClaimID == nil {
 		return nil, ErrNoAccess
 	}
-	var payload []byte
+	var newID uuid.UUID
 	err := d.NewRaw(`
-		SELECT (claimius.create_root_organization(
+		SELECT ((claimius.create_root_organization(
 			claimius.get_disciple_app_id(), ?, ?, ?, ?, ?
-		) -> 'organization')::jsonb
+		) -> 'organization') ->> 'id')::uuid
 	`,
 		org.Name,
 		*ac.UserClaimID,
 		org.Description,
 		org.Type,
 		org.ID,
-	).Scan(ctx, &payload)
+	).Scan(ctx, &newID)
 	if err != nil {
 		return nil, err
 	}
-	if err := json.Unmarshal(payload, org); err != nil {
+	if err := d.NewSelect().
+		Model(org).
+		Where("id = ?", newID).
+		Where("sa_deleted_at IS NULL").
+		Scan(ctx); err != nil {
 		return nil, err
 	}
 	return org, nil
