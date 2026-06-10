@@ -9,7 +9,7 @@ require (
 	github.com/labstack/echo/v4 v4.12.0
 	github.com/lestrrat-go/jwx/v2 v2.1.6
 	github.com/lib/pq v1.12.3
-	github.com/nimling/nimbody v1.0.3
+	github.com/nimling/nimbody v1.0.4
 	github.com/uptrace/bun v1.2.18
 	github.com/uptrace/bun/dialect/pgdialect v1.2.18
 	github.com/uptrace/bun/driver/pgdriver v1.2.18
