@@ -59,15 +59,16 @@ func QualifyObjectType(s string) string {
 }
 
 var bareObjectTypes = map[string]ObjectType{
-	StripObjectSchema(OBJECT_TYPE_USER):         OBJECT_TYPE_USER,
-	StripObjectSchema(OBJECT_TYPE_ORGANIZATION): OBJECT_TYPE_ORGANIZATION,
-	StripObjectSchema(OBJECT_TYPE_LOCATION):     OBJECT_TYPE_LOCATION,
-	StripObjectSchema(OBJECT_TYPE_CLAIM):        OBJECT_TYPE_CLAIM,
-	StripObjectSchema(OBJECT_TYPE_USER_CLAIM):   OBJECT_TYPE_USER_CLAIM,
-	StripObjectSchema(OBJECT_TYPE_CLAIM_OBJECT): OBJECT_TYPE_CLAIM_OBJECT,
-	StripObjectSchema(OBJECT_TYPE_SAMNA_APP):    OBJECT_TYPE_SAMNA_APP,
-	StripObjectSchema(OBJECT_TYPE_SAMNA_CLIENT): OBJECT_TYPE_SAMNA_CLIENT,
-	StripObjectSchema(OBJECT_TYPE_SAMNA_SECRET): OBJECT_TYPE_SAMNA_SECRET,
+	StripObjectSchema(OBJECT_TYPE_USER):          OBJECT_TYPE_USER,
+	StripObjectSchema(OBJECT_TYPE_ORGANIZATION):  OBJECT_TYPE_ORGANIZATION,
+	StripObjectSchema(OBJECT_TYPE_LOCATION):      OBJECT_TYPE_LOCATION,
+	StripObjectSchema(OBJECT_TYPE_CLAIM):         OBJECT_TYPE_CLAIM,
+	StripObjectSchema(OBJECT_TYPE_USER_CLAIM):    OBJECT_TYPE_USER_CLAIM,
+	StripObjectSchema(OBJECT_TYPE_CLAIM_OBJECT):  OBJECT_TYPE_CLAIM_OBJECT,
+	StripObjectSchema(OBJECT_TYPE_USER_RELATION): OBJECT_TYPE_USER_RELATION,
+	StripObjectSchema(OBJECT_TYPE_SAMNA_APP):     OBJECT_TYPE_SAMNA_APP,
+	StripObjectSchema(OBJECT_TYPE_SAMNA_CLIENT):  OBJECT_TYPE_SAMNA_CLIENT,
+	StripObjectSchema(OBJECT_TYPE_SAMNA_SECRET):  OBJECT_TYPE_SAMNA_SECRET,
 }
 
 // ResolveObjectType returns a qualified ObjectType. Bare claimius types resolve to claimius.X. Unknown bare names default to public.X. Already qualified strings pass through.
@@ -107,15 +108,16 @@ const (
 )
 
 const (
-	OBJECT_TYPE_USER         = "claimius.samna_user"
-	OBJECT_TYPE_ORGANIZATION = "claimius.organization"
-	OBJECT_TYPE_LOCATION     = "claimius.location"
-	OBJECT_TYPE_CLAIM        = "claimius.claim"
-	OBJECT_TYPE_USER_CLAIM   = "claimius.user_claim"
-	OBJECT_TYPE_CLAIM_OBJECT = "claimius.claim_object"
-	OBJECT_TYPE_SAMNA_APP    = "claimius.samna_app"
-	OBJECT_TYPE_SAMNA_CLIENT = "claimius.samna_client"
-	OBJECT_TYPE_SAMNA_SECRET = "claimius.samna_secret"
+	OBJECT_TYPE_USER          = "claimius.samna_user"
+	OBJECT_TYPE_ORGANIZATION  = "claimius.organization"
+	OBJECT_TYPE_LOCATION      = "claimius.location"
+	OBJECT_TYPE_CLAIM         = "claimius.claim"
+	OBJECT_TYPE_USER_CLAIM    = "claimius.user_claim"
+	OBJECT_TYPE_CLAIM_OBJECT  = "claimius.claim_object"
+	OBJECT_TYPE_USER_RELATION = "claimius.user_relation"
+	OBJECT_TYPE_SAMNA_APP     = "claimius.samna_app"
+	OBJECT_TYPE_SAMNA_CLIENT  = "claimius.samna_client"
+	OBJECT_TYPE_SAMNA_SECRET  = "claimius.samna_secret"
 )
 
 type OrganizationType string
@@ -277,6 +279,7 @@ type Claim struct {
 	ClaimObjects []ClaimObject `bun:"rel:has-many,join:id=claim_id" json:"claim_objects,omitempty"`
 	ClaimUsers   []UserClaim   `bun:"rel:has-many,join:id=claim_id" json:"claim_users,omitempty"`
 	Owner        *Organization `bun:"rel:belongs-to,join:sa_owner_id=id" json:"owner,omitempty"`
+	Creator      *Creator      `bun:"embed:creator_" json:"creator,omitempty"`
 
 	sessionCtx   context.Context
 	sessionActor *AccessClaim
@@ -366,6 +369,8 @@ type UserClaim struct {
 	UpdatedAt time.Time     `bun:"sa_updated_at,default:now()" json:"updated_at"`
 	Owner     *Organization `bun:"rel:belongs-to,join:sa_owner_id=id" json:"owner,omitempty"`
 	User      *SamnaUser    `bun:"rel:belongs-to,join:user_id=user_id" json:"user,omitempty"`
+	Access    *AccessClaim  `bun:"embed:access_" json:"access,omitempty"`
+	Creator   *Creator      `bun:"embed:creator_" json:"creator,omitempty"`
 }
 
 type ClaimObject struct {
@@ -389,6 +394,7 @@ type ClaimObject struct {
 	CreatedAt  time.Time        `bun:"sa_created_at,default:now()" json:"created_at"`
 	UpdatedAt  time.Time        `bun:"sa_updated_at,default:now()" json:"updated_at"`
 	Owner      *Organization    `bun:"rel:belongs-to,join:sa_owner_id=id" json:"owner,omitempty"`
+	Creator    *Creator         `bun:"embed:creator_" json:"creator,omitempty"`
 }
 
 type AccessClaim struct {
@@ -414,6 +420,21 @@ type AccessUser struct {
 	RootID       *uuid.UUID `bun:"root_id,scanonly" json:"root_id"`
 	LocationID   *uuid.UUID `bun:"location_id,scanonly" json:"location_id"`
 	DirectGrant  bool       `bun:"direct_grant,scanonly" json:"direct_grant"`
+}
+
+type Creator struct {
+	ID         uuid.UUID `bun:"id,scanonly" json:"id"`
+	UserID     uuid.UUID `bun:"user_id,scanonly" json:"user_id"`
+	FirstName  *string   `bun:"first_name,scanonly" json:"first_name,omitempty"`
+	LastName   *string   `bun:"last_name,scanonly" json:"last_name,omitempty"`
+	UserName   *string   `bun:"user_name,scanonly" json:"user_name,omitempty"`
+	UserImage  *string   `bun:"user_image,scanonly" json:"user_image,omitempty"`
+	Phone      *string   `bun:"phone,scanonly" json:"phone,omitempty"`
+	Email      string    `bun:"email,scanonly" json:"email"`
+	ExternalID *string   `bun:"external_id,scanonly" json:"external_id,omitempty"`
+	Status     *string   `bun:"status,scanonly" json:"status,omitempty"`
+	CreatedAt  time.Time `bun:"created_at,scanonly" json:"created_at"`
+	UpdatedAt  time.Time `bun:"updated_at,scanonly" json:"updated_at"`
 }
 
 type Asset struct {
@@ -552,10 +573,11 @@ type UserRelation struct {
 	Priority    *int       `bun:"priority" json:"priority"`
 	ParentID    *uuid.UUID `bun:"parent_id" json:"parent_id"`
 	SiblingID   *uuid.UUID `bun:"sibling_id" json:"sibling_id"`
-	UsedAt      *time.Time `bun:"used_at,default:now()" json:"used_at"`
-	DeletedAt   *time.Time `bun:"sa_deleted_at" json:"deleted_at,omitzero"`
-	CreatedAt   time.Time  `bun:"sa_created_at,default:now()" json:"created_at"`
-	UpdatedAt   time.Time  `bun:"sa_updated_at,default:now()" json:"updated_at"`
+	UsedAt      *time.Time   `bun:"used_at,default:now()" json:"used_at"`
+	DeletedAt   *time.Time   `bun:"sa_deleted_at" json:"deleted_at,omitzero"`
+	CreatedAt   time.Time    `bun:"sa_created_at,default:now()" json:"created_at"`
+	UpdatedAt   time.Time    `bun:"sa_updated_at,default:now()" json:"updated_at"`
+	Access      *AccessClaim `bun:"embed:access_" json:"access,omitempty"`
 }
 
 type Audit struct {
