@@ -171,7 +171,7 @@ var endpointSpecs = map[ObjectType]endpointSpec{
 	OBJECT_TYPE_SAMNA_SECRET: {base: "secret"},
 }
 
-func endpointFor(model any, parents map[string]uuid.UUID, recordID uuid.UUID) (string, error) {
+func endpointFor(model any, recordID uuid.UUID) (string, error) {
 	otype, err := ObjectTypeOf(model)
 	if err != nil {
 		return "", err
@@ -182,9 +182,9 @@ func endpointFor(model any, parents map[string]uuid.UUID, recordID uuid.UUID) (s
 	}
 	var parts []string
 	for _, p := range spec.parents {
-		pid, ok := parents[p]
-		if !ok || pid == uuid.Nil {
-			return "", fmt.Errorf("endpoint %q requires parent %q id", otype, p)
+		pid, err := parentIDFromModel(model, p)
+		if err != nil {
+			return "", fmt.Errorf("endpoint %q: %w", otype, err)
 		}
 		parts = append(parts, p, pid.String())
 	}
@@ -193,6 +193,32 @@ func endpointFor(model any, parents map[string]uuid.UUID, recordID uuid.UUID) (s
 		parts = append(parts, recordID.String())
 	}
 	return strings.Join(parts, "/"), nil
+}
+
+func parentIDFromModel(model any, parent string) (uuid.UUID, error) {
+	switch parent {
+	case "claim":
+		if m, ok := embeddedPtr(model, reflect.TypeOf(ClaimObject{})).(*ClaimObject); ok && m != nil {
+			if m.ClaimID == uuid.Nil {
+				return uuid.Nil, fmt.Errorf("model.claim_id required")
+			}
+			return m.ClaimID, nil
+		}
+		if m, ok := embeddedPtr(model, reflect.TypeOf(UserClaim{})).(*UserClaim); ok && m != nil {
+			if m.ClaimID == uuid.Nil {
+				return uuid.Nil, fmt.Errorf("model.claim_id required")
+			}
+			return m.ClaimID, nil
+		}
+	case "user":
+		if m, ok := embeddedPtr(model, reflect.TypeOf(UserRelation{})).(*UserRelation); ok && m != nil {
+			if m.UserID == uuid.Nil {
+				return uuid.Nil, fmt.Errorf("model.user_id required")
+			}
+			return m.UserID, nil
+		}
+	}
+	return uuid.Nil, fmt.Errorf("parent %q not derivable from model", parent)
 }
 
 type conflictSet struct {
@@ -247,7 +273,6 @@ type InsertQuery struct {
 	db       *DB
 	model    any
 	actor    *AccessClaim
-	parents  map[string]uuid.UUID
 	excludes []string
 	conflict string
 	confSet  []conflictSet
@@ -255,7 +280,7 @@ type InsertQuery struct {
 }
 
 func (d *DB) NewInsert() *InsertQuery {
-	return &InsertQuery{db: d, parents: map[string]uuid.UUID{}}
+	return &InsertQuery{db: d}
 }
 
 func (q *InsertQuery) Model(model any) *InsertQuery {
@@ -265,11 +290,6 @@ func (q *InsertQuery) Model(model any) *InsertQuery {
 
 func (q *InsertQuery) With(ac *AccessClaim) *InsertQuery {
 	q.actor = ac
-	return q
-}
-
-func (q *InsertQuery) Parent(name string, id uuid.UUID) *InsertQuery {
-	q.parents[name] = id
 	return q
 }
 
@@ -349,11 +369,10 @@ func (q *InsertQuery) execClaimius(ctx context.Context, dest ...any) (bool, erro
 		if !ok {
 			return false, nil
 		}
-		claimID, ok := q.parents["claim"]
-		if !ok {
-			return true, fmt.Errorf("insert claim_object: claim parent id required")
+		if m.ClaimID == uuid.Nil {
+			return true, fmt.Errorf("insert claim_object: claim_id required on model")
 		}
-		result, err := q.db.insertClaimObject(ctx, q.actor, claimID, m)
+		result, err := q.db.insertClaimObject(ctx, q.actor, m.ClaimID, m)
 		if err != nil {
 			return true, err
 		}
@@ -364,11 +383,10 @@ func (q *InsertQuery) execClaimius(ctx context.Context, dest ...any) (bool, erro
 		if !ok {
 			return false, nil
 		}
-		claimID, ok := q.parents["claim"]
-		if !ok {
-			return true, fmt.Errorf("insert user_claim: claim parent id required")
+		if m.ClaimID == uuid.Nil {
+			return true, fmt.Errorf("insert user_claim: claim_id required on model")
 		}
-		result, err := q.db.insertClaimUser(ctx, q.actor, claimID, m)
+		result, err := q.db.insertClaimUser(ctx, q.actor, m.ClaimID, m)
 		if err != nil {
 			return true, err
 		}
@@ -437,7 +455,7 @@ func (q *InsertQuery) execClaimius(ctx context.Context, dest ...any) (bool, erro
 }
 
 func (q *InsertQuery) execHTTP(ctx context.Context, dest ...any) (sql.Result, error) {
-	path, err := endpointFor(q.model, q.parents, uuid.Nil)
+	path, err := endpointFor(q.model, uuid.Nil)
 	if err != nil {
 		return nil, err
 	}
@@ -487,7 +505,6 @@ type UpdateQuery struct {
 	db        *DB
 	model     any
 	actor     *AccessClaim
-	parents   map[string]uuid.UUID
 	recordID  uuid.UUID
 	excludes  []string
 	returns   string
@@ -496,7 +513,7 @@ type UpdateQuery struct {
 }
 
 func (d *DB) NewUpdate() *UpdateQuery {
-	return &UpdateQuery{db: d, parents: map[string]uuid.UUID{}}
+	return &UpdateQuery{db: d}
 }
 
 func (q *UpdateQuery) Model(model any) *UpdateQuery {
@@ -506,11 +523,6 @@ func (q *UpdateQuery) Model(model any) *UpdateQuery {
 
 func (q *UpdateQuery) With(ac *AccessClaim) *UpdateQuery {
 	q.actor = ac
-	return q
-}
-
-func (q *UpdateQuery) Parent(name string, id uuid.UUID) *UpdateQuery {
-	q.parents[name] = id
 	return q
 }
 
@@ -662,7 +674,7 @@ func (q *UpdateQuery) execHTTP(ctx context.Context, dest ...any) (sql.Result, er
 	if q.recordID == uuid.Nil {
 		return nil, fmt.Errorf("update: record id required (use .ID(id) or .Where(\"id = ?\", id))")
 	}
-	path, err := endpointFor(q.model, q.parents, q.recordID)
+	path, err := endpointFor(q.model, q.recordID)
 	if err != nil {
 		return nil, err
 	}
@@ -723,14 +735,13 @@ type DeleteQuery struct {
 	db        *DB
 	model     any
 	actor     *AccessClaim
-	parents   map[string]uuid.UUID
 	recordID  uuid.UUID
 	whereExpr []conflictSet
 	returns   string
 }
 
 func (d *DB) NewDelete() *DeleteQuery {
-	return &DeleteQuery{db: d, parents: map[string]uuid.UUID{}}
+	return &DeleteQuery{db: d}
 }
 
 func (q *DeleteQuery) Model(model any) *DeleteQuery {
@@ -740,11 +751,6 @@ func (q *DeleteQuery) Model(model any) *DeleteQuery {
 
 func (q *DeleteQuery) With(ac *AccessClaim) *DeleteQuery {
 	q.actor = ac
-	return q
-}
-
-func (q *DeleteQuery) Parent(name string, id uuid.UUID) *DeleteQuery {
-	q.parents[name] = id
 	return q
 }
 
@@ -821,11 +827,10 @@ func (q *DeleteQuery) execClaimius(ctx context.Context, dest ...any) (bool, erro
 		if !ok {
 			return false, nil
 		}
-		claimID, ok := q.parents["claim"]
-		if !ok {
-			return true, fmt.Errorf("delete claim_object: claim parent id required")
+		if m.ClaimID == uuid.Nil {
+			return true, fmt.Errorf("delete claim_object: claim_id required on model")
 		}
-		result, err := q.db.deleteClaimObject(ctx, q.actor, claimID, q.recordID)
+		result, err := q.db.deleteClaimObject(ctx, q.actor, m.ClaimID, q.recordID)
 		if err != nil {
 			return true, err
 		}
@@ -836,11 +841,10 @@ func (q *DeleteQuery) execClaimius(ctx context.Context, dest ...any) (bool, erro
 		if !ok {
 			return false, nil
 		}
-		claimID, ok := q.parents["claim"]
-		if !ok {
-			return true, fmt.Errorf("delete user_claim: claim parent id required")
+		if m.ClaimID == uuid.Nil {
+			return true, fmt.Errorf("delete user_claim: claim_id required on model")
 		}
-		result, err := q.db.deleteClaimUser(ctx, q.actor, claimID, q.recordID)
+		result, err := q.db.deleteClaimUser(ctx, q.actor, m.ClaimID, q.recordID)
 		if err != nil {
 			return true, err
 		}
@@ -875,11 +879,10 @@ func (q *DeleteQuery) execClaimius(ctx context.Context, dest ...any) (bool, erro
 		if !ok {
 			return false, nil
 		}
-		userID, ok := q.parents["user"]
-		if !ok {
-			return true, fmt.Errorf("delete user_relation: user parent id required")
+		if m.UserID == uuid.Nil {
+			return true, fmt.Errorf("delete user_relation: user_id required on model")
 		}
-		result, err := q.db.deleteRelation(ctx, q.actor, userID, q.recordID)
+		result, err := q.db.deleteRelation(ctx, q.actor, m.UserID, q.recordID)
 		if err != nil {
 			return true, err
 		}
@@ -904,7 +907,7 @@ func (q *DeleteQuery) execHTTP(ctx context.Context, dest ...any) (sql.Result, er
 	if q.recordID == uuid.Nil {
 		return nil, fmt.Errorf("delete: record id required (use .ID(id) or .Where(\"id = ?\", id))")
 	}
-	path, err := endpointFor(q.model, q.parents, q.recordID)
+	path, err := endpointFor(q.model, q.recordID)
 	if err != nil {
 		return nil, err
 	}

@@ -88,7 +88,8 @@ func (c *Claim) AssignObject(target any) (*ClaimObject, error) {
 		co.ObjectType = &otype
 		co.Inherits = true
 	}
-	if err := c.sessionDB.NewInsert().Model(&co).With(c.sessionActor).Parent("claim", c.ID).Scan(c.sessionCtx, &co); err != nil {
+	co.ClaimID = c.ID
+	if err := c.sessionDB.NewInsert().Model(&co).With(c.sessionActor).Scan(c.sessionCtx, &co); err != nil {
 		return nil, err
 	}
 	return &co, nil
@@ -120,8 +121,8 @@ func (c *Claim) AssignUser(userIDs ...uuid.UUID) ([]UserClaim, error) {
 		if !errors.Is(err, sql.ErrNoRows) {
 			return results, err
 		}
-		uc := UserClaim{UserID: uid}
-		if err := c.sessionDB.NewInsert().Model(&uc).With(c.sessionActor).Parent("claim", c.ID).Scan(c.sessionCtx, &uc); err != nil {
+		uc := UserClaim{ClaimID: c.ID, UserID: uid}
+		if err := c.sessionDB.NewInsert().Model(&uc).With(c.sessionActor).Scan(c.sessionCtx, &uc); err != nil {
 			return results, err
 		}
 		results = append(results, uc)

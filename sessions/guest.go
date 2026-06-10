@@ -81,7 +81,8 @@ func IssueGuestToken(ctx context.Context, claimID uuid.UUID, issuer string) (*Gu
 		if accErr != nil {
 			return nil, fmt.Errorf("guest claim access: %w", accErr)
 		}
-		if err := db.Instance().NewInsert().Model(&guestClaim).With(ac).Parent("claim", claimID).Scan(ctx, &guestClaim); err != nil {
+		guestClaim.ClaimID = claimID
+		if err := db.Instance().NewInsert().Model(&guestClaim).With(ac).Scan(ctx, &guestClaim); err != nil {
 			return nil, fmt.Errorf("assign guest claim: %w", err)
 		}
 		existingClaim = guestClaim
