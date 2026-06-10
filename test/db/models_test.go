@@ -2,6 +2,7 @@ package db
 
 import (
 	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -122,5 +123,26 @@ func TestUserRelation_ObjectTypeConstantResolves(t *testing.T) {
 	}
 	if got != sdb.OBJECT_TYPE_USER_RELATION {
 		t.Fatalf("expected %s, got %s", sdb.OBJECT_TYPE_USER_RELATION, got)
+	}
+}
+
+func TestCreateVirtualClaimParams_NoRootID(t *testing.T) {
+	rt := reflect.TypeOf(sdb.CreateVirtualClaimParams{})
+	if _, ok := rt.FieldByName("RootID"); ok {
+		t.Fatalf("CreateVirtualClaimParams must not carry RootID; derived from OwnerID in middleware SQL")
+	}
+	wanted := map[string]bool{
+		"Name": true, "Description": true, "Access": true,
+		"OwnerID": true, "ObjectID": true, "ObjectType": true, "TargetUserID": true,
+	}
+	for i := 0; i < rt.NumField(); i++ {
+		name := rt.Field(i).Name
+		if !wanted[name] {
+			t.Fatalf("unexpected field %s on CreateVirtualClaimParams", name)
+		}
+		delete(wanted, name)
+	}
+	if len(wanted) > 0 {
+		t.Fatalf("missing fields on CreateVirtualClaimParams: %v", wanted)
 	}
 }

@@ -386,7 +386,6 @@ type CreateVirtualClaimParams struct {
 	Description  *string
 	Access       ClaimAccess
 	OwnerID      uuid.UUID
-	RootID       uuid.UUID
 	ObjectID     uuid.UUID
 	ObjectType   string
 	TargetUserID uuid.UUID
@@ -412,7 +411,9 @@ func (d *DB) CreateVirtualClaim(ctx context.Context, ac *AccessClaim, p CreateVi
 		FROM (
 			SELECT claimius.create_claim(
 				claimius.get_disciple_app_id(),
-				?, ?, ?, ?, ?, ?, TRUE, 'virtual'::claimius.claim_type
+				?, ?, ?, ?,
+				(SELECT sa_root_id FROM claimius.organization WHERE id = ?),
+				?, TRUE, 'virtual'::claimius.claim_type
 			) -> 'claim' AS data
 		) created_claim
 		CROSS JOIN LATERAL (
@@ -420,7 +421,7 @@ func (d *DB) CreateVirtualClaim(ctx context.Context, ac *AccessClaim, p CreateVi
 				p_app_id        := claimius.get_disciple_app_id(),
 				p_claim_id      := ((created_claim.data ->> 'id')::uuid),
 				p_sa_owner_id   := ?,
-				p_sa_root_id    := ?,
+				p_sa_root_id    := (SELECT sa_root_id FROM claimius.organization WHERE id = ?),
 				p_sa_created_by := ?,
 				p_object_id     := ?,
 				p_object_type   := ?,
@@ -436,8 +437,8 @@ func (d *DB) CreateVirtualClaim(ctx context.Context, ac *AccessClaim, p CreateVi
 			) -> 'user_claim' AS data
 		) granted_user
 	`,
-		p.Name, p.Description, int(p.Access), p.OwnerID, p.RootID, *ac.UserClaimID,
-		p.OwnerID, p.RootID, *ac.UserClaimID, p.ObjectID, p.ObjectType,
+		p.Name, p.Description, int(p.Access), p.OwnerID, p.OwnerID, *ac.UserClaimID,
+		p.OwnerID, p.OwnerID, *ac.UserClaimID, p.ObjectID, p.ObjectType,
 		p.TargetUserID, p.OwnerID, *ac.UserClaimID,
 	).Scan(ctx, &result)
 	if err != nil {

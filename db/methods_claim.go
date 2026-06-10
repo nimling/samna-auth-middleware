@@ -24,6 +24,15 @@ func (d *DB) CreateClaim(ctx context.Context, ac *AccessClaim, p CreateClaimPara
 	if p.Inherits != nil {
 		inherits = *p.Inherits
 	}
+	var rootID uuid.UUID
+	if err := d.NewSelect().
+		TableExpr("claimius.organization").
+		Column("sa_root_id").
+		Where("id = ?", ac.OwnerID).
+		Where("sa_deleted_at IS NULL").
+		Scan(ctx, &rootID); err != nil {
+		return nil, err
+	}
 	claim := &Claim{
 		Name:        p.Name,
 		Description: p.Description,
@@ -31,7 +40,7 @@ func (d *DB) CreateClaim(ctx context.Context, ac *AccessClaim, p CreateClaimPara
 		Inherits:    inherits,
 		Type:        claimType,
 		OwnerID:     ac.OwnerID,
-		RootID:      ac.RootID,
+		RootID:      rootID,
 		CreatedBy:   ac.UserClaimID,
 	}
 	if err := d.NewInsert().Model(claim).With(ac).Scan(ctx, claim); err != nil {
