@@ -95,8 +95,9 @@ func Init(logger echo.Logger) (*DB, error) {
 	instance = &DB{DB: bunDB, Logger: logger}
 
 	instance.SetMaxOpenConns(25)
-	instance.SetMaxIdleConns(25)
-	instance.SetConnMaxLifetime(5 * time.Minute)
+	instance.SetMaxIdleConns(2)
+	instance.SetConnMaxLifetime(2 * time.Minute)
+	instance.SetConnMaxIdleTime(15 * time.Second)
 
 	if err := instance.Ping(); err != nil {
 		return nil, fmt.Errorf("ping: %w", err)

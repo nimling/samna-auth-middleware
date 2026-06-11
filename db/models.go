@@ -185,7 +185,6 @@ type SamnaUserToken struct {
 
 type SamnaUserExternal struct {
 	nimbody.Body `json:"-"`
-	IDClaim      *string    `json:"id_claim,omitempty"`
 	User         *SamnaUser `json:"user,omitempty"`
 	ClaimID      *uuid.UUID `json:"claim_id"`
 	AppID        *uuid.UUID `json:"app_id"`

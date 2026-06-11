@@ -542,9 +542,6 @@ func (d *DB) UpsertUserExternal(ctx context.Context, ac *AccessClaim, payload Sa
 	}
 
 	idClaim := "external"
-	if payload.IDClaim != nil && *payload.IDClaim != "" {
-		idClaim = *payload.IDClaim
-	}
 	externalID := *payload.User.ExternalID
 
 	user := *payload.User
