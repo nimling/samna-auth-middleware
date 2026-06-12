@@ -2,6 +2,8 @@ package db
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -123,6 +125,22 @@ func TestUserRelation_ObjectTypeConstantResolves(t *testing.T) {
 	}
 	if got != sdb.OBJECT_TYPE_USER_RELATION {
 		t.Fatalf("expected %s, got %s", sdb.OBJECT_TYPE_USER_RELATION, got)
+	}
+}
+
+func TestErrNotFound_DistinctSentinel(t *testing.T) {
+	if sdb.ErrNotFound.Error() != "not found" {
+		t.Fatalf("expected sentinel message 'not found', got %q", sdb.ErrNotFound.Error())
+	}
+	if errors.Is(sdb.ErrNotFound, sdb.ErrNoAccess) {
+		t.Fatal("ErrNotFound must not match ErrNoAccess")
+	}
+	if errors.Is(sdb.ErrNoAccess, sdb.ErrNotFound) {
+		t.Fatal("ErrNoAccess must not match ErrNotFound")
+	}
+	wrapped := fmt.Errorf("mutation access: %w", sdb.ErrNotFound)
+	if !errors.Is(wrapped, sdb.ErrNotFound) {
+		t.Fatal("wrapped ErrNotFound must satisfy errors.Is")
 	}
 }
 

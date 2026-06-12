@@ -4,13 +4,16 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/lib/pq"
+	"github.com/uptrace/bun"
 )
 
 var (
 	ErrNoAccess          = errors.New("no access")
+	ErrNotFound          = errors.New("not found")
 	ErrInternalServer    = errors.New("internal server error")
 	ErrRootConflict      = errors.New("identity already registered under a different root")
 	ErrUserAlreadyExists = errors.New("user already exists")
@@ -39,12 +42,45 @@ func (d *DB) MutationAccess(ctx context.Context, userID, objectID uuid.UUID, obj
 		return nil, err
 	}
 	if uc == nil {
+		exists, existsErr := d.objectExists(ctx, objectID, objectType)
+		if existsErr != nil {
+			return nil, existsErr
+		}
+		if !exists {
+			return nil, ErrNotFound
+		}
 		return nil, ErrNoAccess
 	}
 	if (uc.Access & int(requiredAccess)) != int(requiredAccess) {
 		return nil, ErrNoAccess
 	}
 	return uc, nil
+}
+
+func (d *DB) objectExists(ctx context.Context, objectID uuid.UUID, objectType string) (bool, error) {
+	var exists bool
+	if objectType == OBJECT_TYPE_USER {
+		err := d.NewRaw(
+			"SELECT EXISTS (SELECT 1 FROM claimius.samna_user WHERE user_id = ? AND app_id = claimius.get_disciple_app_id() AND sa_deleted_at IS NULL)",
+			objectID,
+		).Scan(ctx, &exists)
+		if err != nil {
+			return false, ErrInternalServer
+		}
+		return exists, nil
+	}
+	schema, table, ok := strings.Cut(objectType, ".")
+	if !ok {
+		schema, table = "public", objectType
+	}
+	err := d.NewRaw(
+		"SELECT EXISTS (SELECT 1 FROM ?.? WHERE id = ? AND sa_deleted_at IS NULL)",
+		bun.Ident(schema), bun.Ident(table), objectID,
+	).Scan(ctx, &exists)
+	if err != nil {
+		return false, ErrInternalServer
+	}
+	return exists, nil
 }
 
 type AccessRequest struct {
