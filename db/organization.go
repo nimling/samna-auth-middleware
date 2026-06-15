@@ -121,18 +121,19 @@ func (d *DB) InsertRootOrganization(ctx context.Context, ac *AccessClaim, org *O
 	if ac == nil || ac.UserClaimID == nil {
 		return nil, ErrNoAccess
 	}
-	if err := d.NewSelect().
-		Model(org).
-		Where("id = (SELECT ((claimius.create_root_organization(claimius.get_disciple_app_id(), ?, ?, ?, ?, ?, ?) -> 'organization') ->> 'id')::uuid)",
-			org.Name,
-			*ac.UserClaimID,
-			org.Description,
-			org.Type,
-			org.ID,
-			org.ExternalID,
-		).
-		Where("sa_deleted_at IS NULL").
-		Scan(ctx); err != nil {
+	if err := d.NewRaw(`
+		SELECT * FROM jsonb_populate_record(
+			NULL::claimius.organization,
+			claimius.create_root_organization(claimius.get_disciple_app_id(), ?, ?, ?, ?, ?, ?) -> 'organization'
+		)
+	`,
+		org.Name,
+		*ac.UserClaimID,
+		org.Description,
+		org.Type,
+		org.ID,
+		org.ExternalID,
+	).Scan(ctx, org); err != nil {
 		return nil, err
 	}
 	return org, nil
