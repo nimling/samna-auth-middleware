@@ -437,7 +437,7 @@ func (d *DB) CreateVirtualClaim(ctx context.Context, ac *AccessClaim, p CreateVi
 			) -> 'user_claim' AS data
 		) granted_user
 	`,
-		p.Name, p.Description, int(p.Access), p.OwnerID, p.OwnerID, *ac.UserClaimID,
+		p.Name, p.Description, p.Access, p.OwnerID, p.OwnerID, *ac.UserClaimID,
 		p.OwnerID, p.OwnerID, *ac.UserClaimID, p.ObjectID, p.ObjectType,
 		p.TargetUserID, p.OwnerID, *ac.UserClaimID,
 	).Scan(ctx, &result)

@@ -50,7 +50,8 @@ func TestClaim_CreatorEmbedJSONRoundTrip(t *testing.T) {
 }
 
 func TestClaimObject_NoOverlayShadowsAccessBitmask(t *testing.T) {
-	m := 4
+	var m sdb.ClaimAccess = 4
+
 	co := sdb.ClaimObject{
 		ID:      uuid.New(),
 		ClaimID: uuid.New(),
@@ -65,9 +66,35 @@ func TestClaimObject_NoOverlayShadowsAccessBitmask(t *testing.T) {
 	if !strings.Contains(string(raw), `"access":4`) {
 		t.Fatalf("expected access bitmask on ClaimObject, got %s", raw)
 	}
+	if !strings.Contains(string(raw), `"access_slice":["READ"]`) {
+		t.Fatalf("expected access_slice on ClaimObject, got %s", raw)
+	}
+	if !strings.Contains(string(raw), `"access_string":"READ"`) {
+		t.Fatalf("expected access_string on ClaimObject, got %s", raw)
+	}
 }
 
-func TestUserClaim_AccessAndCreatorEmbedsEmit(t *testing.T) {
+func TestClaim_AccessVirtualFieldsEmit(t *testing.T) {
+	c := sdb.Claim{
+		ID:      uuid.New(),
+		Name:    "Editor",
+		Access:  sdb.ACCESS_WRITE | sdb.ACCESS_READ,
+		OwnerID: uuid.New(),
+		RootID:  uuid.New(),
+	}
+	raw, err := json.Marshal(c)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if !strings.Contains(string(raw), `"access_slice":["READ","WRITE"]`) {
+		t.Fatalf("expected access_slice on Claim, got %s", raw)
+	}
+	if !strings.Contains(string(raw), `"access_string":"READ|WRITE"`) {
+		t.Fatalf("expected access_string on Claim, got %s", raw)
+	}
+}
+
+func TestUserClaim_AccessVirtualFieldsEmit(t *testing.T) {
 	uc := sdb.UserClaim{
 		ID:        uuid.New(),
 		ClaimID:   uuid.New(),
@@ -91,6 +118,12 @@ func TestUserClaim_AccessAndCreatorEmbedsEmit(t *testing.T) {
 	}
 	if !strings.Contains(string(raw), `"access":{`) {
 		t.Fatalf("expected access overlay object on UserClaim, got %s", raw)
+	}
+	if !strings.Contains(string(raw), `"access_slice":["READ"]`) {
+		t.Fatalf("expected access_slice on UserClaim, got %s", raw)
+	}
+	if !strings.Contains(string(raw), `"access_string":"READ"`) {
+		t.Fatalf("expected access_string on UserClaim, got %s", raw)
 	}
 	if !strings.Contains(string(raw), `"creator":{`) {
 		t.Fatalf("expected creator overlay object on UserClaim, got %s", raw)
@@ -162,5 +195,224 @@ func TestCreateVirtualClaimParams_NoRootID(t *testing.T) {
 	}
 	if len(wanted) > 0 {
 		t.Fatalf("missing fields on CreateVirtualClaimParams: %v", wanted)
+	}
+}
+
+func TestClaimAccess_UnmarshalJSON(t *testing.T) {
+	tests := []struct {
+		name    string
+		data    string
+		want    sdb.ClaimAccess
+		isError bool
+	}{
+		{
+			name:    "Number: ACCESS_NONE (0)",
+			data:    `0`,
+			want:    sdb.ACCESS_NONE,
+			isError: false,
+		},
+		{
+			name:    "Number: Combined WRITE and READ (6)",
+			data:    `6`,
+			want:    sdb.ACCESS_WRITE | sdb.ACCESS_READ,
+			isError: false,
+		},
+		{
+			name:    "Number: Float error",
+			data:    `6.5`,
+			want:    0,
+			isError: true,
+		},
+
+		{
+			name:    "String: Single value (READ)",
+			data:    `"READ"`,
+			want:    sdb.ACCESS_READ,
+			isError: false,
+		},
+		{
+			name:    "String: Combined via pipe (WRITE|READ)",
+			data:    `"WRITE|READ"`,
+			want:    sdb.ACCESS_WRITE | sdb.ACCESS_READ,
+			isError: false,
+		},
+		{
+			name:    "String: Stringified numbers (2|4)",
+			data:    `"2|4"`,
+			want:    sdb.ACCESS_WRITE | sdb.ACCESS_READ,
+			isError: false,
+		},
+		{
+			name:    "String: Invalid mapping",
+			data:    `"INVALID_VALUE"`,
+			want:    0,
+			isError: true,
+		},
+
+		{
+			name:    "Array: Single value",
+			data:    `["READ"]`,
+			want:    sdb.ACCESS_READ,
+			isError: false,
+		},
+		{
+			name:    "Array: Combined via pipe format",
+			data:    `["WRITE"|"READ"]`,
+			want:    sdb.ACCESS_WRITE | sdb.ACCESS_READ,
+			isError: false,
+		},
+
+		{
+			name:    "Invalid Type: Boolean",
+			data:    `true`,
+			want:    0,
+			isError: true,
+		},
+		{
+			name:    "Empty data",
+			data:    ``,
+			want:    0,
+			isError: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var got sdb.ClaimAccess
+			err := got.UnmarshalJSON([]byte(tt.data))
+
+			if tt.isError {
+				if err == nil {
+					t.Errorf("UnmarshalJSON() expected error, got nil")
+				}
+				return
+			}
+
+			if err != nil {
+				t.Errorf("UnmarshalJSON() unexpected error: %v", err)
+				return
+			}
+
+			if got != tt.want {
+				t.Errorf("UnmarshalJSON() got = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestClaimAccess_Slice(t *testing.T) {
+	tests := []struct {
+		name string
+		a    sdb.ClaimAccess
+		want []string
+	}{
+		{
+			name: "No access",
+			a:    sdb.ACCESS_NONE,
+			want: []string{},
+		},
+		{
+			name: "Single access (READ)",
+			a:    sdb.ACCESS_READ,
+			want: []string{"READ"},
+		},
+		{
+			name: "Multiple accesses (READ and WRITE)",
+			a:    sdb.ACCESS_READ | sdb.ACCESS_WRITE,
+			want: []string{"READ", "WRITE"},
+		},
+		{
+			name: "ACCESS_ALL",
+			a:    sdb.ACCESS_ALL,
+			want: []string{"EXECUTE", "READ", "WRITE", "OWNER"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tt.a.Slice()
+
+			if len(got) == 0 && len(tt.want) == 0 {
+				return
+			}
+
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("Slice() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestClaimAccess_PipeString(t *testing.T) {
+	tests := []struct {
+		name string
+		a    sdb.ClaimAccess
+		want string
+	}{
+		{
+			name: "No access",
+			a:    sdb.ACCESS_NONE,
+			want: "",
+		},
+		{
+			name: "Single access (WRITE)",
+			a:    sdb.ACCESS_WRITE,
+			want: "WRITE",
+		},
+		{
+			name: "Multiple accesses",
+			a:    sdb.ACCESS_READ | sdb.ACCESS_WRITE,
+			want: "READ|WRITE",
+		},
+		{
+			name: "ACCESS_ALL",
+			a:    sdb.ACCESS_ALL,
+			want: "EXECUTE|READ|WRITE|OWNER",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.a.PipeString(); got != tt.want {
+				t.Errorf("PipeString() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestClaimAccess_PipeInt(t *testing.T) {
+	tests := []struct {
+		name string
+		a    sdb.ClaimAccess
+		want string
+	}{
+		{
+			name: "No access",
+			a:    sdb.ACCESS_NONE,
+			want: "",
+		},
+		{
+			name: "Single access (EXECUTE)",
+			a:    sdb.ACCESS_EXECUTE,
+			want: "8",
+		},
+		{
+			name: "Multiple accesses",
+			a:    sdb.ACCESS_READ | sdb.ACCESS_WRITE,
+			want: "4|2",
+		},
+		{
+			name: "ACCESS_ALL",
+			a:    sdb.ACCESS_ALL,
+			want: "8|4|2|1",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.a.PipeInt(); got != tt.want {
+				t.Errorf("PipeInt() = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }

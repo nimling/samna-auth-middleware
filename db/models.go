@@ -4,13 +4,16 @@ import (
 	"context"
 	"database/sql/driver"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"reflect"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/nimling/nimbody"
+	"github.com/nimling/samna-auth-middleware/pkg/jsonx"
 	"github.com/uptrace/bun"
 )
 
@@ -98,6 +101,153 @@ const (
 	ACCESS_ALL     ClaimAccess = ACCESS_OWNER | ACCESS_WRITE | ACCESS_READ | ACCESS_EXECUTE
 )
 
+func mapStringToAccess(s string) (ClaimAccess, error) {
+	switch s {
+	case "NONE", "0":
+		return ACCESS_NONE, nil
+	case "OWNER", "1":
+		return ACCESS_OWNER, nil
+	case "WRITE", "2":
+		return ACCESS_WRITE, nil
+	case "READ", "4":
+		return ACCESS_READ, nil
+	case "EXECUTE", "8":
+		return ACCESS_EXECUTE, nil
+	case "DENY", "16":
+		return ACCESS_DENY, nil
+	case "MEMBER", "32":
+		return ACCESS_MEMBER, nil
+	default:
+		return ACCESS_NONE, fmt.Errorf("invalid access value: %s", s)
+	}
+}
+
+func mapAccessToString(a ClaimAccess) (string, error) {
+	switch a {
+	case ACCESS_NONE:
+		return "NONE", nil
+	case ACCESS_OWNER:
+		return "OWNER", nil
+	case ACCESS_WRITE:
+		return "WRITE", nil
+	case ACCESS_READ:
+		return "READ", nil
+	case ACCESS_EXECUTE:
+		return "EXECUTE", nil
+	case ACCESS_DENY:
+		return "DENY", nil
+	case ACCESS_MEMBER:
+		return "MEMBER", nil
+	default:
+		return "", fmt.Errorf("invalid access value: %d", a)
+	}
+}
+
+func (a *ClaimAccess) UnmarshalJSON(data []byte) error {
+	jsonType, err := jsonx.DefineJsonType(data)
+	if err != nil {
+		return err
+	}
+
+	strData := string(data)
+
+	switch jsonType {
+	case jsonx.TypeNumber:
+		// checking for float
+		val, err := strconv.ParseInt(strData, 10, 64)
+		if err != nil {
+			return errors.New("failed to parse access")
+		}
+
+		*a = ClaimAccess(val)
+	case jsonx.TypeString:
+		strData = strings.Trim(strData, `"`)
+		levels := strings.Split(strData, "|")
+
+		var access ClaimAccess
+		for _, level := range levels {
+			mappedAccess, err := mapStringToAccess(level)
+			if err != nil {
+				return err
+			}
+
+			access = access | mappedAccess
+		}
+
+		*a = access
+		return nil
+	case jsonx.TypeArray:
+		strData = strings.Trim(strData, "[]")
+		levels := strings.Split(strData, "|")
+
+		var access ClaimAccess
+		for _, level := range levels {
+			mappedAccess, err := mapStringToAccess(strings.Trim(level, `"`))
+			if err != nil {
+				return err
+			}
+
+			access = access | mappedAccess
+		}
+
+		*a = access
+		return nil
+	default:
+		return errors.New("failed to parse access")
+	}
+
+	return nil
+}
+
+func (a *ClaimAccess) Slice() []string {
+	const accessesAmount = 6
+
+	accesses := make([]string, 0)
+	for i := accessesAmount - 1; i >= 0; i-- {
+		if *a&(1<<i) != 0 {
+			strAccess, _ := mapAccessToString(1 << i)
+			accesses = append(accesses, strAccess)
+		}
+	}
+
+	return accesses
+}
+
+func (a *ClaimAccess) PipeString() string {
+	accessSlice := a.Slice()
+
+	return strings.Join(accessSlice, "|")
+}
+
+func (a *ClaimAccess) PipeInt() string {
+	accessSlice := a.Slice()
+
+	for i, el := range accessSlice {
+		numericAccess, _ := mapStringToAccess(el)
+		accessSlice[i] = strconv.Itoa(int(numericAccess))
+	}
+
+	return strings.Join(accessSlice, "|")
+}
+
+func accessVirtualOutput(a ClaimAccess) (slice []string, pipe string) {
+	if a == ACCESS_NONE {
+		return nil, ""
+	}
+	slice = a.Slice()
+	if len(slice) == 0 {
+		return nil, ""
+	}
+	return slice, a.PipeString()
+}
+
+func accessVirtualOutputPtr(a *ClaimAccess) (slice []string, pipe string) {
+	if a == nil {
+		return nil, ""
+	}
+	return accessVirtualOutput(*a)
+}
+
 type ClaimType string
 
 const (
@@ -152,24 +302,24 @@ type SamnaUser struct {
 	bun.BaseModel `bun:"table:claimius.samna_user"`
 	nimbody.Body  `bun:"-" json:"-"`
 
-	ID        uuid.UUID        `bun:"id,pk,default:gen_random_uuid()" json:"id"`
-	UserID    uuid.UUID        `bun:"user_id,default:gen_random_uuid()" json:"user_id"`
-	AppID     uuid.UUID        `bun:"app_id,notnull,type:uuid,default:claimius.get_disciple_app_id()" json:"-" sauth:"app_id"`
-	FirstName *string          `bun:"first_name" json:"first_name,omitempty"`
-	LastName  *string          `bun:"last_name" json:"last_name,omitempty"`
-	UserName  *string          `bun:"user_name" json:"user_name,omitempty"`
-	UserImage *string          `bun:"user_image" json:"user_image,omitempty"`
+	ID         uuid.UUID        `bun:"id,pk,default:gen_random_uuid()" json:"id"`
+	UserID     uuid.UUID        `bun:"user_id,default:gen_random_uuid()" json:"user_id"`
+	AppID      uuid.UUID        `bun:"app_id,notnull,type:uuid,default:claimius.get_disciple_app_id()" json:"-" sauth:"app_id"`
+	FirstName  *string          `bun:"first_name" json:"first_name,omitempty"`
+	LastName   *string          `bun:"last_name" json:"last_name,omitempty"`
+	UserName   *string          `bun:"user_name" json:"user_name,omitempty"`
+	UserImage  *string          `bun:"user_image" json:"user_image,omitempty"`
 	Phone      *string          `bun:"phone" json:"phone,omitempty"`
 	Email      string           `bun:"email" json:"email"`
 	ExternalID *string          `bun:"external_id" json:"external_id,omitempty"`
 	Status     *string          `bun:"status,default:'active'" json:"status,omitempty"`
 	Type       *string          `bun:"type,default:'user'" json:"-"`
-	Config    *json.RawMessage `bun:"config" json:"config,omitzero"`
-	DeletedAt *time.Time       `bun:"sa_deleted_at" json:"deleted_at,omitzero"`
-	CreatedAt time.Time        `bun:"sa_created_at,default:now()" json:"created_at"`
-	UpdatedAt time.Time        `bun:"sa_updated_at,default:now()" json:"updated_at"`
-	OwnerID   *uuid.UUID       `bun:"-" json:"owner_id,omitempty"`
-	ClaimID   *uuid.UUID       `bun:"-" json:"claim_id,omitempty"`
+	Config     *json.RawMessage `bun:"config" json:"config,omitzero"`
+	DeletedAt  *time.Time       `bun:"sa_deleted_at" json:"deleted_at,omitzero"`
+	CreatedAt  time.Time        `bun:"sa_created_at,default:now()" json:"created_at"`
+	UpdatedAt  time.Time        `bun:"sa_updated_at,default:now()" json:"updated_at"`
+	OwnerID    *uuid.UUID       `bun:"-" json:"owner_id,omitempty"`
+	ClaimID    *uuid.UUID       `bun:"-" json:"claim_id,omitempty"`
 }
 
 type SamnaUserToken struct {
@@ -266,7 +416,9 @@ type Claim struct {
 	AppID        uuid.UUID     `bun:"app_id,notnull,type:uuid,default:claimius.get_disciple_app_id()" json:"-" sauth:"app_id"`
 	Name         string        `bun:"name" json:"name"`
 	Description  *string       `bun:"description" json:"description"`
-	Access       int           `bun:"sa_access" json:"access"`
+	Access       ClaimAccess   `bun:"sa_access" json:"access"`
+	AccessSlice  []string      `bun:"-" json:"access_slice,omitempty"`
+	AccessString string        `bun:"-" json:"access_string,omitempty"`
 	Inherits     bool          `bun:"inherits,default:true" json:"inherits"`
 	Type         ClaimType     `bun:"type,default:'user'" json:"type"`
 	OwnerID      uuid.UUID     `bun:"sa_owner_id" json:"owner_id"`
@@ -283,6 +435,14 @@ type Claim struct {
 	sessionCtx   context.Context
 	sessionActor *AccessClaim
 	sessionDB    *DB
+}
+
+func (c Claim) MarshalJSON() ([]byte, error) {
+	type alias Claim
+	out := alias(c)
+	p := (*Claim)(&out)
+	p.AccessSlice, p.AccessString = accessVirtualOutput(c.Access)
+	return json.Marshal(&out)
 }
 
 type CreateClaimParams struct {
@@ -368,8 +528,20 @@ type UserClaim struct {
 	UpdatedAt time.Time     `bun:"sa_updated_at,default:now()" json:"updated_at"`
 	Owner     *Organization `bun:"rel:belongs-to,join:sa_owner_id=id" json:"owner,omitempty"`
 	User      *SamnaUser    `bun:"rel:belongs-to,join:user_id=user_id" json:"user,omitempty"`
-	Access    *AccessClaim  `bun:"embed:access_" json:"access,omitempty"`
-	Creator   *Creator      `bun:"embed:creator_" json:"creator,omitempty"`
+	Access       *AccessClaim `bun:"embed:access_" json:"access,omitempty"`
+	AccessSlice  []string     `bun:"-" json:"access_slice,omitempty"`
+	AccessString string       `bun:"-" json:"access_string,omitempty"`
+	Creator      *Creator     `bun:"embed:creator_" json:"creator,omitempty"`
+}
+
+func (uc UserClaim) MarshalJSON() ([]byte, error) {
+	type alias UserClaim
+	out := alias(uc)
+	p := (*UserClaim)(&out)
+	if uc.Access != nil {
+		p.AccessSlice, p.AccessString = accessVirtualOutput(uc.Access.Access)
+	}
+	return json.Marshal(&out)
 }
 
 type ClaimObject struct {
@@ -383,8 +555,10 @@ type ClaimObject struct {
 	ObjectType *ObjectType      `bun:"object_type" json:"object_type"`
 	Reason     *string          `bun:"reason" json:"reason"`
 	Scope      *json.RawMessage `bun:"scope,type:jsonb" json:"scope"`
-	Access     *int             `bun:"sa_access,nullzero" json:"access,omitempty"`
-	Inherits   bool             `bun:"inherits,default:true" json:"inherits"`
+	Access       *ClaimAccess `bun:"sa_access,nullzero" json:"access,omitempty"`
+	AccessSlice  []string     `bun:"-" json:"access_slice,omitempty"`
+	AccessString string       `bun:"-" json:"access_string,omitempty"`
+	Inherits     bool         `bun:"inherits,default:true" json:"inherits"`
 	RefID      *uuid.UUID       `bun:"ref_id" json:"ref_id"`
 	OwnerID    uuid.UUID        `bun:"sa_owner_id" json:"owner_id"`
 	RootID     uuid.UUID        `bun:"sa_root_id" json:"root_id"`
@@ -396,12 +570,20 @@ type ClaimObject struct {
 	Creator    *Creator         `bun:"embed:creator_" json:"creator,omitempty"`
 }
 
+func (co ClaimObject) MarshalJSON() ([]byte, error) {
+	type alias ClaimObject
+	out := alias(co)
+	p := (*ClaimObject)(&out)
+	p.AccessSlice, p.AccessString = accessVirtualOutputPtr(co.Access)
+	return json.Marshal(&out)
+}
+
 type AccessClaim struct {
 	UserObjectID uuid.UUID        `bun:"user_object_id,scanonly" json:"user_object_id"`
 	UserClaimID  *uuid.UUID       `bun:"user_claim_id,scanonly" json:"user_claim_id"`
 	ClaimID      *uuid.UUID       `bun:"claim_id,scanonly" json:"claim_id"`
 	ClaimName    *string          `bun:"claim_name,scanonly" json:"claim_name,omitempty"`
-	Access       int              `bun:"sa_access,scanonly" json:"access"`
+	Access       ClaimAccess      `bun:"sa_access,scanonly" json:"access"`
 	Scope        *json.RawMessage `bun:"scope,type:jsonb,scanonly" json:"scope"`
 	OwnerID      uuid.UUID        `bun:"sa_owner_id,scanonly" json:"owner_id"`
 	RootID       uuid.UUID        `bun:"sa_root_id,scanonly" json:"root_id"`
@@ -410,15 +592,15 @@ type AccessClaim struct {
 }
 
 type AccessUser struct {
-	TargetUserID uuid.UUID  `bun:"target_user_id,scanonly" json:"target_user_id"`
-	Access       int        `bun:"access,scanonly" json:"access"`
-	UserClaimID  *uuid.UUID `bun:"user_claim_id,scanonly" json:"user_claim_id"`
-	ClaimID      *uuid.UUID `bun:"claim_id,scanonly" json:"claim_id"`
-	ClaimName    *string    `bun:"claim_name,scanonly" json:"claim_name,omitempty"`
-	OwnerID      *uuid.UUID `bun:"owner_id,scanonly" json:"owner_id"`
-	RootID       *uuid.UUID `bun:"root_id,scanonly" json:"root_id"`
-	LocationID   *uuid.UUID `bun:"location_id,scanonly" json:"location_id"`
-	DirectGrant  bool       `bun:"direct_grant,scanonly" json:"direct_grant"`
+	TargetUserID uuid.UUID   `bun:"target_user_id,scanonly" json:"target_user_id"`
+	Access       ClaimAccess `bun:"access,scanonly" json:"access"`
+	UserClaimID  *uuid.UUID  `bun:"user_claim_id,scanonly" json:"user_claim_id"`
+	ClaimID      *uuid.UUID  `bun:"claim_id,scanonly" json:"claim_id"`
+	ClaimName    *string     `bun:"claim_name,scanonly" json:"claim_name,omitempty"`
+	OwnerID      *uuid.UUID  `bun:"owner_id,scanonly" json:"owner_id"`
+	RootID       *uuid.UUID  `bun:"root_id,scanonly" json:"root_id"`
+	LocationID   *uuid.UUID  `bun:"location_id,scanonly" json:"location_id"`
+	DirectGrant  bool        `bun:"direct_grant,scanonly" json:"direct_grant"`
 }
 
 type Creator struct {
@@ -562,16 +744,16 @@ type UserRelation struct {
 	bun.BaseModel `bun:"table:claimius.user_relation" json:"-"`
 	nimbody.Body  `bun:"-" json:"-"`
 
-	ID          uuid.UUID  `bun:"id,pk,default:gen_random_uuid()" json:"id"`
-	AppID       uuid.UUID  `bun:"app_id,notnull,type:uuid,default:claimius.get_disciple_app_id()" json:"-" sauth:"app_id"`
-	UserID      uuid.UUID  `bun:"user_id" json:"user_id"`
-	Description *string    `bun:"description" json:"description"`
-	ObjectType  ObjectType `bun:"object_type" json:"object_type"`
-	ObjectID    uuid.UUID  `bun:"object_id" json:"object_id"`
-	Pinned      *int       `bun:"pinned" json:"pinned"`
-	Priority    *int       `bun:"priority" json:"priority"`
-	ParentID    *uuid.UUID `bun:"parent_id" json:"parent_id"`
-	SiblingID   *uuid.UUID `bun:"sibling_id" json:"sibling_id"`
+	ID          uuid.UUID    `bun:"id,pk,default:gen_random_uuid()" json:"id"`
+	AppID       uuid.UUID    `bun:"app_id,notnull,type:uuid,default:claimius.get_disciple_app_id()" json:"-" sauth:"app_id"`
+	UserID      uuid.UUID    `bun:"user_id" json:"user_id"`
+	Description *string      `bun:"description" json:"description"`
+	ObjectType  ObjectType   `bun:"object_type" json:"object_type"`
+	ObjectID    uuid.UUID    `bun:"object_id" json:"object_id"`
+	Pinned      *int         `bun:"pinned" json:"pinned"`
+	Priority    *int         `bun:"priority" json:"priority"`
+	ParentID    *uuid.UUID   `bun:"parent_id" json:"parent_id"`
+	SiblingID   *uuid.UUID   `bun:"sibling_id" json:"sibling_id"`
 	UsedAt      *time.Time   `bun:"used_at,default:now()" json:"used_at"`
 	DeletedAt   *time.Time   `bun:"sa_deleted_at" json:"deleted_at,omitzero"`
 	CreatedAt   time.Time    `bun:"sa_created_at,default:now()" json:"created_at"`
@@ -603,7 +785,7 @@ type UserObject struct {
 	UserID      uuid.UUID        `bun:"user_id" json:"user_id"`
 	ObjectID    uuid.UUID        `bun:"object_id" json:"object_id"`
 	ObjectType  ObjectType       `bun:"object_type" json:"object_type"`
-	Access      int              `bun:"sa_access" json:"access"`
+	Access      ClaimAccess      `bun:"sa_access" json:"access"`
 	Scope       *json.RawMessage `bun:"scope,type:jsonb" json:"scope"`
 	Grants      json.RawMessage  `bun:"grants,type:jsonb,default:'[]'" json:"grants"`
 	DirectGrant bool             `bun:"direct_grant,default:false" json:"direct_grant"`
@@ -666,7 +848,7 @@ type SearchResult struct {
 	Name        *string          `bun:"name" json:"name"`
 	Description *string          `bun:"description" json:"description"`
 	Link        *string          `bun:"link" json:"link"`
-	Access      int              `bun:"sa_access" json:"access"`
+	Access      ClaimAccess      `bun:"sa_access" json:"access"`
 	Scope       *json.RawMessage `bun:"scope,type:jsonb" json:"scope"`
 	OwnerID     *uuid.UUID       `bun:"owner_id" json:"owner_id"`
 	LocationID  *uuid.UUID       `bun:"location_id" json:"location_id"`

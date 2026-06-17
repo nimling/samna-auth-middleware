@@ -36,7 +36,7 @@ func (d *DB) CreateClaim(ctx context.Context, ac *AccessClaim, p CreateClaimPara
 	claim := &Claim{
 		Name:        p.Name,
 		Description: p.Description,
-		Access:      int(p.Access),
+		Access:      p.Access,
 		Inherits:    inherits,
 		Type:        claimType,
 		OwnerID:     ac.OwnerID,
@@ -184,7 +184,7 @@ func (c *Claim) ReCreateFor(access ClaimAccess, opts ReCreateForOptions, userIDs
 			ExcludeColumn("app_id").
 			Where("claim.sa_deleted_at IS NULL").
 			Where("claim.type = ?", c.Type).
-			Where("claim.sa_access = ?", int(expanded)).
+			Where("claim.sa_access = ?", expanded).
 			Where("claim.inherits = ?", inherits).
 			Where("claim.name = ?", name).
 			Where("claim.sa_owner_id = ?", c.OwnerID).

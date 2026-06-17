@@ -22,7 +22,7 @@ var (
 func selfAccessClaim(userID uuid.UUID, requiredAccess ClaimAccess) *AccessClaim {
 	return &AccessClaim{
 		UserObjectID: userID,
-		Access:       int(requiredAccess),
+		Access:       requiredAccess,
 		OwnerID:      userID,
 		RootID:       userID,
 		DirectGrant:  true,
@@ -51,7 +51,7 @@ func (d *DB) MutationAccess(ctx context.Context, userID, objectID uuid.UUID, obj
 		}
 		return nil, ErrNoAccess
 	}
-	if (uc.Access & int(requiredAccess)) != int(requiredAccess) {
+	if (uc.Access & requiredAccess) != requiredAccess {
 		return nil, ErrNoAccess
 	}
 	return uc, nil
@@ -115,7 +115,7 @@ func (s AccessClaimSet) Has(objectType string, objectID, userID uuid.UUID, requi
 		return true
 	}
 	mask := int(required[0])
-	return (claim.Access & mask) == mask
+	return (int(claim.Access) & mask) == mask
 }
 
 func (d *DB) MutationAccessMany(ctx context.Context, requests []AccessRequest) (AccessClaimSet, error) {
