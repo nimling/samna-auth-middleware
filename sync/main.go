@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/nimling/samna-auth-middleware/db"
+	"github.com/nimling/samna-auth-middleware/sauth"
 	"github.com/uptrace/bun"
 )
 
@@ -106,7 +107,7 @@ func deleteByTextID(ctx context.Context, tx bun.Tx, model any, id json.RawMessag
 
 func upsertSamnaUser(ctx context.Context, tx bun.Tx, raw json.RawMessage) error {
 	var entity db.SamnaUser
-	if err := json.Unmarshal(raw, &entity); err != nil {
+	if err := sauth.Unmarshal(raw, &entity); err != nil {
 		return fmt.Errorf("unmarshal: %w", err)
 	}
 	_, err := tx.NewInsert().Model(&entity).
@@ -130,7 +131,7 @@ func upsertSamnaUser(ctx context.Context, tx bun.Tx, raw json.RawMessage) error 
 
 func upsertOrganization(ctx context.Context, tx bun.Tx, raw json.RawMessage) error {
 	var entity db.Organization
-	if err := json.Unmarshal(raw, &entity); err != nil {
+	if err := sauth.Unmarshal(raw, &entity); err != nil {
 		return fmt.Errorf("unmarshal: %w", err)
 	}
 	_, err := tx.NewInsert().Model(&entity).
@@ -154,7 +155,7 @@ func upsertOrganization(ctx context.Context, tx bun.Tx, raw json.RawMessage) err
 
 func upsertLocation(ctx context.Context, tx bun.Tx, raw json.RawMessage) error {
 	var entity db.Location
-	if err := json.Unmarshal(raw, &entity); err != nil {
+	if err := sauth.Unmarshal(raw, &entity); err != nil {
 		return fmt.Errorf("unmarshal: %w", err)
 	}
 	_, err := tx.NewInsert().Model(&entity).
@@ -182,7 +183,7 @@ func upsertLocation(ctx context.Context, tx bun.Tx, raw json.RawMessage) error {
 
 func upsertClaim(ctx context.Context, tx bun.Tx, raw json.RawMessage) error {
 	var entity db.Claim
-	if err := json.Unmarshal(raw, &entity); err != nil {
+	if err := sauth.Unmarshal(raw, &entity); err != nil {
 		return fmt.Errorf("unmarshal: %w", err)
 	}
 	_, err := tx.NewInsert().Model(&entity).
@@ -204,7 +205,7 @@ func upsertClaim(ctx context.Context, tx bun.Tx, raw json.RawMessage) error {
 
 func upsertUserClaim(ctx context.Context, tx bun.Tx, raw json.RawMessage) error {
 	var entity db.UserClaim
-	if err := json.Unmarshal(raw, &entity); err != nil {
+	if err := sauth.Unmarshal(raw, &entity); err != nil {
 		return fmt.Errorf("unmarshal: %w", err)
 	}
 	_, err := tx.NewInsert().Model(&entity).
@@ -225,7 +226,7 @@ func upsertUserClaim(ctx context.Context, tx bun.Tx, raw json.RawMessage) error 
 
 func upsertClaimObject(ctx context.Context, tx bun.Tx, raw json.RawMessage) error {
 	var entity db.ClaimObject
-	if err := json.Unmarshal(raw, &entity); err != nil {
+	if err := sauth.Unmarshal(raw, &entity); err != nil {
 		return fmt.Errorf("unmarshal: %w", err)
 	}
 	_, err := tx.NewInsert().Model(&entity).
@@ -250,7 +251,7 @@ func upsertClaimObject(ctx context.Context, tx bun.Tx, raw json.RawMessage) erro
 
 func upsertSamnaClient(ctx context.Context, tx bun.Tx, raw json.RawMessage) error {
 	var entity db.SamnaClient
-	if err := json.Unmarshal(raw, &entity); err != nil {
+	if err := sauth.Unmarshal(raw, &entity); err != nil {
 		return fmt.Errorf("unmarshal: %w", err)
 	}
 	_, err := tx.NewInsert().Model(&entity).
@@ -272,7 +273,7 @@ func upsertSamnaClient(ctx context.Context, tx bun.Tx, raw json.RawMessage) erro
 
 func upsertSamnaSecret(ctx context.Context, tx bun.Tx, raw json.RawMessage) error {
 	var entity db.SamnaSecret
-	if err := json.Unmarshal(raw, &entity); err != nil {
+	if err := sauth.Unmarshal(raw, &entity); err != nil {
 		return fmt.Errorf("unmarshal: %w", err)
 	}
 	_, err := tx.NewInsert().Model(&entity).
@@ -291,7 +292,7 @@ func upsertSamnaSecret(ctx context.Context, tx bun.Tx, raw json.RawMessage) erro
 
 func upsertSamnaApp(ctx context.Context, tx bun.Tx, raw json.RawMessage) error {
 	var entity db.SamnaApp
-	if err := json.Unmarshal(raw, &entity); err != nil {
+	if err := sauth.Unmarshal(raw, &entity); err != nil {
 		return fmt.Errorf("unmarshal: %w", err)
 	}
 	_, err := tx.NewInsert().Model(&entity).
@@ -321,7 +322,7 @@ func upsertSamnaApp(ctx context.Context, tx bun.Tx, raw json.RawMessage) error {
 
 func upsertObjectField(ctx context.Context, tx bun.Tx, raw json.RawMessage) error {
 	var entity db.ObjectField
-	if err := json.Unmarshal(raw, &entity); err != nil {
+	if err := sauth.Unmarshal(raw, &entity); err != nil {
 		return fmt.Errorf("unmarshal: %w", err)
 	}
 	_, err := tx.NewInsert().Model(&entity).
@@ -343,7 +344,7 @@ func upsertObjectField(ctx context.Context, tx bun.Tx, raw json.RawMessage) erro
 
 func upsertUserField(ctx context.Context, tx bun.Tx, raw json.RawMessage) error {
 	var entity db.UserField
-	if err := json.Unmarshal(raw, &entity); err != nil {
+	if err := sauth.Unmarshal(raw, &entity); err != nil {
 		return fmt.Errorf("unmarshal: %w", err)
 	}
 	_, err := tx.NewInsert().Model(&entity).
@@ -362,7 +363,7 @@ func upsertUserField(ctx context.Context, tx bun.Tx, raw json.RawMessage) error 
 
 func upsertUserRelation(ctx context.Context, tx bun.Tx, raw json.RawMessage) error {
 	var entity db.UserRelation
-	if err := json.Unmarshal(raw, &entity); err != nil {
+	if err := sauth.Unmarshal(raw, &entity); err != nil {
 		return fmt.Errorf("unmarshal: %w", err)
 	}
 	_, err := tx.NewInsert().Model(&entity).
@@ -383,7 +384,7 @@ func upsertUserRelation(ctx context.Context, tx bun.Tx, raw json.RawMessage) err
 
 func upsertAudit(ctx context.Context, tx bun.Tx, raw json.RawMessage) error {
 	var entity db.Audit
-	if err := json.Unmarshal(raw, &entity); err != nil {
+	if err := sauth.Unmarshal(raw, &entity); err != nil {
 		return fmt.Errorf("unmarshal: %w", err)
 	}
 	_, err := tx.NewInsert().Model(&entity).
@@ -403,7 +404,7 @@ func upsertAudit(ctx context.Context, tx bun.Tx, raw json.RawMessage) error {
 
 func upsertUserObject(ctx context.Context, tx bun.Tx, raw json.RawMessage) error {
 	var entity db.UserObject
-	if err := json.Unmarshal(raw, &entity); err != nil {
+	if err := sauth.Unmarshal(raw, &entity); err != nil {
 		return fmt.Errorf("unmarshal: %w", err)
 	}
 	_, err := tx.NewInsert().Model(&entity).
@@ -429,7 +430,7 @@ func upsertUserObject(ctx context.Context, tx bun.Tx, raw json.RawMessage) error
 
 func upsertObjectUsers(ctx context.Context, tx bun.Tx, raw json.RawMessage) error {
 	var entity db.ObjectUsers
-	if err := json.Unmarshal(raw, &entity); err != nil {
+	if err := sauth.Unmarshal(raw, &entity); err != nil {
 		return fmt.Errorf("unmarshal: %w", err)
 	}
 	_, err := tx.NewInsert().Model(&entity).
@@ -445,7 +446,7 @@ func upsertObjectUsers(ctx context.Context, tx bun.Tx, raw json.RawMessage) erro
 
 func upsertUserUsers(ctx context.Context, tx bun.Tx, raw json.RawMessage) error {
 	var entity db.UserUsers
-	if err := json.Unmarshal(raw, &entity); err != nil {
+	if err := sauth.Unmarshal(raw, &entity); err != nil {
 		return fmt.Errorf("unmarshal: %w", err)
 	}
 	_, err := tx.NewInsert().Model(&entity).
