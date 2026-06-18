@@ -256,8 +256,8 @@ func TestClaimAccess_UnmarshalJSON(t *testing.T) {
 			isError: false,
 		},
 		{
-			name:    "Array: Combined via pipe format",
-			data:    `["WRITE"|"READ"]`,
+			name:    "Array: Combined names",
+			data:    `["WRITE","READ"]`,
 			want:    sdb.ACCESS_WRITE | sdb.ACCESS_READ,
 			isError: false,
 		},

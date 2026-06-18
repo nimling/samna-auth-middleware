@@ -177,12 +177,14 @@ func (a *ClaimAccess) UnmarshalJSON(data []byte) error {
 		*a = access
 		return nil
 	case jsonx.TypeArray:
-		strData = strings.Trim(strData, "[]")
-		levels := strings.Split(strData, "|")
+		var levels []string
+		if err := json.Unmarshal(data, &levels); err != nil {
+			return errors.New("failed to parse access")
+		}
 
 		var access ClaimAccess
 		for _, level := range levels {
-			mappedAccess, err := mapStringToAccess(strings.Trim(level, `"`))
+			mappedAccess, err := mapStringToAccess(strings.TrimSpace(level))
 			if err != nil {
 				return err
 			}
@@ -228,6 +230,10 @@ func (a *ClaimAccess) PipeInt() string {
 	}
 
 	return strings.Join(accessSlice, "|")
+}
+
+func (a ClaimAccess) Pipe() string {
+	return a.PipeString()
 }
 
 func accessVirtualOutput(a ClaimAccess) (slice []string, pipe string) {
@@ -437,14 +443,6 @@ type Claim struct {
 	sessionDB    *DB
 }
 
-func (c Claim) MarshalJSON() ([]byte, error) {
-	type alias Claim
-	out := alias(c)
-	p := (*Claim)(&out)
-	p.AccessSlice, p.AccessString = accessVirtualOutput(c.Access)
-	return json.Marshal(&out)
-}
-
 type CreateClaimParams struct {
 	Name        string
 	Description *string
@@ -534,16 +532,6 @@ type UserClaim struct {
 	Creator      *Creator     `bun:"embed:creator_" json:"creator,omitempty"`
 }
 
-func (uc UserClaim) MarshalJSON() ([]byte, error) {
-	type alias UserClaim
-	out := alias(uc)
-	p := (*UserClaim)(&out)
-	if uc.Access != nil {
-		p.AccessSlice, p.AccessString = accessVirtualOutput(uc.Access.Access)
-	}
-	return json.Marshal(&out)
-}
-
 type ClaimObject struct {
 	bun.BaseModel `bun:"table:claimius.claim_object"`
 	nimbody.Body  `bun:"-" json:"-"`
@@ -568,14 +556,6 @@ type ClaimObject struct {
 	UpdatedAt  time.Time        `bun:"sa_updated_at,default:now()" json:"updated_at"`
 	Owner      *Organization    `bun:"rel:belongs-to,join:sa_owner_id=id" json:"owner,omitempty"`
 	Creator    *Creator         `bun:"embed:creator_" json:"creator,omitempty"`
-}
-
-func (co ClaimObject) MarshalJSON() ([]byte, error) {
-	type alias ClaimObject
-	out := alias(co)
-	p := (*ClaimObject)(&out)
-	p.AccessSlice, p.AccessString = accessVirtualOutputPtr(co.Access)
-	return json.Marshal(&out)
 }
 
 type AccessClaim struct {
