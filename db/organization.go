@@ -121,6 +121,10 @@ func (d *DB) InsertRootOrganization(ctx context.Context, ac *AccessClaim, org *O
 	if ac == nil || ac.UserClaimID == nil {
 		return nil, ErrNoAccess
 	}
+	org.ID = uuid.New()
+	org.OwnerID = org.ID
+	org.RootID = org.ID
+	org.CreatedBy = *ac.UserClaimID
 	org.Level = 0
 	if err := d.NewInsert().Model(org).With(ac).Scan(ctx, org); err != nil {
 		return nil, err

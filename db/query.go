@@ -454,17 +454,6 @@ func (q *InsertQuery) execClaimius(ctx context.Context, dest ...any) (bool, erro
 	return false, nil
 }
 
-func withAccessClaim(ctx context.Context, claim *AccessClaim) context.Context {
-	if claim == nil {
-		return ctx
-	}
-	b, err := json.Marshal(claim)
-	if err != nil {
-		return ctx
-	}
-	return client.WithAccessClaim(ctx, string(b))
-}
-
 func (q *InsertQuery) execHTTP(ctx context.Context, dest ...any) (sql.Result, error) {
 	path, err := endpointFor(q.model, uuid.Nil)
 	if err != nil {
@@ -474,7 +463,17 @@ func (q *InsertQuery) execHTTP(ctx context.Context, dest ...any) (sql.Result, er
 	if err != nil {
 		return nil, err
 	}
-	ctx = withAccessClaim(ctx, q.actor)
+	if q.actor != nil {
+		if q.actor.UserClaimID != nil && isBlankID(payload["created_by"]) {
+			payload["created_by"] = *q.actor.UserClaimID
+		}
+		if q.actor.OwnerID != uuid.Nil && isBlankID(payload["owner_id"]) {
+			payload["owner_id"] = q.actor.OwnerID
+		}
+		if q.actor.RootID != uuid.Nil && isBlankID(payload["root_id"]) {
+			payload["root_id"] = q.actor.RootID
+		}
+	}
 	var raw json.RawMessage
 	if err := client.Post(ctx, path, payload, &raw); err != nil {
 		return nil, err
@@ -498,12 +497,29 @@ func (q *InsertQuery) execHTTP(ctx context.Context, dest ...any) (sql.Result, er
 	return nil, nil
 }
 
+func isBlankID(v any) bool {
+	switch x := v.(type) {
+	case nil:
+		return true
+	case uuid.UUID:
+		return x == uuid.Nil
+	case *uuid.UUID:
+		return x == nil || *x == uuid.Nil
+	case string:
+		return x == "" || x == uuid.Nil.String()
+	default:
+		return false
+	}
+}
+
 func payloadForInsert(model any, excludes []string) (map[string]any, error) {
 	m, err := sauth.Map(model)
 	if err != nil {
 		return nil, err
 	}
-	delete(m, "id")
+	if isBlankID(m["id"]) {
+		delete(m, "id")
+	}
 	delete(m, "created_at")
 	delete(m, "updated_at")
 	delete(m, "deleted_at")
@@ -694,7 +710,6 @@ func (q *UpdateQuery) execHTTP(ctx context.Context, dest ...any) (sql.Result, er
 	if err != nil {
 		return nil, err
 	}
-	ctx = withAccessClaim(ctx, q.actor)
 	var raw json.RawMessage
 	if err := client.Patch(ctx, path, payload, &raw); err != nil {
 		return nil, err
@@ -924,7 +939,6 @@ func (q *DeleteQuery) execHTTP(ctx context.Context, dest ...any) (sql.Result, er
 	if err != nil {
 		return nil, err
 	}
-	ctx = withAccessClaim(ctx, q.actor)
 	var raw json.RawMessage
 	if err := client.Delete(ctx, path, &raw); err != nil {
 		return nil, err
