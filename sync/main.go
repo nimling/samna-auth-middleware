@@ -463,11 +463,17 @@ func upsertUserUsers(ctx context.Context, tx bun.Tx, raw json.RawMessage) error 
 
 func UpdateSeq(ctx context.Context, seq int64) error {
 	var state db.DiscipleState
+	if err := db.Instance().NewSelect().
+		Model(&state).
+		Limit(1).
+		Scan(ctx); err != nil {
+		return err
+	}
 	_, err := db.Instance().NewUpdate().
 		Model(&state).
 		Set("last_applied_seq = ?", seq).
 		Set("sa_updated_at = ?", time.Now()).
-		Where("TRUE").
+		Where("id = ?", state.ID).
 		Exec(ctx)
 	return err
 }
