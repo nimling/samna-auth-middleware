@@ -14,6 +14,15 @@ type ResponseEnvelope struct {
 	Data json.RawMessage `json:"data"`
 }
 
+type accessClaimKey struct{}
+
+func WithAccessClaim(ctx context.Context, claim string) context.Context {
+	if claim == "" {
+		return ctx
+	}
+	return context.WithValue(ctx, accessClaimKey{}, claim)
+}
+
 func DecodeJSON[T any](body io.ReadCloser, err error) (T, error) {
 	var zero T
 	if err != nil {
@@ -80,6 +89,10 @@ func (e *httpClient) execute(ctx context.Context, method string, expectedStatus 
 	req.Header.Set("X-Client-IP", localIP())
 	req.Header.Set("SAuth-App-Slug", e.clientSlug)
 	req.Header.Set("SAuth-App-Secret", e.clientSecret)
+
+	if claim, ok := ctx.Value(accessClaimKey{}).(string); ok && claim != "" {
+		req.Header.Set("SAuth-Access-Claim", claim)
+	}
 
 	if reqBody != nil {
 		req.Header.Set("Content-Type", "application/json")
