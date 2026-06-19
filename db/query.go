@@ -520,6 +520,7 @@ func payloadForInsert(model any, excludes []string) (map[string]any, error) {
 	if isBlankID(m["id"]) {
 		delete(m, "id")
 	}
+	delete(m, "app_id")
 	delete(m, "created_at")
 	delete(m, "updated_at")
 	delete(m, "deleted_at")
@@ -750,9 +751,19 @@ func payloadForUpdate(model any, setCols []conflictSet, excludes []string) (map[
 		return nil, err
 	}
 	delete(m, "id")
+	delete(m, "app_id")
+	delete(m, "created_by")
 	delete(m, "created_at")
 	delete(m, "updated_at")
 	delete(m, "deleted_at")
+	delete(m, "owner_id")
+	delete(m, "root_id")
+	delete(m, "claim_id")
+	delete(m, "user_id")
+	delete(m, "client_id")
+	delete(m, "secret_hash")
+	delete(m, "object_type")
+	delete(m, "field_id")
 	for _, col := range excludes {
 		delete(m, col)
 	}
