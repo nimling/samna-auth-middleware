@@ -632,7 +632,7 @@ type SamnaClient struct {
 	Description *string    `bun:"description" json:"description"`
 	AppID       uuid.UUID  `bun:"app_id,notnull,type:uuid,default:claimius.get_disciple_app_id()" json:"-" sauth:"app_id"`
 	ClientID    uuid.UUID  `bun:"client_id,default:gen_random_uuid()" json:"client_id"`
-	SecretHash  string     `bun:"secret_hash" json:"-"`
+	SecretHash  string     `bun:"secret_hash" json:"-" sauth:"secret_hash"`
 	Secret      *string    `bun:"-" json:"secret,omitempty"`
 	Status      string     `bun:"status,default:'active'" json:"status"`
 	ExpiresAt   *time.Time `bun:"expires_at" json:"expires_at"`
