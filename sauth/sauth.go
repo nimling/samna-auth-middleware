@@ -7,22 +7,16 @@ import (
 	"strings"
 )
 
-func fieldKey(field reflect.StructField) (name string, omitEmpty bool, skip bool) {
-	tag := strings.TrimSpace(field.Tag.Get("sauth"))
+// tagName parses the first comma part of a struct tag value.
+func tagName(tag string) (name string, omitEmpty bool, skip bool) {
+	tag = strings.TrimSpace(tag)
 	if tag == "" {
-		tag = strings.TrimSpace(field.Tag.Get("json"))
-	}
-	if tag == "" {
-		return field.Name, false, false
+		return "", false, false
 	}
 	parts := strings.Split(tag, ",")
-	first := strings.TrimSpace(parts[0])
-	if first == "-" {
+	name = strings.TrimSpace(parts[0])
+	if name == "-" {
 		return "", false, true
-	}
-	name = first
-	if name == "" {
-		name = field.Name
 	}
 	for _, p := range parts[1:] {
 		switch strings.TrimSpace(p) {
@@ -31,10 +25,6 @@ func fieldKey(field reflect.StructField) (name string, omitEmpty bool, skip bool
 		}
 	}
 	return name, omitEmpty, false
-}
-
-func hasNameTag(field reflect.StructField) bool {
-	return strings.TrimSpace(field.Tag.Get("sauth")) != "" || strings.TrimSpace(field.Tag.Get("json")) != ""
 }
 
 func isEmpty(v reflect.Value) bool {
@@ -60,57 +50,63 @@ func isEmpty(v reflect.Value) bool {
 	return false
 }
 
+// Map serializes model with encoding/json (which handles anonymous embeds,
+// omitempty and json.Marshaler types correctly), then overlays the sauth-only
+// fields so json-hidden fields carrying a sauth tag still cross the wire. The
+// returned map is mutable so callers can trim keys before sending.
 func Map(model any) (map[string]any, error) {
-	v := reflect.ValueOf(model)
+	b, err := json.Marshal(model)
+	if err != nil {
+		return nil, fmt.Errorf("sauth.Map marshal: %w", err)
+	}
+	out := map[string]any{}
+	if len(b) > 0 && string(b) != "null" {
+		if err := json.Unmarshal(b, &out); err != nil {
+			return nil, fmt.Errorf("sauth.Map decode: %w", err)
+		}
+	}
+	overlayMap(out, reflect.ValueOf(model))
+	return out, nil
+}
+
+func overlayMap(out map[string]any, v reflect.Value) {
 	for v.Kind() == reflect.Pointer || v.Kind() == reflect.Interface {
 		if v.IsNil() {
-			return map[string]any{}, nil
+			return
 		}
 		v = v.Elem()
 	}
 	if v.Kind() != reflect.Struct {
-		return nil, fmt.Errorf("sauth.Map: expected struct, got %s", v.Kind())
+		return
 	}
-	out := map[string]any{}
-	if err := mapInto(out, v); err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func mapInto(out map[string]any, v reflect.Value) error {
 	t := v.Type()
 	for i := 0; i < t.NumField(); i++ {
 		field := t.Field(i)
 		if !field.IsExported() {
 			continue
 		}
-		if field.Anonymous && !hasNameTag(field) {
-			fv := v.Field(i)
-			if fv.Kind() == reflect.Pointer {
-				if fv.IsNil() {
-					continue
-				}
-				fv = fv.Elem()
-			}
-			if fv.Kind() == reflect.Struct {
-				if err := mapInto(out, fv); err != nil {
-					return err
-				}
-				continue
-			}
+		jsonName, _, _ := tagName(field.Tag.Get("json"))
+		sauthTag := strings.TrimSpace(field.Tag.Get("sauth"))
+		if field.Anonymous && sauthTag == "" && jsonName == "" {
+			overlayMap(out, v.Field(i))
+			continue
 		}
-		name, omitEmpty, skip := fieldKey(field)
+		if sauthTag == "" {
+			continue
+		}
+		sauthName, omit, skip := tagName(sauthTag)
 		if skip {
 			continue
 		}
 		val := v.Field(i)
-		if omitEmpty && isEmpty(val) {
+		if omit && isEmpty(val) {
 			continue
 		}
-		out[name] = val.Interface()
+		if jsonName != "" && jsonName != sauthName {
+			delete(out, jsonName)
+		}
+		out[sauthName] = val.Interface()
 	}
-	return nil
 }
 
 func Marshal(model any) ([]byte, error) {
@@ -121,7 +117,12 @@ func Marshal(model any) ([]byte, error) {
 	return json.Marshal(m)
 }
 
+// Unmarshal decodes with encoding/json, then overlays the sauth-only fields by
+// their sauth key (covering json-hidden fields json.Unmarshal would skip).
 func Unmarshal(data []byte, model any) error {
+	if err := json.Unmarshal(data, model); err != nil {
+		return fmt.Errorf("sauth.Unmarshal: %w", err)
+	}
 	raw := map[string]json.RawMessage{}
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return fmt.Errorf("sauth.Unmarshal envelope: %w", err)
@@ -130,12 +131,19 @@ func Unmarshal(data []byte, model any) error {
 	if v.Kind() != reflect.Pointer || v.IsNil() {
 		return fmt.Errorf("sauth.Unmarshal: expected non-nil pointer")
 	}
-	return unmarshalInto(raw, v.Elem())
+	overlayUnmarshal(raw, v.Elem())
+	return nil
 }
 
-func unmarshalInto(raw map[string]json.RawMessage, v reflect.Value) error {
+func overlayUnmarshal(raw map[string]json.RawMessage, v reflect.Value) error {
+	for v.Kind() == reflect.Pointer {
+		if v.IsNil() {
+			return nil
+		}
+		v = v.Elem()
+	}
 	if v.Kind() != reflect.Struct {
-		return fmt.Errorf("sauth.Unmarshal: expected struct, got %s", v.Kind())
+		return nil
 	}
 	t := v.Type()
 	for i := 0; i < t.NumField(); i++ {
@@ -143,31 +151,31 @@ func unmarshalInto(raw map[string]json.RawMessage, v reflect.Value) error {
 		if !field.IsExported() {
 			continue
 		}
-		if field.Anonymous && !hasNameTag(field) {
-			fv := v.Field(i)
-			if fv.Kind() == reflect.Pointer {
-				if fv.IsNil() {
-					fv.Set(reflect.New(fv.Type().Elem()))
-				}
-				fv = fv.Elem()
+		jsonName, _, _ := tagName(field.Tag.Get("json"))
+		sauthTag := strings.TrimSpace(field.Tag.Get("sauth"))
+		if field.Anonymous && sauthTag == "" && jsonName == "" {
+			if err := overlayUnmarshal(raw, v.Field(i)); err != nil {
+				return err
 			}
-			if fv.Kind() == reflect.Struct {
-				if err := unmarshalInto(raw, fv); err != nil {
-					return err
-				}
-				continue
-			}
+			continue
 		}
-		name, _, skip := fieldKey(field)
+		if sauthTag == "" {
+			continue
+		}
+		sauthName, _, skip := tagName(sauthTag)
 		if skip {
 			continue
 		}
-		msg, ok := raw[name]
+		msg, ok := raw[sauthName]
 		if !ok {
 			continue
 		}
-		if err := json.Unmarshal(msg, v.Field(i).Addr().Interface()); err != nil {
-			return fmt.Errorf("sauth.Unmarshal %s: %w", name, err)
+		fv := v.Field(i)
+		if !fv.CanAddr() {
+			continue
+		}
+		if err := json.Unmarshal(msg, fv.Addr().Interface()); err != nil {
+			return fmt.Errorf("sauth.Unmarshal %s: %w", sauthName, err)
 		}
 	}
 	return nil
