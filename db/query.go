@@ -14,6 +14,7 @@ import (
 	"github.com/uptrace/bun"
 
 	"github.com/nimling/samna-auth-middleware/client"
+	"github.com/nimling/samna-auth-middleware/internal/store"
 	"github.com/nimling/samna-auth-middleware/sauth"
 )
 
@@ -476,7 +477,7 @@ func (q *InsertQuery) execHTTP(ctx context.Context, dest ...any) (sql.Result, er
 		if err := sauth.Unmarshal(raw, q.model); err != nil {
 			return nil, fmt.Errorf("decode insert response: %w", err)
 		}
-		if err := upsertLocal(ctx, q.model); err != nil {
+		if err := store.Upsert(ctx, q.db.DB, q.model); err != nil {
 			return nil, err
 		}
 	}
@@ -767,7 +768,7 @@ func (q *UpdateQuery) execHTTP(ctx context.Context, dest ...any) (sql.Result, er
 		if err := sauth.Unmarshal(raw, q.model); err != nil {
 			return nil, fmt.Errorf("decode update response: %w", err)
 		}
-		if err := upsertLocal(ctx, q.model); err != nil {
+		if err := store.Upsert(ctx, q.db.DB, q.model); err != nil {
 			return nil, err
 		}
 	}
@@ -970,7 +971,7 @@ func (q *DeleteQuery) execHTTP(ctx context.Context, dest ...any) (sql.Result, er
 		if err := sauth.Unmarshal(raw, q.model); err != nil {
 			return nil, fmt.Errorf("decode delete response: %w", err)
 		}
-		if err := upsertLocal(ctx, q.model); err != nil {
+		if err := store.Upsert(ctx, q.db.DB, q.model); err != nil {
 			return nil, err
 		}
 	}

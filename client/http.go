@@ -7,8 +7,19 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"strconv"
 	"time"
 )
+
+func requestTimeout() time.Duration {
+	if v := os.Getenv("SAUTH_CLIENT_TIMEOUT"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			return time.Duration(n) * time.Second
+		}
+	}
+	return 5 * time.Second
+}
 
 type ResponseEnvelope struct {
 	Data json.RawMessage `json:"data"`
@@ -37,7 +48,7 @@ func newHTTPClient(clientSlug, clientSecret string) *httpClient {
 	return &httpClient{
 		clientSlug:   clientSlug,
 		clientSecret: clientSecret,
-		httpClient:   &http.Client{Timeout: time.Second * 5},
+		httpClient:   &http.Client{Timeout: requestTimeout()},
 	}
 }
 

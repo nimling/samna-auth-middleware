@@ -2,19 +2,12 @@ package sync
 
 import (
 	"context"
-	"encoding/json"
+	"errors"
 	"fmt"
-	"io"
-	"net/http"
-	"os"
-	"time"
 
+	"github.com/nimling/samna-auth-middleware/client"
 	"github.com/nimling/samna-auth-middleware/db"
 )
-
-type responseEnvelope struct {
-	Data json.RawMessage `json:"data"`
-}
 
 type SnapshotResponse struct {
 	Records []SyncPayload `json:"records"`
@@ -22,40 +15,12 @@ type SnapshotResponse struct {
 }
 
 func PullSnapshot(ctx context.Context) error {
-	endpoint := os.Getenv("SAUTH_ENDPOINT")
-	slug := os.Getenv("SAUTH_APP_SLUG")
-	secret := os.Getenv("SAUTH_APP_SECRET")
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint+"/sam/sync/snapshot", nil)
-	if err != nil {
-		return fmt.Errorf("create request: %w", err)
-	}
-
-	req.Header.Set("SAuth-App-Slug", slug)
-	req.Header.Set("SAuth-App-Secret", secret)
-
-	resp, err := (&http.Client{Timeout: 60 * time.Second}).Do(req)
-	if err != nil {
-		return fmt.Errorf("fetch snapshot: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode == http.StatusNotFound {
-		return db.ErrSyncUnreachable
-	}
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("snapshot returned %d: %s", resp.StatusCode, string(body))
-	}
-
-	var envelope responseEnvelope
-	if err := json.NewDecoder(resp.Body).Decode(&envelope); err != nil {
-		return fmt.Errorf("decode envelope: %w", err)
-	}
-
 	var snapshot SnapshotResponse
-	if err := json.Unmarshal(envelope.Data, &snapshot); err != nil {
-		return fmt.Errorf("decode snapshot: %w", err)
+	if err := client.Get(ctx, "sync/snapshot", &snapshot); err != nil {
+		if errors.Is(err, client.ErrNotFound) {
+			return db.ErrSyncUnreachable
+		}
+		return fmt.Errorf("fetch snapshot: %w", err)
 	}
 
 	for _, payload := range snapshot.Records {
@@ -74,45 +39,17 @@ func PullSnapshot(ctx context.Context) error {
 }
 
 func PullSync(ctx context.Context) error {
-	endpoint := os.Getenv("SAUTH_ENDPOINT")
-	slug := os.Getenv("SAUTH_APP_SLUG")
-	secret := os.Getenv("SAUTH_APP_SECRET")
-
 	seq, err := GetSeq(ctx)
 	if err != nil {
 		return fmt.Errorf("get current seq: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("%s/sam/sync/%d", endpoint, seq), nil)
-	if err != nil {
-		return fmt.Errorf("create request: %w", err)
-	}
-
-	req.Header.Set("SAuth-App-Slug", slug)
-	req.Header.Set("SAuth-App-Secret", secret)
-
-	resp, err := (&http.Client{Timeout: 30 * time.Second}).Do(req)
-	if err != nil {
-		return fmt.Errorf("fetch sync: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode == http.StatusNotFound {
-		return db.ErrSyncUnreachable
-	}
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("sync returned %d: %s", resp.StatusCode, string(body))
-	}
-
-	var syncEnvelope responseEnvelope
-	if err := json.NewDecoder(resp.Body).Decode(&syncEnvelope); err != nil {
-		return fmt.Errorf("decode envelope: %w", err)
-	}
-
 	var payloads []SyncPayload
-	if err := json.Unmarshal(syncEnvelope.Data, &payloads); err != nil {
-		return fmt.Errorf("decode sync: %w", err)
+	if err := client.Get(ctx, fmt.Sprintf("sync/%d", seq), &payloads); err != nil {
+		if errors.Is(err, client.ErrNotFound) {
+			return db.ErrSyncUnreachable
+		}
+		return fmt.Errorf("fetch sync: %w", err)
 	}
 
 	var maxSeq int64

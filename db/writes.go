@@ -13,16 +13,6 @@ import (
 	"github.com/nimling/samna-auth-middleware/client"
 )
 
-func upsertLocal(ctx context.Context, model any) error {
-	_, err := instance.DB.NewInsert().
-		Model(model).
-		On("CONFLICT (id) DO UPDATE").
-		Set("sa_updated_at = EXCLUDED.sa_updated_at").
-		Set("sa_deleted_at = EXCLUDED.sa_deleted_at").
-		Exec(ctx)
-	return err
-}
-
 func (d *DB) ValidateToken(ctx context.Context, token string) (*SamnaUser, uuid.UUID, error) {
 	if token == "" {
 		return nil, uuid.Nil, fmt.Errorf("token is required")
