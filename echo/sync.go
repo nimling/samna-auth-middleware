@@ -33,3 +33,12 @@ func PostSync(ctx echo.Context) error {
 
 	return ctx.String(http.StatusOK, "OK")
 }
+
+func GetSyncPing(ctx echo.Context) error {
+	slug := ctx.Request().Header.Get("SAuth-App-Slug")
+	secret := ctx.Request().Header.Get("SAuth-App-Secret")
+	if !client.VerifyRequest(slug, secret) {
+		return ctx.String(http.StatusUnauthorized, "Unauthorized")
+	}
+	return ctx.String(http.StatusOK, "OK")
+}

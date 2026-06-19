@@ -4,12 +4,60 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	stdsync "sync"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/nimling/samna-auth-middleware/db"
 	"github.com/nimling/samna-auth-middleware/sauth"
 	"github.com/uptrace/bun"
 )
+
+var (
+	discipleAppMu stdsync.Mutex
+	discipleAppID uuid.UUID
+)
+
+func resolveDiscipleApp(ctx context.Context) uuid.UUID {
+	discipleAppMu.Lock()
+	defer discipleAppMu.Unlock()
+	if discipleAppID != uuid.Nil {
+		return discipleAppID
+	}
+	var id uuid.UUID
+	if err := db.Instance().NewRaw("SELECT claimius.get_disciple_app_id()").Scan(ctx, &id); err == nil {
+		discipleAppID = id
+	}
+	return discipleAppID
+}
+
+func payloadScope(eventType string, raw json.RawMessage) (uuid.UUID, bool) {
+	var m struct {
+		AppID *uuid.UUID `json:"app_id"`
+		ID    *uuid.UUID `json:"id"`
+	}
+	if err := json.Unmarshal(raw, &m); err != nil {
+		return uuid.Nil, false
+	}
+	if m.AppID != nil {
+		return *m.AppID, true
+	}
+	if eventType == "claimius.samna_app" && m.ID != nil {
+		return *m.ID, true
+	}
+	return uuid.Nil, false
+}
+
+func Bootstrap(ctx context.Context) error {
+	seq, err := GetSeq(ctx)
+	if err != nil {
+		return fmt.Errorf("get current seq: %w", err)
+	}
+	if seq == 0 {
+		return PullSnapshot(ctx)
+	}
+	return PullSync(ctx)
+}
 
 type SyncPayload struct {
 	Seq       int64           `json:"seq"`
@@ -23,6 +71,11 @@ type idEnvelope struct {
 }
 
 func ApplyPayload(ctx context.Context, payload SyncPayload) error {
+	if appID := resolveDiscipleApp(ctx); appID != uuid.Nil {
+		if scope, ok := payloadScope(payload.EventType, payload.Payload); ok && scope != appID {
+			return nil
+		}
+	}
 	return db.Instance().RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
 		if _, err := tx.ExecContext(ctx, "SET LOCAL claimius.replay_mode = 'true'"); err != nil {
 			return fmt.Errorf("set replay_mode: %w", err)
@@ -475,6 +528,7 @@ func UpdateSeq(ctx context.Context, seq int64) error {
 			Set("last_applied_seq = ?", seq).
 			Set("sa_updated_at = ?", time.Now()).
 			Where("id = ?", state.ID).
+			Where("last_applied_seq < ?", seq).
 			Exec(ctx)
 		return err
 	})
