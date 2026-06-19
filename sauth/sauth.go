@@ -33,6 +33,10 @@ func fieldKey(field reflect.StructField) (name string, omitEmpty bool, skip bool
 	return name, omitEmpty, false
 }
 
+func hasNameTag(field reflect.StructField) bool {
+	return strings.TrimSpace(field.Tag.Get("sauth")) != "" || strings.TrimSpace(field.Tag.Get("json")) != ""
+}
+
 func isEmpty(v reflect.Value) bool {
 	switch v.Kind() {
 	case reflect.Pointer, reflect.Interface:
@@ -68,11 +72,33 @@ func Map(model any) (map[string]any, error) {
 		return nil, fmt.Errorf("sauth.Map: expected struct, got %s", v.Kind())
 	}
 	out := map[string]any{}
+	if err := mapInto(out, v); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func mapInto(out map[string]any, v reflect.Value) error {
 	t := v.Type()
 	for i := 0; i < t.NumField(); i++ {
 		field := t.Field(i)
 		if !field.IsExported() {
 			continue
+		}
+		if field.Anonymous && !hasNameTag(field) {
+			fv := v.Field(i)
+			if fv.Kind() == reflect.Pointer {
+				if fv.IsNil() {
+					continue
+				}
+				fv = fv.Elem()
+			}
+			if fv.Kind() == reflect.Struct {
+				if err := mapInto(out, fv); err != nil {
+					return err
+				}
+				continue
+			}
 		}
 		name, omitEmpty, skip := fieldKey(field)
 		if skip {
@@ -84,7 +110,7 @@ func Map(model any) (map[string]any, error) {
 		}
 		out[name] = val.Interface()
 	}
-	return out, nil
+	return nil
 }
 
 func Marshal(model any) ([]byte, error) {
@@ -104,7 +130,10 @@ func Unmarshal(data []byte, model any) error {
 	if v.Kind() != reflect.Pointer || v.IsNil() {
 		return fmt.Errorf("sauth.Unmarshal: expected non-nil pointer")
 	}
-	v = v.Elem()
+	return unmarshalInto(raw, v.Elem())
+}
+
+func unmarshalInto(raw map[string]json.RawMessage, v reflect.Value) error {
 	if v.Kind() != reflect.Struct {
 		return fmt.Errorf("sauth.Unmarshal: expected struct, got %s", v.Kind())
 	}
@@ -113,6 +142,21 @@ func Unmarshal(data []byte, model any) error {
 		field := t.Field(i)
 		if !field.IsExported() {
 			continue
+		}
+		if field.Anonymous && !hasNameTag(field) {
+			fv := v.Field(i)
+			if fv.Kind() == reflect.Pointer {
+				if fv.IsNil() {
+					fv.Set(reflect.New(fv.Type().Elem()))
+				}
+				fv = fv.Elem()
+			}
+			if fv.Kind() == reflect.Struct {
+				if err := unmarshalInto(raw, fv); err != nil {
+					return err
+				}
+				continue
+			}
 		}
 		name, _, skip := fieldKey(field)
 		if skip {
