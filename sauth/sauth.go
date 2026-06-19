@@ -50,10 +50,6 @@ func isEmpty(v reflect.Value) bool {
 	return false
 }
 
-// Map serializes model with encoding/json (which handles anonymous embeds,
-// omitempty and json.Marshaler types correctly), then overlays the sauth-only
-// fields so json-hidden fields carrying a sauth tag still cross the wire. The
-// returned map is mutable so callers can trim keys before sending.
 func Map(model any) (map[string]any, error) {
 	b, err := json.Marshal(model)
 	if err != nil {
@@ -96,6 +92,9 @@ func overlayMap(out map[string]any, v reflect.Value) {
 		}
 		sauthName, omit, skip := tagName(sauthTag)
 		if skip {
+			continue
+		}
+		if sauthName == "app_id" {
 			continue
 		}
 		val := v.Field(i)

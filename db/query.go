@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
+	"github.com/nimling/nimbody"
 	"github.com/uptrace/bun"
 
 	"github.com/nimling/samna-auth-middleware/client"
@@ -270,13 +271,13 @@ func copyInto(src, dst any) error {
 }
 
 type InsertQuery struct {
-	db       *DB
-	model    any
-	actor    *AccessClaim
-	excludes []string
-	conflict string
-	confSet  []conflictSet
-	returns  string
+	db          *DB
+	model       any
+	accessClaim *AccessClaim
+	excludes    []string
+	conflict    string
+	confSet     []conflictSet
+	returns     string
 }
 
 func (d *DB) NewInsert() *InsertQuery {
@@ -289,7 +290,7 @@ func (q *InsertQuery) Model(model any) *InsertQuery {
 }
 
 func (q *InsertQuery) With(ac *AccessClaim) *InsertQuery {
-	q.actor = ac
+	q.accessClaim = ac
 	return q
 }
 
@@ -358,7 +359,7 @@ func (q *InsertQuery) execClaimius(ctx context.Context, dest ...any) (bool, erro
 		if !ok {
 			return false, nil
 		}
-		result, err := q.db.insertClaim(ctx, q.actor, m)
+		result, err := q.db.insertClaim(ctx, q.accessClaim, m)
 		if err != nil {
 			return true, err
 		}
@@ -372,7 +373,7 @@ func (q *InsertQuery) execClaimius(ctx context.Context, dest ...any) (bool, erro
 		if m.ClaimID == uuid.Nil {
 			return true, fmt.Errorf("insert claim_object: claim_id required on model")
 		}
-		result, err := q.db.insertClaimObject(ctx, q.actor, m.ClaimID, m)
+		result, err := q.db.insertClaimObject(ctx, q.accessClaim, m.ClaimID, m)
 		if err != nil {
 			return true, err
 		}
@@ -386,7 +387,7 @@ func (q *InsertQuery) execClaimius(ctx context.Context, dest ...any) (bool, erro
 		if m.ClaimID == uuid.Nil {
 			return true, fmt.Errorf("insert user_claim: claim_id required on model")
 		}
-		result, err := q.db.insertClaimUser(ctx, q.actor, m.ClaimID, m)
+		result, err := q.db.insertClaimUser(ctx, q.accessClaim, m.ClaimID, m)
 		if err != nil {
 			return true, err
 		}
@@ -410,7 +411,7 @@ func (q *InsertQuery) execClaimius(ctx context.Context, dest ...any) (bool, erro
 		if !ok {
 			return false, nil
 		}
-		result, err := q.db.insertOrganization(ctx, q.actor, m)
+		result, err := q.db.insertOrganization(ctx, q.accessClaim, m)
 		if err != nil {
 			return true, err
 		}
@@ -421,7 +422,7 @@ func (q *InsertQuery) execClaimius(ctx context.Context, dest ...any) (bool, erro
 		if !ok {
 			return false, nil
 		}
-		result, err := q.db.insertLocation(ctx, q.actor, m)
+		result, err := q.db.insertLocation(ctx, q.accessClaim, m)
 		if err != nil {
 			return true, err
 		}
@@ -432,7 +433,7 @@ func (q *InsertQuery) execClaimius(ctx context.Context, dest ...any) (bool, erro
 		if !ok {
 			return false, nil
 		}
-		result, err := q.db.insertRelation(ctx, q.actor, m)
+		result, err := q.db.insertRelation(ctx, q.accessClaim, m)
 		if err != nil {
 			return true, err
 		}
@@ -444,7 +445,7 @@ func (q *InsertQuery) execClaimius(ctx context.Context, dest ...any) (bool, erro
 			return false, nil
 		}
 		body := BodySecret{Key: &m.Key, Value: &m.Value, OwnerID: &m.OwnerID, ExpiresAt: m.ExpiresAt}
-		result, err := q.db.insertSecret(ctx, q.actor, body)
+		result, err := q.db.insertSecret(ctx, q.accessClaim, body)
 		if err != nil {
 			return true, err
 		}
@@ -459,23 +460,16 @@ func (q *InsertQuery) execHTTP(ctx context.Context, dest ...any) (sql.Result, er
 	if err != nil {
 		return nil, err
 	}
-	payload, err := payloadForInsert(q.model, q.excludes)
+	stampAccessClaim(q.model, q.accessClaim)
+	if err := stampRoot(ctx, q.db, q.model, q.accessClaim); err != nil {
+		return nil, err
+	}
+	body, err := sauth.Marshal(q.model)
 	if err != nil {
 		return nil, err
 	}
-	if q.actor != nil {
-		if q.actor.UserClaimID != nil && isBlankID(payload["created_by"]) {
-			payload["created_by"] = *q.actor.UserClaimID
-		}
-		if q.actor.OwnerID != uuid.Nil && isBlankID(payload["owner_id"]) {
-			payload["owner_id"] = q.actor.OwnerID
-		}
-		if q.actor.RootID != uuid.Nil && isBlankID(payload["root_id"]) {
-			payload["root_id"] = q.actor.RootID
-		}
-	}
 	var raw json.RawMessage
-	if err := client.Post(ctx, path, payload, &raw); err != nil {
+	if err := client.Post(ctx, path, json.RawMessage(body), &raw); err != nil {
 		return nil, err
 	}
 	if len(raw) > 0 {
@@ -497,48 +491,96 @@ func (q *InsertQuery) execHTTP(ctx context.Context, dest ...any) (sql.Result, er
 	return nil, nil
 }
 
-func isBlankID(v any) bool {
-	switch x := v.(type) {
-	case nil:
-		return true
-	case uuid.UUID:
-		return x == uuid.Nil
-	case *uuid.UUID:
-		return x == nil || *x == uuid.Nil
-	case string:
-		return x == "" || x == uuid.Nil.String()
-	default:
-		return false
+func stampAccessClaim(model any, ac *AccessClaim) {
+	if ac == nil {
+		return
 	}
+	v := structValue(model)
+	if !v.IsValid() {
+		return
+	}
+	if ac.UserClaimID != nil {
+		setStructUUID(v, "CreatedBy", *ac.UserClaimID, true)
+	}
+	setStructUUID(v, "OwnerID", ac.OwnerID, true)
 }
 
-func payloadForInsert(model any, excludes []string) (map[string]any, error) {
-	m, err := sauth.Map(model)
-	if err != nil {
-		return nil, err
+func stampRoot(ctx context.Context, db *DB, model any, ac *AccessClaim) error {
+	if loc, ok := embeddedPtr(model, reflect.TypeOf(Location{})).(*Location); ok {
+		if loc.ParentID == nil || *loc.ParentID == uuid.Nil {
+			if loc.ID == uuid.Nil {
+				loc.ID = uuid.New()
+			}
+			loc.RootID = loc.ID
+			loc.ParentID = &loc.ID
+			return nil
+		}
+		if loc.RootID == uuid.Nil {
+			var root uuid.UUID
+			if err := db.NewRaw(`SELECT sa_root_id FROM claimius.location WHERE id = ? AND sa_deleted_at IS NULL`, *loc.ParentID).Scan(ctx, &root); err != nil {
+				return err
+			}
+			loc.RootID = root
+		}
+		return nil
 	}
-	if isBlankID(m["id"]) {
-		delete(m, "id")
+	if ac != nil {
+		v := structValue(model)
+		if v.IsValid() {
+			setStructUUID(v, "RootID", ac.RootID, true)
+		}
 	}
-	delete(m, "app_id")
-	delete(m, "created_at")
-	delete(m, "updated_at")
-	delete(m, "deleted_at")
-	for _, col := range excludes {
-		delete(m, col)
+	return nil
+}
+
+func structValue(model any) reflect.Value {
+	v := reflect.ValueOf(model)
+	for v.Kind() == reflect.Pointer {
+		if v.IsNil() {
+			return reflect.Value{}
+		}
+		v = v.Elem()
 	}
-	return m, nil
+	if v.Kind() != reflect.Struct {
+		return reflect.Value{}
+	}
+	return v
+}
+
+func setStructUUID(v reflect.Value, field string, val uuid.UUID, onlyIfZero bool) {
+	if val == uuid.Nil {
+		return
+	}
+	f := v.FieldByName(field)
+	if !f.IsValid() || !f.CanSet() || f.Type() != reflect.TypeOf(uuid.UUID{}) {
+		return
+	}
+	if onlyIfZero && f.Interface().(uuid.UUID) != uuid.Nil {
+		return
+	}
+	f.Set(reflect.ValueOf(val))
+}
+
+func boundBody(model any) map[string]any {
+	if b, ok := model.(interface {
+		Validator() *nimbody.BodyValidator
+	}); ok {
+		if bv := b.Validator(); bv != nil {
+			return bv.Body
+		}
+	}
+	return nil
 }
 
 type UpdateQuery struct {
-	db        *DB
-	model     any
-	actor     *AccessClaim
-	recordID  uuid.UUID
-	excludes  []string
-	returns   string
-	setCols   []conflictSet
-	whereExpr []conflictSet
+	db          *DB
+	model       any
+	accessClaim *AccessClaim
+	recordID    uuid.UUID
+	excludes    []string
+	returns     string
+	setCols     []conflictSet
+	whereExpr   []conflictSet
 }
 
 func (d *DB) NewUpdate() *UpdateQuery {
@@ -551,7 +593,7 @@ func (q *UpdateQuery) Model(model any) *UpdateQuery {
 }
 
 func (q *UpdateQuery) With(ac *AccessClaim) *UpdateQuery {
-	q.actor = ac
+	q.accessClaim = ac
 	return q
 }
 
@@ -633,7 +675,7 @@ func (q *UpdateQuery) execClaimius(ctx context.Context, dest ...any) (bool, erro
 		if !ok {
 			return false, nil
 		}
-		result, err := q.db.updateClaim(ctx, q.actor, q.recordID, m)
+		result, err := q.db.updateClaim(ctx, q.accessClaim, q.recordID, m)
 		if err != nil {
 			return true, err
 		}
@@ -644,7 +686,7 @@ func (q *UpdateQuery) execClaimius(ctx context.Context, dest ...any) (bool, erro
 		if !ok {
 			return false, nil
 		}
-		result, err := q.db.updateUser(ctx, q.actor, q.recordID, m)
+		result, err := q.db.updateUser(ctx, q.accessClaim, q.recordID, m)
 		if err != nil {
 			return true, err
 		}
@@ -655,7 +697,7 @@ func (q *UpdateQuery) execClaimius(ctx context.Context, dest ...any) (bool, erro
 		if !ok {
 			return false, nil
 		}
-		result, err := q.db.updateOrganization(ctx, q.actor, q.recordID, m)
+		result, err := q.db.updateOrganization(ctx, q.accessClaim, q.recordID, m)
 		if err != nil {
 			return true, err
 		}
@@ -666,7 +708,7 @@ func (q *UpdateQuery) execClaimius(ctx context.Context, dest ...any) (bool, erro
 		if !ok {
 			return false, nil
 		}
-		result, err := q.db.updateLocation(ctx, q.actor, q.recordID, m)
+		result, err := q.db.updateLocation(ctx, q.accessClaim, q.recordID, m)
 		if err != nil {
 			return true, err
 		}
@@ -677,7 +719,7 @@ func (q *UpdateQuery) execClaimius(ctx context.Context, dest ...any) (bool, erro
 		if !ok {
 			return false, nil
 		}
-		result, err := q.db.updateRelation(ctx, q.actor, q.recordID, m)
+		result, err := q.db.updateRelation(ctx, q.accessClaim, q.recordID, m)
 		if err != nil {
 			return true, err
 		}
@@ -689,7 +731,7 @@ func (q *UpdateQuery) execClaimius(ctx context.Context, dest ...any) (bool, erro
 			return false, nil
 		}
 		body := BodySecret{Key: &m.Key, Value: &m.Value, OwnerID: &m.OwnerID, ExpiresAt: m.ExpiresAt}
-		result, err := q.db.updateSecret(ctx, q.actor, q.recordID, body)
+		result, err := q.db.updateSecret(ctx, q.accessClaim, q.recordID, body)
 		if err != nil {
 			return true, err
 		}
@@ -707,9 +749,15 @@ func (q *UpdateQuery) execHTTP(ctx context.Context, dest ...any) (sql.Result, er
 	if err != nil {
 		return nil, err
 	}
-	payload, err := payloadForUpdate(q.model, q.setCols, q.excludes)
-	if err != nil {
-		return nil, err
+	var payload any
+	if bound := boundBody(q.model); bound != nil {
+		payload = bound
+	} else {
+		body, err := sauth.Marshal(q.model)
+		if err != nil {
+			return nil, err
+		}
+		payload = json.RawMessage(body)
 	}
 	var raw json.RawMessage
 	if err := client.Patch(ctx, path, payload, &raw); err != nil {
@@ -734,49 +782,13 @@ func (q *UpdateQuery) execHTTP(ctx context.Context, dest ...any) (sql.Result, er
 	return nil, nil
 }
 
-func payloadForUpdate(model any, setCols []conflictSet, excludes []string) (map[string]any, error) {
-	if len(setCols) > 0 {
-		out := map[string]any{}
-		for _, s := range setCols {
-			col := strings.TrimSpace(strings.Split(s.expr, "=")[0])
-			if col == "" || len(s.args) == 0 {
-				continue
-			}
-			out[col] = s.args[0]
-		}
-		return out, nil
-	}
-	m, err := sauth.Map(model)
-	if err != nil {
-		return nil, err
-	}
-	delete(m, "id")
-	delete(m, "app_id")
-	delete(m, "created_by")
-	delete(m, "created_at")
-	delete(m, "updated_at")
-	delete(m, "deleted_at")
-	delete(m, "owner_id")
-	delete(m, "root_id")
-	delete(m, "claim_id")
-	delete(m, "user_id")
-	delete(m, "client_id")
-	delete(m, "secret_hash")
-	delete(m, "object_type")
-	delete(m, "field_id")
-	for _, col := range excludes {
-		delete(m, col)
-	}
-	return m, nil
-}
-
 type DeleteQuery struct {
-	db        *DB
-	model     any
-	actor     *AccessClaim
-	recordID  uuid.UUID
-	whereExpr []conflictSet
-	returns   string
+	db          *DB
+	model       any
+	accessClaim *AccessClaim
+	recordID    uuid.UUID
+	whereExpr   []conflictSet
+	returns     string
 }
 
 func (d *DB) NewDelete() *DeleteQuery {
@@ -789,7 +801,7 @@ func (q *DeleteQuery) Model(model any) *DeleteQuery {
 }
 
 func (q *DeleteQuery) With(ac *AccessClaim) *DeleteQuery {
-	q.actor = ac
+	q.accessClaim = ac
 	return q
 }
 
@@ -855,7 +867,7 @@ func (q *DeleteQuery) execClaimius(ctx context.Context, dest ...any) (bool, erro
 		if !ok {
 			return false, nil
 		}
-		result, err := q.db.deleteClaim(ctx, q.actor, q.recordID)
+		result, err := q.db.deleteClaim(ctx, q.accessClaim, q.recordID)
 		if err != nil {
 			return true, err
 		}
@@ -869,7 +881,7 @@ func (q *DeleteQuery) execClaimius(ctx context.Context, dest ...any) (bool, erro
 		if m.ClaimID == uuid.Nil {
 			return true, fmt.Errorf("delete claim_object: claim_id required on model")
 		}
-		result, err := q.db.deleteClaimObject(ctx, q.actor, m.ClaimID, q.recordID)
+		result, err := q.db.deleteClaimObject(ctx, q.accessClaim, m.ClaimID, q.recordID)
 		if err != nil {
 			return true, err
 		}
@@ -883,7 +895,7 @@ func (q *DeleteQuery) execClaimius(ctx context.Context, dest ...any) (bool, erro
 		if m.ClaimID == uuid.Nil {
 			return true, fmt.Errorf("delete user_claim: claim_id required on model")
 		}
-		result, err := q.db.deleteClaimUser(ctx, q.actor, m.ClaimID, q.recordID)
+		result, err := q.db.deleteClaimUser(ctx, q.accessClaim, m.ClaimID, q.recordID)
 		if err != nil {
 			return true, err
 		}
@@ -896,7 +908,7 @@ func (q *DeleteQuery) execClaimius(ctx context.Context, dest ...any) (bool, erro
 		if !ok {
 			return false, nil
 		}
-		result, err := q.db.deleteOrganization(ctx, q.actor, q.recordID)
+		result, err := q.db.deleteOrganization(ctx, q.accessClaim, q.recordID)
 		if err != nil {
 			return true, err
 		}
@@ -907,7 +919,7 @@ func (q *DeleteQuery) execClaimius(ctx context.Context, dest ...any) (bool, erro
 		if !ok {
 			return false, nil
 		}
-		result, err := q.db.deleteLocation(ctx, q.actor, q.recordID)
+		result, err := q.db.deleteLocation(ctx, q.accessClaim, q.recordID)
 		if err != nil {
 			return true, err
 		}
@@ -921,7 +933,7 @@ func (q *DeleteQuery) execClaimius(ctx context.Context, dest ...any) (bool, erro
 		if m.UserID == uuid.Nil {
 			return true, fmt.Errorf("delete user_relation: user_id required on model")
 		}
-		result, err := q.db.deleteRelation(ctx, q.actor, m.UserID, q.recordID)
+		result, err := q.db.deleteRelation(ctx, q.accessClaim, m.UserID, q.recordID)
 		if err != nil {
 			return true, err
 		}
@@ -932,7 +944,7 @@ func (q *DeleteQuery) execClaimius(ctx context.Context, dest ...any) (bool, erro
 		if !ok {
 			return false, nil
 		}
-		result, err := q.db.deleteSecret(ctx, q.actor, q.recordID)
+		result, err := q.db.deleteSecret(ctx, q.accessClaim, q.recordID)
 		if err != nil {
 			return true, err
 		}
