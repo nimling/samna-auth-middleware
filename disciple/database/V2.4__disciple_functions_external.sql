@@ -930,3 +930,69 @@ END;
 $$ LANGUAGE plpgsql STABLE;
 
 COMMENT ON FUNCTION claimius.search(UUID, TEXT, TEXT[], INTEGER, INTEGER, INTEGER) IS 'Full text search over accessible objects whose mask covers p_required_access. user_claim_id is the actor token from the strongest surviving claim grant per object.';
+
+-- ============================================================================
+-- access_user type + get_user_access (disciple: no app_id)
+-- ============================================================================
+
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'access_user') THEN
+        CREATE TYPE claimius.access_user AS (
+            target_user_id UUID, access INTEGER, user_claim_id UUID, claim_id UUID,
+            owner_id UUID, root_id UUID, location_id UUID, direct_grant BOOLEAN, claim_name TEXT
+        );
+    END IF;
+END $$;
+
+COMMENT ON TYPE claimius.access_user IS 'Resolved access of one actor on one target samna_user.';
+
+DROP FUNCTION IF EXISTS claimius.get_user_access(UUID, UUID, INTEGER);
+
+CREATE OR REPLACE FUNCTION claimius.get_user_access(
+    p_actor_id UUID, p_target_user_id UUID, p_required_access INTEGER DEFAULT 0
+) RETURNS SETOF claimius.access_user AS $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM claimius.samna_user
+        WHERE user_id = p_target_user_id AND sa_deleted_at IS NULL AND status = 'active'
+    ) THEN
+        RETURN;
+    END IF;
+
+    RETURN QUERY
+        WITH branches AS (
+            SELECT 47::INTEGER AS access, NULL::UUID AS user_claim_id, NULL::UUID AS claim_id,
+                   'self'::TEXT AS claim_name, NULL::UUID AS owner_id, NULL::UUID AS root_id,
+                   NULL::UUID AS location_id, FALSE AS direct_grant
+            WHERE p_actor_id = p_target_user_id
+            UNION ALL
+            SELECT 36::INTEGER, NULL::UUID, NULL::UUID, 'member'::TEXT, NULL::UUID, NULL::UUID, NULL::UUID, FALSE
+            FROM claimius.user_users uu
+            WHERE uu.viewer_id = p_actor_id AND uu.target_user_id = p_target_user_id
+            UNION ALL
+            SELECT g.sa_access, g.user_claim_id, g.claim_id, g.claim_name,
+                   g.sa_owner_id, g.sa_root_id, g.sa_location_id, g.direct_grant
+            FROM claimius.get_access(p_actor_id, p_target_user_id, 'claimius.samna_user', 0) g
+        ),
+        merged AS (
+            SELECT p_target_user_id AS target_user_id, COALESCE(bit_or(access), 0) AS access,
+                   (array_agg(user_claim_id) FILTER (WHERE user_claim_id IS NOT NULL))[1] AS user_claim_id,
+                   (array_agg(claim_id) FILTER (WHERE claim_id IS NOT NULL))[1] AS claim_id,
+                   COALESCE(
+                       (array_agg(claim_name) FILTER (WHERE claim_name IS NOT NULL AND claim_name NOT IN ('self','member')))[1],
+                       (array_agg(claim_name) FILTER (WHERE claim_name IS NOT NULL))[1]) AS claim_name,
+                   (array_agg(owner_id) FILTER (WHERE owner_id IS NOT NULL))[1] AS owner_id,
+                   (array_agg(root_id) FILTER (WHERE root_id IS NOT NULL))[1] AS root_id,
+                   (array_agg(location_id) FILTER (WHERE location_id IS NOT NULL))[1] AS location_id,
+                   bool_or(direct_grant) AS direct_grant
+            FROM branches
+        )
+        SELECT target_user_id, access, user_claim_id, claim_id, owner_id, root_id, location_id,
+               COALESCE(direct_grant, FALSE), claim_name
+        FROM merged
+        WHERE access > 0 AND (access & p_required_access) = p_required_access;
+END;
+$$ LANGUAGE plpgsql STABLE;
+
+COMMENT ON FUNCTION claimius.get_user_access(UUID, UUID, INTEGER) IS 'Resolved access of one actor on one target user. Disciple read over synced relation tables.';

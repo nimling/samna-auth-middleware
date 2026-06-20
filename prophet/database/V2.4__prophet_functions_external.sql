@@ -2423,3 +2423,269 @@ END;
 $$ LANGUAGE plpgsql;
 
 COMMENT ON FUNCTION claimius.ensure_app_user IS 'Creates per app samna_user row and grants the app default claim. Idempotent.';
+-- ============================================================================
+-- access_user type + get_user_access + create_organization_user
+-- get_user_access and create_organization_user take no app_id parameter so the
+-- shared Go layer calls one signature on both roles; the prophet resolves the
+-- app internally via claimius.get_app_id().
+-- ============================================================================
+
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'access_user') THEN
+        CREATE TYPE claimius.access_user AS (
+            target_user_id  UUID,
+            access          INTEGER,
+            user_claim_id   UUID,
+            claim_id        UUID,
+            owner_id        UUID,
+            root_id         UUID,
+            location_id     UUID,
+            direct_grant    BOOLEAN,
+            claim_name      TEXT
+        );
+    END IF;
+END $$;
+
+COMMENT ON TYPE claimius.access_user IS
+    'Resolved access of one actor on one target samna_user. access is the OR of three branches: self, member co-visibility via user_users, and direct claim_object on claimius.samna_user. claim_name is self, member, or the granting claim name.';
+
+DROP FUNCTION IF EXISTS claimius.get_user_access(UUID, UUID, UUID, INTEGER);
+DROP FUNCTION IF EXISTS claimius.get_user_access(UUID, UUID, INTEGER);
+
+CREATE OR REPLACE FUNCTION claimius.get_user_access(
+    p_actor_id         UUID,
+    p_target_user_id   UUID,
+    p_required_access  INTEGER DEFAULT 0
+) RETURNS SETOF claimius.access_user AS $$
+DECLARE
+    v_app_id UUID := claimius.get_app_id();
+BEGIN
+    PERFORM claimius.reconcile_if_pending(v_app_id, p_actor_id);
+
+    IF NOT claimius.check_user_active(v_app_id, p_actor_id) THEN
+        RETURN;
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1 FROM claimius.samna_user
+        WHERE user_id = p_target_user_id
+          AND app_id  = v_app_id
+          AND sa_deleted_at IS NULL
+          AND status  = 'active'
+    ) THEN
+        RETURN;
+    END IF;
+
+    RETURN QUERY
+        WITH branches AS (
+            SELECT 47::INTEGER AS access, NULL::UUID AS user_claim_id, NULL::UUID AS claim_id,
+                   'self'::TEXT AS claim_name, NULL::UUID AS owner_id, NULL::UUID AS root_id,
+                   NULL::UUID AS location_id, FALSE AS direct_grant
+            WHERE p_actor_id = p_target_user_id
+            UNION ALL
+            SELECT 36::INTEGER, NULL::UUID, NULL::UUID, 'member'::TEXT, NULL::UUID, NULL::UUID,
+                   NULL::UUID, FALSE
+            FROM claimius.user_users uu
+            WHERE uu.app_id = v_app_id
+              AND uu.viewer_id = p_actor_id
+              AND uu.target_user_id = p_target_user_id
+            UNION ALL
+            SELECT g.sa_access, g.user_claim_id, g.claim_id, g.claim_name,
+                   g.sa_owner_id, g.sa_root_id, g.sa_location_id, g.direct_grant
+            FROM claimius.get_access(p_actor_id, v_app_id, p_target_user_id, 'claimius.samna_user', 0) g
+        ),
+        merged AS (
+            SELECT p_target_user_id AS target_user_id,
+                   COALESCE(bit_or(access), 0) AS access,
+                   (array_agg(user_claim_id) FILTER (WHERE user_claim_id IS NOT NULL))[1] AS user_claim_id,
+                   (array_agg(claim_id) FILTER (WHERE claim_id IS NOT NULL))[1] AS claim_id,
+                   COALESCE(
+                       (array_agg(claim_name) FILTER (WHERE claim_name IS NOT NULL AND claim_name NOT IN ('self','member')))[1],
+                       (array_agg(claim_name) FILTER (WHERE claim_name IS NOT NULL))[1]
+                   ) AS claim_name,
+                   (array_agg(owner_id) FILTER (WHERE owner_id IS NOT NULL))[1] AS owner_id,
+                   (array_agg(root_id) FILTER (WHERE root_id IS NOT NULL))[1] AS root_id,
+                   (array_agg(location_id) FILTER (WHERE location_id IS NOT NULL))[1] AS location_id,
+                   bool_or(direct_grant) AS direct_grant
+            FROM branches
+        )
+        SELECT target_user_id, access, user_claim_id, claim_id, owner_id, root_id, location_id,
+               COALESCE(direct_grant, FALSE), claim_name
+        FROM merged
+        WHERE access > 0
+          AND (access & p_required_access) = p_required_access;
+END;
+$$ LANGUAGE plpgsql;
+
+COMMENT ON FUNCTION claimius.get_user_access(UUID, UUID, INTEGER) IS 'Resolved access of one actor on one target user. Prophet resolves app via get_app_id().';
+
+DROP FUNCTION IF EXISTS claimius.create_organization_user(UUID, UUID, UUID, JSONB, BOOLEAN);
+
+CREATE OR REPLACE FUNCTION claimius.create_organization_user(
+    p_caller_uc  UUID,
+    p_caller_cid UUID,
+    p_owner_id   UUID,
+    p_user       JSONB,
+    p_upsert     BOOLEAN DEFAULT FALSE
+) RETURNS JSONB AS $$
+DECLARE
+    v_app_id            UUID := claimius.get_app_id();
+    v_user_id           UUID;
+    v_external_id       TEXT;
+    v_claim_id          UUID;
+    v_root_id           UUID;
+    v_user_row          claimius.samna_user;
+    v_caller_user_id    UUID;
+    v_existing_uc       claimius.user_claim;
+    v_existing_virtual  claimius.claim;
+    v_existing_caller   claimius.user_claim;
+    v_existing_obj      claimius.claim_object;
+    v_claim_user        JSONB;
+    v_virtual_claim     JSONB;
+    v_virtual_claim_id  UUID;
+    v_claim_obj         JSONB;
+    v_caller_user_claim JSONB;
+BEGIN
+    v_user_id     := NULLIF(NULLIF(p_user ->> 'user_id', ''), '00000000-0000-0000-0000-000000000000')::UUID;
+    v_claim_id    := NULLIF(p_user ->> 'claim_id', '')::UUID;
+    v_external_id := NULLIF(p_user ->> 'external_id', '');
+
+    IF v_claim_id IS NULL THEN
+        RAISE EXCEPTION 'claim_id required';
+    END IF;
+    IF p_owner_id IS NULL THEN
+        RAISE EXCEPTION 'owner_id required';
+    END IF;
+
+    SELECT sa_root_id INTO v_root_id
+      FROM claimius.organization
+     WHERE id = p_owner_id AND sa_deleted_at IS NULL;
+
+    IF v_root_id IS NULL THEN
+        RAISE EXCEPTION 'owner_id invalid';
+    END IF;
+
+    IF p_caller_uc IS NOT NULL THEN
+        SELECT user_id INTO v_caller_user_id
+          FROM claimius.user_claim
+         WHERE id = p_caller_uc AND sa_deleted_at IS NULL;
+        IF v_caller_user_id IS NULL THEN
+            RAISE EXCEPTION 'caller user_claim invalid';
+        END IF;
+    END IF;
+
+    IF NOT p_upsert THEN
+        IF v_user_id IS NOT NULL AND EXISTS (
+            SELECT 1 FROM claimius.samna_user
+             WHERE user_id = v_user_id AND app_id = v_app_id AND sa_deleted_at IS NULL
+        ) THEN
+            RAISE EXCEPTION 'user_id already exists' USING ERRCODE = '23505';
+        END IF;
+        IF v_external_id IS NOT NULL AND EXISTS (
+            SELECT 1 FROM claimius.samna_user
+             WHERE external_id = v_external_id AND app_id = v_app_id AND sa_deleted_at IS NULL
+        ) THEN
+            RAISE EXCEPTION 'external_id already exists' USING ERRCODE = '23505';
+        END IF;
+        INSERT INTO claimius.samna_user (
+            user_id, app_id, first_name, last_name, user_name, user_image,
+            email, phone, external_id, status, type
+        ) VALUES (
+            COALESCE(v_user_id, gen_random_uuid()), v_app_id,
+            NULLIF(p_user ->> 'first_name', ''), NULLIF(p_user ->> 'last_name', ''),
+            NULLIF(p_user ->> 'user_name', ''), NULLIF(p_user ->> 'user_image', ''),
+            NULLIF(p_user ->> 'email', ''), NULLIF(p_user ->> 'phone', ''),
+            v_external_id, COALESCE(NULLIF(p_user ->> 'status', ''), 'active')::claimius.user_status, 'user'
+        ) RETURNING * INTO v_user_row;
+    ELSE
+        INSERT INTO claimius.samna_user (
+            user_id, app_id, first_name, last_name, user_name, user_image,
+            email, phone, external_id, status, type
+        ) VALUES (
+            COALESCE(v_user_id, gen_random_uuid()), v_app_id,
+            NULLIF(p_user ->> 'first_name', ''), NULLIF(p_user ->> 'last_name', ''),
+            NULLIF(p_user ->> 'user_name', ''), NULLIF(p_user ->> 'user_image', ''),
+            NULLIF(p_user ->> 'email', ''), NULLIF(p_user ->> 'phone', ''),
+            v_external_id, COALESCE(NULLIF(p_user ->> 'status', ''), 'active')::claimius.user_status, 'user'
+        )
+        ON CONFLICT (user_id, app_id) WHERE sa_deleted_at IS NULL DO UPDATE SET
+            first_name = COALESCE(EXCLUDED.first_name, claimius.samna_user.first_name),
+            last_name = COALESCE(EXCLUDED.last_name, claimius.samna_user.last_name),
+            user_name = COALESCE(EXCLUDED.user_name, claimius.samna_user.user_name),
+            user_image = COALESCE(EXCLUDED.user_image, claimius.samna_user.user_image),
+            email = COALESCE(EXCLUDED.email, claimius.samna_user.email),
+            phone = COALESCE(EXCLUDED.phone, claimius.samna_user.phone),
+            external_id = COALESCE(EXCLUDED.external_id, claimius.samna_user.external_id),
+            sa_updated_at = now()
+        RETURNING * INTO v_user_row;
+    END IF;
+
+    SELECT * INTO v_existing_uc
+      FROM claimius.user_claim
+     WHERE app_id = v_app_id AND claim_id = v_claim_id AND user_id = v_user_row.user_id
+       AND sa_deleted_at IS NULL LIMIT 1;
+
+    IF v_existing_uc.id IS NOT NULL THEN
+        v_claim_user := jsonb_build_object('user_claim', to_jsonb(v_existing_uc));
+    ELSE
+        v_claim_user := claimius.assign_claim_user(
+            p_app_id => v_app_id, p_claim_id => v_claim_id, p_user_id => v_user_row.user_id,
+            p_sa_owner_id => p_owner_id, p_sa_created_by => p_caller_uc);
+    END IF;
+
+    SELECT * INTO v_existing_virtual
+      FROM claimius.claim
+     WHERE app_id = v_app_id AND name = 'user:' || v_user_row.user_id::text
+       AND type = 'virtual' AND sa_deleted_at IS NULL LIMIT 1;
+
+    IF v_existing_virtual.id IS NOT NULL THEN
+        v_virtual_claim := jsonb_build_object('claim', to_jsonb(v_existing_virtual));
+        v_virtual_claim_id := v_existing_virtual.id;
+    ELSE
+        v_virtual_claim := claimius.create_claim(
+            p_app_id => v_app_id, p_name => 'user:' || v_user_row.user_id::text,
+            p_description => NULL, p_sa_access => 15, p_sa_owner_id => p_owner_id,
+            p_sa_root_id => v_root_id, p_sa_created_by => p_caller_uc, p_inherits => TRUE, p_type => 'virtual');
+        v_virtual_claim_id := (v_virtual_claim -> 'claim' ->> 'id')::UUID;
+    END IF;
+
+    SELECT * INTO v_existing_obj
+      FROM claimius.claim_object
+     WHERE app_id = v_app_id AND claim_id = v_virtual_claim_id AND object_id = v_user_row.user_id
+       AND object_type = 'claimius.samna_user' AND sa_deleted_at IS NULL LIMIT 1;
+
+    IF v_existing_obj.id IS NOT NULL THEN
+        v_claim_obj := jsonb_build_object('claim_object', to_jsonb(v_existing_obj));
+    ELSE
+        v_claim_obj := claimius.assign_claim_object(
+            p_app_id => v_app_id, p_claim_id => v_virtual_claim_id, p_sa_owner_id => p_owner_id,
+            p_sa_root_id => v_root_id, p_sa_created_by => p_caller_uc, p_object_id => v_user_row.user_id,
+            p_object_type => 'claimius.samna_user');
+    END IF;
+
+    IF v_caller_user_id IS NOT NULL THEN
+        SELECT * INTO v_existing_caller
+          FROM claimius.user_claim
+         WHERE app_id = v_app_id AND claim_id = v_virtual_claim_id AND user_id = v_caller_user_id
+           AND sa_deleted_at IS NULL LIMIT 1;
+        IF v_existing_caller.id IS NOT NULL THEN
+            v_caller_user_claim := jsonb_build_object('user_claim', to_jsonb(v_existing_caller));
+        ELSE
+            v_caller_user_claim := claimius.assign_claim_user(
+                p_app_id => v_app_id, p_claim_id => v_virtual_claim_id, p_user_id => v_caller_user_id,
+                p_sa_owner_id => p_owner_id, p_sa_created_by => p_caller_uc);
+        END IF;
+    END IF;
+
+    RETURN jsonb_build_object(
+        'samna_user', to_jsonb(v_user_row),
+        'user_claim', v_claim_user -> 'user_claim',
+        'virtual_claim', v_virtual_claim -> 'claim',
+        'claim_object', v_claim_obj -> 'claim_object',
+        'caller_user_claim', v_caller_user_claim -> 'user_claim'
+    );
+END;
+$$ LANGUAGE plpgsql;
+
+COMMENT ON FUNCTION claimius.create_organization_user IS 'Creates or upserts a samna_user, grants the claim, mints the per user virtual claim and bindings. Prophet resolves app via get_app_id().';
