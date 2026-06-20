@@ -83,7 +83,7 @@ CREATE INDEX IF NOT EXISTS idx_samna_app_sa_owner_id ON claimius.samna_app (sa_o
 CREATE TABLE IF NOT EXISTS claimius.samna_user (
                                                    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
                                                    user_id         UUID NOT NULL DEFAULT gen_random_uuid(),
-                                                   app_id          UUID NOT NULL REFERENCES claimius.samna_app(id),
+                                                   app_id          UUID NOT NULL DEFAULT claimius.get_app_id() REFERENCES claimius.samna_app(id),
                                                    first_name      VARCHAR(255),
                                                    last_name       VARCHAR(255),
                                                    user_name       TEXT,
@@ -120,7 +120,7 @@ CREATE TABLE IF NOT EXISTS claimius.samna_client (
                                                      id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
                                                      name            TEXT NOT NULL,
                                                      description     TEXT,
-                                                     app_id          UUID NOT NULL REFERENCES claimius.samna_app(id),
+                                                     app_id          UUID NOT NULL DEFAULT claimius.get_app_id() REFERENCES claimius.samna_app(id),
                                                      client_id       UUID UNIQUE NOT NULL DEFAULT gen_random_uuid(),
                                                      secret_hash     TEXT NOT NULL,
                                                      status          VARCHAR(50) NOT NULL DEFAULT 'active',
@@ -143,7 +143,7 @@ CREATE INDEX IF NOT EXISTS idx_samna_client_sa_deleted_at ON claimius.samna_clie
 -- Per app secret store. Keyed by (app_id, key) when not soft deleted.
 CREATE TABLE IF NOT EXISTS claimius.samna_secret (
                                                      id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                                                     app_id          UUID NOT NULL REFERENCES claimius.samna_app(id),
+                                                     app_id          UUID NOT NULL DEFAULT claimius.get_app_id() REFERENCES claimius.samna_app(id),
                                                      key             TEXT NOT NULL,
                                                      value           TEXT NOT NULL,
                                                      expires_at      TIMESTAMPTZ,
@@ -172,7 +172,7 @@ CREATE INDEX IF NOT EXISTS idx_samna_secret_sa_deleted_at ON claimius.samna_secr
 -- references.
 CREATE TABLE IF NOT EXISTS claimius.organization (
                                                      id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                                                     app_id          UUID NOT NULL REFERENCES claimius.samna_app(id),
+                                                     app_id          UUID NOT NULL DEFAULT claimius.get_app_id() REFERENCES claimius.samna_app(id),
                                                      name            VARCHAR(255) NOT NULL,
                                                      description     TEXT,
                                                      type            VARCHAR(50),
@@ -206,7 +206,7 @@ CREATE INDEX IF NOT EXISTS idx_organization_sa_deleted_at ON claimius.organizati
 -- through sa_parent_id. Root iff sa_parent_id == sa_root_id == id.
 CREATE TABLE IF NOT EXISTS claimius.location (
                                                  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                                                 app_id          UUID NOT NULL REFERENCES claimius.samna_app(id),
+                                                 app_id          UUID NOT NULL DEFAULT claimius.get_app_id() REFERENCES claimius.samna_app(id),
                                                  sa_owner_id     UUID NOT NULL REFERENCES claimius.organization(id),
                                                  sa_parent_id    UUID NOT NULL,
                                                  sa_root_id      UUID NOT NULL,
@@ -249,7 +249,7 @@ CREATE INDEX IF NOT EXISTS idx_location_sa_deleted_at ON claimius.location (sa_d
 -- other bits enumerate which permissions to subtract on the bound path.
 CREATE TABLE IF NOT EXISTS claimius.claim (
                                               id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                                              app_id          UUID NOT NULL REFERENCES claimius.samna_app(id),
+                                              app_id          UUID NOT NULL DEFAULT claimius.get_app_id() REFERENCES claimius.samna_app(id),
                                               name            TEXT NOT NULL,
                                               description     TEXT,
                                               sa_access       INTEGER NOT NULL,
@@ -278,7 +278,7 @@ CREATE INDEX IF NOT EXISTS idx_claim_sa_deleted_at ON claimius.claim (sa_deleted
 -- by current time against starts_at and ends_at.
 CREATE TABLE IF NOT EXISTS claimius.user_claim (
                                                    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                                                   app_id          UUID NOT NULL REFERENCES claimius.samna_app(id),
+                                                   app_id          UUID NOT NULL DEFAULT claimius.get_app_id() REFERENCES claimius.samna_app(id),
                                                    claim_id        UUID NOT NULL REFERENCES claimius.claim(id),
                                                    user_id         UUID NOT NULL,
                                                    reason          TEXT,
@@ -307,7 +307,7 @@ CREATE INDEX IF NOT EXISTS idx_user_claim_sa_deleted_at ON claimius.user_claim (
 -- object; scope keys are custom.
 CREATE TABLE IF NOT EXISTS claimius.claim_object (
                                                      id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                                                     app_id          UUID NOT NULL REFERENCES claimius.samna_app(id),
+                                                     app_id          UUID NOT NULL DEFAULT claimius.get_app_id() REFERENCES claimius.samna_app(id),
                                                      claim_id        UUID NOT NULL REFERENCES claimius.claim(id),
                                                      object_id       UUID,
                                                      object_type     TEXT,
@@ -348,7 +348,7 @@ CREATE INDEX IF NOT EXISTS idx_claim_object_lookup
 -- POST /user/token, read by SAuth-User-Token validate.
 CREATE TABLE IF NOT EXISTS claimius.user_token (
                                                    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                                                   app_id          UUID NOT NULL REFERENCES claimius.samna_app(id),
+                                                   app_id          UUID NOT NULL DEFAULT claimius.get_app_id() REFERENCES claimius.samna_app(id),
                                                    user_id         UUID NOT NULL,
                                                    id_claim        TEXT NOT NULL DEFAULT 'sub',
                                                    external_id     TEXT NOT NULL,
@@ -649,7 +649,7 @@ CREATE INDEX IF NOT EXISTS idx_audit_object ON claimius.audit (object_type, obje
 -- object_type.
 CREATE TABLE IF NOT EXISTS claimius.object_field (
                                                      id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                                                     app_id          UUID NOT NULL REFERENCES claimius.samna_app(id),
+                                                     app_id          UUID NOT NULL DEFAULT claimius.get_app_id() REFERENCES claimius.samna_app(id),
                                                      object_type     TEXT NOT NULL,
                                                      name            TEXT NOT NULL,
                                                      description     TEXT,
@@ -674,7 +674,7 @@ CREATE INDEX IF NOT EXISTS idx_object_field_sa_deleted_at ON claimius.object_fie
 -- data against an app's custom fields.
 CREATE TABLE IF NOT EXISTS claimius.user_field (
                                                    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                                                   app_id          UUID NOT NULL REFERENCES claimius.samna_app(id),
+                                                   app_id          UUID NOT NULL DEFAULT claimius.get_app_id() REFERENCES claimius.samna_app(id),
                                                    field_id        UUID NOT NULL REFERENCES claimius.object_field(id),
                                                    user_id         UUID NOT NULL,
                                                    value           TEXT,
@@ -697,7 +697,7 @@ CREATE INDEX IF NOT EXISTS idx_user_field_sa_deleted_at ON claimius.user_field (
 -- objects. Used for recents, favourites, per app object tagging.
 CREATE TABLE IF NOT EXISTS claimius.user_relation (
                                                       id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                                                      app_id          UUID NOT NULL REFERENCES claimius.samna_app(id),
+                                                      app_id          UUID NOT NULL DEFAULT claimius.get_app_id() REFERENCES claimius.samna_app(id),
                                                       user_id         UUID NOT NULL,
                                                       description     TEXT,
                                                       object_type     VARCHAR NOT NULL,

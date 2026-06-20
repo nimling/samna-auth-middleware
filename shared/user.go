@@ -1,4 +1,4 @@
-package db
+package shared
 
 import (
 	"context"
@@ -202,7 +202,7 @@ func (d *DB) deleteRelation(ctx context.Context, ac *AccessClaim, userID, relati
 func (d *DB) InsertUser(ctx context.Context, in *SamnaUser) (*SamnaUser, error) {
 	var payload []byte
 	err := d.NewRaw(`
-		SELECT (claimius.ensure_app_user(?, claimius.get_disciple_app_id(), ?, ?, ?, ?, ?, ?, ?) -> 'samna_user')::jsonb
+		SELECT (claimius.ensure_app_user(?, claimius.get_app_id(), ?, ?, ?, ?, ?, ?, ?) -> 'samna_user')::jsonb
 	`, in.UserID, in.FirstName, in.LastName, in.UserName, in.UserImage, in.Email, in.Phone, in.ExternalID).Scan(ctx, &payload)
 	if err != nil {
 		return nil, err

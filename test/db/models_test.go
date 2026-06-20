@@ -9,7 +9,7 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
-	sdb "github.com/nimling/samna-auth-middleware/db"
+	sdb "github.com/nimling/samna-auth-middleware/shared"
 )
 
 func TestClaim_CreatorEmbedJSONRoundTrip(t *testing.T) {

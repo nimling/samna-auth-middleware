@@ -6,11 +6,11 @@ import (
 
 	"github.com/labstack/echo/v4"
 
-	"github.com/nimling/samna-auth-middleware/db"
+	"github.com/nimling/samna-auth-middleware/shared"
 )
 
 func GetMe(ctx echo.Context) error {
-	user, err := db.Instance().GetMe(ctx)
+	user, err := shared.Instance().GetMe(ctx)
 	if err != nil {
 		ctx.Logger().Errorf("GetMe: %v", err)
 		return respondError(ctx, http.StatusNotFound, "Not found")
@@ -19,16 +19,16 @@ func GetMe(ctx echo.Context) error {
 }
 
 func PutMe(ctx echo.Context) error {
-	user := &db.SamnaUser{}
+	user := &shared.SamnaUser{}
 	if err := user.Bind(ctx); err != nil {
 		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
 	if err := user.ValidatePut(); err != nil {
 		return respondError(ctx, http.StatusBadRequest, err.Error())
 	}
-	updated, err := db.Instance().UpdateMe(ctx, user)
+	updated, err := shared.Instance().UpdateMe(ctx, user)
 	if err != nil {
-		if errors.Is(err, db.ErrNoAccess) {
+		if errors.Is(err, shared.ErrNoAccess) {
 			return respondError(ctx, http.StatusForbidden, "Forbidden")
 		}
 		ctx.Logger().Errorf("PutMe: %v", err)
@@ -38,16 +38,16 @@ func PutMe(ctx echo.Context) error {
 }
 
 func PatchMe(ctx echo.Context) error {
-	user := &db.SamnaUser{}
+	user := &shared.SamnaUser{}
 	if err := user.Bind(ctx); err != nil {
 		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
 	if err := user.ValidatePatch(); err != nil {
 		return respondError(ctx, http.StatusBadRequest, err.Error())
 	}
-	updated, err := db.Instance().UpdateMe(ctx, user)
+	updated, err := shared.Instance().UpdateMe(ctx, user)
 	if err != nil {
-		if errors.Is(err, db.ErrNoAccess) {
+		if errors.Is(err, shared.ErrNoAccess) {
 			return respondError(ctx, http.StatusForbidden, "Forbidden")
 		}
 		ctx.Logger().Errorf("PatchMe: %v", err)
@@ -57,7 +57,7 @@ func PatchMe(ctx echo.Context) error {
 }
 
 func GetMeClaims(ctx echo.Context) error {
-	claims, err := db.Instance().GetMeClaims(ctx)
+	claims, err := shared.Instance().GetMeClaims(ctx)
 	if err != nil {
 		ctx.Logger().Errorf("GetMeClaims: %v", err)
 		return respondError(ctx, http.StatusInternalServerError, "Internal server error")
@@ -66,7 +66,7 @@ func GetMeClaims(ctx echo.Context) error {
 }
 
 func GetMeRelations(ctx echo.Context) error {
-	relations, err := db.Instance().GetMeRelations(ctx)
+	relations, err := shared.Instance().GetMeRelations(ctx)
 	if err != nil {
 		ctx.Logger().Errorf("GetMeRelations: %v", err)
 		return respondError(ctx, http.StatusInternalServerError, "Internal server error")
@@ -75,7 +75,7 @@ func GetMeRelations(ctx echo.Context) error {
 }
 
 func GetMeOrganizations(ctx echo.Context) error {
-	orgs, err := db.Instance().GetMeOrganizations(ctx)
+	orgs, err := shared.Instance().GetMeOrganizations(ctx)
 	if err != nil {
 		ctx.Logger().Errorf("GetMeOrganizations: %v", err)
 		return respondError(ctx, http.StatusInternalServerError, "Internal server error")
@@ -84,7 +84,7 @@ func GetMeOrganizations(ctx echo.Context) error {
 }
 
 func GetMeLocations(ctx echo.Context) error {
-	locs, err := db.Instance().GetMeLocations(ctx)
+	locs, err := shared.Instance().GetMeLocations(ctx)
 	if err != nil {
 		ctx.Logger().Errorf("GetMeLocations: %v", err)
 		return respondError(ctx, http.StatusInternalServerError, "Internal server error")
@@ -93,7 +93,7 @@ func GetMeLocations(ctx echo.Context) error {
 }
 
 func GetMeAssets(ctx echo.Context) error {
-	assets, err := db.Instance().GetMeAssets(ctx)
+	assets, err := shared.Instance().GetMeAssets(ctx)
 	if err != nil {
 		ctx.Logger().Errorf("GetMeAssets: %v", err)
 		return respondError(ctx, http.StatusInternalServerError, "Internal server error")
@@ -102,7 +102,7 @@ func GetMeAssets(ctx echo.Context) error {
 }
 
 func GetMeAudit(ctx echo.Context) error {
-	audits, err := db.Instance().GetMeAudit(ctx)
+	audits, err := shared.Instance().GetMeAudit(ctx)
 	if err != nil {
 		ctx.Logger().Errorf("GetMeAudit: %v", err)
 		return respondError(ctx, http.StatusInternalServerError, "Internal server error")

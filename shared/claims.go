@@ -1,4 +1,4 @@
-package db
+package shared
 
 import (
 	"context"
@@ -170,7 +170,7 @@ func (d *DB) insertClaim(ctx context.Context, ac *AccessClaim, claim *Claim) (*C
 	var payload []byte
 	err := d.NewRaw(`
 		SELECT (claimius.create_claim(
-			claimius.get_disciple_app_id(),
+			claimius.get_app_id(),
 			?, ?, ?, ?, ?, ?, ?, ?::claimius.claim_type
 		) -> 'claim')::jsonb
 	`,
@@ -258,7 +258,7 @@ func (d *DB) insertClaimObject(ctx context.Context, ac *AccessClaim, claimID uui
 	var payload []byte
 	err := d.NewRaw(`
 		SELECT (claimius.assign_claim_object(
-			p_app_id        := claimius.get_disciple_app_id(),
+			p_app_id        := claimius.get_app_id(),
 			p_claim_id      := ?,
 			p_sa_owner_id   := ?,
 			p_sa_root_id    := ?,
@@ -328,7 +328,7 @@ func (d *DB) insertClaimUser(ctx context.Context, ac *AccessClaim, claimID uuid.
 	var payload []byte
 	err := d.NewRaw(`
 		SELECT (claimius.assign_claim_user(
-			claimius.get_disciple_app_id(),
+			claimius.get_app_id(),
 			?, ?, ?, ?, ?, ?, ?
 		) -> 'user_claim')::jsonb
 	`,
@@ -404,7 +404,7 @@ func (d *DB) CreateVirtualClaim(ctx context.Context, ac *AccessClaim, p CreateVi
 			FALSE AS direct_grant
 		FROM (
 			SELECT claimius.create_claim(
-				claimius.get_disciple_app_id(),
+				claimius.get_app_id(),
 				?, ?, ?, ?,
 				(SELECT sa_root_id FROM claimius.organization WHERE id = ?),
 				?, TRUE, 'virtual'::claimius.claim_type
@@ -412,7 +412,7 @@ func (d *DB) CreateVirtualClaim(ctx context.Context, ac *AccessClaim, p CreateVi
 		) created_claim
 		CROSS JOIN LATERAL (
 			SELECT claimius.assign_claim_object(
-				p_app_id        := claimius.get_disciple_app_id(),
+				p_app_id        := claimius.get_app_id(),
 				p_claim_id      := ((created_claim.data ->> 'id')::uuid),
 				p_sa_owner_id   := ?,
 				p_sa_root_id    := (SELECT sa_root_id FROM claimius.organization WHERE id = ?),
@@ -425,7 +425,7 @@ func (d *DB) CreateVirtualClaim(ctx context.Context, ac *AccessClaim, p CreateVi
 		) bound_object
 		CROSS JOIN LATERAL (
 			SELECT claimius.assign_claim_user(
-				claimius.get_disciple_app_id(),
+				claimius.get_app_id(),
 				((created_claim.data ->> 'id')::uuid),
 				?, ?, ?
 			) -> 'user_claim' AS data

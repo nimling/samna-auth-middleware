@@ -6,7 +6,7 @@ import (
 	"fmt"
 
 	"github.com/nimling/samna-auth-middleware/client"
-	"github.com/nimling/samna-auth-middleware/db"
+	"github.com/nimling/samna-auth-middleware/shared"
 )
 
 type SnapshotResponse struct {
@@ -18,7 +18,7 @@ func PullSnapshot(ctx context.Context) error {
 	var snapshot SnapshotResponse
 	if err := client.Get(ctx, "sync/snapshot", &snapshot); err != nil {
 		if errors.Is(err, client.ErrNotFound) {
-			return db.ErrSyncUnreachable
+			return shared.ErrSyncUnreachable
 		}
 		return fmt.Errorf("fetch snapshot: %w", err)
 	}
@@ -47,7 +47,7 @@ func PullSync(ctx context.Context) error {
 	var payloads []SyncPayload
 	if err := client.Get(ctx, fmt.Sprintf("sync/%d", seq), &payloads); err != nil {
 		if errors.Is(err, client.ErrNotFound) {
-			return db.ErrSyncUnreachable
+			return shared.ErrSyncUnreachable
 		}
 		return fmt.Errorf("fetch sync: %w", err)
 	}

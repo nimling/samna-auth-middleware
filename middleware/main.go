@@ -14,15 +14,15 @@ import (
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 	"github.com/nimling/samna-auth-middleware/client"
-	"github.com/nimling/samna-auth-middleware/db"
+	"github.com/nimling/samna-auth-middleware/shared"
 	"github.com/nimling/samna-auth-middleware/utils"
 )
 
 func UserAuthMiddleware(opts *UserAuthOptions) echo.MiddlewareFunc {
 	config := configFromUserAuthOptions(opts)
 
-	switch db.GetDebugMode() {
-	case db.DebugModeUser:
+	switch shared.GetDebugMode() {
+	case shared.DebugModeUser:
 		return func(next echo.HandlerFunc) echo.HandlerFunc {
 			return func(ctx echo.Context) error {
 				ctx.Set(UserIDKey, *config.DebugUserID)
@@ -35,7 +35,7 @@ func UserAuthMiddleware(opts *UserAuthOptions) echo.MiddlewareFunc {
 				return next(ctx)
 			}
 		}
-	case db.DebugModeClients:
+	case shared.DebugModeClients:
 		return func(next echo.HandlerFunc) echo.HandlerFunc {
 			return func(ctx echo.Context) error {
 				clientErr := authenticateClient(ctx, config.DebugClients)
@@ -140,10 +140,10 @@ func configFromUserAuthOptions(opts *UserAuthOptions) *AuthMiddlewareConfig {
 
 	debugUserID := getEnvUUID("SAUTH_DEBUG_USER_ID")
 	debugClients := parseDebugClients()
-	debugMode := db.GetDebugMode()
+	debugMode := shared.GetDebugMode()
 
 	getEnvLenient := func(key string) string {
-		if debugMode != db.DebugModeNone {
+		if debugMode != shared.DebugModeNone {
 			return os.Getenv(key)
 		}
 		return utils.GetEnv(key)

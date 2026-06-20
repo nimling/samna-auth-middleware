@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/nimling/samna-auth-middleware/db"
+	"github.com/nimling/samna-auth-middleware/shared"
 	"github.com/nimling/samna-auth-middleware/internal/store"
 	"github.com/nimling/samna-auth-middleware/sauth"
 	"github.com/uptrace/bun"
@@ -26,7 +26,7 @@ func resolveDiscipleApp(ctx context.Context) uuid.UUID {
 		return discipleAppID
 	}
 	var id uuid.UUID
-	if err := db.Instance().NewRaw("SELECT claimius.get_disciple_app_id()").Scan(ctx, &id); err == nil {
+	if err := shared.Instance().NewRaw("SELECT claimius.get_disciple_app_id()").Scan(ctx, &id); err == nil {
 		discipleAppID = id
 	}
 	return discipleAppID
@@ -77,7 +77,7 @@ func ApplyPayload(ctx context.Context, payload SyncPayload) error {
 			return nil
 		}
 	}
-	return db.Instance().RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
+	return shared.Instance().RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
 		if _, err := tx.ExecContext(ctx, "SET LOCAL claimius.replay_mode = 'true'"); err != nil {
 			return fmt.Errorf("set replay_mode: %w", err)
 		}
@@ -96,37 +96,37 @@ func ApplyPayload(ctx context.Context, payload SyncPayload) error {
 func applyUpsert(ctx context.Context, tx bun.Tx, eventType string, raw json.RawMessage) error {
 	switch eventType {
 	case "claimius.samna_app":
-		return upsertEntity[db.SamnaApp](ctx, tx, raw)
+		return upsertEntity[shared.SamnaApp](ctx, tx, raw)
 	case "claimius.samna_user":
-		return upsertEntity[db.SamnaUser](ctx, tx, raw)
+		return upsertEntity[shared.SamnaUser](ctx, tx, raw)
 	case "claimius.samna_client":
-		return upsertEntity[db.SamnaClient](ctx, tx, raw)
+		return upsertEntity[shared.SamnaClient](ctx, tx, raw)
 	case "claimius.samna_secret":
-		return upsertEntity[db.SamnaSecret](ctx, tx, raw)
+		return upsertEntity[shared.SamnaSecret](ctx, tx, raw)
 	case "claimius.organization":
-		return upsertEntity[db.Organization](ctx, tx, raw)
+		return upsertEntity[shared.Organization](ctx, tx, raw)
 	case "claimius.location":
-		return upsertEntity[db.Location](ctx, tx, raw)
+		return upsertEntity[shared.Location](ctx, tx, raw)
 	case "claimius.claim":
-		return upsertEntity[db.Claim](ctx, tx, raw)
+		return upsertEntity[shared.Claim](ctx, tx, raw)
 	case "claimius.user_claim":
-		return upsertEntity[db.UserClaim](ctx, tx, raw)
+		return upsertEntity[shared.UserClaim](ctx, tx, raw)
 	case "claimius.claim_object":
-		return upsertEntity[db.ClaimObject](ctx, tx, raw)
+		return upsertEntity[shared.ClaimObject](ctx, tx, raw)
 	case "claimius.object_field":
-		return upsertEntity[db.ObjectField](ctx, tx, raw)
+		return upsertEntity[shared.ObjectField](ctx, tx, raw)
 	case "claimius.user_field":
-		return upsertEntity[db.UserField](ctx, tx, raw)
+		return upsertEntity[shared.UserField](ctx, tx, raw)
 	case "claimius.user_relation":
-		return upsertEntity[db.UserRelation](ctx, tx, raw)
+		return upsertEntity[shared.UserRelation](ctx, tx, raw)
 	case "claimius.audit":
-		return upsertEntity[db.Audit](ctx, tx, raw)
+		return upsertEntity[shared.Audit](ctx, tx, raw)
 	case "claimius.user_object":
-		return upsertEntity[db.UserObject](ctx, tx, raw)
+		return upsertEntity[shared.UserObject](ctx, tx, raw)
 	case "claimius.object_users":
-		return upsertEntity[db.ObjectUsers](ctx, tx, raw)
+		return upsertEntity[shared.ObjectUsers](ctx, tx, raw)
 	case "claimius.user_users":
-		return upsertEntity[db.UserUsers](ctx, tx, raw)
+		return upsertEntity[shared.UserUsers](ctx, tx, raw)
 	default:
 		return fmt.Errorf("unknown event_type for upsert: %s", eventType)
 	}
@@ -147,11 +147,11 @@ func applyDelete(ctx context.Context, tx bun.Tx, eventType string, raw json.RawM
 	}
 	switch eventType {
 	case "claimius.user_object":
-		return deleteByTextID(ctx, tx, (*db.UserObject)(nil), env.ID)
+		return deleteByTextID(ctx, tx, (*shared.UserObject)(nil), env.ID)
 	case "claimius.object_users":
-		return deleteByTextID(ctx, tx, (*db.ObjectUsers)(nil), env.ID)
+		return deleteByTextID(ctx, tx, (*shared.ObjectUsers)(nil), env.ID)
 	case "claimius.user_users":
-		return deleteByTextID(ctx, tx, (*db.UserUsers)(nil), env.ID)
+		return deleteByTextID(ctx, tx, (*shared.UserUsers)(nil), env.ID)
 	default:
 		return fmt.Errorf("delete not supported for event_type: %s", eventType)
 	}
@@ -168,8 +168,8 @@ func deleteByTextID(ctx context.Context, tx bun.Tx, model any, id json.RawMessag
 }
 
 func UpdateSeq(ctx context.Context, seq int64) error {
-	return db.Instance().RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
-		var state db.DiscipleState
+	return shared.Instance().RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
+		var state shared.DiscipleState
 		if err := tx.NewSelect().
 			Model(&state).
 			Limit(1).
@@ -188,8 +188,8 @@ func UpdateSeq(ctx context.Context, seq int64) error {
 }
 
 func GetSeq(ctx context.Context) (int64, error) {
-	var state db.DiscipleState
-	err := db.Instance().NewSelect().
+	var state shared.DiscipleState
+	err := shared.Instance().NewSelect().
 		Model(&state).
 		Limit(1).
 		Scan(ctx)

@@ -12,7 +12,7 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 
-	"github.com/nimling/samna-auth-middleware/db"
+	"github.com/nimling/samna-auth-middleware/shared"
 	"github.com/nimling/samna-auth-middleware/pkg/encryption"
 )
 
@@ -27,13 +27,13 @@ type GuestTokenResponse struct {
 }
 
 func IssueGuestToken(ctx context.Context, claimID uuid.UUID, issuer string) (*GuestTokenResponse, error) {
-	app, err := db.Instance().GetApp(ctx)
+	app, err := shared.Instance().GetApp(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("get app: %w", err)
 	}
 
-	var claim db.Claim
-	err = db.Instance().NewSelect().
+	var claim shared.Claim
+	err = shared.Instance().NewSelect().
 		Model(&claim).
 		ExcludeColumn("sa_deleted_at").
 		Where("id = ?", claimID).
@@ -46,8 +46,8 @@ func IssueGuestToken(ctx context.Context, claimID uuid.UUID, issuer string) (*Gu
 
 	guestUserID := uuid.NewSHA1(app.ID, []byte("guest:"+claimID.String()))
 
-	var existingClaim db.UserClaim
-	err = db.Instance().NewSelect().
+	var existingClaim shared.UserClaim
+	err = shared.Instance().NewSelect().
 		Model(&existingClaim).
 		ExcludeColumn("sa_deleted_at").
 		Where("claim_id = ?", claimID).
@@ -59,27 +59,27 @@ func IssueGuestToken(ctx context.Context, claimID uuid.UUID, issuer string) (*Gu
 	if errors.Is(err, sql.ErrNoRows) {
 		guestType := "guest"
 		guestFirst := "Guest"
-		guestUser := db.SamnaUser{
+		guestUser := shared.SamnaUser{
 			UserID:    guestUserID,
 			FirstName: &guestFirst,
 			Type:      &guestType,
 		}
-		guestClaim := db.UserClaim{
+		guestClaim := shared.UserClaim{
 			ClaimID: claimID,
 			UserID:  guestUserID,
 			OwnerID: claim.OwnerID,
 		}
 
 		userID, _ := ctx.Value("user_id").(uuid.UUID)
-		if err := db.Instance().NewInsert().Model(&guestUser).Scan(ctx, &guestUser); err != nil {
+		if err := shared.Instance().NewInsert().Model(&guestUser).Scan(ctx, &guestUser); err != nil {
 			return nil, fmt.Errorf("upsert guest user: %w", err)
 		}
-		ac, accErr := db.Instance().MutationAccess(ctx, userID, claimID, db.OBJECT_TYPE_CLAIM, db.ACCESS_OWNER)
+		ac, accErr := shared.Instance().MutationAccess(ctx, userID, claimID, shared.OBJECT_TYPE_CLAIM, shared.ACCESS_OWNER)
 		if accErr != nil {
 			return nil, fmt.Errorf("guest claim access: %w", accErr)
 		}
 		guestClaim.ClaimID = claimID
-		if err := db.Instance().NewInsert().Model(&guestClaim).With(ac).Scan(ctx, &guestClaim); err != nil {
+		if err := shared.Instance().NewInsert().Model(&guestClaim).With(ac).Scan(ctx, &guestClaim); err != nil {
 			return nil, fmt.Errorf("assign guest claim: %w", err)
 		}
 		existingClaim = guestClaim

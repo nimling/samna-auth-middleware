@@ -1,4 +1,4 @@
-package db
+package shared
 
 import (
 	"github.com/uptrace/bun"
