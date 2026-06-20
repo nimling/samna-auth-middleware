@@ -1,15 +1,11 @@
 package shared
 
 import (
-	"embed"
 	"io/fs"
 	"os"
 	"path"
 	"path/filepath"
 )
-
-//go:embed database
-var SQL embed.FS
 
 func WriteTree(fsys fs.FS, srcDir, dstDir string) error {
 	if err := os.MkdirAll(dstDir, 0o755); err != nil {

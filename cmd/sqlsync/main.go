@@ -10,7 +10,7 @@ import (
 
 func main() {
 	role := flag.String("role", "", "prophet or disciple")
-	out := flag.String("out", "", "output directory; shared SQL lands in <out>/shared, role SQL in <out>/main")
+	out := flag.String("out", "", "output directory; the role complete SQL set is written here")
 	flag.Parse()
 
 	if *role == "" || *out == "" {
