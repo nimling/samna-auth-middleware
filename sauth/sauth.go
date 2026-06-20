@@ -94,9 +94,6 @@ func overlayMap(out map[string]any, v reflect.Value) {
 		if skip {
 			continue
 		}
-		if sauthName == "app_id" {
-			continue
-		}
 		val := v.Field(i)
 		if omit && isEmpty(val) {
 			continue

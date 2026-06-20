@@ -835,3 +835,31 @@ type SearchResult struct {
 	DirectGrant bool             `bun:"is_direct_grant" json:"direct_grant"`
 	Rank        float32          `bun:"rank" json:"rank"`
 }
+
+func (c Claim) MarshalJSON() ([]byte, error) {
+	type alias Claim
+	a := alias(c)
+	a.AccessSlice = c.Access.Slice()
+	a.AccessString = c.Access.PipeString()
+	return json.Marshal(a)
+}
+
+func (co ClaimObject) MarshalJSON() ([]byte, error) {
+	type alias ClaimObject
+	a := alias(co)
+	if co.Access != nil {
+		a.AccessSlice = co.Access.Slice()
+		a.AccessString = co.Access.PipeString()
+	}
+	return json.Marshal(a)
+}
+
+func (uc UserClaim) MarshalJSON() ([]byte, error) {
+	type alias UserClaim
+	a := alias(uc)
+	if uc.Access != nil {
+		a.AccessSlice = uc.Access.Access.Slice()
+		a.AccessString = uc.Access.Access.PipeString()
+	}
+	return json.Marshal(a)
+}
