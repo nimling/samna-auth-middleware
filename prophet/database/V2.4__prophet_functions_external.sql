@@ -464,7 +464,7 @@ COMMENT ON FUNCTION claimius.get_claims(UUID, UUID, UUID, TEXT) IS 'All claims t
 -- sa_access, scope.
 -- ----------------------------------------------------------------------------
 
-CREATE OR REPLACE FUNCTION claimius.get_access(
+CREATE OR REPLACE FUNCTION claimius.get_scope_access(
     p_user_id          UUID,
     p_app_id           UUID,
     p_scope_key        TEXT,
@@ -508,7 +508,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius.get_access(UUID, UUID, TEXT, INTEGER) IS 'Strongest active object-less binding whose scope contains p_scope_key and whose mask covers p_required_access.';
+COMMENT ON FUNCTION claimius.get_scope_access(UUID, UUID, TEXT, INTEGER) IS 'Strongest active object-less binding whose scope contains p_scope_key and whose mask covers p_required_access.';
 
 -- ----------------------------------------------------------------------------
 -- get_audit

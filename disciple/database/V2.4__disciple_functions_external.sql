@@ -327,7 +327,7 @@ $$ LANGUAGE plpgsql STABLE;
 COMMENT ON FUNCTION claimius.get_claims(UUID, UUID, TEXT) IS 'All claims the user holds against one object.';
 
 -- get_access (overload: scope key form)
-CREATE OR REPLACE FUNCTION claimius.get_access(
+CREATE OR REPLACE FUNCTION claimius.get_scope_access(
     p_user_id          UUID,
     p_scope_key        TEXT,
     p_required_access  INTEGER DEFAULT 0
@@ -362,7 +362,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql STABLE;
 
-COMMENT ON FUNCTION claimius.get_access(UUID, TEXT, INTEGER) IS 'Strongest active object-less binding whose scope contains p_scope_key and whose mask covers p_required_access.';
+COMMENT ON FUNCTION claimius.get_scope_access(UUID, TEXT, INTEGER) IS 'Strongest active object-less binding whose scope contains p_scope_key and whose mask covers p_required_access.';
 
 -- get_audit
 DROP FUNCTION IF EXISTS claimius.get_audit(UUID, INTEGER, INTEGER, INTEGER);
