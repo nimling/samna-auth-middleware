@@ -63,6 +63,7 @@ BEGIN
 
     IF v_to_remove IS NOT NULL THEN
         FOREACH v_old_object_type IN ARRAY v_to_remove LOOP
+                PERFORM claimius._detach_calc_trigger(v_old_object_type);
                 PERFORM claimius._detach_self_root_trigger(v_old_object_type);
                 DELETE FROM claimius.table_info WHERE object_type = v_old_object_type;
                 DELETE FROM claimius.inheritance_info
@@ -80,13 +81,31 @@ BEGIN
                 v_object_type := 'public.' || v_object_type;
             END IF;
             PERFORM claimius._register_table_info(v_object_type, FALSE);
+            PERFORM claimius._attach_calc_trigger(v_object_type);
             PERFORM claimius._attach_self_root_trigger(v_object_type);
             RAISE NOTICE 'Registered table %', v_object_type;
         END LOOP;
+
+    -- Bulk seed materialized state for any registered table with existing data.
+    -- Runs under replay_mode so calc stays quiet during the rebuild; the seed
+    -- helpers materialize user_object directly.
+    PERFORM set_config('claimius.replay_mode', 'true', TRUE);
+    BEGIN
+        FOREACH v_object_type IN ARRAY v_new LOOP
+                IF position('.' IN v_object_type) = 0 THEN
+                    v_object_type := 'public.' || v_object_type;
+                END IF;
+                PERFORM claimius._bulk_seed_user_object(v_object_type);
+            END LOOP;
+    EXCEPTION WHEN OTHERS THEN
+        PERFORM set_config('claimius.replay_mode', 'false', TRUE);
+        RAISE;
+    END;
+    PERFORM set_config('claimius.replay_mode', 'false', TRUE);
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius.init_claimius_tables IS 'Registers external tables on a disciple. Attaches self root triggers only. Idempotent.';
+COMMENT ON FUNCTION claimius.init_claimius_tables IS 'Registers external tables on a disciple. Attaches calc and self root triggers; bulk seeds. Idempotent.';
 
 -- _grant_disciple_roles
 CREATE OR REPLACE FUNCTION claimius._grant_disciple_roles()
