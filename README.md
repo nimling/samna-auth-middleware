@@ -308,3 +308,26 @@ TEST_TOKEN_ISS=http://localhost:3201
 ## License
 
 This project is licensed under the MIT (Martin Invented This) License.
+
+## Claimius SQL: prophet and disciple sets
+
+The repo ships the Claimius schema as two complete, role tailored SQL sets, both embedded in the module:
+
+- `prophet/database` is the full schema, copied as is from the canonical claimius source. It carries `app_id` on every scoped table and hosts many apps. It is the source of truth: writes fire calc triggers that materialize `user_object` and emit `sync_event` rows for downstream disciples.
+- `disciple/database` is the same schema with `app_id` removed from every table, index, and function, and with the functions that no consumer calls removed (`init_prophet`, `init_hybrid`, `merge_user`, `recompute_state`). A disciple mirrors exactly one app, so it needs no `app_id`. Its calc engine still runs in debug mode for standalone local writes, and stays dormant under `replay_mode` while sync applies the relation tables shipped from the prophet.
+
+`app_id` exists only on the prophet. It is read from the deployment env into `prophet_state` at init. The disciple schema knows nothing about it.
+
+### Choosing a role at migrate time
+
+A consumer picks its role when it pulls the SQL into its own `database` tree, then migrates with smig:
+
+```
+# disciple consumer (e.g. bookable_server)
+go run github.com/nimling/samna-auth-middleware/cmd/sqlsync --role=disciple --out=./database/claimius
+
+# prophet consumer (e.g. samna_auth)
+go run github.com/nimling/samna-auth-middleware/cmd/sqlsync --role=prophet --out=./database/claimius
+```
+
+The materialized files land where `database/migrate.yml` already points its claimius step, and `smig up` applies them. Each role package also exposes `prophet.WriteSQL(dir)` and `disciple.WriteSQL(dir)` if a consumer wants to drive the export from Go. Because Go compiles only the imported package, a disciple consumer that imports `.../disciple` never pulls the prophet set, and the reverse holds for a prophet consumer importing `.../prophet`.

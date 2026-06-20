@@ -1,5 +1,5 @@
 -- ============================================================================
--- Claimius V0.0 Roles (shared)
+-- Claimius V0.0 Roles
 -- ----------------------------------------------------------------------------
 -- Defines the four Postgres roles that gate access to the claimius schema.
 -- Roles are the first line of enforcement for the prophet/disciple model.
@@ -17,8 +17,6 @@
 --                             tables and update sync state. Cannot execute
 --                             write functions. Used by the disciple's sync
 --                             middleware.
---
--- Identical on prophet and disciple. Lives in the shared set.
 -- ============================================================================
 
 DO $$
