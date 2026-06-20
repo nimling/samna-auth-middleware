@@ -61,7 +61,7 @@ func (d *DB) objectExists(ctx context.Context, objectID uuid.UUID, objectType st
 	var exists bool
 	if objectType == OBJECT_TYPE_USER {
 		err := d.NewRaw(
-			"SELECT EXISTS (SELECT 1 FROM claimius.samna_user WHERE user_id = ? AND app_id = claimius.get_disciple_app_id() AND sa_deleted_at IS NULL)",
+			"SELECT EXISTS (SELECT 1 FROM claimius.samna_user WHERE user_id = ? AND sa_deleted_at IS NULL)",
 			objectID,
 		).Scan(ctx, &exists)
 		if err != nil {
@@ -156,7 +156,7 @@ func (d *DB) MutationAccessMany(ctx context.Context, requests []AccessRequest) (
 			g.sa_location_id,
 			g.direct_grant
 		FROM inputs
-		LEFT JOIN LATERAL claimius.get_access(inputs.user_id, claimius.get_disciple_app_id(), inputs.object_id, inputs.object_type, inputs.required_access) g ON TRUE
+		LEFT JOIN LATERAL claimius.get_access(inputs.user_id, inputs.object_id, inputs.object_type, inputs.required_access) g ON TRUE
 		ORDER BY inputs.idx
 	`, pq.Array(userIDs), pq.Array(objectIDs), pq.Array(objectTypes), pq.Array(requiredAccesses)).Scan(ctx, &rows)
 	set := make(AccessClaimSet, len(requests))
@@ -186,7 +186,7 @@ func (d *DB) MutationAccessMany(ctx context.Context, requests []AccessRequest) (
 func (d *DB) UserAccess(ctx context.Context, actorID, targetUserID uuid.UUID, requiredAccess ClaimAccess) (*AccessUser, error) {
 	users := make([]AccessUser, 0)
 	err := d.NewSelect().
-		TableExpr(`claimius.get_user_access(?, claimius.get_disciple_app_id(), ?, ?) AS u`,
+		TableExpr(`claimius.get_user_access(?, ?, ?) AS u`,
 			actorID, targetUserID, requiredAccess).
 		Column("u.*").
 		Scan(ctx, &users)
@@ -207,13 +207,11 @@ func (d *DB) RootAccess(ctx context.Context, userID uuid.UUID, requiredAccess Cl
 	err := d.NewSelect().
 		TableExpr(`claimius.get_access(
 			?,
-			claimius.get_disciple_app_id(),
 			(
 				SELECT DISTINCT c.sa_root_id
 				FROM claimius.user_claim uc
 				JOIN claimius.claim c ON c.id = uc.claim_id
 				WHERE uc.user_id = ?
-				  AND uc.app_id = claimius.get_disciple_app_id()
 				  AND uc.sa_deleted_at IS NULL
 				  AND c.sa_deleted_at IS NULL
 				LIMIT 1

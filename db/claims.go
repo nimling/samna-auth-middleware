@@ -16,7 +16,7 @@ func (d *DB) GetAccess(ctx context.Context, userID, objectID uuid.UUID, objectTy
 	}
 	claims := make([]AccessClaim, 0)
 	err := d.NewSelect().
-		TableExpr("claimius.get_access(?, claimius.get_disciple_app_id(), ?, ?, ?) AS claim", userID, objectID, objectType, requiredAccess).
+		TableExpr("claimius.get_access(?,?, ?, ?) AS claim", userID, objectID, objectType, requiredAccess).
 		Column("claim.*").
 		Scan(ctx, &claims)
 	if err != nil {
@@ -37,7 +37,7 @@ func (d *DB) GetDirectAccess(ctx context.Context, userID, objectID uuid.UUID, ob
 	}
 	claims := make([]AccessClaim, 0)
 	err := d.NewSelect().
-		TableExpr("claimius.get_direct_access(?, claimius.get_disciple_app_id(), ?, ?) AS claim", userID, objectID, objectType).
+		TableExpr("claimius.get_direct_access(?,?, ?) AS claim", userID, objectID, objectType).
 		Column("claim.*").
 		Scan(ctx, &claims)
 	if err != nil {
@@ -66,9 +66,8 @@ func (d *DB) GetClaimQuery(claim *Claim, userID, claimID uuid.UUID, requiredAcce
 		Model(claim).
 		Where("claim.sa_deleted_at IS NULL").
 		ExcludeColumn("sa_deleted_at").
-		ExcludeColumn("app_id").
 		Where("claim.id = ?", claimID).
-		Where("EXISTS (SELECT 1 FROM claimius.get_access(?, claimius.get_disciple_app_id(), claim.id, ?, ?))", userID, OBJECT_TYPE_CLAIM, requiredAccess).
+		Where("EXISTS (SELECT 1 FROM claimius.get_access(?,claim.id, ?, ?))", userID, OBJECT_TYPE_CLAIM, requiredAccess).
 		Limit(1)
 }
 
@@ -86,14 +85,13 @@ func (d *DB) GetClaimsQuery(claims *[]Claim, userID uuid.UUID, requiredAccess Cl
 		Model(claims).
 		Where("claim.sa_deleted_at IS NULL").
 		ExcludeColumn("sa_deleted_at").
-		ExcludeColumn("app_id").
-		Where("claim.id IN (SELECT id FROM claimius.get_claims(?, claimius.get_disciple_app_id(), ?))", userID, requiredAccess)
+		Where("claim.id IN (SELECT id FROM claimius.get_claims(?,?))", userID, requiredAccess)
 }
 
 func (d *DB) GetClaimAudit(ctx context.Context, actorID, claimID uuid.UUID, requiredAccess ClaimAccess) ([]Audit, error) {
 	audits := make([]Audit, 0)
 	err := d.NewSelect().
-		TableExpr("claimius.get_audit(?, claimius.get_disciple_app_id(), ?) AS audit", actorID, requiredAccess).
+		TableExpr("claimius.get_audit(?,?) AS audit", actorID, requiredAccess).
 		Column("audit.*").
 		Where("audit.object_type = ?", OBJECT_TYPE_CLAIM).
 		Where("audit.object_id = ?", claimID).
@@ -108,7 +106,7 @@ func (d *DB) GetClaimAudit(ctx context.Context, actorID, claimID uuid.UUID, requ
 func (d *DB) Search(ctx context.Context, userID uuid.UUID, query string, objectTypes []string, requiredAccess ClaimAccess, limit int, offset int) ([]SearchResult, error) {
 	results := make([]SearchResult, 0)
 	err := d.NewRaw(
-		`SELECT * FROM claimius.search(?, claimius.get_disciple_app_id(), ?, ?::text[], ?, ?, ?)`,
+		`SELECT * FROM claimius.search(?,?, ?::text[], ?, ?, ?)`,
 		userID, query, objectTypes, requiredAccess, limit, offset,
 	).Scan(ctx, &results)
 	if err != nil {
@@ -120,7 +118,7 @@ func (d *DB) Search(ctx context.Context, userID uuid.UUID, query string, objectT
 func (d *DB) GetAudit(ctx context.Context, userID uuid.UUID, requiredAccess ClaimAccess) ([]Audit, error) {
 	audits := make([]Audit, 0)
 	err := d.NewSelect().
-		TableExpr("claimius.get_audit(?, claimius.get_disciple_app_id(), ?) AS audit", userID, requiredAccess).
+		TableExpr("claimius.get_audit(?,?) AS audit", userID, requiredAccess).
 		Column("audit.*").
 		Scan(ctx, &audits)
 	if err != nil {
@@ -140,8 +138,7 @@ func (d *DB) GetObjectClaims(ctx context.Context, userID, objectID uuid.UUID, ob
 		Model(&claims).
 		Where("sa_deleted_at IS NULL").
 		ExcludeColumn("sa_deleted_at").
-		ExcludeColumn("app_id").
-		Where("claim.id IN (SELECT id FROM claimius.get_claims(?, claimius.get_disciple_app_id(), ?, ?))", userID, objectID, objectType).
+		Where("claim.id IN (SELECT id FROM claimius.get_claims(?,?, ?))", userID, objectID, objectType).
 		Scan(ctx)
 	return claims, err
 }
@@ -149,7 +146,7 @@ func (d *DB) GetObjectClaims(ctx context.Context, userID, objectID uuid.UUID, ob
 func (d *DB) GetOwnerGraph(ctx context.Context, userID uuid.UUID, startID *uuid.UUID, depth int, requiredAccess ClaimAccess) ([]GraphNode, error) {
 	nodes := make([]GraphNode, 0)
 	err := d.NewSelect().
-		TableExpr("claimius.get_owner_graph(p_user_id := ?, p_app_id := claimius.get_disciple_app_id(), p_start_id := ?, p_depth := ?, p_required_access := ?) AS graph", userID, startID, depth, requiredAccess).
+		TableExpr("claimius.get_owner_graph(p_user_id := ?, p_start_id := ?, p_depth := ?, p_required_access := ?) AS graph", userID, startID, depth, requiredAccess).
 		Column("graph.*").
 		Scan(ctx, &nodes)
 	return nodes, err
@@ -158,7 +155,7 @@ func (d *DB) GetOwnerGraph(ctx context.Context, userID uuid.UUID, startID *uuid.
 func (d *DB) GetClaimGraph(ctx context.Context, userID uuid.UUID, startID *uuid.UUID, depth int, requiredAccess ClaimAccess) ([]GraphNode, error) {
 	nodes := make([]GraphNode, 0)
 	err := d.NewSelect().
-		TableExpr("claimius.get_claim_graph(p_user_id := ?, p_app_id := claimius.get_disciple_app_id(), p_start_id := ?, p_depth := ?, p_required_access := ?) AS graph", userID, startID, depth, requiredAccess).
+		TableExpr("claimius.get_claim_graph(p_user_id := ?, p_start_id := ?, p_depth := ?, p_required_access := ?) AS graph", userID, startID, depth, requiredAccess).
 		Column("graph.*").
 		Scan(ctx, &nodes)
 	return nodes, err
@@ -243,7 +240,6 @@ func (d *DB) deleteClaim(ctx context.Context, ac *AccessClaim, claimID uuid.UUID
 	var claim Claim
 	err := d.NewSelect().
 		Model(&claim).
-		ExcludeColumn("app_id").
 		ModelTableExpr("claimius.remove_claim(?, ?) AS claim", claimID, *ac.UserClaimID).
 		Scan(ctx)
 	if err != nil {
@@ -315,7 +311,6 @@ func (d *DB) deleteClaimObject(ctx context.Context, ac *AccessClaim, claimID, ob
 	var co ClaimObject
 	err = d.NewSelect().
 		Model(&co).
-		ExcludeColumn("app_id").
 		ModelTableExpr("claimius.remove_claim_object(?, ?) AS claim_object", rowID, *ac.UserClaimID).
 		Scan(ctx)
 	if err != nil {
@@ -372,7 +367,6 @@ func (d *DB) deleteClaimUser(ctx context.Context, ac *AccessClaim, claimID, user
 	var uc UserClaim
 	err = d.NewSelect().
 		Model(&uc).
-		ExcludeColumn("app_id").
 		ModelTableExpr("claimius.remove_user_claim(?, ?) AS user_claim", rowID, *ac.UserClaimID).
 		Scan(ctx)
 	if err != nil {

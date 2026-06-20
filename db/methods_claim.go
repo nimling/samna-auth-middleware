@@ -116,10 +116,8 @@ func (c *Claim) AssignUser(userIDs ...uuid.UUID) ([]UserClaim, error) {
 		var existing UserClaim
 		err := c.sessionDB.NewSelect().
 			Model(&existing).
-			ExcludeColumn("app_id").
 			Where("claim_id = ?", c.ID).
 			Where("user_id = ?", uid).
-			Where("app_id = claimius.get_disciple_app_id()").
 			Where("sa_deleted_at IS NULL").
 			Limit(1).
 			Scan(c.sessionCtx)
@@ -166,7 +164,6 @@ func (c *Claim) ReCreateFor(access ClaimAccess, opts ReCreateForOptions, userIDs
 	if len(bindings) == 0 {
 		err := c.sessionDB.NewSelect().
 			Model(&bindings).
-			ExcludeColumn("app_id").
 			Where("claim_id = ?", c.ID).
 			Where("sa_deleted_at IS NULL").
 			Scan(c.sessionCtx)
@@ -181,7 +178,6 @@ func (c *Claim) ReCreateFor(access ClaimAccess, opts ReCreateForOptions, userIDs
 		existing := &Claim{}
 		err := c.sessionDB.NewSelect().
 			Model(existing).
-			ExcludeColumn("app_id").
 			Where("claim.sa_deleted_at IS NULL").
 			Where("claim.type = ?", c.Type).
 			Where("claim.sa_access = ?", expanded).
@@ -243,7 +239,6 @@ func (c *Claim) ReCreateFor(access ClaimAccess, opts ReCreateForOptions, userIDs
 		existingUsers := make([]UserClaim, 0)
 		err := c.sessionDB.NewSelect().
 			Model(&existingUsers).
-			ExcludeColumn("app_id").
 			Where("claim_id = ?", c.ID).
 			Where("sa_deleted_at IS NULL").
 			Scan(c.sessionCtx)

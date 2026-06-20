@@ -52,7 +52,6 @@ func IssueGuestToken(ctx context.Context, claimID uuid.UUID, issuer string) (*Gu
 		ExcludeColumn("sa_deleted_at").
 		Where("claim_id = ?", claimID).
 		Where("user_id = ?", guestUserID).
-		Where("app_id = ?", app.ID).
 		Where("sa_deleted_at IS NULL").
 		Limit(1).
 		Scan(ctx)
@@ -62,12 +61,10 @@ func IssueGuestToken(ctx context.Context, claimID uuid.UUID, issuer string) (*Gu
 		guestFirst := "Guest"
 		guestUser := db.SamnaUser{
 			UserID:    guestUserID,
-			AppID:     app.ID,
 			FirstName: &guestFirst,
 			Type:      &guestType,
 		}
 		guestClaim := db.UserClaim{
-			AppID:   app.ID,
 			ClaimID: claimID,
 			UserID:  guestUserID,
 			OwnerID: claim.OwnerID,

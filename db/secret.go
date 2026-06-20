@@ -19,7 +19,7 @@ type BodySecret struct {
 
 func (d *DB) GetSecrets(ctx context.Context, userID uuid.UUID, requiredAccess ClaimAccess) ([]SamnaSecret, error) {
 	secrets := make([]SamnaSecret, 0)
-	err := d.NewRaw("SELECT * FROM claimius.get_secrets(?, claimius.get_disciple_app_id(), ?)", userID, requiredAccess).
+	err := d.NewRaw("SELECT * FROM claimius.get_secrets(?, ?)", userID, requiredAccess).
 		Scan(ctx, &secrets)
 	if err != nil {
 		return nil, err
@@ -34,7 +34,6 @@ func (d *DB) GetSecret(ctx context.Context, secretID uuid.UUID) (*SamnaSecret, e
 		ExcludeColumn("sa_deleted_at").
 		Where("id = ?", secretID).
 		Where("sa_deleted_at IS NULL").
-		ExcludeColumn("app_id").
 		Limit(1).
 		Scan(ctx)
 	if err != nil {
@@ -73,7 +72,6 @@ func (d *DB) insertSecret(ctx context.Context, ac *AccessClaim, body BodySecret)
 		if _, err := tx.NewInsert().
 			Model(&secret).
 			ExcludeColumn("id", "sa_created_at", "sa_updated_at", "sa_deleted_at").
-			Value("app_id", "claimius.get_disciple_app_id()").
 			Returning("*").
 			Exec(ctx, &secret); err != nil {
 			return fmt.Errorf("insert secret: %w", err)
@@ -135,7 +133,6 @@ func (d *DB) updateSecret(ctx context.Context, ac *AccessClaim, secretID uuid.UU
 		Where("sa_deleted_at IS NULL").
 		Where("id = ?", secretID).
 		OmitZero().
-		ExcludeColumn("app_id").
 		Returning("*").
 		Exec(ctx, secret)
 	if err != nil {

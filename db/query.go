@@ -82,14 +82,14 @@ func QueryWithObject(ctx echo.Context) ([]ObjectType, error) {
 
 func UserWhere(userID uuid.UUID, requiredAccess ClaimAccess) string {
 	return fmt.Sprintf(
-		`(samna_user.user_id = '%[1]s' OR samna_user.user_id IN (SELECT user_id FROM claimius.get_users('%[1]s', claimius.get_disciple_app_id(), %[2]d))) AND samna_user.user_id NOT IN (SELECT user_id FROM claimius.samna_user WHERE type = 'system' AND sa_deleted_at IS NULL)`,
+		`(samna_user.user_id = '%[1]s' OR samna_user.user_id IN (SELECT user_id FROM claimius.get_users('%[1]s', %[2]d))) AND samna_user.user_id NOT IN (SELECT user_id FROM claimius.samna_user WHERE type = 'system' AND sa_deleted_at IS NULL)`,
 		userID, requiredAccess,
 	)
 }
 
 func ClaimWhere(userID uuid.UUID, requiredAccess ClaimAccess) string {
 	return fmt.Sprintf(
-		`claim.id IN (SELECT id FROM claimius.get_claims('%[1]s', claimius.get_disciple_app_id(), %[2]d))`,
+		`claim.id IN (SELECT id FROM claimius.get_claims('%[1]s', %[2]d))`,
 		userID, requiredAccess,
 	)
 }
@@ -98,7 +98,7 @@ func ObjectWhere(userID uuid.UUID, objectType string, requiredAccess ClaimAccess
 	parts := strings.SplitN(objectType, ".", 2)
 	table := parts[len(parts)-1]
 	return fmt.Sprintf(
-		`%[4]s.id IN (SELECT object_id FROM claimius.get_objects('%[1]s', claimius.get_disciple_app_id(), '%[3]s', %[2]d))`,
+		`%[4]s.id IN (SELECT object_id FROM claimius.get_objects('%[1]s', '%[3]s', %[2]d))`,
 		userID, requiredAccess, objectType, table,
 	)
 }
@@ -107,7 +107,7 @@ func ApplyWithAccess(userID uuid.UUID, objectType string, requiredAccess ClaimAc
 	parts := strings.SplitN(objectType, ".", 2)
 	table := parts[len(parts)-1]
 	join := fmt.Sprintf(
-		`JOIN claimius.get_objects('%[1]s', claimius.get_disciple_app_id(), '%[2]s', %[3]d) ga ON ga.object_id = %[4]s.id`,
+		`JOIN claimius.get_objects('%[1]s', '%[2]s', %[3]d) ga ON ga.object_id = %[4]s.id`,
 		userID, objectType, requiredAccess, table,
 	)
 	return func(q *bun.SelectQuery) *bun.SelectQuery {
@@ -134,7 +134,7 @@ func ApplyWithCreator(objectType string) func(*bun.SelectQuery) *bun.SelectQuery
 		return q.
 			ColumnExpr("?TableAlias.*").
 			Join(creatorJoin).
-			Join(`LEFT JOIN claimius.samna_user AS creator_su ON creator_su.user_id = creator_uc.user_id AND creator_su.app_id = claimius.get_disciple_app_id()`).
+			Join(`LEFT JOIN claimius.samna_user AS creator_su ON creator_su.user_id = creator_uc.user_id`).
 			ColumnExpr("creator_su.id AS creator_id").
 			ColumnExpr("creator_su.user_id AS creator_user_id").
 			ColumnExpr("creator_su.first_name AS creator_first_name").
@@ -152,7 +152,7 @@ func ApplyWithCreator(objectType string) func(*bun.SelectQuery) *bun.SelectQuery
 
 func AuditWhere(userID uuid.UUID, requiredAccess ClaimAccess) string {
 	return fmt.Sprintf(
-		`audit.id IN (SELECT id FROM claimius.get_audit('%[1]s', claimius.get_disciple_app_id(), %[2]d))`,
+		`audit.id IN (SELECT id FROM claimius.get_audit('%[1]s', %[2]d))`,
 		userID, requiredAccess,
 	)
 }

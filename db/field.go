@@ -12,7 +12,6 @@ func (d *DB) GetObjectFields(ctx context.Context) ([]ObjectField, error) {
 	err := d.NewSelect().
 		Model(&fields).
 		ExcludeColumn("sa_deleted_at").
-		ExcludeColumn("app_id").
 		Where("sa_deleted_at IS NULL").
 		Scan(ctx)
 	if err != nil {
@@ -26,7 +25,6 @@ func (d *DB) GetObjectField(ctx context.Context, fieldID uuid.UUID) (*ObjectFiel
 	err := d.NewSelect().
 		Model(&field).
 		ExcludeColumn("sa_deleted_at").
-		ExcludeColumn("app_id").
 		Where("id = ?", fieldID).
 		Where("sa_deleted_at IS NULL").
 		Limit(1).
@@ -42,7 +40,6 @@ func (d *DB) GetUserFields(ctx context.Context, fieldID uuid.UUID) ([]UserField,
 	err := d.NewSelect().
 		Model(&fields).
 		ExcludeColumn("sa_deleted_at").
-		ExcludeColumn("app_id").
 		Where("field_id = ?", fieldID).
 		Where("sa_deleted_at IS NULL").
 		Scan(ctx)
@@ -61,7 +58,6 @@ func (d *DB) insertObjectField(ctx context.Context, ac *AccessClaim, field *Obje
 	_, err := d.DB.NewInsert().
 		Model(field).
 		ExcludeColumn("id", "sa_created_at", "sa_updated_at", "sa_deleted_at").
-		Value("app_id", "claimius.get_disciple_app_id()").
 		Returning("*").
 		Exec(ctx, field)
 	if err != nil {
@@ -78,7 +74,7 @@ func (d *DB) updateObjectField(ctx context.Context, ac *AccessClaim, fieldID uui
 		Model(field).
 		Where("id = ?", fieldID).
 		Where("sa_deleted_at IS NULL").
-		ExcludeColumn("id", "app_id", "sa_owner_id", "sa_created_by", "sa_created_at", "sa_updated_at", "sa_deleted_at").
+		ExcludeColumn("id", "sa_owner_id", "sa_created_by", "sa_created_at", "sa_updated_at", "sa_deleted_at").
 		OmitZero().
 		Returning("*")
 	for _, column := range field.PatchNulls() {
@@ -118,7 +114,6 @@ func (d *DB) insertUserField(ctx context.Context, ac *AccessClaim, field *UserFi
 	_, err := d.DB.NewInsert().
 		Model(field).
 		ExcludeColumn("id", "sa_created_at", "sa_updated_at", "sa_deleted_at").
-		Value("app_id", "claimius.get_disciple_app_id()").
 		Returning("*").
 		Exec(ctx, field)
 	if err != nil {
@@ -135,7 +130,7 @@ func (d *DB) updateUserField(ctx context.Context, ac *AccessClaim, valueID uuid.
 		Model(field).
 		Where("id = ?", valueID).
 		Where("sa_deleted_at IS NULL").
-		ExcludeColumn("id", "app_id", "field_id", "user_id", "sa_owner_id", "sa_created_by", "sa_created_at", "sa_updated_at", "sa_deleted_at").
+		ExcludeColumn("id", "field_id", "user_id", "sa_owner_id", "sa_created_by", "sa_created_at", "sa_updated_at", "sa_deleted_at").
 		OmitZero().
 		Returning("*")
 	for _, column := range field.PatchNulls() {

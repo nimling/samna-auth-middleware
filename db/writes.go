@@ -41,21 +41,16 @@ func (d *DB) validateTokenDebug(ctx context.Context, token string) (*SamnaUser, 
 	if err != nil {
 		return nil, uuid.Nil, fmt.Errorf("marshal claims: %w", err)
 	}
-	app, err := d.GetApp(ctx)
-	if err != nil {
-		return nil, uuid.Nil, err
-	}
 	var userID uuid.UUID
 	var ownerID uuid.UUID
 	err = d.NewRaw(`
 		SELECT t.user_id, t.sa_owner_id
 		  FROM claimius.user_token t
-		 WHERE t.app_id        = ?
-		   AND t.sa_deleted_at IS NULL
+		 WHERE t.sa_deleted_at IS NULL
 		   AND t.external_id   = (?::jsonb ->> t.id_claim)
 		 ORDER BY t.sa_created_at DESC
 		 LIMIT 1
-	`, app.ID, string(claimsJSON)).Scan(ctx, &userID, &ownerID)
+	`, string(claimsJSON)).Scan(ctx, &userID, &ownerID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, uuid.Nil, nil
@@ -76,22 +71,17 @@ func (d *DB) ResolveExternalUser(ctx context.Context, callerID uuid.UUID, extern
 	if externalID == "" {
 		return nil, fmt.Errorf("external_id is required")
 	}
-	app, err := d.GetApp(ctx)
-	if err != nil {
-		return nil, err
-	}
 	var userID uuid.UUID
 	var ownerID uuid.UUID
-	err = d.NewRaw(`
+	err := d.NewRaw(`
 		SELECT t.user_id, t.sa_owner_id
 		  FROM claimius.user_token t
-		 WHERE t.app_id        = ?
-		   AND t.type          = 'external'
+		 WHERE t.type          = 'external'
 		   AND t.external_id   = ?
 		   AND t.sa_deleted_at IS NULL
 		 ORDER BY t.sa_created_at DESC
 		 LIMIT 1
-	`, app.ID, externalID).Scan(ctx, &userID, &ownerID)
+	`, externalID).Scan(ctx, &userID, &ownerID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, nil

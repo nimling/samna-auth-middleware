@@ -26,7 +26,6 @@ func (d *DB) GetUserQuery(user *SamnaUser, actorID, userID uuid.UUID) *bun.Selec
 	return d.NewSelect().
 		Model(user).
 		ExcludeColumn("sa_deleted_at").
-		ExcludeColumn("app_id").
 		Where("samna_user.user_id = ?", userID).
 		Where("samna_user.sa_deleted_at IS NULL").
 		Where(UserWhere(actorID, ACCESS_READ)).
@@ -47,7 +46,6 @@ func (d *DB) GetUsersQuery(users *[]SamnaUser, userID uuid.UUID, requiredAccess 
 		Model(users).
 		Where("samna_user.sa_deleted_at IS NULL").
 		ExcludeColumn("sa_deleted_at").
-		ExcludeColumn("app_id").
 		Where(UserWhere(userID, requiredAccess))
 }
 
@@ -56,7 +54,6 @@ func (d *DB) GetUserClaims(ctx context.Context, userID uuid.UUID) ([]UserClaim, 
 	err := d.NewSelect().
 		Model(&claims).
 		ExcludeColumn("sa_deleted_at").
-		ExcludeColumn("app_id").
 		Relation("Owner").
 		Where("user_claim.user_id = ?", userID).
 		Where("user_claim.sa_deleted_at IS NULL").
@@ -93,7 +90,6 @@ func (d *DB) GetUserRelationsQuery(relations *[]UserRelation, userID uuid.UUID, 
 	q := d.NewSelect().
 		Model(relations).
 		ExcludeColumn("sa_deleted_at").
-		ExcludeColumn("app_id").
 		Where("user_relation.user_id = ?", userID).
 		Where("user_relation.sa_deleted_at IS NULL")
 	if len(f.OrgIDs) > 0 {
@@ -134,7 +130,6 @@ func (d *DB) GetRelation(ctx context.Context, userID uuid.UUID, relationID uuid.
 	err := d.NewSelect().
 		Model(&relation).
 		ExcludeColumn("sa_deleted_at").
-		ExcludeColumn("app_id").
 		Where("user_relation.id = ?", relationID).
 		Where("user_relation.user_id = ?", userID).
 		Where("user_relation.sa_deleted_at IS NULL").
@@ -153,7 +148,6 @@ func (d *DB) insertRelation(ctx context.Context, ac *AccessClaim, relation *User
 	_, err := d.DB.NewInsert().
 		Model(relation).
 		ExcludeColumn("id", "sa_created_at", "sa_updated_at", "sa_deleted_at").
-		Value("app_id", "claimius.get_disciple_app_id()").
 		Returning("*").
 		Exec(ctx, relation)
 	if err != nil {
@@ -170,7 +164,7 @@ func (d *DB) updateRelation(ctx context.Context, ac *AccessClaim, relationID uui
 		Model(relation).
 		Where("id = ?", relationID).
 		Where("sa_deleted_at IS NULL").
-		ExcludeColumn("id", "app_id", "user_id", "sa_created_at", "sa_updated_at", "sa_deleted_at").
+		ExcludeColumn("id", "user_id", "sa_created_at", "sa_updated_at", "sa_deleted_at").
 		OmitZero().
 		Returning("*")
 	for _, column := range relation.PatchNulls() {
@@ -228,8 +222,7 @@ func (d *DB) updateUser(ctx context.Context, ac *AccessClaim, userID uuid.UUID, 
 		Model(user).
 		Where("user_id = ?", userID).
 		Where("sa_deleted_at IS NULL").
-		ExcludeColumn("id", "user_id", "app_id", "type", "sa_created_at", "sa_updated_at", "sa_deleted_at").
-		Value("app_id", "claimius.get_disciple_app_id()").
+		ExcludeColumn("id", "user_id", "type", "sa_created_at", "sa_updated_at", "sa_deleted_at").
 		OmitZero().
 		Returning("*")
 	for _, column := range user.PatchNulls() {
@@ -261,7 +254,7 @@ func (d *DB) DeleteUser(ctx context.Context, ac *AccessClaim, userID uuid.UUID) 
 			UPDATE claimius.user_token
 			SET sa_deleted_at = NOW()
 			WHERE user_id = ?
-			  AND app_id = claimius.get_disciple_app_id()
+			  AND TRUE
 			  AND sa_deleted_at IS NULL
 		`, userID).Exec(ctx); err != nil {
 			return err
@@ -277,7 +270,7 @@ func (d *DB) DeleteUser(ctx context.Context, ac *AccessClaim, userID uuid.UUID) 
 func (d *DB) GetUserAudit(ctx context.Context, userID uuid.UUID, requiredAccess ClaimAccess) ([]Audit, error) {
 	audits := make([]Audit, 0)
 	err := d.NewSelect().
-		TableExpr("claimius.get_audit(?, claimius.get_disciple_app_id(), ?) AS audit", userID, requiredAccess).
+		TableExpr("claimius.get_audit(?, ?) AS audit", userID, requiredAccess).
 		Column("audit.*").
 		OrderExpr("audit.sa_created_at DESC").
 		Scan(ctx, &audits)
@@ -299,7 +292,7 @@ func (d *DB) AssertUserSingleRoot(ctx context.Context, userID uuid.UUID, targetO
 			JOIN claimius.claim c ON c.id = uc.claim_id
 			JOIN claimius.organization t ON t.id = ?
 			WHERE uc.user_id = ?
-			  AND uc.app_id = claimius.get_disciple_app_id()
+			  AND TRUE
 			  AND uc.sa_deleted_at IS NULL
 			  AND c.sa_deleted_at IS NULL
 			  AND c.sa_root_id <> t.sa_root_id
@@ -326,7 +319,7 @@ func (d *DB) AssertUserTokenSingleRoot(ctx context.Context, externalID string, t
 			JOIN claimius.organization existing ON existing.id = ut.sa_owner_id
 			JOIN claimius.organization target ON target.id = ?
 			WHERE ut.external_id = ?
-			  AND ut.app_id = claimius.get_disciple_app_id()
+			  AND TRUE
 			  AND ut.sa_deleted_at IS NULL
 			  AND existing.sa_root_id <> target.sa_root_id
 		)
@@ -473,7 +466,7 @@ func (d *DB) IssueUserToken(ctx context.Context, ac *AccessClaim, payload SamnaU
 		var existingUserID uuid.UUID
 		lookupErr := tx.NewRaw(`
 			SELECT user_id FROM claimius.user_token
-			WHERE app_id = claimius.get_disciple_app_id()
+			WHERE TRUE
 			  AND sa_owner_id = ?
 			  AND external_id = ?
 			  AND sa_deleted_at IS NULL
@@ -505,7 +498,7 @@ func (d *DB) IssueUserToken(ctx context.Context, ac *AccessClaim, payload SamnaU
 			CreatedBy:  ac.UserClaimID,
 		}
 		if _, err := tx.NewInsert().Model(&token).
-			On("CONFLICT (app_id, sa_owner_id, external_id) WHERE sa_deleted_at IS NULL DO UPDATE").
+			On("CONFLICT (sa_owner_id, id_claim, external_id) WHERE sa_deleted_at IS NULL DO UPDATE").
 			Set("user_id = EXCLUDED.user_id").
 			Set("id_claim = EXCLUDED.id_claim").
 			Set("claim_id = EXCLUDED.claim_id").
@@ -558,7 +551,7 @@ func (d *DB) UpsertUserExternal(ctx context.Context, ac *AccessClaim, payload Sa
 		var existingUserID uuid.UUID
 		lookupErr := tx.NewRaw(`
 			SELECT user_id FROM claimius.user_token
-			WHERE app_id = claimius.get_disciple_app_id()
+			WHERE TRUE
 			  AND sa_owner_id = ?
 			  AND external_id = ?
 			  AND sa_deleted_at IS NULL
@@ -590,7 +583,7 @@ func (d *DB) UpsertUserExternal(ctx context.Context, ac *AccessClaim, payload Sa
 			CreatedBy:  ac.UserClaimID,
 		}
 		if _, err := tx.NewInsert().Model(&token).
-			On("CONFLICT (app_id, sa_owner_id, external_id) WHERE sa_deleted_at IS NULL DO UPDATE").
+			On("CONFLICT (sa_owner_id, id_claim, external_id) WHERE sa_deleted_at IS NULL DO UPDATE").
 			Set("user_id = EXCLUDED.user_id").
 			Set("id_claim = EXCLUDED.id_claim").
 			Set("claim_id = EXCLUDED.claim_id").

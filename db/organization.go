@@ -22,7 +22,6 @@ func (d *DB) GetOrganizationQuery(org *Organization, orgID uuid.UUID) *bun.Selec
 		ExcludeColumn("sa_deleted_at").
 		Where("organization.id = ?", orgID).
 		Where("organization.sa_deleted_at IS NULL").
-		ExcludeColumn("app_id").
 		Limit(1)
 }
 
@@ -40,7 +39,6 @@ func (d *DB) GetOrganizationsQuery(orgs *[]Organization, userID uuid.UUID, requi
 		Model(orgs).
 		Where("organization.sa_deleted_at IS NULL").
 		ExcludeColumn("sa_deleted_at").
-		ExcludeColumn("app_id").
 		Where(ObjectWhere(userID, OBJECT_TYPE_ORGANIZATION, requiredAccess))
 }
 
@@ -85,7 +83,6 @@ func (d *DB) insertOrganization(ctx context.Context, ac *AccessClaim, org *Organ
 		if _, err := tx.NewInsert().
 			Model(org).
 			ExcludeColumn("id", "sa_created_at", "sa_updated_at", "sa_deleted_at").
-			Value("app_id", "claimius.get_disciple_app_id()").
 			Returning("*").
 			Exec(ctx, org); err != nil {
 			return err
@@ -140,7 +137,7 @@ func (d *DB) updateOrganization(ctx context.Context, ac *AccessClaim, orgID uuid
 		Model(org).
 		Where("id = ?", orgID).
 		Where("sa_deleted_at IS NULL").
-		ExcludeColumn("id", "app_id", "sa_owner_id", "sa_root_id", "sa_created_by", "provider_id", "sa_created_at", "sa_updated_at", "sa_deleted_at").
+		ExcludeColumn("id", "sa_owner_id", "sa_root_id", "sa_created_by", "provider_id", "sa_created_at", "sa_updated_at", "sa_deleted_at").
 		OmitZero().
 		Returning("*")
 	for _, column := range org.PatchNulls() {
@@ -174,7 +171,7 @@ func (d *DB) deleteOrganization(ctx context.Context, ac *AccessClaim, orgID uuid
 func (d *DB) GetOrganizationAudit(ctx context.Context, actorID, orgID uuid.UUID, requiredAccess ClaimAccess) ([]Audit, error) {
 	audits := make([]Audit, 0)
 	err := d.NewSelect().
-		TableExpr("claimius.get_audit(?, claimius.get_disciple_app_id(), ?) AS audit", actorID, requiredAccess).
+		TableExpr("claimius.get_audit(?, ?) AS audit", actorID, requiredAccess).
 		Column("audit.*").
 		Where("audit.object_id = ?", orgID).
 		Where("audit.object_type = ?", OBJECT_TYPE_ORGANIZATION).

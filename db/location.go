@@ -22,7 +22,6 @@ func (d *DB) GetLocationQuery(loc *Location, locationID uuid.UUID) *bun.SelectQu
 		ExcludeColumn("sa_deleted_at").
 		Where("location.id = ?", locationID).
 		Where("location.sa_deleted_at IS NULL").
-		ExcludeColumn("app_id").
 		Limit(1)
 }
 
@@ -40,7 +39,6 @@ func (d *DB) GetLocationsQuery(locs *[]Location, userID uuid.UUID, requiredAcces
 		Model(locs).
 		Where("location.sa_deleted_at IS NULL").
 		ExcludeColumn("sa_deleted_at").
-		ExcludeColumn("app_id").
 		Where(ObjectWhere(userID, OBJECT_TYPE_LOCATION, requiredAccess))
 }
 
@@ -85,7 +83,6 @@ func (d *DB) insertLocation(ctx context.Context, ac *AccessClaim, loc *Location)
 		if _, err := tx.NewInsert().
 			Model(loc).
 			ExcludeColumn("id", "sa_root_id", "sa_created_at", "sa_updated_at", "sa_deleted_at").
-			Value("app_id", "claimius.get_disciple_app_id()").
 			Returning("*").
 			Exec(ctx, loc); err != nil {
 			return err
@@ -125,7 +122,7 @@ func (d *DB) updateLocation(ctx context.Context, ac *AccessClaim, locationID uui
 		Model(loc).
 		Where("id = ?", locationID).
 		Where("sa_deleted_at IS NULL").
-		ExcludeColumn("id", "app_id", "sa_owner_id", "sa_root_id", "sa_parent_id", "sa_created_by", "provider_id", "sa_created_at", "sa_updated_at", "sa_deleted_at").
+		ExcludeColumn("id", "sa_owner_id", "sa_root_id", "sa_parent_id", "sa_created_by", "provider_id", "sa_created_at", "sa_updated_at", "sa_deleted_at").
 		OmitZero().
 		Returning("*")
 	for _, column := range loc.PatchNulls() {
@@ -159,7 +156,7 @@ func (d *DB) deleteLocation(ctx context.Context, ac *AccessClaim, locationID uui
 func (d *DB) GetLocationAudit(ctx context.Context, actorID, locationID uuid.UUID, requiredAccess ClaimAccess) ([]Audit, error) {
 	audits := make([]Audit, 0)
 	err := d.NewSelect().
-		TableExpr("claimius.get_audit(?, claimius.get_disciple_app_id(), ?) AS audit", actorID, requiredAccess).
+		TableExpr("claimius.get_audit(?, ?) AS audit", actorID, requiredAccess).
 		Column("audit.*").
 		Where("audit.object_id = ?", locationID).
 		Where("audit.object_type = ?", OBJECT_TYPE_LOCATION).
