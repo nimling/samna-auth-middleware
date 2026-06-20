@@ -262,29 +262,6 @@ $$ LANGUAGE plpgsql STABLE;
 -- Registration helpers
 -- ----------------------------------------------------------------------------
 
--- _app_id_for_row
--- Returns the app_id for a registered row. Reads the row's app_id column
--- if the table has one; otherwise infers it from claimius.get_app_id().
--- Used by every trigger that needs to scope a row's effects to an app.
-CREATE OR REPLACE FUNCTION claimius._app_id_for_row(p_object_type TEXT, p_row JSONB)
-    RETURNS UUID AS $$
-DECLARE
-    v_has_app_id BOOLEAN;
-BEGIN
-    SELECT t.has_app_id INTO v_has_app_id
-    FROM claimius.table_info t
-    WHERE t.object_type = p_object_type;
-
-    IF v_has_app_id THEN
-        RETURN claimius.get_app_id();
-    END IF;
-
-    RETURN claimius.get_app_id();
-END;
-$$ LANGUAGE plpgsql STABLE;
-
-COMMENT ON FUNCTION claimius._app_id_for_row(TEXT, JSONB) IS 'Resolves a row''s app_id: from the row when the table has the column, otherwise from claimius.get_app_id().';
-
 -- _register_table_info
 -- Inspects a table's columns, validates required columns, and populates the
 -- table_info row. Raises if required columns are missing.
@@ -302,7 +279,6 @@ DECLARE
     v_has_deleted_at    BOOLEAN;
     v_has_created_at    BOOLEAN;
     v_has_updated_at    BOOLEAN;
-    v_has_app_id        BOOLEAN;
     v_has_name          BOOLEAN;
     v_has_description   BOOLEAN;
 BEGIN
@@ -326,7 +302,6 @@ BEGIN
     v_has_deleted_at  := claimius.table_has_column(p_object_type, 'sa_deleted_at');
     v_has_created_at  := claimius.table_has_column(p_object_type, 'sa_created_at');
     v_has_updated_at  := claimius.table_has_column(p_object_type, 'sa_updated_at');
-    v_has_app_id      := claimius.table_has_column(p_object_type, 'app_id');
     v_has_name        := claimius.table_has_column(p_object_type, 'name');
     v_has_description := claimius.table_has_column(p_object_type, 'description');
 
@@ -354,36 +329,18 @@ BEGIN
             RAISE EXCEPTION 'Table % must have both sa_parent_id and sa_root_id, or neither', p_object_type;
         END IF;
 
-        -- Tables without app_id rely on claimius.get_app_id() at runtime to
-        -- determine scope. That works only when the deployment hosts a
-        -- single app's data: pure disciple, hybrid, or prophet with only
-        -- the system app. On a prophet hosting non system apps,
-        -- get_app_id() returns the system app id, which would mis-scope
-        -- writes to other hosted apps. Reject the registration in that
-        -- case so the implementer adds an app_id column.
-        IF NOT v_has_app_id THEN
-            IF EXISTS (SELECT 1 FROM claimius.prophet_state WHERE system_app_slug IS NOT NULL)
-                AND EXISTS (
-                    SELECT 1 FROM claimius.samna_app a
-                                      JOIN claimius.prophet_state p ON p.system_app_slug IS NOT NULL
-                    WHERE a.slug <> p.system_app_slug
-                      AND a.sa_deleted_at IS NULL
-                ) THEN
-                RAISE EXCEPTION 'Table % has no app_id column but this prophet hosts non system apps; add an app_id column to disambiguate row scope', p_object_type;
-            END IF;
-        END IF;
     END IF;
 
     INSERT INTO claimius.table_info (
         schema_name, table_name, is_internal,
         has_sa_owner_id, has_sa_location_id, has_sa_parent_id, has_sa_root_id,
         has_sa_created_by, has_sa_deleted_at, has_sa_created_at, has_sa_updated_at,
-        has_app_id, has_name, has_description
+        has_name, has_description
     ) VALUES (
                  v_schema, v_table, p_is_internal,
                  v_has_owner, v_has_location, v_has_parent, v_has_root,
                  v_has_created_by, v_has_deleted_at, v_has_created_at, v_has_updated_at,
-                 v_has_app_id, v_has_name, v_has_description
+                 v_has_name, v_has_description
              )
     ON CONFLICT (object_type) DO UPDATE SET
                                             is_internal = EXCLUDED.is_internal,
@@ -395,7 +352,6 @@ BEGIN
                                             has_sa_deleted_at = EXCLUDED.has_sa_deleted_at,
                                             has_sa_created_at = EXCLUDED.has_sa_created_at,
                                             has_sa_updated_at = EXCLUDED.has_sa_updated_at,
-                                            has_app_id = EXCLUDED.has_app_id,
                                             has_name = EXCLUDED.has_name,
                                             has_description = EXCLUDED.has_description,
                                             sa_updated_at = now();

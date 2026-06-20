@@ -579,6 +579,8 @@ type UpdateQuery struct {
 	accessClaim *AccessClaim
 	recordID    uuid.UUID
 	excludes    []string
+	columns     []string
+	omitZero    bool
 	returns     string
 	setCols     []conflictSet
 	whereExpr   []conflictSet
@@ -613,6 +615,16 @@ func (q *UpdateQuery) ExcludeColumn(cols ...string) *UpdateQuery {
 	return q
 }
 
+func (q *UpdateQuery) Column(cols ...string) *UpdateQuery {
+	q.columns = append(q.columns, cols...)
+	return q
+}
+
+func (q *UpdateQuery) OmitZero() *UpdateQuery {
+	q.omitZero = true
+	return q
+}
+
 func (q *UpdateQuery) Set(expr string, args ...any) *UpdateQuery {
 	q.setCols = append(q.setCols, conflictSet{expr: expr, args: args})
 	return q
@@ -632,6 +644,12 @@ func (q *UpdateQuery) buildBun() *bun.UpdateQuery {
 	bq := q.db.DB.NewUpdate().Model(q.model)
 	if len(q.excludes) > 0 {
 		bq = bq.ExcludeColumn(q.excludes...)
+	}
+	if len(q.columns) > 0 {
+		bq = bq.Column(q.columns...)
+	}
+	if q.omitZero {
+		bq = bq.OmitZero()
 	}
 	if q.returns != "" {
 		bq = bq.Returning(q.returns)

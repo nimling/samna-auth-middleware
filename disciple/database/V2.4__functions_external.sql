@@ -2297,10 +2297,9 @@ BEGIN
     EXECUTE 'REVOKE EXECUTE ON FUNCTION claimius.create_claim, claimius.update_claim, claimius.remove_claim,
              claimius.assign_claim_user, claimius.update_claim_user, claimius.remove_user_claim,
              claimius.assign_claim_object, claimius.update_claim_object, claimius.remove_claim_object,
-             claimius.merge_user, claimius.migrate_root,
-             claimius.init_prophet, claimius.init_disciple, claimius.init_hybrid,
-             claimius.init_claimius_tables, claimius.init_claimius_internal,
-             claimius.recompute_state
+             claimius.migrate_root,
+             claimius.init_disciple,
+             claimius.init_claimius_tables, claimius.init_claimius_internal
              FROM claimius_reader';
 
     -- Writer: EXECUTE on everything, plus INSERT/UPDATE on tables that do
@@ -2328,10 +2327,9 @@ BEGIN
     EXECUTE 'REVOKE EXECUTE ON FUNCTION claimius.create_claim, claimius.update_claim, claimius.remove_claim,
              claimius.assign_claim_user, claimius.update_claim_user, claimius.remove_user_claim,
              claimius.assign_claim_object, claimius.update_claim_object, claimius.remove_claim_object,
-             claimius.merge_user, claimius.migrate_root,
-             claimius.init_prophet, claimius.init_disciple, claimius.init_hybrid,
-             claimius.init_claimius_tables, claimius.init_claimius_internal,
-             claimius.recompute_state
+             claimius.migrate_root,
+             claimius.init_disciple,
+             claimius.init_claimius_tables, claimius.init_claimius_internal
              FROM claimius_reader';
     EXECUTE 'GRANT INSERT, UPDATE, DELETE ON claimius.user_object, claimius.object_users, claimius.user_users,
              claimius.disciple_state, claimius.samna_user, claimius.samna_client,
