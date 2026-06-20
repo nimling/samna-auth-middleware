@@ -93,7 +93,6 @@ func (d *DB) insertOrganization(ctx context.Context, ac *AccessClaim, org *Organ
 		}
 		if _, err := tx.NewRaw(`
 			SELECT claimius.assign_claim_object(
-				p_app_id        := claimius.get_app_id(),
 				p_claim_id      := ?,
 				p_sa_owner_id   := ?,
 				p_sa_root_id    := ?,
