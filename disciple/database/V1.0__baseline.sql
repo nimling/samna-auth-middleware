@@ -144,7 +144,6 @@ CREATE TABLE IF NOT EXISTS claimius.samna_user (
 
 COMMENT ON TABLE claimius.samna_user IS 'User record. One row per (user_id) pair.';
 COMMENT ON COLUMN claimius.samna_user.user_id IS 'Stable application identifier across apps. Used in all references.';
-COMMENT ON COLUMN claimius.samna_user.app_id IS 'Required app scope. Disciples only hold rows for their own app.';
 COMMENT ON COLUMN claimius.samna_user.user_name IS 'Optional display username, distinct from first_name/last_name.';
 COMMENT ON COLUMN claimius.samna_user.user_image IS 'Optional user image. URL, string, or id that the implementing system recognizes.';
 

@@ -532,19 +532,19 @@ $$ LANGUAGE plpgsql;
 COMMENT ON FUNCTION claimius.get_users(UUID, INTEGER) IS
     'Users the calling user can see in this app whose resolved access covers p_required_access. Resolution merges self (0x2F), member co-visibility via user_users (0x24), and direct claim_object on claimius.samna_user.';
 
-GRANT EXECUTE ON FUNCTION claimius.get_access(UUID, UUID, UUID, TEXT, INTEGER)
+GRANT EXECUTE ON FUNCTION claimius.get_access(UUID, UUID, TEXT, INTEGER)
     TO claimius_disciple_client, claimius_writer, claimius_admin, claimius_reader;
 
-GRANT EXECUTE ON FUNCTION claimius.get_direct_access(UUID, UUID, UUID, TEXT)
+GRANT EXECUTE ON FUNCTION claimius.get_direct_access(UUID, UUID, TEXT)
     TO claimius_disciple_client, claimius_writer, claimius_admin, claimius_reader;
 
-GRANT EXECUTE ON FUNCTION claimius.get_objects(UUID, UUID, TEXT, INTEGER)
+GRANT EXECUTE ON FUNCTION claimius.get_objects(UUID, TEXT, INTEGER)
     TO claimius_disciple_client, claimius_writer, claimius_admin, claimius_reader;
 
-GRANT EXECUTE ON FUNCTION claimius.get_user_access(UUID, UUID, UUID, INTEGER)
+GRANT EXECUTE ON FUNCTION claimius.get_user_access(UUID, UUID, INTEGER)
     TO claimius_disciple_client, claimius_writer, claimius_admin, claimius_reader;
 
-GRANT EXECUTE ON FUNCTION claimius.get_users(UUID, UUID, INTEGER)
+GRANT EXECUTE ON FUNCTION claimius.get_users(UUID, INTEGER)
     TO claimius_disciple_client, claimius_writer, claimius_admin, claimius_reader;
 
 -- ----------------------------------------------------------------------------
@@ -2212,7 +2212,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius.create_root_organization(UUID, TEXT, UUID, TEXT, TEXT, UUID, TEXT) IS 'Creates a new root organization with self referencing sa_owner_id and sa_root_id. Idempotent on (name).';
+COMMENT ON FUNCTION claimius.create_root_organization(TEXT, UUID, TEXT, TEXT, UUID, TEXT) IS 'Creates a new root organization with self referencing sa_owner_id and sa_root_id. Idempotent on (name).';
 
 -- ----------------------------------------------------------------------------
 -- init_prophet
@@ -2926,7 +2926,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql STABLE;
 
-GRANT EXECUTE ON FUNCTION claimius.get_graph_objects(UUID, UUID, INTEGER, TEXT[], TEXT[], UUID[], BOOLEAN, BOOLEAN) TO claimius_reader, claimius_writer, claimius_admin;
+GRANT EXECUTE ON FUNCTION claimius.get_graph_objects(UUID, INTEGER, TEXT[], TEXT[], UUID[], BOOLEAN, BOOLEAN) TO claimius_reader, claimius_writer, claimius_admin;
 
 DROP FUNCTION IF EXISTS claimius.get_graph_links_owner(UUID, UUID, INTEGER, TEXT[], TEXT[], UUID, INTEGER);
 
@@ -3020,7 +3020,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql STABLE;
 
-GRANT EXECUTE ON FUNCTION claimius.get_graph_links_owner(UUID, UUID, INTEGER, TEXT[], TEXT[], UUID, INTEGER) TO claimius_reader, claimius_writer, claimius_admin;
+GRANT EXECUTE ON FUNCTION claimius.get_graph_links_owner(UUID, INTEGER, TEXT[], TEXT[], UUID, INTEGER) TO claimius_reader, claimius_writer, claimius_admin;
 
 DROP FUNCTION IF EXISTS claimius.get_graph_links_claim(UUID, UUID, INTEGER, TEXT[], TEXT[], UUID, INTEGER);
 
@@ -3197,7 +3197,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql STABLE;
 
-GRANT EXECUTE ON FUNCTION claimius.get_graph_links_claim(UUID, UUID, INTEGER, TEXT[], TEXT[], UUID, INTEGER) TO claimius_reader, claimius_writer, claimius_admin;
+GRANT EXECUTE ON FUNCTION claimius.get_graph_links_claim(UUID, INTEGER, TEXT[], TEXT[], UUID, INTEGER) TO claimius_reader, claimius_writer, claimius_admin;
 
 DROP FUNCTION IF EXISTS claimius.create_organization_user(UUID, UUID, UUID, JSONB);
 DROP FUNCTION IF EXISTS claimius.create_organization_user(UUID, UUID, UUID, JSONB, BOOLEAN);
@@ -3421,7 +3421,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius.create_organization_user(UUID, UUID, JSONB, BOOLEAN) IS
+COMMENT ON FUNCTION claimius.create_organization_user(UUID, UUID, UUID, JSONB, BOOLEAN) IS
     'Disciple side: insert or upsert a samna_user, ensure the supplied claim is granted to the user, ensure a per-user virtual claim with full access is bound to the user, and when p_caller_uc is not null ensure that virtual claim is granted to the caller. p_caller_uc may be null for system-bootstrap callers that have no authenticating user_claim yet; in that case sa_created_by is stamped null and the caller_user_claim grant is skipped. With p_upsert=FALSE default, raises 23505 when user_id or external_id already exists in the app scope. With p_upsert=TRUE, conflicts on user_id and app_id update the row and downstream grants are reused when present. Returns samna_user, user_claim, virtual_claim, claim_object, caller_user_claim.';
 
 GRANT EXECUTE ON FUNCTION claimius.create_organization_user(UUID, UUID, UUID, JSONB, BOOLEAN)

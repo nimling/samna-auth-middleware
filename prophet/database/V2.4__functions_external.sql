@@ -3893,10 +3893,10 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius.create_organization_user(UUID, UUID, JSONB, BOOLEAN) IS
+COMMENT ON FUNCTION claimius.create_organization_user(UUID, UUID, UUID, JSONB, BOOLEAN) IS
     'Disciple side: insert or upsert a samna_user, ensure the supplied claim is granted to the user, ensure a per-user virtual claim with full access is bound to the user, and when p_caller_uc is not null ensure that virtual claim is granted to the caller. p_caller_uc may be null for system-bootstrap callers that have no authenticating user_claim yet; in that case sa_created_by is stamped null and the caller_user_claim grant is skipped. With p_upsert=FALSE default, raises 23505 when user_id or external_id already exists in the app scope. With p_upsert=TRUE, conflicts on user_id and app_id update the row and downstream grants are reused when present. Returns samna_user, user_claim, virtual_claim, claim_object, caller_user_claim.';
 
-GRANT EXECUTE ON FUNCTION claimius.create_organization_user(UUID, UUID, JSONB, BOOLEAN)
+GRANT EXECUTE ON FUNCTION claimius.create_organization_user(UUID, UUID, UUID, JSONB, BOOLEAN)
     TO claimius_disciple_client, claimius_writer, claimius_admin;
 
 ALTER TABLE claimius.user_token ALTER COLUMN app_id SET DEFAULT claimius.get_disciple_app_id();
