@@ -167,6 +167,54 @@ DROP TRIGGER IF EXISTS tg_emit_sync_event ON claimius.user_users;
 CREATE TRIGGER tg_emit_sync_event AFTER INSERT OR UPDATE OR DELETE ON claimius.user_users
     FOR EACH ROW EXECUTE FUNCTION claimius.emit_sync_event();
 
+DROP TRIGGER IF EXISTS tg_emit_sync_event ON claimius.samna_app;
+CREATE TRIGGER tg_emit_sync_event AFTER INSERT OR UPDATE OR DELETE ON claimius.samna_app
+    FOR EACH ROW EXECUTE FUNCTION claimius.emit_sync_event();
+
+DROP TRIGGER IF EXISTS tg_emit_sync_event ON claimius.samna_user;
+CREATE TRIGGER tg_emit_sync_event AFTER INSERT OR UPDATE OR DELETE ON claimius.samna_user
+    FOR EACH ROW EXECUTE FUNCTION claimius.emit_sync_event();
+
+DROP TRIGGER IF EXISTS tg_emit_sync_event ON claimius.samna_client;
+CREATE TRIGGER tg_emit_sync_event AFTER INSERT OR UPDATE OR DELETE ON claimius.samna_client
+    FOR EACH ROW EXECUTE FUNCTION claimius.emit_sync_event();
+
+DROP TRIGGER IF EXISTS tg_emit_sync_event ON claimius.samna_secret;
+CREATE TRIGGER tg_emit_sync_event AFTER INSERT OR UPDATE OR DELETE ON claimius.samna_secret
+    FOR EACH ROW EXECUTE FUNCTION claimius.emit_sync_event();
+
+DROP TRIGGER IF EXISTS tg_emit_sync_event ON claimius.organization;
+CREATE TRIGGER tg_emit_sync_event AFTER INSERT OR UPDATE OR DELETE ON claimius.organization
+    FOR EACH ROW EXECUTE FUNCTION claimius.emit_sync_event();
+
+DROP TRIGGER IF EXISTS tg_emit_sync_event ON claimius.location;
+CREATE TRIGGER tg_emit_sync_event AFTER INSERT OR UPDATE OR DELETE ON claimius.location
+    FOR EACH ROW EXECUTE FUNCTION claimius.emit_sync_event();
+
+DROP TRIGGER IF EXISTS tg_emit_sync_event ON claimius.claim;
+CREATE TRIGGER tg_emit_sync_event AFTER INSERT OR UPDATE OR DELETE ON claimius.claim
+    FOR EACH ROW EXECUTE FUNCTION claimius.emit_sync_event();
+
+DROP TRIGGER IF EXISTS tg_emit_sync_event ON claimius.user_claim;
+CREATE TRIGGER tg_emit_sync_event AFTER INSERT OR UPDATE OR DELETE ON claimius.user_claim
+    FOR EACH ROW EXECUTE FUNCTION claimius.emit_sync_event();
+
+DROP TRIGGER IF EXISTS tg_emit_sync_event ON claimius.claim_object;
+CREATE TRIGGER tg_emit_sync_event AFTER INSERT OR UPDATE OR DELETE ON claimius.claim_object
+    FOR EACH ROW EXECUTE FUNCTION claimius.emit_sync_event();
+
+DROP TRIGGER IF EXISTS tg_emit_sync_event ON claimius.object_field;
+CREATE TRIGGER tg_emit_sync_event AFTER INSERT OR UPDATE OR DELETE ON claimius.object_field
+    FOR EACH ROW EXECUTE FUNCTION claimius.emit_sync_event();
+
+DROP TRIGGER IF EXISTS tg_emit_sync_event ON claimius.user_field;
+CREATE TRIGGER tg_emit_sync_event AFTER INSERT OR UPDATE OR DELETE ON claimius.user_field
+    FOR EACH ROW EXECUTE FUNCTION claimius.emit_sync_event();
+
+DROP TRIGGER IF EXISTS tg_emit_sync_event ON claimius.user_relation;
+CREATE TRIGGER tg_emit_sync_event AFTER INSERT OR UPDATE OR DELETE ON claimius.user_relation
+    FOR EACH ROW EXECUTE FUNCTION claimius.emit_sync_event();
+
 -- ----------------------------------------------------------------------------
 -- Self root triggers: BEFORE INSERT, set self referencing root values when
 -- callers haven't supplied them. Applies to organization and location.
