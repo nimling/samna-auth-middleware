@@ -121,33 +121,14 @@ func (d *DB) InsertRootOrganization(ctx context.Context, ac *AccessClaim, org *O
 	if ac == nil || ac.UserClaimID == nil {
 		return nil, ErrNoAccess
 	}
-	org.ID = uuid.New()
-	org.OwnerID = org.ID
-	org.RootID = org.ID
 	org.CreatedBy = *ac.UserClaimID
 	org.Level = 0
-	if err := d.NewInsert().Model(org).With(ac).Scan(ctx, org); err != nil {
-		return nil, err
-	}
-	return org, nil
-}
-
-func (d *DB) updateOrganization(ctx context.Context, ac *AccessClaim, orgID uuid.UUID, org *Organization) (*Organization, error) {
-	if ac == nil {
-		return nil, ErrNoAccess
-	}
-	q := d.DB.NewUpdate().
+	if _, err := d.DB.NewInsert().
 		Model(org).
-		Where("id = ?", orgID).
-		Where("sa_deleted_at IS NULL").
-		ExcludeColumn("id", "app_id", "sa_owner_id", "sa_root_id", "sa_created_by", "provider_id", "sa_created_at", "sa_updated_at", "sa_deleted_at").
-		OmitZero().
-		Returning("*")
-	for _, column := range org.PatchNulls() {
-		q = q.Set("? = NULL", bun.Ident(column))
-	}
-	_, err := q.Exec(ctx, org)
-	if err != nil {
+		ExcludeColumn("id", "sa_owner_id", "sa_root_id", "sa_created_at", "sa_updated_at", "sa_deleted_at").
+		Value("app_id", "claimius.get_disciple_app_id()").
+		Returning("*").
+		Exec(ctx, org); err != nil {
 		return nil, err
 	}
 	return org, nil

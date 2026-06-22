@@ -117,27 +117,6 @@ func (d *DB) insertLocation(ctx context.Context, ac *AccessClaim, loc *Location)
 	return loc, nil
 }
 
-func (d *DB) updateLocation(ctx context.Context, ac *AccessClaim, locationID uuid.UUID, loc *Location) (*Location, error) {
-	if ac == nil {
-		return nil, ErrNoAccess
-	}
-	q := d.DB.NewUpdate().
-		Model(loc).
-		Where("id = ?", locationID).
-		Where("sa_deleted_at IS NULL").
-		ExcludeColumn("id", "app_id", "sa_owner_id", "sa_root_id", "sa_parent_id", "sa_created_by", "provider_id", "sa_created_at", "sa_updated_at", "sa_deleted_at").
-		OmitZero().
-		Returning("*")
-	for _, column := range loc.PatchNulls() {
-		q = q.Set("? = NULL", bun.Ident(column))
-	}
-	_, err := q.Exec(ctx, loc)
-	if err != nil {
-		return nil, err
-	}
-	return loc, nil
-}
-
 func (d *DB) deleteLocation(ctx context.Context, ac *AccessClaim, locationID uuid.UUID) (*Location, error) {
 	if ac == nil {
 		return nil, ErrNoAccess

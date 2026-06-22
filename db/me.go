@@ -33,7 +33,16 @@ func (d *DB) UpdateMe(ctx echo.Context, user *SamnaUser) (*SamnaUser, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := d.NewUpdate().Model(user).With(ac).ID(userID).Scan(ctx.Request().Context(), user); err != nil {
+	if err := d.NewUpdate().
+		Model(user).
+		With(ac).
+		Where("user_id = ?", userID).
+		Where("samna_user.app_id = claimius.get_disciple_app_id()").
+		Where("samna_user.sa_deleted_at IS NULL").
+		ExcludeColumn("id", "user_id", "app_id", "type", "sa_created_at", "sa_updated_at", "sa_deleted_at").
+		OmitZero().
+		Returning("*").
+		Scan(ctx.Request().Context(), user); err != nil {
 		return nil, err
 	}
 	return user, nil

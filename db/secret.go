@@ -101,49 +101,6 @@ func (d *DB) insertSecret(ctx context.Context, ac *AccessClaim, body BodySecret)
 	return &secret, nil
 }
 
-func (d *DB) updateSecret(ctx context.Context, ac *AccessClaim, secretID uuid.UUID, body BodySecret) (*SamnaSecret, error) {
-	if ac == nil {
-		return nil, ErrNoAccess
-	}
-	secret, err := d.GetSecret(ctx, secretID)
-	if err != nil {
-		return nil, err
-	}
-	if body.Key != nil {
-		secret.Key = *body.Key
-	}
-	if body.Value != nil {
-		app, err := d.GetApp(ctx)
-		if err != nil {
-			return nil, err
-		}
-		seed, err := hex.DecodeString(app.PrivateSeed)
-		if err != nil {
-			return nil, fmt.Errorf("decode app seed: %w", err)
-		}
-		encrypted, err := aesEncrypt(*body.Value, seed)
-		if err != nil {
-			return nil, fmt.Errorf("encrypt: %w", err)
-		}
-		secret.Value = hex.EncodeToString(encrypted)
-	}
-	if body.ExpiresAt != nil {
-		secret.ExpiresAt = body.ExpiresAt
-	}
-	_, err = d.DB.NewUpdate().
-		Model(secret).
-		Where("sa_deleted_at IS NULL").
-		Where("id = ?", secretID).
-		OmitZero().
-		ExcludeColumn("app_id").
-		Returning("*").
-		Exec(ctx, secret)
-	if err != nil {
-		return nil, fmt.Errorf("update secret: %w", err)
-	}
-	return secret, nil
-}
-
 func (d *DB) deleteSecret(ctx context.Context, ac *AccessClaim, secretID uuid.UUID) (*SamnaSecret, error) {
 	if ac == nil {
 		return nil, ErrNoAccess

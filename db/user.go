@@ -162,49 +162,6 @@ func (d *DB) insertRelation(ctx context.Context, ac *AccessClaim, relation *User
 	return relation, nil
 }
 
-func (d *DB) updateRelation(ctx context.Context, ac *AccessClaim, relationID uuid.UUID, relation *UserRelation) (*UserRelation, error) {
-	if ac == nil {
-		return nil, ErrNoAccess
-	}
-	q := d.DB.NewUpdate().
-		Model(relation).
-		Where("id = ?", relationID).
-		Where("sa_deleted_at IS NULL").
-		ExcludeColumn("id", "app_id", "user_id", "sa_created_at", "sa_updated_at", "sa_deleted_at").
-		OmitZero().
-		Returning("*")
-	for _, column := range relation.PatchNulls() {
-		q = q.Set("? = NULL", bun.Ident(column))
-	}
-	_, err := q.Exec(ctx, relation)
-	if err != nil {
-		return nil, err
-	}
-	return relation, nil
-}
-
-func (d *DB) deleteRelation(ctx context.Context, ac *AccessClaim, userID, relationID uuid.UUID) (*UserRelation, error) {
-	if ac == nil {
-		return nil, ErrNoAccess
-	}
-	var relation UserRelation
-	_, err := d.DB.NewUpdate().
-		Model(&relation).
-		Where("id = ?", relationID).
-		Where("user_id = ?", userID).
-		Where("sa_deleted_at IS NULL").
-		Set("sa_deleted_at = NOW()").
-		Returning("*").
-		Exec(ctx, &relation)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, ErrNoAccess
-		}
-		return nil, err
-	}
-	return &relation, nil
-}
-
 func (d *DB) InsertUser(ctx context.Context, in *SamnaUser) (*SamnaUser, error) {
 	var payload []byte
 	err := d.NewRaw(`
@@ -218,28 +175,6 @@ func (d *DB) InsertUser(ctx context.Context, in *SamnaUser) (*SamnaUser, error) 
 		return nil, err
 	}
 	return &out, nil
-}
-
-func (d *DB) updateUser(ctx context.Context, ac *AccessClaim, userID uuid.UUID, user *SamnaUser) (*SamnaUser, error) {
-	if ac == nil {
-		return nil, ErrNoAccess
-	}
-	q := d.DB.NewUpdate().
-		Model(user).
-		Where("user_id = ?", userID).
-		Where("sa_deleted_at IS NULL").
-		ExcludeColumn("id", "user_id", "app_id", "type", "sa_created_at", "sa_updated_at", "sa_deleted_at").
-		Value("app_id", "claimius.get_disciple_app_id()").
-		OmitZero().
-		Returning("*")
-	for _, column := range user.PatchNulls() {
-		q = q.Set("? = NULL", bun.Ident(column))
-	}
-	_, err := q.Exec(ctx, user)
-	if err != nil {
-		return nil, err
-	}
-	return user, nil
 }
 
 func (d *DB) DeleteUser(ctx context.Context, ac *AccessClaim, userID uuid.UUID) (*SamnaUser, error) {
@@ -399,7 +334,7 @@ func (d *DB) callCreateOrganizationUser(ctx context.Context, idb bun.IDB, ac *Ac
 	return &result, nil
 }
 
-func (d *DB) IssueUserToken(ctx context.Context, ac *AccessClaim, payload SamnaUserToken) (*SamnaUser, bool, error) {
+func (d *DB) UpsertUserToken(ctx context.Context, ac *AccessClaim, payload SamnaUserToken) (*SamnaUser, bool, error) {
 	if ac == nil || ac.UserClaimID == nil || ac.ClaimID == nil {
 		return nil, false, ErrNoAccess
 	}
@@ -608,4 +543,3 @@ func (d *DB) UpsertUserExternal(ctx context.Context, ac *AccessClaim, payload Sa
 	}
 	return result.SamnaUser, created, nil
 }
-

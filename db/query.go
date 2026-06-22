@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"reflect"
@@ -103,53 +104,6 @@ func ObjectWhere(userID uuid.UUID, objectType string, requiredAccess ClaimAccess
 	)
 }
 
-func ApplyWithAccess(userID uuid.UUID, objectType string, requiredAccess ClaimAccess) func(*bun.SelectQuery) *bun.SelectQuery {
-	parts := strings.SplitN(objectType, ".", 2)
-	table := parts[len(parts)-1]
-	join := fmt.Sprintf(
-		`JOIN claimius.get_objects('%[1]s', claimius.get_disciple_app_id(), '%[2]s', %[3]d) ga ON ga.object_id = %[4]s.id`,
-		userID, objectType, requiredAccess, table,
-	)
-	return func(q *bun.SelectQuery) *bun.SelectQuery {
-		return q.
-			Join(join).
-			ColumnExpr("?TableAlias.*").
-			ColumnExpr("ga.user_claim_id AS access_user_claim_id").
-			ColumnExpr("ga.claim_id AS access_claim_id").
-			ColumnExpr("ga.claim_name AS access_claim_name").
-			ColumnExpr("ga.sa_access AS access_sa_access").
-			ColumnExpr("ga.scope AS access_scope").
-			ColumnExpr("ga.sa_owner_id AS access_sa_owner_id").
-			ColumnExpr("ga.sa_root_id AS access_sa_root_id").
-			ColumnExpr("ga.sa_location_id AS access_sa_location_id").
-			ColumnExpr("ga.direct_grant AS access_direct_grant")
-	}
-}
-
-func ApplyWithCreator(objectType string) func(*bun.SelectQuery) *bun.SelectQuery {
-	parts := strings.SplitN(objectType, ".", 2)
-	table := parts[len(parts)-1]
-	creatorJoin := fmt.Sprintf(`LEFT JOIN claimius.user_claim AS creator_uc ON creator_uc.id = %s.sa_created_by`, table)
-	return func(q *bun.SelectQuery) *bun.SelectQuery {
-		return q.
-			ColumnExpr("?TableAlias.*").
-			Join(creatorJoin).
-			Join(`LEFT JOIN claimius.samna_user AS creator_su ON creator_su.user_id = creator_uc.user_id AND creator_su.app_id = claimius.get_disciple_app_id()`).
-			ColumnExpr("creator_su.id AS creator_id").
-			ColumnExpr("creator_su.user_id AS creator_user_id").
-			ColumnExpr("creator_su.first_name AS creator_first_name").
-			ColumnExpr("creator_su.last_name AS creator_last_name").
-			ColumnExpr("creator_su.user_name AS creator_user_name").
-			ColumnExpr("creator_su.user_image AS creator_user_image").
-			ColumnExpr("creator_su.phone AS creator_phone").
-			ColumnExpr("creator_su.email AS creator_email").
-			ColumnExpr("creator_su.external_id AS creator_external_id").
-			ColumnExpr("creator_su.status AS creator_status").
-			ColumnExpr("creator_su.sa_created_at AS creator_created_at").
-			ColumnExpr("creator_su.sa_updated_at AS creator_updated_at")
-	}
-}
-
 func AuditWhere(userID uuid.UUID, requiredAccess ClaimAccess) string {
 	return fmt.Sprintf(
 		`audit.id IN (SELECT id FROM claimius.get_audit('%[1]s', claimius.get_disciple_app_id(), %[2]d))`,
@@ -173,7 +127,7 @@ var endpointSpecs = map[ObjectType]endpointSpec{
 	OBJECT_TYPE_SAMNA_SECRET: {base: "secret"},
 }
 
-func endpointFor(model any, recordID uuid.UUID) (string, error) {
+func endpointFor(model any) (string, error) {
 	otype, err := ObjectTypeOf(model)
 	if err != nil {
 		return "", err
@@ -191,10 +145,44 @@ func endpointFor(model any, recordID uuid.UUID) (string, error) {
 		parts = append(parts, p, pid.String())
 	}
 	parts = append(parts, spec.base)
-	if recordID != uuid.Nil {
-		parts = append(parts, recordID.String())
+	if baseID := baseIDFromModel(model, otype); baseID != uuid.Nil {
+		parts = append(parts, baseID.String())
 	}
 	return strings.Join(parts, "/"), nil
+}
+
+func baseIDFromModel(model any, otype ObjectType) uuid.UUID {
+	switch otype {
+	case OBJECT_TYPE_CLAIM:
+		if m, ok := embeddedPtr(model, reflect.TypeOf(Claim{})).(*Claim); ok && m != nil {
+			return m.ID
+		}
+	case OBJECT_TYPE_CLAIM_OBJECT:
+		if m, ok := embeddedPtr(model, reflect.TypeOf(ClaimObject{})).(*ClaimObject); ok && m != nil && m.ObjectID != nil {
+			return *m.ObjectID
+		}
+	case OBJECT_TYPE_USER_CLAIM:
+		if m, ok := embeddedPtr(model, reflect.TypeOf(UserClaim{})).(*UserClaim); ok && m != nil {
+			return m.UserID
+		}
+	case OBJECT_TYPE_USER:
+		if m, ok := embeddedPtr(model, reflect.TypeOf(SamnaUser{})).(*SamnaUser); ok && m != nil {
+			return m.UserID
+		}
+	case OBJECT_TYPE_ORGANIZATION:
+		if m, ok := embeddedPtr(model, reflect.TypeOf(Organization{})).(*Organization); ok && m != nil {
+			return m.ID
+		}
+	case OBJECT_TYPE_LOCATION:
+		if m, ok := embeddedPtr(model, reflect.TypeOf(Location{})).(*Location); ok && m != nil {
+			return m.ID
+		}
+	case OBJECT_TYPE_SAMNA_SECRET:
+		if m, ok := embeddedPtr(model, reflect.TypeOf(SamnaSecret{})).(*SamnaSecret); ok && m != nil {
+			return m.ID
+		}
+	}
+	return uuid.Nil
 }
 
 func parentIDFromModel(model any, parent string) (uuid.UUID, error) {
@@ -226,29 +214,6 @@ func parentIDFromModel(model any, parent string) (uuid.UUID, error) {
 type conflictSet struct {
 	expr string
 	args []any
-}
-
-func whereID(expr string, args []any) (uuid.UUID, bool) {
-	clean := strings.ToLower(strings.TrimSpace(expr))
-	if !strings.HasPrefix(clean, "id =") && !strings.HasPrefix(clean, "user_id =") {
-		return uuid.Nil, false
-	}
-	if len(args) == 0 {
-		return uuid.Nil, false
-	}
-	switch v := args[0].(type) {
-	case uuid.UUID:
-		return v, true
-	case *uuid.UUID:
-		if v != nil {
-			return *v, true
-		}
-	case string:
-		if parsed, err := uuid.Parse(v); err == nil {
-			return parsed, true
-		}
-	}
-	return uuid.Nil, false
 }
 
 func dispatchScan(src any, dest ...any) error {
@@ -406,7 +371,7 @@ func (q *InsertQuery) execClaimius(ctx context.Context, dest ...any) (bool, erro
 		*m = *result
 		return true, dispatchScan(q.model, dest...)
 	case "claimius.user_token":
-		return true, fmt.Errorf("user_token creation reserved; use IssueUserToken")
+		return true, fmt.Errorf("user_token creation reserved; use UpsertUserToken")
 	case "claimius.organization":
 		m, ok := embeddedPtr(q.model, reflect.TypeOf(Organization{})).(*Organization)
 		if !ok {
@@ -457,7 +422,7 @@ func (q *InsertQuery) execClaimius(ctx context.Context, dest ...any) (bool, erro
 }
 
 func (q *InsertQuery) execHTTP(ctx context.Context, dest ...any) (sql.Result, error) {
-	path, err := endpointFor(q.model, uuid.Nil)
+	path, err := endpointFor(q.model)
 	if err != nil {
 		return nil, err
 	}
@@ -577,8 +542,9 @@ type UpdateQuery struct {
 	db          *DB
 	model       any
 	accessClaim *AccessClaim
-	recordID    uuid.UUID
 	excludes    []string
+	columns     []string
+	omitZero    bool
 	returns     string
 	setCols     []conflictSet
 	whereExpr   []conflictSet
@@ -598,11 +564,6 @@ func (q *UpdateQuery) With(ac *AccessClaim) *UpdateQuery {
 	return q
 }
 
-func (q *UpdateQuery) ID(id uuid.UUID) *UpdateQuery {
-	q.recordID = id
-	return q
-}
-
 func (q *UpdateQuery) Returning(s string) *UpdateQuery {
 	q.returns = s
 	return q
@@ -613,6 +574,16 @@ func (q *UpdateQuery) ExcludeColumn(cols ...string) *UpdateQuery {
 	return q
 }
 
+func (q *UpdateQuery) Column(cols ...string) *UpdateQuery {
+	q.columns = append(q.columns, cols...)
+	return q
+}
+
+func (q *UpdateQuery) OmitZero() *UpdateQuery {
+	q.omitZero = true
+	return q
+}
+
 func (q *UpdateQuery) Set(expr string, args ...any) *UpdateQuery {
 	q.setCols = append(q.setCols, conflictSet{expr: expr, args: args})
 	return q
@@ -620,11 +591,6 @@ func (q *UpdateQuery) Set(expr string, args ...any) *UpdateQuery {
 
 func (q *UpdateQuery) Where(expr string, args ...any) *UpdateQuery {
 	q.whereExpr = append(q.whereExpr, conflictSet{expr: expr, args: args})
-	if q.recordID == uuid.Nil {
-		if id, ok := whereID(expr, args); ok {
-			q.recordID = id
-		}
-	}
 	return q
 }
 
@@ -632,6 +598,12 @@ func (q *UpdateQuery) buildBun() *bun.UpdateQuery {
 	bq := q.db.DB.NewUpdate().Model(q.model)
 	if len(q.excludes) > 0 {
 		bq = bq.ExcludeColumn(q.excludes...)
+	}
+	if len(q.columns) > 0 {
+		bq = bq.Column(q.columns...)
+	}
+	if q.omitZero {
+		bq = bq.OmitZero()
 	}
 	if q.returns != "" {
 		bq = bq.Returning(q.returns)
@@ -667,86 +639,75 @@ func (q *UpdateQuery) Scan(ctx context.Context, dest ...any) error {
 }
 
 func (q *UpdateQuery) execClaimius(ctx context.Context, dest ...any) (bool, error) {
-	if q.recordID == uuid.Nil {
-		return false, nil
-	}
 	switch modelTableName(q.db, q.model) {
 	case "claimius.claim":
 		m, ok := embeddedPtr(q.model, reflect.TypeOf(Claim{})).(*Claim)
 		if !ok {
 			return false, nil
 		}
-		result, err := q.db.updateClaim(ctx, q.accessClaim, q.recordID, m)
-		if err != nil {
-			return true, err
+		if m.ID == uuid.Nil {
+			return true, fmt.Errorf("update claim: id required on model")
 		}
-		*m = *result
-		return true, dispatchScan(q.model, dest...)
-	case "claimius.samna_user":
-		m, ok := embeddedPtr(q.model, reflect.TypeOf(SamnaUser{})).(*SamnaUser)
-		if !ok {
-			return false, nil
-		}
-		result, err := q.db.updateUser(ctx, q.accessClaim, q.recordID, m)
-		if err != nil {
-			return true, err
-		}
-		*m = *result
-		return true, dispatchScan(q.model, dest...)
-	case "claimius.organization":
-		m, ok := embeddedPtr(q.model, reflect.TypeOf(Organization{})).(*Organization)
-		if !ok {
-			return false, nil
-		}
-		result, err := q.db.updateOrganization(ctx, q.accessClaim, q.recordID, m)
-		if err != nil {
-			return true, err
-		}
-		*m = *result
-		return true, dispatchScan(q.model, dest...)
-	case "claimius.location":
-		m, ok := embeddedPtr(q.model, reflect.TypeOf(Location{})).(*Location)
-		if !ok {
-			return false, nil
-		}
-		result, err := q.db.updateLocation(ctx, q.accessClaim, q.recordID, m)
-		if err != nil {
-			return true, err
-		}
-		*m = *result
-		return true, dispatchScan(q.model, dest...)
-	case "claimius.user_relation":
-		m, ok := embeddedPtr(q.model, reflect.TypeOf(UserRelation{})).(*UserRelation)
-		if !ok {
-			return false, nil
-		}
-		result, err := q.db.updateRelation(ctx, q.accessClaim, q.recordID, m)
+		result, err := q.db.updateClaim(ctx, q.accessClaim, m.ID, m)
 		if err != nil {
 			return true, err
 		}
 		*m = *result
 		return true, dispatchScan(q.model, dest...)
 	case "claimius.samna_secret":
-		m, ok := embeddedPtr(q.model, reflect.TypeOf(SamnaSecret{})).(*SamnaSecret)
-		if !ok {
-			return false, nil
-		}
-		body := BodySecret{Key: &m.Key, Value: &m.Value, OwnerID: &m.OwnerID, ExpiresAt: m.ExpiresAt}
-		result, err := q.db.updateSecret(ctx, q.accessClaim, q.recordID, body)
-		if err != nil {
+		if err := q.encryptSecretValue(ctx); err != nil {
 			return true, err
 		}
-		*m = *result
+		if err := q.runBunUpdate(ctx); err != nil {
+			return true, err
+		}
+		return true, dispatchScan(q.model, dest...)
+	case "claimius.samna_user", "claimius.organization", "claimius.location", "claimius.user_relation":
+		if err := q.runBunUpdate(ctx); err != nil {
+			return true, err
+		}
 		return true, dispatchScan(q.model, dest...)
 	}
 	return false, nil
 }
 
-func (q *UpdateQuery) execHTTP(ctx context.Context, dest ...any) (sql.Result, error) {
-	if q.recordID == uuid.Nil {
-		return nil, fmt.Errorf("update: record id required (use .ID(id) or .Where(\"id = ?\", id))")
+func (q *UpdateQuery) runBunUpdate(ctx context.Context) error {
+	if q.accessClaim == nil {
+		return ErrNoAccess
 	}
-	path, err := endpointFor(q.model, q.recordID)
+	bq := q.buildBun()
+	if nuller, ok := q.model.(interface{ PatchNulls() []string }); ok {
+		for _, column := range nuller.PatchNulls() {
+			bq = bq.Set("? = NULL", bun.Ident(column))
+		}
+	}
+	_, err := bq.Exec(ctx, q.model)
+	return err
+}
+
+func (q *UpdateQuery) encryptSecretValue(ctx context.Context) error {
+	m, ok := embeddedPtr(q.model, reflect.TypeOf(SamnaSecret{})).(*SamnaSecret)
+	if !ok || m.Value == "" {
+		return nil
+	}
+	app, err := q.db.GetApp(ctx)
+	if err != nil {
+		return err
+	}
+	seed, err := hex.DecodeString(app.PrivateSeed)
+	if err != nil {
+		return fmt.Errorf("decode app seed: %w", err)
+	}
+	encrypted, err := aesEncrypt(m.Value, seed)
+	if err != nil {
+		return fmt.Errorf("encrypt: %w", err)
+	}
+	m.Value = hex.EncodeToString(encrypted)
+	return nil
+}
+
+func (q *UpdateQuery) execHTTP(ctx context.Context, dest ...any) (sql.Result, error) {
+	path, err := endpointFor(q.model)
 	if err != nil {
 		return nil, err
 	}
@@ -787,7 +748,6 @@ type DeleteQuery struct {
 	db          *DB
 	model       any
 	accessClaim *AccessClaim
-	recordID    uuid.UUID
 	whereExpr   []conflictSet
 	returns     string
 }
@@ -806,11 +766,6 @@ func (q *DeleteQuery) With(ac *AccessClaim) *DeleteQuery {
 	return q
 }
 
-func (q *DeleteQuery) ID(id uuid.UUID) *DeleteQuery {
-	q.recordID = id
-	return q
-}
-
 func (q *DeleteQuery) Returning(s string) *DeleteQuery {
 	q.returns = s
 	return q
@@ -818,11 +773,6 @@ func (q *DeleteQuery) Returning(s string) *DeleteQuery {
 
 func (q *DeleteQuery) Where(expr string, args ...any) *DeleteQuery {
 	q.whereExpr = append(q.whereExpr, conflictSet{expr: expr, args: args})
-	if q.recordID == uuid.Nil {
-		if id, ok := whereID(expr, args); ok {
-			q.recordID = id
-		}
-	}
 	return q
 }
 
@@ -859,16 +809,16 @@ func (q *DeleteQuery) Scan(ctx context.Context, dest ...any) error {
 }
 
 func (q *DeleteQuery) execClaimius(ctx context.Context, dest ...any) (bool, error) {
-	if q.recordID == uuid.Nil {
-		return false, nil
-	}
 	switch modelTableName(q.db, q.model) {
 	case "claimius.claim":
 		m, ok := embeddedPtr(q.model, reflect.TypeOf(Claim{})).(*Claim)
 		if !ok {
 			return false, nil
 		}
-		result, err := q.db.deleteClaim(ctx, q.accessClaim, q.recordID)
+		if m.ID == uuid.Nil {
+			return true, fmt.Errorf("delete claim: id required on model")
+		}
+		result, err := q.db.deleteClaim(ctx, q.accessClaim, m.ID)
 		if err != nil {
 			return true, err
 		}
@@ -879,10 +829,10 @@ func (q *DeleteQuery) execClaimius(ctx context.Context, dest ...any) (bool, erro
 		if !ok {
 			return false, nil
 		}
-		if m.ClaimID == uuid.Nil {
-			return true, fmt.Errorf("delete claim_object: claim_id required on model")
+		if m.ClaimID == uuid.Nil || m.ObjectID == nil || *m.ObjectID == uuid.Nil {
+			return true, fmt.Errorf("delete claim_object: claim_id and object_id required on model")
 		}
-		result, err := q.db.deleteClaimObject(ctx, q.accessClaim, m.ClaimID, q.recordID)
+		result, err := q.db.deleteClaimObject(ctx, q.accessClaim, m.ClaimID, *m.ObjectID)
 		if err != nil {
 			return true, err
 		}
@@ -893,10 +843,10 @@ func (q *DeleteQuery) execClaimius(ctx context.Context, dest ...any) (bool, erro
 		if !ok {
 			return false, nil
 		}
-		if m.ClaimID == uuid.Nil {
-			return true, fmt.Errorf("delete user_claim: claim_id required on model")
+		if m.ClaimID == uuid.Nil || m.UserID == uuid.Nil {
+			return true, fmt.Errorf("delete user_claim: claim_id and user_id required on model")
 		}
-		result, err := q.db.deleteClaimUser(ctx, q.accessClaim, m.ClaimID, q.recordID)
+		result, err := q.db.deleteClaimUser(ctx, q.accessClaim, m.ClaimID, m.UserID)
 		if err != nil {
 			return true, err
 		}
@@ -909,7 +859,10 @@ func (q *DeleteQuery) execClaimius(ctx context.Context, dest ...any) (bool, erro
 		if !ok {
 			return false, nil
 		}
-		result, err := q.db.deleteOrganization(ctx, q.accessClaim, q.recordID)
+		if m.ID == uuid.Nil {
+			return true, fmt.Errorf("delete organization: id required on model")
+		}
+		result, err := q.db.deleteOrganization(ctx, q.accessClaim, m.ID)
 		if err != nil {
 			return true, err
 		}
@@ -920,21 +873,10 @@ func (q *DeleteQuery) execClaimius(ctx context.Context, dest ...any) (bool, erro
 		if !ok {
 			return false, nil
 		}
-		result, err := q.db.deleteLocation(ctx, q.accessClaim, q.recordID)
-		if err != nil {
-			return true, err
+		if m.ID == uuid.Nil {
+			return true, fmt.Errorf("delete location: id required on model")
 		}
-		*m = *result
-		return true, dispatchScan(q.model, dest...)
-	case "claimius.user_relation":
-		m, ok := embeddedPtr(q.model, reflect.TypeOf(UserRelation{})).(*UserRelation)
-		if !ok {
-			return false, nil
-		}
-		if m.UserID == uuid.Nil {
-			return true, fmt.Errorf("delete user_relation: user_id required on model")
-		}
-		result, err := q.db.deleteRelation(ctx, q.accessClaim, m.UserID, q.recordID)
+		result, err := q.db.deleteLocation(ctx, q.accessClaim, m.ID)
 		if err != nil {
 			return true, err
 		}
@@ -945,7 +887,10 @@ func (q *DeleteQuery) execClaimius(ctx context.Context, dest ...any) (bool, erro
 		if !ok {
 			return false, nil
 		}
-		result, err := q.db.deleteSecret(ctx, q.accessClaim, q.recordID)
+		if m.ID == uuid.Nil {
+			return true, fmt.Errorf("delete secret: id required on model")
+		}
+		result, err := q.db.deleteSecret(ctx, q.accessClaim, m.ID)
 		if err != nil {
 			return true, err
 		}
@@ -956,10 +901,7 @@ func (q *DeleteQuery) execClaimius(ctx context.Context, dest ...any) (bool, erro
 }
 
 func (q *DeleteQuery) execHTTP(ctx context.Context, dest ...any) (sql.Result, error) {
-	if q.recordID == uuid.Nil {
-		return nil, fmt.Errorf("delete: record id required (use .ID(id) or .Where(\"id = ?\", id))")
-	}
-	path, err := endpointFor(q.model, q.recordID)
+	path, err := endpointFor(q.model)
 	if err != nil {
 		return nil, err
 	}
