@@ -2873,7 +2873,7 @@ $$ LANGUAGE plpgsql;
 
 COMMENT ON FUNCTION claimius.ensure_app_user IS 'Creates per app samna_user row and grants the app default claim. Idempotent.';
 
-DROP FUNCTION IF EXISTS claimius.get_access(UUID, UUID, TEXT, INTEGER);
+DROP FUNCTION IF EXISTS claimius.get_access(UUID, TEXT, INTEGER);
 
 CREATE OR REPLACE FUNCTION claimius.get_owner_descendants(
     p_object_type TEXT,

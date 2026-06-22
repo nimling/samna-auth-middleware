@@ -147,22 +147,18 @@ func overlayUnmarshal(raw map[string]json.RawMessage, v reflect.Value) error {
 		if !field.IsExported() {
 			continue
 		}
-		jsonName, _, _ := tagName(field.Tag.Get("json"))
-		sauthTag := strings.TrimSpace(field.Tag.Get("sauth"))
-		if field.Anonymous && sauthTag == "" && jsonName == "" {
+		bunTag := field.Tag.Get("bun")
+		if field.Anonymous && bunTag == "" {
 			if err := overlayUnmarshal(raw, v.Field(i)); err != nil {
 				return err
 			}
 			continue
 		}
-		if sauthTag == "" {
+		col, _, skip := tagName(bunTag)
+		if skip || col == "" || col == "-" || strings.Contains(bunTag, "rel:") {
 			continue
 		}
-		sauthName, _, skip := tagName(sauthTag)
-		if skip {
-			continue
-		}
-		msg, ok := raw[sauthName]
+		msg, ok := raw[col]
 		if !ok {
 			continue
 		}
@@ -171,7 +167,7 @@ func overlayUnmarshal(raw map[string]json.RawMessage, v reflect.Value) error {
 			continue
 		}
 		if err := json.Unmarshal(msg, fv.Addr().Interface()); err != nil {
-			return fmt.Errorf("sauth.Unmarshal %s: %w", sauthName, err)
+			return fmt.Errorf("sauth.Unmarshal %s: %w", col, err)
 		}
 	}
 	return nil
