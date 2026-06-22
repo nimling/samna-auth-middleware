@@ -411,8 +411,8 @@ COMMENT ON TABLE claimius.user_token IS 'Debug only bridge from JWT identity (ex
 ALTER TABLE claimius.user_token ADD COLUMN IF NOT EXISTS type TEXT NOT NULL DEFAULT 'token';
 COMMENT ON COLUMN claimius.user_token.type IS 'Binding kind: token for JWT derived, external for direct external_id.';
 
-CREATE UNIQUE INDEX IF NOT EXISTS idx_user_token_app_claim_external
-    ON claimius.user_token (app_id, sa_owner_id, id_claim, external_id) WHERE sa_deleted_at IS NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_user_token_app_owner_external
+    ON claimius.user_token (app_id, sa_owner_id, external_id) WHERE sa_deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_user_token_user_id ON claimius.user_token (user_id);
 CREATE INDEX IF NOT EXISTS idx_user_token_app_id ON claimius.user_token (app_id);
 CREATE INDEX IF NOT EXISTS idx_user_token_type ON claimius.user_token (type) WHERE sa_deleted_at IS NULL;
@@ -690,7 +690,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql STABLE;
 
-COMMENT ON FUNCTION claimius.get_prophet_app IS 'Returns the system app row for this deployment (prophet or hybrid). Raises on pure disciple.';
+COMMENT ON FUNCTION claimius.get_prophet_app() IS 'Returns the system app row for this deployment (prophet or hybrid). Raises on pure disciple.';
 
 CREATE OR REPLACE FUNCTION claimius.get_disciple_app()
     RETURNS SETOF claimius.samna_app AS $$
@@ -711,21 +711,21 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql STABLE;
 
-COMMENT ON FUNCTION claimius.get_disciple_app IS 'Returns the upstream prophet app this disciple mirrors. Raises on pure prophet.';
+COMMENT ON FUNCTION claimius.get_disciple_app() IS 'Returns the upstream prophet app this disciple mirrors. Raises on pure prophet.';
 
 CREATE OR REPLACE FUNCTION claimius.get_prophet_app_id()
     RETURNS UUID AS $$
 SELECT id FROM claimius.get_prophet_app();
 $$ LANGUAGE sql STABLE;
 
-COMMENT ON FUNCTION claimius.get_prophet_app_id IS 'Scalar wrapper over get_prophet_app. Returns the system app id; raises on pure disciple.';
+COMMENT ON FUNCTION claimius.get_prophet_app_id() IS 'Scalar wrapper over get_prophet_app. Returns the system app id; raises on pure disciple.';
 
 CREATE OR REPLACE FUNCTION claimius.get_disciple_app_id()
     RETURNS UUID AS $$
 SELECT id FROM claimius.get_disciple_app();
 $$ LANGUAGE sql STABLE;
 
-COMMENT ON FUNCTION claimius.get_disciple_app_id IS 'Scalar wrapper over get_disciple_app. Returns the upstream prophet app id; raises on pure prophet.';
+COMMENT ON FUNCTION claimius.get_disciple_app_id() IS 'Scalar wrapper over get_disciple_app. Returns the upstream prophet app id; raises on pure prophet.';
 
 CREATE OR REPLACE FUNCTION claimius.get_app_id()
     RETURNS UUID AS $$
@@ -757,7 +757,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql STABLE;
 
-COMMENT ON FUNCTION claimius.get_app_id IS 'Returns the deployment own app id. Prophet/hybrid: system app. Pure disciple: upstream app.';
+COMMENT ON FUNCTION claimius.get_app_id() IS 'Returns the deployment own app id. Prophet/hybrid: system app. Pure disciple: upstream app.';
 
 -- ----------------------------------------------------------------------------
 -- 8. Audit
@@ -856,6 +856,8 @@ CREATE TABLE IF NOT EXISTS claimius.user_relation (
                                                       pinned          INTEGER,
                                                       priority        INTEGER,
                                                       used_at         TIMESTAMPTZ DEFAULT now(),
+                                                      parent_id       UUID REFERENCES claimius.user_relation(id),
+                                                      sibling_id      UUID REFERENCES claimius.user_relation(id),
                                                       sa_deleted_at   TIMESTAMPTZ,
                                                       sa_created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
                                                       sa_updated_at   TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -867,3 +869,5 @@ CREATE INDEX IF NOT EXISTS idx_user_relation_user_id ON claimius.user_relation (
 CREATE INDEX IF NOT EXISTS idx_user_relation_object ON claimius.user_relation (object_type, object_id);
 CREATE INDEX IF NOT EXISTS idx_user_relation_app_id ON claimius.user_relation (app_id);
 CREATE INDEX IF NOT EXISTS idx_user_relation_sa_deleted_at ON claimius.user_relation (sa_deleted_at);
+CREATE INDEX IF NOT EXISTS idx_user_relation_parent_id ON claimius.user_relation (parent_id);
+CREATE INDEX IF NOT EXISTS idx_user_relation_sibling_id ON claimius.user_relation (sibling_id);

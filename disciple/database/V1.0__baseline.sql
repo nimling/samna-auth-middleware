@@ -394,8 +394,8 @@ COMMENT ON TABLE claimius.user_token IS 'Debug only bridge from JWT identity (ex
 ALTER TABLE claimius.user_token ADD COLUMN IF NOT EXISTS type TEXT NOT NULL DEFAULT 'token';
 COMMENT ON COLUMN claimius.user_token.type IS 'Binding kind: token for JWT derived, external for direct external_id.';
 
-CREATE UNIQUE INDEX IF NOT EXISTS idx_user_token_app_claim_external
-    ON claimius.user_token (sa_owner_id, id_claim, external_id) WHERE sa_deleted_at IS NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_user_token_app_owner_external
+    ON claimius.user_token (sa_owner_id, external_id) WHERE sa_deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_user_token_user_id ON claimius.user_token (user_id);
 CREATE INDEX IF NOT EXISTS idx_user_token_type ON claimius.user_token (type) WHERE sa_deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_user_token_sa_owner_id ON claimius.user_token (sa_owner_id);
@@ -639,6 +639,101 @@ COMMENT ON TABLE claimius.claim_graph_cache IS 'Per user cache of get_claim_grap
 COMMENT ON COLUMN claimius.claim_graph_cache.graph IS 'JSON array of {object_id, object_type, label, parent_id, data} tuples.';
 
 -- ----------------------------------------------------------------------------
+-- 7.5 App identity helpers
+-- Defined here, before audit and any application table that wants to default
+-- app_id to the local deployment's app id, since DEFAULT expressions resolve
+-- the function at CREATE TABLE time.
+-- ----------------------------------------------------------------------------
+
+CREATE OR REPLACE FUNCTION claimius.get_prophet_app()
+    RETURNS SETOF claimius.samna_app AS $$
+DECLARE
+    v_slug TEXT;
+BEGIN
+    SELECT system_app_slug INTO v_slug
+    FROM claimius.prophet_state
+    WHERE system_app_slug IS NOT NULL
+    LIMIT 1;
+
+    IF v_slug IS NULL THEN
+        RAISE EXCEPTION 'get_prophet_app: no system app registered. This deployment is a pure disciple, or init_prophet has not run.';
+    END IF;
+
+    RETURN QUERY
+        SELECT * FROM claimius.samna_app
+        WHERE slug = v_slug AND sa_deleted_at IS NULL;
+END;
+$$ LANGUAGE plpgsql STABLE;
+
+COMMENT ON FUNCTION claimius.get_prophet_app() IS 'Returns the system app row for this deployment (prophet or hybrid). Raises on pure disciple.';
+
+CREATE OR REPLACE FUNCTION claimius.get_disciple_app()
+    RETURNS SETOF claimius.samna_app AS $$
+DECLARE
+    v_slug TEXT;
+BEGIN
+    SELECT disciple_app_slug INTO v_slug
+    FROM claimius.disciple_state
+    LIMIT 1;
+
+    IF v_slug IS NULL THEN
+        RAISE EXCEPTION 'get_disciple_app: no disciple app registered. This deployment is a pure prophet, or init_disciple has not run.';
+    END IF;
+
+    RETURN QUERY
+        SELECT * FROM claimius.samna_app
+        WHERE slug = v_slug AND sa_deleted_at IS NULL;
+END;
+$$ LANGUAGE plpgsql STABLE;
+
+COMMENT ON FUNCTION claimius.get_disciple_app() IS 'Returns the upstream prophet app this disciple mirrors. Raises on pure prophet.';
+
+CREATE OR REPLACE FUNCTION claimius.get_prophet_app_id()
+    RETURNS UUID AS $$
+SELECT id FROM claimius.get_prophet_app();
+$$ LANGUAGE sql STABLE;
+
+COMMENT ON FUNCTION claimius.get_prophet_app_id() IS 'Scalar wrapper over get_prophet_app. Returns the system app id; raises on pure disciple.';
+
+CREATE OR REPLACE FUNCTION claimius.get_disciple_app_id()
+    RETURNS UUID AS $$
+SELECT id FROM claimius.get_disciple_app();
+$$ LANGUAGE sql STABLE;
+
+COMMENT ON FUNCTION claimius.get_disciple_app_id() IS 'Scalar wrapper over get_disciple_app. Returns the upstream prophet app id; raises on pure prophet.';
+
+CREATE OR REPLACE FUNCTION claimius.get_app_id()
+    RETURNS UUID AS $$
+DECLARE
+    v_id UUID;
+BEGIN
+    SELECT a.id INTO v_id
+    FROM claimius.prophet_state ps
+             JOIN claimius.samna_app a ON a.slug = ps.system_app_slug
+    WHERE ps.system_app_slug IS NOT NULL
+      AND a.sa_deleted_at IS NULL
+    LIMIT 1;
+
+    IF v_id IS NOT NULL THEN
+        RETURN v_id;
+    END IF;
+
+    SELECT a.id INTO v_id
+    FROM claimius.disciple_state ds
+             JOIN claimius.samna_app a ON a.slug = ds.disciple_app_slug
+    WHERE a.sa_deleted_at IS NULL
+    LIMIT 1;
+
+    IF v_id IS NULL THEN
+        RAISE EXCEPTION 'get_app_id: deployment has neither a prophet system app nor a disciple app registered.';
+    END IF;
+
+    RETURN v_id;
+END;
+$$ LANGUAGE plpgsql STABLE;
+
+COMMENT ON FUNCTION claimius.get_app_id() IS 'Returns the deployment own app id. Prophet/hybrid: system app. Pure disciple: upstream app.';
+
 -- ----------------------------------------------------------------------------
 -- 8. Audit
 -- ----------------------------------------------------------------------------
@@ -729,6 +824,8 @@ CREATE TABLE IF NOT EXISTS claimius.user_relation (
                                                       pinned          INTEGER,
                                                       priority        INTEGER,
                                                       used_at         TIMESTAMPTZ DEFAULT now(),
+                                                      parent_id       UUID REFERENCES claimius.user_relation(id),
+                                                      sibling_id      UUID REFERENCES claimius.user_relation(id),
                                                       sa_deleted_at   TIMESTAMPTZ,
                                                       sa_created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
                                                       sa_updated_at   TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -739,3 +836,5 @@ COMMENT ON TABLE claimius.user_relation IS 'Per user pin, priority, and tag agai
 CREATE INDEX IF NOT EXISTS idx_user_relation_user_id ON claimius.user_relation (user_id);
 CREATE INDEX IF NOT EXISTS idx_user_relation_object ON claimius.user_relation (object_type, object_id);
 CREATE INDEX IF NOT EXISTS idx_user_relation_sa_deleted_at ON claimius.user_relation (sa_deleted_at);
+CREATE INDEX IF NOT EXISTS idx_user_relation_parent_id ON claimius.user_relation (parent_id);
+CREATE INDEX IF NOT EXISTS idx_user_relation_sibling_id ON claimius.user_relation (sibling_id);

@@ -678,7 +678,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius._build_grants_for_object IS 'Computes grants jsonb for a (user, object) pair. Walks direct, hierarchy cascaded, and claim composition paths. Applies deny subtraction per (tree_type, cascaded_from) path.';
+COMMENT ON FUNCTION claimius._build_grants_for_object(p_user_id uuid, p_app_id uuid, p_object_type text, p_object_id uuid) IS 'Computes grants jsonb for a (user, object) pair. Walks direct, hierarchy cascaded, and claim composition paths. Applies deny subtraction per (tree_type, cascaded_from) path.';
 
 -- _apply_denies
 -- Subtracts deny bits from each grant on the same path. Returns a new
@@ -725,7 +725,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql IMMUTABLE;
 
-COMMENT ON FUNCTION claimius._apply_denies IS 'Subtracts deny bits from grants on matching paths. Drops grants whose mask becomes 0.';
+COMMENT ON FUNCTION claimius._apply_denies(p_grants jsonb, p_denies jsonb, p_object_type text, p_object_id uuid) IS 'Subtracts deny bits from grants on matching paths. Drops grants whose mask becomes 0.';
 
 -- _direct_grant_for_object
 -- Determines whether the given user holds direct grant on the given object
@@ -816,7 +816,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius._direct_grant_for_object IS 'Determines if user has direct (creator) grant, accounting for owner bit denies.';
+COMMENT ON FUNCTION claimius._direct_grant_for_object(p_user_id uuid, p_app_id uuid, p_object_type text, p_object_id uuid) IS 'Determines if user has direct (creator) grant, accounting for owner bit denies.';
 
 -- _denormalize_object
 -- Reads the registered row's name, description, sa_owner_id, sa_location_id,
@@ -880,7 +880,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius._denormalize_object IS 'Reads name/description/owner/location/root from a registered row. Falls back to organization or location sa_root_id when the row carries no sa_root_id column.';
+COMMENT ON FUNCTION claimius._denormalize_object(p_object_type text, p_object_id uuid, OUT sa_name text, OUT sa_description text, OUT sa_link text, OUT sa_owner_id uuid, OUT sa_location_id uuid, OUT sa_root_id uuid) IS 'Reads name/description/owner/location/root from a registered row. Falls back to organization or location sa_root_id when the row carries no sa_root_id column.';
 
 -- recompute_user_object
 -- The single function that recomputes the user_object row for one
@@ -995,7 +995,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius.recompute_user_object IS 'Recomputes user_object plus companions for one (app, user, object) tuple.';
+COMMENT ON FUNCTION claimius.recompute_user_object(p_app_id uuid, p_user_id uuid, p_object_type text, p_object_id uuid) IS 'Recomputes user_object plus companions for one (app, user, object) tuple.';
 
 -- _refresh_user_users
 -- Recomputes user_users entries for one (app_id, viewer) pair from
@@ -1028,7 +1028,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius._refresh_user_users IS 'Rebuilds user_users rows for one (app, viewer).';
+COMMENT ON FUNCTION claimius._refresh_user_users(p_app_id uuid, p_viewer_id uuid) IS 'Rebuilds user_users rows for one (app, viewer).';
 
 -- _affected_users_for_object
 -- Returns the list of users whose access to the given object could change.
@@ -1085,7 +1085,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql STABLE;
 
-COMMENT ON FUNCTION claimius._affected_users_for_object IS 'Users whose access to the object could change.';
+COMMENT ON FUNCTION claimius._affected_users_for_object(p_app_id uuid, p_object_type text, p_object_id uuid) IS 'Users whose access to the object could change.';
 
 -- ============================================================================
 -- Ancestor walks
@@ -1114,7 +1114,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql STABLE;
 
-COMMENT ON FUNCTION claimius.get_owner_ancestors IS 'Ownership tree ancestors of an object, hop 0 = self.';
+COMMENT ON FUNCTION claimius.get_owner_ancestors(p_object_type text, p_object_id uuid) IS 'Ownership tree ancestors of an object, hop 0 = self.';
 
 -- get_location_ancestors
 -- Reads the location tree closure for location ancestors of an object, plus
@@ -1164,7 +1164,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql STABLE;
 
-COMMENT ON FUNCTION claimius.get_location_ancestors IS 'Location chain ancestors of an object plus each location''s owning org chain.';
+COMMENT ON FUNCTION claimius.get_location_ancestors(p_object_type text, p_object_id uuid) IS 'Location chain ancestors of an object plus each location''s owning org chain.';
 
 -- get_parenthood_ancestors
 -- Reads the parenthood tree closure for ancestors of an object whose table
@@ -1196,7 +1196,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql STABLE;
 
-COMMENT ON FUNCTION claimius.get_parenthood_ancestors IS 'Parenthood tree ancestors via sa_parent_id, hop 0 = self.';
+COMMENT ON FUNCTION claimius.get_parenthood_ancestors(p_object_type text, p_object_id uuid) IS 'Parenthood tree ancestors via sa_parent_id, hop 0 = self.';
 
 -- get_ancestors
 -- Combined ancestor walk. Yields rows from the owner, location, and
@@ -1221,4 +1221,269 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql STABLE;
 
-COMMENT ON FUNCTION claimius.get_ancestors IS 'Combined ancestor walk across owner, location, and parenthood trees.';
+COMMENT ON FUNCTION claimius.get_ancestors(p_object_type text, p_object_id uuid) IS 'Combined ancestor walk across owner, location, and parenthood trees.';
+CREATE OR REPLACE FUNCTION claimius.apply_row_delta(p_object_type text, p_object_id uuid, p_old jsonb, p_new jsonb)
+ RETURNS void
+ LANGUAGE plpgsql
+AS $function$
+DECLARE
+    v_old_active BOOLEAN := (p_old IS NOT NULL AND (p_old ->> 'sa_deleted_at') IS NULL);
+    v_new_active BOOLEAN := (p_new IS NOT NULL AND (p_new ->> 'sa_deleted_at') IS NULL);
+    v_owner_id   UUID;
+    v_loc_id     UUID;
+    v_parent_id  UUID;
+    v_root_id    UUID;
+    v_info       claimius.table_info%ROWTYPE;
+BEGIN
+    SELECT * INTO v_info FROM claimius.table_info WHERE object_type = p_object_type;
+
+    IF v_old_active THEN
+        DELETE FROM claimius.inheritance_info
+        WHERE descendant_type = p_object_type AND descendant_id = p_object_id;
+    END IF;
+
+    IF NOT v_new_active THEN
+        RETURN;
+    END IF;
+
+    v_owner_id  := (p_new ->> 'sa_owner_id')::UUID;
+    v_loc_id    := (p_new ->> 'sa_location_id')::UUID;
+    v_parent_id := (p_new ->> 'sa_parent_id')::UUID;
+    v_root_id   := (p_new ->> 'sa_root_id')::UUID;
+
+    IF p_object_type = 'claimius.organization' THEN
+        INSERT INTO claimius.inheritance_info (tree_type, root_id, ancestor_type, ancestor_id, descendant_type, descendant_id, depth)
+        VALUES ('ownership', v_root_id, p_object_type, p_object_id, p_object_type, p_object_id, 0)
+        ON CONFLICT DO NOTHING;
+
+        IF v_owner_id IS NOT NULL AND v_owner_id <> p_object_id THEN
+            INSERT INTO claimius.inheritance_info (tree_type, root_id, ancestor_type, ancestor_id, descendant_type, descendant_id, depth)
+            SELECT e.tree_type, e.root_id, e.ancestor_type, e.ancestor_id, p_object_type, p_object_id, e.depth + 1
+            FROM claimius.inheritance_info e
+            WHERE e.tree_type = 'ownership'
+              AND e.descendant_type = 'claimius.organization'
+              AND e.descendant_id = v_owner_id
+            ON CONFLICT DO NOTHING;
+        END IF;
+        RETURN;
+    END IF;
+
+    IF p_object_type = 'claimius.location' THEN
+        INSERT INTO claimius.inheritance_info (tree_type, root_id, ancestor_type, ancestor_id, descendant_type, descendant_id, depth)
+        VALUES ('location', v_root_id, p_object_type, p_object_id, p_object_type, p_object_id, 0)
+        ON CONFLICT DO NOTHING;
+
+        IF v_parent_id IS NOT NULL AND v_parent_id <> p_object_id THEN
+            INSERT INTO claimius.inheritance_info (tree_type, root_id, ancestor_type, ancestor_id, descendant_type, descendant_id, depth)
+            SELECT e.tree_type, e.root_id, e.ancestor_type, e.ancestor_id, p_object_type, p_object_id, e.depth + 1
+            FROM claimius.inheritance_info e
+            WHERE e.tree_type = 'location'
+              AND e.descendant_type = 'claimius.location'
+              AND e.descendant_id = v_parent_id
+            ON CONFLICT DO NOTHING;
+        END IF;
+
+        IF v_owner_id IS NOT NULL THEN
+            INSERT INTO claimius.inheritance_info (tree_type, root_id, ancestor_type, ancestor_id, descendant_type, descendant_id, depth)
+            SELECT 'ownership'::claimius.tree_type, e.root_id, p_object_type, p_object_id, p_object_type, p_object_id, 0
+            FROM claimius.inheritance_info e
+            WHERE e.tree_type = 'ownership'
+              AND e.descendant_type = 'claimius.organization'
+              AND e.descendant_id = v_owner_id
+              AND e.depth = 0
+            ON CONFLICT DO NOTHING;
+
+            INSERT INTO claimius.inheritance_info (tree_type, root_id, ancestor_type, ancestor_id, descendant_type, descendant_id, depth)
+            SELECT e.tree_type, e.root_id, e.ancestor_type, e.ancestor_id, p_object_type, p_object_id, e.depth + 1
+            FROM claimius.inheritance_info e
+            WHERE e.tree_type = 'ownership'
+              AND e.descendant_type = 'claimius.organization'
+              AND e.descendant_id = v_owner_id
+            ON CONFLICT DO NOTHING;
+        END IF;
+        RETURN;
+    END IF;
+
+    IF v_info.has_sa_owner_id AND v_owner_id IS NOT NULL THEN
+        INSERT INTO claimius.inheritance_info (tree_type, root_id, ancestor_type, ancestor_id, descendant_type, descendant_id, depth)
+        SELECT 'ownership'::claimius.tree_type, e.root_id, p_object_type, p_object_id, p_object_type, p_object_id, 0
+        FROM claimius.inheritance_info e
+        WHERE e.tree_type = 'ownership'
+          AND e.descendant_type = 'claimius.organization'
+          AND e.descendant_id = v_owner_id
+          AND e.depth = 0
+        ON CONFLICT DO NOTHING;
+
+        INSERT INTO claimius.inheritance_info (tree_type, root_id, ancestor_type, ancestor_id, descendant_type, descendant_id, depth)
+        SELECT 'ownership'::claimius.tree_type, e.root_id, e.ancestor_type, e.ancestor_id, p_object_type, p_object_id, e.depth + 1
+        FROM claimius.inheritance_info e
+        WHERE e.tree_type = 'ownership'
+          AND e.descendant_type = 'claimius.organization'
+          AND e.descendant_id = v_owner_id
+        ON CONFLICT DO NOTHING;
+    END IF;
+
+    IF v_info.has_sa_location_id AND v_loc_id IS NOT NULL THEN
+        INSERT INTO claimius.inheritance_info (tree_type, root_id, ancestor_type, ancestor_id, descendant_type, descendant_id, depth)
+        SELECT 'location'::claimius.tree_type, e.root_id, p_object_type, p_object_id, p_object_type, p_object_id, 0
+        FROM claimius.inheritance_info e
+        WHERE e.tree_type = 'location'
+          AND e.descendant_type = 'claimius.location'
+          AND e.descendant_id = v_loc_id
+          AND e.depth = 0
+        ON CONFLICT DO NOTHING;
+
+        INSERT INTO claimius.inheritance_info (tree_type, root_id, ancestor_type, ancestor_id, descendant_type, descendant_id, depth)
+        SELECT 'location'::claimius.tree_type, e.root_id, e.ancestor_type, e.ancestor_id, p_object_type, p_object_id, e.depth + 1
+        FROM claimius.inheritance_info e
+        WHERE e.tree_type = 'location'
+          AND e.descendant_type = 'claimius.location'
+          AND e.descendant_id = v_loc_id
+        ON CONFLICT DO NOTHING;
+    END IF;
+
+    IF v_info.has_sa_parent_id AND v_info.has_sa_root_id THEN
+        INSERT INTO claimius.inheritance_info (tree_type, root_id, ancestor_type, ancestor_id, descendant_type, descendant_id, depth)
+        VALUES ('parenthood', v_root_id, p_object_type, p_object_id, p_object_type, p_object_id, 0)
+        ON CONFLICT DO NOTHING;
+
+        IF v_parent_id IS NOT NULL AND v_parent_id <> p_object_id THEN
+            INSERT INTO claimius.inheritance_info (tree_type, root_id, ancestor_type, ancestor_id, descendant_type, descendant_id, depth)
+            SELECT e.tree_type, e.root_id, e.ancestor_type, e.ancestor_id, p_object_type, p_object_id, e.depth + 1
+            FROM claimius.inheritance_info e
+            WHERE e.tree_type = 'parenthood'
+              AND e.descendant_type = p_object_type
+              AND e.descendant_id = v_parent_id
+            ON CONFLICT DO NOTHING;
+        END IF;
+    END IF;
+END;
+$function$
+;
+
+CREATE OR REPLACE FUNCTION claimius.rebuild_tree(p_root_id uuid)
+ RETURNS void
+ LANGUAGE plpgsql
+AS $function$
+DECLARE
+    v_row RECORD;
+    v_info claimius.table_info%ROWTYPE;
+    v_conds TEXT;
+BEGIN
+    DELETE FROM claimius.inheritance_info WHERE root_id = p_root_id;
+
+    FOR v_row IN
+        WITH RECURSIVE org_chain AS (
+            SELECT o.id, o.sa_owner_id, 0 AS depth, to_jsonb(o) AS row_data
+            FROM claimius.organization o
+            WHERE o.id = p_root_id AND o.sa_deleted_at IS NULL
+            UNION ALL
+            SELECT o.id, o.sa_owner_id, oc.depth + 1, to_jsonb(o)
+            FROM claimius.organization o
+                     JOIN org_chain oc ON o.sa_owner_id = oc.id
+            WHERE o.id <> o.sa_owner_id AND o.sa_deleted_at IS NULL
+        )
+        SELECT id, row_data FROM org_chain ORDER BY depth
+    LOOP
+        PERFORM claimius.apply_row_delta('claimius.organization', v_row.id, NULL::JSONB, v_row.row_data);
+    END LOOP;
+
+    FOR v_row IN
+        WITH RECURSIVE loc_chain AS (
+            SELECT l.id, l.sa_parent_id, l.sa_owner_id, 0 AS depth, to_jsonb(l) AS row_data
+            FROM claimius.location l
+            WHERE l.sa_root_id = p_root_id AND l.sa_parent_id = l.id AND l.sa_deleted_at IS NULL
+            UNION ALL
+            SELECT l.id, l.sa_parent_id, l.sa_owner_id, lc.depth + 1, to_jsonb(l)
+            FROM claimius.location l
+                     JOIN loc_chain lc ON l.sa_parent_id = lc.id
+            WHERE l.id <> l.sa_parent_id AND l.sa_deleted_at IS NULL AND l.sa_root_id = p_root_id
+        )
+        SELECT id, row_data FROM loc_chain ORDER BY depth
+    LOOP
+        PERFORM claimius.apply_row_delta('claimius.location', v_row.id, NULL::JSONB, v_row.row_data);
+    END LOOP;
+
+    FOR v_info IN
+        SELECT * FROM claimius.table_info
+        WHERE object_type NOT IN ('claimius.organization', 'claimius.location')
+          AND has_sa_deleted_at
+    LOOP
+        IF v_info.has_sa_parent_id AND v_info.has_sa_root_id THEN
+            FOR v_row IN EXECUTE format(
+                $f$
+                WITH RECURSIVE chain AS (
+                    SELECT id, sa_parent_id, 0 AS depth
+                    FROM %1$I.%2$I
+                    WHERE sa_root_id = $1 AND sa_parent_id = id AND sa_deleted_at IS NULL
+                    UNION ALL
+                    SELECT r.id, r.sa_parent_id, c.depth + 1
+                    FROM %1$I.%2$I r
+                             JOIN chain c ON r.sa_parent_id = c.id
+                    WHERE r.id <> r.sa_parent_id AND r.sa_deleted_at IS NULL AND r.sa_root_id = $1
+                )
+                SELECT id FROM chain ORDER BY depth
+                $f$,
+                split_part(v_info.object_type, '.', 1),
+                split_part(v_info.object_type, '.', 2)
+            ) USING p_root_id
+            LOOP
+                EXECUTE format(
+                    'SELECT claimius.apply_row_delta($1, $2, NULL::JSONB, to_jsonb(r.*)) FROM %1$I.%2$I r WHERE r.id = $2',
+                    split_part(v_info.object_type, '.', 1),
+                    split_part(v_info.object_type, '.', 2)
+                ) USING v_info.object_type, v_row.id;
+            END LOOP;
+        ELSE
+            v_conds := NULL;
+            IF v_info.has_sa_owner_id THEN
+                v_conds := 'sa_owner_id IN (SELECT descendant_id FROM claimius.inheritance_info WHERE tree_type = ''ownership'' AND root_id = $1 AND descendant_type = ''claimius.organization'')';
+            END IF;
+            IF v_info.has_sa_location_id THEN
+                v_conds := CASE WHEN v_conds IS NULL THEN '' ELSE v_conds || ' OR ' END
+                    || 'sa_location_id IN (SELECT descendant_id FROM claimius.inheritance_info WHERE tree_type = ''location'' AND root_id = $1 AND descendant_type = ''claimius.location'')';
+            END IF;
+            IF v_conds IS NULL THEN
+                CONTINUE;
+            END IF;
+            FOR v_row IN EXECUTE format(
+                'SELECT id FROM %1$I.%2$I WHERE sa_deleted_at IS NULL AND (%3$s)',
+                split_part(v_info.object_type, '.', 1),
+                split_part(v_info.object_type, '.', 2),
+                v_conds
+            ) USING p_root_id
+            LOOP
+                EXECUTE format(
+                    'SELECT claimius.apply_row_delta($1, $2, NULL::JSONB, to_jsonb(r.*)) FROM %1$I.%2$I r WHERE r.id = $2',
+                    split_part(v_info.object_type, '.', 1),
+                    split_part(v_info.object_type, '.', 2)
+                ) USING v_info.object_type, v_row.id;
+            END LOOP;
+        END IF;
+    END LOOP;
+END;
+$function$
+;
+
+CREATE OR REPLACE FUNCTION claimius.rebuild_user_object()
+ RETURNS void
+ LANGUAGE plpgsql
+AS $function$
+DECLARE
+    v_pair RECORD;
+BEGIN
+    DELETE FROM claimius.user_object;
+
+    FOR v_pair IN
+        SELECT DISTINCT uc.app_id, uc.user_id, co.object_type, co.object_id
+        FROM claimius.user_claim uc
+                 JOIN claimius.claim_object co ON co.claim_id = uc.claim_id
+        WHERE uc.sa_deleted_at IS NULL
+          AND co.sa_deleted_at IS NULL
+    LOOP
+        PERFORM claimius.recompute_user_object(v_pair.app_id, v_pair.user_id, v_pair.object_type, v_pair.object_id);
+    END LOOP;
+END;
+$function$
+;
+

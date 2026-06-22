@@ -274,7 +274,7 @@ BEGIN
             LIMIT 1
             ) best ON TRUE
         WHERE claimius.user_object.user_id = p_user_id
-          AND claimius.TRUE
+          AND TRUE
           AND claimius.user_object.object_type = p_object_type
           AND (claimius.user_object.sa_access & p_required_access) = p_required_access
           AND (best.uc_id IS NOT NULL OR claimius.user_object.direct_grant)
@@ -1492,7 +1492,7 @@ BEGIN
             LIMIT 1
             ) best ON TRUE
         WHERE claimius.user_object.user_id = p_user_id
-          AND claimius.TRUE
+          AND TRUE
           AND (claimius.user_object.sa_access & p_required_access) = p_required_access
           AND claimius.user_object.search_vector @@ v_tsquery
           AND (p_object_types IS NULL OR claimius.user_object.object_type = ANY(p_object_types))
@@ -1590,7 +1590,7 @@ BEGIN
             ) best ON TRUE
         WHERE v_include_others
           AND claimius.user_object.user_id = p_user_id
-          AND claimius.TRUE
+          AND TRUE
           AND (claimius.user_object.sa_access & p_required_access) = p_required_access
           AND claimius.user_object.search_vector @@ v_tsquery
           AND (p_object_types IS NULL OR claimius.user_object.object_type = ANY(p_object_types))
@@ -1938,6 +1938,88 @@ COMMENT ON FUNCTION claimius.remove_claim_object IS 'Soft deletes a claim_object
 -- references where applicable.
 -- ============================================================================
 
+CREATE OR REPLACE FUNCTION claimius.merge_user(
+    p_target_user_id    UUID,
+    p_source_user_id    UUID,
+    p_acting_user_claim UUID DEFAULT NULL
+) RETURNS VOID AS $$
+DECLARE
+    v_target_app_user RECORD;
+    v_source_app_user RECORD;
+BEGIN
+    SELECT * INTO v_target_app_user FROM claimius.samna_user
+    WHERE user_id = p_target_user_id AND sa_deleted_at IS NULL;
+    SELECT * INTO v_source_app_user FROM claimius.samna_user
+    WHERE user_id = p_source_user_id AND sa_deleted_at IS NULL;
+
+    IF v_source_app_user.id IS NULL THEN
+        RETURN;
+    END IF;
+
+    IF v_target_app_user.id IS NULL THEN
+        -- Target has no row: rename the source row to target user_id
+        UPDATE claimius.samna_user
+        SET user_id = p_target_user_id, sa_updated_at = now()
+        WHERE id = v_source_app_user.id;
+    ELSE
+        -- Target already has a row. Merge claims/relations/fields.
+        UPDATE claimius.user_claim SET user_id = p_target_user_id
+        WHERE user_id = p_source_user_id;
+        UPDATE claimius.user_relation SET user_id = p_target_user_id
+        WHERE user_id = p_source_user_id;
+        UPDATE claimius.user_field SET user_id = p_target_user_id
+        WHERE user_id = p_source_user_id;
+
+        -- Propagate the source's profile metadata onto the target row.
+        -- Replace name, image, phone, and config unconditionally; fill
+        -- email only when the target's email is NULL or empty so an
+        -- explicitly set target address is never silently overwritten.
+        -- external_id: source value wins when set; source NULL leaves
+        -- the target's value intact.
+        UPDATE claimius.samna_user
+        SET first_name    = v_source_app_user.first_name,
+            last_name     = v_source_app_user.last_name,
+            user_name     = v_source_app_user.user_name,
+            user_image    = v_source_app_user.user_image,
+            phone         = v_source_app_user.phone,
+            config        = v_source_app_user.config,
+            external_id   = coalesce(v_source_app_user.external_id, external_id),
+            email         = CASE
+                                WHEN coalesce(NULLIF(email, ''), NULL) IS NULL
+                                    THEN v_source_app_user.email
+                                ELSE email
+                END,
+            sa_updated_at = now()
+        WHERE id = v_target_app_user.id;
+
+        -- Hard delete materialized rows for the source; calc functions will
+        -- repopulate as transactions touch the target.
+        DELETE FROM claimius.user_object
+        WHERE user_id = p_source_user_id;
+        DELETE FROM claimius.object_users
+        WHERE user_id = p_source_user_id;
+        DELETE FROM claimius.user_users
+        WHERE viewer_id = p_source_user_id OR target_user_id = p_source_user_id;
+
+        -- Hard delete the source samna_user row
+        DELETE FROM claimius.samna_user WHERE id = v_source_app_user.id;
+    END IF;
+
+    -- Force recompute of materialized state for the target by touching
+    -- every (target, object) currently in object_users
+    PERFORM claimius._refresh_user_users(p_target_user_id);
+
+    PERFORM claimius.write_audit(
+            'merge_user', 'merge', 'claimius.samna_user',
+            p_target_user_id,
+            p_target_user_id,
+            coalesce(p_acting_user_claim, p_target_user_id),
+            'Merged source ' || p_source_user_id::TEXT || ' into target ' || p_target_user_id::TEXT
+            );
+END;
+$$ LANGUAGE plpgsql;
+
+COMMENT ON FUNCTION claimius.merge_user IS 'Reassigns all data from source user_id to target user_id across apps.';
 
 -- ============================================================================
 -- migrate_root: cross root organization migration. Should be called rarely
@@ -2126,6 +2208,67 @@ COMMENT ON FUNCTION claimius._bulk_seed_user_object IS 'Seeds user_object for an
 -- have already registered the relevant tables. If table_info is empty the
 -- function is a no-op.
 -- ----------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION claimius.recompute_state()
+    RETURNS VOID AS $$
+DECLARE
+    v_root    UUID;
+    v_table   RECORD;
+    v_sql     TEXT;
+    v_id      UUID;
+BEGIN
+    PERFORM set_config('claimius.replay_mode', 'true', TRUE);
+    BEGIN
+        FOR v_root IN
+            SELECT id FROM claimius.organization
+            WHERE sa_owner_id = id AND sa_deleted_at IS NULL
+            LOOP
+                PERFORM claimius.build_ownership_tree(v_root);
+            END LOOP;
+
+        FOR v_root IN
+            SELECT id FROM claimius.location
+            WHERE sa_parent_id = id AND sa_deleted_at IS NULL
+            LOOP
+                PERFORM claimius.build_location_tree(v_root);
+            END LOOP;
+
+        FOR v_table IN
+            SELECT object_type, schema_name, table_name
+            FROM claimius.table_info
+            WHERE has_sa_parent_id
+              AND has_sa_root_id
+              AND object_type NOT IN ('claimius.organization', 'claimius.location')
+            LOOP
+                v_sql := format(
+                        'SELECT id FROM %I.%I WHERE sa_parent_id = id AND sa_deleted_at IS NULL',
+                        v_table.schema_name, v_table.table_name
+                         );
+                FOR v_id IN EXECUTE v_sql LOOP
+                        PERFORM claimius.build_parenthood_tree(v_table.object_type, v_id);
+                    END LOOP;
+            END LOOP;
+
+        FOR v_table IN
+            SELECT ti.object_type
+            FROM claimius.table_info ti
+            WHERE ti.has_sa_deleted_at
+              AND EXISTS (
+                SELECT 1 FROM claimius.claim_object co
+                WHERE co.object_type = ti.object_type
+                  AND co.sa_deleted_at IS NULL
+            )
+            LOOP
+                PERFORM claimius._bulk_seed_user_object(v_table.object_type);
+            END LOOP;
+    EXCEPTION WHEN OTHERS THEN
+        PERFORM set_config('claimius.replay_mode', 'false', TRUE);
+        RAISE;
+    END;
+    PERFORM set_config('claimius.replay_mode', 'false', TRUE);
+END;
+$$ LANGUAGE plpgsql;
+
+COMMENT ON FUNCTION claimius.recompute_state() IS 'Rebuilds inheritance_info and user_object for every registered table from live data. Idempotent. Run after bulk writes that bypassed calc triggers.';
 
 -- ----------------------------------------------------------------------------
 -- init_claimius_internal
@@ -2228,6 +2371,256 @@ COMMENT ON FUNCTION claimius.create_root_organization(TEXT, UUID, TEXT, TEXT, UU
 -- generated placeholder uuids and then reconciling with UPDATEs.
 -- ----------------------------------------------------------------------------
 
+CREATE OR REPLACE FUNCTION claimius.init_prophet(
+    p_system_app_slug       TEXT,
+    p_system_app_name       TEXT,
+    p_system_app_private_key  TEXT,
+    p_system_app_private_seed TEXT,
+    p_system_user_id        UUID DEFAULT NULL,
+    p_system_app_redirect_uri  TEXT DEFAULT '',
+    p_system_app_sync_uri      TEXT DEFAULT '',
+    p_system_app_contact_email TEXT DEFAULT NULL,
+    p_system_app_image      TEXT DEFAULT NULL,
+    p_system_app_provider_ids UUID[] DEFAULT ARRAY[]::UUID[],
+    p_system_app_style      JSONB DEFAULT NULL,
+    p_system_app_description TEXT DEFAULT 'System app',
+    p_system_org_name       TEXT DEFAULT 'System',
+    p_system_claim_name     TEXT DEFAULT 'System Administrator',
+    p_system_claim_id       UUID DEFAULT NULL,
+    p_default_claim         JSONB DEFAULT NULL
+) RETURNS JSONB AS $$
+DECLARE
+    v_app            UUID;
+    v_org_id            UUID;
+    v_claim_id          UUID;
+    v_default_claim_id  UUID;
+    v_user_claim_id     UUID;
+    v_pre_app        UUID;
+    v_pre_org_id        UUID;
+    v_default_name      TEXT;
+    v_default_desc      TEXT;
+    v_default_level     INTEGER;
+BEGIN
+    p_system_user_id  := COALESCE(claimius.ensure_uuid_null(p_system_user_id),  gen_random_uuid());
+    p_system_claim_id := COALESCE(claimius.ensure_uuid_null(p_system_claim_id), gen_random_uuid());
+
+    -- Validate the required default claim metadata. The system claim is
+    -- created with hardcoded properties; the default claim (granted to every
+    -- regular user on first login via ensure_app_user) is implementer defined.
+    IF p_default_claim IS NULL THEN
+        RAISE EXCEPTION 'init_prophet: p_default_claim is required and must contain name and description.';
+    END IF;
+    v_default_name  := p_default_claim ->> 'name';
+    v_default_desc  := p_default_claim ->> 'description';
+    v_default_level := coalesce((p_default_claim ->> 'sa_access')::INTEGER, 4);
+    IF v_default_name IS NULL OR v_default_name = '' THEN
+        RAISE EXCEPTION 'init_prophet: p_default_claim.name is required.';
+    END IF;
+    IF v_default_desc IS NULL OR v_default_desc = '' THEN
+        RAISE EXCEPTION 'init_prophet: p_default_claim.description is required.';
+    END IF;
+
+    -- Pre-generate the ids so app and org can reference each other in their
+    -- INSERTs even though they create circular references.
+    v_pre_app := gen_random_uuid();
+    v_pre_org_id := gen_random_uuid();
+
+    -- 1. system app, with sa_owner_id pointing at the future system org.
+    INSERT INTO claimius.samna_app (
+        id, slug, name, description, contact_email, app_image,
+        redirect_uri, sync_uri, provider_ids, status,
+        private_key, private_seed,
+        style, sa_owner_id, sa_created_by
+    ) VALUES (
+                 v_pre_app, p_system_app_slug, p_system_app_name,
+                 p_system_app_description, p_system_app_contact_email, p_system_app_image,
+                 p_system_app_redirect_uri, p_system_app_sync_uri, p_system_app_provider_ids,
+                 'active'::claimius.app_status,
+                 p_system_app_private_key, p_system_app_private_seed,
+                 p_system_app_style, v_pre_org_id, p_system_user_id
+             )
+    ON CONFLICT (slug) DO UPDATE SET
+                                     name = EXCLUDED.name,
+                                     description = EXCLUDED.description,
+                                     contact_email = EXCLUDED.contact_email,
+                                     sa_updated_at = now()
+    RETURNING id INTO v_app;
+
+    -- 2. system samna_user
+    IF NOT EXISTS (
+        SELECT 1 FROM claimius.samna_user
+        WHERE user_id = p_system_user_id AND sa_deleted_at IS NULL
+    ) THEN
+        INSERT INTO claimius.samna_user (user_id, status, type, first_name, last_name)
+        VALUES (p_system_user_id, 'active', 'system', 'System', 'User');
+    END IF;
+
+    -- 3. system organization, self rooted, owned by the system app
+    SELECT id INTO v_org_id FROM claimius.organization
+    WHERE type = 'system' AND sa_deleted_at IS NULL
+    LIMIT 1;
+
+    IF v_org_id IS NULL THEN
+        INSERT INTO claimius.organization (
+            id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by
+        ) VALUES (
+                     v_pre_org_id, p_system_org_name, 'system',
+                     v_pre_org_id, v_pre_org_id, 0, p_system_user_id
+                 )
+        RETURNING id INTO v_org_id;
+    END IF;
+
+    -- 4. reconcile: app's sa_owner_id should match the actual system org id
+    UPDATE claimius.samna_app SET sa_owner_id = v_org_id WHERE id = v_app AND sa_owner_id <> v_org_id;
+
+    -- 5. ensure ownership tree closure self-edge for the system org
+    INSERT INTO claimius.inheritance_info (
+        tree_type, root_id, ancestor_type, ancestor_id, descendant_type, descendant_id, depth
+    ) VALUES (
+        'ownership', v_org_id, 'claimius.organization', v_org_id, 'claimius.organization', v_org_id, 0
+    ) ON CONFLICT DO NOTHING;
+
+    -- 6. system claim (sidelined: granted only to the system user)
+    SELECT id INTO v_claim_id FROM claimius.claim
+    WHERE name = p_system_claim_name AND sa_deleted_at IS NULL;
+
+    IF v_claim_id IS NULL THEN
+        INSERT INTO claimius.claim (
+            id, name, description, sa_access, inherits, type,
+            sa_owner_id, sa_root_id, sa_created_by
+        ) VALUES (
+                     p_system_claim_id, p_system_claim_name,
+                     'Full access to claimius', 15, TRUE, 'system',
+                     v_org_id, v_org_id, p_system_user_id
+                 )
+        RETURNING id INTO v_claim_id;
+    END IF;
+
+    -- 6b. default claim (granted to every regular user on first login via
+    -- ensure_app_user). No claim_object binding, no inheritance: it is a
+    -- "you have an account" marker by default. Implementer defines name,
+    -- description, and level via p_default_claim.
+    SELECT id INTO v_default_claim_id FROM claimius.claim
+    WHERE name = v_default_name AND sa_deleted_at IS NULL;
+
+    IF v_default_claim_id IS NULL THEN
+        INSERT INTO claimius.claim (
+            name, description, sa_access, inherits, type,
+            sa_owner_id, sa_root_id, sa_created_by
+        ) VALUES (
+                     v_default_name, v_default_desc, v_default_level,
+                     FALSE, 'user',
+                     v_org_id, v_org_id, p_system_user_id
+                 )
+        RETURNING id INTO v_default_claim_id;
+    END IF;
+
+    -- 7. attach default claim_id to the system app. This is the claim every
+    -- regular user receives via ensure_app_user. The system claim stays
+    -- sidelined and is granted only to the system user below.
+    UPDATE claimius.samna_app SET claim_id = v_default_claim_id
+    WHERE id = v_app AND (claim_id IS NULL OR claim_id <> v_default_claim_id);
+
+    -- 8. bind claim to system org
+    IF NOT EXISTS (
+        SELECT 1 FROM claimius.claim_object
+        WHERE claim_id = v_claim_id
+          AND object_id = v_org_id
+          AND object_type = 'claimius.organization'
+          AND sa_deleted_at IS NULL
+    ) THEN
+        INSERT INTO claimius.claim_object (
+            claim_id, object_id, object_type,
+            sa_owner_id, sa_root_id, sa_created_by, inherits
+        ) VALUES (
+                     v_claim_id, v_org_id, 'claimius.organization',
+                     v_org_id, v_org_id, p_system_user_id, TRUE
+                 );
+    END IF;
+
+    -- 8b. bind claim to system app directly. Every resource (except users
+    -- and the claim itself) carries at least one direct claim_object grant
+    -- so that access never depends solely on cascade. inherits = FALSE
+    -- because the org binding above already cascades to the app via the
+    -- ownership tree; this is an owner anchor, not a cascade source.
+    IF NOT EXISTS (
+        SELECT 1 FROM claimius.claim_object
+        WHERE claim_id = v_claim_id
+          AND object_id = v_app
+          AND object_type = 'claimius.samna_app'
+          AND sa_deleted_at IS NULL
+    ) THEN
+        INSERT INTO claimius.claim_object (
+            claim_id, object_id, object_type,
+            sa_owner_id, sa_root_id, sa_created_by, inherits
+        ) VALUES (
+                     v_claim_id, v_app, 'claimius.samna_app',
+                     v_org_id, v_org_id, p_system_user_id, FALSE
+                 );
+    END IF;
+
+    -- 9. grant claim to system user
+    SELECT id INTO v_user_claim_id FROM claimius.user_claim
+    WHERE claim_id = v_claim_id
+      AND user_id = p_system_user_id
+      AND sa_deleted_at IS NULL
+    LIMIT 1;
+
+    IF v_user_claim_id IS NULL THEN
+        INSERT INTO claimius.user_claim (
+            claim_id, user_id, sa_owner_id, sa_created_by
+        ) VALUES (
+                     v_claim_id, p_system_user_id, v_org_id, p_system_user_id
+                 )
+        RETURNING id INTO v_user_claim_id;
+    END IF;
+
+    -- 10. prophet_state row for this app, marked as the system app via
+    -- system_app_slug. Partial unique index enforces at most one system row.
+    INSERT INTO claimius.prophet_state (last_applied_seq, system_app_slug)
+    VALUES (0, p_system_app_slug)
+    ON CONFLICT DO NOTHING;
+
+    -- 11. role grants for prophet runtime
+    PERFORM claimius._grant_prophet_roles();
+
+    -- Build the result: 6 keys, each named after the table the row lives in.
+    -- prophet_state and inheritance_info are internal bookkeeping and are
+    -- not returned. Re-running init_prophet is idempotent and returns the
+    -- current state of these rows.
+    DECLARE
+        v_result JSONB;
+    BEGIN
+        SELECT jsonb_build_object(
+                       'samna_app',     to_jsonb(a.*),
+                       'organization',  to_jsonb(o.*),
+                       'samna_user',    to_jsonb(u.*),
+                       'claim',         to_jsonb(c.*),
+                       'default_claim', to_jsonb(dc.*),
+                       'user_claim',    to_jsonb(uc.*),
+                       'claim_object',  to_jsonb(co.*)
+               )
+        INTO v_result
+        FROM claimius.samna_app a
+                 LEFT JOIN claimius.organization o ON o.id = v_org_id
+                 LEFT JOIN claimius.samna_user u ON u.user_id = p_system_user_id
+                 LEFT JOIN claimius.claim c ON c.id = v_claim_id
+                 LEFT JOIN claimius.claim dc ON dc.id = v_default_claim_id
+                 LEFT JOIN claimius.user_claim uc ON uc.id = v_user_claim_id
+                 LEFT JOIN claimius.claim_object co ON co.claim_id = v_claim_id
+            AND co.object_id = v_org_id AND co.object_type = 'claimius.organization'
+            AND co.sa_deleted_at IS NULL
+        WHERE a.id = v_app;
+
+        RAISE NOTICE 'Prophet initialized: app=% org=% claim=% user=%',
+            v_app, v_org_id, v_claim_id, p_system_user_id;
+
+        RETURN v_result;
+    END;
+END;
+$$ LANGUAGE plpgsql;
+
+COMMENT ON FUNCTION claimius.init_prophet IS 'Bootstrap function. Sets up system app, org, user, and claim. Idempotent.';
 
 -- ----------------------------------------------------------------------------
 -- init_disciple
@@ -2283,6 +2676,46 @@ COMMENT ON FUNCTION claimius.init_disciple IS 'Bootstrap as a disciple. Requires
 -- behavior plus role grants for both.
 -- ----------------------------------------------------------------------------
 
+CREATE OR REPLACE FUNCTION claimius.init_hybrid(
+    p_system_app_slug          TEXT,
+    p_system_app_name          TEXT,
+    p_system_app_private_key   TEXT,
+    p_system_app_private_seed  TEXT,
+    p_disciple_app_slug        TEXT,
+    p_system_user_id           UUID DEFAULT NULL,
+    p_system_app_redirect_uri  TEXT DEFAULT '',
+    p_system_app_sync_uri      TEXT DEFAULT '',
+    p_system_app_contact_email TEXT DEFAULT NULL,
+    p_system_app_image         TEXT DEFAULT NULL,
+    p_system_app_provider_ids  UUID[] DEFAULT ARRAY[]::UUID[],
+    p_system_app_style         JSONB DEFAULT NULL,
+    p_system_app_description   TEXT DEFAULT 'System app',
+    p_system_org_name          TEXT DEFAULT 'System',
+    p_system_claim_name        TEXT DEFAULT 'System Administrator',
+    p_system_claim_id          UUID DEFAULT NULL,
+    p_default_claim            JSONB DEFAULT NULL
+) RETURNS JSONB AS $$
+DECLARE
+    v_result JSONB;
+BEGIN
+    v_result := claimius.init_prophet(
+            p_system_app_slug, p_system_app_name,
+            p_system_app_private_key, p_system_app_private_seed,
+            p_system_user_id,
+            p_system_app_redirect_uri, p_system_app_sync_uri, p_system_app_contact_email,
+            p_system_app_image, p_system_app_provider_ids, p_system_app_style,
+            p_system_app_description, p_system_org_name,
+            p_system_claim_name, p_system_claim_id,
+            p_default_claim
+                );
+    PERFORM claimius.init_disciple(p_disciple_app_slug);
+    PERFORM claimius._grant_hybrid_roles();
+    RAISE NOTICE 'Hybrid initialized.';
+    RETURN v_result;
+END;
+$$ LANGUAGE plpgsql;
+
+COMMENT ON FUNCTION claimius.init_hybrid IS 'Bootstrap as a hybrid (prophet + disciple).';
 
 -- ----------------------------------------------------------------------------
 -- Role grant helpers
@@ -2297,9 +2730,10 @@ BEGIN
     EXECUTE 'REVOKE EXECUTE ON FUNCTION claimius.create_claim, claimius.update_claim, claimius.remove_claim,
              claimius.assign_claim_user, claimius.update_claim_user, claimius.remove_user_claim,
              claimius.assign_claim_object, claimius.update_claim_object, claimius.remove_claim_object,
-             claimius.migrate_root,
-             claimius.init_disciple,
-             claimius.init_claimius_tables, claimius.init_claimius_internal
+             claimius.merge_user, claimius.migrate_root,
+             claimius.init_prophet, claimius.init_disciple, claimius.init_hybrid,
+             claimius.init_claimius_tables, claimius.init_claimius_internal,
+             claimius.recompute_state
              FROM claimius_reader';
 
     -- Writer: EXECUTE on everything, plus INSERT/UPDATE on tables that do
@@ -2327,9 +2761,10 @@ BEGIN
     EXECUTE 'REVOKE EXECUTE ON FUNCTION claimius.create_claim, claimius.update_claim, claimius.remove_claim,
              claimius.assign_claim_user, claimius.update_claim_user, claimius.remove_user_claim,
              claimius.assign_claim_object, claimius.update_claim_object, claimius.remove_claim_object,
-             claimius.migrate_root,
-             claimius.init_disciple,
-             claimius.init_claimius_tables, claimius.init_claimius_internal
+             claimius.merge_user, claimius.migrate_root,
+             claimius.init_prophet, claimius.init_disciple, claimius.init_hybrid,
+             claimius.init_claimius_tables, claimius.init_claimius_internal,
+             claimius.recompute_state
              FROM claimius_reader';
     EXECUTE 'GRANT INSERT, UPDATE, DELETE ON claimius.user_object, claimius.object_users, claimius.user_users,
              claimius.disciple_state, claimius.samna_user, claimius.samna_client,
@@ -3426,4 +3861,67 @@ COMMENT ON FUNCTION claimius.create_organization_user(UUID, UUID, UUID, JSONB, B
 
 GRANT EXECUTE ON FUNCTION claimius.create_organization_user(UUID, UUID, UUID, JSONB, BOOLEAN)
     TO claimius_disciple_client, claimius_writer, claimius_admin;
+
+DROP FUNCTION IF EXISTS claimius.search(UUID, UUID, TEXT, TEXT[], INTEGER, INTEGER, INTEGER);
+
+CREATE OR REPLACE FUNCTION claimius.search(p_user_id uuid, p_query text, p_object_types text[] DEFAULT NULL::text[], p_required_access integer DEFAULT 0, p_object_ids uuid[] DEFAULT NULL::uuid[], p_exclude_object_ids uuid[] DEFAULT NULL::uuid[], p_limit integer DEFAULT 20, p_offset integer DEFAULT 0)
+ RETURNS TABLE(object_id uuid, object_type text, user_claim_id uuid, name text, description text, link text, sa_access integer, scope jsonb, owner_id uuid, location_id uuid, is_direct_grant boolean, rank real)
+ LANGUAGE plpgsql
+AS $function$
+DECLARE
+    v_tsquery TSQUERY;
+BEGIN
+    PERFORM claimius.reconcile_if_pending(p_user_id);
+
+    IF NOT claimius.check_user_active(p_user_id) THEN
+        RETURN;
+    END IF;
+
+    v_tsquery := websearch_to_tsquery('simple', p_query);
+
+    RETURN QUERY
+        SELECT
+            claimius.user_object.object_id,
+            claimius.user_object.object_type,
+            best.uc_id,
+            claimius.user_object.sa_name,
+            claimius.user_object.sa_description,
+            claimius.user_object.sa_link,
+            claimius.user_object.sa_access,
+            claimius.user_object.scope,
+            claimius.user_object.sa_owner_id,
+            claimius.user_object.sa_location_id,
+            (claimius.user_object.direct_grant AND best.uc_id IS NULL),
+            ts_rank(claimius.user_object.search_vector, v_tsquery)
+        FROM claimius.user_object
+                 LEFT JOIN LATERAL (
+            SELECT uc.id AS uc_id
+            FROM jsonb_array_elements(claimius.user_object.grants) g
+                     JOIN claimius.user_claim uc ON uc.claim_id = (g ->> 'claim_id')::UUID
+                AND uc.user_id = p_user_id
+                AND TRUE
+                AND uc.sa_deleted_at IS NULL
+                AND (uc.starts_at IS NULL OR uc.starts_at <= now())
+                AND (uc.ends_at IS NULL OR uc.ends_at > now())
+                     JOIN claimius.claim c ON c.id = uc.claim_id AND c.sa_deleted_at IS NULL
+            WHERE ((g ->> 'access')::INTEGER & p_required_access) = p_required_access
+            ORDER BY claimius._popcount((g ->> 'access')::INTEGER) DESC
+            LIMIT 1
+            ) best ON TRUE
+        WHERE claimius.user_object.user_id = p_user_id
+          AND TRUE
+          AND (claimius.user_object.sa_access & p_required_access) = p_required_access
+          AND claimius.user_object.search_vector @@ v_tsquery
+          AND (p_object_types IS NULL OR claimius.user_object.object_type = ANY(p_object_types))
+          AND (p_object_ids IS NULL OR claimius.user_object.object_id = ANY(p_object_ids))
+          AND (p_exclude_object_ids IS NULL OR NOT (claimius.user_object.object_id = ANY(p_exclude_object_ids)))
+          AND (best.uc_id IS NOT NULL OR claimius.user_object.direct_grant)
+        ORDER BY ts_rank(claimius.user_object.search_vector, v_tsquery) DESC
+        LIMIT p_limit OFFSET p_offset;
+END;
+$function$
+
+;
+
+GRANT EXECUTE ON FUNCTION claimius.search(UUID, TEXT, TEXT[], INTEGER, UUID[], UUID[], INTEGER, INTEGER) TO claimius_disciple_client, claimius_writer, claimius_admin, claimius_reader;
 

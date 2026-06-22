@@ -744,7 +744,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius.reconcile_if_pending IS 'Drains reconcile_queue for a user inline. Called at read entry points.';
+COMMENT ON FUNCTION claimius.reconcile_if_pending(p_app_id uuid, p_user_id uuid) IS 'Drains reconcile_queue for a user inline. Called at read entry points.';
 
 -- cascade_user_soft_delete
 -- When read functions detect a soft deleted user, propagate the soft delete
@@ -766,7 +766,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius.cascade_user_soft_delete IS 'Propagates soft delete from samna_user to dependent rows.';
+COMMENT ON FUNCTION claimius.cascade_user_soft_delete(p_app_id uuid, p_user_id uuid) IS 'Propagates soft delete from samna_user to dependent rows.';
 
 -- check_user_active
 -- Pure predicate. Returns true when the user row exists, has status=active,
@@ -796,7 +796,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql STABLE;
 
-COMMENT ON FUNCTION claimius.check_user_active IS 'Predicate: returns true when the user row exists, has status=active, and is not soft deleted.';
+COMMENT ON FUNCTION claimius.check_user_active(p_app_id uuid, p_user_id uuid) IS 'Predicate: returns true when the user row exists, has status=active, and is not soft deleted.';
 
 -- _cascade_user_soft_delete_trg
 -- Trigger wrapper that fires cascade_user_soft_delete exactly once on the
@@ -814,7 +814,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius._cascade_user_soft_delete_trg IS 'Trigger wrapper: fires cascade_user_soft_delete once on samna_user soft delete transition.';
+COMMENT ON FUNCTION claimius._cascade_user_soft_delete_trg() IS 'Trigger wrapper: fires cascade_user_soft_delete once on samna_user soft delete transition.';
 
 -- ----------------------------------------------------------------------------
 -- Self root triggers
@@ -861,7 +861,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius._set_self_owner_on_insert IS 'BEFORE INSERT for organizations. Self references on root creation; copies parent org sa_root_id otherwise.';
+COMMENT ON FUNCTION claimius._set_self_owner_on_insert() IS 'BEFORE INSERT for organizations. Self references on root creation; copies parent org sa_root_id otherwise.';
 
 -- For locations.
 -- Parent column is sa_parent_id (locations belong to a location tree).
@@ -897,7 +897,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius._set_self_root_on_insert IS 'BEFORE INSERT for locations. Self references on root creation; copies parent location sa_root_id otherwise.';
+COMMENT ON FUNCTION claimius._set_self_root_on_insert() IS 'BEFORE INSERT for locations. Self references on root creation; copies parent location sa_root_id otherwise.';
 
 -- For parenthood tables. Parent column is sa_parent_id; lookup target is
 -- the same table the trigger fires on (TG_TABLE_*).
@@ -931,4 +931,4 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius._set_self_parent_on_insert IS 'BEFORE INSERT for parenthood tables. Self references on root creation; copies parent sa_root_id from the same table otherwise.';
+COMMENT ON FUNCTION claimius._set_self_parent_on_insert() IS 'BEFORE INSERT for parenthood tables. Self references on root creation; copies parent sa_root_id from the same table otherwise.';
