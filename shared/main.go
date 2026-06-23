@@ -124,6 +124,12 @@ func Init(logger echo.Logger) (*DB, error) {
 		(*UserToken)(nil),
 	)
 
+	isProphet = false
+	var prophetProbe SamnaApp
+	if probeErr := instance.NewRaw(`SELECT * FROM claimius.get_prophet_app() LIMIT 1`).Scan(context.Background(), &prophetProbe); probeErr == nil {
+		isProphet = true
+	}
+
 	if GetDebugMode() != DebugModeNone {
 		logger.Info("Debug mode active, skipping initial sync")
 		return instance, nil
@@ -172,6 +178,16 @@ func GetDebugMode() DebugMode {
 		return DebugModeClients
 	}
 	return DebugModeNone
+}
+
+var isProphet bool
+
+func IsProphet() bool {
+	return isProphet
+}
+
+func writesLocally() bool {
+	return GetDebugMode() != DebugModeNone || isProphet
 }
 
 func Instance() *DB {

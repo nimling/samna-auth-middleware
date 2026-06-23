@@ -606,6 +606,10 @@ CREATE TABLE IF NOT EXISTS claimius.prophet_state (
                                                       app_id              UUID NOT NULL UNIQUE REFERENCES claimius.samna_app(id),
                                                       last_applied_seq    BIGINT NOT NULL DEFAULT 0,
                                                       system_app_slug     TEXT,
+                                                      sync_mode           TEXT NOT NULL DEFAULT 'idle',
+                                                      sync_failures       INTEGER NOT NULL DEFAULT 0,
+                                                      next_attempt_at     TIMESTAMPTZ,
+                                                      last_contact_at     TIMESTAMPTZ,
                                                       sa_updated_at       TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 

@@ -333,7 +333,7 @@ func (q *InsertQuery) buildBun() *bun.InsertQuery {
 }
 
 func (q *InsertQuery) Exec(ctx context.Context, dest ...any) (sql.Result, error) {
-	if GetDebugMode() != DebugModeNone {
+	if writesLocally() {
 		if handled, err := q.execClaimius(ctx, dest...); handled {
 			return nil, err
 		}
@@ -343,7 +343,7 @@ func (q *InsertQuery) Exec(ctx context.Context, dest ...any) (sql.Result, error)
 }
 
 func (q *InsertQuery) Scan(ctx context.Context, dest ...any) error {
-	if GetDebugMode() != DebugModeNone {
+	if writesLocally() {
 		if handled, err := q.execClaimius(ctx, dest...); handled {
 			return err
 		}
@@ -664,7 +664,7 @@ func (q *UpdateQuery) buildBun() *bun.UpdateQuery {
 }
 
 func (q *UpdateQuery) Exec(ctx context.Context, dest ...any) (sql.Result, error) {
-	if GetDebugMode() != DebugModeNone {
+	if writesLocally() {
 		if handled, err := q.execClaimius(ctx, dest...); handled {
 			return nil, err
 		}
@@ -674,7 +674,7 @@ func (q *UpdateQuery) Exec(ctx context.Context, dest ...any) (sql.Result, error)
 }
 
 func (q *UpdateQuery) Scan(ctx context.Context, dest ...any) error {
-	if GetDebugMode() != DebugModeNone {
+	if writesLocally() {
 		if handled, err := q.execClaimius(ctx, dest...); handled {
 			return err
 		}
@@ -856,7 +856,7 @@ func (q *DeleteQuery) buildBun() *bun.DeleteQuery {
 }
 
 func (q *DeleteQuery) Exec(ctx context.Context, dest ...any) (sql.Result, error) {
-	if GetDebugMode() != DebugModeNone {
+	if writesLocally() {
 		if handled, err := q.execClaimius(ctx, dest...); handled {
 			return nil, err
 		}
@@ -866,7 +866,7 @@ func (q *DeleteQuery) Exec(ctx context.Context, dest ...any) (sql.Result, error)
 }
 
 func (q *DeleteQuery) Scan(ctx context.Context, dest ...any) error {
-	if GetDebugMode() != DebugModeNone {
+	if writesLocally() {
 		if handled, err := q.execClaimius(ctx, dest...); handled {
 			return err
 		}
