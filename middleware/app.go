@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"encoding/base64"
+	"encoding/hex"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -78,11 +79,28 @@ func AppMiddleware(next echo.HandlerFunc) echo.HandlerFunc {
 			return ctx.NoContent(http.StatusUnauthorized)
 		}
 
+		var ownerOrg shared.Organization
+		if err := shared.Instance().NewSelect().
+			Model(&ownerOrg).
+			Column("private_seed").
+			Where("id = ?", app.OwnerID).
+			Where("sa_deleted_at IS NULL").
+			Limit(1).
+			Scan(ctx.Request().Context()); err != nil {
+			ctx.Logger().Infof("Owner org not found for slug=%s: %v", appSlug, err)
+			return ctx.NoContent(http.StatusUnauthorized)
+		}
+		orgSeed, err := hex.DecodeString(ownerOrg.PrivateSeed)
+		if err != nil {
+			ctx.Logger().Infof("Invalid owner org seed for slug=%s: %v", appSlug, err)
+			return ctx.NoContent(http.StatusUnauthorized)
+		}
+
 		storedSecret := ""
 		if app.AppSecret != nil {
 			storedSecret = *app.AppSecret
 		}
-		if !encryption.ValidateAppSecret(masterKey.Seed, appSecret, storedSecret) {
+		if !encryption.ValidateAppSecret(orgSeed, appSecret, storedSecret) {
 			ctx.Logger().Infof("Invalid app secret for slug=%s", appSlug)
 			return ctx.NoContent(http.StatusUnauthorized)
 		}

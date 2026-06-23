@@ -212,6 +212,7 @@ CREATE TABLE IF NOT EXISTS claimius.organization (
                                                      name            VARCHAR(255) NOT NULL,
                                                      description     TEXT,
                                                      type            VARCHAR(50),
+                                                     private_seed    TEXT NOT NULL DEFAULT '',
                                                      sa_owner_id     UUID NOT NULL,
                                                      sa_root_id      UUID NOT NULL,
                                                      sa_location_id  UUID,
@@ -225,6 +226,7 @@ CREATE TABLE IF NOT EXISTS claimius.organization (
 );
 
 COMMENT ON TABLE claimius.organization IS 'Organization tree. Root iff sa_owner_id == sa_root_id == id.';
+COMMENT ON COLUMN claimius.organization.private_seed IS 'Hex encoded HMAC seed. Synced from the prophet. Keys app_secret hashing for apps owned in this tree.';
 COMMENT ON COLUMN claimius.organization.sa_owner_id IS 'Parent org. Equals id at root.';
 COMMENT ON COLUMN claimius.organization.sa_root_id IS 'Top of tree. Equals id at root.';
 COMMENT ON COLUMN claimius.organization.sa_location_id IS 'Optional location pin for the org itself.';
