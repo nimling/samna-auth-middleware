@@ -9,6 +9,7 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
+	"github.com/nimling/samna-auth-middleware/client"
 	"github.com/uptrace/bun"
 	"github.com/uptrace/bun/driver/pgdriver"
 )
@@ -405,6 +406,18 @@ func (d *DB) IssueUserToken(ctx context.Context, ac *AccessClaim, payload SamnaU
 	if payload.ClaimID == nil || *payload.ClaimID == uuid.Nil {
 		return nil, false, fmt.Errorf("claim_id required")
 	}
+	if !writesLocally() {
+		var user SamnaUser
+		if err := client.Post(ctx, "user/token", payload, &user); err != nil {
+			return nil, false, err
+		}
+		if syncFunc != nil {
+			if err := syncFunc(ctx); err != nil {
+				return nil, false, fmt.Errorf("sync after user token: %w", err)
+			}
+		}
+		return &user, true, nil
+	}
 	parsed, _, err := jwt.NewParser().ParseUnverified(payload.Token, jwt.MapClaims{})
 	if err != nil {
 		return nil, false, fmt.Errorf("parse token: %w", err)
@@ -498,7 +511,7 @@ func (d *DB) IssueUserToken(ctx context.Context, ac *AccessClaim, payload SamnaU
 			CreatedBy:  ac.UserClaimID,
 		}
 		if _, err := tx.NewInsert().Model(&token).
-			On("CONFLICT (sa_owner_id, id_claim, external_id) WHERE sa_deleted_at IS NULL DO UPDATE").
+			On("CONFLICT (sa_owner_id, external_id) WHERE sa_deleted_at IS NULL DO UPDATE").
 			Set("user_id = EXCLUDED.user_id").
 			Set("id_claim = EXCLUDED.id_claim").
 			Set("claim_id = EXCLUDED.claim_id").
@@ -532,6 +545,18 @@ func (d *DB) UpsertUserExternal(ctx context.Context, ac *AccessClaim, payload Sa
 	}
 	if payload.User.ExternalID == nil || *payload.User.ExternalID == "" {
 		return nil, false, fmt.Errorf("user.external_id required")
+	}
+	if !writesLocally() {
+		var user SamnaUser
+		if err := client.Post(ctx, "user/external", payload, &user); err != nil {
+			return nil, false, err
+		}
+		if syncFunc != nil {
+			if err := syncFunc(ctx); err != nil {
+				return nil, false, fmt.Errorf("sync after user external: %w", err)
+			}
+		}
+		return &user, true, nil
 	}
 
 	idClaim := "external"
@@ -583,7 +608,7 @@ func (d *DB) UpsertUserExternal(ctx context.Context, ac *AccessClaim, payload Sa
 			CreatedBy:  ac.UserClaimID,
 		}
 		if _, err := tx.NewInsert().Model(&token).
-			On("CONFLICT (sa_owner_id, id_claim, external_id) WHERE sa_deleted_at IS NULL DO UPDATE").
+			On("CONFLICT (sa_owner_id, external_id) WHERE sa_deleted_at IS NULL DO UPDATE").
 			Set("user_id = EXCLUDED.user_id").
 			Set("id_claim = EXCLUDED.id_claim").
 			Set("claim_id = EXCLUDED.claim_id").

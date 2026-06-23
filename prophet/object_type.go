@@ -1,6 +1,7 @@
 package prophet
 
 import (
+	"database/sql/driver"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -81,4 +82,11 @@ func (o *ObjectType) UnmarshalJSON(data []byte) error {
 
 func (o ObjectType) MarshalJSON() ([]byte, error) {
 	return json.Marshal(string(o))
+}
+
+func (o ObjectType) Value() (driver.Value, error) {
+	if o == "" {
+		return nil, nil
+	}
+	return string(o), nil
 }

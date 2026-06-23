@@ -692,10 +692,11 @@ func upsertOrganizationUser(ctx echo.Context, ownerID, claimID, userID uuid.UUID
 	reqctx := ctx.Request().Context()
 
 	var rootID uuid.UUID
+	var callerUC uuid.UUID
 	if err := shared.Instance().NewRaw(
-		"SELECT sa_root_id FROM claimius.organization WHERE app_id = ? AND id = ? AND sa_deleted_at IS NULL LIMIT 1",
+		"SELECT sa_root_id, sa_created_by FROM claimius.organization WHERE app_id = ? AND id = ? AND sa_deleted_at IS NULL LIMIT 1",
 		appID, ownerID,
-	).Scan(reqctx, &rootID); err != nil {
+	).Scan(reqctx, &rootID, &callerUC); err != nil {
 		ctx.Logger().Errorf("organization lookup: %v", err)
 		return nil, http.StatusInternalServerError, errors.New("Internal server error")
 	}
@@ -758,7 +759,7 @@ func upsertOrganizationUser(ctx echo.Context, ownerID, claimID, userID uuid.UUID
 		return nil, http.StatusInternalServerError, errors.New("Internal server error")
 	}
 	if !hasClaim {
-		if _, err := shared.Instance().NewRaw("SELECT claimius.assign_claim_user(?, ?, ?, NULL, ?)", claimID, userID, ownerID, reason).Exec(reqctx); err != nil {
+		if _, err := shared.Instance().NewRaw("SELECT claimius.assign_claim_user(p_app_id := ?, p_claim_id := ?, p_user_id := ?, p_sa_owner_id := ?, p_sa_created_by := ?, p_reason := ?)", appID, claimID, userID, ownerID, callerUC, reason).Exec(reqctx); err != nil {
 			ctx.Logger().Errorf("assign_claim_user: %v", err)
 			return nil, http.StatusInternalServerError, errors.New("Internal server error")
 		}
@@ -772,7 +773,7 @@ func upsertOrganizationUser(ctx echo.Context, ownerID, claimID, userID uuid.UUID
 		return nil, http.StatusInternalServerError, errors.New("Internal server error")
 	}
 	if virtualID == uuid.Nil {
-		if err := shared.Instance().NewRaw("SELECT (claimius.create_claim(?, NULL, 15, ?, ?, NULL, TRUE, 'virtual') -> 'claim' ->> 'id')::uuid", virtualName, ownerID, rootID).Scan(reqctx, &virtualID); err != nil {
+		if err := shared.Instance().NewRaw("SELECT (claimius.create_claim(p_app_id := ?, p_name := ?, p_description := NULL, p_sa_access := 15, p_sa_owner_id := ?, p_sa_root_id := ?, p_sa_created_by := ?, p_inherits := TRUE, p_type := 'virtual') -> 'claim' ->> 'id')::uuid", appID, virtualName, ownerID, rootID, callerUC).Scan(reqctx, &virtualID); err != nil {
 			ctx.Logger().Errorf("create virtual claim: %v", err)
 			return nil, http.StatusInternalServerError, errors.New("Internal server error")
 		}
@@ -784,16 +785,35 @@ func upsertOrganizationUser(ctx echo.Context, ownerID, claimID, userID uuid.UUID
 		return nil, http.StatusInternalServerError, errors.New("Internal server error")
 	}
 	if !hasObj {
-		if _, err := shared.Instance().NewRaw("SELECT claimius.assign_claim_object(?, ?, ?, NULL, ?, 'claimius.samna_user')", virtualID, ownerID, rootID, userID).Exec(reqctx); err != nil {
+		if _, err := shared.Instance().NewRaw("SELECT claimius.assign_claim_object(p_app_id := ?, p_claim_id := ?, p_sa_owner_id := ?, p_sa_root_id := ?, p_sa_created_by := ?, p_object_id := ?, p_object_type := 'claimius.samna_user')", appID, virtualID, ownerID, rootID, callerUC, userID).Exec(reqctx); err != nil {
 			ctx.Logger().Errorf("assign virtual claim_object: %v", err)
 			return nil, http.StatusInternalServerError, errors.New("Internal server error")
+		}
+	}
+
+	var callerUserID uuid.UUID
+	if err := shared.Instance().NewRaw("SELECT user_id FROM claimius.user_claim WHERE id = ? AND sa_deleted_at IS NULL", callerUC).Scan(reqctx, &callerUserID); err != nil && !errors.Is(err, sql.ErrNoRows) {
+		ctx.Logger().Errorf("lookup caller user: %v", err)
+		return nil, http.StatusInternalServerError, errors.New("Internal server error")
+	}
+	if callerUserID != uuid.Nil {
+		var hasCaller bool
+		if err := shared.Instance().NewRaw("SELECT EXISTS (SELECT 1 FROM claimius.user_claim WHERE app_id = ? AND claim_id = ? AND user_id = ? AND sa_deleted_at IS NULL)", appID, virtualID, callerUserID).Scan(reqctx, &hasCaller); err != nil {
+			ctx.Logger().Errorf("lookup caller user_claim: %v", err)
+			return nil, http.StatusInternalServerError, errors.New("Internal server error")
+		}
+		if !hasCaller {
+			if _, err := shared.Instance().NewRaw("SELECT claimius.assign_claim_user(p_app_id := ?, p_claim_id := ?, p_user_id := ?, p_sa_owner_id := ?, p_sa_created_by := ?)", appID, virtualID, callerUserID, ownerID, callerUC).Exec(reqctx); err != nil {
+				ctx.Logger().Errorf("assign caller user_claim: %v", err)
+				return nil, http.StatusInternalServerError, errors.New("Internal server error")
+			}
 		}
 	}
 
 	if _, err := shared.Instance().NewRaw(
 		"INSERT INTO claimius.user_token (app_id, user_id, id_claim, external_id, type, claim_id, data, sa_owner_id) "+
 			"VALUES (?, ?, ?, ?, ?, ?, ?::jsonb, ?) "+
-			"ON CONFLICT (app_id, sa_owner_id, id_claim, external_id) WHERE sa_deleted_at IS NULL DO UPDATE SET "+
+			"ON CONFLICT (app_id, sa_owner_id, external_id) WHERE sa_deleted_at IS NULL DO UPDATE SET "+
 			"user_id = EXCLUDED.user_id, type = EXCLUDED.type, claim_id = EXCLUDED.claim_id, data = EXCLUDED.data, sa_updated_at = now()",
 		appID, userID, idClaim, externalID, identType, claimID, string(data), ownerID,
 	).Exec(reqctx); err != nil {

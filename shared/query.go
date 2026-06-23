@@ -169,8 +169,9 @@ var endpointSpecs = map[ObjectType]endpointSpec{
 	OBJECT_TYPE_USER:         {base: "user"},
 	OBJECT_TYPE_ORGANIZATION: {base: "organization"},
 	OBJECT_TYPE_LOCATION:     {base: "location"},
-	OBJECT_TYPE_SAMNA_CLIENT: {base: "samna_client"},
-	OBJECT_TYPE_SAMNA_SECRET: {base: "secret"},
+	OBJECT_TYPE_SAMNA_CLIENT:  {base: "samna_client"},
+	OBJECT_TYPE_SAMNA_SECRET:  {base: "secret"},
+	OBJECT_TYPE_USER_RELATION: {base: "relation"},
 }
 
 func endpointFor(model any, recordID uuid.UUID) (string, error) {
@@ -855,7 +856,24 @@ func (q *DeleteQuery) buildBun() *bun.DeleteQuery {
 	return bq
 }
 
+func (q *DeleteQuery) ensureRecordID() {
+	if q.recordID != uuid.Nil || q.model == nil {
+		return
+	}
+	switch modelTableName(q.db, q.model) {
+	case "claimius.user_claim":
+		if m, ok := embeddedPtr(q.model, reflect.TypeOf(UserClaim{})).(*UserClaim); ok {
+			q.recordID = m.UserID
+		}
+	case "claimius.claim_object":
+		if m, ok := embeddedPtr(q.model, reflect.TypeOf(ClaimObject{})).(*ClaimObject); ok && m.ObjectID != nil {
+			q.recordID = *m.ObjectID
+		}
+	}
+}
+
 func (q *DeleteQuery) Exec(ctx context.Context, dest ...any) (sql.Result, error) {
+	q.ensureRecordID()
 	if writesLocally() {
 		if handled, err := q.execClaimius(ctx, dest...); handled {
 			return nil, err
@@ -866,6 +884,7 @@ func (q *DeleteQuery) Exec(ctx context.Context, dest ...any) (sql.Result, error)
 }
 
 func (q *DeleteQuery) Scan(ctx context.Context, dest ...any) error {
+	q.ensureRecordID()
 	if writesLocally() {
 		if handled, err := q.execClaimius(ctx, dest...); handled {
 			return err

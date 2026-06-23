@@ -224,14 +224,19 @@ func PatchClaimObject(ctx echo.Context) error {
 
 func DeleteClaimObject(ctx echo.Context) error {
 	appID, _ := ctx.Get("app_id").(uuid.UUID)
-	claimObjectID, err := uuid.Parse(ctx.Param("id"))
+	claimID, err := uuid.Parse(ctx.Param("claim_id"))
+	if err != nil {
+		return respond.Error(ctx, http.StatusBadRequest, "Malformed request")
+	}
+	objectID, err := uuid.Parse(ctx.Param("id"))
 	if err != nil {
 		return respond.Error(ctx, http.StatusBadRequest, "Malformed request")
 	}
 	var claimObject ClaimObject
 	res, err := shared.Instance().NewUpdate().
 		Model(&claimObject).
-		Where("id = ?", claimObjectID).
+		Where("claim_id = ?", claimID).
+		Where("object_id = ?", objectID).
 		Where("app_id = ?", appID).
 		Where("sa_deleted_at IS NULL").
 		Set("sa_deleted_at = NOW()").
@@ -268,6 +273,9 @@ func PostClaimUser(ctx echo.Context) error {
 	userClaim.ClaimID = claimID
 	if _, err := shared.Instance().NewInsert().
 		Model(userClaim).
+		On("CONFLICT (claim_id, user_id, app_id) WHERE sa_deleted_at IS NULL DO UPDATE").
+		Set("reason = EXCLUDED.reason").
+		Set("sa_updated_at = now()").
 		Returning("*").
 		Exec(ctx.Request().Context()); err != nil {
 		ctx.Logger().Errorf("PostClaimUser: %v", err)
@@ -310,14 +318,19 @@ func PatchClaimUser(ctx echo.Context) error {
 
 func DeleteClaimUser(ctx echo.Context) error {
 	appID, _ := ctx.Get("app_id").(uuid.UUID)
-	userClaimID, err := uuid.Parse(ctx.Param("id"))
+	claimID, err := uuid.Parse(ctx.Param("claim_id"))
+	if err != nil {
+		return respond.Error(ctx, http.StatusBadRequest, "Malformed request")
+	}
+	userID, err := uuid.Parse(ctx.Param("id"))
 	if err != nil {
 		return respond.Error(ctx, http.StatusBadRequest, "Malformed request")
 	}
 	var userClaim UserClaim
 	res, err := shared.Instance().NewUpdate().
 		Model(&userClaim).
-		Where("id = ?", userClaimID).
+		Where("claim_id = ?", claimID).
+		Where("user_id = ?", userID).
 		Where("app_id = ?", appID).
 		Where("sa_deleted_at IS NULL").
 		Set("sa_deleted_at = NOW()").

@@ -163,7 +163,7 @@ func deleteByTextID(ctx context.Context, tx bun.Tx, model any, id json.RawMessag
 		return fmt.Errorf("unmarshal id as string: %w", err)
 	}
 	_, err := tx.NewDelete().Model(model).
-		Where("sa_deleted_at IS NULL").Where("id = ?", key).Exec(ctx)
+		Where("id = ?", key).Exec(ctx)
 	return err
 }
 
