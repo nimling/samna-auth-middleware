@@ -871,7 +871,6 @@ DROP FUNCTION IF EXISTS claimius.get_claim_graph(UUID, UUID, INTEGER);
 --
 -- Args:
 --   p_user_id   - reading user
---   p_app_id    - app scope
 --   p_start_id  - optional organization id; when set, restricts the result to
 --                 the subtree rooted at that org (and the org itself). NULL
 --                 means every root the user can see.
@@ -1112,7 +1111,6 @@ COMMENT ON FUNCTION claimius.get_owner_graph(UUID, UUID, INTEGER, INTEGER) IS 'O
 --
 -- Args:
 --   p_user_id   - reading user
---   p_app_id    - app scope
 --   p_start_id  - optional claim id; when set, restricts the walk to that
 --                 single claim (must be one the user holds, otherwise empty).
 --                 NULL means every claim the user holds.
@@ -2280,7 +2278,6 @@ CREATE OR REPLACE FUNCTION claimius.init_claimius_internal()
     RETURNS VOID AS $$
 DECLARE
     v_internal_tables TEXT[] := ARRAY[
-        'claimius.samna_app',
         'claimius.samna_user',
         'claimius.samna_client',
         'claimius.samna_secret',
@@ -2358,401 +2355,36 @@ $$ LANGUAGE plpgsql;
 COMMENT ON FUNCTION claimius.create_root_organization(TEXT, UUID, TEXT, TEXT, UUID, TEXT) IS 'Creates a new root organization with self referencing sa_owner_id and sa_root_id. Idempotent on (name).';
 
 -- ----------------------------------------------------------------------------
--- init_prophet
--- Bootstrap a fresh claimius deployment as a prophet. Creates the system
--- app, system organization (self rooted), system user, system claim, and
--- wires up the bootstrap user_claim and claim_object. Idempotent.
---
--- Per app cryptographic material is generated externally in Go and passed
--- in. Claimius does not generate keys.
---
--- App and org reference each other via sa_owner_id (app->org) and app_id
--- (org->app). We resolve the chicken-and-egg by inserting both with
--- generated placeholder uuids and then reconciling with UPDATEs.
+-- init
+-- Bootstrap a fresh claimius deployment as a disciple. Ensures the singleton
+-- disciple_state cursor row exists and grants the disciple roles. The disciple
+-- identifies its app from env only, so no app slug is stored or required. All
+-- data arrives via sync from the prophet.
 -- ----------------------------------------------------------------------------
 
-CREATE OR REPLACE FUNCTION claimius.init_prophet(
-    p_system_app_slug       TEXT,
-    p_system_app_name       TEXT,
-    p_system_app_private_key  TEXT,
-    p_system_app_private_seed TEXT,
-    p_system_user_id        UUID DEFAULT NULL,
-    p_system_app_redirect_uri  TEXT DEFAULT '',
-    p_system_app_sync_uri      TEXT DEFAULT '',
-    p_system_app_contact_email TEXT DEFAULT NULL,
-    p_system_app_image      TEXT DEFAULT NULL,
-    p_system_app_provider_ids UUID[] DEFAULT ARRAY[]::UUID[],
-    p_system_app_style      JSONB DEFAULT NULL,
-    p_system_app_description TEXT DEFAULT 'System app',
-    p_system_org_name       TEXT DEFAULT 'System',
-    p_system_claim_name     TEXT DEFAULT 'System Administrator',
-    p_system_claim_id       UUID DEFAULT NULL,
-    p_default_claim         JSONB DEFAULT NULL
-) RETURNS JSONB AS $$
-DECLARE
-    v_app            UUID;
-    v_org_id            UUID;
-    v_claim_id          UUID;
-    v_default_claim_id  UUID;
-    v_user_claim_id     UUID;
-    v_pre_app        UUID;
-    v_pre_org_id        UUID;
-    v_default_name      TEXT;
-    v_default_desc      TEXT;
-    v_default_level     INTEGER;
-BEGIN
-    p_system_user_id  := COALESCE(claimius.ensure_uuid_null(p_system_user_id),  gen_random_uuid());
-    p_system_claim_id := COALESCE(claimius.ensure_uuid_null(p_system_claim_id), gen_random_uuid());
-
-    -- Validate the required default claim metadata. The system claim is
-    -- created with hardcoded properties; the default claim (granted to every
-    -- regular user on first login via ensure_app_user) is implementer defined.
-    IF p_default_claim IS NULL THEN
-        RAISE EXCEPTION 'init_prophet: p_default_claim is required and must contain name and description.';
-    END IF;
-    v_default_name  := p_default_claim ->> 'name';
-    v_default_desc  := p_default_claim ->> 'description';
-    v_default_level := coalesce((p_default_claim ->> 'sa_access')::INTEGER, 4);
-    IF v_default_name IS NULL OR v_default_name = '' THEN
-        RAISE EXCEPTION 'init_prophet: p_default_claim.name is required.';
-    END IF;
-    IF v_default_desc IS NULL OR v_default_desc = '' THEN
-        RAISE EXCEPTION 'init_prophet: p_default_claim.description is required.';
-    END IF;
-
-    -- Pre-generate the ids so app and org can reference each other in their
-    -- INSERTs even though they create circular references.
-    v_pre_app := gen_random_uuid();
-    v_pre_org_id := gen_random_uuid();
-
-    -- 1. system app, with sa_owner_id pointing at the future system org.
-    INSERT INTO claimius.samna_app (
-        id, slug, name, description, contact_email, app_image,
-        redirect_uri, sync_uri, provider_ids, status,
-        private_key, private_seed,
-        style, sa_owner_id, sa_created_by
-    ) VALUES (
-                 v_pre_app, p_system_app_slug, p_system_app_name,
-                 p_system_app_description, p_system_app_contact_email, p_system_app_image,
-                 p_system_app_redirect_uri, p_system_app_sync_uri, p_system_app_provider_ids,
-                 'active'::claimius.app_status,
-                 p_system_app_private_key, p_system_app_private_seed,
-                 p_system_app_style, v_pre_org_id, p_system_user_id
-             )
-    ON CONFLICT (slug) DO UPDATE SET
-                                     name = EXCLUDED.name,
-                                     description = EXCLUDED.description,
-                                     contact_email = EXCLUDED.contact_email,
-                                     sa_updated_at = now()
-    RETURNING id INTO v_app;
-
-    -- 2. system samna_user
-    IF NOT EXISTS (
-        SELECT 1 FROM claimius.samna_user
-        WHERE user_id = p_system_user_id AND sa_deleted_at IS NULL
-    ) THEN
-        INSERT INTO claimius.samna_user (user_id, status, type, first_name, last_name)
-        VALUES (p_system_user_id, 'active', 'system', 'System', 'User');
-    END IF;
-
-    -- 3. system organization, self rooted, owned by the system app
-    SELECT id INTO v_org_id FROM claimius.organization
-    WHERE type = 'system' AND sa_deleted_at IS NULL
-    LIMIT 1;
-
-    IF v_org_id IS NULL THEN
-        INSERT INTO claimius.organization (
-            id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by
-        ) VALUES (
-                     v_pre_org_id, p_system_org_name, 'system',
-                     v_pre_org_id, v_pre_org_id, 0, p_system_user_id
-                 )
-        RETURNING id INTO v_org_id;
-    END IF;
-
-    -- 4. reconcile: app's sa_owner_id should match the actual system org id
-    UPDATE claimius.samna_app SET sa_owner_id = v_org_id WHERE id = v_app AND sa_owner_id <> v_org_id;
-
-    -- 5. ensure ownership tree closure self-edge for the system org
-    INSERT INTO claimius.inheritance_info (
-        tree_type, root_id, ancestor_type, ancestor_id, descendant_type, descendant_id, depth
-    ) VALUES (
-        'ownership', v_org_id, 'claimius.organization', v_org_id, 'claimius.organization', v_org_id, 0
-    ) ON CONFLICT DO NOTHING;
-
-    -- 6. system claim (sidelined: granted only to the system user)
-    SELECT id INTO v_claim_id FROM claimius.claim
-    WHERE name = p_system_claim_name AND sa_deleted_at IS NULL;
-
-    IF v_claim_id IS NULL THEN
-        INSERT INTO claimius.claim (
-            id, name, description, sa_access, inherits, type,
-            sa_owner_id, sa_root_id, sa_created_by
-        ) VALUES (
-                     p_system_claim_id, p_system_claim_name,
-                     'Full access to claimius', 15, TRUE, 'system',
-                     v_org_id, v_org_id, p_system_user_id
-                 )
-        RETURNING id INTO v_claim_id;
-    END IF;
-
-    -- 6b. default claim (granted to every regular user on first login via
-    -- ensure_app_user). No claim_object binding, no inheritance: it is a
-    -- "you have an account" marker by default. Implementer defines name,
-    -- description, and level via p_default_claim.
-    SELECT id INTO v_default_claim_id FROM claimius.claim
-    WHERE name = v_default_name AND sa_deleted_at IS NULL;
-
-    IF v_default_claim_id IS NULL THEN
-        INSERT INTO claimius.claim (
-            name, description, sa_access, inherits, type,
-            sa_owner_id, sa_root_id, sa_created_by
-        ) VALUES (
-                     v_default_name, v_default_desc, v_default_level,
-                     FALSE, 'user',
-                     v_org_id, v_org_id, p_system_user_id
-                 )
-        RETURNING id INTO v_default_claim_id;
-    END IF;
-
-    -- 7. attach default claim_id to the system app. This is the claim every
-    -- regular user receives via ensure_app_user. The system claim stays
-    -- sidelined and is granted only to the system user below.
-    UPDATE claimius.samna_app SET claim_id = v_default_claim_id
-    WHERE id = v_app AND (claim_id IS NULL OR claim_id <> v_default_claim_id);
-
-    -- 8. bind claim to system org
-    IF NOT EXISTS (
-        SELECT 1 FROM claimius.claim_object
-        WHERE claim_id = v_claim_id
-          AND object_id = v_org_id
-          AND object_type = 'claimius.organization'
-          AND sa_deleted_at IS NULL
-    ) THEN
-        INSERT INTO claimius.claim_object (
-            claim_id, object_id, object_type,
-            sa_owner_id, sa_root_id, sa_created_by, inherits
-        ) VALUES (
-                     v_claim_id, v_org_id, 'claimius.organization',
-                     v_org_id, v_org_id, p_system_user_id, TRUE
-                 );
-    END IF;
-
-    -- 8b. bind claim to system app directly. Every resource (except users
-    -- and the claim itself) carries at least one direct claim_object grant
-    -- so that access never depends solely on cascade. inherits = FALSE
-    -- because the org binding above already cascades to the app via the
-    -- ownership tree; this is an owner anchor, not a cascade source.
-    IF NOT EXISTS (
-        SELECT 1 FROM claimius.claim_object
-        WHERE claim_id = v_claim_id
-          AND object_id = v_app
-          AND object_type = 'claimius.samna_app'
-          AND sa_deleted_at IS NULL
-    ) THEN
-        INSERT INTO claimius.claim_object (
-            claim_id, object_id, object_type,
-            sa_owner_id, sa_root_id, sa_created_by, inherits
-        ) VALUES (
-                     v_claim_id, v_app, 'claimius.samna_app',
-                     v_org_id, v_org_id, p_system_user_id, FALSE
-                 );
-    END IF;
-
-    -- 9. grant claim to system user
-    SELECT id INTO v_user_claim_id FROM claimius.user_claim
-    WHERE claim_id = v_claim_id
-      AND user_id = p_system_user_id
-      AND sa_deleted_at IS NULL
-    LIMIT 1;
-
-    IF v_user_claim_id IS NULL THEN
-        INSERT INTO claimius.user_claim (
-            claim_id, user_id, sa_owner_id, sa_created_by
-        ) VALUES (
-                     v_claim_id, p_system_user_id, v_org_id, p_system_user_id
-                 )
-        RETURNING id INTO v_user_claim_id;
-    END IF;
-
-    -- 10. prophet_state row for this app, marked as the system app via
-    -- system_app_slug. Partial unique index enforces at most one system row.
-    INSERT INTO claimius.prophet_state (last_applied_seq, system_app_slug)
-    VALUES (0, p_system_app_slug)
-    ON CONFLICT DO NOTHING;
-
-    -- 11. role grants for prophet runtime
-    PERFORM claimius._grant_prophet_roles();
-
-    -- Build the result: 6 keys, each named after the table the row lives in.
-    -- prophet_state and inheritance_info are internal bookkeeping and are
-    -- not returned. Re-running init_prophet is idempotent and returns the
-    -- current state of these rows.
-    DECLARE
-        v_result JSONB;
-    BEGIN
-        SELECT jsonb_build_object(
-                       'samna_app',     to_jsonb(a.*),
-                       'organization',  to_jsonb(o.*),
-                       'samna_user',    to_jsonb(u.*),
-                       'claim',         to_jsonb(c.*),
-                       'default_claim', to_jsonb(dc.*),
-                       'user_claim',    to_jsonb(uc.*),
-                       'claim_object',  to_jsonb(co.*)
-               )
-        INTO v_result
-        FROM claimius.samna_app a
-                 LEFT JOIN claimius.organization o ON o.id = v_org_id
-                 LEFT JOIN claimius.samna_user u ON u.user_id = p_system_user_id
-                 LEFT JOIN claimius.claim c ON c.id = v_claim_id
-                 LEFT JOIN claimius.claim dc ON dc.id = v_default_claim_id
-                 LEFT JOIN claimius.user_claim uc ON uc.id = v_user_claim_id
-                 LEFT JOIN claimius.claim_object co ON co.claim_id = v_claim_id
-            AND co.object_id = v_org_id AND co.object_type = 'claimius.organization'
-            AND co.sa_deleted_at IS NULL
-        WHERE a.id = v_app;
-
-        RAISE NOTICE 'Prophet initialized: app=% org=% claim=% user=%',
-            v_app, v_org_id, v_claim_id, p_system_user_id;
-
-        RETURN v_result;
-    END;
-END;
-$$ LANGUAGE plpgsql;
-
-COMMENT ON FUNCTION claimius.init_prophet IS 'Bootstrap function. Sets up system app, org, user, and claim. Idempotent.';
-
--- ----------------------------------------------------------------------------
--- init_disciple
--- Bootstrap a fresh claimius deployment as a disciple. Records that this
--- instance is a disciple, sets up disciple_state with the slug of the
--- upstream prophet app this disciple mirrors, and grants the
--- disciple_client role. Pass p_disciple_app_slug from an environment
--- variable (e.g. CLAIMIUS_DISCIPLE_APP_SLUG) so the same migration
--- artefact can be deployed against any prophet. The actual data arrives
--- via sync from the prophet.
--- ----------------------------------------------------------------------------
-
-CREATE OR REPLACE FUNCTION claimius.init_disciple(
-    p_disciple_app_slug TEXT
+CREATE OR REPLACE FUNCTION claimius.init(
+    p_disciple_app_slug TEXT DEFAULT NULL
 )
     RETURNS JSONB AS $$
 BEGIN
-    IF p_disciple_app_slug IS NULL OR p_disciple_app_slug = '' THEN
-        RAISE EXCEPTION 'init_disciple: p_disciple_app_slug is required.';
-    END IF;
-
-    -- Singleton row in disciple_state. SELECT-then-INSERT, then UPDATE the
-    -- slug so re-running init_disciple with a different slug is allowed
-    -- (idempotent for the same value, corrective for a wrong one).
     IF NOT EXISTS (SELECT 1 FROM claimius.disciple_state) THEN
-        INSERT INTO claimius.disciple_state (last_applied_seq, disciple_app_slug)
-        VALUES (0, p_disciple_app_slug);
-    ELSE
-        UPDATE claimius.disciple_state
-        SET disciple_app_slug = p_disciple_app_slug,
-            sa_updated_at = now()
-        WHERE disciple_app_slug <> p_disciple_app_slug;
+        INSERT INTO claimius.disciple_state (last_applied_seq)
+        VALUES (0);
     END IF;
 
-    -- Roles: disciple gets reader plus disciple_client
     PERFORM claimius._grant_disciple_roles();
 
-    RAISE NOTICE 'Disciple initialized for app slug %. Sync layer must populate samna_app and other tables from prophet.', p_disciple_app_slug;
+    RAISE NOTICE 'Disciple initialized. Sync layer must populate all tables from prophet.';
 
-    -- Disciples have nothing user meaningful to return: state arrives via
-    -- sync. We return an empty jsonb so the function has the same return
-    -- type as init_prophet and init_hybrid.
     RETURN '{}'::JSONB;
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius.init_disciple IS 'Bootstrap as a disciple. Requires the upstream prophet app slug. State arrives from prophet via sync.';
-
--- ----------------------------------------------------------------------------
--- init_hybrid
--- Hybrid: instance acts as a disciple to an upstream prophet AND as a
--- prophet for downstream disciples. Combines init_prophet and init_disciple
--- behavior plus role grants for both.
--- ----------------------------------------------------------------------------
-
-CREATE OR REPLACE FUNCTION claimius.init_hybrid(
-    p_system_app_slug          TEXT,
-    p_system_app_name          TEXT,
-    p_system_app_private_key   TEXT,
-    p_system_app_private_seed  TEXT,
-    p_disciple_app_slug        TEXT,
-    p_system_user_id           UUID DEFAULT NULL,
-    p_system_app_redirect_uri  TEXT DEFAULT '',
-    p_system_app_sync_uri      TEXT DEFAULT '',
-    p_system_app_contact_email TEXT DEFAULT NULL,
-    p_system_app_image         TEXT DEFAULT NULL,
-    p_system_app_provider_ids  UUID[] DEFAULT ARRAY[]::UUID[],
-    p_system_app_style         JSONB DEFAULT NULL,
-    p_system_app_description   TEXT DEFAULT 'System app',
-    p_system_org_name          TEXT DEFAULT 'System',
-    p_system_claim_name        TEXT DEFAULT 'System Administrator',
-    p_system_claim_id          UUID DEFAULT NULL,
-    p_default_claim            JSONB DEFAULT NULL
-) RETURNS JSONB AS $$
-DECLARE
-    v_result JSONB;
-BEGIN
-    v_result := claimius.init_prophet(
-            p_system_app_slug, p_system_app_name,
-            p_system_app_private_key, p_system_app_private_seed,
-            p_system_user_id,
-            p_system_app_redirect_uri, p_system_app_sync_uri, p_system_app_contact_email,
-            p_system_app_image, p_system_app_provider_ids, p_system_app_style,
-            p_system_app_description, p_system_org_name,
-            p_system_claim_name, p_system_claim_id,
-            p_default_claim
-                );
-    PERFORM claimius.init_disciple(p_disciple_app_slug);
-    PERFORM claimius._grant_hybrid_roles();
-    RAISE NOTICE 'Hybrid initialized.';
-    RETURN v_result;
-END;
-$$ LANGUAGE plpgsql;
-
-COMMENT ON FUNCTION claimius.init_hybrid IS 'Bootstrap as a hybrid (prophet + disciple).';
+COMMENT ON FUNCTION claimius.init IS 'Bootstrap as a disciple. Ensures the sync cursor row and grants disciple roles. App identity comes from env. State arrives from prophet via sync.';
 
 -- ----------------------------------------------------------------------------
 -- Role grant helpers
 -- ----------------------------------------------------------------------------
-
-CREATE OR REPLACE FUNCTION claimius._grant_prophet_roles()
-    RETURNS VOID AS $$
-BEGIN
-    -- Reader: EXECUTE on all functions, then revoke the write functions and
-    -- the init/admin ones. Reader sees no tables directly.
-    EXECUTE 'GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA claimius TO claimius_reader';
-    EXECUTE 'REVOKE EXECUTE ON FUNCTION claimius.create_claim, claimius.update_claim, claimius.remove_claim,
-             claimius.assign_claim_user, claimius.update_claim_user, claimius.remove_user_claim,
-             claimius.assign_claim_object, claimius.update_claim_object, claimius.remove_claim_object,
-             claimius.merge_user, claimius.migrate_root,
-             claimius.init_prophet, claimius.init_disciple, claimius.init_hybrid,
-             claimius.init_claimius_tables, claimius.init_claimius_internal,
-             claimius.recompute_state
-             FROM claimius_reader';
-
-    -- Writer: EXECUTE on everything, plus INSERT/UPDATE on tables that do
-    -- not have dedicated write functions. The prophet's app code is allowed
-    -- to write directly to these tables. Tables WITH write functions
-    -- (claim, user_claim, claim_object) get only EXECUTE on the function;
-    -- direct writes to those tables are not granted.
-    EXECUTE 'GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA claimius TO claimius_writer';
-    EXECUTE 'GRANT INSERT, UPDATE ON
-             claimius.samna_app, claimius.samna_user, claimius.samna_client, claimius.samna_secret,
-             claimius.organization, claimius.location,
-             claimius.object_field, claimius.user_field, claimius.user_relation,
-             claimius.prophet_state
-             TO claimius_writer';
-    EXECUTE 'GRANT INSERT, UPDATE, DELETE ON claimius.claim_graph_cache TO claimius_writer';
-    EXECUTE 'GRANT INSERT, UPDATE, DELETE ON claimius.claim_graph_cache TO claimius_reader';
-    EXECUTE 'GRANT SELECT ON ALL TABLES IN SCHEMA claimius TO claimius_writer';
-END;
-$$ LANGUAGE plpgsql;
 
 CREATE OR REPLACE FUNCTION claimius._grant_disciple_roles()
     RETURNS VOID AS $$
@@ -2762,13 +2394,13 @@ BEGIN
              claimius.assign_claim_user, claimius.update_claim_user, claimius.remove_user_claim,
              claimius.assign_claim_object, claimius.update_claim_object, claimius.remove_claim_object,
              claimius.merge_user, claimius.migrate_root,
-             claimius.init_prophet, claimius.init_disciple, claimius.init_hybrid,
+             claimius.init,
              claimius.init_claimius_tables, claimius.init_claimius_internal,
              claimius.recompute_state
              FROM claimius_reader';
     EXECUTE 'GRANT INSERT, UPDATE, DELETE ON claimius.user_object, claimius.object_users, claimius.user_users,
              claimius.disciple_state, claimius.samna_user, claimius.samna_client,
-             claimius.samna_secret, claimius.samna_app, claimius.organization, claimius.location,
+             claimius.samna_secret, claimius.organization, claimius.location,
              claimius.claim, claimius.user_claim, claimius.claim_object,
              claimius.object_field, claimius.user_field, claimius.user_relation,
              claimius.audit, claimius.inheritance_info, claimius.table_info,
@@ -2780,21 +2412,11 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-CREATE OR REPLACE FUNCTION claimius._grant_hybrid_roles()
-    RETURNS VOID AS $$
-BEGIN
-    PERFORM claimius._grant_prophet_roles();
-    PERFORM claimius._grant_disciple_roles();
-END;
-$$ LANGUAGE plpgsql;
-
 -- ----------------------------------------------------------------------------
 -- ensure_app_user
--- Helper for prophet apps. When a user logs into an app for the first time,
--- creates the per app samna_user row keyed by (user_id, app_id). If the app
--- has a default claim configured (samna_app.claim_id), grants it to the user
--- as part of the same call. Idempotent: re-running returns the existing row
--- and existing user_claim.
+-- When a user logs in for the first time, upserts the samna_user row. On the
+-- disciple there is no app default claim: claim grants arrive via sync, so no
+-- user_claim is created here. Idempotent: re-running returns the existing row.
 -- ----------------------------------------------------------------------------
 
 CREATE OR REPLACE FUNCTION claimius.ensure_app_user(
@@ -2809,15 +2431,11 @@ CREATE OR REPLACE FUNCTION claimius.ensure_app_user(
 ) RETURNS JSONB AS $$
 DECLARE
     v_user_row    claimius.samna_user;
-    v_uc_row      claimius.user_claim;
-    v_default_claim_id UUID;
-    v_default_claim_owner UUID;
 BEGIN
     p_user_id := claimius.ensure_uuid_null(p_user_id);
 
-    -- Find or insert the samna_user row
     SELECT * INTO v_user_row FROM claimius.samna_user
-    WHERE user_id = p_user_id AND TRUE AND sa_deleted_at IS NULL;
+    WHERE user_id = p_user_id AND sa_deleted_at IS NULL;
 
     IF NOT FOUND THEN
         INSERT INTO claimius.samna_user (
@@ -2832,46 +2450,11 @@ BEGIN
         RETURNING * INTO v_user_row;
     END IF;
 
-    -- Look up the app's default claim
-    SELECT a.claim_id, c.sa_owner_id
-    INTO v_default_claim_id, v_default_claim_owner
-    FROM claimius.samna_app a
-             LEFT JOIN claimius.claim c ON c.id = a.claim_id AND c.sa_deleted_at IS NULL
-    WHERE a.sa_deleted_at IS NULL LIMIT 1;
-
-    -- Grant the default claim if one is configured. Idempotent: if the user
-    -- already has a live user_claim for this claim, return the existing one.
-    IF v_default_claim_id IS NOT NULL THEN
-        SELECT * INTO v_uc_row FROM claimius.user_claim
-        WHERE user_id = v_user_row.user_id
-          AND TRUE
-          AND claim_id = v_default_claim_id
-          AND sa_deleted_at IS NULL
-        LIMIT 1;
-
-        IF NOT FOUND THEN
-            INSERT INTO claimius.user_claim (
-                claim_id, user_id, sa_owner_id, sa_created_by
-            ) VALUES (
-                         v_default_claim_id, v_user_row.user_id,
-                         v_default_claim_owner,
-                         v_user_row.user_id  -- bootstrap exception: actor is the user themselves on first login
-                     )
-            RETURNING * INTO v_uc_row;
-        END IF;
-
-        RETURN jsonb_build_object(
-                'samna_user', to_jsonb(v_user_row),
-                'user_claim', to_jsonb(v_uc_row)
-               );
-    END IF;
-
-    -- App has no default claim configured: just return the samna_user row.
     RETURN jsonb_build_object('samna_user', to_jsonb(v_user_row));
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius.ensure_app_user IS 'Creates per app samna_user row and grants the app default claim. Idempotent.';
+COMMENT ON FUNCTION claimius.ensure_app_user IS 'Upserts the samna_user row. Idempotent. Claim grants arrive via sync on the disciple.';
 
 DROP FUNCTION IF EXISTS claimius.get_access(UUID, TEXT, INTEGER);
 
@@ -3857,7 +3440,7 @@ END;
 $$ LANGUAGE plpgsql;
 
 COMMENT ON FUNCTION claimius.create_organization_user(UUID, UUID, UUID, JSONB, BOOLEAN) IS
-    'Disciple side: insert or upsert a samna_user, ensure the supplied claim is granted to the user, ensure a per-user virtual claim with full access is bound to the user, and when p_caller_uc is not null ensure that virtual claim is granted to the caller. p_caller_uc may be null for system-bootstrap callers that have no authenticating user_claim yet; in that case sa_created_by is stamped null and the caller_user_claim grant is skipped. With p_upsert=FALSE default, raises 23505 when user_id or external_id already exists in the app scope. With p_upsert=TRUE, conflicts on user_id and app_id update the row and downstream grants are reused when present. Returns samna_user, user_claim, virtual_claim, claim_object, caller_user_claim.';
+    'Disciple side: insert or upsert a samna_user, ensure the supplied claim is granted to the user, ensure a per-user virtual claim with full access is bound to the user, and when p_caller_uc is not null ensure that virtual claim is granted to the caller. p_caller_uc may be null for system-bootstrap callers that have no authenticating user_claim yet; in that case sa_created_by is stamped null and the caller_user_claim grant is skipped. With p_upsert=FALSE default, raises 23505 when user_id or external_id already exists. With p_upsert=TRUE, conflicts on user_id update the row and downstream grants are reused when present. Returns samna_user, user_claim, virtual_claim, claim_object, caller_user_claim.';
 
 GRANT EXECUTE ON FUNCTION claimius.create_organization_user(UUID, UUID, UUID, JSONB, BOOLEAN)
     TO claimius_disciple_client, claimius_writer, claimius_admin;

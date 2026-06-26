@@ -50,8 +50,7 @@ BEGIN
     END IF;
 
     -- Pull useful fields from the row using JSON conversion (works for any
-    -- registered shape). app_id comes from the row when the table has it,
-    -- otherwise from claimius.get_app_id().
+    -- registered shape).
     IF v_op <> 'DELETE' THEN
         v_owner_id  := (to_jsonb(NEW) ->> 'sa_owner_id')::UUID;
         v_location_id := (to_jsonb(NEW) ->> 'sa_location_id')::UUID;

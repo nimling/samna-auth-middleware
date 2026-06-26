@@ -20,10 +20,6 @@
 -- sa_updated_at maintenance
 -- ----------------------------------------------------------------------------
 
-DROP TRIGGER IF EXISTS tg_update_timestamp ON claimius.samna_app;
-CREATE TRIGGER tg_update_timestamp BEFORE UPDATE ON claimius.samna_app
-    FOR EACH ROW EXECUTE FUNCTION claimius.update_timestamp();
-
 DROP TRIGGER IF EXISTS tg_update_timestamp ON claimius.samna_user;
 CREATE TRIGGER tg_update_timestamp BEFORE UPDATE ON claimius.samna_user
     FOR EACH ROW EXECUTE FUNCTION claimius.update_timestamp();
@@ -95,7 +91,7 @@ CREATE TRIGGER tg_calc_claim_access AFTER INSERT OR UPDATE ON claimius.user_clai
 -- ----------------------------------------------------------------------------
 -- Internal tables that are themselves access targets get calc_object_access
 -- (or calc_hierarchical_access). organization and location are hierarchical.
--- samna_app, samna_user, samna_client, samna_secret are non hierarchical.
+-- samna_user, samna_client, samna_secret are non hierarchical.
 -- ----------------------------------------------------------------------------
 
 DROP TRIGGER IF EXISTS tg_calc_access ON claimius.organization;
@@ -165,10 +161,6 @@ CREATE TRIGGER tg_emit_sync_event AFTER INSERT OR UPDATE OR DELETE ON claimius.o
 
 DROP TRIGGER IF EXISTS tg_emit_sync_event ON claimius.user_users;
 CREATE TRIGGER tg_emit_sync_event AFTER INSERT OR UPDATE OR DELETE ON claimius.user_users
-    FOR EACH ROW EXECUTE FUNCTION claimius.emit_sync_event();
-
-DROP TRIGGER IF EXISTS tg_emit_sync_event ON claimius.samna_app;
-CREATE TRIGGER tg_emit_sync_event AFTER INSERT OR UPDATE OR DELETE ON claimius.samna_app
     FOR EACH ROW EXECUTE FUNCTION claimius.emit_sync_event();
 
 DROP TRIGGER IF EXISTS tg_emit_sync_event ON claimius.samna_user;

@@ -2401,7 +2401,7 @@ $$ LANGUAGE plpgsql;
 COMMENT ON FUNCTION claimius.create_root_organization(UUID, TEXT, UUID, TEXT, TEXT, UUID, TEXT) IS 'Creates a new root organization with self referencing sa_owner_id and sa_root_id. Idempotent on (app_id, name).';
 
 -- ----------------------------------------------------------------------------
--- init_prophet
+-- init
 -- Bootstrap a fresh claimius deployment as a prophet. Creates the system
 -- app, system organization (self rooted), system user, system claim, and
 -- wires up the bootstrap user_claim and claim_object. Idempotent.
@@ -2414,7 +2414,7 @@ COMMENT ON FUNCTION claimius.create_root_organization(UUID, TEXT, UUID, TEXT, TE
 -- generated placeholder uuids and then reconciling with UPDATEs.
 -- ----------------------------------------------------------------------------
 
-CREATE OR REPLACE FUNCTION claimius.init_prophet(
+CREATE OR REPLACE FUNCTION claimius.init(
     p_system_app_slug       TEXT,
     p_system_app_name       TEXT,
     p_system_app_private_key  TEXT,
@@ -2451,16 +2451,16 @@ BEGIN
     -- created with hardcoded properties; the default claim (granted to every
     -- regular user on first login via ensure_app_user) is implementer defined.
     IF p_default_claim IS NULL THEN
-        RAISE EXCEPTION 'init_prophet: p_default_claim is required and must contain name and description.';
+        RAISE EXCEPTION 'init: p_default_claim is required and must contain name and description.';
     END IF;
     v_default_name  := p_default_claim ->> 'name';
     v_default_desc  := p_default_claim ->> 'description';
     v_default_level := coalesce((p_default_claim ->> 'sa_access')::INTEGER, 4);
     IF v_default_name IS NULL OR v_default_name = '' THEN
-        RAISE EXCEPTION 'init_prophet: p_default_claim.name is required.';
+        RAISE EXCEPTION 'init: p_default_claim.name is required.';
     END IF;
     IF v_default_desc IS NULL OR v_default_desc = '' THEN
-        RAISE EXCEPTION 'init_prophet: p_default_claim.description is required.';
+        RAISE EXCEPTION 'init: p_default_claim.description is required.';
     END IF;
 
     -- Pre-generate the ids so app and org can reference each other in their
@@ -2642,7 +2642,7 @@ BEGIN
 
     -- Build the result: 6 keys, each named after the table the row lives in.
     -- prophet_state and inheritance_info are internal bookkeeping and are
-    -- not returned. Re-running init_prophet is idempotent and returns the
+    -- not returned. Re-running init is idempotent and returns the
     -- current state of these rows.
     DECLARE
         v_result JSONB;
@@ -2676,7 +2676,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius.init_prophet(p_system_app_slug text, p_system_app_name text, p_system_app_private_key text, p_system_app_private_seed text, p_system_user_id uuid, p_system_app_redirect_uri text, p_system_app_sync_uri text, p_system_app_contact_email text, p_system_app_image text, p_system_app_provider_ids uuid[], p_system_app_style jsonb, p_system_app_description text, p_system_org_name text, p_system_claim_name text, p_system_claim_id uuid, p_default_claim jsonb) IS 'Bootstrap function. Sets up system app, org, user, and claim. Idempotent.';
+COMMENT ON FUNCTION claimius.init(p_system_app_slug text, p_system_app_name text, p_system_app_private_key text, p_system_app_private_seed text, p_system_user_id uuid, p_system_app_redirect_uri text, p_system_app_sync_uri text, p_system_app_contact_email text, p_system_app_image text, p_system_app_provider_ids uuid[], p_system_app_style jsonb, p_system_app_description text, p_system_org_name text, p_system_claim_name text, p_system_claim_id uuid, p_default_claim jsonb) IS 'Bootstrap function. Sets up system app, org, user, and claim. Idempotent.';
 
 -- ----------------------------------------------------------------------------
 -- init_disciple
@@ -2718,7 +2718,7 @@ BEGIN
 
     -- Disciples have nothing user meaningful to return: state arrives via
     -- sync. We return an empty jsonb so the function has the same return
-    -- type as init_prophet and init_hybrid.
+    -- type as init and init_hybrid.
     RETURN '{}'::JSONB;
 END;
 $$ LANGUAGE plpgsql;
@@ -2728,7 +2728,7 @@ COMMENT ON FUNCTION claimius.init_disciple(p_disciple_app_slug text) IS 'Bootstr
 -- ----------------------------------------------------------------------------
 -- init_hybrid
 -- Hybrid: instance acts as a disciple to an upstream prophet AND as a
--- prophet for downstream disciples. Combines init_prophet and init_disciple
+-- prophet for downstream disciples. Combines init and init_disciple
 -- behavior plus role grants for both.
 -- ----------------------------------------------------------------------------
 
@@ -2754,7 +2754,7 @@ CREATE OR REPLACE FUNCTION claimius.init_hybrid(
 DECLARE
     v_result JSONB;
 BEGIN
-    v_result := claimius.init_prophet(
+    v_result := claimius.init(
             p_system_app_slug, p_system_app_name,
             p_system_app_private_key, p_system_app_private_seed,
             p_system_user_id,
@@ -2787,7 +2787,7 @@ BEGIN
              claimius.assign_claim_user, claimius.update_claim_user, claimius.remove_user_claim,
              claimius.assign_claim_object, claimius.update_claim_object, claimius.remove_claim_object,
              claimius.merge_user, claimius.migrate_root,
-             claimius.init_prophet, claimius.init_disciple, claimius.init_hybrid,
+             claimius.init, claimius.init_disciple, claimius.init_hybrid,
              claimius.init_claimius_tables, claimius.init_claimius_internal,
              claimius.recompute_state
              FROM claimius_reader';
@@ -2818,7 +2818,7 @@ BEGIN
              claimius.assign_claim_user, claimius.update_claim_user, claimius.remove_user_claim,
              claimius.assign_claim_object, claimius.update_claim_object, claimius.remove_claim_object,
              claimius.merge_user, claimius.migrate_root,
-             claimius.init_prophet, claimius.init_disciple, claimius.init_hybrid,
+             claimius.init, claimius.init_disciple, claimius.init_hybrid,
              claimius.init_claimius_tables, claimius.init_claimius_internal,
              claimius.recompute_state
              FROM claimius_reader';

@@ -687,7 +687,7 @@ BEGIN
     LIMIT 1;
 
     IF v_slug IS NULL THEN
-        RAISE EXCEPTION 'get_prophet_app: no system app registered. This deployment is a pure disciple, or init_prophet has not run.';
+        RAISE EXCEPTION 'get_prophet_app: no system app registered. This deployment is a pure disciple, or init has not run.';
     END IF;
 
     RETURN QUERY

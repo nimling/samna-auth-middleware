@@ -65,7 +65,7 @@ App connections never own the schema. They inherit the appropriate role.
 
 **Hybrid**: both. Useful for regional gateways: receives state from a central prophet, also acts as prophet for downstream disciples.
 
-The role is determined at init time by which init function is called: `init_prophet`, `init_disciple`, or `init_hybrid`. There is no separate config table for role. The set of `samna_app` rows that exist plus the role grants tell you which mode you are in.
+The role is determined at init time by which init function is called: `init`, `init_disciple`, or `init_hybrid`. There is no separate config table for role. The set of `samna_app` rows that exist plus the role grants tell you which mode you are in.
 
 ## Migration layout
 
@@ -95,7 +95,7 @@ After Claimius migrations finish, the implementing app runs:
 -- service on demand via samna_app.app_secret. See "App secret" below.
 -- Returns a JSONB object keyed by table name, with the full row each table
 -- received. Capture it if you need ids for follow on inserts.
-SELECT claimius.init_prophet(
+SELECT claimius.init(
            p_system_app_slug          => 'my_app',
            p_system_app_name          => 'My Application',
            p_system_app_private_key   => '<rsa private key from Go>',
@@ -129,9 +129,9 @@ SELECT claimius.init_disciple(
            p_disciple_app_slug => 'mainapp'
        );
 
--- Or a hybrid. Calls both init_prophet (creates this hybrid's own system
+-- Or a hybrid. Calls both init (creates this hybrid's own system
 -- app) AND init_disciple (records the upstream prophet app slug). Returns
--- the same jsonb shape as init_prophet.
+-- the same jsonb shape as init.
 SELECT claimius.init_hybrid(
            p_system_app_slug          => 'my_app',
            p_system_app_name          => 'My Application',
@@ -155,9 +155,9 @@ SELECT claimius.init_claimius_tables(
 
 ## Bootstrap and creation order on a prophet
 
-A fresh prophet has nothing in the database. Bringing it up requires a precise order because tables reference each other circularly (app references org, org has app_id, claims reference org, user_claim references claim, etc). `init_prophet` already encapsulates this for the system app and system org. When you create additional apps, organizations, and resources later, you follow the same pattern.
+A fresh prophet has nothing in the database. Bringing it up requires a precise order because tables reference each other circularly (app references org, org has app_id, claims reference org, user_claim references claim, etc). `init` already encapsulates this for the system app and system org. When you create additional apps, organizations, and resources later, you follow the same pattern.
 
-**Order for a fresh prophet (executed automatically by `init_prophet`):**
+**Order for a fresh prophet (executed automatically by `init`):**
 
 1. **System app** is inserted first, with a placeholder `sa_owner_id` referencing a UUID that will become the system org. `sa_created_by` is the system user's `user_id` (bootstrap exception, since no `user_claim` exists yet).
 2. **System samna_user** is inserted, scoped to the system app.
@@ -195,7 +195,7 @@ Calc triggers handle tree maintenance and `user_object` updates automatically at
 
 `samna_app.app_secret` is the API key disciples (or any other consumer) authenticate with against this prophet's sync endpoints. It is intentionally not a Claimius bootstrap input. The implementing service generates it (typically as `sha256(seed || raw_secret)` with the raw returned to the caller exactly once) and writes the hash to `samna_app.app_secret` on demand. `secret_version` increments on each rotation. Set both fields directly via UPDATE; there is no Claimius helper for this since the secret format and validation are the implementer's concern.
 
-For the system app on a fresh prophet, `app_secret` is NULL after `init_prophet` runs. The implementer fills it in if and when the system app needs to be authenticated against externally. For non system apps the implementer creates, the same applies: generate a secret, write it to `samna_app.app_secret`, return the raw to the caller once.
+For the system app on a fresh prophet, `app_secret` is NULL after `init` runs. The implementer fills it in if and when the system app needs to be authenticated against externally. For non system apps the implementer creates, the same applies: generate a secret, write it to `samna_app.app_secret`, return the raw to the caller once.
 
 ## Self identity
 
@@ -241,7 +241,7 @@ CREATE TABLE public.thing (
 
 The slugs are stored at init:
 
-- `init_prophet(p_system_app_slug => 'mainapp', ...)` writes `'mainapp'` to `claimius.prophet_state.system_app_slug` on the system app's row. A partial unique index (`WHERE system_app_slug IS NOT NULL`) enforces "at most one system row."
+- `init(p_system_app_slug => 'mainapp', ...)` writes `'mainapp'` to `claimius.prophet_state.system_app_slug` on the system app's row. A partial unique index (`WHERE system_app_slug IS NOT NULL`) enforces "at most one system row."
 - `init_disciple(p_disciple_app_slug => 'mainapp')` writes `'mainapp'` to `claimius.disciple_state.disciple_app_slug` (singleton, NOT NULL).
 
 Implementer middleware should call `claimius.get_disciple_app()` (or `get_disciple_app_id()` for a bare UUID) instead of maintaining a parallel `app_id()` helper. On a disciple `claimius.samna_app` only ever contains rows that arrive via sync; the slug-keyed lookup gives you the canonical row even before any migration runs against it.
@@ -346,7 +346,7 @@ DECLARE
     v_org_id   UUID;
     v_claim_id UUID;
 BEGIN
-    v_init := claimius.init_prophet(
+    v_init := claimius.init(
         p_system_app_slug          => 'my_app',
         p_system_app_name          => 'My App',
         p_system_app_private_key   => :'private_key',
@@ -419,7 +419,7 @@ INSERT INTO claimius.samna_app (
 
 After: typically `INSERT INTO claimius.prophet_state (app_id, last_applied_seq) VALUES (:new_app_id, 0)` so the new app has a sync cursor. When the implementing service is ready to issue an API key for this app (typically returned to the caller of the create-app endpoint), generate it externally and `UPDATE claimius.samna_app SET app_secret = :hash, secret_version = secret_version + 1 WHERE id = :new_app_id`.
 
-For the system app (the very first app on a fresh prophet), use `claimius.init_prophet` instead. It handles the system-app/system-org chicken-and-egg ordering and leaves `app_secret` NULL for the implementer to fill on demand.
+For the system app (the very first app on a fresh prophet), use `claimius.init` instead. It handles the system-app/system-org chicken-and-egg ordering and leaves `app_secret` NULL for the implementer to fill on demand.
 
 ### A new organization (root)
 
@@ -550,7 +550,7 @@ SELECT claimius.ensure_app_user(
 );
 ```
 
-Idempotent. Inserts the `samna_user` row if missing. If the app has `samna_app.claim_id` set (the default claim, configured during `init_prophet` via `p_default_claim`), also grants that claim to the user as a `user_claim` row. Returns:
+Idempotent. Inserts the `samna_user` row if missing. If the app has `samna_app.claim_id` set (the default claim, configured during `init` via `p_default_claim`), also grants that claim to the user as a `user_claim` row. Returns:
 
 ```json
 {

@@ -26,19 +26,25 @@ var syncFunc func(ctx context.Context) error
 var ErrSyncUnreachable = errors.New("sync unreachable: app inactive on samna_auth")
 var ErrSecretExpired = errors.New("secret expired")
 
-// GetApp returns the deployment's app row. On a disciple this is the upstream
-// prophet app this disciple mirrors (claimius.get_disciple_app). On a pure
-// prophet this falls back to claimius.get_prophet_app. Errors when neither is
-// registered.
+// GetApp returns the deployment's app row. On a disciple there is no
+// claimius.samna_app table: the app identity comes from env (SAUTH_APP_SLUG and
+// SAUTH_APP_SECRET) and the disciple never signs or decrypts, so no key or seed
+// material is held. On a prophet the system app row is read from
+// claimius.get_prophet_app.
 func (d *DB) GetApp(ctx context.Context) (*SamnaApp, error) {
-	var app SamnaApp
-	if err := d.NewRaw(`SELECT * FROM claimius.get_disciple_app() LIMIT 1`).Scan(ctx, &app); err == nil {
+	if isProphet {
+		var app SamnaApp
+		if err := d.NewRaw(`SELECT * FROM claimius.get_prophet_app() LIMIT 1`).Scan(ctx, &app); err != nil {
+			return nil, fmt.Errorf("no claimius app registered: %w", err)
+		}
 		return &app, nil
 	}
-	if err := d.NewRaw(`SELECT * FROM claimius.get_prophet_app() LIMIT 1`).Scan(ctx, &app); err != nil {
-		return nil, fmt.Errorf("no claimius app registered: %w", err)
+	slug := os.Getenv("SAUTH_APP_SLUG")
+	if slug == "" {
+		return nil, errors.New("SAUTH_APP_SLUG not set")
 	}
-	return &app, nil
+	secret := os.Getenv("SAUTH_APP_SECRET")
+	return &SamnaApp{Slug: slug, AppSecret: &secret}, nil
 }
 
 func RegisterSyncFunc(fn func(ctx context.Context) error) {

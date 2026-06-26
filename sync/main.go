@@ -4,50 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	stdsync "sync"
 	"time"
 
-	"github.com/google/uuid"
-	"github.com/nimling/samna-auth-middleware/shared"
 	"github.com/nimling/samna-auth-middleware/internal/store"
 	"github.com/nimling/samna-auth-middleware/sauth"
+	"github.com/nimling/samna-auth-middleware/shared"
 	"github.com/uptrace/bun"
 )
-
-var (
-	discipleAppMu stdsync.Mutex
-	discipleAppID uuid.UUID
-)
-
-func resolveDiscipleApp(ctx context.Context) uuid.UUID {
-	discipleAppMu.Lock()
-	defer discipleAppMu.Unlock()
-	if discipleAppID != uuid.Nil {
-		return discipleAppID
-	}
-	var id uuid.UUID
-	if err := shared.Instance().NewRaw("SELECT claimius.get_disciple_app_id()").Scan(ctx, &id); err == nil {
-		discipleAppID = id
-	}
-	return discipleAppID
-}
-
-func payloadScope(eventType string, raw json.RawMessage) (uuid.UUID, bool) {
-	var m struct {
-		AppID *uuid.UUID `json:"app_id"`
-		ID    *uuid.UUID `json:"id"`
-	}
-	if err := json.Unmarshal(raw, &m); err != nil {
-		return uuid.Nil, false
-	}
-	if m.AppID != nil {
-		return *m.AppID, true
-	}
-	if eventType == "claimius.samna_app" && m.ID != nil {
-		return *m.ID, true
-	}
-	return uuid.Nil, false
-}
 
 func Bootstrap(ctx context.Context) error {
 	seq, err := GetSeq(ctx)
@@ -71,12 +34,27 @@ type idEnvelope struct {
 	ID json.RawMessage `json:"id"`
 }
 
-func ApplyPayload(ctx context.Context, payload SyncPayload) error {
-	if appID := resolveDiscipleApp(ctx); appID != uuid.Nil {
-		if scope, ok := payloadScope(payload.EventType, payload.Payload); ok && scope != appID {
-			return nil
-		}
+func stripAppID(raw json.RawMessage) json.RawMessage {
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &m); err != nil {
+		return raw
 	}
+	if _, ok := m["app_id"]; !ok {
+		return raw
+	}
+	delete(m, "app_id")
+	cleaned, err := json.Marshal(m)
+	if err != nil {
+		return raw
+	}
+	return cleaned
+}
+
+func ApplyPayload(ctx context.Context, payload SyncPayload) error {
+	if payload.EventType == "claimius.samna_app" {
+		return nil
+	}
+	payload.Payload = stripAppID(payload.Payload)
 	return shared.Instance().RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
 		if _, err := tx.ExecContext(ctx, "SET LOCAL claimius.replay_mode = 'true'"); err != nil {
 			return fmt.Errorf("set replay_mode: %w", err)
@@ -95,8 +73,6 @@ func ApplyPayload(ctx context.Context, payload SyncPayload) error {
 
 func applyUpsert(ctx context.Context, tx bun.Tx, eventType string, raw json.RawMessage) error {
 	switch eventType {
-	case "claimius.samna_app":
-		return upsertEntity[shared.SamnaApp](ctx, tx, raw)
 	case "claimius.samna_user":
 		return upsertEntity[shared.SamnaUser](ctx, tx, raw)
 	case "claimius.samna_client":

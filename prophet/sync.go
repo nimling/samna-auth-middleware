@@ -136,20 +136,6 @@ func GetSyncSnapshot(ctx echo.Context) error {
 
 	var records []SyncPayload
 
-	var app SamnaApp
-	if err := shared.Instance().NewSelect().
-		Model(&app).
-		Where("id = ?", appID).
-		Where("sa_deleted_at IS NULL").
-		Scan(ctx.Request().Context()); err == nil {
-		raw, _ := sauth.Marshal(app)
-		records = append(records, SyncPayload{
-			Operation: "upsert",
-			EventType: "claimius.samna_app",
-			Payload:   raw,
-		})
-	}
-
 	for _, t := range tables {
 		q := shared.Instance().NewSelect().Model(t.model)
 		if t.filterApp && appID != uuid.Nil {
