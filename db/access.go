@@ -4,11 +4,10 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"strings"
 
 	"github.com/google/uuid"
 	"github.com/lib/pq"
-	"github.com/uptrace/bun"
+	"github.com/uptrace/bun/driver/pgdriver"
 )
 
 var (
@@ -30,57 +29,33 @@ func selfAccessClaim(userID uuid.UUID, requiredAccess ClaimAccess) *AccessClaim 
 }
 
 func (d *DB) MutationAccess(ctx context.Context, userID, objectID uuid.UUID, objectType string, requiredAccess ClaimAccess) (*AccessClaim, error) {
-	uc, err := d.GetAccess(ctx, userID, objectID, objectType, requiredAccess)
-	if err != nil && !errors.Is(err, ErrNoAccess) {
-		return nil, err
+	if objectType == OBJECT_TYPE_USER && userID == objectID {
+		return selfAccessClaim(userID, requiredAccess), nil
 	}
-	if uc != nil {
-		return uc, nil
-	}
-	uc, err = d.GetDirectAccess(ctx, userID, objectID, objectType)
-	if err != nil && !errors.Is(err, ErrNoAccess) {
-		return nil, err
-	}
-	if uc == nil {
-		exists, existsErr := d.objectExists(ctx, objectID, objectType)
-		if existsErr != nil {
-			return nil, existsErr
-		}
-		if !exists {
-			return nil, ErrNotFound
-		}
-		return nil, ErrNoAccess
-	}
-	if (uc.Access & requiredAccess) != requiredAccess {
-		return nil, ErrNoAccess
-	}
-	return uc, nil
-}
-
-func (d *DB) objectExists(ctx context.Context, objectID uuid.UUID, objectType string) (bool, error) {
-	var exists bool
-	if objectType == OBJECT_TYPE_USER {
-		err := d.NewRaw(
-			"SELECT EXISTS (SELECT 1 FROM claimius.samna_user WHERE user_id = ? AND app_id = claimius.get_disciple_app_id() AND sa_deleted_at IS NULL)",
-			objectID,
-		).Scan(ctx, &exists)
-		if err != nil {
-			return false, ErrInternalServer
-		}
-		return exists, nil
-	}
-	schema, table, ok := strings.Cut(objectType, ".")
-	if !ok {
-		schema, table = "public", objectType
-	}
+	claims := make([]AccessClaim, 0)
 	err := d.NewRaw(
-		"SELECT EXISTS (SELECT 1 FROM ?.? WHERE id = ? AND sa_deleted_at IS NULL)",
-		bun.Ident(schema), bun.Ident(table), objectID,
-	).Scan(ctx, &exists)
+		"SELECT * FROM claimius.mutation_access(?, ?, ?, ?)",
+		userID, objectID, objectType, requiredAccess,
+	).Scan(ctx, &claims)
 	if err != nil {
-		return false, ErrInternalServer
+		var pgErr pgdriver.Error
+		if errors.As(err, &pgErr) {
+			switch pgErr.Field('C') {
+			case "P0404":
+				return nil, ErrNotFound
+			case "P0403":
+				return nil, ErrNoAccess
+			}
+		}
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNoAccess
+		}
+		return nil, ErrInternalServer
 	}
-	return exists, nil
+	if len(claims) == 0 {
+		return nil, ErrNoAccess
+	}
+	return &claims[0], nil
 }
 
 type AccessRequest struct {
@@ -212,10 +187,12 @@ func (d *DB) RootAccess(ctx context.Context, userID uuid.UUID, requiredAccess Cl
 				SELECT DISTINCT c.sa_root_id
 				FROM claimius.user_claim uc
 				JOIN claimius.claim c ON c.id = uc.claim_id
+				JOIN claimius.organization o ON o.id = c.sa_root_id AND o.sa_deleted_at IS NULL
 				WHERE uc.user_id = ?
 				  AND uc.app_id = claimius.get_disciple_app_id()
 				  AND uc.sa_deleted_at IS NULL
 				  AND c.sa_deleted_at IS NULL
+				ORDER BY c.sa_root_id
 				LIMIT 1
 			),
 			?,
