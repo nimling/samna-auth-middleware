@@ -131,7 +131,7 @@ func (d *DB) MutationAccessMany(ctx context.Context, requests []AccessRequest) (
 			g.sa_location_id,
 			g.direct_grant
 		FROM inputs
-		LEFT JOIN LATERAL claimius.get_access(inputs.user_id, claimius.get_disciple_app_id(), inputs.object_id, inputs.object_type, inputs.required_access) g ON TRUE
+		LEFT JOIN LATERAL claimius.resolve_access(inputs.user_id, claimius.get_disciple_app_id(), inputs.object_id, inputs.object_type, inputs.required_access) g ON TRUE
 		ORDER BY inputs.idx
 	`, pq.Array(userIDs), pq.Array(objectIDs), pq.Array(objectTypes), pq.Array(requiredAccesses)).Scan(ctx, &rows)
 	set := make(AccessClaimSet, len(requests))
