@@ -504,6 +504,80 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql STABLE;
 
+-- _best_grant
+-- Strongest surviving claim grant in a user_object grants array for one user
+-- whose mask covers p_required_access. Inlinable SRF shared by get_access,
+-- get_objects, and search so every read path resolves the actor token
+-- identically.
+CREATE OR REPLACE FUNCTION claimius._best_grant(
+    p_grants          JSONB,
+    p_user_id         UUID,
+    p_required_access INTEGER
+) RETURNS TABLE (
+                    user_claim_id    UUID,
+                    claim_id         UUID,
+                    claim_name       TEXT,
+                    access_bits      INTEGER,
+                    grant_scope      JSONB,
+                    claim_created_at TIMESTAMPTZ
+                ) LANGUAGE sql STABLE AS $$
+    SELECT
+        uc.id,
+        c.id,
+        c.name,
+        (g ->> 'access')::INTEGER,
+        g -> 'scope',
+        c.sa_created_at
+    FROM jsonb_array_elements(p_grants) g
+             JOIN claimius.user_claim uc ON uc.claim_id = (g ->> 'claim_id')::UUID
+        AND uc.user_id = p_user_id
+        AND uc.sa_deleted_at IS NULL
+        AND (uc.starts_at IS NULL OR uc.starts_at <= now())
+        AND (uc.ends_at IS NULL OR uc.ends_at > now())
+             JOIN claimius.claim c ON c.id = uc.claim_id AND c.sa_deleted_at IS NULL
+    WHERE ((g ->> 'access')::INTEGER & p_required_access) = p_required_access
+    ORDER BY claimius._popcount((g ->> 'access')::INTEGER) DESC, (g ->> 'access')::INTEGER DESC, c.sa_created_at ASC
+    LIMIT 1
+$$;
+
+COMMENT ON FUNCTION claimius._best_grant(JSONB, UUID, INTEGER) IS 'Strongest surviving claim grant in a user_object grants array for one user whose mask covers p_required_access. Inlinable SRF shared by get_access, get_objects, and search so every read path resolves the actor token identically.';
+
+-- _user_claim_grants
+-- Returns the user's direct claim grants on claimius.samna_user. Shared by
+-- get_user_access and get_users so the direct branch resolves identically.
+CREATE OR REPLACE FUNCTION claimius._user_claim_grants(
+    p_actor_id       UUID,
+    p_target_user_id UUID DEFAULT NULL
+) RETURNS TABLE (
+                    target_user_id UUID,
+                    access         INTEGER,
+                    user_claim_id  UUID,
+                    claim_id       UUID,
+                    claim_name     TEXT,
+                    owner_id       UUID,
+                    root_id        UUID
+                ) LANGUAGE sql STABLE AS $$
+    SELECT
+        co.object_id,
+        (c.sa_access | COALESCE(co.sa_access, c.sa_access)) & 15,
+        uc.id,
+        c.id,
+        c.name,
+        co.sa_owner_id,
+        co.sa_root_id
+    FROM claimius.user_claim uc
+             JOIN claimius.claim c ON c.id = uc.claim_id AND c.sa_deleted_at IS NULL
+             JOIN claimius.claim_object co ON co.claim_id = c.id
+        AND co.object_type = 'claimius.samna_user'
+        AND co.sa_deleted_at IS NULL
+        AND (p_target_user_id IS NULL OR co.object_id = p_target_user_id)
+    WHERE uc.user_id = p_actor_id
+      AND uc.sa_deleted_at IS NULL
+      AND (uc.starts_at IS NULL OR uc.starts_at <= now())
+      AND (uc.ends_at IS NULL OR uc.ends_at > now())
+      AND ((c.sa_access | COALESCE(co.sa_access, c.sa_access)) & 16) = 0
+$$;
+
 -- _build_grants_for_object
 -- Computes the grants jsonb array for one (user, object) pair by walking
 -- claim_objects bound directly, via inheritance trees, or via composition
@@ -855,8 +929,30 @@ DECLARE
     v_any_unbounded BOOLEAN;
     v_norm          RECORD;
     v_search_vec    TSVECTOR;
+    v_has_soft      BOOLEAN;
+    v_obj_gone      BOOLEAN;
 BEGIN
     v_id := claimius.composite_id(p_user_id::TEXT, p_object_type, p_object_id::TEXT);
+
+    SELECT has_sa_deleted_at INTO v_has_soft
+    FROM claimius.table_info
+    WHERE object_type = p_object_type;
+
+    IF v_has_soft IS TRUE THEN
+        EXECUTE format(
+            'SELECT NOT EXISTS (SELECT 1 FROM %I.%I WHERE id = $1 AND sa_deleted_at IS NULL)',
+            split_part(p_object_type, '.', 1), split_part(p_object_type, '.', 2)
+        ) USING p_object_id INTO v_obj_gone;
+
+        IF v_obj_gone THEN
+            DELETE FROM claimius.user_object WHERE id = v_id;
+            DELETE FROM claimius.object_users
+            WHERE object_id = p_object_id
+              AND object_type = p_object_type AND user_id = p_user_id;
+            PERFORM claimius._refresh_user_users(p_user_id);
+            RETURN;
+        END IF;
+    END IF;
 
     v_grants := claimius._build_grants_for_object(p_user_id, p_object_type, p_object_id);
     v_direct := claimius._direct_grant_for_object(p_user_id, p_object_type, p_object_id);
