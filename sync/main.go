@@ -13,26 +13,48 @@ import (
 	"github.com/uptrace/bun"
 )
 
-func Start(ctx context.Context) error {
-	seq, err := GetSeq(ctx)
-	if err != nil {
-		return fmt.Errorf("get current seq: %w", err)
+func Start(ctx context.Context) <-chan error {
+	errs := make(chan error, 1)
+	if shared.GetDebugMode() != shared.DebugModeNone {
+		return errs
 	}
-	if seq == 0 {
-		if err := PullSnapshot(ctx); err != nil {
-			return err
+	go func() {
+		report := func(err error) {
+			if err == nil {
+				return
+			}
+			select {
+			case errs <- err:
+			default:
+			}
 		}
-	}
-	ticker := time.NewTicker(100 * time.Millisecond)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return nil
-		case <-ticker.C:
-			_ = PullSync(ctx)
+		if seq, err := GetSeq(ctx); err != nil {
+			report(fmt.Errorf("get current seq: %w", err))
+		} else if seq == 0 {
+			report(PullSnapshot(ctx))
 		}
-	}
+		backoff := time.Second
+		const maxBackoff = 30 * time.Second
+		for {
+			wait := 100 * time.Millisecond
+			if err := PullSync(ctx); err != nil {
+				report(err)
+				wait = backoff
+				backoff *= 2
+				if backoff > maxBackoff {
+					backoff = maxBackoff
+				}
+			} else {
+				backoff = time.Second
+			}
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(wait):
+			}
+		}
+	}()
+	return errs
 }
 
 type SyncPayload struct {
