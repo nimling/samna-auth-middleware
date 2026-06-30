@@ -6,21 +6,33 @@ import (
 	"fmt"
 	"time"
 
+	db "github.com/nimling/samna-auth-middleware/disciple/db"
 	"github.com/nimling/samna-auth-middleware/internal/store"
 	"github.com/nimling/samna-auth-middleware/sauth"
 	"github.com/nimling/samna-auth-middleware/shared"
 	"github.com/uptrace/bun"
 )
 
-func Bootstrap(ctx context.Context) error {
+func Start(ctx context.Context) error {
 	seq, err := GetSeq(ctx)
 	if err != nil {
 		return fmt.Errorf("get current seq: %w", err)
 	}
 	if seq == 0 {
-		return PullSnapshot(ctx)
+		if err := PullSnapshot(ctx); err != nil {
+			return err
+		}
 	}
-	return PullSync(ctx)
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-ticker.C:
+			_ = PullSync(ctx)
+		}
+	}
 }
 
 type SyncPayload struct {
@@ -55,7 +67,7 @@ func ApplyPayload(ctx context.Context, payload SyncPayload) error {
 		return nil
 	}
 	payload.Payload = stripAppID(payload.Payload)
-	return shared.Instance().RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
+	return db.Instance().DB.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
 		if _, err := tx.ExecContext(ctx, "SET LOCAL claimius.replay_mode = 'true'"); err != nil {
 			return fmt.Errorf("set replay_mode: %w", err)
 		}
@@ -144,7 +156,7 @@ func deleteByTextID(ctx context.Context, tx bun.Tx, model any, id json.RawMessag
 }
 
 func UpdateSeq(ctx context.Context, seq int64) error {
-	return shared.Instance().RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
+	return db.Instance().DB.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
 		var state shared.DiscipleState
 		if err := tx.NewSelect().
 			Model(&state).
@@ -165,7 +177,7 @@ func UpdateSeq(ctx context.Context, seq int64) error {
 
 func GetSeq(ctx context.Context) (int64, error) {
 	var state shared.DiscipleState
-	err := shared.Instance().NewSelect().
+	err := db.Instance().DB.NewSelect().
 		Model(&state).
 		Limit(1).
 		Scan(ctx)

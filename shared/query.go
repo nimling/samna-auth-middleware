@@ -10,12 +10,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
-	"github.com/nimling/nimbody"
 	"github.com/uptrace/bun"
-
-	"github.com/nimling/samna-auth-middleware/client"
-	"github.com/nimling/samna-auth-middleware/internal/store"
-	"github.com/nimling/samna-auth-middleware/sauth"
 )
 
 func modelTableName(db *DB, model any) string {
@@ -174,7 +169,7 @@ var endpointSpecs = map[ObjectType]endpointSpec{
 	OBJECT_TYPE_USER_RELATION: {base: "relation"},
 }
 
-func endpointFor(model any, recordID uuid.UUID) (string, error) {
+func EndpointFor(model any, recordID uuid.UUID) (string, error) {
 	otype, err := ObjectTypeOf(model)
 	if err != nil {
 		return "", err
@@ -257,14 +252,14 @@ func dispatchScan(src any, dest ...any) error {
 		if d == nil {
 			continue
 		}
-		if err := copyInto(src, d); err != nil {
+		if err := CopyInto(src, d); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func copyInto(src, dst any) error {
+func CopyInto(src, dst any) error {
 	data, err := json.Marshal(src)
 	if err != nil {
 		return err
@@ -291,7 +286,7 @@ func (q *InsertQuery) Model(model any) *InsertQuery {
 	return q
 }
 
-func (q *InsertQuery) With(ac *AccessClaim) *InsertQuery {
+func (q *InsertQuery) Access(ac *AccessClaim) *InsertQuery {
 	q.accessClaim = ac
 	return q
 }
@@ -334,24 +329,17 @@ func (q *InsertQuery) buildBun() *bun.InsertQuery {
 }
 
 func (q *InsertQuery) Exec(ctx context.Context, dest ...any) (sql.Result, error) {
-	if writesLocally() {
-		if handled, err := q.execClaimius(ctx, dest...); handled {
-			return nil, err
-		}
-		return q.buildBun().Exec(ctx, dest...)
+	if handled, err := q.execClaimius(ctx, dest...); handled {
+		return nil, err
 	}
-	return q.execHTTP(ctx, dest...)
+	return q.buildBun().Exec(ctx, dest...)
 }
 
 func (q *InsertQuery) Scan(ctx context.Context, dest ...any) error {
-	if writesLocally() {
-		if handled, err := q.execClaimius(ctx, dest...); handled {
-			return err
-		}
-		return q.buildBun().Scan(ctx, dest...)
+	if handled, err := q.execClaimius(ctx, dest...); handled {
+		return err
 	}
-	_, err := q.execHTTP(ctx, dest...)
-	return err
+	return q.buildBun().Scan(ctx, dest...)
 }
 
 func (q *InsertQuery) execClaimius(ctx context.Context, dest ...any) (bool, error) {
@@ -457,43 +445,8 @@ func (q *InsertQuery) execClaimius(ctx context.Context, dest ...any) (bool, erro
 	return false, nil
 }
 
-func (q *InsertQuery) execHTTP(ctx context.Context, dest ...any) (sql.Result, error) {
-	path, err := endpointFor(q.model, uuid.Nil)
-	if err != nil {
-		return nil, err
-	}
-	stampAccessClaim(q.model, q.accessClaim)
-	if err := stampRoot(ctx, q.db, q.model, q.accessClaim); err != nil {
-		return nil, err
-	}
-	body, err := sauth.Marshal(q.model)
-	if err != nil {
-		return nil, err
-	}
-	var raw json.RawMessage
-	if err := client.Post(ctx, path, json.RawMessage(body), &raw); err != nil {
-		return nil, err
-	}
-	if len(raw) > 0 {
-		if err := sauth.Unmarshal(raw, q.model); err != nil {
-			return nil, fmt.Errorf("decode insert response: %w", err)
-		}
-		if err := store.Upsert(ctx, q.db.DB, q.model); err != nil {
-			return nil, err
-		}
-	}
-	for _, d := range dest {
-		if d == nil {
-			continue
-		}
-		if err := copyInto(q.model, d); err != nil {
-			return nil, err
-		}
-	}
-	return nil, nil
-}
 
-func stampAccessClaim(model any, ac *AccessClaim) {
+func StampAccessClaim(model any, ac *AccessClaim) {
 	if ac == nil {
 		return
 	}
@@ -507,7 +460,7 @@ func stampAccessClaim(model any, ac *AccessClaim) {
 	setStructUUID(v, "OwnerID", ac.OwnerID, true)
 }
 
-func stampRoot(ctx context.Context, db *DB, model any, ac *AccessClaim) error {
+func StampRoot(ctx context.Context, db *DB, model any, ac *AccessClaim) error {
 	if loc, ok := embeddedPtr(model, reflect.TypeOf(Location{})).(*Location); ok {
 		if loc.ParentID == nil || *loc.ParentID == uuid.Nil {
 			if loc.ID == uuid.Nil {
@@ -563,16 +516,6 @@ func setStructUUID(v reflect.Value, field string, val uuid.UUID, onlyIfZero bool
 	f.Set(reflect.ValueOf(val))
 }
 
-func boundBody(model any) map[string]any {
-	if b, ok := model.(interface {
-		Validator() *nimbody.BodyValidator
-	}); ok {
-		if bv := b.Validator(); bv != nil {
-			return bv.Body
-		}
-	}
-	return nil
-}
 
 type UpdateQuery struct {
 	db          *DB
@@ -596,7 +539,7 @@ func (q *UpdateQuery) Model(model any) *UpdateQuery {
 	return q
 }
 
-func (q *UpdateQuery) With(ac *AccessClaim) *UpdateQuery {
+func (q *UpdateQuery) Access(ac *AccessClaim) *UpdateQuery {
 	q.accessClaim = ac
 	return q
 }
@@ -665,25 +608,19 @@ func (q *UpdateQuery) buildBun() *bun.UpdateQuery {
 }
 
 func (q *UpdateQuery) Exec(ctx context.Context, dest ...any) (sql.Result, error) {
-	if writesLocally() {
-		if handled, err := q.execClaimius(ctx, dest...); handled {
-			return nil, err
-		}
-		return q.buildBun().Exec(ctx, dest...)
+	if handled, err := q.execClaimius(ctx, dest...); handled {
+		return nil, err
 	}
-	return q.execHTTP(ctx, dest...)
+	return q.buildBun().Exec(ctx, dest...)
 }
 
 func (q *UpdateQuery) Scan(ctx context.Context, dest ...any) error {
-	if writesLocally() {
-		if handled, err := q.execClaimius(ctx, dest...); handled {
-			return err
-		}
-		return q.buildBun().Scan(ctx, dest...)
+	if handled, err := q.execClaimius(ctx, dest...); handled {
+		return err
 	}
-	_, err := q.execHTTP(ctx, dest...)
-	return err
+	return q.buildBun().Scan(ctx, dest...)
 }
+
 
 func (q *UpdateQuery) execClaimius(ctx context.Context, dest ...any) (bool, error) {
 	if q.recordID == uuid.Nil {
@@ -761,46 +698,6 @@ func (q *UpdateQuery) execClaimius(ctx context.Context, dest ...any) (bool, erro
 	return false, nil
 }
 
-func (q *UpdateQuery) execHTTP(ctx context.Context, dest ...any) (sql.Result, error) {
-	if q.recordID == uuid.Nil {
-		return nil, fmt.Errorf("update: record id required (use .ID(id) or .Where(\"id = ?\", id))")
-	}
-	path, err := endpointFor(q.model, q.recordID)
-	if err != nil {
-		return nil, err
-	}
-	var payload any
-	if bound := boundBody(q.model); bound != nil {
-		payload = bound
-	} else {
-		body, err := sauth.Marshal(q.model)
-		if err != nil {
-			return nil, err
-		}
-		payload = json.RawMessage(body)
-	}
-	var raw json.RawMessage
-	if err := client.Patch(ctx, path, payload, &raw); err != nil {
-		return nil, err
-	}
-	if len(raw) > 0 {
-		if err := sauth.Unmarshal(raw, q.model); err != nil {
-			return nil, fmt.Errorf("decode update response: %w", err)
-		}
-		if err := store.Upsert(ctx, q.db.DB, q.model); err != nil {
-			return nil, err
-		}
-	}
-	for _, d := range dest {
-		if d == nil {
-			continue
-		}
-		if err := copyInto(q.model, d); err != nil {
-			return nil, err
-		}
-	}
-	return nil, nil
-}
 
 type DeleteQuery struct {
 	db          *DB
@@ -820,7 +717,7 @@ func (q *DeleteQuery) Model(model any) *DeleteQuery {
 	return q
 }
 
-func (q *DeleteQuery) With(ac *AccessClaim) *DeleteQuery {
+func (q *DeleteQuery) Access(ac *AccessClaim) *DeleteQuery {
 	q.accessClaim = ac
 	return q
 }
@@ -874,26 +771,20 @@ func (q *DeleteQuery) ensureRecordID() {
 
 func (q *DeleteQuery) Exec(ctx context.Context, dest ...any) (sql.Result, error) {
 	q.ensureRecordID()
-	if writesLocally() {
-		if handled, err := q.execClaimius(ctx, dest...); handled {
-			return nil, err
-		}
-		return q.buildBun().Exec(ctx, dest...)
+	if handled, err := q.execClaimius(ctx, dest...); handled {
+		return nil, err
 	}
-	return q.execHTTP(ctx, dest...)
+	return q.buildBun().Exec(ctx, dest...)
 }
 
 func (q *DeleteQuery) Scan(ctx context.Context, dest ...any) error {
 	q.ensureRecordID()
-	if writesLocally() {
-		if handled, err := q.execClaimius(ctx, dest...); handled {
-			return err
-		}
-		return q.buildBun().Scan(ctx, dest...)
+	if handled, err := q.execClaimius(ctx, dest...); handled {
+		return err
 	}
-	_, err := q.execHTTP(ctx, dest...)
-	return err
+	return q.buildBun().Scan(ctx, dest...)
 }
+
 
 func (q *DeleteQuery) execClaimius(ctx context.Context, dest ...any) (bool, error) {
 	if q.recordID == uuid.Nil {
@@ -992,33 +883,14 @@ func (q *DeleteQuery) execClaimius(ctx context.Context, dest ...any) (bool, erro
 	return false, nil
 }
 
-func (q *DeleteQuery) execHTTP(ctx context.Context, dest ...any) (sql.Result, error) {
-	if q.recordID == uuid.Nil {
-		return nil, fmt.Errorf("delete: record id required (use .ID(id) or .Where(\"id = ?\", id))")
-	}
-	path, err := endpointFor(q.model, q.recordID)
-	if err != nil {
-		return nil, err
-	}
-	var raw json.RawMessage
-	if err := client.Delete(ctx, path, &raw); err != nil {
-		return nil, err
-	}
-	if len(raw) > 0 {
-		if err := sauth.Unmarshal(raw, q.model); err != nil {
-			return nil, fmt.Errorf("decode delete response: %w", err)
-		}
-		if err := store.Upsert(ctx, q.db.DB, q.model); err != nil {
-			return nil, err
-		}
-	}
-	for _, d := range dest {
-		if d == nil {
-			continue
-		}
-		if err := copyInto(q.model, d); err != nil {
-			return nil, err
-		}
-	}
-	return nil, nil
+
+func (q *InsertQuery) Built() (any, *AccessClaim) { return q.model, q.accessClaim }
+
+func (q *UpdateQuery) Built() (any, *AccessClaim, uuid.UUID) {
+	return q.model, q.accessClaim, q.recordID
+}
+
+func (q *DeleteQuery) Built() (any, *AccessClaim, uuid.UUID) {
+	q.ensureRecordID()
+	return q.model, q.accessClaim, q.recordID
 }

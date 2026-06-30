@@ -10,7 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 	"github.com/nimling/samna-auth-middleware/pkg/respond"
-	"github.com/nimling/samna-auth-middleware/shared"
+	prophetdb "github.com/nimling/samna-auth-middleware/prophet/db"
 	"github.com/nimling/samna-auth-middleware/utils"
 	"golang.org/x/crypto/bcrypt"
 )
@@ -23,7 +23,7 @@ func GetClients(ctx echo.Context) error {
 	}
 
 	var clients []SamnaClient
-	err := shared.Instance().NewSelect().
+	err := prophetdb.Instance().NewSelect().
 		Model(&clients).
 		ExcludeColumn("sa_deleted_at").
 		Where("app_id = ?", appID).
@@ -53,7 +53,7 @@ func GetClient(ctx echo.Context) error {
 	}
 
 	var client SamnaClient
-	err = shared.Instance().NewSelect().
+	err = prophetdb.Instance().NewSelect().
 		Model(&client).
 		ExcludeColumn("sa_deleted_at").
 		Where("id = ?", clientID).
@@ -100,7 +100,7 @@ func PostClient(ctx echo.Context) error {
 	client.AppID = appID
 	client.SecretHash = string(hashedSecret)
 
-	_, err = shared.Instance().NewInsert().
+	_, err = prophetdb.Instance().NewInsert().
 		Model(client).
 		Returning("*").
 		Exec(ctx.Request().Context())
@@ -123,7 +123,7 @@ func PutClient(ctx echo.Context) error {
 	}
 
 	var client SamnaClient
-	err = shared.Instance().NewSelect().
+	err = prophetdb.Instance().NewSelect().
 		Model(&client).
 		ExcludeColumn("sa_deleted_at").
 		Where("id = ?", clientID).
@@ -161,7 +161,7 @@ func PutClient(ctx echo.Context) error {
 		client.Status = patch.Status
 	}
 
-	err = shared.Instance().NewUpdate().
+	err = prophetdb.Instance().NewUpdate().
 		Model(&client).
 		Where("sa_deleted_at IS NULL").
 		OmitZero().
@@ -188,7 +188,7 @@ func DeleteClient(ctx echo.Context) error {
 	}
 
 	var client SamnaClient
-	err = shared.Instance().NewUpdate().
+	err = prophetdb.Instance().NewUpdate().
 		Model(&client).
 		Where("id = ?", clientID).
 		Where("app_id = ?", appID).
@@ -218,7 +218,7 @@ func PostClientRotate(ctx echo.Context) error {
 	}
 
 	var client SamnaClient
-	err = shared.Instance().NewSelect().
+	err = prophetdb.Instance().NewSelect().
 		Model(&client).
 		ExcludeColumn("sa_deleted_at").
 		Where("id = ?", clientID).
@@ -247,7 +247,7 @@ func PostClientRotate(ctx echo.Context) error {
 		return respond.Error(ctx, http.StatusInternalServerError, "Internal server error")
 	}
 
-	err = shared.Instance().NewUpdate().
+	err = prophetdb.Instance().NewUpdate().
 		Model((*SamnaClient)(nil)).
 		Where("id = ?", clientID).
 		Where("app_id = ?", appID).
@@ -276,7 +276,7 @@ func PostClientClaim(ctx echo.Context) error {
 	}
 
 	var client SamnaClient
-	err = shared.Instance().NewSelect().
+	err = prophetdb.Instance().NewSelect().
 		Model(&client).
 		ExcludeColumn("sa_deleted_at").
 		Where("id = ?", clientID).
@@ -304,7 +304,7 @@ func PostClientClaim(ctx echo.Context) error {
 
 	userClaim.AppID = appID
 
-	_, err = shared.Instance().NewInsert().
+	_, err = prophetdb.Instance().NewInsert().
 		Model(userClaim).
 		Returning("*").
 		Exec(ctx.Request().Context())
@@ -333,7 +333,7 @@ func DeleteClientClaim(ctx echo.Context) error {
 	}
 
 	var userClaim UserClaim
-	err = shared.Instance().NewUpdate().
+	err = prophetdb.Instance().NewUpdate().
 		Model(&userClaim).
 		Where("id = ?", claimID).
 		Where("user_id = ?", clientID).

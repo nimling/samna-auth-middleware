@@ -9,7 +9,7 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/nimling/samna-auth-middleware/pkg/errorsx"
 	"github.com/nimling/samna-auth-middleware/pkg/respond"
-	"github.com/nimling/samna-auth-middleware/shared"
+	prophetdb "github.com/nimling/samna-auth-middleware/prophet/db"
 	"github.com/nimling/samna-auth-middleware/utils"
 )
 
@@ -152,7 +152,7 @@ func PostUserField(ctx echo.Context) error {
 		return respond.Error(ctx, http.StatusBadRequest, err.Error())
 	}
 
-	if _, err := shared.Instance().NewInsert().
+	if _, err := prophetdb.Instance().NewInsert().
 		Model(value).
 		Returning("*").
 		Exec(ctx.Request().Context()); err != nil {
@@ -181,7 +181,7 @@ func PutUserField(ctx echo.Context) error {
 		return respond.Error(ctx, http.StatusBadRequest, err.Error())
 	}
 
-	res, err := shared.Instance().NewUpdate().
+	res, err := prophetdb.Instance().NewUpdate().
 		Model(patch).
 		Where("sa_deleted_at IS NULL").
 		Where("id = ?", valueID).
@@ -216,7 +216,7 @@ func DeleteUserField(ctx echo.Context) error {
 	}
 
 	var value UserField
-	res, err := shared.Instance().NewUpdate().
+	res, err := prophetdb.Instance().NewUpdate().
 		Model(&value).
 		Set("sa_deleted_at = NOW()").
 		Where("id = ?", valueID).
@@ -241,7 +241,7 @@ func DeleteUserField(ctx echo.Context) error {
 
 func fieldObjectFields(ctx echo.Context, appID uuid.UUID, objectType string) ([]ObjectField, error) {
 	fields := make([]ObjectField, 0)
-	query := shared.Instance().NewSelect().
+	query := prophetdb.Instance().NewSelect().
 		Model(&fields).
 		ExcludeColumn("sa_deleted_at").
 		Where("app_id = ?", appID).
@@ -259,7 +259,7 @@ func fieldObjectFields(ctx echo.Context, appID uuid.UUID, objectType string) ([]
 
 func fieldObjectField(ctx echo.Context, fieldID, appID uuid.UUID) (*ObjectField, error) {
 	var field ObjectField
-	err := shared.Instance().NewSelect().
+	err := prophetdb.Instance().NewSelect().
 		Model(&field).
 		ExcludeColumn("sa_deleted_at").
 		Where("id = ?", fieldID).
@@ -277,7 +277,7 @@ func fieldObjectField(ctx echo.Context, fieldID, appID uuid.UUID) (*ObjectField,
 }
 
 func fieldPostObjectField(ctx echo.Context, field *ObjectField) error {
-	_, err := shared.Instance().NewInsert().
+	_, err := prophetdb.Instance().NewInsert().
 		Model(field).
 		Returning("*").
 		Exec(ctx.Request().Context())
@@ -285,7 +285,7 @@ func fieldPostObjectField(ctx echo.Context, field *ObjectField) error {
 }
 
 func fieldPutObjectField(ctx echo.Context, fieldID, appID uuid.UUID, field *ObjectField) error {
-	res, err := shared.Instance().NewUpdate().
+	res, err := prophetdb.Instance().NewUpdate().
 		Model(field).
 		Where("sa_deleted_at IS NULL").
 		Where("id = ?", fieldID).
@@ -307,7 +307,7 @@ func fieldPutObjectField(ctx echo.Context, fieldID, appID uuid.UUID, field *Obje
 
 func fieldDeleteObjectField(ctx echo.Context, fieldID, appID uuid.UUID) (*ObjectField, error) {
 	var field ObjectField
-	res, err := shared.Instance().NewUpdate().
+	res, err := prophetdb.Instance().NewUpdate().
 		Model(&field).
 		Set("sa_deleted_at = NOW()").
 		Where("id = ?", fieldID).
@@ -330,7 +330,7 @@ func fieldDeleteObjectField(ctx echo.Context, fieldID, appID uuid.UUID) (*Object
 
 func fieldUserFields(ctx echo.Context, fieldID, appID uuid.UUID) ([]UserField, error) {
 	values := make([]UserField, 0)
-	err := shared.Instance().NewSelect().
+	err := prophetdb.Instance().NewSelect().
 		Model(&values).
 		ExcludeColumn("sa_deleted_at").
 		Where("field_id = ?", fieldID).

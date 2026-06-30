@@ -9,7 +9,7 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/nimling/samna-auth-middleware/pkg/errorsx"
 	"github.com/nimling/samna-auth-middleware/pkg/respond"
-	"github.com/nimling/samna-auth-middleware/shared"
+	prophetdb "github.com/nimling/samna-auth-middleware/prophet/db"
 	"github.com/nimling/samna-auth-middleware/utils"
 )
 
@@ -19,7 +19,7 @@ func GetOrganizations(ctx echo.Context) error {
 		return respond.Error(ctx, http.StatusBadRequest, err.Error())
 	}
 	orgs := make([]Organization, 0)
-	if err := shared.Instance().NewSelect().
+	if err := prophetdb.Instance().NewSelect().
 		Model(&orgs).
 		ExcludeColumn("sa_deleted_at").
 		Where("app_id = ?", appID).
@@ -47,7 +47,7 @@ func GetOrganization(ctx echo.Context) error {
 func GetOrganizationGraph(ctx echo.Context) error {
 	appID, _ := ctx.Get("app_id").(uuid.UUID)
 	nodes := make([]*GraphNode, 0)
-	if err := shared.Instance().NewRaw(`
+	if err := prophetdb.Instance().NewRaw(`
 		SELECT id AS object_id,
 		       'claimius.organization' AS object_type,
 		       name AS label,
@@ -121,7 +121,7 @@ func DeleteOrganization(ctx echo.Context) error {
 
 func getOrganization(ctx echo.Context, orgID, appID uuid.UUID) (*Organization, error) {
 	var organization Organization
-	err := shared.Instance().
+	err := prophetdb.Instance().
 		NewSelect().
 		Model(&organization).
 		ExcludeColumn("sa_deleted_at").
@@ -138,7 +138,7 @@ func getOrganization(ctx echo.Context, orgID, appID uuid.UUID) (*Organization, e
 	}
 
 	var objectAssets []ObjectAsset
-	err = shared.Instance().
+	err = prophetdb.Instance().
 		NewSelect().
 		Model(&objectAssets).
 		ExcludeColumn("sa_deleted_at").
@@ -166,7 +166,7 @@ func postOrganization(ctx echo.Context, org Organization) (*Organization, error)
 			orgType = *org.Type
 		}
 		var rootID uuid.UUID
-		if err := shared.Instance().NewRaw(
+		if err := prophetdb.Instance().NewRaw(
 			"SELECT (claimius.create_root_organization(?, ?, ?, ?, ?) -> 'organization' ->> 'id')::uuid",
 			org.AppID, org.Name, org.CreatedBy, org.Description, orgType,
 		).Scan(ctx.Request().Context(), &rootID); err != nil {
@@ -174,7 +174,7 @@ func postOrganization(ctx echo.Context, org Organization) (*Organization, error)
 			return nil, errorsx.ErrDbUnexpected
 		}
 		var createdRoot Organization
-		if err := shared.Instance().NewSelect().
+		if err := prophetdb.Instance().NewSelect().
 			Model(&createdRoot).
 			Where("id = ?", rootID).
 			Scan(ctx.Request().Context()); err != nil {
@@ -185,7 +185,7 @@ func postOrganization(ctx echo.Context, org Organization) (*Organization, error)
 	}
 
 	var created Organization
-	if _, err := shared.Instance().NewInsert().
+	if _, err := prophetdb.Instance().NewInsert().
 		Model(&org).
 		Returning("*").
 		Exec(ctx.Request().Context(), &created); err != nil {
@@ -196,7 +196,7 @@ func postOrganization(ctx echo.Context, org Organization) (*Organization, error)
 }
 
 func putOrganization(ctx echo.Context, org Organization, appID uuid.UUID) error {
-	res, err := shared.Instance().NewUpdate().
+	res, err := prophetdb.Instance().NewUpdate().
 		Model(&org).
 		Where("sa_deleted_at IS NULL").
 		Where("id = ?", org.ID).
@@ -220,7 +220,7 @@ func putOrganization(ctx echo.Context, org Organization, appID uuid.UUID) error 
 
 func deleteOrganization(ctx echo.Context, organizationID, appID uuid.UUID) (*Organization, error) {
 	var organization Organization
-	res, err := shared.Instance().
+	res, err := prophetdb.Instance().
 		NewUpdate().
 		Model(&organization).
 		Where("id = ?", organizationID).

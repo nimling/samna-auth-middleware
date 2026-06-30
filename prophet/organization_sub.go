@@ -6,7 +6,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 	"github.com/nimling/samna-auth-middleware/pkg/respond"
-	"github.com/nimling/samna-auth-middleware/shared"
+	prophetdb "github.com/nimling/samna-auth-middleware/prophet/db"
 	"github.com/nimling/samna-auth-middleware/utils"
 )
 
@@ -18,7 +18,7 @@ func GetOrganizationAssets(ctx echo.Context) error {
 	}
 
 	var objectAssets []ObjectAsset
-	if err := shared.Instance().NewSelect().
+	if err := prophetdb.Instance().NewSelect().
 		Model(&objectAssets).
 		ExcludeColumn("sa_deleted_at").
 		Relation("Asset").
@@ -50,7 +50,7 @@ func GetOrganizationClaims(ctx echo.Context) error {
 	}
 
 	claims := make([]Claim, 0)
-	if err := shared.Instance().NewSelect().
+	if err := prophetdb.Instance().NewSelect().
 		Model(&claims).
 		ExcludeColumn("sa_deleted_at").
 		Where("claim.app_id = ?", appID).
@@ -74,7 +74,7 @@ func GetOrganizationAudit(ctx echo.Context) error {
 	}
 
 	audits := make([]Audit, 0)
-	if err := shared.Instance().NewSelect().
+	if err := prophetdb.Instance().NewSelect().
 		Model(&audits).
 		Where("app_id = ?", appID).
 		Where("object_id = ?", orgID).

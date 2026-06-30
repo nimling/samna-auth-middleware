@@ -122,7 +122,7 @@ func (d *DB) InsertRootOrganization(ctx context.Context, ac *AccessClaim, org *O
 	org.RootID = org.ID
 	org.CreatedBy = *ac.UserClaimID
 	org.Level = 0
-	if err := d.NewInsert().Model(org).With(ac).Scan(ctx, org); err != nil {
+	if err := d.NewInsert().Model(org).Access(ac).Scan(ctx, org); err != nil {
 		return nil, err
 	}
 	return org, nil

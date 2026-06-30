@@ -10,7 +10,7 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/nimling/samna-auth-middleware/pkg/errorsx"
 	"github.com/nimling/samna-auth-middleware/pkg/respond"
-	"github.com/nimling/samna-auth-middleware/shared"
+	prophetdb "github.com/nimling/samna-auth-middleware/prophet/db"
 	"github.com/nimling/samna-auth-middleware/utils"
 )
 
@@ -163,7 +163,7 @@ func DeleteCode(ctx echo.Context) error {
 
 func codeGet(ctx echo.Context, id, appID uuid.UUID) (*Code, error) {
 	var c Code
-	err := shared.Instance().
+	err := prophetdb.Instance().
 		NewSelect().
 		Model(&c).
 		ExcludeColumn("sa_deleted_at").
@@ -183,7 +183,7 @@ func codeGet(ctx echo.Context, id, appID uuid.UUID) (*Code, error) {
 
 func codeGetAll(ctx echo.Context, appID uuid.UUID) ([]Code, error) {
 	codes := make([]Code, 0)
-	err := shared.Instance().
+	err := prophetdb.Instance().
 		NewSelect().
 		Model(&codes).
 		ExcludeColumn("sa_deleted_at").
@@ -200,7 +200,7 @@ func codeGetAll(ctx echo.Context, appID uuid.UUID) ([]Code, error) {
 
 func codeGetValue(ctx echo.Context, value string, appID uuid.UUID) (*Code, error) {
 	var c Code
-	err := shared.Instance().
+	err := prophetdb.Instance().
 		NewSelect().
 		Model(&c).
 		ExcludeColumn("sa_deleted_at").
@@ -233,7 +233,7 @@ func codeGetValue(ctx echo.Context, value string, appID uuid.UUID) (*Code, error
 }
 
 func codePost(ctx echo.Context, c *Code) (*Code, error) {
-	if _, err := shared.Instance().
+	if _, err := prophetdb.Instance().
 		NewInsert().
 		Model(c).
 		Returning("*").
@@ -246,7 +246,7 @@ func codePost(ctx echo.Context, c *Code) (*Code, error) {
 }
 
 func codePut(ctx echo.Context, c *Code, appID uuid.UUID) error {
-	res, err := shared.Instance().
+	res, err := prophetdb.Instance().
 		NewUpdate().
 		Model(c).
 		Where("id = ?", c.ID).
@@ -274,7 +274,7 @@ func codePut(ctx echo.Context, c *Code, appID uuid.UUID) error {
 
 func codeDelete(ctx echo.Context, id, appID uuid.UUID) (*Code, error) {
 	var c Code
-	res, err := shared.Instance().
+	res, err := prophetdb.Instance().
 		NewUpdate().
 		Model(&c).
 		Set("sa_deleted_at = ?", time.Now().UTC()).
@@ -301,7 +301,7 @@ func codeDelete(ctx echo.Context, id, appID uuid.UUID) (*Code, error) {
 }
 
 func codeRedeem(ctx echo.Context, c *Code, userID uuid.UUID) error {
-	tx, err := shared.Instance().BeginTx(ctx.Request().Context(), nil)
+	tx, err := prophetdb.Instance().BeginTx(ctx.Request().Context(), nil)
 	if err != nil {
 		ctx.Logger().Errorf("codeRedeem begin tx: %v", err)
 		return errorsx.ErrDbUnexpected
@@ -311,7 +311,7 @@ func codeRedeem(ctx echo.Context, c *Code, userID uuid.UUID) error {
 		ownerID := c.OwnerID
 		if ownerID == uuid.Nil {
 			var claim Claim
-			err = shared.Instance().
+			err = prophetdb.Instance().
 				NewSelect().
 				Model(&claim).
 				Where("sa_deleted_at IS NULL").

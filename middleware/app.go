@@ -12,6 +12,7 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/nimling/samna-auth-middleware/pkg/encryption"
 	"github.com/nimling/samna-auth-middleware/prophet"
+	prophetdb "github.com/nimling/samna-auth-middleware/prophet/db"
 	"github.com/nimling/samna-auth-middleware/shared"
 	"github.com/nimling/samna-auth-middleware/utils"
 )
@@ -56,7 +57,7 @@ func AppMiddleware(next echo.HandlerFunc) echo.HandlerFunc {
 		ctx.Set("app_secret", appSecret)
 
 		var app prophet.SamnaApp
-		err := shared.Instance().NewSelect().
+		err := prophetdb.Instance().NewSelect().
 			Model(&app).
 			ExcludeColumn("sa_deleted_at").
 			Where("slug = ?", appSlug).
@@ -80,7 +81,7 @@ func AppMiddleware(next echo.HandlerFunc) echo.HandlerFunc {
 		}
 
 		var ownerOrg shared.Organization
-		if err := shared.Instance().NewSelect().
+		if err := prophetdb.Instance().NewSelect().
 			Model(&ownerOrg).
 			Column("private_seed").
 			Where("id = ?", app.OwnerID).

@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
+	discipledb "github.com/nimling/samna-auth-middleware/disciple/db"
 	"github.com/nimling/samna-auth-middleware/shared"
 	"golang.org/x/crypto/bcrypt"
 )
@@ -81,7 +82,7 @@ func authenticateClient(ctx echo.Context, debugClients map[string]DebugClient) e
 		return fmt.Errorf("parse client_id: %w: %w", err, ErrorUnauthorized)
 	}
 
-	samnaClient, err := shared.Instance().GetClient(ctx.Request().Context(), clientUUID)
+	samnaClient, err := discipledb.Instance().GetClient(ctx.Request().Context(), clientUUID)
 	if err != nil {
 		return fmt.Errorf("lookup client: %w: %w", err, ErrorUnauthorized)
 	}
@@ -113,7 +114,7 @@ func forwardUserToken(ctx echo.Context) error {
 	if token == "" {
 		return nil
 	}
-	user, ownerID, err := shared.Instance().ValidateToken(ctx.Request().Context(), token)
+	user, ownerID, err := discipledb.Instance().ValidateToken(ctx.Request().Context(), token)
 	if err != nil {
 		return fmt.Errorf("validate forwarded user token: %w: %w", err, ErrorUserTokenNotRecognized)
 	}
@@ -122,7 +123,7 @@ func forwardUserToken(ctx echo.Context) error {
 	}
 	if ownerID != uuid.Nil {
 		clientID, _ := ctx.Get(UserIDKey).(uuid.UUID)
-		if !shared.Instance().HasAccess(ctx.Request().Context(), clientID, ownerID, shared.OBJECT_TYPE_ORGANIZATION, shared.ACCESS_READ) {
+		if !discipledb.Instance().HasAccess(ctx.Request().Context(), clientID, ownerID, shared.OBJECT_TYPE_ORGANIZATION, shared.ACCESS_READ) {
 			return ErrorUserTokenNotRecognized
 		}
 	}
@@ -136,7 +137,7 @@ func forwardUserExternal(ctx echo.Context) error {
 		return nil
 	}
 	clientID, _ := ctx.Get(UserIDKey).(uuid.UUID)
-	user, err := shared.Instance().ResolveExternalUser(ctx.Request().Context(), clientID, externalID)
+	user, err := discipledb.Instance().ResolveExternalUser(ctx.Request().Context(), clientID, externalID)
 	if err != nil {
 		return fmt.Errorf("resolve external user id: %w: %w", err, ErrorUserExternalNotRecognized)
 	}

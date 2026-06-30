@@ -10,7 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 	"github.com/nimling/samna-auth-middleware/pkg/respond"
-	"github.com/nimling/samna-auth-middleware/shared"
+	prophetdb "github.com/nimling/samna-auth-middleware/prophet/db"
 	"github.com/nimling/samna-auth-middleware/utils"
 	"github.com/uptrace/bun/dialect/pgdialect"
 )
@@ -343,7 +343,7 @@ func searchRun(ctx echo.Context, req *BodySearch) error {
 
 func searchClaimius(ctx echo.Context, userID, appID uuid.UUID, query string, req *BodySearch, access, cap int) ([]ResponseSearch, int, error) {
 	rs := make([]ResponseSearch, 0)
-	err := shared.Instance().NewRaw(
+	err := prophetdb.Instance().NewRaw(
 		`SELECT object_id       AS id,
 		        object_type     AS object_type,
 		        user_claim_id   AS user_claim_id,
@@ -378,7 +378,7 @@ func searchClaimObjectKeys(ctx echo.Context, claimID uuid.UUID) (map[string]stru
 		ObjectID   uuid.UUID `bun:"object_id"`
 		ObjectType string    `bun:"object_type"`
 	}
-	err := shared.Instance().NewRaw(
+	err := prophetdb.Instance().NewRaw(
 		`SELECT object_id, object_type
 		   FROM claimius.claim_object
 		  WHERE claim_id = ?
@@ -484,7 +484,7 @@ func searchApplyFilters(ctx echo.Context, appID uuid.UUID, results []ResponseSea
 func searchAnyUserHasAccess(ctx echo.Context, appID uuid.UUID, userIDs []uuid.UUID, objectID uuid.UUID, objectType string) bool {
 	for _, uid := range userIDs {
 		exists := false
-		err := shared.Instance().NewRaw(
+		err := prophetdb.Instance().NewRaw(
 			`SELECT EXISTS (SELECT 1 FROM claimius.get_access(?, ?, ?, ?, ?))`,
 			uid, appID, objectID, objectType, int(ACCESS_READ),
 		).Scan(ctx.Request().Context(), &exists)
@@ -600,7 +600,7 @@ func searchHydrate(ctx echo.Context, page []ResponseSearch, with searchWithSet) 
 			ObjectID   uuid.UUID `bun:"object_id"`
 			TreeType   string    `bun:"tree_type"`
 		}
-		err := shared.Instance().NewRaw(
+		err := prophetdb.Instance().NewRaw(
 			`SELECT a.object_type, a.object_id, a.tree_type
 			   FROM unnest(?::text[], ?::uuid[]) AS src(object_type, object_id)
 			   CROSS JOIN LATERAL claimius.get_ancestors(src.object_type, src.object_id) a
@@ -720,7 +720,7 @@ func searchLoadObjectsUnion(ctx echo.Context, idsByType map[string][]uuid.UUID) 
 		ID         uuid.UUID       `bun:"id"`
 		Data       json.RawMessage `bun:"data"`
 	}
-	if err := shared.Instance().NewRaw(sqlStr, args...).Scan(ctx.Request().Context(), &rows); err != nil {
+	if err := prophetdb.Instance().NewRaw(sqlStr, args...).Scan(ctx.Request().Context(), &rows); err != nil {
 		return nil, err
 	}
 	for _, r := range rows {

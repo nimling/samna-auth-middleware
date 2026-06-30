@@ -20,25 +20,25 @@ type DB struct {
 	Logger echo.Logger
 }
 
-var instance *DB
 var syncFunc func(ctx context.Context) error
 
 var ErrSyncUnreachable = errors.New("sync unreachable: app inactive on samna_auth")
 var ErrSecretExpired = errors.New("secret expired")
 
-// GetApp returns the deployment's app row. On a disciple there is no
-// claimius.samna_app table: the app identity comes from env (SAUTH_APP_SLUG and
-// SAUTH_APP_SECRET) and the disciple never signs or decrypts, so no key or seed
-// material is held. On a prophet the system app row is read from
-// claimius.get_prophet_app.
-func (d *DB) GetApp(ctx context.Context) (*SamnaApp, error) {
-	if isProphet {
-		var app SamnaApp
-		if err := d.NewRaw(`SELECT * FROM claimius.get_prophet_app() LIMIT 1`).Scan(ctx, &app); err != nil {
-			return nil, fmt.Errorf("no claimius app registered: %w", err)
-		}
-		return &app, nil
+// GetAppProphet reads the system app row from claimius.get_prophet_app. The
+// prophet holds the full row including key and seed material.
+func (d *DB) GetAppProphet(ctx context.Context) (*SamnaApp, error) {
+	var app SamnaApp
+	if err := d.NewRaw(`SELECT * FROM claimius.get_prophet_app() LIMIT 1`).Scan(ctx, &app); err != nil {
+		return nil, fmt.Errorf("no claimius app registered: %w", err)
 	}
+	return &app, nil
+}
+
+// GetAppEnv builds the disciple's app identity from env (SAUTH_APP_SLUG and
+// SAUTH_APP_SECRET). A disciple never signs or decrypts, so it holds no key or
+// seed material.
+func (d *DB) GetAppEnv(ctx context.Context) (*SamnaApp, error) {
 	slug := os.Getenv("SAUTH_APP_SLUG")
 	if slug == "" {
 		return nil, errors.New("SAUTH_APP_SLUG not set")
@@ -51,7 +51,7 @@ func RegisterSyncFunc(fn func(ctx context.Context) error) {
 	syncFunc = fn
 }
 
-func Init(logger echo.Logger) (*DB, error) {
+func Connect(logger echo.Logger) (*DB, error) {
 	pgHost, exists := os.LookupEnv("PGHOST")
 	if !exists {
 		return nil, errors.New("PGHOST not set")
@@ -98,18 +98,18 @@ func Init(logger echo.Logger) (*DB, error) {
 		return nil, errors.New("failed to initialize db")
 	}
 
-	instance = &DB{DB: bunDB, Logger: logger}
+	db := &DB{DB: bunDB, Logger: logger}
 
-	instance.SetMaxOpenConns(25)
-	instance.SetMaxIdleConns(2)
-	instance.SetConnMaxLifetime(2 * time.Minute)
-	instance.SetConnMaxIdleTime(15 * time.Second)
+	db.SetMaxOpenConns(25)
+	db.SetMaxIdleConns(2)
+	db.SetConnMaxLifetime(2 * time.Minute)
+	db.SetConnMaxIdleTime(15 * time.Second)
 
-	if err := instance.Ping(); err != nil {
+	if err := db.Ping(); err != nil {
 		return nil, fmt.Errorf("ping: %w", err)
 	}
 
-	instance.RegisterModel(
+	db.RegisterModel(
 		(*SamnaUser)(nil),
 		(*Organization)(nil),
 		(*Location)(nil),
@@ -130,33 +130,32 @@ func Init(logger echo.Logger) (*DB, error) {
 		(*UserToken)(nil),
 	)
 
-	isProphet = false
-	var prophetProbe SamnaApp
-	if probeErr := instance.NewRaw(`SELECT * FROM claimius.get_prophet_app() LIMIT 1`).Scan(context.Background(), &prophetProbe); probeErr == nil {
-		isProphet = true
-	}
+	return db, nil
+}
 
+// InitialSync performs the disciple's first pull from the prophet, retrying a
+// few times. Debug mode and a missing sync function skip it; an unreachable
+// prophet is not fatal.
+func InitialSync(logger echo.Logger) error {
 	if GetDebugMode() != DebugModeNone {
 		logger.Info("Debug mode active, skipping initial sync")
-		return instance, nil
+		return nil
 	}
-
 	if syncFunc == nil {
 		logger.Warn("No sync function registered, skipping initial sync")
-		return instance, nil
+		return nil
 	}
-
 	maxRetries := 5
 	for attempt := 1; attempt <= maxRetries; attempt++ {
 		logger.Infof("Starting initial sync (attempt %d/%d)", attempt, maxRetries)
 		if err := syncFunc(context.Background()); err != nil {
 			if errors.Is(err, ErrSyncUnreachable) {
 				logger.Warnf("Initial sync skipped: %v", err)
-				return instance, nil
+				return nil
 			}
 			logger.Errorf("Initial sync attempt %d failed: %v", attempt, err)
 			if attempt == maxRetries {
-				return nil, fmt.Errorf("initial sync failed after %d attempts: %w", maxRetries, err)
+				return fmt.Errorf("initial sync failed after %d attempts: %w", maxRetries, err)
 			}
 			time.Sleep(time.Duration(attempt) * 2 * time.Second)
 			continue
@@ -164,8 +163,7 @@ func Init(logger echo.Logger) (*DB, error) {
 		logger.Info("Initial sync completed")
 		break
 	}
-
-	return instance, nil
+	return nil
 }
 
 type DebugMode string
@@ -184,20 +182,6 @@ func GetDebugMode() DebugMode {
 		return DebugModeClients
 	}
 	return DebugModeNone
-}
-
-var isProphet bool
-
-func IsProphet() bool {
-	return isProphet
-}
-
-func writesLocally() bool {
-	return GetDebugMode() != DebugModeNone || isProphet
-}
-
-func Instance() *DB {
-	return instance
 }
 
 func ModelType[T any]() reflect.Type {

@@ -26,14 +26,14 @@ type GuestTokenResponse struct {
 	EndsAt          *time.Time `json:"ends_at,omitempty"`
 }
 
-func IssueGuestToken(ctx context.Context, claimID uuid.UUID, issuer string) (*GuestTokenResponse, error) {
-	app, err := shared.Instance().GetApp(ctx)
+func IssueGuestToken(d *shared.DB, ctx context.Context, claimID uuid.UUID, issuer string) (*GuestTokenResponse, error) {
+	app, err := d.GetAppProphet(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("get app: %w", err)
 	}
 
 	var claim shared.Claim
-	err = shared.Instance().NewSelect().
+	err = d.NewSelect().
 		Model(&claim).
 		ExcludeColumn("sa_deleted_at").
 		Where("id = ?", claimID).
@@ -47,7 +47,7 @@ func IssueGuestToken(ctx context.Context, claimID uuid.UUID, issuer string) (*Gu
 	guestUserID := uuid.NewSHA1(app.ID, []byte("guest:"+claimID.String()))
 
 	var existingClaim shared.UserClaim
-	err = shared.Instance().NewSelect().
+	err = d.NewSelect().
 		Model(&existingClaim).
 		ExcludeColumn("sa_deleted_at").
 		Where("claim_id = ?", claimID).
@@ -71,15 +71,15 @@ func IssueGuestToken(ctx context.Context, claimID uuid.UUID, issuer string) (*Gu
 		}
 
 		userID, _ := ctx.Value("user_id").(uuid.UUID)
-		if err := shared.Instance().NewInsert().Model(&guestUser).Scan(ctx, &guestUser); err != nil {
+		if err := d.NewInsert().Model(&guestUser).Scan(ctx, &guestUser); err != nil {
 			return nil, fmt.Errorf("upsert guest user: %w", err)
 		}
-		ac, accErr := shared.Instance().MutationAccess(ctx, userID, claimID, shared.OBJECT_TYPE_CLAIM, shared.ACCESS_OWNER)
+		ac, accErr := d.MutationAccess(ctx, userID, claimID, shared.OBJECT_TYPE_CLAIM, shared.ACCESS_OWNER)
 		if accErr != nil {
 			return nil, fmt.Errorf("guest claim access: %w", accErr)
 		}
 		guestClaim.ClaimID = claimID
-		if err := shared.Instance().NewInsert().Model(&guestClaim).With(ac).Scan(ctx, &guestClaim); err != nil {
+		if err := d.NewInsert().Model(&guestClaim).Access(ac).Scan(ctx, &guestClaim); err != nil {
 			return nil, fmt.Errorf("assign guest claim: %w", err)
 		}
 		existingClaim = guestClaim

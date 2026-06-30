@@ -153,22 +153,22 @@ type ObjectField struct {
 }
 
 type Organization struct {
-	ID          uuid.UUID  `bun:"id,pk,notnull,type:uuid,default:gen_random_uuid()" json:"id"`
-	AppID       uuid.UUID  `bun:"app_id,notnull,type:uuid" json:"app_id"`
-	Name        string     `bun:"name,notnull" json:"name"`
-	Description *string    `bun:"description" json:"description,omitempty"`
-	OwnerID     *uuid.UUID `bun:"sa_owner_id,type:uuid" json:"owner_id,omitempty"`
-	RootID      *uuid.UUID `bun:"sa_root_id,type:uuid" json:"root_id"`
-	LocationID  *uuid.UUID `bun:"sa_location_id,type:uuid" json:"location_id,omitempty"`
-	Type        *string    `bun:"type" json:"type,omitempty"`
-	PrivateSeed string     `bun:"private_seed" sauth:"private_seed" json:"-"`
-	Level       int        `bun:"sa_level,notnull,default:0" json:"level"`
-	ExternalID  *string    `bun:"external_id" json:"external_id,omitempty"`
-	ProviderID  *string    `bun:"provider_id,type:uuid" json:"-"`
-	CreatedBy   *uuid.UUID `bun:"sa_created_by,type:uuid" json:"created_by,omitempty"`
-	DeletedAt   *time.Time `bun:"sa_deleted_at" json:"deleted_at,omitzero"`
-	CreatedAt   time.Time  `bun:"sa_created_at,notnull,default:current_timestamp" json:"created_at"`
-	UpdatedAt   time.Time  `bun:"sa_updated_at,notnull,default:current_timestamp" json:"updated_at"`
+	ID          uuid.UUID   `bun:"id,pk,notnull,type:uuid,default:gen_random_uuid()" json:"id"`
+	AppID       uuid.UUID   `bun:"app_id,notnull,type:uuid" json:"app_id"`
+	Name        string      `bun:"name,notnull" json:"name"`
+	Description *string     `bun:"description" json:"description,omitempty"`
+	OwnerID     *uuid.UUID  `bun:"sa_owner_id,type:uuid" json:"owner_id,omitempty"`
+	RootID      *uuid.UUID  `bun:"sa_root_id,type:uuid" json:"root_id"`
+	LocationID  *uuid.UUID  `bun:"sa_location_id,type:uuid" json:"location_id,omitempty"`
+	Type        *string     `bun:"type" json:"type,omitempty"`
+	PrivateSeed string      `bun:"private_seed" sauth:"private_seed" json:"-"`
+	Level       int         `bun:"sa_level,notnull,default:0" json:"level"`
+	ExternalID  *string     `bun:"external_id" json:"external_id,omitempty"`
+	ProviderID  *string     `bun:"provider_id,type:uuid" json:"-"`
+	CreatedBy   *uuid.UUID  `bun:"sa_created_by,type:uuid" json:"created_by,omitempty"`
+	DeletedAt   *time.Time  `bun:"sa_deleted_at" json:"deleted_at,omitzero"`
+	CreatedAt   time.Time   `bun:"sa_created_at,notnull,default:current_timestamp" json:"created_at"`
+	UpdatedAt   time.Time   `bun:"sa_updated_at,notnull,default:current_timestamp" json:"updated_at"`
 	Assets      []*Asset    `bun:"-" json:"assets,omitempty"`
 	RootName    string      `bun:"root_name,scanonly" json:"root_name,omitempty"`
 	ParentName  string      `bun:"parent_name,scanonly" json:"parent_name,omitempty"`
@@ -181,25 +181,25 @@ type Organization struct {
 }
 
 type Location struct {
-	ID          uuid.UUID  `bun:"id,pk,notnull,type:uuid,default:gen_random_uuid()" json:"id"`
-	AppID       uuid.UUID  `bun:"app_id,notnull,type:uuid" json:"app_id"`
-	OwnerID     uuid.UUID  `bun:"sa_owner_id,type:uuid,notnull" json:"owner_id"`
-	RootID      *uuid.UUID `bun:"sa_root_id,type:uuid" json:"root_id"`
-	Name        string     `bun:"name,notnull" json:"name"`
-	Description *string    `bun:"description" json:"description,omitempty"`
-	ParentID    *uuid.UUID `bun:"sa_parent_id,type:uuid" json:"parent_id"`
-	Type        string     `bun:"type,notnull,default:'room'" json:"type"`
-	Longitude   *float64   `bun:"longitude" json:"longitude,omitempty"`
-	Latitude    *float64   `bun:"latitude" json:"latitude,omitempty"`
-	Level       int        `bun:"sa_level,notnull,default:0" json:"level"`
-	CodeType    *string    `bun:"code_type" json:"code_type,omitempty"`
-	Code        *string    `bun:"code" json:"code,omitempty"`
-	ExternalID  *string    `bun:"external_id" json:"external_id,omitempty"`
-	ProviderID  *string    `bun:"provider_id" json:"-"`
-	CreatedBy   *uuid.UUID `bun:"sa_created_by,type:uuid" json:"created_by"`
-	CreatedAt   time.Time  `bun:"sa_created_at,notnull,default:current_timestamp" json:"created_at"`
-	UpdatedAt   time.Time  `bun:"sa_updated_at,notnull,default:current_timestamp" json:"updated_at"`
-	DeletedAt   *time.Time `bun:"sa_deleted_at" json:"deleted_at,omitzero"`
+	ID          uuid.UUID   `bun:"id,pk,notnull,type:uuid,default:gen_random_uuid()" json:"id"`
+	AppID       uuid.UUID   `bun:"app_id,notnull,type:uuid" json:"app_id"`
+	OwnerID     uuid.UUID   `bun:"sa_owner_id,type:uuid,notnull" json:"owner_id"`
+	RootID      *uuid.UUID  `bun:"sa_root_id,type:uuid" json:"root_id"`
+	Name        string      `bun:"name,notnull" json:"name"`
+	Description *string     `bun:"description" json:"description,omitempty"`
+	ParentID    *uuid.UUID  `bun:"sa_parent_id,type:uuid" json:"parent_id"`
+	Type        string      `bun:"type,notnull,default:'room'" json:"type"`
+	Longitude   *float64    `bun:"longitude" json:"longitude,omitempty"`
+	Latitude    *float64    `bun:"latitude" json:"latitude,omitempty"`
+	Level       int         `bun:"sa_level,notnull,default:0" json:"level"`
+	CodeType    *string     `bun:"code_type" json:"code_type,omitempty"`
+	Code        *string     `bun:"code" json:"code,omitempty"`
+	ExternalID  *string     `bun:"external_id" json:"external_id,omitempty"`
+	ProviderID  *string     `bun:"provider_id" json:"-"`
+	CreatedBy   *uuid.UUID  `bun:"sa_created_by,type:uuid" json:"created_by"`
+	CreatedAt   time.Time   `bun:"sa_created_at,notnull,default:current_timestamp" json:"created_at"`
+	UpdatedAt   time.Time   `bun:"sa_updated_at,notnull,default:current_timestamp" json:"updated_at"`
+	DeletedAt   *time.Time  `bun:"sa_deleted_at" json:"deleted_at,omitzero"`
 	Assets      []*Asset    `bun:"-" json:"assets,omitempty"`
 	OwnerName   string      `bun:"owner_name,scanonly" json:"owner_name,omitempty"`
 	ParentName  string      `bun:"parent_name,scanonly" json:"parent_name,omitempty"`

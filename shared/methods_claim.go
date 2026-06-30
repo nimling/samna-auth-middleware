@@ -43,7 +43,7 @@ func (d *DB) CreateClaim(ctx context.Context, ac *AccessClaim, p CreateClaimPara
 		RootID:      rootID,
 		CreatedBy:   ac.UserClaimID,
 	}
-	if err := d.NewInsert().Model(claim).With(ac).Scan(ctx, claim); err != nil {
+	if err := d.NewInsert().Model(claim).Access(ac).Scan(ctx, claim); err != nil {
 		return nil, err
 	}
 	return claim.With(ctx, ac, d), nil
@@ -98,7 +98,7 @@ func (c *Claim) AssignObject(target any) (*ClaimObject, error) {
 		co.Inherits = true
 	}
 	co.ClaimID = c.ID
-	if err := c.sessionDB.NewInsert().Model(&co).With(c.accessClaim).Scan(c.sessionCtx, &co); err != nil {
+	if err := c.sessionDB.NewInsert().Model(&co).Access(c.accessClaim).Scan(c.sessionCtx, &co); err != nil {
 		return nil, err
 	}
 	return &co, nil
@@ -129,7 +129,7 @@ func (c *Claim) AssignUser(userIDs ...uuid.UUID) ([]UserClaim, error) {
 			return results, err
 		}
 		uc := UserClaim{ClaimID: c.ID, UserID: uid}
-		if err := c.sessionDB.NewInsert().Model(&uc).With(c.accessClaim).Scan(c.sessionCtx, &uc); err != nil {
+		if err := c.sessionDB.NewInsert().Model(&uc).Access(c.accessClaim).Scan(c.sessionCtx, &uc); err != nil {
 			return results, err
 		}
 		results = append(results, uc)

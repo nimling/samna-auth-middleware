@@ -11,7 +11,7 @@ import (
 	"github.com/nimling/samna-auth-middleware/pkg/encryption"
 	"github.com/nimling/samna-auth-middleware/pkg/errorsx"
 	"github.com/nimling/samna-auth-middleware/pkg/respond"
-	"github.com/nimling/samna-auth-middleware/shared"
+	prophetdb "github.com/nimling/samna-auth-middleware/prophet/db"
 	"github.com/nimling/samna-auth-middleware/utils"
 )
 
@@ -126,7 +126,7 @@ func DeleteSecret(ctx echo.Context) error {
 
 func secretSelectAll(ctx echo.Context, appID uuid.UUID) ([]SamnaSecret, error) {
 	secrets := make([]SamnaSecret, 0)
-	err := shared.Instance().NewSelect().
+	err := prophetdb.Instance().NewSelect().
 		Model(&secrets).
 		ExcludeColumn("sa_deleted_at").
 		Where("app_id = ?", appID).
@@ -141,7 +141,7 @@ func secretSelectAll(ctx echo.Context, appID uuid.UUID) ([]SamnaSecret, error) {
 
 func secretSelect(ctx echo.Context, secretID, appID uuid.UUID) (*SamnaSecret, error) {
 	var secret SamnaSecret
-	err := shared.Instance().NewSelect().
+	err := prophetdb.Instance().NewSelect().
 		Model(&secret).
 		ExcludeColumn("sa_deleted_at").
 		Where("id = ?", secretID).
@@ -160,7 +160,7 @@ func secretSelect(ctx echo.Context, secretID, appID uuid.UUID) (*SamnaSecret, er
 }
 
 func secretInsert(ctx echo.Context, secret *SamnaSecret) (*SamnaSecret, error) {
-	if _, err := shared.Instance().NewInsert().
+	if _, err := prophetdb.Instance().NewInsert().
 		Model(secret).
 		Returning("*").
 		Exec(ctx.Request().Context()); err != nil {
@@ -171,7 +171,7 @@ func secretInsert(ctx echo.Context, secret *SamnaSecret) (*SamnaSecret, error) {
 }
 
 func secretUpdate(ctx echo.Context, secret *SamnaSecret, secretID, appID uuid.UUID) error {
-	res, err := shared.Instance().NewUpdate().
+	res, err := prophetdb.Instance().NewUpdate().
 		Model(secret).
 		Where("sa_deleted_at IS NULL").
 		Where("id = ?", secretID).
@@ -195,7 +195,7 @@ func secretUpdate(ctx echo.Context, secret *SamnaSecret, secretID, appID uuid.UU
 
 func secretDelete(ctx echo.Context, secretID, appID uuid.UUID) (*SamnaSecret, error) {
 	var secret SamnaSecret
-	res, err := shared.Instance().
+	res, err := prophetdb.Instance().
 		NewUpdate().
 		Model(&secret).
 		Where("id = ?", secretID).

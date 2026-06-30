@@ -9,7 +9,7 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/nimling/samna-auth-middleware/pkg/errorsx"
 	"github.com/nimling/samna-auth-middleware/pkg/respond"
-	"github.com/nimling/samna-auth-middleware/shared"
+	prophetdb "github.com/nimling/samna-auth-middleware/prophet/db"
 	"github.com/nimling/samna-auth-middleware/utils"
 )
 
@@ -19,7 +19,7 @@ func GetLocations(ctx echo.Context) error {
 		return respond.Error(ctx, http.StatusBadRequest, err.Error())
 	}
 	locations := make([]Location, 0)
-	if err := shared.Instance().NewSelect().
+	if err := prophetdb.Instance().NewSelect().
 		Model(&locations).
 		ExcludeColumn("sa_deleted_at").
 		Where("app_id = ?", appID).
@@ -52,7 +52,7 @@ func GetLocationAssets(ctx echo.Context) error {
 	}
 
 	var objectAssets []ObjectAsset
-	if err := shared.Instance().NewSelect().
+	if err := prophetdb.Instance().NewSelect().
 		Model(&objectAssets).
 		ExcludeColumn("sa_deleted_at").
 		Relation("Asset").
@@ -84,7 +84,7 @@ func GetLocationClaims(ctx echo.Context) error {
 	}
 
 	claims := make([]Claim, 0)
-	if err := shared.Instance().NewSelect().
+	if err := prophetdb.Instance().NewSelect().
 		Model(&claims).
 		ExcludeColumn("sa_deleted_at").
 		Where("claim.app_id = ?", appID).
@@ -163,7 +163,7 @@ func GetLocationAudit(ctx echo.Context) error {
 	}
 
 	audits := make([]Audit, 0)
-	if err := shared.Instance().NewSelect().
+	if err := prophetdb.Instance().NewSelect().
 		Model(&audits).
 		Where("app_id = ?", appID).
 		Where("object_id = ?", locationID).
@@ -179,7 +179,7 @@ func GetLocationAudit(ctx echo.Context) error {
 
 func getLocation(ctx echo.Context, locationID, appID uuid.UUID) (*Location, error) {
 	var location Location
-	err := shared.Instance().
+	err := prophetdb.Instance().
 		NewSelect().
 		Model(&location).
 		ExcludeColumn("sa_deleted_at").
@@ -196,7 +196,7 @@ func getLocation(ctx echo.Context, locationID, appID uuid.UUID) (*Location, erro
 	}
 
 	var objectAssets []ObjectAsset
-	err = shared.Instance().
+	err = prophetdb.Instance().
 		NewSelect().
 		Model(&objectAssets).
 		ExcludeColumn("sa_deleted_at").
@@ -219,7 +219,7 @@ func getLocation(ctx echo.Context, locationID, appID uuid.UUID) (*Location, erro
 
 func postLocation(ctx echo.Context, location Location) (*Location, error) {
 	var created Location
-	if _, err := shared.Instance().NewInsert().
+	if _, err := prophetdb.Instance().NewInsert().
 		Model(&location).
 		Returning("*").
 		Exec(ctx.Request().Context(), &created); err != nil {
@@ -230,7 +230,7 @@ func postLocation(ctx echo.Context, location Location) (*Location, error) {
 }
 
 func putLocation(ctx echo.Context, location Location, appID uuid.UUID) error {
-	res, err := shared.Instance().NewUpdate().
+	res, err := prophetdb.Instance().NewUpdate().
 		Model(&location).
 		Where("sa_deleted_at IS NULL").
 		Where("id = ?", location.ID).
@@ -254,7 +254,7 @@ func putLocation(ctx echo.Context, location Location, appID uuid.UUID) error {
 
 func deleteLocation(ctx echo.Context, locationID, appID uuid.UUID) (*Location, error) {
 	var location Location
-	res, err := shared.Instance().
+	res, err := prophetdb.Instance().
 		NewUpdate().
 		Model(&location).
 		Where("id = ?", locationID).

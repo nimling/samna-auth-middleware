@@ -10,7 +10,7 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/nimling/samna-auth-middleware/pkg/errorsx"
 	"github.com/nimling/samna-auth-middleware/pkg/respond"
-	"github.com/nimling/samna-auth-middleware/shared"
+	prophetdb "github.com/nimling/samna-auth-middleware/prophet/db"
 	"github.com/nimling/samna-auth-middleware/utils"
 	"github.com/uptrace/bun"
 )
@@ -21,7 +21,7 @@ func GetClaims(ctx echo.Context) error {
 		return respond.Error(ctx, http.StatusBadRequest, err.Error())
 	}
 	claims := make([]Claim, 0)
-	if err := shared.Instance().NewSelect().
+	if err := prophetdb.Instance().NewSelect().
 		Model(&claims).
 		ExcludeColumn("sa_deleted_at").
 		Where("app_id = ?", appID).
@@ -36,7 +36,7 @@ func GetClaims(ctx echo.Context) error {
 func GetClaimGraph(ctx echo.Context) error {
 	appID, _ := ctx.Get("app_id").(uuid.UUID)
 	nodes := make([]*GraphNode, 0)
-	if err := shared.Instance().NewRaw(`
+	if err := prophetdb.Instance().NewRaw(`
 		SELECT id AS object_id,
 		       'claimius.claim' AS object_type,
 		       name AS label,
@@ -74,7 +74,7 @@ func PostClaim(ctx echo.Context) error {
 		return respond.Error(ctx, http.StatusBadRequest, err.Error())
 	}
 	claim.AppID = appID
-	if _, err := shared.Instance().NewInsert().
+	if _, err := prophetdb.Instance().NewInsert().
 		Model(claim).
 		Returning("*").
 		Exec(ctx.Request().Context()); err != nil {
@@ -99,7 +99,7 @@ func PutClaim(ctx echo.Context) error {
 	}
 	patch.ID = claimID
 	patch.AppID = appID
-	query := shared.Instance().NewUpdate().
+	query := prophetdb.Instance().NewUpdate().
 		Model(patch).
 		Where("sa_deleted_at IS NULL").
 		Where("id = ?", claimID).
@@ -134,7 +134,7 @@ func DeleteClaim(ctx echo.Context) error {
 		return respond.Error(ctx, http.StatusBadRequest, "Malformed request")
 	}
 	var claim Claim
-	res, err := shared.Instance().NewUpdate().
+	res, err := prophetdb.Instance().NewUpdate().
 		Model(&claim).
 		Where("id = ?", claimID).
 		Where("app_id = ?", appID).
@@ -171,7 +171,7 @@ func PostClaimObject(ctx echo.Context) error {
 	}
 	claimObject.AppID = appID
 	claimObject.ClaimID = claimID
-	if _, err := shared.Instance().NewInsert().
+	if _, err := prophetdb.Instance().NewInsert().
 		Model(claimObject).
 		Returning("*").
 		Exec(ctx.Request().Context()); err != nil {
@@ -203,7 +203,7 @@ func PatchClaimObject(ctx echo.Context) error {
 		v := patch.Inherits
 		inherits = &v
 	}
-	if _, err := shared.Instance().NewRaw(
+	if _, err := prophetdb.Instance().NewRaw(
 		"SELECT claimius.update_claim_object(?, ?, ?, ?, ?::jsonb)",
 		claimObjectID, patch.Reason, inherits, patch.Access, scopeBytes,
 	).Exec(ctx.Request().Context()); err != nil {
@@ -211,7 +211,7 @@ func PatchClaimObject(ctx echo.Context) error {
 		return respond.Error(ctx, http.StatusInternalServerError, "claim_object update failed")
 	}
 	var updated ClaimObject
-	if err := shared.Instance().NewSelect().
+	if err := prophetdb.Instance().NewSelect().
 		Model(&updated).
 		Where("id = ?", claimObjectID).
 		Where("app_id = ?", appID).
@@ -233,7 +233,7 @@ func DeleteClaimObject(ctx echo.Context) error {
 		return respond.Error(ctx, http.StatusBadRequest, "Malformed request")
 	}
 	var claimObject ClaimObject
-	res, err := shared.Instance().NewUpdate().
+	res, err := prophetdb.Instance().NewUpdate().
 		Model(&claimObject).
 		Where("claim_id = ?", claimID).
 		Where("object_id = ?", objectID).
@@ -271,7 +271,7 @@ func PostClaimUser(ctx echo.Context) error {
 	}
 	userClaim.AppID = appID
 	userClaim.ClaimID = claimID
-	if _, err := shared.Instance().NewInsert().
+	if _, err := prophetdb.Instance().NewInsert().
 		Model(userClaim).
 		On("CONFLICT (claim_id, user_id, app_id) WHERE sa_deleted_at IS NULL DO UPDATE").
 		Set("reason = EXCLUDED.reason").
@@ -299,7 +299,7 @@ func PatchClaimUser(ctx echo.Context) error {
 	var result struct {
 		UserClaim json.RawMessage `bun:"update_claim_user"`
 	}
-	if err := shared.Instance().NewRaw(
+	if err := prophetdb.Instance().NewRaw(
 		"SELECT claimius.update_claim_user(?, ?, ?, ?) AS update_claim_user",
 		userClaimID, patch.Reason, patch.StartsAt, patch.EndsAt,
 	).Scan(ctx.Request().Context(), &result); err != nil {
@@ -327,7 +327,7 @@ func DeleteClaimUser(ctx echo.Context) error {
 		return respond.Error(ctx, http.StatusBadRequest, "Malformed request")
 	}
 	var userClaim UserClaim
-	res, err := shared.Instance().NewUpdate().
+	res, err := prophetdb.Instance().NewUpdate().
 		Model(&userClaim).
 		Where("claim_id = ?", claimID).
 		Where("user_id = ?", userID).
@@ -362,7 +362,7 @@ func GetClaimAudit(ctx echo.Context) error {
 	}
 
 	audits := make([]Audit, 0)
-	query := shared.Instance().NewSelect().
+	query := prophetdb.Instance().NewSelect().
 		Model(&audits).
 		Where("app_id = ?", appID).
 		Where("object_id = ?", objectID).
@@ -381,7 +381,7 @@ func GetClaimAudit(ctx echo.Context) error {
 
 func getClaim(ctx echo.Context, claimID, appID uuid.UUID) (*Claim, error) {
 	var claim Claim
-	err := shared.Instance().
+	err := prophetdb.Instance().
 		NewSelect().
 		Model(&claim).
 		ExcludeColumn("sa_deleted_at").
@@ -418,7 +418,7 @@ func getClaim(ctx echo.Context, claimID, appID uuid.UUID) (*Claim, error) {
 
 	if len(locationIDs) > 0 {
 		var locations []Location
-		if err = shared.Instance().
+		if err = prophetdb.Instance().
 			NewSelect().
 			Model(&locations).
 			ExcludeColumn("sa_deleted_at").
@@ -436,7 +436,7 @@ func getClaim(ctx echo.Context, claimID, appID uuid.UUID) (*Claim, error) {
 
 	if len(orgIDs) > 0 {
 		var orgs []Organization
-		if err = shared.Instance().
+		if err = prophetdb.Instance().
 			NewSelect().
 			Model(&orgs).
 			ExcludeColumn("sa_deleted_at").
@@ -477,7 +477,7 @@ func getClaim(ctx echo.Context, claimID, appID uuid.UUID) (*Claim, error) {
 
 	if len(userIDs) > 0 {
 		var users []SamnaUser
-		err = shared.Instance().
+		err = prophetdb.Instance().
 			NewSelect().
 			Model(&users).
 			ExcludeColumn("sa_deleted_at").

@@ -13,7 +13,7 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/nimling/samna-auth-middleware/pkg/errorsx"
 	"github.com/nimling/samna-auth-middleware/pkg/respond"
-	"github.com/nimling/samna-auth-middleware/shared"
+	prophetdb "github.com/nimling/samna-auth-middleware/prophet/db"
 	"github.com/nimling/samna-auth-middleware/utils"
 	"github.com/uptrace/bun"
 )
@@ -61,7 +61,7 @@ func GetUsers(ctx echo.Context) error {
 	}
 
 	users := make([]*SamnaUser, 0)
-	query := shared.Instance().
+	query := prophetdb.Instance().
 		NewSelect().
 		Model(&users).
 		ExcludeColumn("sa_deleted_at").
@@ -112,7 +112,7 @@ func GetUserAssets(ctx echo.Context) error {
 	}
 
 	var objectAssets []ObjectAsset
-	err = shared.Instance().NewSelect().
+	err = prophetdb.Instance().NewSelect().
 		Model(&objectAssets).
 		ExcludeColumn("sa_deleted_at").
 		Relation("Asset").
@@ -264,7 +264,7 @@ func PostUser(ctx echo.Context) error {
 			UserID:  user.UserID,
 			Reason:  req.Reason,
 		}
-		if _, err := shared.Instance().NewInsert().
+		if _, err := prophetdb.Instance().NewInsert().
 			Model(&userClaim).
 			Exec(ctx.Request().Context()); err != nil {
 			ctx.Logger().Errorf("assign claim: %v", err)
@@ -308,7 +308,7 @@ func DeleteUser(ctx echo.Context) error {
 	}
 
 	var user SamnaUser
-	res, err := shared.Instance().
+	res, err := prophetdb.Instance().
 		NewUpdate().
 		Model(&user).
 		Set("sa_deleted_at = NOW()").
@@ -408,7 +408,7 @@ func PostUserTokenValidate(ctx echo.Context) error {
 	}
 
 	var user SamnaUser
-	err = shared.Instance().NewRaw(
+	err = prophetdb.Instance().NewRaw(
 		"SELECT u.* FROM claimius.samna_user u JOIN claimius.user_token t ON t.user_id = u.user_id AND t.app_id = u.app_id "+
 			"WHERE u.app_id = ? AND u.sa_deleted_at IS NULL AND t.sa_deleted_at IS NULL AND t.external_id = (?::jsonb ->> t.id_claim) "+
 			"ORDER BY t.sa_created_at DESC LIMIT 1",
@@ -447,7 +447,7 @@ func getUser(ctx echo.Context, userID uuid.UUID) (*SamnaUser, error) {
 	appID := ctx.Get("app_id").(uuid.UUID)
 
 	var user SamnaUser
-	err := shared.Instance().
+	err := prophetdb.Instance().
 		NewSelect().
 		Where("user_id = ?", userID).
 		Where("app_id = ?", appID).
@@ -469,7 +469,7 @@ func getUser(ctx echo.Context, userID uuid.UUID) (*SamnaUser, error) {
 func getUserConnections(ctx echo.Context, userID uuid.UUID) ([]*SamnaUser, error) {
 	appID := ctx.Get("app_id").(uuid.UUID)
 	users := make([]*SamnaUser, 0)
-	err := shared.Instance().
+	err := prophetdb.Instance().
 		NewSelect().
 		Model(&users).
 		ExcludeColumn("sa_deleted_at").
@@ -490,7 +490,7 @@ func getUserConnections(ctx echo.Context, userID uuid.UUID) ([]*SamnaUser, error
 func getUserClaims(ctx echo.Context, userID uuid.UUID, paginate func(*bun.SelectQuery) *bun.SelectQuery) ([]Claim, int, error) {
 	appID := ctx.Get("app_id").(uuid.UUID)
 	claims := make([]Claim, 0)
-	query := shared.Instance().
+	query := prophetdb.Instance().
 		NewSelect().
 		Model(&claims).
 		ExcludeColumn("sa_deleted_at").
@@ -523,7 +523,7 @@ func getUserAudit(ctx echo.Context, objectType string, objectID *uuid.UUID, oper
 	appID := ctx.Get("app_id").(uuid.UUID)
 
 	audits := make([]Audit, 0)
-	query := shared.Instance().NewSelect().
+	query := prophetdb.Instance().NewSelect().
 		Model(&audits).
 		ExcludeColumn("sa_deleted_at").
 		Where("app_id = ?", appID).
@@ -552,7 +552,7 @@ func getUserAudit(ctx echo.Context, objectType string, objectID *uuid.UUID, oper
 func getUserRelations(ctx echo.Context, userID uuid.UUID) ([]UserRelation, error) {
 	relations := make([]UserRelation, 0)
 	appID := ctx.Get("app_id").(uuid.UUID)
-	err := shared.Instance().NewSelect().
+	err := prophetdb.Instance().NewSelect().
 		Model(&relations).
 		ExcludeColumn("sa_deleted_at").
 		Where("?TableAlias.user_id = ?", userID).
@@ -570,7 +570,7 @@ func getUserRelations(ctx echo.Context, userID uuid.UUID) ([]UserRelation, error
 func getUserOrganizations(ctx echo.Context, userID uuid.UUID) ([]Organization, error) {
 	appID := ctx.Get("app_id").(uuid.UUID)
 	organizations := make([]Organization, 0)
-	err := shared.Instance().NewSelect().
+	err := prophetdb.Instance().NewSelect().
 		Model(&organizations).
 		ExcludeColumn("sa_deleted_at").
 		Where("app_id = ?", appID).
@@ -587,7 +587,7 @@ func getUserOrganizations(ctx echo.Context, userID uuid.UUID) ([]Organization, e
 func getUserLocations(ctx echo.Context, userID uuid.UUID) ([]Location, error) {
 	appID := ctx.Get("app_id").(uuid.UUID)
 	locations := make([]Location, 0)
-	err := shared.Instance().NewSelect().
+	err := prophetdb.Instance().NewSelect().
 		Model(&locations).
 		ExcludeColumn("sa_deleted_at").
 		Where("app_id = ?", appID).
@@ -603,7 +603,7 @@ func getUserLocations(ctx echo.Context, userID uuid.UUID) ([]Location, error) {
 
 func postUser(ctx echo.Context, req BodyUser, userName, userImage string) (*SamnaUser, error) {
 	var userID uuid.UUID
-	err := shared.Instance().NewRaw(
+	err := prophetdb.Instance().NewRaw(
 		"SELECT (claimius.ensure_app_user(?, ?, ?, ?, ?, ?, ?, ?, ?) -> 'samna_user' ->> 'user_id')::uuid",
 		req.UserID, *req.AppID, req.FirstName, req.LastName, userName, userImage, req.Email, req.Phone, req.ExternalID,
 	).Scan(ctx.Request().Context(), &userID)
@@ -612,7 +612,7 @@ func postUser(ctx echo.Context, req BodyUser, userName, userImage string) (*Samn
 		return nil, errorsx.ErrDbUnexpected
 	}
 
-	if _, err := shared.Instance().NewUpdate().
+	if _, err := prophetdb.Instance().NewUpdate().
 		Model((*SamnaUser)(nil)).
 		Set("first_name = ?", req.FirstName).
 		Set("last_name = ?", req.LastName).
@@ -625,7 +625,7 @@ func postUser(ctx echo.Context, req BodyUser, userName, userImage string) (*Samn
 	}
 
 	var user SamnaUser
-	err = shared.Instance().NewSelect().
+	err = prophetdb.Instance().NewSelect().
 		Model(&user).
 		ExcludeColumn("sa_deleted_at").
 		Where("app_id = ?", *req.AppID).
@@ -642,7 +642,7 @@ func postUser(ctx echo.Context, req BodyUser, userName, userImage string) (*Samn
 }
 
 func putUser(ctx echo.Context, user *SamnaUser) error {
-	res, err := shared.Instance().
+	res, err := prophetdb.Instance().
 		NewUpdate().
 		Model(user).
 		Where("sa_deleted_at IS NULL").
@@ -693,7 +693,7 @@ func upsertOrganizationUser(ctx echo.Context, ownerID, claimID, userID uuid.UUID
 
 	var rootID uuid.UUID
 	var callerUC uuid.UUID
-	if err := shared.Instance().NewRaw(
+	if err := prophetdb.Instance().NewRaw(
 		"SELECT sa_root_id, sa_created_by FROM claimius.organization WHERE app_id = ? AND id = ? AND sa_deleted_at IS NULL LIMIT 1",
 		appID, ownerID,
 	).Scan(reqctx, &rootID, &callerUC); err != nil {
@@ -702,7 +702,7 @@ func upsertOrganizationUser(ctx echo.Context, ownerID, claimID, userID uuid.UUID
 	}
 
 	var existingUserID uuid.UUID
-	err := shared.Instance().NewRaw(
+	err := prophetdb.Instance().NewRaw(
 		"SELECT user_id FROM claimius.user_token WHERE app_id = ? AND sa_owner_id = ? AND id_claim = ? AND external_id = ? AND sa_deleted_at IS NULL LIMIT 1",
 		appID, ownerID, idClaim, externalID,
 	).Scan(reqctx, &existingUserID)
@@ -733,7 +733,7 @@ func upsertOrganizationUser(ctx echo.Context, ownerID, claimID, userID uuid.UUID
 	}
 
 	var user SamnaUser
-	err = shared.Instance().NewRaw(
+	err = prophetdb.Instance().NewRaw(
 		"INSERT INTO claimius.samna_user (user_id, app_id, first_name, last_name, user_name, user_image, email, phone, external_id, status, type) "+
 			"VALUES (?, ?, NULLIF(?,''), NULLIF(?,''), NULLIF(?,''), NULLIF(?,''), NULLIF(?,''), NULLIF(?,''), NULLIF(?,''), 'active', 'user') "+
 			"ON CONFLICT (user_id, app_id) WHERE sa_deleted_at IS NULL DO UPDATE SET "+
@@ -754,12 +754,12 @@ func upsertOrganizationUser(ctx echo.Context, ownerID, claimID, userID uuid.UUID
 	userID = user.UserID
 
 	var hasClaim bool
-	if err := shared.Instance().NewRaw("SELECT EXISTS (SELECT 1 FROM claimius.user_claim WHERE app_id = ? AND claim_id = ? AND user_id = ? AND sa_deleted_at IS NULL)", appID, claimID, userID).Scan(reqctx, &hasClaim); err != nil {
+	if err := prophetdb.Instance().NewRaw("SELECT EXISTS (SELECT 1 FROM claimius.user_claim WHERE app_id = ? AND claim_id = ? AND user_id = ? AND sa_deleted_at IS NULL)", appID, claimID, userID).Scan(reqctx, &hasClaim); err != nil {
 		ctx.Logger().Errorf("lookup user_claim: %v", err)
 		return nil, http.StatusInternalServerError, errors.New("Internal server error")
 	}
 	if !hasClaim {
-		if _, err := shared.Instance().NewRaw("SELECT claimius.assign_claim_user(p_app_id := ?, p_claim_id := ?, p_user_id := ?, p_sa_owner_id := ?, p_sa_created_by := ?, p_reason := ?)", appID, claimID, userID, ownerID, callerUC, reason).Exec(reqctx); err != nil {
+		if _, err := prophetdb.Instance().NewRaw("SELECT claimius.assign_claim_user(p_app_id := ?, p_claim_id := ?, p_user_id := ?, p_sa_owner_id := ?, p_sa_created_by := ?, p_reason := ?)", appID, claimID, userID, ownerID, callerUC, reason).Exec(reqctx); err != nil {
 			ctx.Logger().Errorf("assign_claim_user: %v", err)
 			return nil, http.StatusInternalServerError, errors.New("Internal server error")
 		}
@@ -767,50 +767,50 @@ func upsertOrganizationUser(ctx echo.Context, ownerID, claimID, userID uuid.UUID
 
 	virtualName := "user:" + userID.String()
 	var virtualID uuid.UUID
-	err = shared.Instance().NewRaw("SELECT id FROM claimius.claim WHERE app_id = ? AND name = ? AND type = 'virtual' AND sa_deleted_at IS NULL LIMIT 1", appID, virtualName).Scan(reqctx, &virtualID)
+	err = prophetdb.Instance().NewRaw("SELECT id FROM claimius.claim WHERE app_id = ? AND name = ? AND type = 'virtual' AND sa_deleted_at IS NULL LIMIT 1", appID, virtualName).Scan(reqctx, &virtualID)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		ctx.Logger().Errorf("lookup virtual claim: %v", err)
 		return nil, http.StatusInternalServerError, errors.New("Internal server error")
 	}
 	if virtualID == uuid.Nil {
-		if err := shared.Instance().NewRaw("SELECT (claimius.create_claim(p_app_id := ?, p_name := ?, p_description := NULL, p_sa_access := 15, p_sa_owner_id := ?, p_sa_root_id := ?, p_sa_created_by := ?, p_inherits := TRUE, p_type := 'virtual') -> 'claim' ->> 'id')::uuid", appID, virtualName, ownerID, rootID, callerUC).Scan(reqctx, &virtualID); err != nil {
+		if err := prophetdb.Instance().NewRaw("SELECT (claimius.create_claim(p_app_id := ?, p_name := ?, p_description := NULL, p_sa_access := 15, p_sa_owner_id := ?, p_sa_root_id := ?, p_sa_created_by := ?, p_inherits := TRUE, p_type := 'virtual') -> 'claim' ->> 'id')::uuid", appID, virtualName, ownerID, rootID, callerUC).Scan(reqctx, &virtualID); err != nil {
 			ctx.Logger().Errorf("create virtual claim: %v", err)
 			return nil, http.StatusInternalServerError, errors.New("Internal server error")
 		}
 	}
 
 	var hasObj bool
-	if err := shared.Instance().NewRaw("SELECT EXISTS (SELECT 1 FROM claimius.claim_object WHERE app_id = ? AND claim_id = ? AND object_id = ? AND object_type = 'claimius.samna_user' AND sa_deleted_at IS NULL)", appID, virtualID, userID).Scan(reqctx, &hasObj); err != nil {
+	if err := prophetdb.Instance().NewRaw("SELECT EXISTS (SELECT 1 FROM claimius.claim_object WHERE app_id = ? AND claim_id = ? AND object_id = ? AND object_type = 'claimius.samna_user' AND sa_deleted_at IS NULL)", appID, virtualID, userID).Scan(reqctx, &hasObj); err != nil {
 		ctx.Logger().Errorf("lookup virtual claim_object: %v", err)
 		return nil, http.StatusInternalServerError, errors.New("Internal server error")
 	}
 	if !hasObj {
-		if _, err := shared.Instance().NewRaw("SELECT claimius.assign_claim_object(p_app_id := ?, p_claim_id := ?, p_sa_owner_id := ?, p_sa_root_id := ?, p_sa_created_by := ?, p_object_id := ?, p_object_type := 'claimius.samna_user')", appID, virtualID, ownerID, rootID, callerUC, userID).Exec(reqctx); err != nil {
+		if _, err := prophetdb.Instance().NewRaw("SELECT claimius.assign_claim_object(p_app_id := ?, p_claim_id := ?, p_sa_owner_id := ?, p_sa_root_id := ?, p_sa_created_by := ?, p_object_id := ?, p_object_type := 'claimius.samna_user')", appID, virtualID, ownerID, rootID, callerUC, userID).Exec(reqctx); err != nil {
 			ctx.Logger().Errorf("assign virtual claim_object: %v", err)
 			return nil, http.StatusInternalServerError, errors.New("Internal server error")
 		}
 	}
 
 	var callerUserID uuid.UUID
-	if err := shared.Instance().NewRaw("SELECT user_id FROM claimius.user_claim WHERE id = ? AND sa_deleted_at IS NULL", callerUC).Scan(reqctx, &callerUserID); err != nil && !errors.Is(err, sql.ErrNoRows) {
+	if err := prophetdb.Instance().NewRaw("SELECT user_id FROM claimius.user_claim WHERE id = ? AND sa_deleted_at IS NULL", callerUC).Scan(reqctx, &callerUserID); err != nil && !errors.Is(err, sql.ErrNoRows) {
 		ctx.Logger().Errorf("lookup caller user: %v", err)
 		return nil, http.StatusInternalServerError, errors.New("Internal server error")
 	}
 	if callerUserID != uuid.Nil {
 		var hasCaller bool
-		if err := shared.Instance().NewRaw("SELECT EXISTS (SELECT 1 FROM claimius.user_claim WHERE app_id = ? AND claim_id = ? AND user_id = ? AND sa_deleted_at IS NULL)", appID, virtualID, callerUserID).Scan(reqctx, &hasCaller); err != nil {
+		if err := prophetdb.Instance().NewRaw("SELECT EXISTS (SELECT 1 FROM claimius.user_claim WHERE app_id = ? AND claim_id = ? AND user_id = ? AND sa_deleted_at IS NULL)", appID, virtualID, callerUserID).Scan(reqctx, &hasCaller); err != nil {
 			ctx.Logger().Errorf("lookup caller user_claim: %v", err)
 			return nil, http.StatusInternalServerError, errors.New("Internal server error")
 		}
 		if !hasCaller {
-			if _, err := shared.Instance().NewRaw("SELECT claimius.assign_claim_user(p_app_id := ?, p_claim_id := ?, p_user_id := ?, p_sa_owner_id := ?, p_sa_created_by := ?)", appID, virtualID, callerUserID, ownerID, callerUC).Exec(reqctx); err != nil {
+			if _, err := prophetdb.Instance().NewRaw("SELECT claimius.assign_claim_user(p_app_id := ?, p_claim_id := ?, p_user_id := ?, p_sa_owner_id := ?, p_sa_created_by := ?)", appID, virtualID, callerUserID, ownerID, callerUC).Exec(reqctx); err != nil {
 				ctx.Logger().Errorf("assign caller user_claim: %v", err)
 				return nil, http.StatusInternalServerError, errors.New("Internal server error")
 			}
 		}
 	}
 
-	if _, err := shared.Instance().NewRaw(
+	if _, err := prophetdb.Instance().NewRaw(
 		"INSERT INTO claimius.user_token (app_id, user_id, id_claim, external_id, type, claim_id, data, sa_owner_id) "+
 			"VALUES (?, ?, ?, ?, ?, ?, ?::jsonb, ?) "+
 			"ON CONFLICT (app_id, sa_owner_id, external_id) WHERE sa_deleted_at IS NULL DO UPDATE SET "+

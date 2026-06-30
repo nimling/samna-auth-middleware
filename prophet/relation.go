@@ -9,7 +9,7 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/nimling/samna-auth-middleware/pkg/errorsx"
 	"github.com/nimling/samna-auth-middleware/pkg/respond"
-	"github.com/nimling/samna-auth-middleware/shared"
+	prophetdb "github.com/nimling/samna-auth-middleware/prophet/db"
 	"github.com/nimling/samna-auth-middleware/utils"
 )
 
@@ -19,7 +19,7 @@ func GetRelations(ctx echo.Context) error {
 		return respond.Error(ctx, http.StatusBadRequest, err.Error())
 	}
 	relations := make([]UserRelation, 0)
-	if err := shared.Instance().NewSelect().
+	if err := prophetdb.Instance().NewSelect().
 		Model(&relations).
 		ExcludeColumn("sa_deleted_at").
 		Where("?TableAlias.app_id = ?", appID).
@@ -102,7 +102,7 @@ func DeleteRelation(ctx echo.Context) error {
 
 func getRelation(ctx echo.Context, relationID, appID uuid.UUID) (*UserRelation, error) {
 	var relation UserRelation
-	err := shared.Instance().NewSelect().
+	err := prophetdb.Instance().NewSelect().
 		Model(&relation).
 		ExcludeColumn("sa_deleted_at").
 		Where("?TableAlias.id = ?", relationID).
@@ -122,7 +122,7 @@ func getRelation(ctx echo.Context, relationID, appID uuid.UUID) (*UserRelation, 
 
 func postRelation(ctx echo.Context, relation *UserRelation) (*UserRelation, error) {
 	var created UserRelation
-	if _, err := shared.Instance().NewInsert().
+	if _, err := prophetdb.Instance().NewInsert().
 		Model(relation).
 		Returning("*").
 		Exec(ctx.Request().Context(), &created); err != nil {
@@ -133,7 +133,7 @@ func postRelation(ctx echo.Context, relation *UserRelation) (*UserRelation, erro
 }
 
 func putRelation(ctx echo.Context, relation *UserRelation, appID uuid.UUID) error {
-	res, err := shared.Instance().NewUpdate().
+	res, err := prophetdb.Instance().NewUpdate().
 		Model(relation).
 		Where("sa_deleted_at IS NULL").
 		Where("id = ?", relation.ID).
@@ -157,7 +157,7 @@ func putRelation(ctx echo.Context, relation *UserRelation, appID uuid.UUID) erro
 
 func deleteRelation(ctx echo.Context, relationID, appID uuid.UUID) (*UserRelation, error) {
 	var relation UserRelation
-	res, err := shared.Instance().NewUpdate().
+	res, err := prophetdb.Instance().NewUpdate().
 		Model(&relation).
 		Set("sa_deleted_at = NOW()").
 		Where("id = ?", relationID).

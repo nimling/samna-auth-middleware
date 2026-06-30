@@ -14,7 +14,7 @@ import (
 	"github.com/nimling/samna-auth-middleware/pkg/azure"
 	"github.com/nimling/samna-auth-middleware/pkg/errorsx"
 	"github.com/nimling/samna-auth-middleware/pkg/respond"
-	"github.com/nimling/samna-auth-middleware/shared"
+	prophetdb "github.com/nimling/samna-auth-middleware/prophet/db"
 )
 
 type BodyAsset struct {
@@ -40,7 +40,7 @@ func GetAssets(ctx echo.Context) error {
 	appID := ctx.Get("app_id").(uuid.UUID)
 
 	assets := make([]Asset, 0)
-	amount, err := shared.Instance().
+	amount, err := prophetdb.Instance().
 		NewSelect().
 		Model(&assets).
 		ExcludeColumn("sa_deleted_at").
@@ -71,7 +71,7 @@ func GetAsset(ctx echo.Context) error {
 	}
 
 	var asset Asset
-	err = shared.Instance().
+	err = prophetdb.Instance().
 		NewSelect().
 		Model(&asset).
 		Where("sa_deleted_at IS NULL").
@@ -104,7 +104,7 @@ func GetAssetData(ctx echo.Context) error {
 	}
 
 	var asset Asset
-	err = shared.Instance().
+	err = prophetdb.Instance().
 		NewSelect().
 		Model(&asset).
 		Where("sa_deleted_at IS NULL").
@@ -203,7 +203,7 @@ func PostAssetUpload(ctx echo.Context) error {
 	}
 
 	var asset Asset
-	err = shared.Instance().
+	err = prophetdb.Instance().
 		NewSelect().
 		Model(&asset).
 		Where("sa_deleted_at IS NULL").
@@ -251,7 +251,7 @@ func PostAssetUpload(ctx echo.Context) error {
 	}
 
 	asset.Status = "complete"
-	_, err = shared.Instance().
+	_, err = prophetdb.Instance().
 		NewUpdate().
 		Model(&asset).
 		Where("sa_deleted_at IS NULL").
@@ -297,7 +297,7 @@ func PutAsset(ctx echo.Context) error {
 		asset.Description = req.Description
 	}
 
-	_, err = shared.Instance().
+	_, err = prophetdb.Instance().
 		NewUpdate().
 		OmitZero().
 		Model(&asset).
@@ -328,7 +328,7 @@ func DeleteAsset(ctx echo.Context) error {
 	}
 
 	var asset Asset
-	_, err = shared.Instance().
+	_, err = prophetdb.Instance().
 		NewUpdate().
 		OmitZero().
 		Where("id = ?", assetID).
@@ -345,7 +345,7 @@ func DeleteAsset(ctx echo.Context) error {
 	}
 
 	var objectAsset ObjectAsset
-	_, err = shared.Instance().
+	_, err = prophetdb.Instance().
 		NewUpdate().
 		OmitZero().
 		Where("asset_id = ?", assetID).
@@ -371,7 +371,7 @@ func assetObjectAssets(ctx echo.Context, id uuid.UUID, objectType ObjectType) er
 	appID := ctx.Get("app_id").(uuid.UUID)
 
 	var objectAssets []ObjectAsset
-	err := shared.Instance().NewSelect().
+	err := prophetdb.Instance().NewSelect().
 		Model(&objectAssets).
 		ExcludeColumn("sa_deleted_at").
 		Relation("Asset").
@@ -404,7 +404,7 @@ func assetPostObject(ctx echo.Context, objectType ObjectType, objectID uuid.UUID
 
 	appID := ctx.Get("app_id").(uuid.UUID)
 
-	tx, err := shared.Instance().BeginTx(ctx.Request().Context(), nil)
+	tx, err := prophetdb.Instance().BeginTx(ctx.Request().Context(), nil)
 	if err != nil {
 		ctx.Logger().Errorf("assetPostObject tx: %v", err)
 		return nil, errorsx.ErrDbUnexpected
@@ -481,7 +481,7 @@ func assetPostObject(ctx echo.Context, objectType ObjectType, objectID uuid.UUID
 	asset.AssetURL = app.RedirectURI + "/api/asset/" + asset.ID.String() + "/data"
 
 	if input.UserImage && objectType == OBJECT_TYPE_USER {
-		if _, updErr := shared.Instance().NewUpdate().
+		if _, updErr := prophetdb.Instance().NewUpdate().
 			Model((*SamnaUser)(nil)).
 			Set("user_image = ?", asset.AssetURL).
 			Where("user_id = ?", objectID).

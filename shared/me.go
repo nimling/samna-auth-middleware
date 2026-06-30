@@ -33,7 +33,7 @@ func (d *DB) UpdateMe(ctx echo.Context, user *SamnaUser) (*SamnaUser, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := d.NewUpdate().Model(user).With(ac).ID(userID).Scan(ctx.Request().Context(), user); err != nil {
+	if err := d.NewUpdate().Model(user).Access(ac).ID(userID).Scan(ctx.Request().Context(), user); err != nil {
 		return nil, err
 	}
 	return user, nil

@@ -9,13 +9,14 @@ import (
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 	"github.com/nimling/samna-auth-middleware/pkg/respond"
+	prophetdb "github.com/nimling/samna-auth-middleware/prophet/db"
 	"github.com/nimling/samna-auth-middleware/sauth"
 	"github.com/nimling/samna-auth-middleware/shared"
 )
 
-func syncArmPush(ctx context.Context, appID uuid.UUID, seq int64) error {
+func syncArmPush(d *shared.DB, ctx context.Context, appID uuid.UUID, seq int64) error {
 	now := time.Now()
-	_, err := shared.Instance().NewInsert().
+	_, err := d.NewInsert().
 		Model(&ProphetState{AppID: appID, LastAppliedSeq: seq, SyncMode: SYNC_MODE_ACTIVE}).
 		On("CONFLICT (app_id) DO UPDATE").
 		Set("last_applied_seq = EXCLUDED.last_applied_seq").
@@ -56,7 +57,7 @@ func PostSync(ctx echo.Context) error {
 		return respond.JSON(ctx, http.StatusOK, map[string]any{"accepted": 0}, 1)
 	}
 
-	tx, err := shared.Instance().BeginTx(ctx.Request().Context(), nil)
+	tx, err := prophetdb.Instance().BeginTx(ctx.Request().Context(), nil)
 	if err != nil {
 		ctx.Logger().Errorf("sync: begin tx: %v", err)
 		return respond.Error(ctx, http.StatusInternalServerError, "Internal server error")
@@ -137,7 +138,7 @@ func GetSyncSnapshot(ctx echo.Context) error {
 	var records []SyncPayload
 
 	for _, t := range tables {
-		q := shared.Instance().NewSelect().Model(t.model)
+		q := prophetdb.Instance().NewSelect().Model(t.model)
 		if t.filterApp && appID != uuid.Nil {
 			q = q.Where("app_id = ?", appID)
 		}
@@ -161,7 +162,7 @@ func GetSyncSnapshot(ctx echo.Context) error {
 	}
 
 	var lastSeq int64
-	if err := shared.Instance().NewSelect().
+	if err := prophetdb.Instance().NewSelect().
 		TableExpr("claimius.sync_event").
 		ColumnExpr("COALESCE(MAX(seq), 0)").
 		Scan(ctx.Request().Context(), &lastSeq); err != nil {
@@ -173,7 +174,7 @@ func GetSyncSnapshot(ctx echo.Context) error {
 	}
 
 	if appID != uuid.Nil {
-		if err := syncArmPush(ctx.Request().Context(), appID, lastSeq); err != nil {
+		if err := syncArmPush(prophetdb.Instance(), ctx.Request().Context(), appID, lastSeq); err != nil {
 			ctx.Logger().Errorf("snapshot arm push %s: %v", appID, err)
 		}
 	}
@@ -191,7 +192,7 @@ func GetSyncEvents(ctx echo.Context) error {
 	}
 
 	var events []SyncEvent
-	err := shared.Instance().NewSelect().
+	err := prophetdb.Instance().NewSelect().
 		Model(&events).
 		Where("seq > ?", seq).
 		OrderExpr("seq ASC").
@@ -218,7 +219,7 @@ func GetSyncEvents(ctx echo.Context) error {
 	}
 
 	if appID, ok := ctx.Get("app_id").(uuid.UUID); ok && appID != uuid.Nil {
-		if err := syncArmPush(ctx.Request().Context(), appID, maxSeq); err != nil {
+		if err := syncArmPush(prophetdb.Instance(), ctx.Request().Context(), appID, maxSeq); err != nil {
 			ctx.Logger().Errorf("delta arm push %s: %v", appID, err)
 		}
 	}
