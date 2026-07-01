@@ -12,7 +12,7 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/nimling/samna-auth-middleware/dpop"
-	"github.com/nimling/samna-auth-middleware/middleware"
+	"github.com/nimling/samna-auth-middleware/smw"
 )
 
 const (
@@ -31,7 +31,7 @@ func mustKey(t *testing.T) *rsa.PrivateKey {
 
 func signAccess(t *testing.T, key *rsa.PrivateKey, issuer string, audience []string) string {
 	t.Helper()
-	claims := middleware.TokenClaims{
+	claims := smw.TokenClaims{
 		RegisteredClaims: jwt.RegisteredClaims{
 			Subject:   "11111111-1111-1111-1111-111111111111",
 			Issuer:    issuer,
@@ -57,10 +57,10 @@ func keyFunc(key *rsa.PrivateKey) jwt.Keyfunc {
 func TestValidateTokenAudienceAccept(t *testing.T) {
 	key := mustKey(t)
 	token := signAccess(t, key, testIssuer, []string{testSlug})
-	config := &middleware.AuthMiddlewareConfig{ClientSlug: testSlug, ExpectedTokenIssuer: testIssuer}
+	config := &smw.AuthMiddlewareConfig{ClientSlug: testSlug, ExpectedTokenIssuer: testIssuer}
 
 	req, _ := http.NewRequest(http.MethodGet, "https://api.example.com/resource", nil)
-	user, err := middleware.ValidateToken(req, token, config, keyFunc(key))
+	user, err := smw.ValidateToken(req, token, config, keyFunc(key))
 	if err != nil {
 		t.Fatalf("expected valid token, got %v", err)
 	}
@@ -72,10 +72,10 @@ func TestValidateTokenAudienceAccept(t *testing.T) {
 func TestValidateTokenAudienceReject(t *testing.T) {
 	key := mustKey(t)
 	token := signAccess(t, key, testIssuer, []string{"other-app"})
-	config := &middleware.AuthMiddlewareConfig{ClientSlug: testSlug, ExpectedTokenIssuer: testIssuer}
+	config := &smw.AuthMiddlewareConfig{ClientSlug: testSlug, ExpectedTokenIssuer: testIssuer}
 
 	req, _ := http.NewRequest(http.MethodGet, "https://api.example.com/resource", nil)
-	if _, err := middleware.ValidateToken(req, token, config, keyFunc(key)); err == nil {
+	if _, err := smw.ValidateToken(req, token, config, keyFunc(key)); err == nil {
 		t.Fatalf("expected audience rejection")
 	}
 }
@@ -83,10 +83,10 @@ func TestValidateTokenAudienceReject(t *testing.T) {
 func TestValidateTokenIssuerReject(t *testing.T) {
 	key := mustKey(t)
 	token := signAccess(t, key, "https://evil.example.com", []string{testSlug})
-	config := &middleware.AuthMiddlewareConfig{ClientSlug: testSlug, ExpectedTokenIssuer: testIssuer}
+	config := &smw.AuthMiddlewareConfig{ClientSlug: testSlug, ExpectedTokenIssuer: testIssuer}
 
 	req, _ := http.NewRequest(http.MethodGet, "https://api.example.com/resource", nil)
-	if _, err := middleware.ValidateToken(req, token, config, keyFunc(key)); err == nil {
+	if _, err := smw.ValidateToken(req, token, config, keyFunc(key)); err == nil {
 		t.Fatalf("expected issuer rejection")
 	}
 }

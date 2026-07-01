@@ -22,7 +22,7 @@ func cookieSameSite() http.SameSite {
 func cookieDomain() (string, bool) {
 	domain := os.Getenv("SAUTH_COOKIE_DOMAIN")
 	if domain == "" {
-		domain = CookieDomainFromURI(os.Getenv("SAUTH_REDIRECT_URI"))
+		domain = CookieDomainFromURI(Cfg().RedirectURI)
 	}
 	secure := domain != ""
 	if v := os.Getenv("SAUTH_COOKIE_SECURE"); v != "" {

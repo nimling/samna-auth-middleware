@@ -49,7 +49,7 @@ func (d *DB) insertSecret(ctx context.Context, ac *AccessClaim, body BodySecret)
 	if ac.ClaimID == nil {
 		return nil, ErrNoAccess
 	}
-	app, err := d.GetAppProphet(ctx)
+	app, err := d.GetApp(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -110,7 +110,7 @@ func (d *DB) updateSecret(ctx context.Context, ac *AccessClaim, secretID uuid.UU
 		secret.Key = *body.Key
 	}
 	if body.Value != nil {
-		app, err := d.GetAppProphet(ctx)
+		app, err := d.GetApp(ctx)
 		if err != nil {
 			return nil, err
 		}
@@ -165,7 +165,7 @@ func (s *SamnaSecret) Resolve(ctx context.Context, d *DB) (string, error) {
 	if s.ExpiresAt != nil && !s.ExpiresAt.After(time.Now()) {
 		return "", ErrSecretExpired
 	}
-	app, err := d.GetAppProphet(ctx)
+	app, err := d.GetApp(ctx)
 	if err != nil {
 		return "", err
 	}

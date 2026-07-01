@@ -600,7 +600,7 @@ CREATE INDEX IF NOT EXISTS idx_sync_event_type_seq ON claimius.sync_event (event
 -- Per app cursor on the prophet side. Tracks the highest sync_event.seq
 -- already published to disciples for this app. Additionally carries the
 -- system_app_slug marker on the system app's row (NULL on every other row),
--- which is how get_prophet_app finds the deployment's system app.
+-- which is how get_app finds the deployment's system app.
 CREATE TABLE IF NOT EXISTS claimius.prophet_state (
                                                       id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
                                                       app_id              UUID NOT NULL UNIQUE REFERENCES claimius.samna_app(id),
@@ -676,7 +676,7 @@ COMMENT ON COLUMN claimius.claim_graph_cache.graph IS 'JSON array of {object_id,
 -- the function at CREATE TABLE time.
 -- ----------------------------------------------------------------------------
 
-CREATE OR REPLACE FUNCTION claimius.get_prophet_app()
+CREATE OR REPLACE FUNCTION claimius.get_app()
     RETURNS SETOF claimius.samna_app AS $$
 DECLARE
     v_slug TEXT;
@@ -687,7 +687,7 @@ BEGIN
     LIMIT 1;
 
     IF v_slug IS NULL THEN
-        RAISE EXCEPTION 'get_prophet_app: no system app registered. This deployment is a pure disciple, or init has not run.';
+        RAISE EXCEPTION 'get_app: no system app registered. This deployment is a pure disciple, or init has not run.';
     END IF;
 
     RETURN QUERY
@@ -696,7 +696,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql STABLE;
 
-COMMENT ON FUNCTION claimius.get_prophet_app() IS 'Returns the system app row for this deployment (prophet or hybrid). Raises on pure disciple.';
+COMMENT ON FUNCTION claimius.get_app() IS 'Returns the system app row for this deployment (prophet or hybrid). Raises on pure disciple.';
 
 CREATE OR REPLACE FUNCTION claimius.get_disciple_app()
     RETURNS SETOF claimius.samna_app AS $$
@@ -721,10 +721,10 @@ COMMENT ON FUNCTION claimius.get_disciple_app() IS 'Returns the upstream prophet
 
 CREATE OR REPLACE FUNCTION claimius.get_prophet_app_id()
     RETURNS UUID AS $$
-SELECT id FROM claimius.get_prophet_app();
+SELECT id FROM claimius.get_app();
 $$ LANGUAGE sql STABLE;
 
-COMMENT ON FUNCTION claimius.get_prophet_app_id() IS 'Scalar wrapper over get_prophet_app. Returns the system app id; raises on pure disciple.';
+COMMENT ON FUNCTION claimius.get_prophet_app_id() IS 'Scalar wrapper over get_app. Returns the system app id; raises on pure disciple.';
 
 CREATE OR REPLACE FUNCTION claimius.get_disciple_app_id()
     RETURNS UUID AS $$

@@ -5,15 +5,15 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/nimling/samna-auth-middleware/utils"
 	"io"
 	"net/http"
-	"os"
 	"strconv"
 	"time"
 )
 
 func requestTimeout() time.Duration {
-	if v := os.Getenv("SAUTH_CLIENT_TIMEOUT"); v != "" {
+	if v := utils.Cfg().ClientTimeout; v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
 			return time.Duration(n) * time.Second
 		}

@@ -4,10 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/nimling/samna-auth-middleware/utils"
 	"io"
 	"net/http"
 	"net/url"
-	"os"
 	"strings"
 	"time"
 )
@@ -27,7 +27,7 @@ type OpenIDConfiguration struct {
 }
 
 func GetLogin(ctx context.Context, provider *string) (string, error) {
-	endpoint := os.Getenv("SAUTH_ENDPOINT")
+	endpoint := utils.Cfg().Endpoint
 
 	var path string
 	if provider != nil && len(*provider) > 0 {
@@ -47,14 +47,14 @@ func GetLogin(ctx context.Context, provider *string) (string, error) {
 	}
 
 	q := parsed.Query()
-	q.Set("client_slug", os.Getenv("SAUTH_APP_SLUG"))
+	q.Set("client_slug", utils.Cfg().AppSlug)
 	parsed.RawQuery = q.Encode()
 
 	return parsed.String(), nil
 }
 
 func GetLogout(ctx context.Context, accessToken string) (int, error) {
-	endpoint := os.Getenv("SAUTH_ENDPOINT")
+	endpoint := utils.Cfg().Endpoint
 
 	u, err := joinURL(endpoint, "sam/logout")
 	if err != nil {
@@ -65,8 +65,8 @@ func GetLogout(ctx context.Context, accessToken string) (int, error) {
 	if err != nil {
 		return 0, fmt.Errorf("create request: %w", err)
 	}
-	req.Header.Set("SAuth-App-Slug", os.Getenv("SAUTH_APP_SLUG"))
-	req.Header.Set("SAuth-App-Secret", os.Getenv("SAUTH_APP_SECRET"))
+	req.Header.Set("SAuth-App-Slug", utils.Cfg().AppSlug)
+	req.Header.Set("SAuth-App-Secret", utils.Cfg().AppSecret)
 	req.Header.Set("Authorization", "Bearer "+accessToken)
 
 	httpClient := &http.Client{Timeout: 3 * time.Second}

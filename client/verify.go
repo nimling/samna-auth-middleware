@@ -1,12 +1,12 @@
 package client
 
 import (
-	"os"
+	"github.com/nimling/samna-auth-middleware/utils"
 )
 
 func VerifyRequest(slug string, secret string) bool {
-	expectedSlug := os.Getenv("SAUTH_APP_SLUG")
-	expectedSecret := os.Getenv("SAUTH_APP_SECRET")
+	expectedSlug := utils.Cfg().AppSlug
+	expectedSecret := utils.Cfg().AppSecret
 
 	if expectedSlug == "" || expectedSecret == "" {
 		return false

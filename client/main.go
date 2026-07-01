@@ -1,13 +1,13 @@
 package client
 
 import (
-	"os"
+	"github.com/nimling/samna-auth-middleware/utils"
 )
 
 func newClient() *SAuthClient {
-	endpoint := os.Getenv("SAUTH_ENDPOINT")
-	slug := os.Getenv("SAUTH_APP_SLUG")
-	secret := os.Getenv("SAUTH_APP_SECRET")
+	endpoint := utils.Cfg().Endpoint
+	slug := utils.Cfg().AppSlug
+	secret := utils.Cfg().AppSecret
 
 	return &SAuthClient{
 		apiURL: endpoint + "/sam",

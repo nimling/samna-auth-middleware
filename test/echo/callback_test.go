@@ -1,13 +1,13 @@
 package echo
 
 import (
-	"strings"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/labstack/echo/v4"
-	saecho "github.com/nimling/samna-auth-middleware/echo"
+	saecho "github.com/nimling/samna-auth-middleware/disciple/echo"
 )
 
 func TestGetCallbackSetsTokenAndCSRFCookies(t *testing.T) {

@@ -1,8 +1,6 @@
 package utils
 
 import (
-	"os"
-
 	"github.com/google/uuid"
 )
 
@@ -12,7 +10,7 @@ func IsSystemApp(value any) bool {
 		if v == "" {
 			return true
 		}
-		if v == os.Getenv("SAUTH_APP_SLUG") {
+		if v == Cfg().AppSlug {
 			return true
 		}
 		parsed, err := uuid.Parse(v)

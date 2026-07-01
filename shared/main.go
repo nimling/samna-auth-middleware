@@ -5,11 +5,14 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"reflect"
 	"time"
 
 	"github.com/labstack/echo/v4"
+	"github.com/nimling/samna-auth-middleware/client"
+	"github.com/nimling/samna-auth-middleware/utils"
 	"github.com/uptrace/bun"
 	"github.com/uptrace/bun/dialect/pgdialect"
 	"github.com/uptrace/bun/driver/pgdriver"
@@ -20,35 +23,28 @@ type DB struct {
 	Logger echo.Logger
 }
 
-var syncFunc func(ctx context.Context) error
-
 var ErrSyncUnreachable = errors.New("sync unreachable: app inactive on samna_auth")
 var ErrSecretExpired = errors.New("secret expired")
 
-// GetAppProphet reads the system app row from claimius.get_prophet_app. The
-// prophet holds the full row including key and seed material.
-func (d *DB) GetAppProphet(ctx context.Context) (*SamnaApp, error) {
+// GetApp reads the system app row from claimius.get_app. The prophet
+// holds the full row including key and seed material.
+func (d *DB) GetApp(ctx context.Context) (*SamnaApp, error) {
 	var app SamnaApp
-	if err := d.NewRaw(`SELECT * FROM claimius.get_prophet_app() LIMIT 1`).Scan(ctx, &app); err != nil {
+	if err := d.NewRaw(`SELECT * FROM claimius.get_app() LIMIT 1`).Scan(ctx, &app); err != nil {
 		return nil, fmt.Errorf("no claimius app registered: %w", err)
 	}
 	return &app, nil
 }
 
-// GetAppEnv builds the disciple's app identity from env (SAUTH_APP_SLUG and
-// SAUTH_APP_SECRET). A disciple never signs or decrypts, so it holds no key or
-// seed material.
+// GetAppEnv builds the disciple's app identity from the loaded config. A
+// disciple never signs or decrypts, so it holds no key or seed material.
 func (d *DB) GetAppEnv(ctx context.Context) (*SamnaApp, error) {
-	slug := os.Getenv("SAUTH_APP_SLUG")
+	slug := utils.Cfg().AppSlug
 	if slug == "" {
 		return nil, errors.New("SAUTH_APP_SLUG not set")
 	}
-	secret := os.Getenv("SAUTH_APP_SECRET")
+	secret := utils.Cfg().AppSecret
 	return &SamnaApp{Slug: slug, AppSecret: &secret}, nil
-}
-
-func RegisterSyncFunc(fn func(ctx context.Context) error) {
-	syncFunc = fn
 }
 
 func Connect(logger echo.Logger) (*DB, error) {
@@ -130,40 +126,46 @@ func Connect(logger echo.Logger) (*DB, error) {
 		(*UserToken)(nil),
 	)
 
+	resolveOIDC(logger)
+
 	return db, nil
 }
 
-// InitialSync performs the disciple's first pull from the prophet, retrying a
-// few times. Debug mode and a missing sync function skip it; an unreachable
-// prophet is not fatal.
-func InitialSync(logger echo.Logger) error {
+func resolveOIDC(logger echo.Logger) {
 	if GetDebugMode() != DebugModeNone {
-		logger.Info("Debug mode active, skipping initial sync")
-		return nil
+		return
 	}
-	if syncFunc == nil {
-		logger.Warn("No sync function registered, skipping initial sync")
-		return nil
+	c := utils.Cfg()
+	if c.Endpoint == "" || c.AppSlug == "" {
+		logger.Warn("oidc resolution skipped: endpoint or app slug missing")
+		utils.SetAuthDisabled()
+		return
 	}
-	maxRetries := 5
-	for attempt := 1; attempt <= maxRetries; attempt++ {
-		logger.Infof("Starting initial sync (attempt %d/%d)", attempt, maxRetries)
-		if err := syncFunc(context.Background()); err != nil {
-			if errors.Is(err, ErrSyncUnreachable) {
-				logger.Warnf("Initial sync skipped: %v", err)
-				return nil
-			}
-			logger.Errorf("Initial sync attempt %d failed: %v", attempt, err)
-			if attempt == maxRetries {
-				return fmt.Errorf("initial sync failed after %d attempts: %w", maxRetries, err)
-			}
-			time.Sleep(time.Duration(attempt) * 2 * time.Second)
-			continue
+	configURL := c.Endpoint + "/api/app/" + c.AppSlug + "/.well-known/openid-configuration"
+	oidc, err := client.GetOpenIDConfiguration(context.Background(), configURL)
+	if err != nil {
+		if errors.Is(err, client.ErrNotFound) {
+			logger.Warnf("oidc unavailable for slug %q; auth disabled", c.AppSlug)
+		} else {
+			logger.Warnf("oidc resolution failed: %v", err)
 		}
-		logger.Info("Initial sync completed")
-		break
+		utils.SetAuthDisabled()
+		return
 	}
-	return nil
+	tokenURL, err := url.Parse(oidc.TokenEndpoint)
+	if err != nil {
+		logger.Warnf("oidc token endpoint parse: %v", err)
+		utils.SetAuthDisabled()
+		return
+	}
+	jwksURL, err := url.Parse(oidc.JwksUri)
+	if err != nil {
+		logger.Warnf("oidc jwks uri parse: %v", err)
+		utils.SetAuthDisabled()
+		return
+	}
+	utils.SetOIDC(oidc.Issuer, *tokenURL, *jwksURL)
+	logger.Infof("oidc issuer=%s token=%s jwks=%s", oidc.Issuer, oidc.TokenEndpoint, oidc.JwksUri)
 }
 
 type DebugMode string
@@ -175,10 +177,10 @@ const (
 )
 
 func GetDebugMode() DebugMode {
-	if os.Getenv("SAUTH_DEBUG_USER_ID") != "" {
+	if utils.Cfg().DebugUserID != "" {
 		return DebugModeUser
 	}
-	if os.Getenv("SAUTH_DEBUG_CLIENTS") != "" {
+	if utils.Cfg().DebugClients != "" {
 		return DebugModeClients
 	}
 	return DebugModeNone

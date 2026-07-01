@@ -5,8 +5,8 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"fmt"
+	"github.com/nimling/samna-auth-middleware/utils"
 	"net/url"
-	"os"
 )
 
 const (
@@ -28,7 +28,7 @@ func ChallengeS256(verifier string) string {
 }
 
 func AuthorizeURL(slug string, redirectURI string, state string, challenge string) (string, error) {
-	endpoint := os.Getenv("SAUTH_ENDPOINT")
+	endpoint := utils.Cfg().Endpoint
 	joined, err := joinURL(endpoint, fmt.Sprintf("api/app/%s/oauth/authorize", slug))
 	if err != nil {
 		return "", fmt.Errorf("build authorize url: %w", err)
@@ -49,13 +49,13 @@ func AuthorizeURL(slug string, redirectURI string, state string, challenge strin
 }
 
 func TokenURLFor(slug string) (string, error) {
-	endpoint := os.Getenv("SAUTH_ENDPOINT")
+	endpoint := utils.Cfg().Endpoint
 	return joinURL(endpoint, fmt.Sprintf("api/app/%s/oauth/token", slug))
 }
 
 func EndSessionURL() (string, error) {
-	endpoint := os.Getenv("SAUTH_ENDPOINT")
-	slug := os.Getenv("SAUTH_APP_SLUG")
+	endpoint := utils.Cfg().Endpoint
+	slug := utils.Cfg().AppSlug
 	joined, err := joinURL(endpoint, fmt.Sprintf("api/app/%s/oauth/end_session", slug))
 	if err != nil {
 		return "", fmt.Errorf("build end session url: %w", err)
@@ -64,7 +64,7 @@ func EndSessionURL() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("parse end session url: %w", err)
 	}
-	pageRedirect := os.Getenv("SAUTH_PAGE_REDIRECT")
+	pageRedirect := utils.Cfg().PageRedirect
 	if pageRedirect != "" {
 		q := parsed.Query()
 		q.Set("post_logout_redirect_uri", pageRedirect)
