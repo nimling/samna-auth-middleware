@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strings"
 
 	"github.com/MicahParks/keyfunc/v3"
 	"github.com/google/uuid"
@@ -98,9 +99,25 @@ func UserAuthMiddleware(opts *UserAuthOptions) echo.MiddlewareFunc {
 				return next(ctx)
 			}
 
-			return ctx.String(http.StatusUnauthorized, "Unauthorized")
+			return respondUnauthenticated(ctx)
 		}
 	}
+}
+
+const loginRedirectPath = "/api/sauth/login"
+
+func respondUnauthenticated(ctx echo.Context) error {
+	if isNavigation(ctx) {
+		return ctx.Redirect(http.StatusFound, loginRedirectPath)
+	}
+	return ctx.String(http.StatusUnauthorized, "Unauthorized")
+}
+
+func isNavigation(ctx echo.Context) bool {
+	if ctx.Request().Header.Get("Sec-Fetch-Mode") == "navigate" {
+		return true
+	}
+	return strings.Contains(ctx.Request().Header.Get("Accept"), "text/html")
 }
 
 func respondAuthError(ctx echo.Context, err error) error {
@@ -111,7 +128,7 @@ func respondAuthError(ctx echo.Context, err error) error {
 		return ctx.String(http.StatusNotFound, string(ErrorUserExternalNotRecognized))
 	}
 	if errors.Is(err, ErrorUnauthorized) {
-		return ctx.String(http.StatusUnauthorized, "Unauthorized")
+		return respondUnauthenticated(ctx)
 	}
 	ctx.Logger().Errorf("auth error: %v", err)
 	return ctx.String(http.StatusInternalServerError, "Internal Server Error")
