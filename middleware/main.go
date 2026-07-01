@@ -71,14 +71,6 @@ func UserAuthMiddleware(opts *UserAuthOptions) echo.MiddlewareFunc {
 
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(ctx echo.Context) error {
-			if handled, exErr := exchangeAuthCodeFromQuery(ctx, config); handled {
-				if exErr != nil {
-					ctx.Logger().Warnf("Failed to exchange the authorization code: %v", exErr)
-					return respondAuthError(ctx, exErr)
-				}
-				return ctx.Redirect(http.StatusFound, config.PageRedirectURI)
-			}
-
 			if bearerErr := authenticateBearer(ctx, config, jwksClient.Keyfunc); !errors.Is(bearerErr, ErrorCredentialMissing) {
 				if bearerErr != nil {
 					return respondAuthError(ctx, bearerErr)

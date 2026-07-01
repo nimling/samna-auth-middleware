@@ -57,14 +57,6 @@ func authenticateCookie(ctx echo.Context, config *AuthMiddlewareConfig, keyFunc 
 	return nil
 }
 
-func exchangeAuthCodeFromQuery(ctx echo.Context, config *AuthMiddlewareConfig) (bool, error) {
-	if !ctx.QueryParams().Has(authCodeParamKey) {
-		return false, nil
-	}
-	authCode := ctx.QueryParam(authCodeParamKey)
-	return true, exchangeAuthorizationCode(ctx, authCode, *config)
-}
-
 func generateCSRFToken() (string, error) {
 	b := make([]byte, 32)
 	_, err := rand.Read(b)
@@ -122,31 +114,6 @@ func refreshTokens(ctx echo.Context, config AuthMiddlewareConfig) (*client.Respo
 	writeCSRFCookie(ctx)
 
 	return tokenResp, nil
-}
-
-func exchangeAuthorizationCode(ctx echo.Context, authCode string, config AuthMiddlewareConfig) error {
-	tokenResp, err := client.PostAuthCode(ctx.Request().Context(), config.TokenURL.String(), config.ClientSlug, config.ClientSecret, authCode, config.RedirectURI)
-	if err != nil {
-		return fmt.Errorf("exchange authorization code: %w", err)
-	}
-
-	utils.WriteCookie(ctx, &http.Cookie{
-		Name:   accessTokenCookieKey,
-		Value:  tokenResp.AccessToken,
-		Path:   "/",
-		MaxAge: tokenResp.AccessExpiresIn,
-	})
-
-	utils.WriteCookie(ctx, &http.Cookie{
-		Name:   refreshTokenCookieKey,
-		Value:  tokenResp.RefreshToken,
-		Path:   "/",
-		MaxAge: tokenResp.RefreshExpiresIn,
-	})
-
-	writeCSRFCookie(ctx)
-
-	return nil
 }
 
 func getOpenIDConfiguration(ctx context.Context, config *AuthMiddlewareConfig) error {

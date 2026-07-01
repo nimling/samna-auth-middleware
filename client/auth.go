@@ -137,11 +137,12 @@ func postToken(ctx context.Context, tokenURL string, slug string, secret string,
 	return &token, nil
 }
 
-func PostAuthCode(ctx context.Context, tokenURL string, slug string, secret string, code string, redirectURI string) (*ResponseToken, error) {
+func PostAuthCode(ctx context.Context, tokenURL string, slug string, secret string, code string, redirectURI string, codeVerifier string) (*ResponseToken, error) {
 	form := url.Values{}
 	form.Set("grant_type", "authorization_code")
 	form.Set("code", code)
 	form.Set("redirect_uri", redirectURI)
+	form.Set("code_verifier", codeVerifier)
 	return postToken(ctx, tokenURL, slug, secret, form)
 }
 

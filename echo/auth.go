@@ -2,6 +2,7 @@ package echo
 
 import (
 	"net/http"
+	"os"
 
 	"github.com/labstack/echo/v4"
 	"github.com/nimling/samna-auth-middleware/client"
@@ -9,17 +10,76 @@ import (
 )
 
 func GetLogin(ctx echo.Context) error {
-	var provider *string
-	if p := ctx.QueryParam("provider"); len(p) > 0 {
-		provider = &p
-	}
-
-	redirectURL, err := client.GetLogin(ctx.Request().Context(), provider)
+	verifier, err := client.GenerateVerifier()
 	if err != nil {
-		ctx.Logger().Errorf("GetLogin: %v", err)
+		ctx.Logger().Errorf("GetLogin verifier: %v", err)
 		return respondError(ctx, http.StatusInternalServerError, "Internal Server Error")
 	}
-	return Redirect(ctx, http.StatusTemporaryRedirect, redirectURL)
+	state, err := client.GenerateVerifier()
+	if err != nil {
+		ctx.Logger().Errorf("GetLogin state: %v", err)
+		return respondError(ctx, http.StatusInternalServerError, "Internal Server Error")
+	}
+
+	slug := os.Getenv("SAUTH_APP_SLUG")
+	redirectURI := os.Getenv("SAUTH_REDIRECT_URI")
+	authURL, err := client.AuthorizeURL(slug, redirectURI, state, client.ChallengeS256(verifier))
+	if err != nil {
+		ctx.Logger().Errorf("GetLogin authorize url: %v", err)
+		return respondError(ctx, http.StatusInternalServerError, "Internal Server Error")
+	}
+
+	utils.WriteCookie(ctx, &http.Cookie{Name: client.PKCEVerifierCookie, Value: verifier, Path: "/", MaxAge: 600})
+	utils.WriteCookie(ctx, &http.Cookie{Name: client.OAuthStateCookie, Value: state, Path: "/", MaxAge: 600})
+
+	return Redirect(ctx, http.StatusTemporaryRedirect, authURL)
+}
+
+func GetCallback(ctx echo.Context) error {
+	code := ctx.QueryParam("code")
+	if code == "" {
+		return respondError(ctx, http.StatusBadRequest, "missing code")
+	}
+
+	stateParam := ctx.QueryParam("state")
+	stateCookie, stateErr := ctx.Cookie(client.OAuthStateCookie)
+	if stateErr != nil || stateCookie.Value == "" || stateParam == "" || stateParam != stateCookie.Value {
+		return respondError(ctx, http.StatusBadRequest, "invalid state")
+	}
+
+	verifierCookie, verifierErr := ctx.Cookie(client.PKCEVerifierCookie)
+	if verifierErr != nil || verifierCookie.Value == "" {
+		return respondError(ctx, http.StatusBadRequest, "missing verifier")
+	}
+
+	slug := os.Getenv("SAUTH_APP_SLUG")
+	secret := os.Getenv("SAUTH_APP_SECRET")
+	redirectURI := os.Getenv("SAUTH_REDIRECT_URI")
+	tokenURL, err := client.TokenURLFor(slug)
+	if err != nil {
+		ctx.Logger().Errorf("GetCallback token url: %v", err)
+		return respondError(ctx, http.StatusInternalServerError, "Internal Server Error")
+	}
+
+	tokens, err := client.PostAuthCode(ctx.Request().Context(), tokenURL, slug, secret, code, redirectURI, verifierCookie.Value)
+	if err != nil {
+		ctx.Logger().Errorf("GetCallback exchange: %v", err)
+		return respondError(ctx, http.StatusUnauthorized, "Unauthorized")
+	}
+
+	utils.ClearCookie(ctx, client.PKCEVerifierCookie)
+	utils.ClearCookie(ctx, client.OAuthStateCookie)
+
+	utils.WriteCookie(ctx, &http.Cookie{Name: "sauth_access_token", Value: tokens.AccessToken, Path: "/", MaxAge: tokens.AccessExpiresIn})
+	if tokens.RefreshToken != "" {
+		utils.WriteCookie(ctx, &http.Cookie{Name: "sauth_refresh_token", Value: tokens.RefreshToken, Path: "/", MaxAge: tokens.RefreshExpiresIn})
+	}
+
+	pageRedirect := os.Getenv("SAUTH_PAGE_REDIRECT")
+	if pageRedirect == "" {
+		pageRedirect = "/"
+	}
+	return Redirect(ctx, http.StatusFound, pageRedirect)
 }
 
 func GetLogout(ctx echo.Context) error {
