@@ -3,7 +3,6 @@ package utils
 import (
 	"net/url"
 	"os"
-	"sync"
 )
 
 type Config struct {
@@ -22,10 +21,7 @@ type Config struct {
 	AuthDisabled bool
 }
 
-var (
-	cfg     Config
-	cfgOnce sync.Once
-)
+var cfg Config
 
 func loadConfig() {
 	cfg.Endpoint = os.Getenv("SAUTH_ENDPOINT")
@@ -39,7 +35,7 @@ func loadConfig() {
 }
 
 func Cfg() *Config {
-	cfgOnce.Do(loadConfig)
+	loadConfig()
 	return &cfg
 }
 
