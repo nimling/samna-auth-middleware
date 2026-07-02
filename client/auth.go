@@ -53,21 +53,30 @@ func GetLogin(ctx context.Context, provider *string) (string, error) {
 	return parsed.String(), nil
 }
 
-func GetLogout(ctx context.Context) (int, error) {
-	c := newClient()
+func GetLogout(ctx context.Context, accessToken string) (int, error) {
+	endpoint := os.Getenv("SAUTH_ENDPOINT")
 
-	u, err := joinURL(c.apiURL, "logout")
+	u, err := joinURL(endpoint, "sam/logout")
 	if err != nil {
 		return 0, fmt.Errorf("build url: %w", err)
 	}
 
-	body, err := c.client.Get(ctx, u)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {
-		return 0, err
+		return 0, fmt.Errorf("create request: %w", err)
 	}
-	body.Close()
+	req.Header.Set("SAuth-App-Slug", os.Getenv("SAUTH_APP_SLUG"))
+	req.Header.Set("SAuth-App-Secret", os.Getenv("SAUTH_APP_SECRET"))
+	req.Header.Set("Authorization", "Bearer "+accessToken)
 
-	return 200, nil
+	httpClient := &http.Client{Timeout: 3 * time.Second}
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return 0, fmt.Errorf("send request: %w", err)
+	}
+	resp.Body.Close()
+
+	return resp.StatusCode, nil
 }
 
 func GetOpenIDConfiguration(ctx context.Context, configURL string) (*OpenIDConfiguration, error) {

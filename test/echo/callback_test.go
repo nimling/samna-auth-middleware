@@ -72,3 +72,81 @@ func TestGetCallbackRejectsStateMismatch(t *testing.T) {
 		t.Fatalf("status = %d, want 400 on state mismatch", rec.Code)
 	}
 }
+
+func TestGetLogoutForwardsTokenAndClearsCookies(t *testing.T) {
+	var gotPath, gotAuth, gotSlug, gotSecret string
+	authServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotAuth = r.Header.Get("Authorization")
+		gotSlug = r.Header.Get("SAuth-App-Slug")
+		gotSecret = r.Header.Get("SAuth-App-Secret")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer authServer.Close()
+
+	t.Setenv("SAUTH_ENDPOINT", authServer.URL)
+	t.Setenv("SAUTH_APP_SLUG", "testapp")
+	t.Setenv("SAUTH_APP_SECRET", "secret")
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/api/sauth/logout", nil)
+	req.AddCookie(&http.Cookie{Name: "sauth_access_token", Value: "tok123"})
+	rec := httptest.NewRecorder()
+	ctx := e.NewContext(req, rec)
+
+	if err := saecho.GetLogout(ctx); err != nil {
+		t.Fatalf("GetLogout: %v", err)
+	}
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if gotPath != "/sam/logout" {
+		t.Errorf("path = %q, want /sam/logout", gotPath)
+	}
+	if gotAuth != "Bearer tok123" {
+		t.Errorf("authorization = %q, want Bearer tok123", gotAuth)
+	}
+	if gotSlug != "testapp" || gotSecret != "secret" {
+		t.Errorf("app credentials missing: slug=%q secret=%q", gotSlug, gotSecret)
+	}
+
+	cleared := map[string]bool{}
+	for _, c := range rec.Result().Cookies() {
+		if c.MaxAge < 0 {
+			cleared[c.Name] = true
+		}
+	}
+	for _, name := range []string{"sauth_access_token", "sauth_refresh_token", "sauth_csrf_token"} {
+		if !cleared[name] {
+			t.Errorf("cookie %s not cleared on logout", name)
+		}
+	}
+}
+
+func TestGetLogoutWithoutTokenOnlyClearsCookies(t *testing.T) {
+	called := false
+	authServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+	}))
+	defer authServer.Close()
+
+	t.Setenv("SAUTH_ENDPOINT", authServer.URL)
+	t.Setenv("SAUTH_APP_SLUG", "testapp")
+	t.Setenv("SAUTH_APP_SECRET", "secret")
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/api/sauth/logout", nil)
+	rec := httptest.NewRecorder()
+	ctx := e.NewContext(req, rec)
+
+	if err := saecho.GetLogout(ctx); err != nil {
+		t.Fatalf("GetLogout: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if called {
+		t.Errorf("auth server called without an access token")
+	}
+}

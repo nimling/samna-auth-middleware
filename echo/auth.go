@@ -85,14 +85,26 @@ func GetCallback(ctx echo.Context) error {
 }
 
 func GetLogout(ctx echo.Context) error {
+	accessToken := ""
+	if cookie, err := ctx.Cookie("sauth_access_token"); err == nil {
+		accessToken = cookie.Value
+	}
+
 	for _, name := range []string{"sauth_csrf_token", "sauth_refresh_token", "sauth_access_token"} {
 		utils.ClearCookie(ctx, name)
 	}
 
-	statusCode, err := client.GetLogout(ctx.Request().Context())
+	if accessToken == "" {
+		return ctx.NoContent(http.StatusOK)
+	}
+
+	statusCode, err := client.GetLogout(ctx.Request().Context(), accessToken)
 	if err != nil {
 		ctx.Logger().Errorf("GetLogout: %v", err)
-		return ctx.NoContent(http.StatusInternalServerError)
+		return ctx.NoContent(http.StatusOK)
 	}
-	return ctx.NoContent(statusCode)
+	if statusCode >= http.StatusBadRequest {
+		ctx.Logger().Errorf("GetLogout: auth server returned %d", statusCode)
+	}
+	return ctx.NoContent(http.StatusOK)
 }
