@@ -94,17 +94,19 @@ func GetLogout(ctx echo.Context) error {
 		utils.ClearCookie(ctx, name)
 	}
 
-	if accessToken == "" {
-		return ctx.NoContent(http.StatusOK)
+	if accessToken != "" {
+		statusCode, err := client.GetLogout(ctx.Request().Context(), accessToken)
+		if err != nil {
+			ctx.Logger().Errorf("GetLogout: %v", err)
+		} else if statusCode >= http.StatusBadRequest {
+			ctx.Logger().Errorf("GetLogout: auth server returned %d", statusCode)
+		}
 	}
 
-	statusCode, err := client.GetLogout(ctx.Request().Context(), accessToken)
+	endSessionURL, err := client.EndSessionURL()
 	if err != nil {
-		ctx.Logger().Errorf("GetLogout: %v", err)
+		ctx.Logger().Errorf("GetLogout end session url: %v", err)
 		return ctx.NoContent(http.StatusOK)
 	}
-	if statusCode >= http.StatusBadRequest {
-		ctx.Logger().Errorf("GetLogout: auth server returned %d", statusCode)
-	}
-	return ctx.NoContent(http.StatusOK)
+	return Redirect(ctx, http.StatusFound, endSessionURL)
 }

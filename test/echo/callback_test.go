@@ -1,6 +1,7 @@
 package echo
 
 import (
+	"strings"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -87,6 +88,7 @@ func TestGetLogoutForwardsTokenAndClearsCookies(t *testing.T) {
 	t.Setenv("SAUTH_ENDPOINT", authServer.URL)
 	t.Setenv("SAUTH_APP_SLUG", "testapp")
 	t.Setenv("SAUTH_APP_SECRET", "secret")
+	t.Setenv("SAUTH_PAGE_REDIRECT", "http://localhost:4200/")
 
 	e := echo.New()
 	req := httptest.NewRequest(http.MethodGet, "/api/sauth/logout", nil)
@@ -98,8 +100,15 @@ func TestGetLogoutForwardsTokenAndClearsCookies(t *testing.T) {
 		t.Fatalf("GetLogout: %v", err)
 	}
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", rec.Code)
+	if rec.Code != http.StatusFound {
+		t.Fatalf("status = %d, want 302 to end_session", rec.Code)
+	}
+	location := rec.Header().Get("Location")
+	if !strings.Contains(location, "/api/app/testapp/oauth/end_session") {
+		t.Errorf("location = %q, want end_session url", location)
+	}
+	if !strings.Contains(location, "post_logout_redirect_uri=http%3A%2F%2Flocalhost%3A4200%2F") {
+		t.Errorf("location = %q, want post_logout_redirect_uri", location)
 	}
 	if gotPath != "/sam/logout" {
 		t.Errorf("path = %q, want /sam/logout", gotPath)
@@ -124,7 +133,7 @@ func TestGetLogoutForwardsTokenAndClearsCookies(t *testing.T) {
 	}
 }
 
-func TestGetLogoutWithoutTokenOnlyClearsCookies(t *testing.T) {
+func TestGetLogoutWithoutTokenRedirectsToEndSession(t *testing.T) {
 	called := false
 	authServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		called = true
@@ -134,6 +143,7 @@ func TestGetLogoutWithoutTokenOnlyClearsCookies(t *testing.T) {
 	t.Setenv("SAUTH_ENDPOINT", authServer.URL)
 	t.Setenv("SAUTH_APP_SLUG", "testapp")
 	t.Setenv("SAUTH_APP_SECRET", "secret")
+	t.Setenv("SAUTH_PAGE_REDIRECT", "http://localhost:4200/")
 
 	e := echo.New()
 	req := httptest.NewRequest(http.MethodGet, "/api/sauth/logout", nil)
@@ -143,8 +153,11 @@ func TestGetLogoutWithoutTokenOnlyClearsCookies(t *testing.T) {
 	if err := saecho.GetLogout(ctx); err != nil {
 		t.Fatalf("GetLogout: %v", err)
 	}
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", rec.Code)
+	if rec.Code != http.StatusFound {
+		t.Fatalf("status = %d, want 302 to end_session", rec.Code)
+	}
+	if !strings.Contains(rec.Header().Get("Location"), "/api/app/testapp/oauth/end_session") {
+		t.Errorf("location = %q, want end_session url", rec.Header().Get("Location"))
 	}
 	if called {
 		t.Errorf("auth server called without an access token")
