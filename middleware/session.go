@@ -27,8 +27,12 @@ func authenticateCookie(ctx echo.Context, config *AuthMiddlewareConfig, keyFunc 
 		return ErrorCredentialMissing
 	}
 
+	if csrfErr := enforceCSRF(ctx); csrfErr != nil {
+		return csrfErr
+	}
+
 	if accessPresent {
-		claimUser, vldErr := ValidateToken(accessCookie.Value, config.ExpectedTokenIssuer, keyFunc)
+		claimUser, vldErr := ValidateToken(ctx.Request(), accessCookie.Value, config, keyFunc)
 		if vldErr == nil {
 			ctx.Set(UserIDKey, claimUser.ID)
 			ctx.Set(AccessTokenKey, accessCookie.Value)
@@ -54,6 +58,22 @@ func authenticateCookie(ctx echo.Context, config *AuthMiddlewareConfig, keyFunc 
 
 	ctx.Set(UserIDKey, claims.ID)
 	ctx.Set(AccessTokenKey, tokens.AccessToken)
+	return nil
+}
+
+func enforceCSRF(ctx echo.Context) error {
+	method := ctx.Request().Method
+	if method == http.MethodGet || method == http.MethodHead || method == http.MethodOptions {
+		return nil
+	}
+	cookie, err := ctx.Cookie(csrfTokenCookieKey)
+	if err != nil || cookie.Value == "" {
+		return fmt.Errorf("csrf cookie missing: %w", ErrorForbidden)
+	}
+	header := ctx.Request().Header.Get("SAuth-CSRF-Token")
+	if header == "" || header != cookie.Value {
+		return fmt.Errorf("csrf token mismatch: %w", ErrorForbidden)
+	}
 	return nil
 }
 

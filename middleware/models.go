@@ -30,6 +30,7 @@ func (e AuthError) Error() string {
 const (
 	ErrorTokenExpired           AuthError = "Token is expired"
 	ErrorUnauthorized           AuthError = "Unauthorized"
+	ErrorForbidden              AuthError = "Forbidden"
 	ErrorCredentialMissing      AuthError = "Credential missing"
 	ErrorUserTokenNotRecognized    AuthError = "User token not recognized"
 	ErrorUserExternalNotRecognized AuthError = "User external id not recognized"
@@ -79,8 +80,14 @@ type UserDetail struct {
 	Value string `json:"value"`
 }
 
+type Confirmation struct {
+	JKT     string `json:"jkt,omitempty"`
+	X5tS256 string `json:"x5t#S256,omitempty"`
+}
+
 type TokenClaims struct {
 	jwt.RegisteredClaims
+	CNF *Confirmation `json:"cnf,omitempty"`
 }
 
 type ClaimUser struct {

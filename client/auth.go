@@ -129,8 +129,8 @@ func postToken(ctx context.Context, tokenURL string, slug string, secret string,
 		return nil, fmt.Errorf("auth server returned status %d", resp.StatusCode)
 	}
 
-	var token ResponseToken
-	if err = json.NewDecoder(resp.Body).Decode(&token); err != nil {
+	token, err := DecodeJSON[ResponseToken](resp.Body, nil)
+	if err != nil {
 		return nil, fmt.Errorf("decode response: %w", err)
 	}
 

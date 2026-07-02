@@ -49,7 +49,7 @@ export async function readSessionFromDocument(): Promise<ClaimUser | null> {
   try {
     const oidc = await loadOIDC()
     const jwks = await getJWKS(oidc.jwks_uri)
-    return await validateToken(token, oidc.issuer, jwks)
+    return await validateToken(token, oidc.issuer, edgeConfig.clientSlug, jwks)
   } catch {
     return null
   }
