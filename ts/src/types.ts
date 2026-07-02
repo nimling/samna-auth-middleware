@@ -45,6 +45,7 @@ export const ACCESS_TOKEN_KEY = 'access_token'
 export const ACCESS_TOKEN_COOKIE = 'sauth_access_token'
 export const REFRESH_TOKEN_COOKIE = 'sauth_refresh_token'
 export const CSRF_TOKEN_COOKIE = 'sauth_csrf_token'
+export const CSRF_TOKEN_HEADER = 'SAuth-CSRF-Token'
 
 export interface JWKSLike {
   keys: unknown[]

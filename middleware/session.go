@@ -86,7 +86,7 @@ func generateCSRFToken() (string, error) {
 	return base64.URLEncoding.EncodeToString(b), nil
 }
 
-func writeCSRFCookie(ctx echo.Context) {
+func WriteCSRFCookie(ctx echo.Context) {
 	token, err := generateCSRFToken()
 	if err != nil {
 		ctx.Logger().Errorf("Failed to generate CSRF token: %v", err)
@@ -131,7 +131,7 @@ func refreshTokens(ctx echo.Context, config AuthMiddlewareConfig) (*client.Respo
 		})
 	}
 
-	writeCSRFCookie(ctx)
+	WriteCSRFCookie(ctx)
 
 	return tokenResp, nil
 }

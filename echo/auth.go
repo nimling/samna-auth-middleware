@@ -6,6 +6,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 	"github.com/nimling/samna-auth-middleware/client"
+	"github.com/nimling/samna-auth-middleware/middleware"
 	"github.com/nimling/samna-auth-middleware/utils"
 )
 
@@ -74,6 +75,7 @@ func GetCallback(ctx echo.Context) error {
 	if tokens.RefreshToken != "" {
 		utils.WriteCookie(ctx, &http.Cookie{Name: "sauth_refresh_token", Value: tokens.RefreshToken, Path: "/", MaxAge: tokens.RefreshExpiresIn})
 	}
+	middleware.WriteCSRFCookie(ctx)
 
 	pageRedirect := os.Getenv("SAUTH_PAGE_REDIRECT")
 	if pageRedirect == "" {
