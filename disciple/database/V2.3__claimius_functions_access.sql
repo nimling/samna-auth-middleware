@@ -35,6 +35,7 @@ DECLARE
     v_op            TEXT;
     v_was_active    BOOLEAN;
     v_is_active     BOOLEAN;
+    v_viewers       UUID[] := '{}';
 BEGIN
     IF claimius.in_replay_mode() THEN
         RETURN coalesce(NEW, OLD);
@@ -83,7 +84,11 @@ BEGIN
         SELECT user_id FROM claimius._affected_users_for_object(v_object_type, v_obj_id)
         LOOP
             PERFORM claimius.recompute_user_object(v_user.user_id, v_object_type, v_obj_id);
+            v_viewers := array_append(v_viewers, v_user.user_id);
         END LOOP;
+
+    PERFORM claimius._refresh_user_users(uid)
+    FROM (SELECT DISTINCT unnest(v_viewers) AS uid) s;
 
     RETURN coalesce(NEW, OLD);
 EXCEPTION WHEN OTHERS THEN
@@ -212,6 +217,7 @@ DECLARE
     v_is_active     BOOLEAN;
     v_old_root      UUID;
     v_new_root      UUID;
+    v_viewers       UUID[] := '{}';
 BEGIN
     IF claimius.in_replay_mode() THEN
         RETURN coalesce(NEW, OLD);
@@ -274,6 +280,7 @@ BEGIN
         SELECT user_id FROM claimius._affected_users_for_object(v_object_type, v_obj_id)
         LOOP
             PERFORM claimius.recompute_user_object(v_user.user_id, v_object_type, v_obj_id);
+            v_viewers := array_append(v_viewers, v_user.user_id);
         END LOOP;
 
     -- For descendant rows in the same tree, recompute too. Read descendants
@@ -296,8 +303,12 @@ BEGIN
             SELECT * FROM affected
             LOOP
                 PERFORM claimius.recompute_user_object(v_user.user_id, v_user.object_type, v_user.object_id);
+                v_viewers := array_append(v_viewers, v_user.user_id);
             END LOOP;
     END IF;
+
+    PERFORM claimius._refresh_user_users(uid)
+    FROM (SELECT DISTINCT unnest(v_viewers) AS uid) s;
 
     RETURN coalesce(NEW, OLD);
 EXCEPTION WHEN OTHERS THEN
@@ -392,6 +403,7 @@ DECLARE
     v_link        RECORD;
     v_b_binding   RECORD;
     v_user_of_a   RECORD;
+    v_viewers     UUID[] := '{}';
 BEGIN
     IF claimius.in_replay_mode() THEN
         RETURN coalesce(NEW, OLD);
@@ -412,6 +424,7 @@ BEGIN
               AND co.sa_deleted_at IS NULL
         LOOP
             PERFORM claimius.recompute_user_object(v_pair.user_id, v_pair.object_type, v_pair.object_id);
+            v_viewers := array_append(v_viewers, v_pair.user_id);
             IF coalesce((SELECT inherits FROM claimius.claim WHERE id = v_claim_id), FALSE)
                 AND v_pair.co_inherits THEN
                 PERFORM claimius._cascade_recompute(v_pair.user_id, v_pair.object_type, v_pair.object_id);
@@ -441,6 +454,7 @@ BEGIN
                 LOOP
                     PERFORM claimius.recompute_user_object(
                         v_user_of_a.user_id, v_b_binding.object_type, v_b_binding.object_id);
+                    v_viewers := array_append(v_viewers, v_user_of_a.user_id);
                 END LOOP;
             END LOOP;
         END LOOP;
@@ -468,6 +482,7 @@ BEGIN
                 LOOP
                     PERFORM claimius.recompute_user_object(
                         v_user_of_a.user_id, v_b_binding.object_type, v_b_binding.object_id);
+                    v_viewers := array_append(v_viewers, v_user_of_a.user_id);
                 END LOOP;
             END LOOP;
         END LOOP;
@@ -485,6 +500,7 @@ BEGIN
               AND uc.sa_deleted_at IS NULL
         LOOP
             PERFORM claimius.recompute_user_object(v_pair.user_id, v_object_type, v_object_id);
+            v_viewers := array_append(v_viewers, v_pair.user_id);
             IF coalesce(NEW.inherits, OLD.inherits, FALSE)
                 AND coalesce((SELECT inherits FROM claimius.claim WHERE id = v_claim_id), FALSE) THEN
                 PERFORM claimius._cascade_recompute(v_pair.user_id, v_object_type, v_object_id);
@@ -507,6 +523,7 @@ BEGIN
                 LOOP
                     PERFORM claimius.recompute_user_object(
                         v_user_of_a.user_id, v_b_binding.object_type, v_b_binding.object_id);
+                    v_viewers := array_append(v_viewers, v_user_of_a.user_id);
                 END LOOP;
             END LOOP;
         END IF;
@@ -527,12 +544,14 @@ BEGIN
             LOOP
                 PERFORM claimius.recompute_user_object(
                     v_user_of_a.user_id, v_object_type, v_object_id);
+                v_viewers := array_append(v_viewers, v_user_of_a.user_id);
             END LOOP;
         END LOOP;
 
     ELSIF v_table = 'user_claim' THEN
         v_claim_id := coalesce(NEW.claim_id, OLD.claim_id);
         v_user_id  := coalesce(NEW.user_id, OLD.user_id);
+        v_viewers  := array_append(v_viewers, v_user_id);
 
         FOR v_pair IN
             SELECT co.object_type, co.object_id, co.inherits
@@ -568,6 +587,9 @@ BEGIN
             END LOOP;
         END LOOP;
     END IF;
+
+    PERFORM claimius._refresh_user_users(uid)
+    FROM (SELECT DISTINCT unnest(v_viewers) AS uid) s;
 
     RETURN coalesce(NEW, OLD);
 END;
@@ -715,6 +737,7 @@ CREATE OR REPLACE FUNCTION claimius.reconcile_if_pending(p_user_id UUID)
     RETURNS VOID AS $$
 DECLARE
     v_row RECORD;
+    v_drained BOOLEAN := FALSE;
 BEGIN
     FOR v_row IN
         SELECT id, object_id, object_type FROM claimius.reconcile_queue
@@ -724,11 +747,16 @@ BEGIN
             BEGIN
                 PERFORM claimius.recompute_user_object(p_user_id, v_row.object_type, v_row.object_id);
                 DELETE FROM claimius.reconcile_queue WHERE id = v_row.id;
+                v_drained := TRUE;
             EXCEPTION WHEN OTHERS THEN
                 -- leave it queued for the next attempt
                 NULL;
             END;
         END LOOP;
+
+    IF v_drained THEN
+        PERFORM claimius._refresh_user_users(p_user_id);
+    END IF;
 END;
 $$ LANGUAGE plpgsql;
 

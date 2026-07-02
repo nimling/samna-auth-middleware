@@ -19,6 +19,11 @@
 CREATE OR REPLACE FUNCTION claimius.build_ownership_tree(p_root_id UUID)
     RETURNS VOID AS $$
 BEGIN
+    -- Serialize concurrent rebuilds of the same root. Without this, two
+    -- transactions both delete against their own snapshot and collide on
+    -- the closure insert with a duplicate inheritance_info_pkey.
+    PERFORM pg_advisory_xact_lock(hashtext(p_root_id::TEXT));
+
     DELETE FROM claimius.inheritance_info
     WHERE tree_type = 'ownership' AND root_id = p_root_id;
 
@@ -81,6 +86,8 @@ COMMENT ON FUNCTION claimius.build_ownership_tree(UUID) IS 'Rewrites ownership t
 CREATE OR REPLACE FUNCTION claimius.build_location_tree(p_root_id UUID)
     RETURNS VOID AS $$
 BEGIN
+    PERFORM pg_advisory_xact_lock(hashtext(p_root_id::TEXT));
+
     DELETE FROM claimius.inheritance_info
     WHERE tree_type = 'location' AND root_id = p_root_id;
 
@@ -139,6 +146,8 @@ DECLARE
     v_parts TEXT[];
     v_sql TEXT;
 BEGIN
+    PERFORM pg_advisory_xact_lock(hashtext(p_root_id::TEXT));
+
     v_parts := claimius.split_object_type(p_object_type);
     v_schema := v_parts[1];
     v_table := v_parts[2];
@@ -956,7 +965,10 @@ COMMENT ON FUNCTION claimius._denormalize_object(p_object_type text, p_object_id
 -- The single function that recomputes the user_object row for one
 -- (app_id, user_id, object_type, object_id) tuple. It handles insert,
 -- update, and delete based on whether grants survive. Also maintains the
--- companion object_users and user_users rows.
+-- companion object_users row. The user_users companion is rebuilt once per
+-- viewer by the calling orchestrator after its recompute loop settles, since
+-- a full rebuild per object is redundant when the viewer's object_users set
+-- is only final at the end of the cascade.
 CREATE OR REPLACE FUNCTION claimius.recompute_user_object(
     p_app_id        UUID,
     p_user_id       UUID,
@@ -993,7 +1005,6 @@ BEGIN
             DELETE FROM claimius.object_users
             WHERE app_id = p_app_id AND object_id = p_object_id
               AND object_type = p_object_type AND user_id = p_user_id;
-            PERFORM claimius._refresh_user_users(p_app_id, p_user_id);
             RETURN;
         END IF;
     END IF;
@@ -1001,12 +1012,12 @@ BEGIN
     v_grants := claimius._build_grants_for_object(p_user_id, p_app_id, p_object_type, p_object_id);
     v_direct := claimius._direct_grant_for_object(p_user_id, p_app_id, p_object_type, p_object_id);
 
+    -- No surviving access at all: delete the user_object row and companions
     IF jsonb_array_length(v_grants) = 0 AND NOT v_direct THEN
         DELETE FROM claimius.user_object WHERE id = v_id;
         DELETE FROM claimius.object_users
         WHERE app_id = p_app_id AND object_id = p_object_id
           AND object_type = p_object_type AND user_id = p_user_id;
-        PERFORM claimius._refresh_user_users(p_app_id, p_user_id);
         RETURN;
     END IF;
 
@@ -1073,12 +1084,10 @@ BEGIN
                p_app_id, p_object_id, p_object_type, p_user_id
            )
     ON CONFLICT (id) DO UPDATE SET sa_updated_at = now();
-
-    PERFORM claimius._refresh_user_users(p_app_id, p_user_id);
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius.recompute_user_object(p_app_id uuid, p_user_id uuid, p_object_type text, p_object_id uuid) IS 'Recomputes user_object plus companions for one (app, user, object) tuple. Purges the row when the object is soft deleted or absent.';
+COMMENT ON FUNCTION claimius.recompute_user_object(p_app_id uuid, p_user_id uuid, p_object_type text, p_object_id uuid) IS 'Recomputes user_object and object_users for one (app, user, object) tuple. Purges the row when the object is soft deleted or absent. user_users is rebuilt per viewer by the calling orchestrator.';
 
 -- _refresh_user_users
 -- Recomputes user_users entries for one (app_id, viewer) pair from
@@ -1566,6 +1575,9 @@ BEGIN
     LOOP
         PERFORM claimius.recompute_user_object(v_pair.app_id, v_pair.user_id, v_pair.object_type, v_pair.object_id);
     END LOOP;
+
+    PERFORM claimius._refresh_user_users(s.app_id, s.user_id)
+    FROM (SELECT DISTINCT app_id, user_id FROM claimius.object_users) s;
 END;
 $function$
 ;

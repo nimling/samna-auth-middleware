@@ -224,6 +224,10 @@ BEGIN
         RETURN;
     END IF;
 
+    -- For each (user, object) row, pick the surviving claim grant whose
+    -- access mask carries the most bits, restricted to grants that cover
+    -- the required access bits. If only direct_grant applies,
+    -- user_claim_id is null and direct_grant is true.
     RETURN QUERY
         SELECT
             claimius.user_object.object_id,
@@ -506,6 +510,18 @@ GRANT EXECUTE ON FUNCTION claimius.get_user_access(UUID, UUID, UUID, INTEGER)
 GRANT EXECUTE ON FUNCTION claimius.get_users(UUID, UUID, INTEGER)
     TO claimius_disciple_client, claimius_writer, claimius_admin, claimius_reader;
 
+-- ----------------------------------------------------------------------------
+-- resolve_access + mutation_access
+-- Single object access gate for the mutation path. resolve_access dispatches
+-- audit, user_relation, and samna_user object types to their bespoke lookups
+-- and everything else through get_access then get_direct_access. mutation_access
+-- wraps it and RAISEs P0403 when the object exists but the caller lacks access,
+-- P0404 when the object is absent or soft deleted, so the Go side maps one round
+-- trip to 200 / 403 / 404.
+-- ----------------------------------------------------------------------------
+
+DROP FUNCTION IF EXISTS claimius.require_access(UUID, UUID, TEXT, INTEGER);
+
 CREATE OR REPLACE FUNCTION claimius.resolve_access(
     p_user_id     UUID,
     p_app_id      UUID,
@@ -661,8 +677,6 @@ COMMENT ON FUNCTION claimius.mutation_access(UUID, UUID, TEXT, INTEGER) IS 'Sing
 
 GRANT EXECUTE ON FUNCTION claimius.mutation_access(UUID, UUID, TEXT, INTEGER)
     TO claimius_disciple_client, claimius_writer, claimius_admin, claimius_reader;
-
-DROP FUNCTION IF EXISTS claimius.require_access(UUID, UUID, TEXT, INTEGER);
 
 -- ----------------------------------------------------------------------------
 -- get_claims (overload: by user)
@@ -1196,17 +1210,14 @@ BEGIN
           AND uc.app_id = p_app_id
           AND uc.sa_deleted_at IS NULL
           AND c.sa_deleted_at IS NULL
-          AND (p_required_access = 0 OR c.sa_access <= p_required_access);
+          AND (p_required_access = 0 OR (c.sa_access & p_required_access) = p_required_access);
     ELSE
-        SELECT array_agg(uc.claim_id) INTO v_claim_ids
-        FROM claimius.user_claim uc
-                 JOIN claimius.claim c ON c.id = uc.claim_id
-        WHERE uc.user_id = p_user_id
-          AND uc.app_id = p_app_id
-          AND uc.claim_id = p_start_id
-          AND uc.sa_deleted_at IS NULL
+        SELECT array_agg(c.id) INTO v_claim_ids
+        FROM claimius.claim c
+        WHERE c.id = p_start_id
+          AND c.app_id = p_app_id
           AND c.sa_deleted_at IS NULL
-          AND (p_required_access = 0 OR c.sa_access <= p_required_access);
+          AND (p_required_access = 0 OR (c.sa_access & p_required_access) = p_required_access);
     END IF;
 
     IF v_claim_ids IS NULL OR array_length(v_claim_ids, 1) IS NULL THEN
@@ -1238,11 +1249,35 @@ BEGIN
                     ELSE (e -> 'cascaded_from' ->> 'id')::UUID END  AS anchor_id
         FROM claimius.user_object uo
                  CROSS JOIN LATERAL jsonb_array_elements(uo.grants) e
-        WHERE uo.user_id = p_user_id
+        WHERE p_start_id IS NULL
+          AND uo.user_id = p_user_id
           AND uo.app_id = p_app_id
-          AND (p_required_access = 0 OR uo.sa_access <= p_required_access)
+          AND (p_required_access = 0 OR (uo.sa_access & p_required_access) = p_required_access)
           AND (e->>'claim_id')::UUID = ANY(v_claim_ids)
           AND (p_depth = 0 OR e->>'tree_type' = 'direct')
+    ),
+    reach AS (
+        SELECT DISTINCT ON (co.id, ii.descendant_type, ii.descendant_id)
+               co.id                AS co_id,
+               ii.descendant_type   AS object_type,
+               ii.descendant_id     AS object_id,
+               ii.tree_type::TEXT   AS tree_type,
+               ii.depth             AS depth,
+               coalesce(co.sa_access, c.sa_access) AS access,
+               co.scope             AS scope
+        FROM claimius.claim_object co
+                 JOIN claimius.claim c ON c.id = co.claim_id AND c.sa_deleted_at IS NULL
+                 JOIN claimius.inheritance_info ii
+                      ON ii.ancestor_type = co.object_type
+                          AND ii.ancestor_id = co.object_id
+                          AND (ii.depth = 0 OR (c.inherits AND co.inherits AND (p_depth = 0 OR ii.depth <= p_depth)))
+        WHERE p_start_id IS NOT NULL
+          AND co.app_id = p_app_id
+          AND co.sa_deleted_at IS NULL
+          AND co.object_id IS NOT NULL
+          AND co.object_type <> 'claimius.claim'
+          AND co.claim_id = ANY(v_claim_ids)
+        ORDER BY co.id, ii.descendant_type, ii.descendant_id, ii.depth
     ),
     self_node AS (
         SELECT u.id                                                                     AS object_id,
@@ -1260,6 +1295,7 @@ BEGIN
                )                                                                        AS data
         FROM claimius.samna_user u
         WHERE u.id = v_user_row_id
+          AND p_start_id IS NULL
     ),
     other_users_node AS (
         SELECT u.id                                                                     AS object_id,
@@ -1287,6 +1323,7 @@ BEGIN
         WHERE u.app_id = p_app_id
           AND u.sa_deleted_at IS NULL
           AND u.id <> v_user_row_id
+          AND p_start_id IS NULL
     ),
     user_claim_node AS (
         SELECT uc.id                AS object_id,
@@ -1371,6 +1408,24 @@ BEGIN
                           AND co.object_type = ga.anchor_type
                           AND co.object_id = ga.anchor_id
                           AND co.sa_deleted_at IS NULL
+        UNION ALL
+        SELECT r.object_id            AS object_id,
+               r.object_type          AS object_type,
+               coalesce(uo.sa_name, r.object_id::TEXT)::TEXT  AS label,
+               r.co_id                AS parent_id,
+               jsonb_build_object(
+                   'access', r.access & 15,
+                   'deny', (r.access & 16) <> 0,
+                   'scope', r.scope,
+                   'level', r.depth,
+                   'tree_type', r.tree_type
+               )                      AS data
+        FROM reach r
+                 LEFT JOIN claimius.user_object uo
+                      ON uo.object_id = r.object_id
+                          AND uo.object_type = r.object_type
+                          AND uo.user_id = p_user_id
+                          AND uo.app_id = p_app_id
     ),
     all_nodes AS (
         SELECT * FROM self_node
@@ -1676,12 +1731,12 @@ BEGIN
            combined.rank,
            COUNT(*) OVER ()::INTEGER AS total_count
     FROM combined
-    ORDER BY combined.rank DESC
+    ORDER BY combined.rank DESC, combined.object_id ASC
     LIMIT p_limit OFFSET p_offset;
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius.search(UUID, UUID, TEXT, TEXT[], INTEGER, UUID[], UUID[], UUID[], UUID, TEXT, UUID[], INTEGER, INTEGER) IS 'Full text search over accessible objects. Includes claimius.claim rows the user holds, skipped when any subtree, parent, or type filter is set. p_owner_subtree_ids scopes via ownership tree. p_parent_id and p_parent_type scope via location or parenthood tree. p_type_ids restricts bookable rows to those whose type_id is in the set. total_count carries the un-capped match count for pagination.';
+COMMENT ON FUNCTION claimius.search(UUID, UUID, TEXT, TEXT[], INTEGER, UUID[], UUID[], UUID[], UUID, TEXT, UUID[], INTEGER, INTEGER) IS 'Full text search over accessible objects. Includes claimius.claim rows the user holds, skipped when any subtree, parent, or type filter is set. p_owner_subtree_ids scopes via ownership tree. p_parent_id and p_parent_type scope via location or parenthood tree. p_type_ids restricts bookable rows to those whose type_id is in the set. total_count carries the un-capped match count for pagination. Rows tie-break on object_id so offset pagination tiles without overlap or skip.';
 
 GRANT EXECUTE ON FUNCTION claimius.search(UUID, UUID, TEXT, TEXT[], INTEGER, INTEGER, INTEGER) TO claimius_disciple_client, claimius_writer, claimius_admin, claimius_reader;
 GRANT EXECUTE ON FUNCTION claimius.search(UUID, UUID, TEXT, TEXT[], INTEGER, UUID[], UUID[], UUID[], UUID, TEXT, UUID[], INTEGER, INTEGER) TO claimius_disciple_client, claimius_writer, claimius_admin, claimius_reader;
@@ -2222,6 +2277,13 @@ BEGIN
                 RAISE NOTICE '  ... seeded % rows of %', v_row_count, p_object_type;
             END IF;
         END LOOP;
+
+    PERFORM claimius._refresh_user_users(s.app_id, s.user_id)
+    FROM (
+        SELECT DISTINCT app_id, user_id
+        FROM claimius.object_users
+        WHERE object_type = p_object_type
+    ) s;
 END;
 $$ LANGUAGE plpgsql;
 
@@ -3544,13 +3606,10 @@ BEGIN
           AND c.sa_deleted_at IS NULL
           AND (p_required_access = 0 OR (c.sa_access & p_required_access) = p_required_access);
     ELSE
-        SELECT array_agg(uc.claim_id) INTO v_claim_ids
-        FROM claimius.user_claim uc
-        JOIN claimius.claim c ON c.id = uc.claim_id
-        WHERE uc.user_id = p_user_id
-          AND uc.app_id = p_app_id
-          AND uc.claim_id = p_start_id
-          AND uc.sa_deleted_at IS NULL
+        SELECT array_agg(c.id) INTO v_claim_ids
+        FROM claimius.claim c
+        WHERE c.id = p_start_id
+          AND c.app_id = p_app_id
           AND c.sa_deleted_at IS NULL
           AND (p_required_access = 0 OR (c.sa_access & p_required_access) = p_required_access);
     END IF;
@@ -3569,17 +3628,16 @@ BEGIN
                ii.tree_type::TEXT AS tree_type,
                ii.depth AS depth
         FROM claimius.claim_object co
+        JOIN claimius.claim c ON c.id = co.claim_id AND c.sa_deleted_at IS NULL
         JOIN claimius.inheritance_info ii
                ON ii.ancestor_type = co.object_type
               AND ii.ancestor_id   = co.object_id
               AND ii.depth >= 1
               AND (p_depth = 0 OR ii.depth <= p_depth)
-        JOIN claimius.user_object uo
-               ON uo.object_id = ii.descendant_id AND uo.object_type = ii.descendant_type
-              AND uo.user_id = p_user_id AND uo.app_id = p_app_id
         WHERE co.app_id = p_app_id
           AND co.sa_deleted_at IS NULL
           AND co.inherits = TRUE
+          AND c.inherits = TRUE
           AND co.claim_id = ANY(v_claim_ids)
           AND claimius.graph_type_passes(ii.descendant_type, p_include_types, p_exclude_types)
         ORDER BY co.id, ii.descendant_type, ii.descendant_id, ii.tree_type, ii.depth ASC
@@ -3616,9 +3674,6 @@ BEGIN
             'reason',       co.reason
         )
         FROM claimius.claim_object co
-        JOIN claimius.user_object uo
-               ON uo.object_id = co.object_id AND uo.object_type = co.object_type
-              AND uo.user_id = p_user_id AND uo.app_id = p_app_id
         WHERE co.app_id = p_app_id
           AND co.sa_deleted_at IS NULL
           AND co.claim_id = ANY(v_claim_ids)
@@ -3649,6 +3704,7 @@ BEGIN
         FROM claimius.samna_user u
         JOIN claimius.user_users uu ON uu.viewer_id = p_user_id AND uu.app_id = p_app_id AND uu.target_user_id = u.user_id
         WHERE v_user_row_id IS NOT NULL
+          AND p_start_id IS NULL
           AND u.app_id = p_app_id
           AND u.sa_deleted_at IS NULL
           AND u.id <> v_user_row_id
@@ -3673,6 +3729,7 @@ BEGIN
                ON uo.object_id = ur.object_id AND uo.object_type = ur.object_type
               AND uo.user_id = p_user_id AND uo.app_id = p_app_id
         WHERE ur.app_id = p_app_id
+          AND p_start_id IS NULL
           AND ur.sa_deleted_at IS NULL
           AND ur.user_id = p_user_id
           AND claimius.graph_type_passes(ur.object_type, p_include_types, p_exclude_types)
