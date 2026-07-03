@@ -191,10 +191,16 @@ func GetSyncEvents(ctx echo.Context) error {
 		return respond.Error(ctx, http.StatusBadRequest, "Bad request")
 	}
 
+	appID, _ := ctx.Get("app_id").(uuid.UUID)
+	if appID == uuid.Nil {
+		return respond.Error(ctx, http.StatusUnauthorized, "Unauthorized")
+	}
+
 	var events []SyncEvent
 	err := sdb.Instance().NewSelect().
 		Model(&events).
 		Where("seq > ?", seq).
+		Where("(app_id = ? OR app_id IS NULL)", appID).
 		OrderExpr("seq ASC").
 		Limit(1000).
 		Scan(ctx.Request().Context())
@@ -218,10 +224,8 @@ func GetSyncEvents(ctx echo.Context) error {
 		}
 	}
 
-	if appID, ok := ctx.Get("app_id").(uuid.UUID); ok && appID != uuid.Nil {
-		if err := syncArmPush(sdb.Instance(), ctx.Request().Context(), appID, maxSeq); err != nil {
-			ctx.Logger().Errorf("delta arm push %s: %v", appID, err)
-		}
+	if err := syncArmPush(sdb.Instance(), ctx.Request().Context(), appID, maxSeq); err != nil {
+		ctx.Logger().Errorf("delta arm push %s: %v", appID, err)
 	}
 
 	return respond.JSON(ctx, http.StatusOK, payloads, len(payloads))

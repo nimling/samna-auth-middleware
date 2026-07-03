@@ -795,6 +795,7 @@ type SyncEvent struct {
 	Operation string          `bun:"operation" json:"operation"`
 	EventType string          `bun:"event_type" json:"event_type"`
 	Payload   json.RawMessage `bun:"payload,type:jsonb" json:"payload"`
+	AppID     *uuid.UUID      `bun:"app_id,nullzero" json:"app_id,omitempty"`
 	WrittenAt time.Time       `bun:"written_at,default:now()" json:"written_at"`
 }
 

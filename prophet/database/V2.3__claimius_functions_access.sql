@@ -722,14 +722,14 @@ BEGIN
 
     IF TG_OP = 'DELETE' THEN
         v_op := 'delete';
-        v_payload := jsonb_build_object('id', (to_jsonb(OLD) ->> 'id'));
+        v_payload := jsonb_build_object('id', (to_jsonb(OLD) ->> 'id'), 'app_id', (to_jsonb(OLD) ->> 'app_id'));
     ELSE
         v_op := 'upsert';
         v_payload := to_jsonb(NEW);
     END IF;
 
-    INSERT INTO claimius.sync_event (operation, event_type, payload)
-    VALUES (v_op, v_type, v_payload);
+    INSERT INTO claimius.sync_event (operation, event_type, payload, app_id)
+    VALUES (v_op, v_type, v_payload, (v_payload ->> 'app_id')::uuid);
 
     RETURN coalesce(NEW, OLD);
 END;
