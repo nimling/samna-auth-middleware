@@ -61,6 +61,9 @@ DO $$
         IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'app_status') THEN
             CREATE TYPE claimius.app_status AS ENUM ('draft', 'active', 'inactive', 'erroneous');
         END IF;
+        IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'app_connection') THEN
+            CREATE TYPE claimius.app_connection AS ENUM ('direct', 'code');
+        END IF;
     END $$;
 
 -- ----------------------------------------------------------------------------
@@ -87,6 +90,7 @@ CREATE TABLE IF NOT EXISTS claimius.samna_app (
                                                   sync_uri        TEXT NOT NULL DEFAULT '',
                                                   provider_ids    UUID[] NOT NULL DEFAULT ARRAY[]::UUID[],
                                                   status          claimius.app_status NOT NULL DEFAULT 'active',
+                                                  connection      claimius.app_connection NOT NULL DEFAULT 'code',
                                                   private_key     TEXT NOT NULL,
                                                   private_seed    TEXT NOT NULL,
                                                   app_secret      TEXT,
@@ -102,6 +106,7 @@ CREATE TABLE IF NOT EXISTS claimius.samna_app (
 
 COMMENT ON TABLE claimius.samna_app IS 'App registry. Set of rows determines deployment role.';
 COMMENT ON COLUMN claimius.samna_app.slug IS 'URL slug for app, unique.';
+COMMENT ON COLUMN claimius.samna_app.connection IS 'Session delivery mode. direct issues session cookies straight from the callback and the prophet serves the content. code hands an auth code to the app backend for exchange.';
 COMMENT ON COLUMN claimius.samna_app.contact_email IS 'Contact email for the app.';
 COMMENT ON COLUMN claimius.samna_app.app_image IS 'App image URL or asset reference.';
 COMMENT ON COLUMN claimius.samna_app.redirect_uri IS 'OAuth redirect URI.';

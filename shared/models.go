@@ -664,6 +664,7 @@ type SamnaApp struct {
 	SyncUri       string           `bun:"sync_uri,default:''" json:"sync_uri"`
 	ProviderIDs   []uuid.UUID      `bun:"provider_ids,array,default:'{}'" json:"provider_ids"`
 	Status        string           `bun:"status,default:'active'" json:"status"`
+	Connection    string           `bun:"connection,default:'code'" json:"connection"`
 	PrivateKey    string           `bun:"private_key" json:"-"`
 	PrivateSeed   string           `bun:"private_seed" json:"-"`
 	AppSecret     *string          `bun:"app_secret" json:"-"`
