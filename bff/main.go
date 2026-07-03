@@ -1,0 +1,82 @@
+package bff
+
+import (
+	"context"
+	"net/http/httputil"
+	"net/url"
+	"os"
+
+	"github.com/labstack/echo/v4"
+	h "github.com/nimling/samna-auth-middleware/disciple/echo"
+	sam "github.com/nimling/samna-auth-middleware/disciple/sam"
+	sdb "github.com/nimling/samna-auth-middleware/disciple/sdb"
+	"github.com/nimling/samna-auth-middleware/smw"
+)
+
+type Config struct {
+	Port        string
+	BasePath    string
+	StaticDir   string
+	ProxyTarget string
+}
+
+func ConfigFromEnv() Config {
+	config := Config{
+		Port:        os.Getenv("SAUTH_BFF_PORT"),
+		BasePath:    os.Getenv("SAUTH_BFF_BASE_PATH"),
+		StaticDir:   os.Getenv("SAUTH_BFF_STATIC_DIR"),
+		ProxyTarget: os.Getenv("SAUTH_BFF_PROXY_TARGET"),
+	}
+	if config.Port == "" {
+		config.Port = "4300"
+	}
+	if config.BasePath == "" {
+		config.BasePath = "/api/sauth"
+	}
+	return config
+}
+
+// Serve runs a disciple as a browser facing BFF. The auth flow endpoints are
+// mounted openly on BasePath so the login redirect from the gate resolves, the
+// me endpoint and all content sit behind UserAuthMiddleware, and content comes
+// from StaticDir or is reverse proxied to ProxyTarget when set, which is the
+// local dev server case.
+func Serve(ctx context.Context, config Config) error {
+	e := echo.New()
+
+	if _, err := sdb.Init(e.Logger); err != nil {
+		return err
+	}
+
+	auth := e.Group(config.BasePath)
+	auth.GET("/login", h.GetLogin)
+	auth.GET("/callback", h.GetCallback)
+	auth.GET("/logout", h.GetLogout)
+
+	gate := smw.UserAuthMiddleware(nil)
+
+	me := auth.Group("/me", gate)
+	me.GET("", h.GetMe)
+
+	if config.ProxyTarget != "" {
+		target, err := url.Parse(config.ProxyTarget)
+		if err != nil {
+			return err
+		}
+		proxy := httputil.NewSingleHostReverseProxy(target)
+		e.GET("/*", echo.WrapHandler(proxy), gate)
+	} else {
+		staticDir := config.StaticDir
+		e.GET("/*", func(c echo.Context) error {
+			filePath := staticDir + c.Request().URL.Path
+			if _, statErr := os.Stat(filePath); statErr == nil {
+				return c.File(filePath)
+			}
+			return c.File(staticDir + "/index.html")
+		}, gate)
+	}
+
+	sam.SyncStart(ctx)
+
+	return e.Start(":" + config.Port)
+}

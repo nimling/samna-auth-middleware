@@ -15,11 +15,14 @@ export {
   getEdgeConfig,
   getAppSlug,
   getAuthEndpoint,
+  getEdgeMode,
+  getBffPath,
   readSessionFromDocument,
   getLoginUrl,
   getLogoutUrl,
   startLogin,
+  handleUnauthenticated,
   endSession
 } from './session'
-export type { EdgeConfig } from './session'
+export type { EdgeConfig, EdgeCallbacks, EdgeMode } from './session'
 export { createAuthFetch } from './fetch'
