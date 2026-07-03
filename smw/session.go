@@ -44,6 +44,12 @@ func authenticateCookie(ctx echo.Context, config *AuthMiddlewareConfig, keyFunc 
 	tokens, err := refreshTokens(ctx, *config)
 	if err != nil {
 		ctx.Logger().Warnf("Failed to refresh tokens: %v", err)
+		if errors.Is(err, client.ErrUnauthorized) {
+			utils.ClearCookie(ctx, accessTokenCookieKey)
+			utils.ClearCookie(ctx, refreshTokenCookieKey)
+			utils.ClearCookie(ctx, csrfTokenCookieKey)
+			return fmt.Errorf("refresh rejected: %w: %w", err, ErrorUnauthorized)
+		}
 		return err
 	}
 
