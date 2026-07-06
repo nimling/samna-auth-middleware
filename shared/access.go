@@ -3,6 +3,7 @@ package shared
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 
 	"github.com/google/uuid"
@@ -156,6 +157,91 @@ func (d *DB) MutationAccessMany(ctx context.Context, requests []AccessRequest) (
 		set[idx].Claim = &ac
 	}
 	return set, nil
+}
+
+func (d *DB) ScopeAccess(ctx context.Context, userID uuid.UUID, scopeKeyPattern string, requiredAccess ClaimAccess) ([]AccessClaim, error) {
+	type scopeAccessRow struct {
+		UserClaimID   uuid.UUID        `bun:"user_claim_id"`
+		ClaimID       uuid.UUID        `bun:"claim_id"`
+		ClaimName     string           `bun:"claim_name"`
+		Access        ClaimAccess      `bun:"sa_access"`
+		OwnerID       uuid.UUID        `bun:"sa_owner_id"`
+		RootID        uuid.UUID        `bun:"sa_root_id"`
+		ObjectRowID   uuid.UUID        `bun:"object_row_id"`
+		ObjectScope   *json.RawMessage `bun:"object_scope,type:jsonb"`
+		ObjectAccess  *ClaimAccess     `bun:"object_access"`
+		ObjectInherit bool             `bun:"object_inherits"`
+	}
+	rows := make([]scopeAccessRow, 0)
+	err := d.NewRaw(`
+		SELECT
+			uc.id                               AS user_claim_id,
+			c.id                                AS claim_id,
+			c.name                              AS claim_name,
+			((c.sa_access | co.sa_access) & 15) AS sa_access,
+			co.sa_owner_id                      AS sa_owner_id,
+			co.sa_root_id                       AS sa_root_id,
+			co.id                               AS object_row_id,
+			co.scope                            AS object_scope,
+			co.sa_access                        AS object_access,
+			co.inherits                         AS object_inherits
+		FROM claimius.user_claim uc
+			JOIN claimius.claim c ON c.id = uc.claim_id
+			JOIN claimius.claim_object co ON co.claim_id = uc.claim_id
+		WHERE uc.user_id = ?
+			AND uc.sa_deleted_at IS NULL
+			AND c.sa_deleted_at IS NULL
+			AND co.sa_deleted_at IS NULL
+			AND (uc.starts_at IS NULL OR uc.starts_at <= now())
+			AND (uc.ends_at IS NULL OR uc.ends_at > now())
+			AND co.object_id IS NULL
+			AND EXISTS (SELECT 1 FROM jsonb_object_keys(co.scope) k WHERE k ~ ?)
+			AND ((c.sa_access | co.sa_access) & 16) = 0
+			AND (((c.sa_access | co.sa_access) & 15) & ?) = ?
+		ORDER BY c.id
+	`, userID, scopeKeyPattern, requiredAccess, requiredAccess).Scan(ctx, &rows)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return []AccessClaim{}, nil
+		}
+		return nil, ErrInternalServer
+	}
+
+	order := make([]uuid.UUID, 0)
+	byClaim := make(map[uuid.UUID]*AccessClaim)
+	for i := range rows {
+		r := rows[i]
+		ac, ok := byClaim[r.ClaimID]
+		if !ok {
+			claimID := r.ClaimID
+			userClaimID := r.UserClaimID
+			claimName := r.ClaimName
+			ac = &AccessClaim{
+				UserClaimID: &userClaimID,
+				ClaimID:     &claimID,
+				ClaimName:   &claimName,
+				Access:      r.Access,
+				OwnerID:     r.OwnerID,
+				RootID:      r.RootID,
+			}
+			byClaim[r.ClaimID] = ac
+			order = append(order, r.ClaimID)
+		}
+		ac.Objects = append(ac.Objects, ClaimObject{
+			ID:       r.ObjectRowID,
+			ClaimID:  r.ClaimID,
+			Scope:    r.ObjectScope,
+			Access:   r.ObjectAccess,
+			Inherits: r.ObjectInherit,
+			OwnerID:  r.OwnerID,
+			RootID:   r.RootID,
+		})
+	}
+	result := make([]AccessClaim, 0, len(order))
+	for _, claimID := range order {
+		result = append(result, *byClaim[claimID])
+	}
+	return result, nil
 }
 
 func (d *DB) UserAccess(ctx context.Context, actorID, targetUserID uuid.UUID, requiredAccess ClaimAccess) (*AccessUser, error) {

@@ -416,3 +416,39 @@ func TestClaimAccess_PipeInt(t *testing.T) {
 		})
 	}
 }
+
+func TestAccessClaim_ObjectsJSONRoundTrip(t *testing.T) {
+	empty := sdb.AccessClaim{UserObjectID: uuid.New()}
+	rawEmpty, err := json.Marshal(empty)
+	if err != nil {
+		t.Fatalf("marshal empty: %v", err)
+	}
+	if strings.Contains(string(rawEmpty), "objects") {
+		t.Fatalf("expected objects omitted when empty, got %s", rawEmpty)
+	}
+
+	scope := json.RawMessage(`{"page":{"time-report":{"_access":"READ|EXECUTE"}}}`)
+	withObjects := sdb.AccessClaim{
+		UserObjectID: uuid.New(),
+		Objects: []sdb.ClaimObject{
+			{ID: uuid.New(), ClaimID: uuid.New(), Scope: &scope},
+		},
+	}
+	raw, err := json.Marshal(withObjects)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if !strings.Contains(string(raw), `"objects":[`) {
+		t.Fatalf("expected objects array on AccessClaim, got %s", raw)
+	}
+	var back sdb.AccessClaim
+	if err := json.Unmarshal(raw, &back); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(back.Objects) != 1 {
+		t.Fatalf("objects round-trip lost, got %+v", back.Objects)
+	}
+	if back.Objects[0].Scope == nil {
+		t.Fatalf("expected claim_object scope to round-trip")
+	}
+}

@@ -563,6 +563,7 @@ type AccessClaim struct {
 	RootID       uuid.UUID        `bun:"sa_root_id,scanonly" json:"root_id"`
 	LocationID   *uuid.UUID       `bun:"sa_location_id,scanonly" json:"location_id"`
 	DirectGrant  bool             `bun:"direct_grant,scanonly" json:"direct_grant"`
+	Objects      []ClaimObject    `bun:"-" json:"objects,omitempty"`
 }
 
 type AccessUser struct {
