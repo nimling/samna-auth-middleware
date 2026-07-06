@@ -159,7 +159,7 @@ func (d *DB) MutationAccessMany(ctx context.Context, requests []AccessRequest) (
 	return set, nil
 }
 
-func (d *DB) ScopeAccess(ctx context.Context, userID uuid.UUID, scopeKeyPattern string, requiredAccess ClaimAccess) ([]AccessClaim, error) {
+func (d *DB) ScopeAccess(ctx context.Context, userID uuid.UUID, scopePath string, requiredAccess ClaimAccess) ([]AccessClaim, error) {
 	type scopeAccessRow struct {
 		UserClaimID   uuid.UUID        `bun:"user_claim_id"`
 		ClaimID       uuid.UUID        `bun:"claim_id"`
@@ -195,11 +195,11 @@ func (d *DB) ScopeAccess(ctx context.Context, userID uuid.UUID, scopeKeyPattern 
 			AND (uc.starts_at IS NULL OR uc.starts_at <= now())
 			AND (uc.ends_at IS NULL OR uc.ends_at > now())
 			AND co.object_id IS NULL
-			AND EXISTS (SELECT 1 FROM jsonb_object_keys(co.scope) k WHERE k ~ ?)
+			AND jsonb_path_exists(co.scope, ?::jsonpath)
 			AND ((c.sa_access | co.sa_access) & 16) = 0
 			AND (((c.sa_access | co.sa_access) & 15) & ?) = ?
 		ORDER BY c.id
-	`, userID, scopeKeyPattern, requiredAccess, requiredAccess).Scan(ctx, &rows)
+	`, userID, scopePath, requiredAccess, requiredAccess).Scan(ctx, &rows)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return []AccessClaim{}, nil
