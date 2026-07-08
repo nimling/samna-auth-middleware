@@ -69,6 +69,7 @@ type Asset struct {
 	OwnerID       uuid.UUID  `bun:"sa_owner_id,notnull,type:uuid" json:"owner_id"`
 	CreatedBy     uuid.UUID  `bun:"sa_created_by,notnull,type:uuid" json:"created_by"`
 	Status        string     `bun:"column:status" json:"status"`
+	Type          *string    `bun:"column:type" json:"type,omitempty"`
 	Index         int        `bun:"column:index" json:"index"`
 	BlobURL       *string    `bun:"blob_url,default:null" json:"-"`
 	AssetURL      string     `bun:"-" json:"asset_url,omitempty"`

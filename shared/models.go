@@ -790,6 +790,28 @@ type ObjectUsers struct {
 	UpdatedAt  time.Time  `bun:"sa_updated_at,default:now()" json:"updated_at"`
 }
 
+type Notification struct {
+	bun.BaseModel `bun:"table:claimius.notification"`
+
+	ID          uuid.UUID       `bun:"id,pk,default:gen_random_uuid()" json:"id"`
+	UserID      uuid.UUID       `bun:"user_id" json:"user_id"`
+	Title       string          `bun:"title" json:"title"`
+	Description *string         `bun:"description" json:"description,omitempty"`
+	Style       json.RawMessage `bun:"style,type:jsonb,default:'{}'" json:"style"`
+	Type        string          `bun:"type" json:"type"`
+	Link        *string         `bun:"link" json:"link,omitempty"`
+	ObjectID    *uuid.UUID      `bun:"object_id" json:"object_id,omitempty"`
+	ObjectType  *ObjectType     `bun:"object_type" json:"object_type,omitempty"`
+	CreatedBy   *uuid.UUID      `bun:"sa_created_by" json:"created_by,omitempty"`
+	OwnerID     *uuid.UUID      `bun:"sa_owner_id" json:"owner_id,omitempty"`
+	ReadAt      *time.Time      `bun:"read_at" json:"read_at,omitzero"`
+	ClosedAt    *time.Time      `bun:"closed_at" json:"closed_at,omitzero"`
+	RepeatsAt   *string         `bun:"repeats_at" json:"repeats_at,omitempty"`
+	DeletedAt   *time.Time      `bun:"sa_deleted_at" json:"deleted_at,omitzero"`
+	CreatedAt   time.Time       `bun:"sa_created_at,default:now()" json:"created_at"`
+	UpdatedAt   time.Time       `bun:"sa_updated_at,default:now()" json:"updated_at"`
+}
+
 type SyncEvent struct {
 	bun.BaseModel `bun:"table:claimius.sync_event"`
 

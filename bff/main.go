@@ -36,11 +36,6 @@ func ConfigFromEnv() Config {
 	return config
 }
 
-// Serve runs a disciple as a browser facing BFF. The auth flow endpoints are
-// mounted openly on BasePath so the login redirect from the gate resolves, the
-// me endpoint and all content sit behind UserAuthMiddleware, and content comes
-// from StaticDir or is reverse proxied to ProxyTarget when set, which is the
-// local dev server case.
 func Serve(ctx context.Context, config Config) error {
 	e := echo.New()
 

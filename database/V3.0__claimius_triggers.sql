@@ -192,3 +192,15 @@ DROP TRIGGER IF EXISTS tg_invalidate_claim_graph_cache ON claimius.claim_object;
 CREATE TRIGGER tg_invalidate_claim_graph_cache
     AFTER INSERT OR UPDATE OR DELETE ON claimius.claim_object
     FOR EACH ROW EXECUTE FUNCTION claimius._invalidate_claim_graph_cache();
+
+-- ----------------------------------------------------------------------------
+-- Notification
+-- ----------------------------------------------------------------------------
+
+DROP TRIGGER IF EXISTS tg_update_timestamp ON claimius.notification;
+CREATE TRIGGER tg_update_timestamp BEFORE UPDATE ON claimius.notification
+    FOR EACH ROW EXECUTE FUNCTION claimius.update_timestamp();
+
+DROP TRIGGER IF EXISTS tg_notify_notification ON claimius.notification;
+CREATE TRIGGER tg_notify_notification AFTER INSERT ON claimius.notification
+    FOR EACH ROW EXECUTE FUNCTION claimius.notify_notification();

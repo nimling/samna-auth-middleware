@@ -24,4 +24,10 @@ func RegisterEndpoints(g *echo.Group) {
 	me.GET("/location", h.GetMeLocations)
 	me.GET("/asset", h.GetMeAssets)
 	me.GET("/audit", h.GetMeAudit)
+
+	notif := g.Group("/notification")
+	notif.GET("", h.GetNotifications)
+	notif.PUT("/:id/read", h.PutNotificationRead)
+	notif.PUT("/:id/closed", h.PutNotificationClosed)
+	notif.DELETE("/:id", h.DeleteNotification)
 }

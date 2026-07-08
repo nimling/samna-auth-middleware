@@ -3974,3 +3974,70 @@ GRANT EXECUTE ON FUNCTION claimius.create_organization_user(UUID, UUID, UUID, JS
     TO claimius_disciple_client, claimius_writer, claimius_admin;
 
 ALTER TABLE claimius.user_token ALTER COLUMN app_id SET DEFAULT claimius.get_disciple_app_id();
+
+-- ----------------------------------------------------------------------------
+-- Notification writers
+-- ----------------------------------------------------------------------------
+
+CREATE OR REPLACE FUNCTION claimius.notify_notification() RETURNS trigger AS $$
+BEGIN
+    PERFORM pg_notify('claimius_notification',
+        json_build_object('user_id', NEW.user_id, 'id', NEW.id)::text);
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+COMMENT ON FUNCTION claimius.notify_notification() IS 'Trigger function. Wakes the live layer with the recipient and row id on the claimius_notification channel after an insert.';
+
+CREATE OR REPLACE FUNCTION claimius.notify_object(
+    p_app_id UUID, p_title TEXT, p_description TEXT, p_style JSONB, p_type TEXT,
+    p_link TEXT, p_object_type TEXT, p_object_id UUID, p_created_by UUID,
+    p_owner_id UUID, p_repeats_at INTERVAL
+) RETURNS INTEGER AS $$
+    WITH inserted AS (
+        INSERT INTO claimius.notification
+            (app_id, user_id, title, description, style, type, link,
+             object_id, object_type, sa_created_by, sa_owner_id, repeats_at)
+        SELECT p_app_id, ou.user_id, p_title, p_description,
+               COALESCE(p_style, '{}'::jsonb), p_type, p_link,
+               p_object_id, p_object_type, p_created_by, p_owner_id, p_repeats_at
+        FROM claimius.object_users ou
+        WHERE ou.app_id = p_app_id
+          AND ou.object_type = p_object_type
+          AND ou.object_id = p_object_id
+        RETURNING 1
+    )
+    SELECT count(*)::INTEGER FROM inserted;
+$$ LANGUAGE sql;
+
+COMMENT ON FUNCTION claimius.notify_object(UUID, TEXT, TEXT, JSONB, TEXT, TEXT, TEXT, UUID, UUID, UUID, INTERVAL) IS 'Fans a notification out to every user with access to the object through object_users. Returns the number of rows inserted.';
+
+GRANT EXECUTE ON FUNCTION claimius.notify_object(UUID, TEXT, TEXT, JSONB, TEXT, TEXT, TEXT, UUID, UUID, UUID, INTERVAL)
+    TO claimius_writer, claimius_admin;
+
+CREATE OR REPLACE FUNCTION claimius.notify_user(
+    p_app_id UUID, p_title TEXT, p_description TEXT, p_style JSONB, p_type TEXT,
+    p_link TEXT, p_object_type TEXT, p_object_id UUID, p_created_by UUID,
+    p_owner_id UUID, p_repeats_at INTERVAL, p_user_ids UUID[]
+) RETURNS INTEGER AS $$
+    WITH inserted AS (
+        INSERT INTO claimius.notification
+            (app_id, user_id, title, description, style, type, link,
+             object_id, object_type, sa_created_by, sa_owner_id, repeats_at)
+        SELECT p_app_id, su.user_id, p_title, p_description,
+               COALESCE(p_style, '{}'::jsonb), p_type, p_link,
+               p_object_id, p_object_type, p_created_by, p_owner_id, p_repeats_at
+        FROM claimius.samna_user su
+        WHERE su.user_id = ANY(p_user_ids)
+          AND su.app_id = p_app_id
+          AND su.status = 'active'
+          AND su.sa_deleted_at IS NULL
+        RETURNING 1
+    )
+    SELECT count(*)::INTEGER FROM inserted;
+$$ LANGUAGE sql;
+
+COMMENT ON FUNCTION claimius.notify_user(UUID, TEXT, TEXT, JSONB, TEXT, TEXT, TEXT, UUID, UUID, UUID, INTERVAL, UUID[]) IS 'Writes a notification straight to each named active user. Returns the number of rows inserted.';
+
+GRANT EXECUTE ON FUNCTION claimius.notify_user(UUID, TEXT, TEXT, JSONB, TEXT, TEXT, TEXT, UUID, UUID, UUID, INTERVAL, UUID[])
+    TO claimius_writer, claimius_admin;

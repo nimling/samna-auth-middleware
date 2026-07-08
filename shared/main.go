@@ -20,7 +20,14 @@ import (
 
 type DB struct {
 	*bun.DB
-	Logger echo.Logger
+	Logger  echo.Logger
+	ConnStr string
+}
+
+// GetConnectionString returns the DSN the pool was opened with. The
+// notification listener opens its own dedicated pq connection with it.
+func (d *DB) GetConnectionString() string {
+	return d.ConnStr
 }
 
 var ErrSyncUnreachable = errors.New("sync unreachable: app inactive on samna_auth")
@@ -94,7 +101,7 @@ func Connect(logger echo.Logger) (*DB, error) {
 		return nil, errors.New("failed to initialize db")
 	}
 
-	db := &DB{DB: bunDB, Logger: logger}
+	db := &DB{DB: bunDB, Logger: logger, ConnStr: dsn}
 
 	db.SetMaxOpenConns(25)
 	db.SetMaxIdleConns(2)
@@ -121,6 +128,7 @@ func Connect(logger echo.Logger) (*DB, error) {
 		(*UserObject)(nil),
 		(*UserUsers)(nil),
 		(*ObjectUsers)(nil),
+		(*Notification)(nil),
 		(*SyncEvent)(nil),
 		(*DiscipleState)(nil),
 		(*UserToken)(nil),

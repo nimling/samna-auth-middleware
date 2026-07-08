@@ -132,4 +132,10 @@ func RegisterEndpoints(g *echo.Group) {
 	field.POST("/:id/value", h.PostUserField)
 	field.PUT("/:id/value/:value_id", h.PutUserField)
 	field.DELETE("/:id/value/:value_id", h.DeleteUserField)
+
+	notif := g.Group("/notification")
+	notif.GET("", h.GetNotifications)
+	notif.PUT("/:id/read", h.PutNotificationRead)
+	notif.PUT("/:id/closed", h.PutNotificationClosed)
+	notif.DELETE("/:id", h.DeleteNotification)
 }

@@ -2,6 +2,7 @@ package echo
 
 import (
 	"net/http"
+	"strings"
 
 	"github.com/labstack/echo/v4"
 	"github.com/nimling/samna-auth-middleware/client"
@@ -31,6 +32,11 @@ func GetLogin(ctx echo.Context) error {
 
 	utils.WriteCookie(ctx, &http.Cookie{Name: client.PKCEVerifierCookie, Value: verifier, Path: "/", MaxAge: 600})
 	utils.WriteCookie(ctx, &http.Cookie{Name: client.OAuthStateCookie, Value: state, Path: "/", MaxAge: 600})
+
+	next := ctx.QueryParam("next")
+	if strings.HasPrefix(next, "/") {
+		utils.WriteCookie(ctx, &http.Cookie{Name: client.LoginNextCookie, Value: next, Path: "/", MaxAge: 600})
+	}
 
 	return Redirect(ctx, http.StatusTemporaryRedirect, authURL)
 }
@@ -77,6 +83,10 @@ func GetCallback(ctx echo.Context) error {
 	smw.WriteCSRFCookie(ctx)
 
 	pageRedirect := utils.Cfg().PageRedirect
+	if nextCookie, nextErr := ctx.Cookie(client.LoginNextCookie); nextErr == nil && strings.HasPrefix(nextCookie.Value, "/") {
+		pageRedirect = nextCookie.Value
+	}
+	utils.ClearCookie(ctx, client.LoginNextCookie)
 	if pageRedirect == "" {
 		pageRedirect = "/"
 	}

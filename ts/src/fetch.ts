@@ -1,5 +1,6 @@
 import { CSRF_TOKEN_COOKIE, CSRF_TOKEN_HEADER, ErrUnauthorized } from './types'
 import { parseCookies } from './cookies'
+import { handleUnauthenticated } from './session'
 
 function csrfHeader(method: string): Record<string, string> {
   const upper = method.toUpperCase()
@@ -28,4 +29,21 @@ export function createAuthFetch(baseUrl: string): typeof fetch {
     if (res.status === 401) throw ErrUnauthorized
     return res
   }
+}
+
+export async function guardedFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  const res = await fetch(input, {
+    ...init,
+    credentials: 'include',
+    headers: {
+      ...csrfHeader(init?.method ?? 'GET'),
+      ...((init?.headers as Record<string, string>) ?? {})
+    }
+  })
+  if (res.status === 401) {
+    const returnTo = typeof window !== 'undefined' ? window.location.pathname + window.location.search : undefined
+    handleUnauthenticated(returnTo)
+    throw ErrUnauthorized
+  }
+  return res
 }

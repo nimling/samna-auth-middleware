@@ -12,6 +12,7 @@ import (
 const (
 	PKCEVerifierCookie = "sauth_pkce_verifier"
 	OAuthStateCookie   = "sauth_oauth_state"
+	LoginNextCookie    = "sauth_login_next"
 )
 
 func GenerateVerifier() (string, error) {
