@@ -2296,7 +2296,7 @@ BEGIN
              claimius.samna_app, claimius.samna_user, claimius.samna_client, claimius.samna_secret,
              claimius.organization, claimius.location,
              claimius.object_field, claimius.user_field, claimius.user_relation,
-             claimius.prophet_state
+             claimius.notification, claimius.prophet_state
              TO claimius_writer';
     EXECUTE 'GRANT INSERT, UPDATE, DELETE ON claimius.claim_graph_cache TO claimius_writer';
     EXECUTE 'GRANT INSERT, UPDATE, DELETE ON claimius.claim_graph_cache TO claimius_reader';
@@ -2322,7 +2322,7 @@ BEGIN
              claimius.claim, claimius.user_claim, claimius.claim_object,
              claimius.object_field, claimius.user_field, claimius.user_relation,
              claimius.audit, claimius.inheritance_info, claimius.table_info,
-             claimius.claim_graph_cache
+             claimius.notification, claimius.claim_graph_cache
              TO claimius_disciple_client';
     EXECUTE 'GRANT INSERT, UPDATE, DELETE ON claimius.claim_graph_cache TO claimius_reader';
     EXECUTE 'GRANT SELECT ON ALL TABLES IN SCHEMA claimius TO claimius_disciple_client';
