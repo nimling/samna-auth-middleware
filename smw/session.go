@@ -50,7 +50,7 @@ func authenticateCookie(ctx echo.Context, config *AuthMiddlewareConfig, keyFunc 
 			utils.ClearCookie(ctx, csrfTokenCookieKey)
 			return fmt.Errorf("refresh rejected: %w: %w", err, ErrorUnauthorized)
 		}
-		return err
+		return fmt.Errorf("refresh failed: %w: %w", err, ErrorUnauthorized)
 	}
 
 	claims, err := claimsFromTokenUnsafe(tokens.AccessToken)
