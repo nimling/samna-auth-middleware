@@ -2447,19 +2447,21 @@ CREATE OR REPLACE FUNCTION claimius.notify_object(
         INSERT INTO claimius.notification
             (app_id, user_id, title, description, style, type, link,
              object_id, object_type, sa_created_by, sa_owner_id, repeats_at)
-        SELECT p_app_id, ou.user_id, p_title, p_description,
+        SELECT p_app_id, uo.user_id, p_title, p_description,
                COALESCE(p_style, '{}'::jsonb), p_type, p_link,
                p_object_id, p_object_type, p_created_by, p_owner_id, p_repeats_at
-        FROM claimius.object_users ou
-        WHERE ou.app_id = p_app_id
-          AND ou.object_type = p_object_type
-          AND ou.object_id = p_object_id
+        FROM claimius.user_object uo
+        WHERE uo.app_id = p_app_id
+          AND uo.object_type = p_object_type
+          AND uo.object_id = p_object_id
+          AND (uo.sa_access & 4) <> 0
+          AND (p_created_by IS NULL OR uo.user_id <> p_created_by)
         RETURNING 1
     )
     SELECT count(*)::INTEGER FROM inserted;
 $$ LANGUAGE sql;
 
-COMMENT ON FUNCTION claimius.notify_object(UUID, TEXT, TEXT, JSONB, TEXT, TEXT, TEXT, UUID, UUID, UUID, INTERVAL) IS 'Fans a notification out to every user with access to the object through object_users. Returns the number of rows inserted.';
+COMMENT ON FUNCTION claimius.notify_object(UUID, TEXT, TEXT, JSONB, TEXT, TEXT, TEXT, UUID, UUID, UUID, INTERVAL) IS 'Fans a notification out to every user holding read access on the object through user_object, excluding the triggering user. Returns the number of rows inserted.';
 
 GRANT EXECUTE ON FUNCTION claimius.notify_object(UUID, TEXT, TEXT, JSONB, TEXT, TEXT, TEXT, UUID, UUID, UUID, INTERVAL)
     TO claimius_writer, claimius_admin;
