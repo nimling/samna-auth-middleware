@@ -28,9 +28,11 @@ func selfAccessClaim(userID uuid.UUID, requiredAccess ClaimAccess) *AccessClaim 
 	}
 }
 
-func (d *DB) MutationAccess(ctx context.Context, userID, objectID uuid.UUID, objectType string, requiredAccess ClaimAccess) (*AccessClaim, error) {
-	if objectType == OBJECT_TYPE_USER && userID == objectID {
-		return selfAccessClaim(userID, requiredAccess), nil
+func (d *DB) MutationAccess(ctx context.Context, userID uuid.UUID, objectID, objectType string, requiredAccess ClaimAccess) (*AccessClaim, error) {
+	if objectType == OBJECT_TYPE_USER {
+		if parsed, parseErr := uuid.Parse(objectID); parseErr == nil && parsed == userID {
+			return selfAccessClaim(userID, requiredAccess), nil
+		}
 	}
 	claims := make([]AccessClaim, 0)
 	err := d.NewRaw(
@@ -60,7 +62,7 @@ func (d *DB) MutationAccess(ctx context.Context, userID, objectID uuid.UUID, obj
 
 type AccessRequest struct {
 	UserID         uuid.UUID
-	ObjectID       uuid.UUID
+	ObjectID       string
 	ObjectType     string
 	RequiredAccess ClaimAccess
 }
@@ -72,7 +74,7 @@ type AccessClaimSetEntry struct {
 
 type AccessClaimSet []AccessClaimSetEntry
 
-func (s AccessClaimSet) Get(objectType string, objectID, userID uuid.UUID) *AccessClaim {
+func (s AccessClaimSet) Get(objectType, objectID string, userID uuid.UUID) *AccessClaim {
 	for _, e := range s {
 		if e.Request.UserID == userID && e.Request.ObjectType == objectType && e.Request.ObjectID == objectID {
 			return e.Claim
@@ -81,7 +83,7 @@ func (s AccessClaimSet) Get(objectType string, objectID, userID uuid.UUID) *Acce
 	return nil
 }
 
-func (s AccessClaimSet) Has(objectType string, objectID, userID uuid.UUID, required ...ClaimAccess) bool {
+func (s AccessClaimSet) Has(objectType, objectID string, userID uuid.UUID, required ...ClaimAccess) bool {
 	claim := s.Get(objectType, objectID, userID)
 	if claim == nil {
 		return false
@@ -98,7 +100,7 @@ func (d *DB) MutationAccessMany(ctx context.Context, requests []AccessRequest) (
 		return AccessClaimSet{}, nil
 	}
 	userIDs := make([]uuid.UUID, len(requests))
-	objectIDs := make([]uuid.UUID, len(requests))
+	objectIDs := make([]string, len(requests))
 	objectTypes := make([]string, len(requests))
 	requiredAccesses := make([]int64, len(requests))
 	for i, r := range requests {
@@ -116,7 +118,7 @@ func (d *DB) MutationAccessMany(ctx context.Context, requests []AccessRequest) (
 		WITH inputs AS (
 			SELECT user_id, object_id, object_type, required_access,
 			       row_number() OVER () AS idx
-			FROM unnest(?::uuid[], ?::uuid[], ?::text[], ?::int[]) AS u(user_id, object_id, object_type, required_access)
+			FROM unnest(?::uuid[], ?::text[], ?::text[], ?::int[]) AS u(user_id, object_id, object_type, required_access)
 		)
 		SELECT
 			inputs.idx,
@@ -158,11 +160,11 @@ func (d *DB) MutationAccessMany(ctx context.Context, requests []AccessRequest) (
 	return set, nil
 }
 
-func (d *DB) UserAccess(ctx context.Context, actorID, targetUserID uuid.UUID, requiredAccess ClaimAccess) (*AccessUser, error) {
+func (d *DB) UserAccess(ctx context.Context, actorID uuid.UUID, target string, requiredAccess ClaimAccess) (*AccessUser, error) {
 	users := make([]AccessUser, 0)
 	err := d.NewSelect().
 		TableExpr(`claimius.get_user_access(?, claimius.get_disciple_app_id(), ?, ?) AS u`,
-			actorID, targetUserID, requiredAccess).
+			actorID, target, requiredAccess).
 		Column("u.*").
 		Scan(ctx, &users)
 	if err != nil {

@@ -29,7 +29,7 @@ func (d *DB) UpdateMe(ctx echo.Context, user *SamnaUser) (*SamnaUser, error) {
 	if err != nil {
 		return nil, err
 	}
-	ac, err := d.MutationAccess(ctx.Request().Context(), userID, userID, OBJECT_TYPE_USER, ACCESS_WRITE)
+	ac, err := d.MutationAccess(ctx.Request().Context(), userID, userID.String(), OBJECT_TYPE_USER, ACCESS_WRITE)
 	if err != nil {
 		return nil, err
 	}

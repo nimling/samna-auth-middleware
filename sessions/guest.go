@@ -77,7 +77,7 @@ func IssueGuestToken(ctx context.Context, claimID uuid.UUID, issuer string) (*Gu
 		if err := db.Instance().NewInsert().Model(&guestUser).Scan(ctx, &guestUser); err != nil {
 			return nil, fmt.Errorf("upsert guest user: %w", err)
 		}
-		ac, accErr := db.Instance().MutationAccess(ctx, userID, claimID, db.OBJECT_TYPE_CLAIM, db.ACCESS_OWNER)
+		ac, accErr := db.Instance().MutationAccess(ctx, userID, claimID.String(), db.OBJECT_TYPE_CLAIM, db.ACCESS_OWNER)
 		if accErr != nil {
 			return nil, fmt.Errorf("guest claim access: %w", accErr)
 		}
