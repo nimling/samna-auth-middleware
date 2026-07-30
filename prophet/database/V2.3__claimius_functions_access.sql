@@ -26,6 +26,7 @@ DECLARE
     v_object_type   TEXT;
     v_obj_id        UUID;
     v_app_id        UUID;
+    v_app_ids       UUID[];
     v_owner_id      UUID;
     v_location_id   UUID;
     v_user          RECORD;
@@ -52,10 +53,11 @@ BEGIN
     END IF;
 
     -- Pull useful fields from the row using JSON conversion (works for any
-    -- registered shape). app_id comes from the row when the table has it,
-    -- otherwise from claimius.get_app_id().
+    -- registered shape). App scope comes from the row's app_id column when
+    -- the table has it, from app_object links when it does not, otherwise
+    -- from claimius.get_app_id().
     IF v_op <> 'DELETE' THEN
-        v_app_id    := claimius._app_id_for_row(v_object_type, to_jsonb(NEW));
+        v_app_ids   := ARRAY(SELECT claimius._app_ids_for_row(v_object_type, to_jsonb(NEW)));
         v_owner_id  := (to_jsonb(NEW) ->> 'sa_owner_id')::UUID;
         v_location_id := (to_jsonb(NEW) ->> 'sa_location_id')::UUID;
         v_is_active := (to_jsonb(NEW) ->> 'sa_deleted_at') IS NULL;
@@ -63,7 +65,7 @@ BEGIN
     IF v_op <> 'INSERT' THEN
         v_was_active := (to_jsonb(OLD) ->> 'sa_deleted_at') IS NULL;
         IF v_op = 'DELETE' THEN
-            v_app_id := claimius._app_id_for_row(v_object_type, to_jsonb(OLD));
+            v_app_ids := ARRAY(SELECT claimius._app_ids_for_row(v_object_type, to_jsonb(OLD)));
         END IF;
     END IF;
 
@@ -83,16 +85,19 @@ BEGIN
         END IF;
     END IF;
 
-    -- Recompute user_object for every affected user
-    FOR v_user IN
-        SELECT user_id FROM claimius._affected_users_for_object(v_app_id, v_object_type, v_obj_id)
-        LOOP
-            PERFORM claimius.recompute_user_object(v_app_id, v_user.user_id, v_object_type, v_obj_id);
-            v_viewers := array_append(v_viewers, v_user.user_id);
-        END LOOP;
+    -- Recompute user_object for every affected user in every scoped app
+    FOREACH v_app_id IN ARRAY v_app_ids LOOP
+        v_viewers := '{}';
+        FOR v_user IN
+            SELECT user_id FROM claimius._affected_users_for_object(v_app_id, v_object_type, v_obj_id)
+            LOOP
+                PERFORM claimius.recompute_user_object(v_app_id, v_user.user_id, v_object_type, v_obj_id);
+                v_viewers := array_append(v_viewers, v_user.user_id);
+            END LOOP;
 
-    PERFORM claimius._refresh_user_users(v_app_id, uid)
-    FROM (SELECT DISTINCT unnest(v_viewers) AS uid) s;
+        PERFORM claimius._refresh_user_users(v_app_id, uid)
+        FROM (SELECT DISTINCT unnest(v_viewers) AS uid) s;
+    END LOOP;
 
     RETURN coalesce(NEW, OLD);
 EXCEPTION WHEN OTHERS THEN
@@ -214,6 +219,7 @@ DECLARE
     v_object_type   TEXT;
     v_obj_id        UUID;
     v_app_id        UUID;
+    v_app_ids       UUID[];
     v_root_id       UUID;
     v_old_root_id   UUID;
     v_user          RECORD;
@@ -237,8 +243,16 @@ BEGIN
         v_obj_id := NEW.id;
     END IF;
 
+    -- New organizations and locations inherit the app links of their owning
+    -- organization so apps linked to a tree see rows added under it.
+    IF v_op = 'INSERT' AND v_object_type IN ('claimius.organization', 'claimius.location') THEN
+        PERFORM claimius.link_app_object(a, v_object_type, v_obj_id, (to_jsonb(NEW) ->> 'sa_created_by')::UUID)
+        FROM claimius.apps_for_object('claimius.organization', (to_jsonb(NEW) ->> 'sa_owner_id')::UUID) a
+        WHERE (to_jsonb(NEW) ->> 'sa_owner_id')::UUID <> v_obj_id;
+    END IF;
+
     IF v_op <> 'DELETE' THEN
-        v_app_id    := claimius._app_id_for_row(v_object_type, to_jsonb(NEW));
+        v_app_ids   := ARRAY(SELECT claimius._app_ids_for_row(v_object_type, to_jsonb(NEW)));
         v_root_id   := (to_jsonb(NEW) ->> 'sa_root_id')::UUID;
         v_is_active := (to_jsonb(NEW) ->> 'sa_deleted_at') IS NULL;
     END IF;
@@ -246,7 +260,7 @@ BEGIN
         v_old_root_id := (to_jsonb(OLD) ->> 'sa_root_id')::UUID;
         v_was_active := (to_jsonb(OLD) ->> 'sa_deleted_at') IS NULL;
         IF v_op = 'DELETE' THEN
-            v_app_id := claimius._app_id_for_row(v_object_type, to_jsonb(OLD));
+            v_app_ids := ARRAY(SELECT claimius._app_ids_for_row(v_object_type, to_jsonb(OLD)));
         END IF;
     END IF;
 
@@ -282,40 +296,42 @@ BEGIN
         END IF;
     END IF;
 
-    -- Recompute affected users for this row
-    FOR v_user IN
-        SELECT user_id FROM claimius._affected_users_for_object(v_app_id, v_object_type, v_obj_id)
-        LOOP
-            PERFORM claimius.recompute_user_object(v_app_id, v_user.user_id, v_object_type, v_obj_id);
-            v_viewers := array_append(v_viewers, v_user.user_id);
-        END LOOP;
-
-    -- For descendant rows in the same tree, recompute too. Read descendants
-    -- directly from the closure index.
-    IF v_object_type IN ('claimius.organization', 'claimius.location') OR (
-        SELECT t.has_sa_parent_id AND t.has_sa_root_id FROM claimius.table_info t WHERE t.object_type = v_object_type
-    ) THEN
+    -- Recompute affected users for this row and its descendants, once per
+    -- scoped app. Descendants are read directly from the closure index.
+    FOREACH v_app_id IN ARRAY v_app_ids LOOP
+        v_viewers := '{}';
         FOR v_user IN
-            WITH descendants AS (
-                SELECT DISTINCT e.descendant_type AS object_type, e.descendant_id AS object_id
-                FROM claimius.inheritance_info e
-                WHERE e.ancestor_type = v_object_type
-                  AND e.ancestor_id   = v_obj_id
-            ),
-                 affected AS (
-                     SELECT DISTINCT u.user_id, d.object_type, d.object_id
-                     FROM descendants d
-                              CROSS JOIN LATERAL claimius._affected_users_for_object(v_app_id, d.object_type, d.object_id) u
-                 )
-            SELECT * FROM affected
+            SELECT user_id FROM claimius._affected_users_for_object(v_app_id, v_object_type, v_obj_id)
             LOOP
-                PERFORM claimius.recompute_user_object(v_app_id, v_user.user_id, v_user.object_type, v_user.object_id);
+                PERFORM claimius.recompute_user_object(v_app_id, v_user.user_id, v_object_type, v_obj_id);
                 v_viewers := array_append(v_viewers, v_user.user_id);
             END LOOP;
-    END IF;
 
-    PERFORM claimius._refresh_user_users(v_app_id, uid)
-    FROM (SELECT DISTINCT unnest(v_viewers) AS uid) s;
+        IF v_object_type IN ('claimius.organization', 'claimius.location') OR (
+            SELECT t.has_sa_parent_id AND t.has_sa_root_id FROM claimius.table_info t WHERE t.object_type = v_object_type
+        ) THEN
+            FOR v_user IN
+                WITH descendants AS (
+                    SELECT DISTINCT e.descendant_type AS object_type, e.descendant_id AS object_id
+                    FROM claimius.inheritance_info e
+                    WHERE e.ancestor_type = v_object_type
+                      AND e.ancestor_id   = v_obj_id
+                ),
+                     affected AS (
+                         SELECT DISTINCT u.user_id, d.object_type, d.object_id
+                         FROM descendants d
+                                  CROSS JOIN LATERAL claimius._affected_users_for_object(v_app_id, d.object_type, d.object_id) u
+                     )
+                SELECT * FROM affected
+                LOOP
+                    PERFORM claimius.recompute_user_object(v_app_id, v_user.user_id, v_user.object_type, v_user.object_id);
+                    v_viewers := array_append(v_viewers, v_user.user_id);
+                END LOOP;
+        END IF;
+
+        PERFORM claimius._refresh_user_users(v_app_id, uid)
+        FROM (SELECT DISTINCT unnest(v_viewers) AS uid) s;
+    END LOOP;
 
     RETURN coalesce(NEW, OLD);
 EXCEPTION WHEN OTHERS THEN

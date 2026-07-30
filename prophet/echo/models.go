@@ -25,7 +25,6 @@ type SamnaUser struct {
 	FirstName     string                     `bun:"first_name" json:"first_name"`
 	LastName      string                     `bun:"last_name" json:"last_name"`
 	UserName      *string                    `bun:"user_name" json:"user_name,omitempty"`
-	UserImage     *string                    `bun:"user_image" json:"user_image,omitempty"`
 	Phone         *string                    `bun:"phone" json:"phone,omitempty"`
 	Email         string                     `bun:"email" json:"email,omitempty"`
 	ExternalID    *string                    `bun:"external_id" json:"external_id,omitempty"`
@@ -155,7 +154,6 @@ type ObjectField struct {
 
 type Organization struct {
 	ID          uuid.UUID   `bun:"id,pk,notnull,type:uuid,default:gen_random_uuid()" json:"id"`
-	AppID       uuid.UUID   `bun:"app_id,notnull,type:uuid" json:"app_id"`
 	Name        string      `bun:"name,notnull" json:"name"`
 	Description *string     `bun:"description" json:"description,omitempty"`
 	OwnerID     *uuid.UUID  `bun:"sa_owner_id,type:uuid" json:"owner_id,omitempty"`
@@ -183,7 +181,6 @@ type Organization struct {
 
 type Location struct {
 	ID          uuid.UUID   `bun:"id,pk,notnull,type:uuid,default:gen_random_uuid()" json:"id"`
-	AppID       uuid.UUID   `bun:"app_id,notnull,type:uuid" json:"app_id"`
 	OwnerID     uuid.UUID   `bun:"sa_owner_id,type:uuid,notnull" json:"owner_id"`
 	RootID      *uuid.UUID  `bun:"sa_root_id,type:uuid" json:"root_id"`
 	Name        string      `bun:"name,notnull" json:"name"`

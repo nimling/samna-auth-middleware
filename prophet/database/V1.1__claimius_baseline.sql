@@ -136,7 +136,6 @@ CREATE TABLE IF NOT EXISTS claimius.samna_user (
                                                    first_name      VARCHAR(255),
                                                    last_name       VARCHAR(255),
                                                    user_name       TEXT,
-                                                   user_image      TEXT,
                                                    phone           VARCHAR(50),
                                                    email           VARCHAR(255),
                                                    external_id     TEXT DEFAULT NULL,
@@ -152,7 +151,6 @@ COMMENT ON TABLE claimius.samna_user IS 'User record. One row per (user_id, app_
 COMMENT ON COLUMN claimius.samna_user.user_id IS 'Stable application identifier across apps. Used in all references.';
 COMMENT ON COLUMN claimius.samna_user.app_id IS 'Required app scope. Disciples only hold rows for their own app.';
 COMMENT ON COLUMN claimius.samna_user.user_name IS 'Optional display username, distinct from first_name/last_name.';
-COMMENT ON COLUMN claimius.samna_user.user_image IS 'Optional user image. URL, string, or id that the implementing system recognizes.';
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_samna_user_user_app
     ON claimius.samna_user (user_id, app_id) WHERE sa_deleted_at IS NULL;
@@ -221,7 +219,6 @@ CREATE INDEX IF NOT EXISTS idx_samna_secret_sa_deleted_at ON claimius.samna_secr
 -- references.
 CREATE TABLE IF NOT EXISTS claimius.organization (
                                                      id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                                                     app_id          UUID NOT NULL REFERENCES claimius.samna_app(id),
                                                      name            VARCHAR(255) NOT NULL,
                                                      description     TEXT,
                                                      type            VARCHAR(50),
@@ -244,7 +241,6 @@ COMMENT ON COLUMN claimius.organization.sa_owner_id IS 'Parent org. Equals id at
 COMMENT ON COLUMN claimius.organization.sa_root_id IS 'Top of tree. Equals id at root.';
 COMMENT ON COLUMN claimius.organization.sa_location_id IS 'Optional location pin for the org itself.';
 
-CREATE INDEX IF NOT EXISTS idx_organization_app_id ON claimius.organization (app_id);
 CREATE INDEX IF NOT EXISTS idx_organization_sa_owner_id ON claimius.organization (sa_owner_id);
 CREATE INDEX IF NOT EXISTS idx_organization_sa_root_id ON claimius.organization (sa_root_id);
 CREATE INDEX IF NOT EXISTS idx_organization_sa_location_id ON claimius.organization (sa_location_id) WHERE sa_location_id IS NOT NULL;
@@ -257,7 +253,6 @@ CREATE INDEX IF NOT EXISTS idx_organization_sa_deleted_at ON claimius.organizati
 -- through sa_parent_id. Root iff sa_parent_id == sa_root_id == id.
 CREATE TABLE IF NOT EXISTS claimius.location (
                                                  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                                                 app_id          UUID NOT NULL REFERENCES claimius.samna_app(id),
                                                  sa_owner_id     UUID NOT NULL REFERENCES claimius.organization(id),
                                                  sa_parent_id    UUID NOT NULL,
                                                  sa_root_id      UUID NOT NULL,
@@ -282,13 +277,34 @@ COMMENT ON COLUMN claimius.location.sa_owner_id IS 'Owning organization. Require
 COMMENT ON COLUMN claimius.location.sa_parent_id IS 'Parent location. Equals id at root.';
 COMMENT ON COLUMN claimius.location.sa_root_id IS 'Top of tree. Equals id at root.';
 
-CREATE INDEX IF NOT EXISTS idx_location_app_id ON claimius.location (app_id);
 CREATE INDEX IF NOT EXISTS idx_location_sa_owner_id ON claimius.location (sa_owner_id);
 CREATE INDEX IF NOT EXISTS idx_location_sa_parent_id ON claimius.location (sa_parent_id);
 CREATE INDEX IF NOT EXISTS idx_location_sa_root_id ON claimius.location (sa_root_id);
 CREATE INDEX IF NOT EXISTS idx_location_external_id ON claimius.location (external_id);
 CREATE INDEX IF NOT EXISTS idx_location_provider_id ON claimius.location (provider_id);
 CREATE INDEX IF NOT EXISTS idx_location_sa_deleted_at ON claimius.location (sa_deleted_at);
+
+-- app_object
+-- Links apps to the shared hierarchy objects: organizations and locations.
+-- These two tables carry no app_id column; an object belongs to every app
+-- holding a live link here. Every other table stays scoped by its own
+-- app_id column.
+CREATE TABLE IF NOT EXISTS claimius.app_object (
+                                                   id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                                                   app_id          UUID NOT NULL REFERENCES claimius.samna_app(id),
+                                                   object_type     TEXT NOT NULL,
+                                                   object_id       UUID NOT NULL,
+                                                   sa_created_by   UUID,
+                                                   sa_deleted_at   TIMESTAMPTZ,
+                                                   sa_created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+COMMENT ON TABLE claimius.app_object IS 'App to object links for shared hierarchy objects (organizations and locations).';
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_app_object_unique
+    ON claimius.app_object (app_id, object_type, object_id) WHERE sa_deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_app_object_object ON claimius.app_object (object_type, object_id);
+CREATE INDEX IF NOT EXISTS idx_app_object_app_id ON claimius.app_object (app_id);
 
 -- ----------------------------------------------------------------------------
 -- 4. Claims and bindings

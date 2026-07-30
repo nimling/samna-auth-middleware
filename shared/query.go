@@ -135,7 +135,6 @@ func ApplyWithCreator(objectType string) func(*bun.SelectQuery) *bun.SelectQuery
 			ColumnExpr("creator_su.first_name AS creator_first_name").
 			ColumnExpr("creator_su.last_name AS creator_last_name").
 			ColumnExpr("creator_su.user_name AS creator_user_name").
-			ColumnExpr("creator_su.user_image AS creator_user_image").
 			ColumnExpr("creator_su.phone AS creator_phone").
 			ColumnExpr("creator_su.email AS creator_email").
 			ColumnExpr("creator_su.external_id AS creator_external_id").

@@ -40,9 +40,11 @@ func (d *DB) GetUserAssets(ctx context.Context, userID uuid.UUID) ([]Asset, erro
 	err := d.NewSelect().
 		Model(&assets).
 		ExcludeColumn("sa_deleted_at").
-		Where("user_id = ?", userID).
-		Where("sa_deleted_at IS NULL").
-		OrderExpr("index ASC, sa_created_at DESC").
+		Join("JOIN object_asset AS oa ON oa.asset_id = ?TableAlias.id AND oa.sa_deleted_at IS NULL").
+		Where("oa.object_type = ?", OBJECT_TYPE_USER).
+		Where("oa.object_id = ?", userID).
+		Where("?TableAlias.sa_deleted_at IS NULL").
+		OrderExpr("?TableAlias.\"index\" ASC, ?TableAlias.sa_created_at DESC").
 		Scan(ctx)
 	if err != nil {
 		return nil, err

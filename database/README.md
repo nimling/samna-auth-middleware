@@ -545,7 +545,6 @@ SELECT claimius.ensure_app_user(
     p_first_name => :first,
     p_last_name  => :last,
     p_user_name  => :user_name,
-    p_user_image => :user_image,
     p_email      => :email
 );
 ```

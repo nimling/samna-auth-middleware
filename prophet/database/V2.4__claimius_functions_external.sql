@@ -278,7 +278,7 @@ BEGIN
     RETURN QUERY
         SELECT o.*
         FROM claimius.organization o
-        WHERE o.app_id = p_app_id
+        WHERE o.id IN (SELECT claimius.app_object_ids(p_app_id, 'claimius.organization'))
           AND o.sa_deleted_at IS NULL
           AND o.id IN (
             SELECT g.object_id FROM claimius.get_objects(p_user_id, p_app_id, 'claimius.organization', p_required_access) g
@@ -309,7 +309,7 @@ BEGIN
     RETURN QUERY
         SELECT l.*
         FROM claimius.location l
-        WHERE l.app_id = p_app_id
+        WHERE l.id IN (SELECT claimius.app_object_ids(p_app_id, 'claimius.location'))
           AND l.sa_deleted_at IS NULL
           AND l.id IN (
             SELECT g.object_id FROM claimius.get_objects(p_user_id, p_app_id, 'claimius.location', p_required_access) g
@@ -946,7 +946,7 @@ BEGIN
     IF p_start_id IS NULL THEN
         SELECT array_agg(o.id) INTO v_root_ids
         FROM claimius.organization o
-        WHERE o.app_id = p_app_id
+        WHERE o.id IN (SELECT claimius.app_object_ids(p_app_id, 'claimius.organization'))
           AND o.sa_deleted_at IS NULL
           AND o.sa_owner_id = o.id  -- root: self referential
           AND o.id IN (
@@ -955,7 +955,7 @@ BEGIN
     ELSE
         SELECT ARRAY[o.id] INTO v_root_ids
         FROM claimius.organization o
-        WHERE o.app_id = p_app_id
+        WHERE o.id IN (SELECT claimius.app_object_ids(p_app_id, 'claimius.organization'))
           AND o.id = p_start_id
           AND o.sa_deleted_at IS NULL
           AND o.id IN (
@@ -974,16 +974,14 @@ BEGIN
             SELECT o.id, o.name::TEXT AS name, o.description, o.type::TEXT AS type, o.sa_level,
                    o.sa_owner_id, 0 AS lvl
             FROM claimius.organization o
-            WHERE o.app_id = p_app_id
-              AND o.sa_deleted_at IS NULL
+            WHERE o.sa_deleted_at IS NULL
               AND o.id = ANY(v_root_ids)
             UNION ALL
             SELECT c.id, c.name::TEXT, c.description, c.type::TEXT, c.sa_level,
                    c.sa_owner_id, w.lvl + 1
             FROM claimius.organization c
                      JOIN org_walk w ON c.sa_owner_id = w.id
-            WHERE c.app_id = p_app_id
-              AND c.sa_deleted_at IS NULL
+            WHERE c.sa_deleted_at IS NULL
               AND c.id <> c.sa_owner_id  -- don't re-walk the root
               AND (p_depth = 0 OR w.lvl + 1 <= p_depth)
         )
@@ -1021,15 +1019,13 @@ BEGIN
     WITH RECURSIVE org_walk AS (
         SELECT o.id, 0 AS lvl
         FROM claimius.organization o
-        WHERE o.app_id = p_app_id
-          AND o.sa_deleted_at IS NULL
+        WHERE o.sa_deleted_at IS NULL
           AND o.id = ANY(v_root_ids)
         UNION ALL
         SELECT c.id, w.lvl + 1
         FROM claimius.organization c
                  JOIN org_walk w ON c.sa_owner_id = w.id
-        WHERE c.app_id = p_app_id
-          AND c.sa_deleted_at IS NULL
+        WHERE c.sa_deleted_at IS NULL
           AND c.id <> c.sa_owner_id
           AND (p_depth = 0 OR w.lvl + 1 <= p_depth)
     )
@@ -1057,8 +1053,7 @@ BEGIN
                                AND uo.object_type = 'claimius.location'
                                AND uo.user_id = p_user_id
                                AND uo.app_id = p_app_id
-        WHERE l.app_id = p_app_id
-          AND l.sa_deleted_at IS NULL
+        WHERE l.sa_deleted_at IS NULL
           AND l.sa_owner_id IN (SELECT org_id FROM _owner_graph_orgs)
           AND l.id IN (
             SELECT g.object_id FROM claimius.get_objects(p_user_id, p_app_id, 'claimius.location', p_required_access) g
@@ -2055,7 +2050,6 @@ BEGIN
                 SET first_name    = v_source_app_user.first_name,
                     last_name     = v_source_app_user.last_name,
                     user_name     = v_source_app_user.user_name,
-                    user_image    = v_source_app_user.user_image,
                     phone         = v_source_app_user.phone,
                     config        = v_source_app_user.config,
                     external_id   = coalesce(v_source_app_user.external_id, external_id),
@@ -2249,7 +2243,6 @@ DECLARE
     v_table TEXT;
     v_parts TEXT[];
     v_row_count INTEGER := 0;
-    v_has_app_id BOOLEAN;
     v_user RECORD;
     v_obj RECORD;
     v_sql TEXT;
@@ -2258,14 +2251,9 @@ BEGIN
     v_schema := v_parts[1];
     v_table := v_parts[2];
 
-    SELECT t.has_app_id INTO v_has_app_id
-    FROM claimius.table_info t WHERE t.object_type = p_object_type;
-
-    IF v_has_app_id THEN
-        v_sql := format('SELECT id, app_id FROM %I.%I WHERE sa_deleted_at IS NULL', v_schema, v_table);
-    ELSE
-        v_sql := format('SELECT id, claimius.get_app_id() AS app_id FROM %I.%I WHERE sa_deleted_at IS NULL', v_schema, v_table);
-    END IF;
+    v_sql := format(
+            'SELECT r.id, a AS app_id FROM %I.%I r CROSS JOIN LATERAL claimius._app_ids_for_row(%L, to_jsonb(r)) a WHERE r.sa_deleted_at IS NULL',
+            v_schema, v_table, p_object_type);
     FOR v_obj IN EXECUTE v_sql LOOP
             FOR v_user IN
                 SELECT user_id FROM claimius._affected_users_for_object(v_obj.app_id, p_object_type, v_obj.id)
@@ -2423,13 +2411,13 @@ DECLARE
 BEGIN
     p_id := claimius.ensure_uuid_null(p_id);
 
-    -- Idempotency: existing root org with same (app, name)?
+    -- Idempotency: existing root org with same name linked to this app?
     SELECT * INTO v_row
     FROM claimius.organization
-    WHERE app_id = p_app_id
-      AND name = p_name
+    WHERE name = p_name
       AND sa_deleted_at IS NULL
       AND sa_owner_id = id
+      AND claimius.app_has_object(p_app_id, 'claimius.organization', id)
     LIMIT 1;
 
     IF v_row.id IS NOT NULL THEN
@@ -2437,19 +2425,75 @@ BEGIN
     END IF;
 
     INSERT INTO claimius.organization (
-        id, app_id, name, description, type, external_id,
+        id, name, description, type, external_id,
         sa_level, sa_created_by
     ) VALUES (
-                 coalesce(p_id, gen_random_uuid()), p_app_id, p_name, p_description, p_type, p_external_id,
+                 coalesce(p_id, gen_random_uuid()), p_name, p_description, p_type, p_external_id,
                  0, p_actor_user_claim_id
              )
     RETURNING * INTO v_row;
+
+    PERFORM claimius.link_app_object(p_app_id, 'claimius.organization', v_row.id, p_actor_user_claim_id);
 
     RETURN jsonb_build_object('organization', to_jsonb(v_row));
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius.create_root_organization(UUID, TEXT, UUID, TEXT, TEXT, UUID, TEXT) IS 'Creates a new root organization with self referencing sa_owner_id and sa_root_id. Idempotent on (app_id, name).';
+COMMENT ON FUNCTION claimius.create_root_organization(UUID, TEXT, UUID, TEXT, TEXT, UUID, TEXT) IS 'Creates a new root organization with self referencing sa_owner_id and sa_root_id, linked to the app through app_object. Idempotent on (app, name).';
+
+-- ----------------------------------------------------------------------------
+-- link_app_organization
+-- Links an app to an existing organization through app_object. With
+-- p_cascade the link extends to every organization and location in the
+-- org's ownership tree, read from inheritance_info. Additive and
+-- idempotent: existing links stay untouched, nothing is ever unlinked.
+-- ----------------------------------------------------------------------------
+
+CREATE OR REPLACE FUNCTION claimius.link_app_organization(
+    p_app_id    UUID,
+    p_org_id    UUID,
+    p_cascade   BOOLEAN DEFAULT TRUE,
+    p_linked_by UUID DEFAULT NULL
+) RETURNS JSONB AS $$
+DECLARE
+    v_org      claimius.organization;
+    v_linked   INTEGER := 0;
+    v_desc     RECORD;
+BEGIN
+    SELECT * INTO v_org
+    FROM claimius.organization
+    WHERE id = p_org_id AND sa_deleted_at IS NULL;
+
+    IF v_org.id IS NULL THEN
+        RAISE EXCEPTION 'Organization % not found', p_org_id;
+    END IF;
+
+    PERFORM claimius.link_app_object(p_app_id, 'claimius.organization', v_org.id, p_linked_by);
+    v_linked := v_linked + 1;
+
+    IF p_cascade THEN
+        FOR v_desc IN
+            SELECT DISTINCT e.descendant_type, e.descendant_id
+            FROM claimius.inheritance_info e
+            WHERE e.tree_type = 'ownership'
+              AND e.ancestor_type = 'claimius.organization'
+              AND e.ancestor_id = v_org.id
+              AND e.depth > 0
+              AND e.descendant_type IN ('claimius.organization', 'claimius.location')
+            LOOP
+                PERFORM claimius.link_app_object(p_app_id, v_desc.descendant_type, v_desc.descendant_id, p_linked_by);
+                v_linked := v_linked + 1;
+            END LOOP;
+    END IF;
+
+    RETURN jsonb_build_object(
+            'organization', to_jsonb(v_org),
+            'linked_count', v_linked
+           );
+END;
+$$ LANGUAGE plpgsql;
+
+COMMENT ON FUNCTION claimius.link_app_organization(UUID, UUID, BOOLEAN, UUID) IS 'Links an app to an existing organization, cascading over its ownership tree to organizations and locations. Additive and idempotent.';
 
 -- ----------------------------------------------------------------------------
 -- init
@@ -2558,18 +2602,22 @@ BEGIN
 
     -- 3. system organization, self rooted, owned by the system app
     SELECT id INTO v_org_id FROM claimius.organization
-    WHERE app_id = v_app_id AND type = 'system' AND sa_deleted_at IS NULL
+    WHERE type = 'system'
+      AND sa_deleted_at IS NULL
+      AND claimius.app_has_object(v_app_id, 'claimius.organization', id)
     LIMIT 1;
 
     IF v_org_id IS NULL THEN
         INSERT INTO claimius.organization (
-            id, app_id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by
+            id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by
         ) VALUES (
-                     v_pre_org_id, v_app_id, p_system_org_name, 'system',
+                     v_pre_org_id, p_system_org_name, 'system',
                      v_pre_org_id, v_pre_org_id, 0, p_system_user_id
                  )
         RETURNING id INTO v_org_id;
     END IF;
+
+    PERFORM claimius.link_app_object(v_app_id, 'claimius.organization', v_org_id, p_system_user_id);
 
     -- 4. reconcile: app's sa_owner_id should match the actual system org id
     UPDATE claimius.samna_app SET sa_owner_id = v_org_id WHERE id = v_app_id AND sa_owner_id <> v_org_id;
@@ -2910,7 +2958,6 @@ CREATE OR REPLACE FUNCTION claimius.ensure_app_user(
     p_first_name TEXT DEFAULT NULL,
     p_last_name  TEXT DEFAULT NULL,
     p_user_name  TEXT DEFAULT NULL,
-    p_user_image TEXT DEFAULT NULL,
     p_email      TEXT DEFAULT NULL,
     p_phone      TEXT DEFAULT NULL,
     p_external_id TEXT DEFAULT NULL
@@ -2929,12 +2976,12 @@ BEGIN
 
     IF NOT FOUND THEN
         INSERT INTO claimius.samna_user (
-            user_id, app_id, first_name, last_name, user_name, user_image,
+            user_id, app_id, first_name, last_name, user_name,
             email, phone, external_id, status, type
         )
         VALUES (
                    COALESCE(p_user_id, gen_random_uuid()),
-                   p_app_id, p_first_name, p_last_name, p_user_name, p_user_image,
+                   p_app_id, p_first_name, p_last_name, p_user_name,
                    p_email, p_phone, p_external_id, 'active', 'user'
                )
         RETURNING * INTO v_user_row;
@@ -2979,7 +3026,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius.ensure_app_user(p_user_id uuid, p_app_id uuid, p_first_name text, p_last_name text, p_user_name text, p_user_image text, p_email text, p_phone text, p_external_id text) IS 'Creates per app samna_user row and grants the app default claim. Idempotent.';
+COMMENT ON FUNCTION claimius.ensure_app_user(p_user_id uuid, p_app_id uuid, p_first_name text, p_last_name text, p_user_name text, p_email text, p_phone text, p_external_id text) IS 'Creates per app samna_user row and grants the app default claim. Idempotent.';
 
 DROP FUNCTION IF EXISTS claimius.get_access(UUID, UUID, TEXT, INTEGER);
 
@@ -3312,7 +3359,6 @@ BEGIN
                         'first_name',  u.first_name,
                         'last_name',   u.last_name,
                         'user_name',   u.user_name,
-                        'user_image',  u.user_image,
                         'phone',       u.phone,
                         'email',       u.email,
                         'external_id', u.external_id,
@@ -3821,7 +3867,7 @@ BEGIN
         END IF;
 
         INSERT INTO claimius.samna_user (
-            user_id, app_id, first_name, last_name, user_name, user_image,
+            user_id, app_id, first_name, last_name, user_name,
             email, phone, external_id, status, type
         ) VALUES (
             COALESCE(v_user_id, gen_random_uuid()),
@@ -3829,7 +3875,6 @@ BEGIN
             NULLIF(p_user ->> 'first_name', ''),
             NULLIF(p_user ->> 'last_name', ''),
             NULLIF(p_user ->> 'user_name', ''),
-            NULLIF(p_user ->> 'user_image', ''),
             NULLIF(p_user ->> 'email', ''),
             NULLIF(p_user ->> 'phone', ''),
             v_external_id,
@@ -3839,7 +3884,7 @@ BEGIN
         RETURNING * INTO v_user_row;
     ELSE
         INSERT INTO claimius.samna_user (
-            user_id, app_id, first_name, last_name, user_name, user_image,
+            user_id, app_id, first_name, last_name, user_name,
             email, phone, external_id, status, type
         ) VALUES (
             COALESCE(v_user_id, gen_random_uuid()),
@@ -3847,7 +3892,6 @@ BEGIN
             NULLIF(p_user ->> 'first_name', ''),
             NULLIF(p_user ->> 'last_name', ''),
             NULLIF(p_user ->> 'user_name', ''),
-            NULLIF(p_user ->> 'user_image', ''),
             NULLIF(p_user ->> 'email', ''),
             NULLIF(p_user ->> 'phone', ''),
             v_external_id,
@@ -3858,7 +3902,6 @@ BEGIN
             first_name    = COALESCE(EXCLUDED.first_name, claimius.samna_user.first_name),
             last_name     = COALESCE(EXCLUDED.last_name, claimius.samna_user.last_name),
             user_name     = COALESCE(EXCLUDED.user_name, claimius.samna_user.user_name),
-            user_image    = COALESCE(EXCLUDED.user_image, claimius.samna_user.user_image),
             email         = COALESCE(EXCLUDED.email, claimius.samna_user.email),
             phone         = COALESCE(EXCLUDED.phone, claimius.samna_user.phone),
             external_id   = COALESCE(EXCLUDED.external_id, claimius.samna_user.external_id),

@@ -5,8 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"net/url"
-	"strings"
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
@@ -23,7 +21,6 @@ type BodyUser struct {
 	FirstName  string     `json:"first_name"`
 	LastName   string     `json:"last_name"`
 	UserName   *string    `json:"user_name"`
-	UserImage  *string    `json:"user_image"`
 	Phone      string     `json:"phone"`
 	Email      string     `json:"email"`
 	ExternalID *string    `json:"external_id"`
@@ -98,9 +95,6 @@ func GetUser(ctx echo.Context) error {
 	if err != nil {
 		return respond.Error(ctx, errorsx.ErrToHttpCode(err), "")
 	}
-
-	app, _ := ctx.Get("app").(SamnaApp)
-	populateUserImage(user, app.RedirectURI)
 
 	return respond.JSON(ctx, http.StatusOK, user, 1)
 }
@@ -247,12 +241,7 @@ func PostUser(ctx echo.Context) error {
 	if req.UserName != nil {
 		userName = *req.UserName
 	}
-	userImage := ""
-	if req.UserImage != nil {
-		userImage = *req.UserImage
-	}
-
-	user, err := postUser(ctx, req, userName, userImage)
+	user, err := postUser(ctx, req, userName)
 	if err != nil {
 		return respond.Error(ctx, http.StatusInternalServerError, "Internal server error")
 	}
@@ -601,11 +590,11 @@ func getUserLocations(ctx echo.Context, userID uuid.UUID) ([]Location, error) {
 	return locations, nil
 }
 
-func postUser(ctx echo.Context, req BodyUser, userName, userImage string) (*SamnaUser, error) {
+func postUser(ctx echo.Context, req BodyUser, userName string) (*SamnaUser, error) {
 	var userID uuid.UUID
 	err := sdb.Instance().NewRaw(
-		"SELECT (claimius.ensure_app_user(?, ?, ?, ?, ?, ?, ?, ?, ?) -> 'samna_user' ->> 'user_id')::uuid",
-		req.UserID, *req.AppID, req.FirstName, req.LastName, userName, userImage, req.Email, req.Phone, req.ExternalID,
+		"SELECT (claimius.ensure_app_user(?, ?, ?, ?, ?, ?, ?, ?) -> 'samna_user' ->> 'user_id')::uuid",
+		req.UserID, *req.AppID, req.FirstName, req.LastName, userName, req.Email, req.Phone, req.ExternalID,
 	).Scan(ctx.Request().Context(), &userID)
 	if err != nil {
 		ctx.Logger().Errorf("ensure_app_user: %v", err)
@@ -669,21 +658,6 @@ func putUser(ctx echo.Context, user *SamnaUser) error {
 	return nil
 }
 
-func populateUserImage(appUser *SamnaUser, baseURL string) {
-	if appUser == nil || appUser.UserImage != nil {
-		return
-	}
-	q := appUser.Email
-	if q == "" {
-		q = appUser.FirstName + " " + appUser.LastName
-	}
-	if strings.TrimSpace(q) == "" {
-		return
-	}
-	placeholder := baseURL + "/api/placeholder?q=" + url.QueryEscape(q)
-	appUser.UserImage = &placeholder
-}
-
 func upsertOrganizationUser(ctx echo.Context, ownerID, claimID, userID uuid.UUID, idClaim, externalID, identType string, data json.RawMessage, in *SamnaUser, reason *string) (*SamnaUser, int, error) {
 	appID := ctx.Get("app_id").(uuid.UUID)
 	if appID == uuid.Nil {
@@ -694,8 +668,8 @@ func upsertOrganizationUser(ctx echo.Context, ownerID, claimID, userID uuid.UUID
 	var rootID uuid.UUID
 	var callerUC uuid.UUID
 	if err := sdb.Instance().NewRaw(
-		"SELECT sa_root_id, sa_created_by FROM claimius.organization WHERE app_id = ? AND id = ? AND sa_deleted_at IS NULL LIMIT 1",
-		appID, ownerID,
+		"SELECT sa_root_id, sa_created_by FROM claimius.organization WHERE id = ? AND sa_deleted_at IS NULL AND claimius.app_has_object(?, 'claimius.organization', id) LIMIT 1",
+		ownerID, appID,
 	).Scan(reqctx, &rootID, &callerUC); err != nil {
 		ctx.Logger().Errorf("organization lookup: %v", err)
 		return nil, http.StatusInternalServerError, errors.New("Internal server error")
@@ -718,14 +692,11 @@ func upsertOrganizationUser(ctx echo.Context, ownerID, claimID, userID uuid.UUID
 		userID = uuid.New()
 	}
 
-	firstName, lastName, userName, userImage, email, phone := "", "", "", "", "", ""
+	firstName, lastName, userName, email, phone := "", "", "", "", ""
 	if in != nil {
 		firstName, lastName, email = in.FirstName, in.LastName, in.Email
 		if in.UserName != nil {
 			userName = *in.UserName
-		}
-		if in.UserImage != nil {
-			userImage = *in.UserImage
 		}
 		if in.Phone != nil {
 			phone = *in.Phone
@@ -734,18 +705,17 @@ func upsertOrganizationUser(ctx echo.Context, ownerID, claimID, userID uuid.UUID
 
 	var user SamnaUser
 	err = sdb.Instance().NewRaw(
-		"INSERT INTO claimius.samna_user (user_id, app_id, first_name, last_name, user_name, user_image, email, phone, external_id, status, type) "+
-			"VALUES (?, ?, NULLIF(?,''), NULLIF(?,''), NULLIF(?,''), NULLIF(?,''), NULLIF(?,''), NULLIF(?,''), NULLIF(?,''), 'active', 'user') "+
+		"INSERT INTO claimius.samna_user (user_id, app_id, first_name, last_name, user_name, email, phone, external_id, status, type) "+
+			"VALUES (?, ?, NULLIF(?,''), NULLIF(?,''), NULLIF(?,''), NULLIF(?,''), NULLIF(?,''), NULLIF(?,''), 'active', 'user') "+
 			"ON CONFLICT (user_id, app_id) WHERE sa_deleted_at IS NULL DO UPDATE SET "+
 			"first_name = COALESCE(EXCLUDED.first_name, claimius.samna_user.first_name), "+
 			"last_name = COALESCE(EXCLUDED.last_name, claimius.samna_user.last_name), "+
 			"user_name = COALESCE(EXCLUDED.user_name, claimius.samna_user.user_name), "+
-			"user_image = COALESCE(EXCLUDED.user_image, claimius.samna_user.user_image), "+
 			"email = COALESCE(EXCLUDED.email, claimius.samna_user.email), "+
 			"phone = COALESCE(EXCLUDED.phone, claimius.samna_user.phone), "+
 			"external_id = COALESCE(EXCLUDED.external_id, claimius.samna_user.external_id), "+
 			"sa_updated_at = now() RETURNING *",
-		userID, appID, firstName, lastName, userName, userImage, email, phone, externalID,
+		userID, appID, firstName, lastName, userName, email, phone, externalID,
 	).Scan(reqctx, &user)
 	if err != nil {
 		ctx.Logger().Errorf("upsert samna_user: %v", err)

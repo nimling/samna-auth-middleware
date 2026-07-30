@@ -313,7 +313,6 @@ type SamnaUser struct {
 	FirstName  *string          `bun:"first_name" json:"first_name,omitempty"`
 	LastName   *string          `bun:"last_name" json:"last_name,omitempty"`
 	UserName   *string          `bun:"user_name" json:"user_name,omitempty"`
-	UserImage  *string          `bun:"user_image" json:"user_image,omitempty"`
 	Phone      *string          `bun:"phone" json:"phone,omitempty"`
 	Email      string           `bun:"email" json:"email"`
 	ExternalID *string          `bun:"external_id" json:"external_id,omitempty"`
@@ -584,7 +583,6 @@ type Creator struct {
 	FirstName  *string   `bun:"first_name,scanonly" json:"first_name,omitempty"`
 	LastName   *string   `bun:"last_name,scanonly" json:"last_name,omitempty"`
 	UserName   *string   `bun:"user_name,scanonly" json:"user_name,omitempty"`
-	UserImage  *string   `bun:"user_image,scanonly" json:"user_image,omitempty"`
 	Phone      *string   `bun:"phone,scanonly" json:"phone,omitempty"`
 	Email      string    `bun:"email,scanonly" json:"email"`
 	ExternalID *string   `bun:"external_id,scanonly" json:"external_id,omitempty"`
@@ -601,7 +599,6 @@ type Asset struct {
 	Name        string     `bun:"column:name" json:"name"`
 	Description *string    `bun:"column:description" json:"description"`
 	MimeType    string     `bun:"column:mime_type" json:"mime_type"`
-	UserID      uuid.UUID  `bun:"column:user_id" json:"user_id"`
 	Status      string     `bun:"column:status" json:"status"`
 	Index       int        `bun:"column:index" json:"index"`
 	BlobURL     *string    `bun:"blob_url,default:null" json:"-"`

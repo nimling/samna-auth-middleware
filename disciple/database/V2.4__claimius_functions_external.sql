@@ -1992,7 +1992,6 @@ BEGIN
         SET first_name    = v_source_app_user.first_name,
             last_name     = v_source_app_user.last_name,
             user_name     = v_source_app_user.user_name,
-            user_image    = v_source_app_user.user_image,
             phone         = v_source_app_user.phone,
             config        = v_source_app_user.config,
             external_id   = coalesce(v_source_app_user.external_id, external_id),
@@ -2445,7 +2444,6 @@ CREATE OR REPLACE FUNCTION claimius.ensure_app_user(
     p_first_name TEXT DEFAULT NULL,
     p_last_name  TEXT DEFAULT NULL,
     p_user_name  TEXT DEFAULT NULL,
-    p_user_image TEXT DEFAULT NULL,
     p_email      TEXT DEFAULT NULL,
     p_phone      TEXT DEFAULT NULL,
     p_external_id TEXT DEFAULT NULL
@@ -2460,12 +2458,12 @@ BEGIN
 
     IF NOT FOUND THEN
         INSERT INTO claimius.samna_user (
-            user_id, first_name, last_name, user_name, user_image,
+            user_id, first_name, last_name, user_name,
             email, phone, external_id, status, type
         )
         VALUES (
                    COALESCE(p_user_id, gen_random_uuid()),
-                   p_first_name, p_last_name, p_user_name, p_user_image,
+                   p_first_name, p_last_name, p_user_name,
                    p_email, p_phone, p_external_id, 'active', 'user'
                )
         RETURNING * INTO v_user_row;
@@ -2807,7 +2805,6 @@ BEGIN
                         'first_name',  u.first_name,
                         'last_name',   u.last_name,
                         'user_name',   u.user_name,
-                        'user_image',  u.user_image,
                         'phone',       u.phone,
                         'email',       u.email,
                         'external_id', u.external_id,
@@ -3311,14 +3308,13 @@ BEGIN
         END IF;
 
         INSERT INTO claimius.samna_user (
-            user_id, first_name, last_name, user_name, user_image,
+            user_id, first_name, last_name, user_name,
             email, phone, external_id, status, type
         ) VALUES (
             COALESCE(v_user_id, gen_random_uuid()),
             NULLIF(p_user ->> 'first_name', ''),
             NULLIF(p_user ->> 'last_name', ''),
             NULLIF(p_user ->> 'user_name', ''),
-            NULLIF(p_user ->> 'user_image', ''),
             NULLIF(p_user ->> 'email', ''),
             NULLIF(p_user ->> 'phone', ''),
             v_external_id,
@@ -3328,14 +3324,13 @@ BEGIN
         RETURNING * INTO v_user_row;
     ELSE
         INSERT INTO claimius.samna_user (
-            user_id, first_name, last_name, user_name, user_image,
+            user_id, first_name, last_name, user_name,
             email, phone, external_id, status, type
         ) VALUES (
             COALESCE(v_user_id, gen_random_uuid()),
             NULLIF(p_user ->> 'first_name', ''),
             NULLIF(p_user ->> 'last_name', ''),
             NULLIF(p_user ->> 'user_name', ''),
-            NULLIF(p_user ->> 'user_image', ''),
             NULLIF(p_user ->> 'email', ''),
             NULLIF(p_user ->> 'phone', ''),
             v_external_id,
@@ -3346,7 +3341,6 @@ BEGIN
             first_name    = COALESCE(EXCLUDED.first_name, claimius.samna_user.first_name),
             last_name     = COALESCE(EXCLUDED.last_name, claimius.samna_user.last_name),
             user_name     = COALESCE(EXCLUDED.user_name, claimius.samna_user.user_name),
-            user_image    = COALESCE(EXCLUDED.user_image, claimius.samna_user.user_image),
             email         = COALESCE(EXCLUDED.email, claimius.samna_user.email),
             phone         = COALESCE(EXCLUDED.phone, claimius.samna_user.phone),
             external_id   = COALESCE(EXCLUDED.external_id, claimius.samna_user.external_id),

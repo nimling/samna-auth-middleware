@@ -271,28 +271,168 @@ $$ LANGUAGE plpgsql STABLE;
 -- Registration helpers
 -- ----------------------------------------------------------------------------
 
--- _app_id_for_row
--- Returns the app_id for a registered row. Reads the row's app_id column
--- if the table has one; otherwise infers it from claimius.get_app_id().
--- Used by every trigger that needs to scope a row's effects to an app.
-CREATE OR REPLACE FUNCTION claimius._app_id_for_row(p_object_type TEXT, p_row JSONB)
-    RETURNS UUID AS $$
+-- app_object_ids
+-- Object ids of a given type linked to an app through app_object.
+CREATE OR REPLACE FUNCTION claimius.app_object_ids(p_app_id UUID, p_object_type TEXT)
+    RETURNS SETOF UUID AS $$
+    SELECT ao.object_id
+    FROM claimius.app_object ao
+    WHERE ao.app_id = p_app_id
+      AND ao.object_type = p_object_type
+      AND ao.sa_deleted_at IS NULL;
+$$ LANGUAGE sql STABLE;
+
+COMMENT ON FUNCTION claimius.app_object_ids(UUID, TEXT) IS 'Object ids of one type linked to an app through app_object.';
+
+-- apps_for_object
+-- App ids holding a live link to one object.
+CREATE OR REPLACE FUNCTION claimius.apps_for_object(p_object_type TEXT, p_object_id UUID)
+    RETURNS SETOF UUID AS $$
+    SELECT ao.app_id
+    FROM claimius.app_object ao
+    WHERE ao.object_type = p_object_type
+      AND ao.object_id = p_object_id
+      AND ao.sa_deleted_at IS NULL;
+$$ LANGUAGE sql STABLE;
+
+COMMENT ON FUNCTION claimius.apps_for_object(TEXT, UUID) IS 'App ids holding a live app_object link to one object.';
+
+-- app_has_object
+CREATE OR REPLACE FUNCTION claimius.app_has_object(p_app_id UUID, p_object_type TEXT, p_object_id UUID)
+    RETURNS BOOLEAN AS $$
+    SELECT EXISTS (
+        SELECT 1
+        FROM claimius.app_object ao
+        WHERE ao.app_id = p_app_id
+          AND ao.object_type = p_object_type
+          AND ao.object_id = p_object_id
+          AND ao.sa_deleted_at IS NULL
+    );
+$$ LANGUAGE sql STABLE;
+
+COMMENT ON FUNCTION claimius.app_has_object(UUID, TEXT, UUID) IS 'True when the app holds a live app_object link to the object.';
+
+-- link_app_object
+-- Creates a live app_object link and materializes access for the newly
+-- linked (app, object) pair. Idempotent: an existing live link is returned
+-- untouched.
+CREATE OR REPLACE FUNCTION claimius.link_app_object(
+    p_app_id      UUID,
+    p_object_type TEXT,
+    p_object_id   UUID,
+    p_created_by  UUID DEFAULT NULL
+) RETURNS UUID AS $$
+DECLARE
+    v_id      UUID;
+    v_user    RECORD;
+    v_viewers UUID[] := '{}';
+BEGIN
+    SELECT id INTO v_id FROM claimius.app_object
+    WHERE app_id = p_app_id
+      AND object_type = p_object_type
+      AND object_id = p_object_id
+      AND sa_deleted_at IS NULL;
+
+    IF v_id IS NOT NULL THEN
+        RETURN v_id;
+    END IF;
+
+    INSERT INTO claimius.app_object (app_id, object_type, object_id, sa_created_by)
+    VALUES (p_app_id, p_object_type, p_object_id, p_created_by)
+    RETURNING id INTO v_id;
+
+    IF NOT claimius.in_replay_mode() THEN
+        FOR v_user IN
+            SELECT user_id FROM claimius._affected_users_for_object(p_app_id, p_object_type, p_object_id)
+            LOOP
+                PERFORM claimius.recompute_user_object(p_app_id, v_user.user_id, p_object_type, p_object_id);
+                v_viewers := array_append(v_viewers, v_user.user_id);
+            END LOOP;
+
+        PERFORM claimius._refresh_user_users(p_app_id, uid)
+        FROM (SELECT DISTINCT unnest(v_viewers) AS uid) s;
+    END IF;
+
+    RETURN v_id;
+END;
+$$ LANGUAGE plpgsql;
+
+COMMENT ON FUNCTION claimius.link_app_object(UUID, TEXT, UUID, UUID) IS 'Creates a live app_object link and materializes access for the pair. Idempotent.';
+
+-- unlink_app_object
+-- Soft deletes a live link and purges the materialized access rows the
+-- app held on the object.
+CREATE OR REPLACE FUNCTION claimius.unlink_app_object(
+    p_app_id      UUID,
+    p_object_type TEXT,
+    p_object_id   UUID
+) RETURNS BOOLEAN AS $$
+DECLARE
+    v_viewers UUID[];
+BEGIN
+    UPDATE claimius.app_object
+    SET sa_deleted_at = now()
+    WHERE app_id = p_app_id
+      AND object_type = p_object_type
+      AND object_id = p_object_id
+      AND sa_deleted_at IS NULL;
+
+    IF NOT FOUND THEN
+        RETURN FALSE;
+    END IF;
+
+    SELECT array_agg(DISTINCT user_id) INTO v_viewers
+    FROM claimius.user_object
+    WHERE app_id = p_app_id AND object_type = p_object_type AND object_id = p_object_id;
+
+    DELETE FROM claimius.user_object
+    WHERE app_id = p_app_id AND object_type = p_object_type AND object_id = p_object_id;
+
+    DELETE FROM claimius.object_users
+    WHERE app_id = p_app_id AND object_type = p_object_type AND object_id = p_object_id;
+
+    PERFORM claimius._refresh_user_users(p_app_id, uid)
+    FROM (SELECT unnest(v_viewers) AS uid) s;
+
+    RETURN TRUE;
+END;
+$$ LANGUAGE plpgsql;
+
+COMMENT ON FUNCTION claimius.unlink_app_object(UUID, TEXT, UUID) IS 'Soft deletes an app_object link and purges the app''s materialized access on the object.';
+
+-- _app_ids_for_row
+-- Returns every app_id a registered row is scoped to. Reads the row's
+-- app_id column when the table has one; for internal tables scoped through
+-- app_object it returns every linked app, which is empty for a row whose
+-- link has not been created yet (the link materializes access when it
+-- lands); external tables without app_id fall back to
+-- claimius.get_app_id(). Used by every trigger that scopes a row's
+-- effects to apps.
+CREATE OR REPLACE FUNCTION claimius._app_ids_for_row(p_object_type TEXT, p_row JSONB)
+    RETURNS SETOF UUID AS $$
 DECLARE
     v_has_app_id BOOLEAN;
+    v_is_internal BOOLEAN;
 BEGIN
-    SELECT t.has_app_id INTO v_has_app_id
+    SELECT t.has_app_id, t.is_internal INTO v_has_app_id, v_is_internal
     FROM claimius.table_info t
     WHERE t.object_type = p_object_type;
 
     IF v_has_app_id THEN
-        RETURN (p_row ->> 'app_id')::UUID;
+        RETURN NEXT (p_row ->> 'app_id')::UUID;
+        RETURN;
     END IF;
 
-    RETURN claimius.get_app_id();
+    RETURN QUERY SELECT claimius.apps_for_object(p_object_type, (p_row ->> 'id')::UUID);
+    IF FOUND OR v_is_internal THEN
+        RETURN;
+    END IF;
+
+    RETURN NEXT claimius.get_app_id();
 END;
 $$ LANGUAGE plpgsql STABLE;
 
-COMMENT ON FUNCTION claimius._app_id_for_row(TEXT, JSONB) IS 'Resolves a row''s app_id: from the row when the table has the column, otherwise from claimius.get_app_id().';
+COMMENT ON FUNCTION claimius._app_ids_for_row(TEXT, JSONB) IS 'Resolves every app_id a row is scoped to: the row''s app_id column, its app_object links, or claimius.get_app_id().';
 
 -- _register_table_info
 -- Inspects a table's columns, validates required columns, and populates the

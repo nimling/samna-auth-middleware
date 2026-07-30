@@ -155,13 +155,13 @@ SELECT claimius.init_claimius_tables(
 
 ## Bootstrap and creation order on a prophet
 
-A fresh prophet has nothing in the database. Bringing it up requires a precise order because tables reference each other circularly (app references org, org has app_id, claims reference org, user_claim references claim, etc). `init` already encapsulates this for the system app and system org. When you create additional apps, organizations, and resources later, you follow the same pattern.
+A fresh prophet has nothing in the database. Bringing it up requires a precise order because tables reference each other circularly (app references org, org links back to the app through `app_object`, claims reference org, user_claim references claim, etc). `init` already encapsulates this for the system app and system org. When you create additional apps, organizations, and resources later, you follow the same pattern.
 
 **Order for a fresh prophet (executed automatically by `init`):**
 
 1. **System app** is inserted first, with a placeholder `sa_owner_id` referencing a UUID that will become the system org. `sa_created_by` is the system user's `user_id` (bootstrap exception, since no `user_claim` exists yet).
 2. **System samna_user** is inserted, scoped to the system app.
-3. **System organization** is inserted with `sa_owner_id = sa_root_id = id` (self rooted), and `app_id` points at the system app.
+3. **System organization** is inserted with `sa_owner_id = sa_root_id = id` (self rooted), and an `app_object` link ties it to the system app.
 4. **App's `sa_owner_id`** is reconciled with an UPDATE to point at the real system org.
 5. **`inheritance_info` self-edge** for the system org is inserted (`ownership` tree, depth 0), bootstrapping the closure for that root.
 6. **System claim** ('System Administrator', level 0) is created, owned by the system org. This claim is sidelined: granted only to the system user, never via `ensure_app_user`.
@@ -545,7 +545,6 @@ SELECT claimius.ensure_app_user(
     p_first_name => :first,
     p_last_name  => :last,
     p_user_name  => :user_name,
-    p_user_image => :user_image,
     p_email      => :email
 );
 ```

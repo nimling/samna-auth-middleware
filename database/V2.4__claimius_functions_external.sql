@@ -1507,7 +1507,6 @@ BEGIN
                 SET first_name    = v_source_app_user.first_name,
                     last_name     = v_source_app_user.last_name,
                     user_name     = v_source_app_user.user_name,
-                    user_image    = v_source_app_user.user_image,
                     phone         = v_source_app_user.phone,
                     config        = v_source_app_user.config,
                     external_id   = coalesce(v_source_app_user.external_id, external_id),
@@ -2353,7 +2352,6 @@ CREATE OR REPLACE FUNCTION claimius.ensure_app_user(
     p_first_name TEXT DEFAULT NULL,
     p_last_name  TEXT DEFAULT NULL,
     p_user_name  TEXT DEFAULT NULL,
-    p_user_image TEXT DEFAULT NULL,
     p_email      TEXT DEFAULT NULL,
     p_phone      TEXT DEFAULT NULL,
     p_external_id TEXT DEFAULT NULL
@@ -2372,12 +2370,12 @@ BEGIN
 
     IF NOT FOUND THEN
         INSERT INTO claimius.samna_user (
-            user_id, app_id, first_name, last_name, user_name, user_image,
+            user_id, app_id, first_name, last_name, user_name,
             email, phone, external_id, status, type
         )
         VALUES (
                    COALESCE(p_user_id, gen_random_uuid()),
-                   p_app_id, p_first_name, p_last_name, p_user_name, p_user_image,
+                   p_app_id, p_first_name, p_last_name, p_user_name,
                    p_email, p_phone, p_external_id, 'active', 'user'
                )
         RETURNING * INTO v_user_row;

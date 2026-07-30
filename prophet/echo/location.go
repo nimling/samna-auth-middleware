@@ -22,7 +22,7 @@ func GetLocations(ctx echo.Context) error {
 	if err := sdb.Instance().NewSelect().
 		Model(&locations).
 		ExcludeColumn("sa_deleted_at").
-		Where("app_id = ?", appID).
+		Where("claimius.app_has_object(?, 'claimius.location', ?TableAlias.id)", appID).
 		Where("sa_deleted_at IS NULL").
 		Scan(ctx.Request().Context()); err != nil {
 		ctx.Logger().Errorf("GetLocations: %v", err)
@@ -98,7 +98,6 @@ func GetLocationClaims(ctx echo.Context) error {
 }
 
 func PostLocation(ctx echo.Context) error {
-	appID, _ := ctx.Get("app_id").(uuid.UUID)
 	loc := &Location{}
 	if err := loc.Bind(ctx); err != nil {
 		return respond.Error(ctx, http.StatusBadRequest, "invalid json body")
@@ -106,7 +105,6 @@ func PostLocation(ctx echo.Context) error {
 	if err := loc.ValidatePost(); err != nil {
 		return respond.Error(ctx, http.StatusBadRequest, err.Error())
 	}
-	loc.AppID = appID
 	created, err := postLocation(ctx, *loc)
 	if err != nil {
 		return respond.Error(ctx, errorsx.ErrToHttpCode(err), err.Error())
@@ -128,7 +126,6 @@ func PutLocation(ctx echo.Context) error {
 		return respond.Error(ctx, http.StatusBadRequest, err.Error())
 	}
 	updated.ID = locationID
-	updated.AppID = appID
 	if err := putLocation(ctx, *updated, appID); err != nil {
 		return respond.Error(ctx, errorsx.ErrToHttpCode(err), err.Error())
 	}
@@ -184,7 +181,7 @@ func getLocation(ctx echo.Context, locationID, appID uuid.UUID) (*Location, erro
 		Model(&location).
 		ExcludeColumn("sa_deleted_at").
 		Where("?TableAlias.id = ?", locationID).
-		Where("?TableAlias.app_id = ?", appID).
+		Where("claimius.app_has_object(?, 'claimius.location', ?TableAlias.id)", appID).
 		Where("?TableAlias.sa_deleted_at IS NULL").
 		Scan(ctx.Request().Context())
 	if err != nil {
@@ -234,7 +231,7 @@ func putLocation(ctx echo.Context, location Location, appID uuid.UUID) error {
 		Model(&location).
 		Where("sa_deleted_at IS NULL").
 		Where("id = ?", location.ID).
-		Where("app_id = ?", appID).
+		Where("claimius.app_has_object(?, 'claimius.location', id)", appID).
 		OmitZero().
 		Returning("*").
 		Exec(ctx.Request().Context())
@@ -258,7 +255,7 @@ func deleteLocation(ctx echo.Context, locationID, appID uuid.UUID) (*Location, e
 		NewUpdate().
 		Model(&location).
 		Where("id = ?", locationID).
-		Where("app_id = ?", appID).
+		Where("claimius.app_has_object(?, 'claimius.location', id)", appID).
 		Where("sa_deleted_at IS NULL").
 		Set("sa_deleted_at = NOW()").
 		Returning("*").

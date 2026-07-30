@@ -33,7 +33,7 @@ type assetInput struct {
 	MimeType    string
 	OwnerID     uuid.UUID
 	CreatedBy   uuid.UUID
-	UserImage   bool
+	Type        string
 }
 
 func GetAssets(ctx echo.Context) error {
@@ -155,7 +155,7 @@ func PostAsset(ctx echo.Context) error {
 			MimeType:    *req.MimeType,
 			OwnerID:     *req.OwnerID,
 			CreatedBy:   *req.CreatedBy,
-			UserImage:   ctx.QueryParam("type") == "user_image",
+			Type:        ctx.QueryParam("type"),
 		}
 		asset, err := assetPostObject(ctx, *req.ObjectType, *req.ObjectID, input, nil)
 		if err != nil {
@@ -398,7 +398,7 @@ func assetObjectAssets(ctx echo.Context, id uuid.UUID, objectType ObjectType) er
 }
 
 func assetPostObject(ctx echo.Context, objectType ObjectType, objectID uuid.UUID, input assetInput, formFile *multipart.FileHeader) (*Asset, error) {
-	if input.UserImage && !strings.HasPrefix(input.MimeType, "image/") {
+	if (input.Type == "profile" || input.Type == "banner" || input.Type == "logo") && !strings.HasPrefix(input.MimeType, "image/") {
 		return nil, errorsx.ErrBadRequest
 	}
 
@@ -418,6 +418,9 @@ func assetPostObject(ctx echo.Context, objectType ObjectType, objectID uuid.UUID
 		Status:      "pending",
 		OwnerID:     input.OwnerID,
 		CreatedBy:   input.CreatedBy,
+	}
+	if input.Type != "" {
+		asset.Type = &input.Type
 	}
 
 	if _, err := tx.NewInsert().Model(&asset).Returning("*").Exec(ctx.Request().Context()); err != nil {
@@ -480,18 +483,6 @@ func assetPostObject(ctx echo.Context, objectType ObjectType, objectID uuid.UUID
 	app, _ := ctx.Get("app").(SamnaApp)
 	asset.AssetURL = app.RedirectURI + "/api/asset/" + asset.ID.String() + "/data"
 
-	if input.UserImage && objectType == OBJECT_TYPE_USER {
-		if _, updErr := sdb.Instance().NewUpdate().
-			Model((*SamnaUser)(nil)).
-			Set("user_image = ?", asset.AssetURL).
-			Where("user_id = ?", objectID).
-			Where("app_id = ?", appID).
-			Where("sa_deleted_at IS NULL").
-			Exec(ctx.Request().Context()); updErr != nil {
-			ctx.Logger().Errorf("assetPostObject update user_image: %v", updErr)
-		}
-	}
-
 	return &asset, nil
 }
 
@@ -502,7 +493,7 @@ func assetResolveInputFromForm(ctx echo.Context, formFile *multipart.FileHeader)
 	}
 
 	input := assetInput{
-		UserImage: ctx.QueryParam("type") == "user_image",
+		Type: ctx.QueryParam("type"),
 	}
 
 	if params.Has("name") {

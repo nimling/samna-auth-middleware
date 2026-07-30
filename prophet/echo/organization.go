@@ -54,7 +54,7 @@ func GetOrganizationGraph(ctx echo.Context) error {
 		       CASE WHEN sa_owner_id = id THEN NULL ELSE sa_owner_id END AS parent_id,
 		       jsonb_build_object('level', sa_level) AS data
 		FROM claimius.organization
-		WHERE app_id = ? AND sa_deleted_at IS NULL`, appID).
+		WHERE claimius.app_has_object(?, 'claimius.organization', id) AND sa_deleted_at IS NULL`, appID).
 		Scan(ctx.Request().Context(), &nodes); err != nil {
 		ctx.Logger().Errorf("GetOrganizationGraph: %v", err)
 		return respond.Error(ctx, http.StatusInternalServerError, "Internal server error")
@@ -73,8 +73,7 @@ func PostOrganization(ctx echo.Context) error {
 		ctx.Logger().Warnf("sam PostOrganization validate: %v", err)
 		return respond.Error(ctx, http.StatusBadRequest, err.Error())
 	}
-	org.AppID = appID
-	created, err := postOrganization(ctx, *org)
+	created, err := postOrganization(ctx, *org, appID)
 	if err != nil {
 		return respond.Error(ctx, errorsx.ErrToHttpCode(err), err.Error())
 	}
@@ -95,7 +94,6 @@ func PutOrganization(ctx echo.Context) error {
 		return respond.Error(ctx, http.StatusBadRequest, err.Error())
 	}
 	updated.ID = organizationID
-	updated.AppID = appID
 	if err := putOrganization(ctx, *updated, appID); err != nil {
 		return respond.Error(ctx, errorsx.ErrToHttpCode(err), err.Error())
 	}
@@ -126,7 +124,7 @@ func getOrganization(ctx echo.Context, orgID, appID uuid.UUID) (*Organization, e
 		Model(&organization).
 		ExcludeColumn("sa_deleted_at").
 		Where("?TableAlias.id = ?", orgID).
-		Where("?TableAlias.app_id = ?", appID).
+		Where("claimius.app_has_object(?, 'claimius.organization', ?TableAlias.id)", appID).
 		Where("?TableAlias.sa_deleted_at IS NULL").
 		Scan(ctx.Request().Context())
 	if err != nil {
@@ -159,7 +157,7 @@ func getOrganization(ctx echo.Context, orgID, appID uuid.UUID) (*Organization, e
 	return &organization, nil
 }
 
-func postOrganization(ctx echo.Context, org Organization) (*Organization, error) {
+func postOrganization(ctx echo.Context, org Organization, appID uuid.UUID) (*Organization, error) {
 	if org.OwnerID == nil {
 		orgType := "standard"
 		if org.Type != nil && *org.Type != "" {
@@ -168,7 +166,7 @@ func postOrganization(ctx echo.Context, org Organization) (*Organization, error)
 		var rootID uuid.UUID
 		if err := sdb.Instance().NewRaw(
 			"SELECT (claimius.create_root_organization(?, ?, ?, ?, ?) -> 'organization' ->> 'id')::uuid",
-			org.AppID, org.Name, org.CreatedBy, org.Description, orgType,
+			appID, org.Name, org.CreatedBy, org.Description, orgType,
 		).Scan(ctx.Request().Context(), &rootID); err != nil {
 			ctx.Logger().Errorf("postOrganization root: %v", err)
 			return nil, errorsx.ErrDbUnexpected
@@ -200,7 +198,7 @@ func putOrganization(ctx echo.Context, org Organization, appID uuid.UUID) error 
 		Model(&org).
 		Where("sa_deleted_at IS NULL").
 		Where("id = ?", org.ID).
-		Where("app_id = ?", appID).
+		Where("claimius.app_has_object(?, 'claimius.organization', id)", appID).
 		OmitZero().
 		Returning("*").
 		Exec(ctx.Request().Context())
@@ -224,7 +222,7 @@ func deleteOrganization(ctx echo.Context, organizationID, appID uuid.UUID) (*Org
 		NewUpdate().
 		Model(&organization).
 		Where("id = ?", organizationID).
-		Where("app_id = ?", appID).
+		Where("claimius.app_has_object(?, 'claimius.organization', id)", appID).
 		Where("sa_deleted_at IS NULL").
 		Set("sa_deleted_at = NOW()").
 		Returning("*").

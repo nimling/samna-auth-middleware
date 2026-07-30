@@ -131,7 +131,6 @@ CREATE TABLE IF NOT EXISTS claimius.samna_user (
                                                    first_name      VARCHAR(255),
                                                    last_name       VARCHAR(255),
                                                    user_name       TEXT,
-                                                   user_image      TEXT,
                                                    phone           VARCHAR(50),
                                                    email           VARCHAR(255),
                                                    external_id     TEXT DEFAULT NULL,
@@ -147,7 +146,6 @@ COMMENT ON TABLE claimius.samna_user IS 'User record. One row per (user_id, app_
 COMMENT ON COLUMN claimius.samna_user.user_id IS 'Stable application identifier across apps. Used in all references.';
 COMMENT ON COLUMN claimius.samna_user.app_id IS 'Required app scope. Disciples only hold rows for their own app.';
 COMMENT ON COLUMN claimius.samna_user.user_name IS 'Optional display username, distinct from first_name/last_name.';
-COMMENT ON COLUMN claimius.samna_user.user_image IS 'Optional user image. URL, string, or id that the implementing system recognizes.';
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_samna_user_user_app
     ON claimius.samna_user (user_id, app_id) WHERE sa_deleted_at IS NULL;

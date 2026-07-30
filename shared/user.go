@@ -202,8 +202,8 @@ func (d *DB) deleteRelation(ctx context.Context, ac *AccessClaim, userID, relati
 func (d *DB) InsertUser(ctx context.Context, in *SamnaUser) (*SamnaUser, error) {
 	var payload []byte
 	err := d.NewRaw(`
-		SELECT (claimius.ensure_app_user(?, ?, ?, ?, ?, ?, ?, ?) -> 'samna_user')::jsonb
-	`, in.UserID, in.FirstName, in.LastName, in.UserName, in.UserImage, in.Email, in.Phone, in.ExternalID).Scan(ctx, &payload)
+		SELECT (claimius.ensure_app_user(?, ?, ?, ?, ?, ?, ?) -> 'samna_user')::jsonb
+	`, in.UserID, in.FirstName, in.LastName, in.UserName, in.Email, in.Phone, in.ExternalID).Scan(ctx, &payload)
 	if err != nil {
 		return nil, err
 	}
@@ -446,7 +446,6 @@ func (d *DB) IssueUserToken(ctx context.Context, ac *AccessClaim, payload SamnaU
 		user.FirstName = payload.User.FirstName
 		user.LastName = payload.User.LastName
 		user.UserName = payload.User.UserName
-		user.UserImage = payload.User.UserImage
 		user.Phone = payload.User.Phone
 		user.Email = payload.User.Email
 	}
