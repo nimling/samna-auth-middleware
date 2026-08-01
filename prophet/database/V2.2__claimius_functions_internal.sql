@@ -1128,6 +1128,10 @@ DECLARE
     v_has_soft      BOOLEAN;
     v_obj_gone      BOOLEAN;
 BEGIN
+    IF p_object_type IS NULL OR p_object_id IS NULL THEN
+        RETURN;
+    END IF;
+
     v_id := claimius.composite_id(p_app_id::TEXT, p_user_id::TEXT, p_object_type, p_object_id::TEXT);
 
     SELECT has_sa_deleted_at INTO v_has_soft
