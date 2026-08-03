@@ -139,7 +139,11 @@ func GetSyncSnapshot(ctx echo.Context) error {
 
 	for _, t := range tables {
 		q := sdb.Instance().NewSelect().Model(t.model)
-		if t.filterApp && appID != uuid.Nil {
+		if t.eventType == "claimius.organization" || t.eventType == "claimius.location" {
+			if appID != uuid.Nil {
+				q = q.Where("id IN (SELECT claimius.app_object_ids(?, ?))", appID, t.eventType)
+			}
+		} else if t.filterApp && appID != uuid.Nil {
 			q = q.Where("app_id = ?", appID)
 		}
 		if err := q.Scan(ctx.Request().Context()); err != nil {
