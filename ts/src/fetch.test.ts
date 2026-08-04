@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
-import { createAuthFetch } from '../fetch'
-import { CSRF_TOKEN_HEADER } from '../types'
+import { createAuthFetch } from './fetch'
+import { CSRF_TOKEN_HEADER } from './types'
 
 function stubFetch() {
   const calls: { url: unknown; init: RequestInit | undefined }[] = []

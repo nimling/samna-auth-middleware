@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { parseCookies } from '../cookies'
+import { parseCookies } from './cookies'
 
 describe('parseCookies', () => {
   it('parses a single cookie', () => {

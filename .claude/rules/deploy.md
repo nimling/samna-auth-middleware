@@ -22,7 +22,7 @@ This repo publishes two artefacts: the Go module consumed via `go get github.com
 
 1. Update or add Go tests under `test/` for any change that has an observable contract on the Go side.
 
-2. Update or add typescript tests under `ts/src/__tests__/` for any change that has an observable contract on the typescript side.
+2. Update or add typescript tests beside the module they cover as `ts/src/<name>.test.ts` for any change that has an observable contract on the typescript side.
 
 3. Match the json tag, not the Go field name, when mirroring Go types into typescript.
 

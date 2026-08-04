@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest'
-import { createServiceClient } from '../service'
-import { ErrForbidden, ErrNotFound, ErrUnauthorized, USER_TOKEN_HEADER } from '../types'
+import { createServiceClient } from './service'
+import { ErrForbidden, ErrNotFound, ErrUnauthorized, USER_TOKEN_HEADER } from './types'
 
 function stubFetch(status = 200, payload: unknown = { data: { id: 'a1' } }) {
   const calls: { url: unknown; init: RequestInit | undefined }[] = []
