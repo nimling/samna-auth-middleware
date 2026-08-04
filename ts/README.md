@@ -26,15 +26,35 @@ Capabilities split on whether the runtime can hold a confidential client secret.
 
 ### Requires `client_id` and `client_secret`, server only
 
-These flows hold a confidential secret and must run on a first-party backend. They are not implemented in this package today; the Go middleware in `client/auth.go` is the canonical source.
+These flows hold a confidential secret and must run on a first-party backend.
 
-1. Authorization code exchange at `/oauth/token`.
+1. Authorization code exchange at `/oauth/token`, through `postAuthCode`.
 
-2. Refresh token exchange at `/oauth/token`.
+2. Refresh token exchange at `/oauth/token`, through `postRefreshToken`.
 
-3. Service-to-service client credentials grant.
+3. Service to service calls with client credentials, through `createServiceClient`.
 
 4. Local schema sync. The Go middleware's `sync.PullSnapshot` is the only implementation; a browser cannot hold the resulting database.
+
+### Service to service
+
+`createServiceClient` calls another Samna service with a machine client's credentials. It sends HTTP basic auth, unwraps the response envelope and returns `data`, and maps 401, 403, 404, 400 and 409 onto the exported `Err*` sentinels. 204 resolves to `undefined`.
+
+```ts
+import { createServiceClient } from '@nimling/samna-auth-middleware'
+
+const api = createServiceClient({
+  baseUrl: process.env.CONTENT_BASE_URL!,
+  clientId: process.env.CONTENT_CLIENT_ID!,
+  clientSecret: process.env.CONTENT_CLIENT_SECRET!
+})
+
+const articles = await api.get<Article[]>('/api/article')
+```
+
+The client id becomes the actor on the serving side, so what comes back is decided by the claims bound to that client. To act on behalf of a signed in human on the same call, pass `userToken` or `userExternalId` in the per call options; they travel as `SAuth-User-Token` and `SAuth-User-ID`.
+
+Creating the client and granting it a claim happens on the prophet. See `docs/clients.md` in the repo root.
 
 ## Best practice: never ship client credentials to a plain frontend
 

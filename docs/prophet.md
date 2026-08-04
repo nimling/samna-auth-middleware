@@ -50,6 +50,14 @@ func main() {
 
 4. `smw.UserAuthMiddleware(opts)` protects browser and bearer facing routes. Pass `nil` to take the slug, secret, redirect and page redirect from the config. `smw.ClientAuthMiddleware()` protects service to service routes.
 
+## App scoping
+
+The prophet hosts every app, so every read it performs is scoped. Most tables carry an `app_id` column. `organization` and `location` do not: they are shared objects linked to apps through `claimius.app_object`, filtered with `app_object_ids(app_id, object_type)` and linked with `link_app_object`. See [App scoping](app_scoping.md).
+
+## Machine clients
+
+`/samna_client` under the registered group creates the service accounts other services authenticate with. `POST` returns the raw secret once and stores only its bcrypt hash; `POST /:id/rotate` issues a new one; `POST /:id/claim` binds a claim to the client. The client is always created under the app whose API it will call, because the sync feed is filtered by `app_id`. See [Machine clients](clients.md).
+
 ## Notes
 
 The prophet serves the sync snapshot and delta feed at `sync/snapshot` and `sync/:seq` under the registered group. It does not run `SyncStart`; that is the disciple side.

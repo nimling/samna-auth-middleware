@@ -47,6 +47,32 @@ export const REFRESH_TOKEN_COOKIE = 'sauth_refresh_token'
 export const CSRF_TOKEN_COOKIE = 'sauth_csrf_token'
 export const CSRF_TOKEN_HEADER = 'SAuth-CSRF-Token'
 
+export const APP_SLUG_HEADER = 'SAuth-App-Slug'
+export const APP_SECRET_HEADER = 'SAuth-App-Secret'
+export const USER_TOKEN_HEADER = 'SAuth-User-Token'
+export const USER_EXTERNAL_HEADER = 'SAuth-User-ID'
+
+export interface ResponseEnvelope<T> {
+  data: T
+  error?: string
+  request_id?: string
+  count?: number
+}
+
+export interface ServiceClientConfig {
+  baseUrl: string
+  clientId: string
+  clientSecret: string
+  timeoutMs?: number
+}
+
+export interface ServiceCallOptions {
+  userToken?: string
+  userExternalId?: string
+  headers?: Record<string, string>
+  signal?: AbortSignal
+}
+
 export interface JWKSLike {
   keys: unknown[]
 }

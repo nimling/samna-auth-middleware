@@ -51,6 +51,16 @@ func main() {
 
 4. `sam.SyncStart(ctx)` launches the background pull loop that keeps the local database current. It takes a snapshot on first run, then polls the prophet for deltas, backing off on failure and logging through the database logger. Call it once; it returns immediately and runs until the context ends.
 
+## App scoping
+
+A disciple mirrors exactly one app, so nothing it holds needs an app filter. Its tables carry no `app_id` column, it has no `app_object` table, and the sync layer strips `app_id` from every payload before upsert. Write app scoping on the prophet side only. See [App scoping](app_scoping.md).
+
+When a disciple answers 403 on every listing endpoint while the service is otherwise healthy, check the organization count in its replica first. `RootAccess` resolves through the actor's root organization, and an empty organization table fails every one of those gates.
+
+## Serving other services
+
+A disciple that other services read from mounts `smw.UserAuthMiddleware(nil)` on the group they call, which accepts a bearer token, a session cookie, or client credentials. Use `smw.ClientAuthMiddleware()` instead when the group is only ever reached machine to machine. The client id becomes the actor, so the same claims and the same `ScopeAccess` grants decide the answer. The client row itself is created on the prophet and arrives by sync. See [Machine clients](clients.md).
+
 ## Notes
 
 There is no inbound sync endpoint on a disciple. The disciple reaches out to the prophet.

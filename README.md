@@ -38,6 +38,13 @@ Follow the walkthrough for your role:
 - [Prophet](docs/prophet.md)
 - [Disciple](docs/disciple.md)
 
+Then the cross cutting topics:
+
+- [Sync](docs/sync.md), the disciple pull loop
+- [App scoping](docs/app_scoping.md), `app_id` columns and `app_object` links
+- [Machine clients](docs/clients.md), service to service calls with client credentials
+- [Marshalling](docs/marshalling.md), the JSON shape over the wire
+
 Runnable examples live under [example/prophet](example/prophet) and [example/disciple](example/disciple). Each has a `.env.example`; copy it to `.env`, fill it in, and run `go run main.go`.
 
 ## Middleware
@@ -47,6 +54,8 @@ The `smw` package validates requests against the Samna Auth service following OA
 - `smw.AppMiddleware` is internal. It guards the endpoints apps use to reach the prophet, authenticating the app slug and secret and setting the app context.
 - `smw.UserAuthMiddleware(opts)` authenticates browser and bearer users. It checks a bearer token, then a session cookie, then client credentials, and reads the resolved OIDC endpoints from the config that `sdb.Init` loaded. Pass `nil` to take the slug, secret, redirect, and page redirect from the config.
 - `smw.ClientAuthMiddleware()` authenticates service to service callers by their client credentials.
+
+Client credentials arrive as HTTP basic auth or as `client_id` and `client_secret` form values, and the client id becomes the actor, so a machine is authorized by the same claims a human is. [Machine clients](docs/clients.md) covers creating one, granting it a claim, and calling with it.
 
 After a successful pass the user id and access token sit in the context:
 
@@ -84,10 +93,10 @@ Setting `SAUTH_DEBUG_USER_ID` to a valid UUID makes the middleware skip authenti
 
 The repo ships the Claimius schema as two complete, role tailored SQL sets, both embedded in the module:
 
-- `prophet/database` is the full schema, copied as is from the canonical claimius source. It carries `app_id` on every scoped table and hosts many apps. It is the source of truth: writes fire calc triggers that materialize `user_object` and emit `sync_event` rows for downstream disciples.
-- `disciple/database` is the same schema with `app_id` removed from every table, index, and function, and with the functions that no consumer calls removed (`init_prophet`, `init_hybrid`, `merge_user`, `recompute_state`). A disciple mirrors exactly one app, so it needs no `app_id`. Its calc engine still runs in debug mode for standalone local writes, and stays dormant under `replay_mode` while sync applies the relation tables shipped from the prophet.
+- `prophet/database` is the full schema, copied as is from the canonical claimius source. It hosts many apps and scopes them two ways: an `app_id` column on most tables, and `claimius.app_object` links for `organization` and `location`, which carry no `app_id`. It is the source of truth: writes fire calc triggers that materialize `user_object` and emit `sync_event` rows for downstream disciples.
+- `disciple/database` is the same schema with `app_id` removed from every table, index, and function, without `app_object`, and with the functions that no consumer calls removed (`init_prophet`, `init_hybrid`, `merge_user`, `recompute_state`). A disciple mirrors exactly one app, so it needs neither mechanism. Its calc engine still runs in debug mode for standalone local writes, and stays dormant under `replay_mode` while sync applies the relation tables shipped from the prophet.
 
-`app_id` exists only on the prophet. It is read from the deployment env into `prophet_state` at init. The disciple schema knows nothing about it.
+Both scoping mechanisms exist only on the prophet. `app_id` is read from the deployment env into `prophet_state` at init. The disciple schema knows nothing about either. [App scoping](docs/app_scoping.md) has the full rules.
 
 ### Choosing a role at migrate time
 

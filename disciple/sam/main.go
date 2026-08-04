@@ -154,23 +154,47 @@ func applyDelete(ctx context.Context, tx bun.Tx, eventType string, raw json.RawM
 		return fmt.Errorf("unmarshal id envelope: %w", err)
 	}
 	switch eventType {
+	case "claimius.samna_user":
+		return deleteEntity[shared.SamnaUser](ctx, tx, env.ID)
+	case "claimius.samna_client":
+		return deleteEntity[shared.SamnaClient](ctx, tx, env.ID)
+	case "claimius.samna_secret":
+		return deleteEntity[shared.SamnaSecret](ctx, tx, env.ID)
+	case "claimius.organization":
+		return deleteEntity[shared.Organization](ctx, tx, env.ID)
+	case "claimius.location":
+		return deleteEntity[shared.Location](ctx, tx, env.ID)
+	case "claimius.claim":
+		return deleteEntity[shared.Claim](ctx, tx, env.ID)
+	case "claimius.user_claim":
+		return deleteEntity[shared.UserClaim](ctx, tx, env.ID)
+	case "claimius.claim_object":
+		return deleteEntity[shared.ClaimObject](ctx, tx, env.ID)
+	case "claimius.object_field":
+		return deleteEntity[shared.ObjectField](ctx, tx, env.ID)
+	case "claimius.user_field":
+		return deleteEntity[shared.UserField](ctx, tx, env.ID)
+	case "claimius.user_relation":
+		return deleteEntity[shared.UserRelation](ctx, tx, env.ID)
+	case "claimius.audit":
+		return deleteEntity[shared.Audit](ctx, tx, env.ID)
 	case "claimius.user_object":
-		return deleteByTextID(ctx, tx, (*shared.UserObject)(nil), env.ID)
+		return deleteEntity[shared.UserObject](ctx, tx, env.ID)
 	case "claimius.object_users":
-		return deleteByTextID(ctx, tx, (*shared.ObjectUsers)(nil), env.ID)
+		return deleteEntity[shared.ObjectUsers](ctx, tx, env.ID)
 	case "claimius.user_users":
-		return deleteByTextID(ctx, tx, (*shared.UserUsers)(nil), env.ID)
+		return deleteEntity[shared.UserUsers](ctx, tx, env.ID)
 	default:
 		return fmt.Errorf("delete not supported for event_type: %s", eventType)
 	}
 }
 
-func deleteByTextID(ctx context.Context, tx bun.Tx, model any, id json.RawMessage) error {
+func deleteEntity[T any](ctx context.Context, tx bun.Tx, id json.RawMessage) error {
 	var key string
 	if err := json.Unmarshal(id, &key); err != nil {
-		return fmt.Errorf("unmarshal id as string: %w", err)
+		return fmt.Errorf("unmarshal id: %w", err)
 	}
-	_, err := tx.NewDelete().Model(model).
+	_, err := tx.NewDelete().Model((*T)(nil)).
 		Where("id = ?", key).Exec(ctx)
 	return err
 }

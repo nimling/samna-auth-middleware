@@ -12,6 +12,9 @@ description: |
    sa_parent_id sa_location_id sa_created_by sa_deleted_at app_id, deny
    is_deny inherits cascaded_from grants direct_grant, samna_app samna_user
    samna_client samna_secret inheritance_info table_info sync_event,
+   app_object app_object_ids apps_for_object link_app_object app_has_object
+   unlink_app_object create_root_organization, scope claim ScopeAccess
+   jsonb_path_exists machine client service to service client credentials,
    init_prophet init_disciple init_hybrid init_claimius_tables
    init_claimius_internal ensure_app_user merge_user migrate_root,
    calc_object_access calc_hierarchical_access calc_claim_access
@@ -29,6 +32,7 @@ hard_constraints:
    - tree roots are self referential. Orgs root when `sa_owner_id == sa_root_id == id`. Locations and parenthood tables root when `sa_parent_id == sa_root_id == id`. No nullable parents.
    - `sa_parent_id` and `sa_root_id` come together or not at all
    - every materialized state query must filter on `app_id`
+   - `organization` and `location` are the exception: no `app_id` column, scoped through `claimius.app_object` links, filtered with `app_object_ids(app_id, object_type)`
    - registered external tables may omit the `app_id` column. Claimius infers it from `get_app_id()` at trigger time. On prophets that host more than one app the column is required, and registration is rejected without it.
    - object types are always schema qualified like `public.device`, never bare `device`
    - `claimius.replay_mode` is set ONLY by the disciple sync layer, never by app code
@@ -136,12 +140,15 @@ BEGIN
 END $$;
 
 -- Direct INSERT is fine on tables without a write function. Calc triggers
--- attached to the table maintain everything afterward.
+-- attached to the table maintain everything afterward. organization and
+-- location carry no app_id; link the row to the app afterwards.
 INSERT INTO claimius.organization (
-    app_id, name, sa_owner_id, sa_root_id, sa_level, sa_created_by
+    name, sa_owner_id, sa_root_id, sa_level, sa_created_by
 ) VALUES (
-    $app_id, 'Acme NYC', $parent_org_id, $parent_org_root_id, 1, $user_claim_id
-);
+    'Acme NYC', $parent_org_id, $parent_org_root_id, 1, $user_claim_id
+) RETURNING id INTO v_org_id;
+
+SELECT claimius.link_app_object($app_id, 'claimius.organization', v_org_id, $user_claim_id);
 ```
 
 Tables that have a write function:
@@ -159,11 +166,13 @@ Tables that have a write function:
 Tables where direct INSERT/UPDATE is the documented path:
 
 - `samna_app`. Use `init_prophet` for the FIRST app only.
-- `organization`
+- `organization`. Prefer `create_root_organization` for roots; it links `app_object` for you.
 - `location`
 - `samna_client`, `samna_secret`
 - `object_field`, `user_field`, `user_relation`
 - `prophet_state`, `disciple_state`
+
+`app_object` has write functions and is never written directly: `link_app_object`, `unlink_app_object`. Both maintain the materialized access rows for the pair.
 
 You may NEVER write directly to:
 
@@ -199,9 +208,24 @@ For root creation with an idempotency guard on app and name, use `claimius.creat
 
 ### App scoping
 
-Every materialized state row carries `app_id`. The same human user gets one `samna_user` row per app, all sharing the same `user_id`. Disciples only know about their own app's rows. The prophet holds rows for every app.
+There are two scoping mechanisms and the table decides which one applies.
 
-When writing a query that hits any of `samna_user`, `user_claim`, `user_object`, `object_users`, `user_users`, `user_relation`, `user_field`, always include `app_id` in the filter.
+Own `app_id` column. `samna_user`, `claim`, `user_claim`, `claim_object`, `user_object`, `object_users`, `user_users`, `user_relation`, `user_field`, `object_field`, `samna_client`, `samna_secret`, `audit`. One row belongs to exactly one app. The same human user gets one `samna_user` row per app, all sharing the same `user_id`. Any query hitting these tables includes `app_id` in the filter.
+
+`app_object` links. `organization` and `location` carry no `app_id` column. They are shared hierarchy objects, and an object belongs to every app holding a live `claimius.app_object` row for it. One organization can serve several apps without duplication.
+
+The helpers on the prophet:
+
+- `app_object_ids(app_id, object_type)` returns the object ids of one type linked to an app. This is the filter to use in place of `app_id = ?` for organizations and locations.
+- `apps_for_object(object_type, object_id)` returns the app ids holding a live link to one object.
+- `app_has_object(app_id, object_type, object_id)` is the boolean guard.
+- `link_app_object(app_id, object_type, object_id, created_by)` creates the link and materializes access for the pair. Idempotent.
+- `unlink_app_object` soft deletes the link and purges the materialized rows it granted.
+- `create_root_organization(app_id, name, ...)` creates the root and links it in one call, idempotent on app and name.
+
+The unique index is `(app_id, object_type, object_id)` where `sa_deleted_at IS NULL`, so a live link is unique per app and object.
+
+Disciples do not carry `app_object` at all, and their `organization` and `location` tables have no `app_id`. A disciple mirrors exactly one app, so every row it holds is already in scope. The sync layer strips `app_id` from each payload before upsert, and the prophet selects organizations and locations for the snapshot through `app_object_ids`. Write the app filter on the prophet side only.
 
 ### Deny semantics
 
@@ -328,6 +352,8 @@ To force a refresh, call `claimius.recompute_user_object($app_id, $user_id, $obj
 - Hard delete in app code on a registered table.
 - Adding an FK from app tables to `samna_user.id`. Use `samna_user.user_id`.
 - A query against `samna_user` without `app_id` in the filter.
+- A query filtering `organization` or `location` by `app_id`. That column does not exist; use `app_object_ids`.
+- Direct INSERT/UPDATE on `app_object`. Use `link_app_object` and `unlink_app_object`.
 - Editing `user_object` rows directly to change access.
 - Overriding `claimius.replay_mode` outside the disciple sync layer.
 - Calling `migrate_root` without flagging for human review.
