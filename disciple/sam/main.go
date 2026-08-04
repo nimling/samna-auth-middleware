@@ -194,9 +194,20 @@ func deleteEntity[T any](ctx context.Context, tx bun.Tx, id json.RawMessage) err
 	if err := json.Unmarshal(id, &key); err != nil {
 		return fmt.Errorf("unmarshal id: %w", err)
 	}
-	_, err := tx.NewDelete().Model((*T)(nil)).
+	entity := new(T)
+	result, err := tx.NewDelete().Model(entity).
 		Where("id = ?", key).Exec(ctx)
-	return err
+	if err != nil {
+		return fmt.Errorf("delete %T: %w", entity, err)
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("delete %T rows: %w", entity, err)
+	}
+	if rows == 0 {
+		sdb.Instance().Logger.Debugf("disciple sync: delete %T id %s matched no row", entity, key)
+	}
+	return nil
 }
 
 func UpdateSeq(ctx context.Context, seq int64) error {
