@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/google/uuid"
 	sdb "github.com/nimling/samna-auth-middleware/disciple/sdb"
 	"github.com/nimling/samna-auth-middleware/internal/store"
 	"github.com/nimling/samna-auth-middleware/sauth"
@@ -94,13 +95,70 @@ func ApplyPayload(ctx context.Context, payload SyncPayload) error {
 
 		switch payload.Operation {
 		case "upsert":
-			return applyUpsert(ctx, tx, payload.EventType, payload.Payload)
+			if err := applyUpsert(ctx, tx, payload.EventType, payload.Payload); err != nil {
+				return err
+			}
 		case "delete":
-			return applyDelete(ctx, tx, payload.EventType, payload.Payload)
+			if err := applyDelete(ctx, tx, payload.EventType, payload.Payload); err != nil {
+				return err
+			}
 		default:
 			return fmt.Errorf("unknown sync operation: %s", payload.Operation)
 		}
+
+		return recomputeExternal(ctx, tx, payload.EventType, payload.Payload)
 	})
+}
+
+type claimBindingEnvelope struct {
+	ID      *uuid.UUID `json:"id"`
+	ClaimID *uuid.UUID `json:"claim_id"`
+	UserID  *uuid.UUID `json:"user_id"`
+}
+
+func recomputeExternal(ctx context.Context, tx bun.Tx, eventType string, raw json.RawMessage) error {
+	var envelope claimBindingEnvelope
+	switch eventType {
+	case "claimius.claim":
+		if err := json.Unmarshal(raw, &envelope); err != nil {
+			return fmt.Errorf("unmarshal claim envelope: %w", err)
+		}
+		envelope.ClaimID = envelope.ID
+	case "claimius.claim_object", "claimius.user_claim":
+		if err := json.Unmarshal(raw, &envelope); err != nil {
+			return fmt.Errorf("unmarshal claim binding envelope: %w", err)
+		}
+	default:
+		return nil
+	}
+
+	userIDs := make([]uuid.UUID, 0, 1)
+	if envelope.UserID != nil {
+		userIDs = append(userIDs, *envelope.UserID)
+	} else if envelope.ClaimID != nil {
+		if err := tx.NewSelect().
+			Model((*shared.UserClaim)(nil)).
+			Column("user_id").
+			Where("claim_id = ?", *envelope.ClaimID).
+			Where("sa_deleted_at IS NULL").
+			Scan(ctx, &userIDs); err != nil {
+			return fmt.Errorf("select claim holders: %w", err)
+		}
+	}
+
+	if _, err := tx.ExecContext(ctx, "SET LOCAL claimius.replay_mode = 'false'"); err != nil {
+		return fmt.Errorf("clear replay_mode: %w", err)
+	}
+	defer func() {
+		_, _ = tx.ExecContext(ctx, "SET LOCAL claimius.replay_mode = 'true'")
+	}()
+
+	for _, userID := range userIDs {
+		if _, err := tx.ExecContext(ctx, "SELECT claimius.recompute_external_access(?)", userID); err != nil {
+			return fmt.Errorf("recompute external access for %s: %w", userID, err)
+		}
+	}
+	return nil
 }
 
 func applyUpsert(ctx context.Context, tx bun.Tx, eventType string, raw json.RawMessage) error {

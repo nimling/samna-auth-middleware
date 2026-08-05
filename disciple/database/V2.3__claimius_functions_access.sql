@@ -955,3 +955,39 @@ END;
 $$ LANGUAGE plpgsql;
 
 COMMENT ON FUNCTION claimius._set_self_parent_on_insert() IS 'BEFORE INSERT for parenthood tables. Self references on root creation; copies parent sa_root_id from the same table otherwise.';
+-- recompute_external_access
+-- Materializes user_object and object_users for one user across every
+-- registered external table. The prophet cannot compute these rows because
+-- the tables exist only on the disciple, so sync calls this after applying a
+-- claim, claim_object or user_claim payload.
+CREATE OR REPLACE FUNCTION claimius.recompute_external_access(
+    p_user_id UUID
+) RETURNS INTEGER AS $$
+DECLARE
+    v_table RECORD;
+    v_row   RECORD;
+    v_count INTEGER := 0;
+BEGIN
+    FOR v_table IN
+        SELECT object_type, schema_name, table_name, has_sa_deleted_at
+        FROM claimius.table_info
+        WHERE is_internal = FALSE
+        LOOP
+            FOR v_row IN EXECUTE format(
+                'SELECT id FROM %I.%I%s',
+                v_table.schema_name,
+                v_table.table_name,
+                CASE WHEN v_table.has_sa_deleted_at THEN ' WHERE sa_deleted_at IS NULL' ELSE '' END
+            )
+                LOOP
+                    PERFORM claimius.recompute_user_object(p_user_id, v_table.object_type, v_row.id);
+                    v_count := v_count + 1;
+                END LOOP;
+        END LOOP;
+
+    PERFORM claimius._refresh_user_users(p_user_id);
+    RETURN v_count;
+END;
+$$ LANGUAGE plpgsql;
+
+COMMENT ON FUNCTION claimius.recompute_external_access(p_user_id uuid) IS 'Rebuilds user_object and object_users for one user over every external registered table. Called by disciple sync after a claim binding arrives, since the prophet holds no external tables.';
