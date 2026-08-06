@@ -7,12 +7,42 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/labstack/echo/v4"
 	sdb "github.com/nimling/samna-auth-middleware/disciple/sdb"
 	"github.com/nimling/samna-auth-middleware/internal/store"
 	"github.com/nimling/samna-auth-middleware/sauth"
 	"github.com/nimling/samna-auth-middleware/shared"
 	"github.com/uptrace/bun"
 )
+
+const (
+	activeInterval            = 100 * time.Millisecond
+	maxIdleInterval           = 15 * time.Second
+	maxBackoff                = 30 * time.Second
+	emptyPullsBeforeReconcile = 40
+)
+
+// reportStalledCursor records that the disciple has asked for events past its
+// cursor repeatedly without receiving any. A cursor above the prophet's highest
+// sequence produces exactly this pattern and never recovers on its own, so the
+// loop answers it with a snapshot and leaves an audit trail of the reconcile.
+func reportStalledCursor(ctx context.Context, log echo.Logger) {
+	seq, err := GetSeq(ctx)
+	if err != nil {
+		log.Errorf("disciple sync: read cursor before reconcile: %v", err)
+		return
+	}
+	log.Warnf("disciple sync: cursor %d returned no events %d times, reconciling from snapshot", seq, emptyPullsBeforeReconcile)
+	sdb.Write(
+		"disciple sync reconcile",
+		"update",
+		"claimius.disciple_state",
+		uuid.Nil,
+		uuid.Nil,
+		nil,
+		fmt.Sprintf("cursor %d yielded no events %d consecutive pulls, pulling a fresh snapshot", seq, emptyPullsBeforeReconcile),
+	)
+}
 
 // SyncStart launches the background pull loop that keeps the disciple database
 // current. Call it once after the server starts. It runs until the context ends
@@ -34,18 +64,40 @@ func SyncStart(ctx context.Context) {
 			report(PullSnapshot(ctx))
 		}
 		backoff := time.Second
-		const maxBackoff = 30 * time.Second
+		idle := time.Duration(0)
+		empty := 0
 		for {
-			wait := 100 * time.Millisecond
-			if err := PullSync(ctx); err != nil {
+			wait := activeInterval
+			applied, err := PullSync(ctx)
+			switch {
+			case err != nil:
 				report(err)
 				wait = backoff
 				backoff *= 2
 				if backoff > maxBackoff {
 					backoff = maxBackoff
 				}
-			} else {
+			case applied > 0:
 				backoff = time.Second
+				idle = 0
+				empty = 0
+			default:
+				backoff = time.Second
+				empty++
+				if idle == 0 {
+					idle = activeInterval
+				}
+				idle *= 2
+				if idle > maxIdleInterval {
+					idle = maxIdleInterval
+				}
+				wait = idle
+				if empty >= emptyPullsBeforeReconcile {
+					empty = 0
+					idle = 0
+					reportStalledCursor(ctx, log)
+					report(PullSnapshot(ctx))
+				}
 			}
 			select {
 			case <-ctx.Done():

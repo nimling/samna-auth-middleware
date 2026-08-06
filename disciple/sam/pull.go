@@ -38,24 +38,24 @@ func PullSnapshot(ctx context.Context) error {
 	return nil
 }
 
-func PullSync(ctx context.Context) error {
+func PullSync(ctx context.Context) (int, error) {
 	seq, err := GetSeq(ctx)
 	if err != nil {
-		return fmt.Errorf("get current seq: %w", err)
+		return 0, fmt.Errorf("get current seq: %w", err)
 	}
 
 	var payloads []SyncPayload
 	if err := client.Get(ctx, fmt.Sprintf("sync/%d", seq), &payloads); err != nil {
 		if errors.Is(err, client.ErrNotFound) {
-			return shared.ErrSyncUnreachable
+			return 0, shared.ErrSyncUnreachable
 		}
-		return fmt.Errorf("fetch sync: %w", err)
+		return 0, fmt.Errorf("fetch sync: %w", err)
 	}
 
 	var maxSeq int64
 	for _, payload := range payloads {
 		if err := ApplyPayload(ctx, payload); err != nil {
-			return fmt.Errorf("apply %s seq %d: %w", payload.EventType, payload.Seq, err)
+			return 0, fmt.Errorf("apply %s seq %d: %w", payload.EventType, payload.Seq, err)
 		}
 		if payload.Seq > maxSeq {
 			maxSeq = payload.Seq
@@ -64,9 +64,9 @@ func PullSync(ctx context.Context) error {
 
 	if maxSeq > 0 {
 		if err := UpdateSeq(ctx, maxSeq); err != nil {
-			return fmt.Errorf("update seq: %w", err)
+			return len(payloads), fmt.Errorf("update seq: %w", err)
 		}
 	}
 
-	return nil
+	return len(payloads), nil
 }
