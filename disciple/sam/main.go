@@ -16,23 +16,25 @@ import (
 )
 
 const (
-	activeInterval            = 100 * time.Millisecond
-	maxIdleInterval           = 15 * time.Second
-	maxBackoff                = 30 * time.Second
-	emptyPullsBeforeReconcile = 40
+	activeInterval             = 100 * time.Millisecond
+	maxIdleInterval            = 15 * time.Second
+	maxBackoff                 = 30 * time.Second
+	emptyPullsBeforeReconcile  = 40
+	failedPullsBeforeReconcile = 10
 )
 
-// reportStalledCursor records that the disciple has asked for events past its
-// cursor repeatedly without receiving any. A cursor above the prophet's highest
-// sequence produces exactly this pattern and never recovers on its own, so the
-// loop answers it with a snapshot and leaves an audit trail of the reconcile.
-func reportStalledCursor(ctx context.Context, log echo.Logger) {
+// reportStalledCursor records that the disciple has stopped making progress at
+// its cursor. Two patterns produce this and neither recovers on its own: a
+// cursor above the prophet's highest sequence, which yields empty pulls
+// forever, and an event the replica cannot apply, which fails forever. The loop
+// answers both with a snapshot and leaves an audit trail of the reconcile.
+func reportStalledCursor(ctx context.Context, log echo.Logger, reason string) {
 	seq, err := GetSeq(ctx)
 	if err != nil {
 		log.Errorf("disciple sync: read cursor before reconcile: %v", err)
 		return
 	}
-	log.Warnf("disciple sync: cursor %d returned no events %d times, reconciling from snapshot", seq, emptyPullsBeforeReconcile)
+	log.Warnf("disciple sync: cursor %d %s, reconciling from snapshot", seq, reason)
 	sdb.Write(
 		"disciple sync reconcile",
 		"update",
@@ -40,7 +42,7 @@ func reportStalledCursor(ctx context.Context, log echo.Logger) {
 		uuid.Nil,
 		uuid.Nil,
 		nil,
-		fmt.Sprintf("cursor %d yielded no events %d consecutive pulls, pulling a fresh snapshot", seq, emptyPullsBeforeReconcile),
+		fmt.Sprintf("cursor %d %s, pulling a fresh snapshot", seq, reason),
 	)
 }
 
@@ -66,6 +68,7 @@ func SyncStart(ctx context.Context) {
 		backoff := time.Second
 		idle := time.Duration(0)
 		empty := 0
+		failed := 0
 		for {
 			wait := activeInterval
 			applied, err := PullSync(ctx)
@@ -77,13 +80,22 @@ func SyncStart(ctx context.Context) {
 				if backoff > maxBackoff {
 					backoff = maxBackoff
 				}
+				failed++
+				if failed >= failedPullsBeforeReconcile {
+					failed = 0
+					backoff = time.Second
+					reportStalledCursor(ctx, log, fmt.Sprintf("failed to apply %d consecutive pulls, last error %v", failedPullsBeforeReconcile, err))
+					report(PullSnapshot(ctx))
+				}
 			case applied > 0:
 				backoff = time.Second
 				idle = 0
 				empty = 0
+				failed = 0
 			default:
 				backoff = time.Second
 				empty++
+				failed = 0
 				if idle == 0 {
 					idle = activeInterval
 				}
@@ -95,7 +107,7 @@ func SyncStart(ctx context.Context) {
 				if empty >= emptyPullsBeforeReconcile {
 					empty = 0
 					idle = 0
-					reportStalledCursor(ctx, log)
+					reportStalledCursor(ctx, log, fmt.Sprintf("returned no events %d consecutive pulls", emptyPullsBeforeReconcile))
 					report(PullSnapshot(ctx))
 				}
 			}
@@ -216,7 +228,21 @@ func recomputeExternal(ctx context.Context, tx bun.Tx, eventType string, raw jso
 func applyUpsert(ctx context.Context, tx bun.Tx, eventType string, raw json.RawMessage) error {
 	switch eventType {
 	case "claimius.samna_user":
-		return upsertEntity[shared.SamnaUser](ctx, tx, raw)
+		var incoming shared.SamnaUser
+		if err := sauth.Unmarshal(raw, &incoming); err != nil {
+			return fmt.Errorf("unmarshal: %w", err)
+		}
+		if _, err := tx.NewUpdate().
+			Model((*shared.SamnaUser)(nil)).
+			Set("sa_deleted_at = now()").
+			Set("sa_updated_at = now()").
+			Where("user_id = ?", incoming.UserID).
+			Where("id <> ?", incoming.ID).
+			Where("sa_deleted_at IS NULL").
+			Exec(ctx); err != nil {
+			return fmt.Errorf("retire superseded samna_user %s: %w", incoming.UserID, err)
+		}
+		return store.Upsert(ctx, tx, &incoming)
 	case "claimius.samna_client":
 		return upsertEntity[shared.SamnaClient](ctx, tx, raw)
 	case "claimius.samna_secret":

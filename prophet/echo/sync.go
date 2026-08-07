@@ -148,12 +148,13 @@ func GetSyncSnapshot(ctx echo.Context) error {
 		}
 		if err := q.Scan(ctx.Request().Context()); err != nil {
 			ctx.Logger().Errorf("snapshot %s: %v", t.eventType, err)
-			continue
+			return respond.Error(ctx, http.StatusInternalServerError, "Internal server error")
 		}
 
 		items, err := sauth.MarshalRows(t.model)
 		if err != nil {
-			continue
+			ctx.Logger().Errorf("snapshot marshal %s: %v", t.eventType, err)
+			return respond.Error(ctx, http.StatusInternalServerError, "Internal server error")
 		}
 
 		for _, item := range items {
