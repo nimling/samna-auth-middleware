@@ -69,6 +69,7 @@ func SyncStart(ctx context.Context) {
 		idle := time.Duration(0)
 		empty := 0
 		failed := 0
+		reconciled := int64(-1)
 		for {
 			wait := activeInterval
 			applied, err := PullSync(ctx)
@@ -106,9 +107,15 @@ func SyncStart(ctx context.Context) {
 				wait = idle
 				if empty >= emptyPullsBeforeReconcile {
 					empty = 0
-					idle = 0
-					reportStalledCursor(ctx, log, fmt.Sprintf("returned no events %d consecutive pulls", emptyPullsBeforeReconcile))
-					report(PullSnapshot(ctx))
+					seq, err := GetSeq(ctx)
+					if err != nil {
+						report(fmt.Errorf("read cursor before reconcile: %w", err))
+					} else if seq != reconciled {
+						idle = 0
+						reconciled = seq
+						reportStalledCursor(ctx, log, fmt.Sprintf("returned no events %d consecutive pulls", emptyPullsBeforeReconcile))
+						report(PullSnapshot(ctx))
+					}
 				}
 			}
 			select {

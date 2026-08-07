@@ -420,7 +420,7 @@ type Claim struct {
 	Access       ClaimAccess   `bun:"sa_access" json:"access"`
 	AccessSlice  []string      `bun:"-" json:"access_slice,omitempty"`
 	AccessString string        `bun:"-" json:"access_string,omitempty"`
-	Inherits     bool          `bun:"inherits,default:true" json:"inherits"`
+	Inherits     bool          `bun:"inherits" json:"inherits"`
 	Type         ClaimType     `bun:"type,default:'user'" json:"type"`
 	OwnerID      uuid.UUID     `bun:"sa_owner_id" json:"owner_id"`
 	RootID       uuid.UUID     `bun:"sa_root_id" json:"root_id"`
@@ -539,7 +539,7 @@ type ClaimObject struct {
 	Access       *ClaimAccess     `bun:"sa_access,nullzero" json:"access,omitempty"`
 	AccessSlice  []string         `bun:"-" json:"access_slice,omitempty"`
 	AccessString string           `bun:"-" json:"access_string,omitempty"`
-	Inherits     bool             `bun:"inherits,default:true" json:"inherits"`
+	Inherits     bool             `bun:"inherits" json:"inherits"`
 	RefID        *uuid.UUID       `bun:"ref_id" json:"ref_id"`
 	OwnerID      uuid.UUID        `bun:"sa_owner_id" json:"owner_id"`
 	RootID       uuid.UUID        `bun:"sa_root_id" json:"root_id"`
