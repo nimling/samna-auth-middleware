@@ -589,6 +589,7 @@ BEGIN
                         p_object_type AS cascaded_from_type,
                         p_object_id   AS cascaded_from_id,
                         'direct'::TEXT AS tree_type,
+                        0             AS depth,
                         (uc.claim_access | COALESCE(co.sa_access, uc.claim_access)) AS sa_access,
                         co.scope
                  FROM claimius.claim_object co
@@ -606,6 +607,7 @@ BEGIN
                         co.object_type AS cascaded_from_type,
                         co.object_id   AS cascaded_from_id,
                         e.tree_type::TEXT AS tree_type,
+                        e.depth        AS depth,
                         (uc.claim_access | COALESCE(co.sa_access, uc.claim_access)) AS sa_access,
                         co.scope
                  FROM claimius.claim_object co
@@ -632,7 +634,8 @@ BEGIN
                         'access', v_deny_bits,
                         'scope', v_row.scope,
                         'cascaded_from', jsonb_build_object('type', v_row.cascaded_from_type, 'id', v_row.cascaded_from_id),
-                        'tree_type', v_row.tree_type
+                        'tree_type', v_row.tree_type,
+                        'depth', v_row.depth
                                                           ));
             ELSE
                 v_grant_bits := v_row.sa_access & 15;
@@ -641,7 +644,8 @@ BEGIN
                         'access', v_grant_bits,
                         'scope', v_row.scope,
                         'cascaded_from', jsonb_build_object('type', v_row.cascaded_from_type, 'id', v_row.cascaded_from_id),
-                        'tree_type', v_row.tree_type
+                        'tree_type', v_row.tree_type,
+                        'depth', v_row.depth
                                                           ));
             END IF;
         END LOOP;
@@ -689,10 +693,13 @@ BEGIN
                 -- grant on any path.
                 IF (v_deny ->> 'tree_type') = 'direct' AND (v_deny -> 'cascaded_from') = v_object_key THEN
                     v_grant_bits := v_grant_bits & ~v_deny_bits;
-                -- A deny on the same (tree_type, cascaded_from) path
-                -- subtracts from grants on that same path.
-                ELSIF (v_deny ->> 'tree_type') = (v_grant ->> 'tree_type')
-                    AND (v_deny -> 'cascaded_from') = (v_grant -> 'cascaded_from') THEN
+                -- Otherwise the nearer binding decides. A deny anchored at or
+                -- below the grant's anchor covers every descendant, so an
+                -- inherited deny beats a wider grant. A grant bound nearer
+                -- than the deny survives, which is how one object is shared
+                -- out of a denied subtree.
+                ELSIF COALESCE((v_deny ->> 'depth')::INTEGER, 0)
+                      <= COALESCE((v_grant ->> 'depth')::INTEGER, 0) THEN
                     v_grant_bits := v_grant_bits & ~v_deny_bits;
                 END IF;
                 EXIT WHEN v_grant_bits = 0;
@@ -706,7 +713,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql IMMUTABLE;
 
-COMMENT ON FUNCTION claimius._apply_denies IS 'Subtracts deny bits from grants on matching paths. Drops grants whose mask becomes 0.';
+COMMENT ON FUNCTION claimius._apply_denies IS 'Subtracts deny bits from grants the deny covers. A direct deny clears every grant on the object; otherwise the nearer binding wins, so an inherited deny covers all descendants and a nearer grant survives it. Drops grants whose mask becomes 0.';
 
 -- _direct_grant_for_object
 -- Determines whether the given user holds direct grant on the given object
