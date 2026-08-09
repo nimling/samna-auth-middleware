@@ -932,10 +932,11 @@ BEGIN
                 -- grant on any path.
                 IF (v_deny ->> 'tree_type') = 'direct' AND (v_deny -> 'cascaded_from') = v_object_key THEN
                     v_grant_bits := v_grant_bits & ~v_deny_bits;
-                -- A deny on the same (tree_type, cascaded_from) path
-                -- subtracts from grants on that same path.
-                ELSIF COALESCE((v_deny ->> 'depth')::INTEGER, 0)
-                      <= COALESCE((v_grant ->> 'depth')::INTEGER, 0) THEN
+                -- An inherited deny covers every descendant, whichever tree
+                -- it travelled. It does not touch a grant bound directly on
+                -- the object, which is how one object is shared out of a
+                -- denied subtree.
+                ELSIF COALESCE((v_grant ->> 'depth')::INTEGER, 0) <> 0 THEN
                     v_grant_bits := v_grant_bits & ~v_deny_bits;
                 END IF;
                 EXIT WHEN v_grant_bits = 0;
@@ -949,7 +950,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql IMMUTABLE;
 
-COMMENT ON FUNCTION claimius._apply_denies(p_grants jsonb, p_denies jsonb, p_object_type text, p_object_id uuid) IS 'Subtracts deny bits from grants the deny covers. A direct deny clears every grant on the object; otherwise the nearer binding wins, so an inherited deny covers all descendants and a nearer grant survives it. Drops grants whose mask becomes 0.';
+COMMENT ON FUNCTION claimius._apply_denies(p_grants jsonb, p_denies jsonb, p_object_type text, p_object_id uuid) IS 'Subtracts deny bits from grants the deny covers. A direct deny clears every grant on the object; an inherited deny covers every descendant in any tree and leaves grants bound directly on the object intact. Drops grants whose mask becomes 0.';
 
 -- _direct_grant_for_object
 -- Determines whether the given user holds direct grant on the given object
