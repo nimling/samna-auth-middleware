@@ -47,15 +47,26 @@ func GetCallback(ctx echo.Context) error {
 		return respondError(ctx, http.StatusBadRequest, "missing code")
 	}
 
+	startOver := utils.Cfg().PageRedirect
+	if startOver == "" {
+		startOver = "/"
+	}
+
 	stateParam := ctx.QueryParam("state")
 	stateCookie, stateErr := ctx.Cookie(client.OAuthStateCookie)
 	if stateErr != nil || stateCookie.Value == "" || stateParam == "" || stateParam != stateCookie.Value {
-		return respondError(ctx, http.StatusBadRequest, "invalid state")
+		ctx.Logger().Warnf("GetCallback invalid state, clearing the flow cookies and sending the visitor back to start over")
+		utils.ClearCookie(ctx, client.PKCEVerifierCookie)
+		utils.ClearCookie(ctx, client.OAuthStateCookie)
+		return Redirect(ctx, http.StatusFound, startOver)
 	}
 
 	verifierCookie, verifierErr := ctx.Cookie(client.PKCEVerifierCookie)
 	if verifierErr != nil || verifierCookie.Value == "" {
-		return respondError(ctx, http.StatusBadRequest, "missing verifier")
+		ctx.Logger().Warnf("GetCallback missing verifier, clearing the flow cookies and sending the visitor back to start over")
+		utils.ClearCookie(ctx, client.PKCEVerifierCookie)
+		utils.ClearCookie(ctx, client.OAuthStateCookie)
+		return Redirect(ctx, http.StatusFound, startOver)
 	}
 
 	slug := utils.Cfg().AppSlug

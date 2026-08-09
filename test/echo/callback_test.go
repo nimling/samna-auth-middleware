@@ -60,17 +60,34 @@ func TestGetCallbackSetsTokenAndCSRFCookies(t *testing.T) {
 }
 
 func TestGetCallbackRejectsStateMismatch(t *testing.T) {
+	t.Setenv("SAUTH_PAGE_REDIRECT", "http://localhost:4200/")
+
 	e := echo.New()
 	req := httptest.NewRequest(http.MethodGet, "/api/sauth/callback?code=abc&state=other", nil)
 	req.AddCookie(&http.Cookie{Name: "sauth_oauth_state", Value: "st1"})
+	req.AddCookie(&http.Cookie{Name: "sauth_pkce_verifier", Value: "ver1"})
 	rec := httptest.NewRecorder()
 	ctx := e.NewContext(req, rec)
 
 	if err := saecho.GetCallback(ctx); err != nil {
 		t.Fatalf("GetCallback: %v", err)
 	}
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400 on state mismatch", rec.Code)
+	if rec.Code != http.StatusFound {
+		t.Fatalf("status = %d, want 302 on state mismatch", rec.Code)
+	}
+	if location := rec.Header().Get("Location"); location != "http://localhost:4200/" {
+		t.Fatalf("Location = %q, want the page redirect so the visitor starts over", location)
+	}
+
+	cleared := map[string]int{}
+	for _, c := range rec.Result().Cookies() {
+		cleared[c.Name] = c.MaxAge
+	}
+	if cleared["sauth_oauth_state"] != -1 {
+		t.Errorf("sauth_oauth_state MaxAge = %d, want -1 so the stale pair cannot fail again", cleared["sauth_oauth_state"])
+	}
+	if cleared["sauth_pkce_verifier"] != -1 {
+		t.Errorf("sauth_pkce_verifier MaxAge = %d, want -1 so the stale pair cannot fail again", cleared["sauth_pkce_verifier"])
 	}
 }
 
