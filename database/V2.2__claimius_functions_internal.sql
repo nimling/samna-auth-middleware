@@ -589,7 +589,6 @@ BEGIN
                         p_object_type AS cascaded_from_type,
                         p_object_id   AS cascaded_from_id,
                         'direct'::TEXT AS tree_type,
-                        0             AS depth,
                         (uc.claim_access | COALESCE(co.sa_access, uc.claim_access)) AS sa_access,
                         co.scope
                  FROM claimius.claim_object co
@@ -607,7 +606,6 @@ BEGIN
                         co.object_type AS cascaded_from_type,
                         co.object_id   AS cascaded_from_id,
                         e.tree_type::TEXT AS tree_type,
-                        e.depth        AS depth,
                         (uc.claim_access | COALESCE(co.sa_access, uc.claim_access)) AS sa_access,
                         co.scope
                  FROM claimius.claim_object co
@@ -634,8 +632,7 @@ BEGIN
                         'access', v_deny_bits,
                         'scope', v_row.scope,
                         'cascaded_from', jsonb_build_object('type', v_row.cascaded_from_type, 'id', v_row.cascaded_from_id),
-                        'tree_type', v_row.tree_type,
-                        'depth', v_row.depth
+                        'tree_type', v_row.tree_type
                                                           ));
             ELSE
                 v_grant_bits := v_row.sa_access & 15;
@@ -644,17 +641,15 @@ BEGIN
                         'access', v_grant_bits,
                         'scope', v_row.scope,
                         'cascaded_from', jsonb_build_object('type', v_row.cascaded_from_type, 'id', v_row.cascaded_from_id),
-                        'tree_type', v_row.tree_type,
-                        'depth', v_row.depth
+                        'tree_type', v_row.tree_type
                                                           ));
             END IF;
         END LOOP;
 
-    -- Step 2: subtract deny bits from grants on the same path. A deny on
-    -- path P with bits B clears those bits from every grant on path P.
-    -- Paths are identified by (cascaded_from, tree_type). Direct denies
-    -- (tree_type = 'direct', cascaded_from = the object itself) subtract
-    -- bits from all grants regardless of path.
+    -- Step 2: subtract deny bits from the grants a deny covers. A deny
+    -- bound directly on the object clears bits from every grant on it. A
+    -- deny inherited from an ancestor clears bits from inherited grants in
+    -- any tree, and leaves grants bound on the object itself intact.
     IF jsonb_array_length(v_denies) > 0 THEN
         v_grants := claimius._apply_denies(v_grants, v_denies, p_object_type, p_object_id);
     END IF;
@@ -666,9 +661,10 @@ $$ LANGUAGE plpgsql;
 COMMENT ON FUNCTION claimius._build_grants_for_object IS 'Computes grants jsonb for a (user, object) pair, with bitwise deny subtraction.';
 
 -- _apply_denies
--- Subtracts deny bits from each grant on the same path. Returns a new
--- jsonb array of grants. Grants whose access mask becomes 0 after
--- subtraction are dropped.
+-- Subtracts deny bits from the grants a deny covers. A direct deny clears
+-- every grant on the object. An inherited deny clears inherited grants in any
+-- tree and spares grants bound on the object itself. Returns a new jsonb array
+-- of grants. Grants whose access mask becomes 0 after subtraction are dropped.
 CREATE OR REPLACE FUNCTION claimius._apply_denies(
     p_grants        JSONB,
     p_denies        JSONB,
@@ -697,7 +693,7 @@ BEGIN
                 -- it travelled. It does not touch a grant bound directly on
                 -- the object, which is how one object is shared out of a
                 -- denied subtree.
-                ELSIF COALESCE((v_grant ->> 'depth')::INTEGER, 0) <> 0 THEN
+                ELSIF (v_grant ->> 'tree_type') NOT IN ('direct', 'composition') THEN
                     v_grant_bits := v_grant_bits & ~v_deny_bits;
                 END IF;
                 EXIT WHEN v_grant_bits = 0;
@@ -768,10 +764,10 @@ BEGIN
         END IF;
     END IF;
 
-    -- A direct creator's grant is wiped only by a deny that subtracts the
-    -- owner bit. Any binding (claim or claim_object) whose effective mask
-    -- has the deny bit (0x10) and the owner bit (0x01) on this object or
-    -- any of its inherited ancestors revokes the direct grant.
+    -- A creator's grant is wiped only by a deny bound directly on this
+    -- object whose effective mask carries the deny bit (0x10) and the owner
+    -- bit (0x01). A deny inherited from an ancestor never removes it, so an
+    -- author always reaches what they made.
     SELECT EXISTS (
         SELECT 1
         FROM claimius.user_claim uc
@@ -785,24 +781,15 @@ BEGIN
           AND co.sa_deleted_at IS NULL
           AND ((c.sa_access | co.sa_access) & 16) <> 0
           AND ((c.sa_access | co.sa_access) & 1)  <> 0
-          AND (
-            (co.object_type = p_object_type AND co.object_id = p_object_id)
-                OR (co.inherits = TRUE AND c.inherits = TRUE AND EXISTS (
-                SELECT 1 FROM claimius.inheritance_info e
-                WHERE e.ancestor_type   = co.object_type
-                  AND e.ancestor_id     = co.object_id
-                  AND e.descendant_type = p_object_type
-                  AND e.descendant_id   = p_object_id
-                  AND e.depth > 0
-            ))
-            )
+          AND co.object_type = p_object_type
+          AND co.object_id = p_object_id
     ) INTO v_has_deny;
 
     RETURN NOT v_has_deny;
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius._direct_grant_for_object IS 'Determines if user has direct (creator) grant, accounting for owner bit denies.';
+COMMENT ON FUNCTION claimius._direct_grant_for_object IS 'Determines if user has direct (creator) grant. Only a deny bound directly on the object with the owner bit removes it.';
 
 -- _denormalize_object
 -- Reads the registered row's name, description, sa_owner_id, sa_location_id,

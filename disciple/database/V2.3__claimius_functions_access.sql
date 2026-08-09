@@ -607,11 +607,41 @@ COMMENT ON FUNCTION claimius.calc_claim_access() IS 'Trigger on claim, claim_obj
 CREATE OR REPLACE FUNCTION claimius._check_claim_composition()
     RETURNS TRIGGER AS $$
 DECLARE
-    v_user_id    UUID;
-    v_has_access BOOLEAN;
+    v_user_id      UUID;
+    v_has_access   BOOLEAN;
+    v_actor_access INTEGER;
 BEGIN
     IF claimius.in_replay_mode() THEN
         RETURN NEW;
+    END IF;
+
+    -- A binding may never hand out more than the actor already holds on the
+    -- object. Denies are restrictive, so they are exempt. No computed access
+    -- counts as none held, so an actor who cannot reach an object cannot
+    -- grant it away. Creating an object records the creator, which computes
+    -- their access before any binding is written.
+    IF NEW.object_id IS NOT NULL
+        AND NEW.object_type IS DISTINCT FROM 'claimius.claim'
+        AND NEW.sa_access IS NOT NULL
+        AND (NEW.sa_access & 16) = 0
+    THEN
+        SELECT uc.user_id INTO v_user_id
+        FROM claimius.user_claim uc
+        WHERE uc.id = NEW.sa_created_by
+          AND uc.sa_deleted_at IS NULL;
+
+        IF v_user_id IS NOT NULL THEN
+            SELECT max(sa_access) INTO v_actor_access
+            FROM claimius.user_object
+            WHERE user_id     = v_user_id
+              AND object_type = NEW.object_type
+              AND object_id   = NEW.object_id;
+
+            IF (NEW.sa_access & ~coalesce(v_actor_access, 0) & 15) <> 0 THEN
+                RAISE EXCEPTION 'cannot grant more access than held: user % holds % on % %, requested %',
+                    v_user_id, coalesce(v_actor_access, 0), NEW.object_type, NEW.object_id, NEW.sa_access;
+            END IF;
+        END IF;
     END IF;
 
     IF NEW.object_type IS DISTINCT FROM 'claimius.claim' OR NEW.object_id IS NULL THEN
@@ -659,7 +689,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius._check_claim_composition() IS 'BEFORE INSERT/UPDATE trigger on claim_object. Enforces composition link invariants: no self loop, no reverse link cycle, caller has read on target claim. Bypassed during disciple replay.';
+COMMENT ON FUNCTION claimius._check_claim_composition() IS 'BEFORE INSERT/UPDATE trigger on claim_object. Rejects a grant handing out more access than the actor holds on the object, denies exempt. Enforces composition link invariants: no self loop, no reverse link cycle, caller has read on target claim. Bypassed during disciple replay.';
 
 DROP TRIGGER IF EXISTS tg_check_claim_composition ON claimius.claim_object;
 CREATE TRIGGER tg_check_claim_composition
