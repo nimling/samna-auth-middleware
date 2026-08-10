@@ -997,9 +997,50 @@ CREATE OR REPLACE FUNCTION claimius._affected_users_for_object(
     p_object_type   TEXT,
     p_object_id     UUID
 ) RETURNS TABLE(user_id UUID) AS $$
+DECLARE
+    v_parts         TEXT[];
+    v_has_creator   BOOLEAN;
+    v_creator_uc_id UUID;
+    v_creator_user  UUID;
 BEGIN
+    -- The creator of a row holds it through _direct_grant_for_object without
+    -- any claim binding, so they are resolved here from sa_created_by. Without
+    -- this branch a creator who holds no claim on the object or an ancestor is
+    -- never enumerated, no user_object row is ever written for them, and their
+    -- direct grant stays invisible to every read path.
+    IF p_object_type <> 'claimius.samna_user' THEN
+        SELECT ti.has_sa_created_by INTO v_has_creator
+        FROM claimius.table_info ti
+        WHERE ti.object_type = p_object_type;
+
+        IF v_has_creator IS TRUE THEN
+            v_parts := claimius.split_object_type(p_object_type);
+            BEGIN
+                EXECUTE format('SELECT sa_created_by FROM %I.%I WHERE id = $1', v_parts[1], v_parts[2])
+                    INTO v_creator_uc_id USING p_object_id;
+            EXCEPTION WHEN OTHERS THEN
+                v_creator_uc_id := NULL;
+            END;
+
+            IF v_creator_uc_id IS NOT NULL THEN
+                SELECT uc.user_id INTO v_creator_user
+                FROM claimius.user_claim uc
+                WHERE uc.id = v_creator_uc_id
+                  AND uc.app_id = p_app_id
+                  AND uc.sa_deleted_at IS NULL;
+            END IF;
+        END IF;
+    END IF;
+
     RETURN QUERY
         WITH all_users AS (
+            -- the creator, resolved through sa_created_by, which is a
+            -- user_claim.id and nothing else.
+            SELECT v_creator_user AS user_id
+            WHERE v_creator_user IS NOT NULL
+
+            UNION
+
             -- existing object_users
             SELECT ou.user_id FROM claimius.object_users ou
             WHERE ou.app_id = p_app_id AND ou.object_id = p_object_id AND ou.object_type = p_object_type
