@@ -15,6 +15,9 @@ type Config struct {
 	DebugUserID   string
 	DebugClients  string
 
+	ConsentPolicyVersion string
+	ConsentPolicyPath    string
+
 	Issuer       string
 	TokenURL     url.URL
 	JWKSURL      url.URL
@@ -32,6 +35,15 @@ func loadConfig() {
 	cfg.ClientTimeout = os.Getenv("SAUTH_CLIENT_TIMEOUT")
 	cfg.DebugUserID = os.Getenv("SAUTH_DEBUG_USER_ID")
 	cfg.DebugClients = os.Getenv("SAUTH_DEBUG_CLIENTS")
+	cfg.ConsentPolicyVersion = envOr("SAUTH_CONSENT_POLICY_VERSION", "1")
+	cfg.ConsentPolicyPath = envOr("SAUTH_CONSENT_POLICY_PATH", "/legal/cookie-policy")
+}
+
+func envOr(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return fallback
 }
 
 func Cfg() *Config {

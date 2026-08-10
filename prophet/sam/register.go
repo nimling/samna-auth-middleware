@@ -138,4 +138,13 @@ func RegisterEndpoints(g *echo.Group) {
 	notif.PUT("/:id/read", h.PutNotificationRead)
 	notif.PUT("/:id/closed", h.PutNotificationClosed)
 	notif.DELETE("/:id", h.DeleteNotification)
+
+	consent := g.Group("/consent")
+	consent.GET("", h.GetConsent)
+	consent.POST("", h.PostConsent)
+
+	stat := g.Group("/analytics")
+	stat.POST("", h.PostAnalytics)
+	stat.GET("/event", h.GetAnalyticsEvents)
+	stat.GET("/session", h.GetAnalyticsSessions)
 }

@@ -25,6 +25,28 @@ type ResponseEnvelope struct {
 	Data json.RawMessage `json:"data"`
 }
 
+type forwardKey struct{}
+
+// Forward carries the browser identity of the visitor an app is acting for, so
+// the prophet records the visitor rather than the calling app. Every request
+// built from a context holding one sends it on the SAuth-Forwarded headers.
+type Forward struct {
+	IP        string
+	UserAgent string
+	UserID    string
+}
+
+// WithForward attaches the visitor identity to a context handed to Get, Post,
+// Put, Patch or Delete.
+func WithForward(ctx context.Context, f Forward) context.Context {
+	return context.WithValue(ctx, forwardKey{}, f)
+}
+
+func forwardFrom(ctx context.Context) (Forward, bool) {
+	f, ok := ctx.Value(forwardKey{}).(Forward)
+	return f, ok
+}
+
 func DecodeJSON[T any](body io.ReadCloser, err error) (T, error) {
 	var zero T
 	if err != nil {
@@ -53,26 +75,26 @@ func newHTTPClient(clientSlug, clientSecret string) *httpClient {
 }
 
 func (e *httpClient) Get(ctx context.Context, url string) (io.ReadCloser, error) {
-	return e.execute(ctx, http.MethodGet, http.StatusOK, nil, url)
+	return e.execute(ctx, http.MethodGet, nil, url)
 }
 
 func (e *httpClient) Post(ctx context.Context, body any, url string) (io.ReadCloser, error) {
-	return e.execute(ctx, http.MethodPost, http.StatusCreated, body, url)
+	return e.execute(ctx, http.MethodPost, body, url)
 }
 
 func (e *httpClient) Put(ctx context.Context, body any, url string) (io.ReadCloser, error) {
-	return e.execute(ctx, http.MethodPut, http.StatusOK, body, url)
+	return e.execute(ctx, http.MethodPut, body, url)
 }
 
 func (e *httpClient) Patch(ctx context.Context, body any, url string) (io.ReadCloser, error) {
-	return e.execute(ctx, http.MethodPatch, http.StatusOK, body, url)
+	return e.execute(ctx, http.MethodPatch, body, url)
 }
 
 func (e *httpClient) Delete(ctx context.Context, url string) (io.ReadCloser, error) {
-	return e.execute(ctx, http.MethodDelete, http.StatusOK, nil, url)
+	return e.execute(ctx, http.MethodDelete, nil, url)
 }
 
-func (e *httpClient) execute(ctx context.Context, method string, expectedStatus int, reqBody any, targetURL string) (io.ReadCloser, error) {
+func (e *httpClient) execute(ctx context.Context, method string, reqBody any, targetURL string) (io.ReadCloser, error) {
 	var body io.Reader
 	if reqBody != nil {
 		payloadBytes, err := json.Marshal(reqBody)
@@ -92,6 +114,18 @@ func (e *httpClient) execute(ctx context.Context, method string, expectedStatus 
 	req.Header.Set("SAuth-App-Slug", e.clientSlug)
 	req.Header.Set("SAuth-App-Secret", e.clientSecret)
 
+	if f, ok := forwardFrom(ctx); ok {
+		if f.IP != "" {
+			req.Header.Set("SAuth-Forwarded-For", f.IP)
+		}
+		if f.UserAgent != "" {
+			req.Header.Set("SAuth-Forwarded-Agent", f.UserAgent)
+		}
+		if f.UserID != "" {
+			req.Header.Set("SAuth-Forwarded-User", f.UserID)
+		}
+	}
+
 	if reqBody != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
@@ -102,7 +136,7 @@ func (e *httpClient) execute(ctx context.Context, method string, expectedStatus 
 	}
 
 	switch {
-	case resp.StatusCode == expectedStatus:
+	case resp.StatusCode >= 200 && resp.StatusCode < 300:
 		return resp.Body, nil
 	case resp.StatusCode == http.StatusUnauthorized:
 		return nil, ErrUnauthorized

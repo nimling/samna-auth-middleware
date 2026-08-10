@@ -23,7 +23,8 @@
     "dist"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json && pnpm run build:browser",
+    "build:browser": "esbuild src/browser.ts --bundle --format=iife --global-name=SamnaAnalytics --minify --target=es2020 --outfile=dist/analytics.global.js",
     "clean": "rimraf dist",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -34,6 +35,8 @@
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
+    "esbuild": "^0.28.2",
+    "jsdom": "^30.0.1",
     "rimraf": "^6.0.1",
     "typescript": "~5.9.3",
     "vitest": "^3.2.4"

@@ -28,3 +28,20 @@ export type { EdgeConfig, EdgeCallbacks, EdgeMode } from './session'
 export { createAuthFetch, guardedFetch } from './fetch'
 export { createServiceClient } from './service'
 export type { ServiceClient } from './service'
+export {
+  configureAnalytics,
+  getConsent,
+  postConsent,
+  getConsentState,
+  postView,
+  flush,
+  stopAnalytics
+} from './analytics'
+export type {
+  AnalyticsConfig,
+  AnalyticsEventInput,
+  ConsentCategories,
+  ConsentState
+} from './analytics'
+export { configureConsent, openConsentBanner, closeConsentBanner } from './consent'
+export type { ConsentBannerConfig, ConsentCopy } from './consent'

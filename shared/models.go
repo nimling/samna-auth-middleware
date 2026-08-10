@@ -809,6 +809,96 @@ type Notification struct {
 	UpdatedAt   time.Time       `bun:"sa_updated_at,default:now()" json:"updated_at"`
 }
 
+type Consent struct {
+	bun.BaseModel `bun:"table:claimius.consent"`
+
+	ID            uuid.UUID       `bun:"id,pk,default:gen_random_uuid()" json:"id"`
+	AppID         uuid.UUID       `bun:"app_id" json:"app_id"`
+	UserID        *uuid.UUID      `bun:"user_id" json:"user_id,omitempty"`
+	AnonymousID   string          `bun:"anonymous_id" json:"anonymous_id"`
+	Categories    json.RawMessage `bun:"categories,type:jsonb,default:'{}'" json:"categories"`
+	PolicyVersion string          `bun:"policy_version" json:"policy_version"`
+	IP            *string         `bun:"ip" json:"ip,omitempty"`
+	UserAgent     *string         `bun:"user_agent" json:"user_agent,omitempty"`
+	GrantedAt     time.Time       `bun:"granted_at,default:now()" json:"granted_at"`
+	RevokedAt     *time.Time      `bun:"revoked_at" json:"revoked_at,omitzero"`
+	CreatedAt     time.Time       `bun:"sa_created_at,default:now()" json:"created_at"`
+	UpdatedAt     time.Time       `bun:"sa_updated_at,default:now()" json:"updated_at"`
+}
+
+type AnalyticsSession struct {
+	bun.BaseModel `bun:"table:claimius.analytics_session"`
+
+	ID               uuid.UUID       `bun:"id,pk,default:gen_random_uuid()" json:"id"`
+	AppID            uuid.UUID       `bun:"app_id" json:"app_id"`
+	UserID           *uuid.UUID      `bun:"user_id" json:"user_id,omitempty"`
+	AnonymousID      string          `bun:"anonymous_id" json:"anonymous_id"`
+	SessionKey       string          `bun:"session_key" json:"session_key"`
+	EntryPath        *string         `bun:"entry_path" json:"entry_path,omitempty"`
+	Referrer         *string         `bun:"referrer" json:"referrer,omitempty"`
+	UserAgent        *string         `bun:"user_agent" json:"user_agent,omitempty"`
+	IP               *string         `bun:"ip" json:"ip,omitempty"`
+	Language         *string         `bun:"language" json:"language,omitempty"`
+	Timezone         *string         `bun:"timezone" json:"timezone,omitempty"`
+	Platform         *string         `bun:"platform" json:"platform,omitempty"`
+	ScreenWidth      *int            `bun:"screen_width" json:"screen_width,omitempty"`
+	ScreenHeight     *int            `bun:"screen_height" json:"screen_height,omitempty"`
+	DevicePixelRatio *float32        `bun:"device_pixel_ratio" json:"device_pixel_ratio,omitempty"`
+	Context          json.RawMessage `bun:"context,type:jsonb,default:'{}'" json:"context"`
+	StartedAt        time.Time       `bun:"started_at,default:now()" json:"started_at"`
+	LastSeenAt       time.Time       `bun:"last_seen_at,default:now()" json:"last_seen_at"`
+}
+
+type AnalyticsEvent struct {
+	bun.BaseModel `bun:"table:claimius.analytics_event"`
+
+	ID         uuid.UUID       `bun:"id,pk,default:gen_random_uuid()" json:"id"`
+	AppID      uuid.UUID       `bun:"app_id" json:"app_id"`
+	SessionID  uuid.UUID       `bun:"session_id" json:"session_id"`
+	UserID     *uuid.UUID      `bun:"user_id" json:"user_id,omitempty"`
+	Type       string          `bun:"type" json:"type"`
+	Path       string          `bun:"path" json:"path"`
+	Payload    json.RawMessage `bun:"payload,type:jsonb,default:'{}'" json:"payload"`
+	OccurredAt time.Time       `bun:"occurred_at" json:"occurred_at"`
+	ReceivedAt time.Time       `bun:"received_at,default:now()" json:"received_at"`
+}
+
+type ConsentCategories struct {
+	Necessary   bool `json:"necessary"`
+	Preferences bool `json:"preferences"`
+	Analytics   bool `json:"analytics"`
+	Marketing   bool `json:"marketing"`
+}
+
+type ConsentState struct {
+	AnonymousID   string             `json:"anonymous_id"`
+	PolicyVersion string             `json:"policy_version"`
+	PolicyURL     string             `json:"policy_url"`
+	Decided       bool               `json:"decided"`
+	Categories    ConsentCategories  `json:"categories"`
+	GrantedAt     *time.Time         `json:"granted_at,omitzero"`
+}
+
+type ConsentRequest struct {
+	AnonymousID   string            `json:"anonymous_id" validate:"required"`
+	PolicyVersion string            `json:"policy_version" validate:"required"`
+	Categories    ConsentCategories `json:"categories"`
+}
+
+type AnalyticsEventInput struct {
+	Type       string          `json:"type" validate:"required"`
+	Path       string          `json:"path"`
+	Payload    json.RawMessage `json:"payload"`
+	OccurredAt int64           `json:"occurred_at"`
+}
+
+type AnalyticsBatch struct {
+	AnonymousID string                `json:"anonymous_id" validate:"required"`
+	SessionKey  string                `json:"session_key" validate:"required"`
+	Context     json.RawMessage       `json:"context"`
+	Events      []AnalyticsEventInput `json:"events"`
+}
+
 type SyncEvent struct {
 	bun.BaseModel `bun:"table:claimius.sync_event"`
 
