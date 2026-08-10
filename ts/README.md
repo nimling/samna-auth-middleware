@@ -105,6 +105,37 @@ startLogin('microsoft', window.location.pathname)
 const url = getLoginUrl(undefined, '/protected')
 ```
 
+## Consent and analytics
+
+One call reads the visitor's consent, starts capture when the analytics category
+is granted, and shows the banner when no decision is stored under the current
+policy. Nothing it does can throw into the host app.
+
+```ts
+import { configureConsent, postView } from '@nimling/samna-auth-middleware'
+
+await configureConsent({ endpoint: '/api' })
+
+router.afterEach((to) => postView(to.fullPath))
+```
+
+The decision is stored against the account on the prophet, so one answer covers
+every app the person signs in to. Reopen the banner from a settings control with
+`openConsentBanner()`.
+
+A page with no build step loads the same recorder from one script tag:
+
+```html
+<script src="/analytics.js" data-endpoint=""></script>
+```
+
+The backend half is one call as well. Mount it outside any group that requires a
+session, because an anonymous visitor reaches consent before they have one:
+
+```go
+saecho.RegisterAnalytics(e.Group(""))
+```
+
 ## Build and publish
 
 ```bash
