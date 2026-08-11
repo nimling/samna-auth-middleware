@@ -121,8 +121,10 @@ func postToken(ctx context.Context, tokenURL string, slug string, secret string,
 
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("Accept", "application/json")
-	req.Header.Set("SAuth-App-Slug", slug)
-	req.Header.Set("SAuth-App-Secret", secret)
+	if slug != "" {
+		req.Header.Set("SAuth-App-Slug", slug)
+		req.Header.Set("SAuth-App-Secret", secret)
+	}
 
 	httpClient := &http.Client{Timeout: 3 * time.Second}
 	resp, err := httpClient.Do(req)
@@ -160,4 +162,12 @@ func PostRefreshToken(ctx context.Context, tokenURL string, slug string, secret 
 	form.Set("grant_type", "refresh_token")
 	form.Set("refresh_token", refreshToken)
 	return postToken(ctx, tokenURL, slug, secret, form)
+}
+
+func PostClientCredentials(ctx context.Context, tokenURL string, clientID string, clientSecret string) (*ResponseToken, error) {
+	form := url.Values{}
+	form.Set("grant_type", "client_credentials")
+	form.Set("client_id", clientID)
+	form.Set("client_secret", clientSecret)
+	return postToken(ctx, tokenURL, "", "", form)
 }
