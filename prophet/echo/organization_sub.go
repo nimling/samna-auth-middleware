@@ -35,7 +35,7 @@ func GetOrganizationAssets(ctx echo.Context) error {
 	assets := make([]*Asset, 0, len(objectAssets))
 	for _, oa := range objectAssets {
 		if oa.Asset != nil {
-			oa.Asset.AssetURL = app.RedirectURI + "/api/asset/" + oa.Asset.ID.String() + "/data"
+			oa.Asset.AssetURL = app.GetPrimaryOrigin() + "/api/asset/" + oa.Asset.ID.String() + "/data"
 			assets = append(assets, oa.Asset)
 		}
 	}

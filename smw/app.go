@@ -114,7 +114,7 @@ func AppMiddleware(next echo.HandlerFunc) echo.HandlerFunc {
 		ctx.Set("app_sync_uri", app.SyncURI)
 		ctx.Set("app_internal", utils.IsSystemApp(app.Slug))
 
-		appRedirectURI, err := url.Parse(app.RedirectURI)
+		appRedirectURI, err := url.Parse(app.GetPrimaryOrigin())
 		if err != nil {
 			ctx.Logger().Infof("Failed to parse app redirect uri: %s", err)
 			return ctx.NoContent(http.StatusInternalServerError)

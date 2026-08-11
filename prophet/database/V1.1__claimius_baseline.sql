@@ -62,7 +62,7 @@ DO $$
             CREATE TYPE claimius.app_status AS ENUM ('draft', 'active', 'inactive', 'erroneous');
         END IF;
         IF NOT EXISTS (SELECT 1 FROM pg_type t JOIN pg_namespace n ON n.oid = t.typnamespace WHERE t.typname = 'app_connection' AND n.nspname = 'claimius') THEN
-            CREATE TYPE claimius.app_connection AS ENUM ('direct', 'code');
+            CREATE TYPE claimius.app_connection AS ENUM ('direct', 'code', 'bff');
         END IF;
     END $$;
 

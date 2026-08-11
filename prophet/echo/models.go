@@ -318,7 +318,7 @@ type SamnaApp struct {
 	Description   string       `bun:"description" json:"description,omitempty"`
 	ContactEmail  *string      `bun:"contact_email" json:"contact_email,omitempty"`
 	AppImage      *string      `bun:"app_image" json:"app_image,omitempty"`
-	RedirectURI   string       `bun:"redirect_uri,notnull" json:"redirect_uri"`
+	RedirectURIs  []string     `bun:"redirect_uris,array,type:text[]" json:"redirect_uris"`
 	SyncURI       string       `bun:"sync_uri,notnull" json:"sync_uri,omitempty"`
 	ProviderIDs   []uuid.UUID  `bun:"provider_ids,array,type:uuid[]" json:"provider_ids,omitempty"`
 	Status        AppStatus    `bun:"status,notnull,default:'active'" json:"status"`
@@ -335,6 +335,16 @@ type SamnaApp struct {
 	UpdatedAt     time.Time    `bun:"sa_updated_at,notnull,default:current_timestamp" json:"updated_at"`
 	Access        ClaimAccess  `bun:"access,scanonly" json:"access,omitempty"`
 	bun.BaseModel `bun:"table:claimius.samna_app" json:"-"`
+}
+
+// GetPrimaryOrigin returns the first registered redirect URI, the origin the app
+// is reached on. Every other entry is an additional callback the authorize
+// endpoint accepts.
+func (a SamnaApp) GetPrimaryOrigin() string {
+	if len(a.RedirectURIs) == 0 {
+		return ""
+	}
+	return a.RedirectURIs[0]
 }
 
 type UserRelation struct {

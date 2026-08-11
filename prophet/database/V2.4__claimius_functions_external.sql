@@ -2571,13 +2571,14 @@ BEGIN
     -- schema default until the first secret is issued.
     INSERT INTO claimius.samna_app (
         id, slug, name, description, contact_email, app_image,
-        redirect_uri, sync_uri, provider_ids, status,
+        redirect_uris, sync_uri, provider_ids, status,
         private_key, private_seed,
         style, sa_owner_id, sa_created_by
     ) VALUES (
                  v_pre_app_id, p_system_app_slug, p_system_app_name,
                  p_system_app_description, p_system_app_contact_email, p_system_app_image,
-                 p_system_app_redirect_uri, p_system_app_sync_uri, p_system_app_provider_ids,
+                 CASE WHEN p_system_app_redirect_uri = '' THEN ARRAY[]::TEXT[] ELSE ARRAY[p_system_app_redirect_uri] END,
+                 p_system_app_sync_uri, p_system_app_provider_ids,
                  'active'::claimius.app_status,
                  p_system_app_private_key, p_system_app_private_seed,
                  p_system_app_style, v_pre_org_id, p_system_user_id

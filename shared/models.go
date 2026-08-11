@@ -658,7 +658,7 @@ type SamnaApp struct {
 	Description   string           `bun:"description,default:''" json:"description"`
 	ContactEmail  *string          `bun:"contact_email" json:"contact_email"`
 	AppImage      *string          `bun:"app_image" json:"app_image"`
-	RedirectUri   string           `bun:"redirect_uri,default:''" json:"redirect_uri"`
+	RedirectUris  []string         `bun:"redirect_uris,array,default:'{}'" json:"redirect_uris"`
 	SyncUri       string           `bun:"sync_uri,default:''" json:"sync_uri"`
 	ProviderIDs   []uuid.UUID      `bun:"provider_ids,array,default:'{}'" json:"provider_ids"`
 	Status        string           `bun:"status,default:'active'" json:"status"`
