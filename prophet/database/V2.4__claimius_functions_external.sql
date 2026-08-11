@@ -328,7 +328,7 @@ COMMENT ON FUNCTION claimius.get_locations(p_user_id uuid, p_app_id uuid, p_requ
 
 DO $$
 BEGIN
-    IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'access_user') THEN
+    IF NOT EXISTS (SELECT 1 FROM pg_type t JOIN pg_namespace n ON n.oid = t.typnamespace WHERE t.typname = 'access_user' AND n.nspname = 'claimius') THEN
         CREATE TYPE claimius.access_user AS (
             target_user_id  UUID,
             access          INTEGER,

@@ -43,25 +43,25 @@
 
 DO $$
     BEGIN
-        IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'claim_type') THEN
+        IF NOT EXISTS (SELECT 1 FROM pg_type t JOIN pg_namespace n ON n.oid = t.typnamespace WHERE t.typname = 'claim_type' AND n.nspname = 'claimius') THEN
             CREATE TYPE claimius.claim_type AS ENUM ('system', 'user', 'service', 'virtual');
         END IF;
-        IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'user_type') THEN
+        IF NOT EXISTS (SELECT 1 FROM pg_type t JOIN pg_namespace n ON n.oid = t.typnamespace WHERE t.typname = 'user_type' AND n.nspname = 'claimius') THEN
             CREATE TYPE claimius.user_type AS ENUM ('user', 'client', 'system', 'guest');
         END IF;
-        IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'user_status') THEN
+        IF NOT EXISTS (SELECT 1 FROM pg_type t JOIN pg_namespace n ON n.oid = t.typnamespace WHERE t.typname = 'user_status' AND n.nspname = 'claimius') THEN
             CREATE TYPE claimius.user_status AS ENUM ('active', 'pending', 'suspended', 'inactive');
         END IF;
-        IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'tree_type') THEN
+        IF NOT EXISTS (SELECT 1 FROM pg_type t JOIN pg_namespace n ON n.oid = t.typnamespace WHERE t.typname = 'tree_type' AND n.nspname = 'claimius') THEN
             CREATE TYPE claimius.tree_type AS ENUM ('ownership', 'location', 'parenthood');
         END IF;
-        IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'sync_operation') THEN
+        IF NOT EXISTS (SELECT 1 FROM pg_type t JOIN pg_namespace n ON n.oid = t.typnamespace WHERE t.typname = 'sync_operation' AND n.nspname = 'claimius') THEN
             CREATE TYPE claimius.sync_operation AS ENUM ('upsert', 'delete');
         END IF;
-        IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'app_status') THEN
+        IF NOT EXISTS (SELECT 1 FROM pg_type t JOIN pg_namespace n ON n.oid = t.typnamespace WHERE t.typname = 'app_status' AND n.nspname = 'claimius') THEN
             CREATE TYPE claimius.app_status AS ENUM ('draft', 'active', 'inactive', 'erroneous');
         END IF;
-        IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'app_connection') THEN
+        IF NOT EXISTS (SELECT 1 FROM pg_type t JOIN pg_namespace n ON n.oid = t.typnamespace WHERE t.typname = 'app_connection' AND n.nspname = 'claimius') THEN
             CREATE TYPE claimius.app_connection AS ENUM ('direct', 'code');
         END IF;
     END $$;
