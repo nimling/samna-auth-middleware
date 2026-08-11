@@ -1,9 +1,11 @@
 -- ============================================================================
 -- Claimius V5.6 Analytics
 -- ----------------------------------------------------------------------------
--- Consent and interaction capture. The prophet is the only store. Disciples
--- hold no analytics tables and forward every read and write here over the app
--- key, the same way nim.io reaches samna_auth through nimployer.
+-- Consent and interaction capture. The prophet is the only writer: every app
+-- forwards its consent decisions and capture batches here on its own app key,
+-- nim.io and nimployer alike. Disciples carry the replica in V5.1 and receive
+-- these rows through the sync feed like every other claimius table, so an app
+-- granted a claim over another app's capture reads it from its own replica.
 --
 -- claimius.consent carries one live decision per app and identity. A known
 -- user resolves across every app on the prophet, so one decision follows the

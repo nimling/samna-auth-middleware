@@ -63,7 +63,7 @@ A disciple that other services read from mounts `smw.UserAuthMiddleware(nil)` on
 
 ## Consent and capture
 
-Interaction capture records clicks, pointer samples, scroll depth, inputs and page views for a visitor who has granted the analytics category, and it works for anonymous visitors as well as signed in ones. The disciple stores none of it. Every read and write forwards to the prophet on the app key, so the prophet stays the single place the data lives.
+Interaction capture records clicks, pointer samples, scroll depth, inputs and page views for a visitor who has granted the analytics category, and it works for anonymous visitors as well as signed in ones. The disciple never writes it. Every consent decision and every capture batch forwards to the prophet on the app key, and the rows come back through the sync feed into `claimius.consent`, `claimius.analytics_session` and `claimius.analytics_event`, the same way claim, organization and audit arrive. An app granted a claim over another app's capture reads it from its own replica, which is how nimployer sees what nim.io recorded.
 
 The handlers are the same shape as every other one in `disciple/echo`, so a consumer mounts them itself:
 

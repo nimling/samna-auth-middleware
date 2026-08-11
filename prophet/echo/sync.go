@@ -133,6 +133,9 @@ func GetSyncSnapshot(ctx echo.Context) error {
 		{"claimius.user_object", &[]UserObject{}, true},
 		{"claimius.object_users", &[]ObjectUsers{}, true},
 		{"claimius.user_users", &[]UserUsers{}, true},
+		{"claimius.consent", &[]shared.Consent{}, true},
+		{"claimius.analytics_session", &[]shared.AnalyticsSession{}, true},
+		{"claimius.analytics_event", &[]shared.AnalyticsEvent{}, true},
 	}
 
 	var records []SyncPayload
