@@ -66,6 +66,7 @@ type AuthMiddlewareConfig struct {
 	OpenIDConfigURL     url.URL
 	DebugUserID         *uuid.UUID
 	DebugClients        map[string]DebugClient
+	Optional            bool
 }
 
 type UserAuthOptions struct {
@@ -73,6 +74,7 @@ type UserAuthOptions struct {
 	ClientSecret    string
 	RedirectURI     string
 	PageRedirectURI string
+	Optional        bool
 }
 
 type UserDetail struct {

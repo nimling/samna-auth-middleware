@@ -101,7 +101,7 @@ The `get_*` family:
    - `start_id` is an org to root from. NULL means all roots.
    - `depth` is levels of descent. 0 means unlimited.
    - Each row has fields `object_id`, `object_type`, `label`, `parent_id`, and `data jsonb`. `object_type` is schema qualified, like `'claimius.organization'` or `'public.bookable'`.
-   - `data` always carries `access_level` and `level` plus per type fallback fields with `sa_` prefixes stripped, so `owner_id` rather than `sa_owner_id`.
+   - `data` always carries `access`, the bitwise mask from `user_object.sa_access`, and `level`, plus per type fallback fields with `sa_` prefixes stripped, so `owner_id` rather than `sa_owner_id`.
 - `get_claim_graph(user, app, start_id?, depth?, min_level?)` — access graph covering the user, other users seen, claims, user_claims, claim_object connectors, and reachable objects.
    - `start_id` is a single claim. NULL means all claims the user holds.
    - `depth` 0 includes cascaded objects. depth >= 1 returns direct only.
@@ -129,12 +129,13 @@ DECLARE
     v_claim_id UUID;
 BEGIN
     v_result := claimius.create_claim(
-        p_app_id          => $app_id,
-        p_name            => 'Editor',
-        p_sa_access_level => 5,
-        p_sa_owner_id     => $org_id,
-        p_sa_root_id      => $root_org_id,
-        p_sa_created_by   => $user_claim_id
+        p_app_id        => $app_id,
+        p_name          => 'Editor',
+        p_description   => 'Read and write',
+        p_sa_access     => 6,
+        p_sa_owner_id   => $org_id,
+        p_sa_root_id    => $root_org_id,
+        p_sa_created_by => $user_claim_id
     );
     v_claim_id := (v_result -> 'claim' ->> 'id')::UUID;
 END $$;
@@ -227,9 +228,28 @@ The unique index is `(app_id, object_type, object_id)` where `sa_deleted_at IS N
 
 Disciples do not carry `app_object` at all, and their `organization` and `location` tables have no `app_id`. A disciple mirrors exactly one app, so every row it holds is already in scope. The sync layer strips `app_id` from each payload before upsert, and the prophet selects organizations and locations for the snapshot through `app_object_ids`. Write the app filter on the prophet side only.
 
+### Access bits
+
+`sa_access` is an INTEGER bitwise mask on `claim`, `claim_object` and `user_object`. Check with `(stored & required) = required`. The Go constants are `shared.ClaimAccess` in `shared/models.go`.
+
+| Bit | Value | Constant |
+|-----|-------|----------|
+| owner | `0x01` | `ACCESS_OWNER` |
+| write | `0x02` | `ACCESS_WRITE` |
+| read | `0x04` | `ACCESS_READ` |
+| execute | `0x08` | `ACCESS_EXECUTE` |
+| deny | `0x10` | `ACCESS_DENY` |
+| member | `0x20` | `ACCESS_MEMBER` |
+
+`ACCESS_ALL` is owner, write, read and execute unioned, so `15`. Common grants: read only is `4`, read with write is `6`, read with execute is `12`.
+
+On a grant claim with the deny bit clear, `create_claim` expands the mask: owner implies write, read and execute; write implies read and execute; execute implies read. The member bit stands alone. A `claim_object.sa_access` of NULL inherits the claim mask at read time.
+
+There is no access level. Any column, parameter or payload key naming one is wrong.
+
 ### Deny semantics
 
-To deny, create a claim with `is_deny = TRUE` and a specific `sa_access_level`, then bind it via `assign_claim_object`. Calc functions remove blocked grants from `user_object` at write time, so reads never need to filter for denies.
+To deny, create a claim with the deny bit `0x10` set on `sa_access` and the other bits enumerating which permissions to subtract, then bind it via `assign_claim_object`. Deny claims store the supplied bits verbatim, so any subset of read, write, execute and owner can be denied. Calc functions remove blocked grants from `user_object` at write time, so reads never need to filter for denies.
 
 ### Adding a column to a registered table
 
@@ -306,7 +326,7 @@ SELECT EXISTS (
 SELECT * FROM claimius.get_objects($user_id, $app_id, 'public.device', 8);
 ```
 
-Returns object_id, sa_access_level, denormalized name, description, and link, plus tree position columns. Already filtered for active claims, soft delete, and time validity.
+Returns object_id, sa_access as a bitwise mask, denormalized name, description, and link, plus tree position columns. Already filtered for active claims, soft delete, and time validity.
 
 ### You're rendering an org chart in a frontend
 
@@ -318,7 +338,7 @@ SELECT * FROM claimius.get_owner_graph($user_id, $app_id);
 SELECT * FROM claimius.get_owner_graph($user_id, $app_id, $start_org_id, 2);
 ```
 
-Returns flat rows with fields `object_id`, `object_type`, `label`, `parent_id`, and `data`. `object_type` is schema qualified, like `'claimius.organization'` or `'public.bookable'`. The `data` jsonb always carries `access_level` and `level`. Render as a tree in the frontend by grouping on `parent_id`. To enrich rows with table specific fields, write your own wrapper that UNIONs claimius's output with rows from your app tables filtered through `claimius.get_objects`.
+Returns flat rows with fields `object_id`, `object_type`, `label`, `parent_id`, and `data`. `object_type` is schema qualified, like `'claimius.organization'` or `'public.bookable'`. The `data` jsonb always carries `access`, the bitwise mask, and `level`. Render as a tree in the frontend by grouping on `parent_id`. To enrich rows with table specific fields, write your own wrapper that UNIONs claimius's output with rows from your app tables filtered through `claimius.get_objects`.
 
 ### A claim grant should expire automatically
 

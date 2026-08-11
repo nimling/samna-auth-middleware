@@ -18,6 +18,10 @@ import (
 // It checks a bearer token, then a session cookie, then client credentials, and
 // reads the resolved OIDC issuer, jwks and token endpoints from the config that
 // sdb.Init loaded. When auth is disabled it serves an unavailable response.
+//
+// Optional admits a request that carries no credential at all and leaves the
+// actor unset, so a route can serve public content and still recognize a signed
+// in visitor. A credential that is present but invalid is still refused.
 func UserAuthMiddleware(opts *UserAuthOptions) echo.MiddlewareFunc {
 	config := configFromUserAuthOptions(opts)
 
@@ -40,6 +44,9 @@ func UserAuthMiddleware(opts *UserAuthOptions) echo.MiddlewareFunc {
 			return func(ctx echo.Context) error {
 				clientErr := authenticateClient(ctx, config.DebugClients)
 				if errors.Is(clientErr, ErrorCredentialMissing) {
+					if config.Optional {
+						return next(ctx)
+					}
 					return ctx.String(http.StatusUnauthorized, "Unauthorized")
 				}
 				if clientErr != nil {
@@ -58,6 +65,9 @@ func UserAuthMiddleware(opts *UserAuthOptions) echo.MiddlewareFunc {
 
 	c := utils.Cfg()
 	if c.AuthDisabled {
+		if config.Optional {
+			return passthroughMiddleware()
+		}
 		return inactiveAppMiddleware()
 	}
 	config.ExpectedTokenIssuer = c.Issuer
@@ -98,6 +108,9 @@ func UserAuthMiddleware(opts *UserAuthOptions) echo.MiddlewareFunc {
 				return next(ctx)
 			}
 
+			if config.Optional {
+				return next(ctx)
+			}
 			return respondUnauthenticated(ctx)
 		}
 	}
@@ -144,6 +157,14 @@ func inactiveAppMiddleware() echo.MiddlewareFunc {
 	}
 }
 
+func passthroughMiddleware() echo.MiddlewareFunc {
+	return func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(ctx echo.Context) error {
+			return next(ctx)
+		}
+	}
+}
+
 func configFromUserAuthOptions(opts *UserAuthOptions) *AuthMiddlewareConfig {
 	if opts == nil {
 		opts = &UserAuthOptions{}
@@ -175,6 +196,7 @@ func configFromUserAuthOptions(opts *UserAuthOptions) *AuthMiddlewareConfig {
 		PageRedirectURI: pageRedirectURI,
 		DebugUserID:     parseUUID(c.DebugUserID),
 		DebugClients:    parseDebugClients(),
+		Optional:        opts.Optional,
 	}
 }
 

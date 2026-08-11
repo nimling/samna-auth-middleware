@@ -8,7 +8,7 @@ The disciple is a local replica. It never signs or decrypts, its app identity co
 |---------|--------|------|
 | `sdb` | `disciple/sdb` | Database layer. `sdb.Init(logger)` connects the pool and loads config once. |
 | `echo` | `disciple/echo` | The individual HTTP handlers: the me routes and the login flow. |
-| `sam` | `disciple/sam` | `sam.RegisterEndpoints(group)` mounts the handlers, and `sam.SyncStart(ctx)` runs the pull loop. |
+| `sam` | `disciple/sam` | `sam.RegisterEndpoints(group)` mounts the handlers, `sam.RegisterCapture(group)` and `sam.RegisterCaptureRead(group)` mount consent and capture, and `sam.SyncStart(ctx)` runs the pull loop. |
 | `smw` | `smw` | Middleware. |
 
 ## main.go
@@ -60,6 +60,26 @@ When a disciple answers 403 on every listing endpoint while the service is other
 ## Serving other services
 
 A disciple that other services read from mounts `smw.UserAuthMiddleware(nil)` on the group they call, which accepts a bearer token, a session cookie, or client credentials. Use `smw.ClientAuthMiddleware()` instead when the group is only ever reached machine to machine. The client id becomes the actor, so the same claims and the same `ScopeAccess` grants decide the answer. The client row itself is created on the prophet and arrives by sync. See [Machine clients](clients.md).
+
+## Consent and capture
+
+Interaction capture records clicks, pointer samples, scroll depth, inputs and page views for a visitor who has granted the analytics category, and it works for anonymous visitors as well as signed in ones. The disciple stores none of it. Every read and write forwards to the prophet on the app key, so the prophet stays the single place the data lives.
+
+The handlers are the same shape as every other one in `disciple/echo`, so a consumer mounts them itself:
+
+```go
+sauth := e.Group("/api/sauth")
+sauth.GET("/consent", saecho.GetConsent)
+sauth.POST("/consent", saecho.PostConsent)
+sauth.POST("/analytics", saecho.PostAnalytics)
+sauth.GET("/analytics.js", saecho.GetAnalyticsScript)
+```
+
+`sam.RegisterCapture(group)` mounts those four in one call, and `sam.RegisterEndpoints` already includes it. Mount either on a group with no session requirement: a visitor answers the banner before they have a session, and capture has to reach anonymous visitors too.
+
+`sam.RegisterCaptureRead(group)` mounts `GET /event` and `GET /session`. Those read across visitors, so they belong behind a session and behind whatever page grant gates the consumer's admin surface.
+
+The browser half is one call, `configureConsent({ endpoint: '/api/sauth' })`, which reads consent, starts capture only once the analytics category is granted, and raises the banner when the visitor has not decided under the current policy. A page with no build step loads `<script src="/api/sauth/analytics.js" data-endpoint="/api/sauth">` instead, which the `GetAnalyticsScript` route serves when `SAUTH_ANALYTICS_SCRIPT` points at the bundle. `SAUTH_CONSENT_POLICY_VERSION` and `SAUTH_CONSENT_POLICY_PATH` decide the policy the banner links and the version a decision is recorded against; raising the version prompts every visitor again.
 
 ## Notes
 

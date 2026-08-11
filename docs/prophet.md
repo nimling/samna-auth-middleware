@@ -58,6 +58,16 @@ The prophet hosts every app, so every read it performs is scoped. Most tables ca
 
 `/samna_client` under the registered group creates the service accounts other services authenticate with. `POST` returns the raw secret once and stores only its bcrypt hash; `POST /:id/rotate` issues a new one; `POST /:id/claim` binds a claim to the client. The client is always created under the app whose API it will call, because the sync feed is filtered by `app_id`. See [Machine clients](clients.md).
 
+## Consent and capture
+
+The prophet is where consent and interaction capture live. `claimius.consent` records a decision per app and per visitor, keyed on the user when there is one and on the anonymous id when there is not, with the granted categories, the policy version, the ip and the user agent. `claimius.analytics_session` and `claimius.analytics_event` hold what was captured, one row per signal.
+
+`RegisterEndpoints` mounts the routes a disciple forwards to: `GET` and `POST /consent`, `POST /analytics`, and `GET /analytics/event` and `/analytics/session` for reading back. `analytics.Init(db)` starts the async writer, so capture never blocks a request.
+
+Consent is enforced in SQL, not in the handler. `post_analytics_events` writes nothing when the analytics category is absent for that visitor, so a disciple that forwards a batch for someone who has not granted it stores nothing.
+
+`SAUTH_CONSENT_POLICY_VERSION` and `SAUTH_CONSENT_POLICY_PATH` set the policy a decision is recorded against and the document the banner links. Raising the version makes every visitor decide again.
+
 ## Notes
 
 The prophet serves the sync snapshot and delta feed at `sync/snapshot` and `sync/:seq` under the registered group. It does not run `SyncStart`; that is the disciple side.

@@ -24,7 +24,7 @@ func newAuthServerWithFailingRefresh(t *testing.T) *httptest.Server {
 	}))
 }
 
-func userAuthHandlerAgainst(t *testing.T, server *httptest.Server) echo.HandlerFunc {
+func userAuthHandlerAgainst(t *testing.T, server *httptest.Server, opts *smw.UserAuthOptions) echo.HandlerFunc {
 	t.Helper()
 	t.Setenv("SAUTH_DEBUG_USER_ID", "")
 	t.Setenv("SAUTH_DEBUG_CLIENTS", "")
@@ -41,7 +41,7 @@ func userAuthHandlerAgainst(t *testing.T, server *httptest.Server) echo.HandlerF
 	}
 	utils.SetOIDC(server.URL, *tokenURL, *jwksURL)
 
-	return smw.UserAuthMiddleware(nil)(func(ctx echo.Context) error {
+	return smw.UserAuthMiddleware(opts)(func(ctx echo.Context) error {
 		return ctx.String(http.StatusOK, "ok")
 	})
 }
@@ -50,7 +50,7 @@ func TestRefreshAuthServerErrorAnswersUnauthorizedOnFetch(t *testing.T) {
 	server := newAuthServerWithFailingRefresh(t)
 	defer server.Close()
 
-	handler := userAuthHandlerAgainst(t, server)
+	handler := userAuthHandlerAgainst(t, server, nil)
 
 	e := echo.New()
 	req := httptest.NewRequest(http.MethodGet, "/api/me/employee", nil)
@@ -70,7 +70,7 @@ func TestRefreshAuthServerErrorRedirectsToLoginOnNavigation(t *testing.T) {
 	server := newAuthServerWithFailingRefresh(t)
 	defer server.Close()
 
-	handler := userAuthHandlerAgainst(t, server)
+	handler := userAuthHandlerAgainst(t, server, nil)
 
 	e := echo.New()
 	req := httptest.NewRequest(http.MethodGet, "/nimployment", nil)
@@ -87,5 +87,67 @@ func TestRefreshAuthServerErrorRedirectsToLoginOnNavigation(t *testing.T) {
 	}
 	if loc := rec.Header().Get("Location"); loc != "/api/sauth/login" {
 		t.Fatalf("location = %q, want /api/sauth/login", loc)
+	}
+}
+
+func TestOptionalServesRequestCarryingNoCredential(t *testing.T) {
+	server := newAuthServerWithFailingRefresh(t)
+	defer server.Close()
+
+	handler := userAuthHandlerAgainst(t, server, &smw.UserAuthOptions{Optional: true})
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/guide/intro", nil)
+	req.Header.Set("Accept", "text/html")
+	rec := httptest.NewRecorder()
+
+	if err := handler(e.NewContext(req, rec)); err != nil {
+		t.Fatalf("middleware handler: %v", err)
+	}
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if rec.Body.String() != "ok" {
+		t.Fatalf("body = %q, want ok", rec.Body.String())
+	}
+}
+
+func TestOptionalRefusesRequestCarryingABrokenCredential(t *testing.T) {
+	server := newAuthServerWithFailingRefresh(t)
+	defer server.Close()
+
+	handler := userAuthHandlerAgainst(t, server, &smw.UserAuthOptions{Optional: true})
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/api/me/employee", nil)
+	req.AddCookie(&http.Cookie{Name: "sauth_refresh_token", Value: "ref"})
+	rec := httptest.NewRecorder()
+
+	if err := handler(e.NewContext(req, rec)); err != nil {
+		t.Fatalf("middleware handler: %v", err)
+	}
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401", rec.Code)
+	}
+}
+
+func TestWithoutOptionalARequestCarryingNoCredentialIsRefused(t *testing.T) {
+	server := newAuthServerWithFailingRefresh(t)
+	defer server.Close()
+
+	handler := userAuthHandlerAgainst(t, server, nil)
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/api/me/employee", nil)
+	rec := httptest.NewRecorder()
+
+	if err := handler(e.NewContext(req, rec)); err != nil {
+		t.Fatalf("middleware handler: %v", err)
+	}
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401", rec.Code)
 	}
 }

@@ -129,11 +129,26 @@ A page with no build step loads the same recorder from one script tag:
 <script src="/analytics.js" data-endpoint=""></script>
 ```
 
-The backend half is one call as well. Mount it outside any group that requires a
-session, because an anonymous visitor reaches consent before they have one:
+The backend half mounts the same way every other saecho handler does. Put it
+outside any group that requires a session, because an anonymous visitor reaches
+consent before they have one:
 
 ```go
-saecho.RegisterAnalytics(e.Group(""))
+sauth := e.Group("/api/sauth")
+sauth.GET("/consent", saecho.GetConsent)
+sauth.POST("/consent", saecho.PostConsent)
+sauth.POST("/analytics", saecho.PostAnalytics)
+sauth.GET("/analytics.js", saecho.GetAnalyticsScript)
+```
+
+The read routes answer with what was recorded about other people, so they belong
+on a group that requires a session, behind whatever page grant gates the
+consumer's admin surface:
+
+```go
+analytics := api.Group("/analytics")
+analytics.GET("/event", saecho.GetAnalyticsEvents)
+analytics.GET("/session", saecho.GetAnalyticsSessions)
 ```
 
 ## Build and publish
