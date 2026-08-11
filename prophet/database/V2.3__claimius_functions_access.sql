@@ -37,7 +37,8 @@ DECLARE
     v_op            TEXT;
     v_was_active    BOOLEAN;
     v_is_active     BOOLEAN;
-    v_viewers       UUID[] := '{}';
+    v_actor         UUID;
+    v_structural    BOOLEAN := TRUE;
 BEGIN
     IF claimius.in_replay_mode() THEN
         RETURN coalesce(NEW, OLD);
@@ -82,21 +83,25 @@ BEGIN
             OR (to_jsonb(OLD) ->> 'sa_location_id') IS DISTINCT FROM (to_jsonb(NEW) ->> 'sa_location_id') THEN
             PERFORM claimius._detach_object_from_trees(v_object_type, v_obj_id, OLD);
             PERFORM claimius._attach_object_to_trees(v_object_type, v_obj_id, NEW);
+        ELSE
+            -- Nothing that can move access changed. Refresh what the acting
+            -- user sees and leave every other user untouched.
+            v_structural := FALSE;
         END IF;
     END IF;
 
-    -- Recompute user_object for every affected user in every scoped app
+    -- The acting user materializes immediately so a writer reads its own work
+    -- back within the same request. Every other user settles when it reads.
     FOREACH v_app_id IN ARRAY v_app_ids LOOP
-        v_viewers := '{}';
-        FOR v_user IN
-            SELECT user_id FROM claimius._affected_users_for_object(v_app_id, v_object_type, v_obj_id)
-            LOOP
-                PERFORM claimius.recompute_user_object(v_app_id, v_user.user_id, v_object_type, v_obj_id);
-                v_viewers := array_append(v_viewers, v_user.user_id);
-            END LOOP;
+        v_actor := claimius._actor_user_for_row(v_app_id, v_object_type, coalesce(NEW, OLD));
+        IF v_actor IS NOT NULL THEN
+            PERFORM claimius.recompute_user_object(v_app_id, v_actor, v_object_type, v_obj_id);
+            PERFORM claimius._refresh_user_users(v_app_id, v_actor);
+        END IF;
 
-        PERFORM claimius._refresh_user_users(v_app_id, uid)
-        FROM (SELECT DISTINCT unnest(v_viewers) AS uid) s;
+        IF v_structural THEN
+            PERFORM claimius._raise_object_diff(v_app_id, v_object_type, v_obj_id);
+        END IF;
     END LOOP;
 
     RETURN coalesce(NEW, OLD);
@@ -228,7 +233,7 @@ DECLARE
     v_is_active     BOOLEAN;
     v_old_root      UUID;
     v_new_root      UUID;
-    v_viewers       UUID[] := '{}';
+    v_actor         UUID;
 BEGIN
     IF claimius.in_replay_mode() THEN
         RETURN coalesce(NEW, OLD);
@@ -296,41 +301,17 @@ BEGIN
         END IF;
     END IF;
 
-    -- Recompute affected users for this row and its descendants, once per
-    -- scoped app. Descendants are read directly from the closure index.
+    -- The acting user materializes immediately so a writer reads its own work
+    -- back within the same request. One diff carries the row and its subtree,
+    -- and the closure walk runs once, inside the read that claims the area.
     FOREACH v_app_id IN ARRAY v_app_ids LOOP
-        v_viewers := '{}';
-        FOR v_user IN
-            SELECT user_id FROM claimius._affected_users_for_object(v_app_id, v_object_type, v_obj_id)
-            LOOP
-                PERFORM claimius.recompute_user_object(v_app_id, v_user.user_id, v_object_type, v_obj_id);
-                v_viewers := array_append(v_viewers, v_user.user_id);
-            END LOOP;
-
-        IF v_object_type IN ('claimius.organization', 'claimius.location') OR (
-            SELECT t.has_sa_parent_id AND t.has_sa_root_id FROM claimius.table_info t WHERE t.object_type = v_object_type
-        ) THEN
-            FOR v_user IN
-                WITH descendants AS (
-                    SELECT DISTINCT e.descendant_type AS object_type, e.descendant_id AS object_id
-                    FROM claimius.inheritance_info e
-                    WHERE e.ancestor_type = v_object_type
-                      AND e.ancestor_id   = v_obj_id
-                ),
-                     affected AS (
-                         SELECT DISTINCT u.user_id, d.object_type, d.object_id
-                         FROM descendants d
-                                  CROSS JOIN LATERAL claimius._affected_users_for_object(v_app_id, d.object_type, d.object_id) u
-                     )
-                SELECT * FROM affected
-                LOOP
-                    PERFORM claimius.recompute_user_object(v_app_id, v_user.user_id, v_user.object_type, v_user.object_id);
-                    v_viewers := array_append(v_viewers, v_user.user_id);
-                END LOOP;
+        v_actor := claimius._actor_user_for_row(v_app_id, v_object_type, coalesce(NEW, OLD));
+        IF v_actor IS NOT NULL THEN
+            PERFORM claimius.recompute_user_object(v_app_id, v_actor, v_object_type, v_obj_id);
+            PERFORM claimius._refresh_user_users(v_app_id, v_actor);
         END IF;
 
-        PERFORM claimius._refresh_user_users(v_app_id, uid)
-        FROM (SELECT DISTINCT unnest(v_viewers) AS uid) s;
+        PERFORM claimius._raise_object_diff(v_app_id, v_object_type, v_obj_id, TRUE);
     END LOOP;
 
     RETURN coalesce(NEW, OLD);
@@ -420,203 +401,45 @@ DECLARE
     v_table       TEXT;
     v_app_id      UUID;
     v_claim_id    UUID;
-    v_user_id     UUID;
-    v_object_id   UUID;
-    v_object_type TEXT;
-    v_pair        RECORD;
-    v_link        RECORD;
-    v_b_binding   RECORD;
-    v_user_of_a   RECORD;
-    v_viewers     UUID[] := '{}';
+    v_actor       UUID;
 BEGIN
     IF claimius.in_replay_mode() THEN
         RETURN coalesce(NEW, OLD);
     END IF;
 
-    v_table := TG_TABLE_NAME;
+    v_table  := TG_TABLE_NAME;
+    v_app_id := coalesce(NEW.app_id, OLD.app_id);
 
+    -- Every shape resolves to the claim whose area moved. claim_object carries
+    -- it directly, user_claim carries the assignment, and a composition link
+    -- moves the linked claim as well as its own.
     IF v_table = 'claim' THEN
         v_claim_id := coalesce(NEW.id, OLD.id);
-        v_app_id   := coalesce(NEW.app_id, OLD.app_id);
-
-        FOR v_pair IN
-            SELECT uc.user_id, co.object_type, co.object_id, co.inherits AS co_inherits
-            FROM claimius.user_claim uc
-                JOIN claimius.claim_object co ON co.claim_id = uc.claim_id
-            WHERE uc.claim_id = v_claim_id
-              AND uc.app_id = v_app_id
-              AND uc.sa_deleted_at IS NULL
-              AND co.sa_deleted_at IS NULL
-        LOOP
-            PERFORM claimius.recompute_user_object(v_app_id, v_pair.user_id, v_pair.object_type, v_pair.object_id);
-            v_viewers := array_append(v_viewers, v_pair.user_id);
-            IF coalesce((SELECT inherits FROM claimius.claim WHERE id = v_claim_id), FALSE)
-                AND v_pair.co_inherits THEN
-                PERFORM claimius._cascade_recompute(v_app_id, v_pair.user_id, v_pair.object_type, v_pair.object_id);
-            END IF;
-        END LOOP;
-
-        FOR v_link IN
-            SELECT link.object_id AS b_id
-            FROM claimius.claim_object link
-            WHERE link.claim_id      = v_claim_id
-              AND link.object_type   = 'claimius.claim'
-              AND link.app_id        = v_app_id
-              AND link.sa_deleted_at IS NULL
-        LOOP
-            FOR v_b_binding IN
-                SELECT object_type, object_id
-                FROM claimius.claim_object
-                WHERE claim_id      = v_link.b_id
-                  AND app_id        = v_app_id
-                  AND sa_deleted_at IS NULL
-            LOOP
-                FOR v_user_of_a IN
-                    SELECT user_id FROM claimius.user_claim
-                    WHERE claim_id      = v_claim_id
-                      AND app_id        = v_app_id
-                      AND sa_deleted_at IS NULL
-                LOOP
-                    PERFORM claimius.recompute_user_object(
-                        v_app_id, v_user_of_a.user_id, v_b_binding.object_type, v_b_binding.object_id);
-                    v_viewers := array_append(v_viewers, v_user_of_a.user_id);
-                END LOOP;
-            END LOOP;
-        END LOOP;
-
-        FOR v_link IN
-            SELECT link.claim_id AS a_id
-            FROM claimius.claim_object link
-            WHERE link.object_type   = 'claimius.claim'
-              AND link.object_id     = v_claim_id
-              AND link.app_id        = v_app_id
-              AND link.sa_deleted_at IS NULL
-        LOOP
-            FOR v_b_binding IN
-                SELECT object_type, object_id
-                FROM claimius.claim_object
-                WHERE claim_id      = v_claim_id
-                  AND app_id        = v_app_id
-                  AND sa_deleted_at IS NULL
-            LOOP
-                FOR v_user_of_a IN
-                    SELECT user_id FROM claimius.user_claim
-                    WHERE claim_id      = v_link.a_id
-                      AND app_id        = v_app_id
-                      AND sa_deleted_at IS NULL
-                LOOP
-                    PERFORM claimius.recompute_user_object(
-                        v_app_id, v_user_of_a.user_id, v_b_binding.object_type, v_b_binding.object_id);
-                    v_viewers := array_append(v_viewers, v_user_of_a.user_id);
-                END LOOP;
-            END LOOP;
-        END LOOP;
-
-    ELSIF v_table = 'claim_object' THEN
-        v_claim_id    := coalesce(NEW.claim_id, OLD.claim_id);
-        v_app_id      := coalesce(NEW.app_id, OLD.app_id);
-        v_object_id   := coalesce(NEW.object_id, OLD.object_id);
-        v_object_type := coalesce(NEW.object_type, OLD.object_type);
-
-        FOR v_pair IN
-            SELECT uc.user_id
-            FROM claimius.user_claim uc
-            WHERE uc.claim_id = v_claim_id
-              AND uc.app_id = v_app_id
-              AND uc.sa_deleted_at IS NULL
-        LOOP
-            PERFORM claimius.recompute_user_object(v_app_id, v_pair.user_id, v_object_type, v_object_id);
-            v_viewers := array_append(v_viewers, v_pair.user_id);
-            IF coalesce(NEW.inherits, OLD.inherits, FALSE)
-                AND coalesce((SELECT inherits FROM claimius.claim WHERE id = v_claim_id), FALSE) THEN
-                PERFORM claimius._cascade_recompute(v_app_id, v_pair.user_id, v_object_type, v_object_id);
-            END IF;
-        END LOOP;
-
-        IF v_object_type = 'claimius.claim' THEN
-            FOR v_b_binding IN
-                SELECT object_type, object_id
-                FROM claimius.claim_object
-                WHERE claim_id      = v_object_id
-                  AND app_id        = v_app_id
-                  AND sa_deleted_at IS NULL
-            LOOP
-                FOR v_user_of_a IN
-                    SELECT user_id FROM claimius.user_claim
-                    WHERE claim_id      = v_claim_id
-                      AND app_id        = v_app_id
-                      AND sa_deleted_at IS NULL
-                LOOP
-                    PERFORM claimius.recompute_user_object(
-                        v_app_id, v_user_of_a.user_id, v_b_binding.object_type, v_b_binding.object_id);
-                    v_viewers := array_append(v_viewers, v_user_of_a.user_id);
-                END LOOP;
-            END LOOP;
-        END IF;
-
-        FOR v_link IN
-            SELECT link.claim_id AS a_id
-            FROM claimius.claim_object link
-            WHERE link.object_type   = 'claimius.claim'
-              AND link.object_id     = v_claim_id
-              AND link.app_id        = v_app_id
-              AND link.sa_deleted_at IS NULL
-        LOOP
-            FOR v_user_of_a IN
-                SELECT user_id FROM claimius.user_claim
-                WHERE claim_id      = v_link.a_id
-                  AND app_id        = v_app_id
-                  AND sa_deleted_at IS NULL
-            LOOP
-                PERFORM claimius.recompute_user_object(
-                    v_app_id, v_user_of_a.user_id, v_object_type, v_object_id);
-                v_viewers := array_append(v_viewers, v_user_of_a.user_id);
-            END LOOP;
-        END LOOP;
-
-    ELSIF v_table = 'user_claim' THEN
+    ELSE
         v_claim_id := coalesce(NEW.claim_id, OLD.claim_id);
-        v_user_id  := coalesce(NEW.user_id, OLD.user_id);
-        v_app_id   := coalesce(NEW.app_id, OLD.app_id);
-        v_viewers  := array_append(v_viewers, v_user_id);
-
-        FOR v_pair IN
-            SELECT co.object_type, co.object_id, co.inherits
-            FROM claimius.claim_object co
-            WHERE co.claim_id = v_claim_id
-              AND co.app_id = v_app_id
-              AND co.sa_deleted_at IS NULL
-        LOOP
-            PERFORM claimius.recompute_user_object(v_app_id, v_user_id, v_pair.object_type, v_pair.object_id);
-            IF v_pair.inherits
-                AND coalesce((SELECT inherits FROM claimius.claim WHERE id = v_claim_id), FALSE) THEN
-                PERFORM claimius._cascade_recompute(v_app_id, v_user_id, v_pair.object_type, v_pair.object_id);
-            END IF;
-        END LOOP;
-
-        FOR v_link IN
-            SELECT link.object_id AS b_id
-            FROM claimius.claim_object link
-            WHERE link.claim_id      = v_claim_id
-              AND link.object_type   = 'claimius.claim'
-              AND link.app_id        = v_app_id
-              AND link.sa_deleted_at IS NULL
-        LOOP
-            FOR v_b_binding IN
-                SELECT object_type, object_id
-                FROM claimius.claim_object
-                WHERE claim_id      = v_link.b_id
-                  AND app_id        = v_app_id
-                  AND sa_deleted_at IS NULL
-            LOOP
-                PERFORM claimius.recompute_user_object(
-                    v_app_id, v_user_id, v_b_binding.object_type, v_b_binding.object_id);
-            END LOOP;
-        END LOOP;
     END IF;
 
-    PERFORM claimius._refresh_user_users(v_app_id, uid)
-    FROM (SELECT DISTINCT unnest(v_viewers) AS uid) s;
+    PERFORM claimius._raise_claim_diff(v_app_id, v_claim_id);
+
+    IF v_table = 'claim_object' THEN
+        IF coalesce(NEW.object_type, OLD.object_type) = 'claimius.claim' THEN
+            PERFORM claimius._raise_claim_diff(v_app_id, coalesce(NEW.object_id, OLD.object_id));
+        END IF;
+    END IF;
+
+    -- The acting user settles its own view now, so an assignment or a binding
+    -- made in a request is visible to the rest of that request.
+    v_actor := claimius._actor_user_for_row(v_app_id, 'claimius.' || v_table, coalesce(NEW, OLD));
+    IF v_actor IS NOT NULL THEN
+        PERFORM claimius._settle_claim_diff_for_user(v_app_id, v_actor, v_claim_id);
+        PERFORM claimius._refresh_user_users(v_app_id, v_actor);
+    END IF;
+
+    IF v_table = 'user_claim' THEN
+        PERFORM claimius._settle_claim_diff_for_user(
+                v_app_id, coalesce(NEW.user_id, OLD.user_id), v_claim_id);
+        PERFORM claimius._refresh_user_users(v_app_id, coalesce(NEW.user_id, OLD.user_id));
+    END IF;
 
     RETURN coalesce(NEW, OLD);
 END;
@@ -788,15 +611,89 @@ COMMENT ON FUNCTION claimius.emit_sync_event() IS 'Trigger on materialized state
 -- ----------------------------------------------------------------------------
 
 -- reconcile_if_pending
--- Drains reconcile_queue entries for one user inline. Called at the top of
--- every get_* function. Disciple side use only; on the prophet there are
--- normally no entries.
-CREATE OR REPLACE FUNCTION claimius.reconcile_if_pending(p_app_id UUID, p_user_id UUID)
+-- Settles outstanding access areas inline, at the top of every get_* function.
+-- Two independent sources feed it.
+--
+-- The diff. access_diff holds the areas a write marked instead of recomputing.
+-- A read claims the rows whose area it targets, recalculates each area for
+-- every user in it, and deletes the row. First come first serve through
+-- FOR UPDATE SKIP LOCKED: concurrent readers never settle the same area twice,
+-- the first one through pays for everyone, and an area nobody reads is never
+-- computed at all.
+--
+-- p_object_type and p_object_id narrow the claim to what the caller is about
+-- to read. Called with neither, a read settles every area it can reach as the
+-- holder of its claims, which is what the list and graph functions need.
+--
+-- The retry queue. reconcile_queue holds sync event applications that failed.
+-- It drains the same way it always has, so transient sync failures self heal.
+CREATE OR REPLACE FUNCTION claimius.reconcile_if_pending(
+    p_app_id        UUID,
+    p_user_id       UUID,
+    p_object_type   TEXT DEFAULT NULL,
+    p_object_id     UUID DEFAULT NULL
+)
     RETURNS VOID AS $$
 DECLARE
-    v_row RECORD;
-    v_drained BOOLEAN := FALSE;
+    v_row       RECORD;
+    v_diff      RECORD;
+    v_touched   UUID[] := '{}';
+    v_users     UUID[];
 BEGIN
+    IF p_app_id IS NULL OR p_user_id IS NULL THEN
+        RETURN;
+    END IF;
+
+    FOR v_diff IN
+        SELECT d.* FROM claimius.access_diff d
+        WHERE d.app_id = p_app_id
+          AND (
+                  p_object_type IS NULL
+                  OR (d.kind = 'object'
+                      AND d.object_type = p_object_type
+                      AND (p_object_id IS NULL OR d.object_id = p_object_id))
+                  OR d.kind = 'claim'
+              )
+          AND (
+                  d.kind = 'object'
+                  OR EXISTS (
+                      SELECT 1 FROM claimius.user_claim uc
+                      WHERE uc.user_id = p_user_id
+                        AND uc.app_id = p_app_id
+                        AND uc.sa_deleted_at IS NULL
+                        AND (
+                            uc.claim_id = d.claim_id
+                            OR EXISTS (
+                                SELECT 1 FROM claimius.claim_object link
+                                WHERE link.claim_id = uc.claim_id
+                                  AND link.app_id = p_app_id
+                                  AND link.object_type = 'claimius.claim'
+                                  AND link.object_id = d.claim_id
+                                  AND link.sa_deleted_at IS NULL
+                            )
+                        )
+                  )
+              )
+        FOR UPDATE SKIP LOCKED
+        LOOP
+            BEGIN
+                IF v_diff.kind = 'object' THEN
+                    SELECT array_agg(u) INTO v_users
+                    FROM claimius._settle_object_diff(
+                            p_app_id, v_diff.object_type, v_diff.object_id, v_diff.cascade) u;
+                ELSE
+                    SELECT array_agg(u) INTO v_users
+                    FROM claimius._settle_claim_diff(p_app_id, v_diff.claim_id) u;
+                END IF;
+
+                DELETE FROM claimius.access_diff WHERE id = v_diff.id;
+                v_touched := v_touched || coalesce(v_users, '{}');
+            EXCEPTION WHEN OTHERS THEN
+                -- leave the area outstanding for the next reader
+                NULL;
+            END;
+        END LOOP;
+
     FOR v_row IN
         SELECT id, object_id, object_type FROM claimius.reconcile_queue
         WHERE app_id = p_app_id AND user_id = p_user_id
@@ -805,20 +702,19 @@ BEGIN
             BEGIN
                 PERFORM claimius.recompute_user_object(p_app_id, p_user_id, v_row.object_type, v_row.object_id);
                 DELETE FROM claimius.reconcile_queue WHERE id = v_row.id;
-                v_drained := TRUE;
+                v_touched := v_touched || p_user_id;
             EXCEPTION WHEN OTHERS THEN
                 -- leave it queued for the next attempt
                 NULL;
             END;
         END LOOP;
 
-    IF v_drained THEN
-        PERFORM claimius._refresh_user_users(p_app_id, p_user_id);
-    END IF;
+    PERFORM claimius._refresh_user_users(p_app_id, s.uid)
+    FROM (SELECT DISTINCT unnest(v_touched) AS uid) s;
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius.reconcile_if_pending(p_app_id uuid, p_user_id uuid) IS 'Drains reconcile_queue for a user inline. Called at read entry points.';
+COMMENT ON FUNCTION claimius.reconcile_if_pending(UUID, UUID, TEXT, UUID) IS 'Settles outstanding access_diff areas the read targets and drains reconcile_queue. Called at read entry points.';
 
 -- cascade_user_soft_delete
 -- When read functions detect a soft deleted user, propagate the soft delete

@@ -672,6 +672,35 @@ COMMENT ON TABLE claimius.reconcile_queue IS 'Disciple side retry queue for fail
 
 CREATE INDEX IF NOT EXISTS idx_reconcile_queue_user ON claimius.reconcile_queue (app_id, user_id);
 
+-- access_diff
+-- The outstanding areas of access that no longer reflect their inputs. A write
+-- records one row here, keyed on what changed and never on the users it
+-- affects, so write cost is constant in the number of users.
+-- A read that targets one of these areas recalculates it and clears the row.
+-- First come first serve: the first reader to reach an area settles it for
+-- everyone, and an area nobody reads is never computed at all.
+-- kind 'object' carries object_type and object_id: a row entered or left a
+-- tree, changed owner or location, or was soft deleted. kind 'claim' carries
+-- claim_id: a claim, a binding, or an assignment changed.
+-- The id is deterministic on the area, so repeated changes to the same area
+-- collapse into one outstanding row instead of a queue of duplicates.
+CREATE TABLE IF NOT EXISTS claimius.access_diff (
+                                                    id              UUID PRIMARY KEY,
+                                                    app_id          UUID NOT NULL,
+                                                    kind            TEXT NOT NULL,
+                                                    object_type     TEXT,
+                                                    object_id       UUID,
+                                                    claim_id        UUID,
+                                                    cascade         BOOLEAN NOT NULL DEFAULT FALSE,
+                                                    sa_created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+                                                    sa_updated_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+COMMENT ON TABLE claimius.access_diff IS 'Outstanding access areas awaiting recalculation. Written by calc triggers, cleared first come first serve by the read that targets the area.';
+
+CREATE INDEX IF NOT EXISTS idx_access_diff_object ON claimius.access_diff (app_id, object_type, object_id) WHERE kind = 'object';
+CREATE INDEX IF NOT EXISTS idx_access_diff_claim ON claimius.access_diff (app_id, claim_id) WHERE kind = 'claim';
+
 -- claim_graph_cache
 -- Per user materialized result of claimius.get_claim_graph for the default
 -- argument shape: p_start_id IS NULL, p_depth = 0, p_required_access = 0. The

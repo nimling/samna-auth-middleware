@@ -18,14 +18,15 @@ description: |
    init_prophet init_disciple init_hybrid init_claimius_tables
    init_claimius_internal ensure_app_user merge_user migrate_root,
    calc_object_access calc_hierarchical_access calc_claim_access
-   emit_sync_event audit_trigger replay_mode reconcile_queue
+   emit_sync_event audit_trigger replay_mode reconcile_queue access_diff
    prophet_state disciple_state, register a table for access control,
    permission template, role grant claimius_writer claimius_reader
    claimius_disciple_client, org chart access graph hierarchy rendering,
    full text search over accessible objects.
 hard_constraints:
    - reads always go through `get_*` functions, never direct SELECT on claimius tables
-   - writes go through a write function when one exists; otherwise direct INSERT/UPDATE on the prophet side is fine. Triggers fire either way and maintain `user_object`.
+   - writes go through a write function when one exists; otherwise direct INSERT/UPDATE on the prophet side is fine. Triggers fire either way: they settle `user_object` for the acting user and mark the area in `access_diff` for everyone else.
+   - `user_object` for a user other than the writer is settled by that user's next read, through `reconcile_if_pending`. Never assume another user's row exists immediately after a write.
    - hard delete is forbidden in app code; default is soft delete via `sa_deleted_at`
    - `sa_created_by` is a `user_claim.id`, not a `samna_user.user_id`
    - `samna_user.user_id` is the human stable identifier; `samna_user.id` is the row PK
@@ -45,6 +46,8 @@ do_not_invent: true
 # Claimius rules
 
 This project uses **Claimius** for access control. Claimius is a Postgres schema named `claimius` that materializes user access into a denormalized index. Application code reads through `get_*` functions, never direct SELECTs against claimius tables.
+
+Materialization is paid on read, not on write. A write settles the acting user, so a writer reads its own change back inside the same request, and records the changed area in `claimius.access_diff`. The next read that targets that area recalculates it for every user in it and clears the row, first come first serve. An area nobody reads is never computed. This keeps write cost constant in the number of users and is why a write must never assume another user's `user_object` row exists yet.
 
 This document is a usage guide. It tells you which functions to call, which tables you may write to, and which patterns to follow. It does not describe how the engine computes access. Trust the engine and call the documented entry points.
 
@@ -182,6 +185,7 @@ You may NEVER write directly to:
 - `sync_event`. Append only, written by triggers.
 - `audit`. Write via `claimius.write_audit` if you must.
 - `reconcile_queue`. Managed by sync layer.
+- `access_diff`. Written by the calc triggers, cleared by the read that settles the area.
 
 ### `sa_created_by` is `user_claim.id`, never `samna_user.user_id`
 
@@ -343,6 +347,10 @@ Returns flat rows with fields `object_id`, `object_type`, `label`, `parent_id`, 
 ### A claim grant should expire automatically
 
 Pass `p_starts_at` or `p_ends_at` to `assign_claim_user`. `get_*` functions filter by current time. No background job required; expiration is read time.
+
+### A user cannot see something another user just created
+
+Expected until that user reads. The write marked the area in `access_diff` and settled only the writer. The next `get_*` call for the other user claims the area, recalculates it, and clears the row. If it persists past a read, check that the read entered through a `get_*` function rather than a direct SELECT, since `reconcile_if_pending` runs at the top of the `get_*` family and nowhere else.
 
 ### The disciple keeps falling behind on sync
 

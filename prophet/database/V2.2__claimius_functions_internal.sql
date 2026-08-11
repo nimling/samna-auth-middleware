@@ -1760,3 +1760,227 @@ END;
 $function$
 ;
 
+
+-- ----------------------------------------------------------------------------
+-- _actor_user_for_row
+-- The user acting on a row, resolved from sa_created_by, which is a
+-- user_claim.id. Claimius is always entered in the context of a user or a
+-- client, so this is the one user whose materialization a write settles
+-- synchronously. Returns NULL when the table carries no sa_created_by or the
+-- assignment no longer resolves.
+-- ----------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION claimius._actor_user_for_row(
+    p_app_id        UUID,
+    p_object_type   TEXT,
+    p_row           ANYELEMENT
+) RETURNS UUID AS $$
+DECLARE
+    v_created_by    UUID;
+    v_user_id       UUID;
+BEGIN
+    IF p_object_type = 'claimius.samna_user' THEN
+        RETURN NULL;
+    END IF;
+
+    v_created_by := (to_jsonb(p_row) ->> 'sa_created_by')::UUID;
+    IF v_created_by IS NULL THEN
+        RETURN NULL;
+    END IF;
+
+    SELECT uc.user_id INTO v_user_id
+    FROM claimius.user_claim uc
+    WHERE uc.id = v_created_by
+      AND uc.app_id = p_app_id
+      AND uc.sa_deleted_at IS NULL;
+
+    RETURN v_user_id;
+EXCEPTION WHEN OTHERS THEN
+    RETURN NULL;
+END;
+$$ LANGUAGE plpgsql STABLE;
+
+COMMENT ON FUNCTION claimius._actor_user_for_row(UUID, TEXT, ANYELEMENT) IS 'User behind sa_created_by on a row. The one user a write materializes synchronously.';
+
+-- ----------------------------------------------------------------------------
+-- _raise_object_diff
+-- Marks the area around one object as needing recalculation. One row, no user
+-- enumeration. Repeated changes to the same object collapse onto the same id.
+-- ----------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION claimius._raise_object_diff(
+    p_app_id        UUID,
+    p_object_type   TEXT,
+    p_object_id     UUID,
+    p_cascade       BOOLEAN DEFAULT FALSE
+) RETURNS VOID AS $$
+BEGIN
+    IF p_app_id IS NULL THEN
+        RETURN;
+    END IF;
+
+    INSERT INTO claimius.access_diff (id, app_id, kind, object_type, object_id, cascade)
+    VALUES (claimius.composite_id('object', p_app_id::TEXT, p_object_type, p_object_id::TEXT),
+            p_app_id, 'object', p_object_type, p_object_id, p_cascade)
+    ON CONFLICT (id) DO UPDATE
+        SET sa_updated_at = now(),
+            cascade = claimius.access_diff.cascade OR EXCLUDED.cascade;
+END;
+$$ LANGUAGE plpgsql;
+
+COMMENT ON FUNCTION claimius._raise_object_diff(UUID, TEXT, UUID, BOOLEAN) IS 'Marks an object area outstanding in access_diff.';
+
+-- ----------------------------------------------------------------------------
+-- _raise_claim_diff
+-- Marks the area around one claim as needing recalculation.
+-- ----------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION claimius._raise_claim_diff(
+    p_app_id        UUID,
+    p_claim_id      UUID
+) RETURNS VOID AS $$
+BEGIN
+    IF p_app_id IS NULL OR p_claim_id IS NULL THEN
+        RETURN;
+    END IF;
+
+    INSERT INTO claimius.access_diff (id, app_id, kind, claim_id)
+    VALUES (claimius.composite_id('claim', p_app_id::TEXT, p_claim_id::TEXT),
+            p_app_id, 'claim', p_claim_id)
+    ON CONFLICT (id) DO UPDATE SET sa_updated_at = now();
+END;
+$$ LANGUAGE plpgsql;
+
+COMMENT ON FUNCTION claimius._raise_claim_diff(UUID, UUID) IS 'Marks a claim area outstanding in access_diff.';
+
+-- ----------------------------------------------------------------------------
+-- _settle_object_diff
+-- Recalculates one object area for every user it touches. This is the work the
+-- write no longer does, paid once by the first read that targets the area.
+-- ----------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION claimius._settle_object_diff(
+    p_app_id        UUID,
+    p_object_type   TEXT,
+    p_object_id     UUID,
+    p_cascade       BOOLEAN DEFAULT FALSE
+) RETURNS SETOF UUID AS $$
+DECLARE
+    v_user RECORD;
+BEGIN
+    FOR v_user IN
+        SELECT user_id FROM claimius._affected_users_for_object(p_app_id, p_object_type, p_object_id)
+        LOOP
+            PERFORM claimius.recompute_user_object(p_app_id, v_user.user_id, p_object_type, p_object_id);
+            RETURN NEXT v_user.user_id;
+        END LOOP;
+
+    -- A hierarchical row carries its subtree. The write records one diff and
+    -- the closure is walked here, once, by the reader that claims the area.
+    IF p_cascade THEN
+        FOR v_user IN
+            WITH descendants AS (
+                SELECT DISTINCT e.descendant_type AS object_type, e.descendant_id AS object_id
+                FROM claimius.inheritance_info e
+                WHERE e.ancestor_type = p_object_type
+                  AND e.ancestor_id = p_object_id
+                  AND e.depth > 0
+            )
+            SELECT DISTINCT u.user_id, d.object_type, d.object_id
+            FROM descendants d
+                CROSS JOIN LATERAL claimius._affected_users_for_object(p_app_id, d.object_type, d.object_id) u
+            LOOP
+                PERFORM claimius.recompute_user_object(
+                        p_app_id, v_user.user_id, v_user.object_type, v_user.object_id);
+                RETURN NEXT v_user.user_id;
+            END LOOP;
+    END IF;
+END;
+$$ LANGUAGE plpgsql;
+
+COMMENT ON FUNCTION claimius._settle_object_diff(UUID, TEXT, UUID, BOOLEAN) IS 'Recomputes one object for every user reaching it. Returns the users touched.';
+
+-- ----------------------------------------------------------------------------
+-- _settle_claim_diff_for_user
+-- The single user slice of a claim area. A write settles the acting user and
+-- the assigned user through this, so both read their own change back while
+-- every other holder waits for the diff to be claimed by a read.
+-- ----------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION claimius._settle_claim_diff_for_user(
+    p_app_id        UUID,
+    p_user_id       UUID,
+    p_claim_id      UUID
+) RETURNS VOID AS $$
+DECLARE
+    v_inherits  BOOLEAN;
+    v_target    RECORD;
+BEGIN
+    IF p_app_id IS NULL OR p_user_id IS NULL OR p_claim_id IS NULL THEN
+        RETURN;
+    END IF;
+
+    SELECT coalesce(c.inherits, FALSE) INTO v_inherits
+    FROM claimius.claim c WHERE c.id = p_claim_id;
+
+    FOR v_target IN
+        SELECT co.object_type, co.object_id
+        FROM claimius.claim_object co
+        WHERE co.claim_id = p_claim_id
+          AND co.app_id = p_app_id
+          AND co.sa_deleted_at IS NULL
+          AND co.object_type <> 'claimius.claim'
+
+        UNION
+
+        SELECT e.descendant_type, e.descendant_id
+        FROM claimius.claim_object co
+            JOIN claimius.inheritance_info e
+                ON e.ancestor_type = co.object_type
+               AND e.ancestor_id = co.object_id
+               AND e.depth > 0
+        WHERE co.claim_id = p_claim_id
+          AND co.app_id = p_app_id
+          AND co.sa_deleted_at IS NULL
+          AND co.inherits = TRUE
+          AND v_inherits
+        LOOP
+            PERFORM claimius.recompute_user_object(
+                    p_app_id, p_user_id, v_target.object_type, v_target.object_id);
+        END LOOP;
+END;
+$$ LANGUAGE plpgsql;
+
+COMMENT ON FUNCTION claimius._settle_claim_diff_for_user(UUID, UUID, UUID) IS 'Recomputes the objects a claim reaches, for one user only.';
+
+-- ----------------------------------------------------------------------------
+-- _settle_claim_diff
+-- Recalculates the area a claim covers for every user holding it, directly or
+-- through a composition link.
+-- ----------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION claimius._settle_claim_diff(
+    p_app_id        UUID,
+    p_claim_id      UUID
+) RETURNS SETOF UUID AS $$
+DECLARE
+    v_holder RECORD;
+BEGIN
+    FOR v_holder IN
+        SELECT DISTINCT uc.user_id
+        FROM claimius.user_claim uc
+        WHERE uc.app_id = p_app_id
+          AND uc.sa_deleted_at IS NULL
+          AND (
+              uc.claim_id = p_claim_id
+              OR EXISTS (
+                  SELECT 1 FROM claimius.claim_object link
+                  WHERE link.claim_id = uc.claim_id
+                    AND link.app_id = p_app_id
+                    AND link.object_type = 'claimius.claim'
+                    AND link.object_id = p_claim_id
+                    AND link.sa_deleted_at IS NULL
+              )
+          )
+        LOOP
+            PERFORM claimius._settle_claim_diff_for_user(p_app_id, v_holder.user_id, p_claim_id);
+            RETURN NEXT v_holder.user_id;
+        END LOOP;
+END;
+$$ LANGUAGE plpgsql;
+
+COMMENT ON FUNCTION claimius._settle_claim_diff(UUID, UUID) IS 'Recomputes the objects a claim reaches for every user holding it. Returns the users touched.';
