@@ -22,6 +22,17 @@ func RegisterAnalytics(g *echo.Group) {
 	g.GET("/analytics.js", GetAnalyticsScript)
 }
 
+// RegisterAnalyticsRead mounts the capture read routes. These answer with what
+// was recorded about other people, so unlike RegisterAnalytics they belong on a
+// group that requires a session, behind whatever page grant the consumer gates
+// its admin surface with.
+//
+//	saecho.RegisterAnalyticsRead(api.Group("/analytics"))
+func RegisterAnalyticsRead(g *echo.Group) {
+	g.GET("/event", GetAnalyticsEvents)
+	g.GET("/session", GetAnalyticsSessions)
+}
+
 // GetAnalyticsScript serves the self contained browser recorder so a page with
 // no build step can load it from one script tag:
 //

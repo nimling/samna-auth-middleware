@@ -104,6 +104,44 @@ func PostConsent(ctx echo.Context) error {
 	return respondJSON(ctx, http.StatusOK, state, 1)
 }
 
+// GetAnalyticsEvents reads captured events back from the prophet. The query is
+// passed through, so type, path, session_id, user_id, limit and offset all
+// filter on the prophet side.
+func GetAnalyticsEvents(ctx echo.Context) error {
+	items := make([]shared.AnalyticsEvent, 0)
+	forwarded := client.WithForward(ctx.Request().Context(), forwardContext(ctx))
+	if err := client.Get(forwarded, "analytics/event"+passthroughQuery(ctx), &items); err != nil {
+		ctx.Logger().Errorf("GetAnalyticsEvents: %v", err)
+		return respondError(ctx, http.StatusBadGateway, "Analytics service unavailable")
+	}
+	return respondJSON(ctx, http.StatusOK, items, len(items))
+}
+
+// GetAnalyticsSessions reads the captured visits back from the prophet.
+func GetAnalyticsSessions(ctx echo.Context) error {
+	items := make([]shared.AnalyticsSession, 0)
+	forwarded := client.WithForward(ctx.Request().Context(), forwardContext(ctx))
+	if err := client.Get(forwarded, "analytics/session"+passthroughQuery(ctx), &items); err != nil {
+		ctx.Logger().Errorf("GetAnalyticsSessions: %v", err)
+		return respondError(ctx, http.StatusBadGateway, "Analytics service unavailable")
+	}
+	return respondJSON(ctx, http.StatusOK, items, len(items))
+}
+
+func passthroughQuery(ctx echo.Context) string {
+	allowed := []string{"type", "path", "session_id", "user_id", "anonymous_id", "limit", "offset"}
+	values := url.Values{}
+	for _, key := range allowed {
+		if v := ctx.QueryParam(key); v != "" {
+			values.Set(key, v)
+		}
+	}
+	if len(values) == 0 {
+		return ""
+	}
+	return "?" + values.Encode()
+}
+
 // PostAnalytics forwards a capture batch to the prophet. It answers 204 whatever
 // happens, so a recorder in the browser never sees an error and never retries
 // into a loop.
