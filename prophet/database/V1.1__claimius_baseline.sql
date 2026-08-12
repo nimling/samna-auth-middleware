@@ -86,7 +86,7 @@ CREATE TABLE IF NOT EXISTS claimius.samna_app (
                                                   description     TEXT DEFAULT '',
                                                   contact_email   TEXT,
                                                   app_image       TEXT,
-                                                  redirect_uri    TEXT NOT NULL DEFAULT '',
+                                                  redirect_uris   TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[],
                                                   sync_uri        TEXT NOT NULL DEFAULT '',
                                                   provider_ids    UUID[] NOT NULL DEFAULT ARRAY[]::UUID[],
                                                   status          claimius.app_status NOT NULL DEFAULT 'active',
@@ -109,7 +109,7 @@ COMMENT ON COLUMN claimius.samna_app.slug IS 'URL slug for app, unique.';
 COMMENT ON COLUMN claimius.samna_app.connection IS 'Session delivery mode. direct issues session cookies straight from the callback and the prophet serves the content. code hands an auth code to the app backend for exchange.';
 COMMENT ON COLUMN claimius.samna_app.contact_email IS 'Contact email for the app.';
 COMMENT ON COLUMN claimius.samna_app.app_image IS 'App image URL or asset reference.';
-COMMENT ON COLUMN claimius.samna_app.redirect_uri IS 'OAuth redirect URI.';
+COMMENT ON COLUMN claimius.samna_app.redirect_uris IS 'Registered OAuth redirect URIs. An authorize request matches by exact equality against any entry. The first entry is the primary origin and is the one the cookie domain derives from.';
 COMMENT ON COLUMN claimius.samna_app.sync_uri IS 'Sync receiver URL for this app (used by disciples).';
 COMMENT ON COLUMN claimius.samna_app.provider_ids IS 'Array of allowed provider UUIDs from external provider table.';
 COMMENT ON COLUMN claimius.samna_app.private_key IS 'App private key for signing. Generated externally in Go.';
