@@ -14,4 +14,4 @@ BEGIN
     END IF;
 END $$;
 
-COMMENT ON COLUMN claimius.samna_app.redirect_uris IS 'Registered OAuth redirect URIs. An authorize request matches by exact equality against any entry. The first entry is the primary origin and is the one the cookie domain derives from.';
+COMMENT ON COLUMN claimius.samna_app.redirect_uris IS 'Registered OAuth redirect URIs. First entry is the primary origin.';

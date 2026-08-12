@@ -109,7 +109,7 @@ COMMENT ON COLUMN claimius.samna_app.slug IS 'URL slug for app, unique.';
 COMMENT ON COLUMN claimius.samna_app.connection IS 'Session delivery mode. direct issues session cookies straight from the callback and the prophet serves the content. code hands an auth code to the app backend for exchange.';
 COMMENT ON COLUMN claimius.samna_app.contact_email IS 'Contact email for the app.';
 COMMENT ON COLUMN claimius.samna_app.app_image IS 'App image URL or asset reference.';
-COMMENT ON COLUMN claimius.samna_app.redirect_uris IS 'Registered OAuth redirect URIs. An authorize request matches by exact equality against any entry. The first entry is the primary origin and is the one the cookie domain derives from.';
+COMMENT ON COLUMN claimius.samna_app.redirect_uris IS 'Registered OAuth redirect URIs. First entry is the primary origin.';
 COMMENT ON COLUMN claimius.samna_app.sync_uri IS 'Sync receiver URL for this app (used by disciples).';
 COMMENT ON COLUMN claimius.samna_app.provider_ids IS 'Array of allowed provider UUIDs from external provider table.';
 COMMENT ON COLUMN claimius.samna_app.private_key IS 'App private key for signing. Generated externally in Go.';
