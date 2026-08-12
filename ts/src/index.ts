@@ -26,7 +26,6 @@ export {
 } from './session'
 export type { EdgeConfig, EdgeCallbacks, EdgeMode } from './session'
 export { createAuthFetch, guardedFetch } from './fetch'
-export { postSubscription } from './subscribe'
 export { createServiceClient } from './service'
 export type { ServiceClient } from './service'
 export {
