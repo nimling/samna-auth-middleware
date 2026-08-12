@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"path"
 	"strconv"
+	"strings"
 
 	"github.com/google/uuid"
 )
@@ -64,7 +65,15 @@ func joinURL(baseURL string, segments ...string) (string, error) {
 		return "unknown", err
 	}
 
-	allSegments := append([]string{base.Path}, segments...)
+	root := base.Path
+	for _, s := range segments {
+		if strings.HasPrefix(s, "/") {
+			root = ""
+			break
+		}
+	}
+
+	allSegments := append([]string{root}, segments...)
 	base.Path = path.Join(allSegments...)
 
 	return base.String(), nil

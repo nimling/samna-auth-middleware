@@ -53,6 +53,7 @@ func Serve(ctx context.Context, config Config) error {
 
 	me := auth.Group("/me", gate)
 	me.GET("", h.GetMe)
+	me.GET("/claim", h.GetMeClaims)
 
 	if config.ProxyTarget != "" {
 		target, err := url.Parse(config.ProxyTarget)
