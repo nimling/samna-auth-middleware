@@ -42,11 +42,15 @@ func prophetStub(t *testing.T) *forwardCapture {
 
 func subscribeContext(t *testing.T, method string, body string) (echo.Context, *httptest.ResponseRecorder) {
 	t.Helper()
+	t.Setenv("SAUTH_APP_SLUG", "docs")
 	e := echo.New()
-	req := httptest.NewRequest(method, "/api/sauth/subscription/subscribe", strings.NewReader(body))
+	req := httptest.NewRequest(method, "/api/sauth/app/docs/subscription/subscribe", strings.NewReader(body))
 	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
 	rec := httptest.NewRecorder()
-	return e.NewContext(req, rec), rec
+	ctx := e.NewContext(req, rec)
+	ctx.SetParamNames("app_slug")
+	ctx.SetParamValues("docs")
+	return ctx, rec
 }
 
 func TestPostSubscriptionForwardsTheFeedToTheProphet(t *testing.T) {

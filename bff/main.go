@@ -56,7 +56,7 @@ func Serve(ctx context.Context, config Config) error {
 	me.GET("", h.GetMe)
 	me.GET("/claim", h.GetMeClaims)
 
-	subscription := auth.Group("/subscription", smw.RateLimiter(5, time.Hour))
+	subscription := auth.Group("/app/:app_slug/subscription", smw.RateLimiter(5, time.Hour))
 	subscription.POST("/subscribe", PostSubscription(config))
 	subscription.DELETE("/subscribe", DeleteSubscription)
 

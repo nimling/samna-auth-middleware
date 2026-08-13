@@ -31,6 +31,9 @@ type subscribeForward struct {
 var feedClient = &http.Client{Timeout: 10 * time.Second}
 
 func subscriptionForward(ctx echo.Context) (*subscribeForward, error) {
+	if ctx.Param("app_slug") != utils.Cfg().AppSlug {
+		return nil, ctx.String(http.StatusNotFound, "unknown app")
+	}
 	var body subscribeRequest
 	if err := ctx.Bind(&body); err != nil {
 		return nil, ctx.String(http.StatusBadRequest, "Bad request")
