@@ -67,7 +67,7 @@ describe('configureAnalytics', () => {
     const { configureAnalytics, getConsentState } = await import('./analytics')
     const state = await configureAnalytics({ endpoint: '/api' })
     expect(state?.anonymous_id).toBe('anon-1')
-    expect(String(calls[0].url)).toContain('/api/consent')
+    expect(String(calls[0].url)).toContain('/api/analytics/consent')
     expect(getConsentState()?.policy_url).toBe(consentState.policy_url)
   })
 
