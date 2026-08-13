@@ -14,10 +14,11 @@ type rateWindow struct {
 }
 
 type rateLimiter struct {
-	mu      sync.Mutex
-	windows map[string]*rateWindow
-	limit   int
-	period  time.Duration
+	mu        sync.Mutex
+	windows   map[string]*rateWindow
+	limit     int
+	period    time.Duration
+	lastSweep time.Time
 }
 
 // RateLimiter caps how many requests one client address may send to a route
@@ -45,10 +46,13 @@ func (l *rateLimiter) allow(key string) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
-	for k, w := range l.windows {
-		if now.After(w.reset) {
-			delete(l.windows, k)
+	if now.Sub(l.lastSweep) >= l.period {
+		for k, w := range l.windows {
+			if now.After(w.reset) {
+				delete(l.windows, k)
+			}
 		}
+		l.lastSweep = now
 	}
 
 	w, ok := l.windows[key]
