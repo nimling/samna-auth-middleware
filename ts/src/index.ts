@@ -22,9 +22,11 @@ export {
   getLogoutUrl,
   startLogin,
   handleUnauthenticated,
-  endSession
+  endSession,
+  readClaimsFromBff,
+  postSubscription
 } from './session'
-export type { EdgeConfig, EdgeCallbacks, EdgeMode } from './session'
+export type { EdgeConfig, EdgeCallbacks, EdgeMode, ViewerClaim } from './session'
 export { createAuthFetch, guardedFetch } from './fetch'
 export { createServiceClient } from './service'
 export type { ServiceClient } from './service'
