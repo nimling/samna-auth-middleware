@@ -182,7 +182,7 @@ func (q *DeleteQuery) Exec(ctx context.Context, dest ...any) (sql.Result, error)
 		return nil, err
 	}
 	var raw json.RawMessage
-	if err := client.Delete(ctx, path, &raw); err != nil {
+	if err := client.Delete(ctx, path, nil, &raw); err != nil {
 		return nil, err
 	}
 	if len(raw) > 0 {

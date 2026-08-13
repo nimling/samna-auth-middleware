@@ -56,7 +56,9 @@ func Serve(ctx context.Context, config Config) error {
 	me.GET("", h.GetMe)
 	me.GET("/claim", h.GetMeClaims)
 
-	auth.POST("/subscribe", subscribeHandler(config), smw.RateLimiter(5, time.Hour))
+	subscription := auth.Group("/subscription", smw.RateLimiter(5, time.Hour))
+	subscription.POST("/subscribe", PostSubscription(config))
+	subscription.DELETE("/subscribe", DeleteSubscription)
 
 	if config.ProxyTarget != "" {
 		target, err := url.Parse(config.ProxyTarget)

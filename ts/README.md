@@ -87,10 +87,10 @@ import {
   startLogin,
   endSession,
   createAuthFetch,
-  validateAccessToken,
-  fetchOIDCConfiguration,
+  validateToken,
+  getOpenIDConfiguration,
   getJWKS,
-  type SessionUser
+  type ClaimUser
 } from '@nimling/samna-auth-middleware'
 
 configureEdge({
@@ -98,7 +98,7 @@ configureEdge({
   clientSlug: 'docs'
 })
 
-const user: SessionUser | null = await readSessionFromDocument()
+const user: ClaimUser | null = await readSessionFromDocument()
 
 startLogin('microsoft', window.location.pathname)
 

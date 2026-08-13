@@ -18,7 +18,7 @@ function boot(): void {
   if (!script || script.dataset.auto === 'false') return
   void configureConsent({
     endpoint: script.dataset.endpoint ?? '',
-    consentPath: script.dataset.consentPath ?? '/consent',
+    consentPath: script.dataset.consentPath ?? '/analytics/consent',
     ingestPath: script.dataset.ingestPath ?? '/analytics',
     captureText: script.dataset.captureText === 'true',
     worker: script.dataset.worker !== 'false'

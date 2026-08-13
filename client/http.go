@@ -105,8 +105,8 @@ func (e *httpClient) Patch(ctx context.Context, body any, url string) (io.ReadCl
 	return e.execute(ctx, http.MethodPatch, body, url)
 }
 
-func (e *httpClient) Delete(ctx context.Context, url string) (io.ReadCloser, error) {
-	return e.execute(ctx, http.MethodDelete, nil, url)
+func (e *httpClient) Delete(ctx context.Context, body any, url string) (io.ReadCloser, error) {
+	return e.execute(ctx, http.MethodDelete, body, url)
 }
 
 func (e *httpClient) execute(ctx context.Context, method string, reqBody any, targetURL string) (io.ReadCloser, error) {
@@ -240,13 +240,13 @@ func Patch(ctx context.Context, path string, payload any, out any) error {
 	return decodeInto(body, out)
 }
 
-func Delete(ctx context.Context, path string, out any) error {
+func Delete(ctx context.Context, path string, payload any, out any) error {
 	c := newClient()
 	u, err := joinURL(c.apiURL, path)
 	if err != nil {
 		return fmt.Errorf("build url: %w", err)
 	}
-	body, err := c.client.Delete(ctx, u)
+	body, err := c.client.Delete(ctx, payload, u)
 	if err != nil {
 		return err
 	}

@@ -23,8 +23,7 @@ export {
   startLogin,
   handleUnauthenticated,
   endSession,
-  readClaimsFromBff,
-  postSubscription
+  readClaimsFromBff
 } from './session'
 export type { EdgeConfig, EdgeCallbacks, EdgeMode, ViewerClaim } from './session'
 export { createAuthFetch, guardedFetch } from './fetch'

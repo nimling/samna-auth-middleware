@@ -96,20 +96,6 @@ export async function readClaimsFromBff(): Promise<ViewerClaim[]> {
   }
 }
 
-export async function postSubscription(email: string, feed?: string): Promise<boolean> {
-  try {
-    const res = await fetch(`${getBffPath()}/subscribe`, {
-      method: 'POST',
-      credentials: 'include',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(feed ? { email, feed } : { email })
-    })
-    return res.ok
-  } catch {
-    return false
-  }
-}
-
 async function readSessionFromCookie(): Promise<ClaimUser | null> {
   if (!edgeConfig.endpoint || !edgeConfig.clientSlug) return null
   const cookieName = edgeConfig.cookieNames?.accessToken ?? ACCESS_TOKEN_COOKIE
