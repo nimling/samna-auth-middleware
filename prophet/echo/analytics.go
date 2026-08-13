@@ -51,10 +51,39 @@ func forwardedUser(ctx echo.Context) *uuid.UUID {
 	return &id
 }
 
+func analyticsEnabled(ctx echo.Context, appID uuid.UUID) bool {
+	var enabled bool
+	err := sdb.Instance().NewRaw(`
+		SELECT EXISTS (
+			SELECT 1
+			FROM claimius.user_claim uc
+				JOIN claimius.claim c ON c.id = uc.claim_id
+				JOIN claimius.claim_object co ON co.claim_id = uc.claim_id
+			WHERE c.app_id = ?
+				AND uc.sa_deleted_at IS NULL
+				AND c.sa_deleted_at IS NULL
+				AND co.sa_deleted_at IS NULL
+				AND (uc.starts_at IS NULL OR uc.starts_at <= now())
+				AND (uc.ends_at IS NULL OR uc.ends_at > now())
+				AND co.object_id IS NULL
+				AND jsonb_path_exists(co.scope, '$.analytics'::jsonpath)
+				AND ((c.sa_access | co.sa_access) & 16) = 0
+		)
+	`, appID).Scan(ctx.Request().Context(), &enabled)
+	if err != nil {
+		ctx.Logger().Errorf("analyticsEnabled: %v", err)
+		return false
+	}
+	return enabled
+}
+
 func GetConsent(ctx echo.Context) error {
 	appID, ok := ctx.Get("app_id").(uuid.UUID)
 	if !ok || appID == uuid.Nil {
 		return respond.Error(ctx, http.StatusUnauthorized, "Unauthorized")
+	}
+	if !analyticsEnabled(ctx, appID) {
+		return respond.Error(ctx, http.StatusForbidden, "Forbidden")
 	}
 	anonymousID := ctx.QueryParam("anonymous_id")
 	state, err := analytics.GetConsent(ctx.Request().Context(), appID, forwardedUser(ctx), anonymousID)
@@ -69,6 +98,9 @@ func PostConsent(ctx echo.Context) error {
 	appID, ok := ctx.Get("app_id").(uuid.UUID)
 	if !ok || appID == uuid.Nil {
 		return respond.Error(ctx, http.StatusUnauthorized, "Unauthorized")
+	}
+	if !analyticsEnabled(ctx, appID) {
+		return respond.Error(ctx, http.StatusForbidden, "Forbidden")
 	}
 	var body shared.ConsentRequest
 	if err := ctx.Bind(&body); err != nil {
@@ -92,6 +124,9 @@ func PostAnalytics(ctx echo.Context) error {
 	appID, ok := ctx.Get("app_id").(uuid.UUID)
 	if !ok || appID == uuid.Nil {
 		return respond.Error(ctx, http.StatusUnauthorized, "Unauthorized")
+	}
+	if !analyticsEnabled(ctx, appID) {
+		return respond.Error(ctx, http.StatusForbidden, "Forbidden")
 	}
 	var body shared.AnalyticsBatch
 	if err := ctx.Bind(&body); err != nil {
@@ -118,6 +153,9 @@ func GetAnalyticsEvents(ctx echo.Context) error {
 	appID, ok := ctx.Get("app_id").(uuid.UUID)
 	if !ok || appID == uuid.Nil {
 		return respond.Error(ctx, http.StatusUnauthorized, "Unauthorized")
+	}
+	if !analyticsEnabled(ctx, appID) {
+		return respond.Error(ctx, http.StatusForbidden, "Forbidden")
 	}
 	items := make([]shared.AnalyticsEvent, 0)
 	q := sdb.Instance().NewSelect().
@@ -153,6 +191,9 @@ func GetAnalyticsSessions(ctx echo.Context) error {
 	appID, ok := ctx.Get("app_id").(uuid.UUID)
 	if !ok || appID == uuid.Nil {
 		return respond.Error(ctx, http.StatusUnauthorized, "Unauthorized")
+	}
+	if !analyticsEnabled(ctx, appID) {
+		return respond.Error(ctx, http.StatusForbidden, "Forbidden")
 	}
 	items := make([]shared.AnalyticsSession, 0)
 	q := sdb.Instance().NewSelect().
