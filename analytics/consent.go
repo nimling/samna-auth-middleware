@@ -81,7 +81,7 @@ func PostConsent(ctx context.Context, appID uuid.UUID, in shared.ConsentRequest,
 			Categories:    in.Categories,
 		}, nil
 	}
-	var result json.RawMessage
+	var result string
 	if err := run.db.NewRaw(
 		"SELECT claimius.post_consent(?, ?, ?::jsonb, ?, ?, ?::inet, ?)",
 		appID, in.AnonymousID, json.RawMessage(categories), in.PolicyVersion, userID, nullString(ip), nullString(userAgent),
@@ -91,7 +91,7 @@ func PostConsent(ctx context.Context, appID uuid.UUID, in shared.ConsentRequest,
 	var wrapper struct {
 		Consent shared.Consent `json:"consent"`
 	}
-	if err := json.Unmarshal(result, &wrapper); err != nil {
+	if err := json.Unmarshal([]byte(result), &wrapper); err != nil {
 		return nil, err
 	}
 	return &shared.ConsentState{

@@ -13,6 +13,17 @@ func TestJoinURL_RelativeSegmentStaysUnderBase(t *testing.T) {
 	}
 }
 
+func TestJoinURL_QuerySegmentKeepsQuery(t *testing.T) {
+	got, err := joinURL("https://auth.example.io/sam", "consent?anonymous_id=abc")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "https://auth.example.io/sam/consent?anonymous_id=abc"
+	if got != want {
+		t.Fatalf("want %s, got %s", want, got)
+	}
+}
+
 func TestJoinURL_AbsoluteSegmentDropsBasePath(t *testing.T) {
 	got, err := joinURL("https://auth.example.io/sam", "/api/app/docs/subscription/client")
 	if err != nil {
