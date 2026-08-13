@@ -10,7 +10,7 @@ import (
 // GetAnalyticsScript serves the self contained browser recorder so a page with
 // no build step can load it from one script tag:
 //
-//	<script src="/analytics.js" data-endpoint=""></script>
+//	<script src="/analytics/script.js" data-endpoint=""></script>
 //
 // The file is the analytics.global.js the typescript package ships. Point
 // SAUTH_ANALYTICS_SCRIPT at it to enable this route; without it the route

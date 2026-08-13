@@ -42,7 +42,7 @@ const ANONYMOUS_ID_STORAGE = 'sauth_anonymous_id'
 
 const defaults: Required<Omit<AnalyticsConfig, 'onConsent'>> = {
   endpoint: '',
-  consentPath: '/consent',
+  consentPath: '/analytics/consent',
   ingestPath: '/analytics',
   flushIntervalMs: 10000,
   maxBatch: 200,

@@ -34,22 +34,24 @@ func RegisterEndpoints(g *echo.Group) {
 	RegisterCapture(g)
 }
 
-// RegisterCapture mounts consent and interaction capture on the passed group.
-// It belongs on a group that carries no session requirement, because a visitor
-// answers the consent banner before they have one and capture records anonymous
-// visitors too. RegisterEndpoints already calls it, so mount it on its own only
-// when the consumer keeps the rest of the surface elsewhere.
+// RegisterCapture gathers consent and interaction capture under one analytics
+// group on the passed group. The consent banner and the recorder script stay
+// reachable for a visitor with no session. RegisterEndpoints already calls it,
+// so mount it on its own only when the consumer keeps the rest of the surface
+// elsewhere.
 func RegisterCapture(g *echo.Group) {
-	g.GET("/consent", h.GetConsent)
-	g.POST("/consent", h.PostConsent)
-	g.POST("/analytics", h.PostAnalytics)
-	g.GET("/analytics.js", h.GetAnalyticsScript)
+	analytics := g.Group("/analytics")
+	analytics.GET("/consent", h.GetConsent)
+	analytics.POST("/consent", h.PostConsent)
+	analytics.POST("", h.PostAnalytics)
+	analytics.GET("/script.js", h.GetAnalyticsScript)
 }
 
 // RegisterCaptureRead mounts the routes that answer with what was captured about
-// other people. They read across visitors, so unlike RegisterCapture they belong
-// behind a session and whatever page grant gates the consumer's admin surface.
+// other people inside the same analytics group. They read across visitors, so
+// they belong behind a session and the Analytics claim.
 func RegisterCaptureRead(g *echo.Group) {
-	g.GET("/event", h.GetAnalyticsEvents)
-	g.GET("/session", h.GetAnalyticsSessions)
+	analytics := g.Group("/analytics")
+	analytics.GET("/event", h.GetAnalyticsEvents)
+	analytics.GET("/session", h.GetAnalyticsSessions)
 }
