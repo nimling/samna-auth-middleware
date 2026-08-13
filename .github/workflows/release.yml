@@ -18,7 +18,10 @@ jobs:
           go-version: '1.24'
 
       - name: Build bff artifacts
+        env:
+          GOPRIVATE: github.com/nimling/*
         run: |
+          git config --global url."https://${{ secrets.DOCKER_PACKAGE_READ }}@github.com/".insteadOf "https://github.com/"
           mkdir -p dist
           GOOS=linux GOARCH=amd64 go build -o dist/sauth-bff-linux-amd64 ./cmd/bff
           GOOS=darwin GOARCH=arm64 go build -o dist/sauth-bff-darwin-arm64 ./cmd/bff
