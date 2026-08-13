@@ -42,6 +42,21 @@ func WithForward(ctx context.Context, f Forward) context.Context {
 	return context.WithValue(ctx, forwardKey{}, f)
 }
 
+type contentTypeKey struct{}
+
+// WithContentType overrides the request content type for a body handed to Post,
+// Put or Patch as raw bytes, for payloads that are not json.
+func WithContentType(ctx context.Context, contentType string) context.Context {
+	return context.WithValue(ctx, contentTypeKey{}, contentType)
+}
+
+func contentTypeFrom(ctx context.Context) string {
+	if v, ok := ctx.Value(contentTypeKey{}).(string); ok && v != "" {
+		return v
+	}
+	return "application/json"
+}
+
 func forwardFrom(ctx context.Context) (Forward, bool) {
 	f, ok := ctx.Value(forwardKey{}).(Forward)
 	return f, ok
@@ -97,11 +112,15 @@ func (e *httpClient) Delete(ctx context.Context, url string) (io.ReadCloser, err
 func (e *httpClient) execute(ctx context.Context, method string, reqBody any, targetURL string) (io.ReadCloser, error) {
 	var body io.Reader
 	if reqBody != nil {
-		payloadBytes, err := json.Marshal(reqBody)
-		if err != nil {
-			return nil, fmt.Errorf("marshal request body: %w", err)
+		if raw, ok := reqBody.([]byte); ok {
+			body = bytes.NewReader(raw)
+		} else {
+			payloadBytes, err := json.Marshal(reqBody)
+			if err != nil {
+				return nil, fmt.Errorf("marshal request body: %w", err)
+			}
+			body = bytes.NewReader(payloadBytes)
 		}
-		body = bytes.NewReader(payloadBytes)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, method, targetURL, body)
@@ -127,7 +146,7 @@ func (e *httpClient) execute(ctx context.Context, method string, reqBody any, ta
 	}
 
 	if reqBody != nil {
-		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Content-Type", contentTypeFrom(ctx))
 	}
 
 	resp, err := e.httpClient.Do(req)

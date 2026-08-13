@@ -5,6 +5,7 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"os"
+	"time"
 
 	"github.com/labstack/echo/v4"
 	h "github.com/nimling/samna-auth-middleware/disciple/echo"
@@ -54,6 +55,8 @@ func Serve(ctx context.Context, config Config) error {
 	me := auth.Group("/me", gate)
 	me.GET("", h.GetMe)
 	me.GET("/claim", h.GetMeClaims)
+
+	auth.POST("/subscribe", subscribeHandler(config), smw.RateLimiter(5, time.Hour))
 
 	if config.ProxyTarget != "" {
 		target, err := url.Parse(config.ProxyTarget)
