@@ -273,21 +273,6 @@ COMMENT ON FUNCTION claimius.post_analytics_events(UUID, TEXT, JSONB) IS 'Writes
 
 -- ----------------------------------------------------------------------------
 -- Reach
---
--- A capture row belongs to the app that recorded it, the same way an audit row
--- does, and it keeps its app_id for that reason. Another app reads it by
--- holding a live app_object link to that app's samna_app row, which is the same
--- link organizations and locations cross apps on.
---
--- The link is the authority on purpose. A claim_object binding is not:
--- _check_claim_composition only rejects an over broad grant when sa_access is
--- set on the binding, so a binding written with a NULL access inherits the
--- claim mask and skips the check, which would let an app grant itself another
--- app's capture.
---
--- capture_app_ids is the set a caller may read: itself plus every app it links.
--- capture_app_access never evaluates it for the common case where an app reads
--- its own capture.
 -- ----------------------------------------------------------------------------
 
 CREATE OR REPLACE FUNCTION claimius.capture_app_ids(p_app_id UUID)
@@ -330,7 +315,7 @@ CREATE OR REPLACE FUNCTION claimius.capture_app_access(p_app_id UUID, p_target_a
     END;
 $$ LANGUAGE sql STABLE;
 
-COMMENT ON FUNCTION claimius.capture_app_access(UUID, UUID) IS 'True when the calling app may read the target app''s capture and the target has capture enabled. CASE orders the checks so ingest, which always targets its own app, costs one capability lookup and never touches the reach join.';
+COMMENT ON FUNCTION claimius.capture_app_access(UUID, UUID) IS 'True when the calling app may read the target app''s capture and the target has capture enabled.';
 
 DROP FUNCTION IF EXISTS claimius.get_analytics_events(UUID, UUID, TEXT, TEXT, INTEGER, INTEGER);
 
