@@ -277,8 +277,17 @@ COMMENT ON FUNCTION claimius.post_analytics_events(UUID, TEXT, JSONB) IS 'Writes
 -- A capture row belongs to the app that recorded it, the same way an audit row
 -- does, and it keeps its app_id for that reason. Another app reads it by
 -- holding a live app_object link to that app's samna_app row, which is the same
--- link organizations and locations cross apps on. capture_app_ids is the set a
--- caller may read: itself plus every app it links.
+-- link organizations and locations cross apps on.
+--
+-- The link is the authority on purpose. A claim_object binding is not:
+-- _check_claim_composition only rejects an over broad grant when sa_access is
+-- set on the binding, so a binding written with a NULL access inherits the
+-- claim mask and skips the check, which would let an app grant itself another
+-- app's capture.
+--
+-- capture_app_ids is the set a caller may read: itself plus every app it links.
+-- capture_app_access never evaluates it for the common case where an app reads
+-- its own capture.
 -- ----------------------------------------------------------------------------
 
 CREATE OR REPLACE FUNCTION claimius.capture_app_ids(p_app_id UUID)
@@ -313,11 +322,15 @@ COMMENT ON FUNCTION claimius.analytics_enabled(UUID) IS 'True when the app holds
 
 CREATE OR REPLACE FUNCTION claimius.capture_app_access(p_app_id UUID, p_target_app UUID)
     RETURNS BOOLEAN AS $$
-    SELECT COALESCE(p_target_app IN (SELECT claimius.capture_app_ids(p_app_id)), FALSE)
-       AND claimius.analytics_enabled(p_target_app);
+    SELECT CASE
+        WHEN p_app_id IS NULL OR p_target_app IS NULL THEN FALSE
+        WHEN NOT claimius.analytics_enabled(p_target_app) THEN FALSE
+        WHEN p_target_app = p_app_id THEN TRUE
+        ELSE EXISTS (SELECT 1 FROM claimius.capture_app_ids(p_app_id) reach WHERE reach = p_target_app)
+    END;
 $$ LANGUAGE sql STABLE;
 
-COMMENT ON FUNCTION claimius.capture_app_access(UUID, UUID) IS 'True when the calling app may read the target app''s capture and the target has capture enabled.';
+COMMENT ON FUNCTION claimius.capture_app_access(UUID, UUID) IS 'True when the calling app may read the target app''s capture and the target has capture enabled. CASE orders the checks so ingest, which always targets its own app, costs one capability lookup and never touches the reach join.';
 
 DROP FUNCTION IF EXISTS claimius.get_analytics_events(UUID, UUID, TEXT, TEXT, INTEGER, INTEGER);
 
