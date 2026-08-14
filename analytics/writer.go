@@ -16,7 +16,7 @@ func PostSession(ctx context.Context, appID uuid.UUID, anonymousID, sessionKey s
 	if len(body) == 0 {
 		body = json.RawMessage("{}")
 	}
-	var result json.RawMessage
+	var result string
 	if err := run.db.NewRaw(
 		"SELECT claimius.post_analytics_session(?, ?, ?, ?::jsonb, ?, ?::inet, ?)",
 		appID, anonymousID, sessionKey, body, userID, nullString(ip), nullString(userAgent),
@@ -26,7 +26,7 @@ func PostSession(ctx context.Context, appID uuid.UUID, anonymousID, sessionKey s
 	var wrapper struct {
 		Session *shared.AnalyticsSession `json:"analytics_session"`
 	}
-	if err := json.Unmarshal(result, &wrapper); err != nil {
+	if err := json.Unmarshal([]byte(result), &wrapper); err != nil {
 		return false, err
 	}
 	return wrapper.Session != nil, nil
