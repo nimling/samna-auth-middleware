@@ -73,7 +73,9 @@ function csrfHeaders(): Record<string, string> {
 }
 
 function ingestUrl(): string {
-  return `${config.endpoint.replace(/\/$/, '')}${config.ingestPath}`
+  const path = `${config.endpoint.replace(/\/$/, '')}${config.ingestPath}`
+  if (typeof location === 'undefined') return path
+  return new URL(path, location.origin).toString()
 }
 
 function consentUrl(): string {

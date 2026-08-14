@@ -33,16 +33,18 @@ function stubBrowser(): void {
     setItem: (k: string, v: string) => void store.set(k, v),
     removeItem: (k: string) => void store.delete(k)
   }
+  const listeners = { addEventListener: () => {}, removeEventListener: () => {} }
   Object.assign(globalThis, {
-    window: { localStorage: shim, sessionStorage: shim },
+    window: { localStorage: shim, sessionStorage: shim, innerWidth: 800, innerHeight: 600, ...listeners },
     localStorage: shim,
     sessionStorage: shim,
-    document: { cookie: '' }
+    document: { cookie: '', title: 'test', ...listeners },
+    location: { origin: 'https://nim.io', pathname: '/', search: '' }
   })
 }
 
 function clearBrowser(): void {
-  for (const key of ['window', 'localStorage', 'sessionStorage', 'document']) {
+  for (const key of ['window', 'localStorage', 'sessionStorage', 'document', 'location']) {
     delete (globalThis as Record<string, unknown>)[key]
   }
 }
@@ -129,5 +131,17 @@ describe('flush', () => {
     const before = calls.length
     flush()
     expect(calls.length).toBe(before)
+  })
+
+  it('posts the batch to an absolute url so a worker can resolve it', async () => {
+    stubBrowser()
+    const granted = { ...consentState, categories: { ...consentState.categories, analytics: true } }
+    const calls = stubFetch(() => envelope(granted))
+    const { configureAnalytics, postView, flush } = await import('./analytics')
+    await configureAnalytics({ endpoint: '/api', worker: false })
+    postView('/service/cloud')
+    flush()
+    const ingest = calls.map((c) => String(c.url)).filter((u) => u.endsWith('/api/analytics'))
+    expect(ingest).toContain('https://nim.io/api/analytics')
   })
 })
