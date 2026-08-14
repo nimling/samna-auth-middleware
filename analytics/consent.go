@@ -12,13 +12,17 @@ import (
 	"github.com/nimling/samna-auth-middleware/utils"
 )
 
+const (
+	policyVersion = "1"
+	policyPath    = "/legal/cookie-policy"
+)
+
 func PolicyVersion() string {
-	return utils.Cfg().ConsentPolicyVersion
+	return policyVersion
 }
 
 func PolicyURL() string {
-	c := utils.Cfg()
-	return strings.TrimRight(c.Endpoint, "/") + c.ConsentPolicyPath
+	return strings.TrimRight(utils.Cfg().Endpoint, "/") + policyPath
 }
 
 func GetConsent(ctx context.Context, appID uuid.UUID, userID *uuid.UUID, anonymousID string) (*shared.ConsentState, error) {

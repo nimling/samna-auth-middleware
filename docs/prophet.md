@@ -66,7 +66,7 @@ The prophet is where consent and interaction capture live. `claimius.consent` re
 
 Consent is enforced in SQL, not in the handler. `post_analytics_events` writes nothing when the analytics category is absent for that visitor, so a disciple that forwards a batch for someone who has not granted it stores nothing.
 
-`SAUTH_CONSENT_POLICY_VERSION` and `SAUTH_CONSENT_POLICY_PATH` set the policy a decision is recorded against and the document the banner links. Raising the version makes every visitor decide again.
+The policy a decision is recorded against and the document the banner links are held in the middleware. The link resolves from `SAUTH_ENDPOINT` and the `/legal/cookie-policy` page the prophet serves beside its other legal documents, so a consumer configures neither.
 
 ## Notes
 
