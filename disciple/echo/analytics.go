@@ -120,7 +120,7 @@ func GetAnalyticsSessions(ctx echo.Context) error {
 }
 
 func passthroughQuery(ctx echo.Context) string {
-	allowed := []string{"app", "type", "path", "session_id", "user_id", "anonymous_id", "from", "to", "limit", "offset"}
+	allowed := []string{"app", "type", "path", "session_id", "visitor", "anonymous_id", "from", "to", "limit", "offset"}
 	values := url.Values{}
 	for _, key := range allowed {
 		if v := ctx.QueryParam(key); v != "" {
