@@ -72,14 +72,13 @@ sauth := e.Group("/api/sauth")
 sauth.GET("/consent", saecho.GetConsent)
 sauth.POST("/consent", saecho.PostConsent)
 sauth.POST("/analytics", saecho.PostAnalytics)
-sauth.GET("/analytics.js", saecho.GetAnalyticsScript)
 ```
 
-`sam.RegisterCapture(group)` mounts those four in one call, and `sam.RegisterEndpoints` already includes it. Mount either on a group with no session requirement: a visitor answers the banner before they have a session, and capture has to reach anonymous visitors too.
+`sam.RegisterCapture(group)` mounts those three in one call, and `sam.RegisterEndpoints` already includes it. Mount either on a group with no session requirement: a visitor answers the banner before they have a session, and capture has to reach anonymous visitors too.
 
 `sam.RegisterCaptureRead(group)` mounts `GET /event` and `GET /session`. Those read across visitors, so they belong behind a session and behind whatever page grant gates the consumer's admin surface.
 
-The browser half is one call, `configureConsent({ endpoint: '/api/sauth' })`, which reads consent, starts capture only once the analytics category is granted, and raises the banner when the visitor has not decided under the current policy. A page with no build step loads `<script src="/api/sauth/analytics.js" data-endpoint="/api/sauth">` instead, which the `GetAnalyticsScript` route serves when `SAUTH_ANALYTICS_SCRIPT` points at the bundle. `SAUTH_CONSENT_POLICY_VERSION` and `SAUTH_CONSENT_POLICY_PATH` decide the policy the banner links and the version a decision is recorded against; raising the version prompts every visitor again.
+The browser half is one call, `configureConsent({ endpoint: '/api/sauth' })`, which reads consent, starts capture only once the analytics category is granted, and raises the banner when the visitor has not decided under the current policy. The policy link and version arrive in the consent response, resolved on the prophet from its endpoint and its `/legal/cookie-policy` page.
 
 ## Notes
 

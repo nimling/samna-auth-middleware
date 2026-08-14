@@ -8,9 +8,6 @@ import (
 	"github.com/nimling/samna-auth-middleware/shared"
 )
 
-// PostSession opens or touches the session row for a visit and returns whether
-// the visitor granted the analytics category. It runs on the request path
-// because the recorder needs the answer before it starts capturing.
 func PostSession(ctx context.Context, appID uuid.UUID, anonymousID, sessionKey string, context_ json.RawMessage, userID *uuid.UUID, ip, userAgent string) (bool, error) {
 	if run == nil {
 		return false, nil
@@ -35,8 +32,6 @@ func PostSession(ctx context.Context, appID uuid.UUID, anonymousID, sessionKey s
 	return wrapper.Session != nil, nil
 }
 
-// Post queues a batch against an open session. It returns immediately. A full
-// queue drops the batch rather than blocking the caller.
 func Post(appID uuid.UUID, sessionKey string, events []shared.AnalyticsEventInput) {
 	if run == nil || len(events) == 0 {
 		return

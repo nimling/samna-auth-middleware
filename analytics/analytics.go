@@ -1,8 +1,3 @@
-// Package analytics is the claimius capture layer. It runs on the prophet,
-// where the consent and event tables live. Init starts the batch writer, Post
-// hands a batch to it and returns immediately, so the request path never waits
-// on a write. Consent is enforced by the schema functions, so a batch from a
-// visitor who did not grant the analytics category writes nothing.
 package analytics
 
 import (
@@ -33,8 +28,6 @@ type runner struct {
 
 var run *runner
 
-// Init starts the async batch writer. Call it once at startup with the database
-// the role's Init returned. A second call is a no op.
 func Init(db *shared.DB) error {
 	if run != nil {
 		return nil
@@ -51,7 +44,6 @@ func Init(db *shared.DB) error {
 	return nil
 }
 
-// Stop ends the write loop. Batches still queued are dropped.
 func Stop() {
 	if run == nil {
 		return
@@ -66,8 +58,6 @@ func Stop() {
 	run.logger.Info("analytics runner stopped")
 }
 
-// Running reports whether the capture layer is active. A consumer that never
-// called Init serves consent reads but drops every batch.
 func Running() bool {
 	return run != nil && run.running
 }

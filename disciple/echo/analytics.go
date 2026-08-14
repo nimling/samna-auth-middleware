@@ -53,9 +53,6 @@ func writeAnonymousCookie(ctx echo.Context, value string) {
 	})
 }
 
-// GetConsent resolves the visitor's consent through the prophet, so a decision
-// made in any samna_auth app answers here too. The visitor mints the anonymous
-// id; this route pins it to a cookie so it survives the next visit.
 func GetConsent(ctx echo.Context) error {
 	id := anonymousID(ctx)
 	if id == "" {
@@ -80,8 +77,6 @@ func GetConsent(ctx echo.Context) error {
 	return respondJSON(ctx, http.StatusOK, state, 1)
 }
 
-// PostConsent records the visitor's decision on the prophet, so one banner
-// answer covers every app the person reaches.
 func PostConsent(ctx echo.Context) error {
 	var body shared.ConsentRequest
 	if err := ctx.Bind(&body); err != nil {
@@ -104,9 +99,6 @@ func PostConsent(ctx echo.Context) error {
 	return respondJSON(ctx, http.StatusOK, state, 1)
 }
 
-// GetAnalyticsEvents reads captured events back from the prophet. The query is
-// passed through, so type, path, session_id, user_id, limit and offset all
-// filter on the prophet side.
 func GetAnalyticsEvents(ctx echo.Context) error {
 	items := make([]shared.AnalyticsEvent, 0)
 	forwarded := client.WithForward(ctx.Request().Context(), forwardContext(ctx))
@@ -117,7 +109,6 @@ func GetAnalyticsEvents(ctx echo.Context) error {
 	return respondJSON(ctx, http.StatusOK, items, len(items))
 }
 
-// GetAnalyticsSessions reads the captured visits back from the prophet.
 func GetAnalyticsSessions(ctx echo.Context) error {
 	items := make([]shared.AnalyticsSession, 0)
 	forwarded := client.WithForward(ctx.Request().Context(), forwardContext(ctx))
@@ -142,9 +133,6 @@ func passthroughQuery(ctx echo.Context) string {
 	return "?" + values.Encode()
 }
 
-// PostAnalytics forwards a capture batch to the prophet. It answers 204 whatever
-// happens, so a recorder in the browser never sees an error and never retries
-// into a loop.
 func PostAnalytics(ctx echo.Context) error {
 	var body shared.AnalyticsBatch
 	if err := ctx.Bind(&body); err != nil {

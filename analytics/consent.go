@@ -12,22 +12,15 @@ import (
 	"github.com/nimling/samna-auth-middleware/utils"
 )
 
-// PolicyVersion is the policy the banner asks the visitor to agree to. A newer
-// version makes every stored decision stale and re-prompts.
 func PolicyVersion() string {
 	return utils.Cfg().ConsentPolicyVersion
 }
 
-// PolicyURL is the absolute address of the cookie policy page on samna_auth.
-// Every app sends the visitor to the same page, so one document covers them all.
 func PolicyURL() string {
 	c := utils.Cfg()
 	return strings.TrimRight(c.Endpoint, "/") + c.ConsentPolicyPath
 }
 
-// GetConsent resolves the live decision for an identity. A known user resolves
-// across every app on the prophet, so a decision made in one samna_auth app
-// follows the person into the next one.
 func GetConsent(ctx context.Context, appID uuid.UUID, userID *uuid.UUID, anonymousID string) (*shared.ConsentState, error) {
 	state := &shared.ConsentState{
 		AnonymousID:   anonymousID,
@@ -63,9 +56,6 @@ func GetConsent(ctx context.Context, appID uuid.UUID, userID *uuid.UUID, anonymo
 	return state, nil
 }
 
-// PostConsent records a decision and revokes the previous live one for the same
-// identity. It returns the resolved state the caller should hand back to the
-// browser.
 func PostConsent(ctx context.Context, appID uuid.UUID, in shared.ConsentRequest, userID *uuid.UUID, ip, userAgent string) (*shared.ConsentState, error) {
 	in.Categories.Necessary = true
 	categories, err := json.Marshal(in.Categories)
