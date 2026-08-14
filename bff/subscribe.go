@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"net/mail"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -45,10 +46,21 @@ func subscriptionForward(ctx echo.Context) (*subscribeForward, error) {
 	if body.Feed == "" && body.Name == "" {
 		return nil, ctx.String(http.StatusBadRequest, "feed or name is required")
 	}
-	if body.Feed != "" && (!strings.HasPrefix(body.Feed, "/") || strings.Contains(body.Feed, "..")) {
-		return nil, ctx.String(http.StatusBadRequest, "feed must be a site absolute path")
+	if body.Feed != "" {
+		parsed, parseErr := url.Parse(body.Feed)
+		if parseErr != nil || parsed.Path == "" || !strings.HasPrefix(parsed.Path, "/") || strings.Contains(parsed.Path, "..") {
+			return nil, ctx.String(http.StatusBadRequest, "feed must be a site absolute path or url")
+		}
 	}
 	return &subscribeForward{Email: address.Address, Feed: body.Feed, Name: body.Name}, nil
+}
+
+func feedPath(feed string) string {
+	parsed, err := url.Parse(feed)
+	if err != nil {
+		return feed
+	}
+	return parsed.Path
 }
 
 func subscriptionTarget() string {
@@ -62,14 +74,18 @@ func PostSubscription(config Config) echo.HandlerFunc {
 			return err
 		}
 		if forward.Feed != "" {
-			feed, readErr := readFeed(config, forward.Feed)
+			feed, readErr := readFeed(config, feedPath(forward.Feed))
 			if readErr != nil {
 				ctx.Logger().Errorf("subscribe read feed: %v", readErr)
 			} else {
 				forward.RSS = string(feed)
 			}
 		}
-		if err := client.Post(ctx.Request().Context(), subscriptionTarget(), forward, nil); err != nil {
+		reqCtx := client.WithClientCredentials(ctx.Request().Context(), client.ClientCredentials{
+			ID:     utils.Cfg().ClientID,
+			Secret: utils.Cfg().ClientSecret,
+		})
+		if err := client.Post(reqCtx, subscriptionTarget(), forward, nil); err != nil {
 			ctx.Logger().Errorf("subscribe forward: %v", err)
 			return ctx.String(http.StatusBadGateway, "subscription failed")
 		}
@@ -82,7 +98,11 @@ func DeleteSubscription(ctx echo.Context) error {
 	if forward == nil {
 		return err
 	}
-	if err := client.Delete(ctx.Request().Context(), subscriptionTarget(), forward, nil); err != nil {
+	reqCtx := client.WithClientCredentials(ctx.Request().Context(), client.ClientCredentials{
+		ID:     utils.Cfg().ClientID,
+		Secret: utils.Cfg().ClientSecret,
+	})
+	if err := client.Delete(reqCtx, subscriptionTarget(), forward, nil); err != nil {
 		ctx.Logger().Errorf("unsubscribe forward: %v", err)
 		return ctx.String(http.StatusBadGateway, "subscription failed")
 	}

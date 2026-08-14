@@ -60,7 +60,7 @@ func TestPostSubscriptionForwardsTheFeedToTheProphet(t *testing.T) {
 		t.Fatalf("write feed: %v", err)
 	}
 
-	ctx, rec := subscribeContext(t, http.MethodPost, `{"email":"reader@example.com","feed":"/rss.xml","name":"news"}`)
+	ctx, rec := subscribeContext(t, http.MethodPost, `{"email":"reader@example.com","feed":"https://site.example/rss.xml","name":"news"}`)
 	if err := bff.PostSubscription(bff.Config{StaticDir: dir})(ctx); err != nil {
 		t.Fatalf("handler: %v", err)
 	}
@@ -80,7 +80,7 @@ func TestPostSubscriptionForwardsTheFeedToTheProphet(t *testing.T) {
 	if capture.body["email"] != "reader@example.com" {
 		t.Fatalf("forward email = %q", capture.body["email"])
 	}
-	if capture.body["feed"] != "/rss.xml" {
+	if capture.body["feed"] != "https://site.example/rss.xml" {
 		t.Fatalf("forward feed = %q", capture.body["feed"])
 	}
 	if capture.body["name"] != "news" {

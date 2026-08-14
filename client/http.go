@@ -57,6 +57,26 @@ func contentTypeFrom(ctx context.Context) string {
 	return "application/json"
 }
 
+type clientCredentialsKey struct{}
+
+// ClientCredentials names the machine client a request acts as, for routes the
+// prophet gates on a client actor rather than the app itself.
+type ClientCredentials struct {
+	ID     string
+	Secret string
+}
+
+// WithClientCredentials attaches a machine client identity to a context handed
+// to Get, Post, Put, Patch or Delete.
+func WithClientCredentials(ctx context.Context, c ClientCredentials) context.Context {
+	return context.WithValue(ctx, clientCredentialsKey{}, c)
+}
+
+func clientCredentialsFrom(ctx context.Context) (ClientCredentials, bool) {
+	c, ok := ctx.Value(clientCredentialsKey{}).(ClientCredentials)
+	return c, ok && c.ID != "" && c.Secret != ""
+}
+
 func forwardFrom(ctx context.Context) (Forward, bool) {
 	f, ok := ctx.Value(forwardKey{}).(Forward)
 	return f, ok
@@ -131,7 +151,11 @@ func (e *httpClient) execute(ctx context.Context, method string, reqBody any, ta
 	req.Header.Set("X-Request-ID", generateRequestID())
 	req.Header.Set("X-Client-IP", localIP())
 	req.Header.Set("SAuth-App-Slug", e.clientSlug)
-	req.Header.Set("SAuth-App-Secret", e.clientSecret)
+	if c, ok := clientCredentialsFrom(ctx); ok {
+		req.SetBasicAuth(c.ID, c.Secret)
+	} else {
+		req.Header.Set("SAuth-App-Secret", e.clientSecret)
+	}
 
 	if f, ok := forwardFrom(ctx); ok {
 		if f.IP != "" {

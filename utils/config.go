@@ -9,6 +9,8 @@ type Config struct {
 	Endpoint      string
 	AppSlug       string
 	AppSecret     string
+	ClientID      string
+	ClientSecret  string
 	RedirectURI   string
 	PageRedirect  string
 	ClientTimeout string
@@ -30,6 +32,8 @@ func loadConfig() {
 	cfg.Endpoint = os.Getenv("SAUTH_ENDPOINT")
 	cfg.AppSlug = os.Getenv("SAUTH_APP_SLUG")
 	cfg.AppSecret = os.Getenv("SAUTH_APP_SECRET")
+	cfg.ClientID = os.Getenv("SAUTH_CLIENT_ID")
+	cfg.ClientSecret = os.Getenv("SAUTH_CLIENT_SECRET")
 	cfg.RedirectURI = os.Getenv("SAUTH_REDIRECT_URI")
 	cfg.PageRedirect = os.Getenv("SAUTH_PAGE_REDIRECT")
 	cfg.ClientTimeout = os.Getenv("SAUTH_CLIENT_TIMEOUT")
