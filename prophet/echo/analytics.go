@@ -3,6 +3,7 @@ package echo
 import (
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
@@ -51,30 +52,60 @@ func forwardedUser(ctx echo.Context) *uuid.UUID {
 	return &id
 }
 
-func analyticsEnabled(ctx echo.Context, appID uuid.UUID) bool {
-	var enabled bool
-	err := sdb.Instance().NewRaw(`
-		SELECT EXISTS (
-			SELECT 1
-			FROM claimius.user_claim uc
-				JOIN claimius.claim c ON c.id = uc.claim_id
-				JOIN claimius.claim_object co ON co.claim_id = uc.claim_id
-			WHERE c.app_id = ?
-				AND uc.sa_deleted_at IS NULL
-				AND c.sa_deleted_at IS NULL
-				AND co.sa_deleted_at IS NULL
-				AND (uc.starts_at IS NULL OR uc.starts_at <= now())
-				AND (uc.ends_at IS NULL OR uc.ends_at > now())
-				AND co.object_id IS NULL
-				AND jsonb_path_exists(co.scope, '$.analytics'::jsonpath)
-				AND ((c.sa_access | co.sa_access) & 16) = 0
-		)
-	`, appID).Scan(ctx.Request().Context(), &enabled)
+func captureAccess(ctx echo.Context, appID, targetApp uuid.UUID) bool {
+	var allowed bool
+	err := sdb.Instance().
+		NewRaw(`SELECT claimius.capture_app_access(?, ?)`, appID, targetApp).
+		Scan(ctx.Request().Context(), &allowed)
 	if err != nil {
-		ctx.Logger().Errorf("analyticsEnabled: %v", err)
+		ctx.Logger().Errorf("captureAccess: %v", err)
 		return false
 	}
-	return enabled
+	return allowed
+}
+
+func targetAppID(ctx echo.Context, appID uuid.UUID) (uuid.UUID, bool) {
+	raw := ctx.QueryParam("app")
+	if raw == "" {
+		return appID, true
+	}
+	id, err := uuid.Parse(raw)
+	if err != nil || id == uuid.Nil {
+		return uuid.Nil, false
+	}
+	return id, true
+}
+
+func uuidParam(ctx echo.Context, name string) (*uuid.UUID, bool) {
+	raw := ctx.QueryParam(name)
+	if raw == "" {
+		return nil, true
+	}
+	id, err := uuid.Parse(raw)
+	if err != nil || id == uuid.Nil {
+		return nil, false
+	}
+	return &id, true
+}
+
+func textParam(ctx echo.Context, name string) *string {
+	raw := ctx.QueryParam(name)
+	if raw == "" {
+		return nil
+	}
+	return &raw
+}
+
+func timeParam(ctx echo.Context, name string) (*time.Time, bool) {
+	raw := ctx.QueryParam(name)
+	if raw == "" {
+		return nil, true
+	}
+	moment, err := time.Parse(time.RFC3339, raw)
+	if err != nil {
+		return nil, false
+	}
+	return &moment, true
 }
 
 func GetConsent(ctx echo.Context) error {
@@ -82,7 +113,7 @@ func GetConsent(ctx echo.Context) error {
 	if !ok || appID == uuid.Nil {
 		return respond.Error(ctx, http.StatusUnauthorized, "Unauthorized")
 	}
-	if !analyticsEnabled(ctx, appID) {
+	if !captureAccess(ctx, appID, appID) {
 		return respond.Error(ctx, http.StatusForbidden, "Forbidden")
 	}
 	anonymousID := ctx.QueryParam("anonymous_id")
@@ -99,7 +130,7 @@ func PostConsent(ctx echo.Context) error {
 	if !ok || appID == uuid.Nil {
 		return respond.Error(ctx, http.StatusUnauthorized, "Unauthorized")
 	}
-	if !analyticsEnabled(ctx, appID) {
+	if !captureAccess(ctx, appID, appID) {
 		return respond.Error(ctx, http.StatusForbidden, "Forbidden")
 	}
 	var body shared.ConsentRequest
@@ -125,7 +156,7 @@ func PostAnalytics(ctx echo.Context) error {
 	if !ok || appID == uuid.Nil {
 		return respond.Error(ctx, http.StatusUnauthorized, "Unauthorized")
 	}
-	if !analyticsEnabled(ctx, appID) {
+	if !captureAccess(ctx, appID, appID) {
 		return respond.Error(ctx, http.StatusForbidden, "Forbidden")
 	}
 	var body shared.AnalyticsBatch
@@ -154,33 +185,38 @@ func GetAnalyticsEvents(ctx echo.Context) error {
 	if !ok || appID == uuid.Nil {
 		return respond.Error(ctx, http.StatusUnauthorized, "Unauthorized")
 	}
-	if !analyticsEnabled(ctx, appID) {
+	targetApp, ok := targetAppID(ctx, appID)
+	if !ok {
+		return respond.Error(ctx, http.StatusBadRequest, "app must be a uuid")
+	}
+	sessionID, ok := uuidParam(ctx, "session_id")
+	if !ok {
+		return respond.Error(ctx, http.StatusBadRequest, "session_id must be a uuid")
+	}
+	userID, ok := uuidParam(ctx, "user_id")
+	if !ok {
+		return respond.Error(ctx, http.StatusBadRequest, "user_id must be a uuid")
+	}
+	from, ok := timeParam(ctx, "from")
+	if !ok {
+		return respond.Error(ctx, http.StatusBadRequest, "from must be an RFC3339 timestamp")
+	}
+	until, ok := timeParam(ctx, "to")
+	if !ok {
+		return respond.Error(ctx, http.StatusBadRequest, "to must be an RFC3339 timestamp")
+	}
+	if !captureAccess(ctx, appID, targetApp) {
 		return respond.Error(ctx, http.StatusForbidden, "Forbidden")
 	}
 	items := make([]shared.AnalyticsEvent, 0)
-	q := sdb.Instance().NewSelect().
-		Model(&items).
-		Where("app_id = ?", appID).
-		Order("occurred_at DESC").
-		Limit(intParam(ctx, "limit", 100)).
-		Offset(intParam(ctx, "offset", 0))
-	if raw := ctx.QueryParam("session_id"); raw != "" {
-		id, err := uuid.Parse(raw)
-		if err != nil {
-			return respond.Error(ctx, http.StatusBadRequest, "session_id must be a uuid")
-		}
-		q = q.Where("session_id = ?", id)
-	}
-	if userID := forwardedUser(ctx); userID != nil {
-		q = q.Where("user_id = ?", *userID)
-	}
-	if v := ctx.QueryParam("type"); v != "" {
-		q = q.Where("type = ?", v)
-	}
-	if v := ctx.QueryParam("path"); v != "" {
-		q = q.Where("path = ?", v)
-	}
-	if err := q.Scan(ctx.Request().Context()); err != nil {
+	err := sdb.Instance().
+		NewRaw(`SELECT * FROM claimius.get_analytics_events(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			appID, targetApp, sessionID, userID,
+			textParam(ctx, "type"), textParam(ctx, "path"),
+			from, until,
+			intParam(ctx, "limit", 100), intParam(ctx, "offset", 0)).
+		Scan(ctx.Request().Context(), &items)
+	if err != nil {
 		ctx.Logger().Errorf("GetAnalyticsEvents: %v", err)
 		return respond.Error(ctx, http.StatusInternalServerError, "Internal server error")
 	}
@@ -192,23 +228,33 @@ func GetAnalyticsSessions(ctx echo.Context) error {
 	if !ok || appID == uuid.Nil {
 		return respond.Error(ctx, http.StatusUnauthorized, "Unauthorized")
 	}
-	if !analyticsEnabled(ctx, appID) {
+	targetApp, ok := targetAppID(ctx, appID)
+	if !ok {
+		return respond.Error(ctx, http.StatusBadRequest, "app must be a uuid")
+	}
+	userID, ok := uuidParam(ctx, "user_id")
+	if !ok {
+		return respond.Error(ctx, http.StatusBadRequest, "user_id must be a uuid")
+	}
+	from, ok := timeParam(ctx, "from")
+	if !ok {
+		return respond.Error(ctx, http.StatusBadRequest, "from must be an RFC3339 timestamp")
+	}
+	until, ok := timeParam(ctx, "to")
+	if !ok {
+		return respond.Error(ctx, http.StatusBadRequest, "to must be an RFC3339 timestamp")
+	}
+	if !captureAccess(ctx, appID, targetApp) {
 		return respond.Error(ctx, http.StatusForbidden, "Forbidden")
 	}
 	items := make([]shared.AnalyticsSession, 0)
-	q := sdb.Instance().NewSelect().
-		Model(&items).
-		Where("app_id = ?", appID).
-		Order("started_at DESC").
-		Limit(intParam(ctx, "limit", 100)).
-		Offset(intParam(ctx, "offset", 0))
-	if userID := forwardedUser(ctx); userID != nil {
-		q = q.Where("user_id = ?", *userID)
-	}
-	if v := ctx.QueryParam("anonymous_id"); v != "" {
-		q = q.Where("anonymous_id = ?", v)
-	}
-	if err := q.Scan(ctx.Request().Context()); err != nil {
+	err := sdb.Instance().
+		NewRaw(`SELECT * FROM claimius.get_analytics_sessions(?, ?, ?, ?, ?, ?, ?, ?)`,
+			appID, targetApp, userID, textParam(ctx, "anonymous_id"),
+			from, until,
+			intParam(ctx, "limit", 100), intParam(ctx, "offset", 0)).
+		Scan(ctx.Request().Context(), &items)
+	if err != nil {
 		ctx.Logger().Errorf("GetAnalyticsSessions: %v", err)
 		return respond.Error(ctx, http.StatusInternalServerError, "Internal server error")
 	}

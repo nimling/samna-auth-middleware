@@ -271,25 +271,107 @@ $$ LANGUAGE plpgsql;
 
 COMMENT ON FUNCTION claimius.post_analytics_events(UUID, TEXT, JSONB) IS 'Writes a batch against an open session. Returns 0 and writes nothing when consent is absent or the session is unknown.';
 
+-- ----------------------------------------------------------------------------
+-- Reach
+--
+-- A capture row belongs to the app that recorded it, the same way an audit row
+-- does, and it keeps its app_id for that reason. Another app reads it by
+-- holding a live app_object link to that app's samna_app row, which is the same
+-- link organizations and locations cross apps on. capture_app_ids is the set a
+-- caller may read: itself plus every app it links.
+-- ----------------------------------------------------------------------------
+
+CREATE OR REPLACE FUNCTION claimius.capture_app_ids(p_app_id UUID)
+    RETURNS SETOF UUID AS $$
+    SELECT p_app_id
+    UNION
+    SELECT linked FROM claimius.app_object_ids(p_app_id, 'claimius.samna_app') AS linked;
+$$ LANGUAGE sql STABLE;
+
+COMMENT ON FUNCTION claimius.capture_app_ids(UUID) IS 'Apps whose capture one app may read: itself plus every app it holds a live app_object link to.';
+
+CREATE OR REPLACE FUNCTION claimius.analytics_enabled(p_app_id UUID)
+    RETURNS BOOLEAN AS $$
+    SELECT EXISTS (
+        SELECT 1
+        FROM claimius.user_claim uc
+            JOIN claimius.claim c ON c.id = uc.claim_id
+            JOIN claimius.claim_object co ON co.claim_id = uc.claim_id
+        WHERE c.app_id = p_app_id
+          AND uc.sa_deleted_at IS NULL
+          AND c.sa_deleted_at IS NULL
+          AND co.sa_deleted_at IS NULL
+          AND (uc.starts_at IS NULL OR uc.starts_at <= now())
+          AND (uc.ends_at IS NULL OR uc.ends_at > now())
+          AND co.object_id IS NULL
+          AND jsonb_path_exists(co.scope, '$.analytics'::jsonpath)
+          AND ((c.sa_access | COALESCE(co.sa_access, c.sa_access)) & 16) = 0
+    );
+$$ LANGUAGE sql STABLE;
+
+COMMENT ON FUNCTION claimius.analytics_enabled(UUID) IS 'True when the app holds a live object-less grant carrying the analytics scope. A NULL claim_object access inherits the claim mask.';
+
+CREATE OR REPLACE FUNCTION claimius.capture_app_access(p_app_id UUID, p_target_app UUID)
+    RETURNS BOOLEAN AS $$
+    SELECT COALESCE(p_target_app IN (SELECT claimius.capture_app_ids(p_app_id)), FALSE)
+       AND claimius.analytics_enabled(p_target_app);
+$$ LANGUAGE sql STABLE;
+
+COMMENT ON FUNCTION claimius.capture_app_access(UUID, UUID) IS 'True when the calling app may read the target app''s capture and the target has capture enabled.';
+
+DROP FUNCTION IF EXISTS claimius.get_analytics_events(UUID, UUID, TEXT, TEXT, INTEGER, INTEGER);
+
 CREATE OR REPLACE FUNCTION claimius.get_analytics_events(
-    p_app_id  UUID,
-    p_user_id UUID DEFAULT NULL,
-    p_type    TEXT DEFAULT NULL,
-    p_path    TEXT DEFAULT NULL,
-    p_limit   INTEGER DEFAULT 100,
-    p_offset  INTEGER DEFAULT 0
+    p_app_id     UUID,
+    p_target_app UUID,
+    p_session_id UUID DEFAULT NULL,
+    p_user_id    UUID DEFAULT NULL,
+    p_type       TEXT DEFAULT NULL,
+    p_path       TEXT DEFAULT NULL,
+    p_from       TIMESTAMPTZ DEFAULT NULL,
+    p_to         TIMESTAMPTZ DEFAULT NULL,
+    p_limit      INTEGER DEFAULT 100,
+    p_offset     INTEGER DEFAULT 0
 ) RETURNS SETOF claimius.analytics_event AS $$
-    SELECT *
-    FROM claimius.analytics_event
-    WHERE app_id = p_app_id
-      AND (p_user_id IS NULL OR user_id = p_user_id)
-      AND (p_type IS NULL OR type = p_type)
-      AND (p_path IS NULL OR path = p_path)
-    ORDER BY occurred_at DESC
+    SELECT e.*
+    FROM claimius.analytics_event e
+    WHERE claimius.capture_app_access(p_app_id, p_target_app)
+      AND e.app_id = p_target_app
+      AND (p_session_id IS NULL OR e.session_id = p_session_id)
+      AND (p_user_id IS NULL OR e.user_id = p_user_id)
+      AND (p_type IS NULL OR e.type = p_type)
+      AND (p_path IS NULL OR e.path = p_path)
+      AND (p_from IS NULL OR e.occurred_at >= p_from)
+      AND (p_to IS NULL OR e.occurred_at < p_to)
+    ORDER BY e.occurred_at DESC
     LIMIT p_limit OFFSET p_offset;
 $$ LANGUAGE sql STABLE;
 
-COMMENT ON FUNCTION claimius.get_analytics_events(UUID, UUID, TEXT, TEXT, INTEGER, INTEGER) IS 'Filtered capture read for the samna_auth list view, shaped like get_audit.';
+COMMENT ON FUNCTION claimius.get_analytics_events(UUID, UUID, UUID, UUID, TEXT, TEXT, TIMESTAMPTZ, TIMESTAMPTZ, INTEGER, INTEGER) IS 'Filtered capture read. Returns nothing unless the caller reaches the target app and the target has capture enabled.';
+
+CREATE OR REPLACE FUNCTION claimius.get_analytics_sessions(
+    p_app_id       UUID,
+    p_target_app   UUID,
+    p_user_id      UUID DEFAULT NULL,
+    p_anonymous_id TEXT DEFAULT NULL,
+    p_from         TIMESTAMPTZ DEFAULT NULL,
+    p_to           TIMESTAMPTZ DEFAULT NULL,
+    p_limit        INTEGER DEFAULT 100,
+    p_offset       INTEGER DEFAULT 0
+) RETURNS SETOF claimius.analytics_session AS $$
+    SELECT s.*
+    FROM claimius.analytics_session s
+    WHERE claimius.capture_app_access(p_app_id, p_target_app)
+      AND s.app_id = p_target_app
+      AND (p_user_id IS NULL OR s.user_id = p_user_id)
+      AND (p_anonymous_id IS NULL OR s.anonymous_id = p_anonymous_id)
+      AND (p_from IS NULL OR s.started_at >= p_from)
+      AND (p_to IS NULL OR s.started_at < p_to)
+    ORDER BY s.started_at DESC
+    LIMIT p_limit OFFSET p_offset;
+$$ LANGUAGE sql STABLE;
+
+COMMENT ON FUNCTION claimius.get_analytics_sessions(UUID, UUID, UUID, TEXT, TIMESTAMPTZ, TIMESTAMPTZ, INTEGER, INTEGER) IS 'Filtered visit read, scoped exactly like get_analytics_events.';
 
 GRANT EXECUTE ON FUNCTION claimius.get_consent(UUID, UUID, TEXT) TO claimius_writer;
 GRANT EXECUTE ON FUNCTION claimius.get_consent(UUID, UUID, TEXT) TO claimius_reader;
@@ -298,5 +380,13 @@ GRANT EXECUTE ON FUNCTION claimius.consent_allows(UUID, TEXT, UUID, TEXT) TO cla
 GRANT EXECUTE ON FUNCTION claimius.consent_allows(UUID, TEXT, UUID, TEXT) TO claimius_reader;
 GRANT EXECUTE ON FUNCTION claimius.post_analytics_session(UUID, TEXT, TEXT, JSONB, UUID, INET, TEXT) TO claimius_writer;
 GRANT EXECUTE ON FUNCTION claimius.post_analytics_events(UUID, TEXT, JSONB) TO claimius_writer;
-GRANT EXECUTE ON FUNCTION claimius.get_analytics_events(UUID, UUID, TEXT, TEXT, INTEGER, INTEGER) TO claimius_writer;
-GRANT EXECUTE ON FUNCTION claimius.get_analytics_events(UUID, UUID, TEXT, TEXT, INTEGER, INTEGER) TO claimius_reader;
+GRANT EXECUTE ON FUNCTION claimius.capture_app_ids(UUID) TO claimius_writer;
+GRANT EXECUTE ON FUNCTION claimius.capture_app_ids(UUID) TO claimius_reader;
+GRANT EXECUTE ON FUNCTION claimius.analytics_enabled(UUID) TO claimius_writer;
+GRANT EXECUTE ON FUNCTION claimius.analytics_enabled(UUID) TO claimius_reader;
+GRANT EXECUTE ON FUNCTION claimius.capture_app_access(UUID, UUID) TO claimius_writer;
+GRANT EXECUTE ON FUNCTION claimius.capture_app_access(UUID, UUID) TO claimius_reader;
+GRANT EXECUTE ON FUNCTION claimius.get_analytics_events(UUID, UUID, UUID, UUID, TEXT, TEXT, TIMESTAMPTZ, TIMESTAMPTZ, INTEGER, INTEGER) TO claimius_writer;
+GRANT EXECUTE ON FUNCTION claimius.get_analytics_events(UUID, UUID, UUID, UUID, TEXT, TEXT, TIMESTAMPTZ, TIMESTAMPTZ, INTEGER, INTEGER) TO claimius_reader;
+GRANT EXECUTE ON FUNCTION claimius.get_analytics_sessions(UUID, UUID, UUID, TEXT, TIMESTAMPTZ, TIMESTAMPTZ, INTEGER, INTEGER) TO claimius_writer;
+GRANT EXECUTE ON FUNCTION claimius.get_analytics_sessions(UUID, UUID, UUID, TEXT, TIMESTAMPTZ, TIMESTAMPTZ, INTEGER, INTEGER) TO claimius_reader;

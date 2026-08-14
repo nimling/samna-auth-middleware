@@ -66,6 +66,8 @@ The prophet is where consent and interaction capture live. `claimius.consent` re
 
 Consent is enforced in SQL, not in the handler. `post_analytics_events` writes nothing when the analytics category is absent for that visitor, so a disciple that forwards a batch for someone who has not granted it stores nothing.
 
+Reach is enforced in SQL too. Every capture row carries the app_id of the app that recorded it, and an app reads another app's capture by holding a live `app_object` link to that app's `samna_app` row, the same link organizations and locations cross apps on. `claimius.capture_app_ids` returns the readable set, `claimius.analytics_enabled` answers whether an app has capture switched on, and `claimius.capture_app_access` combines the two. `get_analytics_events` and `get_analytics_sessions` take the calling app and the target app and return nothing when the pair does not resolve, so the scope cannot be bypassed by a handler.
+
 The policy a decision is recorded against and the document the banner links are held in the middleware. The link resolves from `SAUTH_ENDPOINT` and the `/legal/cookie-policy` page the prophet serves beside its other legal documents, so a consumer configures neither.
 
 ## Notes
