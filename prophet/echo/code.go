@@ -15,13 +15,16 @@ import (
 )
 
 type BodyCode struct {
-	ClaimID   *uuid.UUID `json:"claim_id"`
-	UserID    *uuid.UUID `json:"user_id"`
-	Count     *int       `json:"count"`
-	StartsAt  *time.Time `json:"starts_at"`
-	EndsAt    *time.Time `json:"ends_at"`
-	ExpiresAt *time.Time `json:"expires_at"`
-	OwnerID   *uuid.UUID `json:"owner_id"`
+	ClaimID       *uuid.UUID `json:"claim_id"`
+	UserID        *uuid.UUID `json:"user_id"`
+	Count         *int       `json:"count"`
+	StartsAt      *time.Time `json:"starts_at"`
+	EndsAt        *time.Time `json:"ends_at"`
+	ExpiresAt     *time.Time `json:"expires_at"`
+	OwnerID       *uuid.UUID `json:"owner_id"`
+	CreatedBy     *uuid.UUID `json:"created_by"`
+	ReferenceType *string    `json:"reference_type"`
+	ReferenceID   *uuid.UUID `json:"reference_id"`
 }
 
 func GetCodes(ctx echo.Context) error {
@@ -78,18 +81,25 @@ func PostCode(ctx echo.Context) error {
 		return respond.Error(ctx, http.StatusBadRequest, "owner_id required")
 	}
 
+	if req.CreatedBy == nil {
+		return respond.Error(ctx, http.StatusBadRequest, "created_by required")
+	}
+
 	if req.UserID != nil && req.ClaimID != nil {
 		return respond.Error(ctx, http.StatusBadRequest, "code must carry either user_id or claim_id, not both")
 	}
 
 	c := Code{
-		AppID:     appID,
-		ClaimID:   req.ClaimID,
-		UserID:    req.UserID,
-		StartsAt:  req.StartsAt,
-		EndsAt:    req.EndsAt,
-		ExpiresAt: req.ExpiresAt,
-		OwnerID:   *req.OwnerID,
+		AppID:         appID,
+		ClaimID:       req.ClaimID,
+		UserID:        req.UserID,
+		StartsAt:      req.StartsAt,
+		EndsAt:        req.EndsAt,
+		ExpiresAt:     req.ExpiresAt,
+		OwnerID:       *req.OwnerID,
+		CreatedBy:     *req.CreatedBy,
+		ReferenceType: req.ReferenceType,
+		ReferenceID:   req.ReferenceID,
 	}
 
 	if req.Count != nil {
@@ -137,6 +147,12 @@ func PutCode(ctx echo.Context) error {
 	}
 	if req.OwnerID != nil {
 		existing.OwnerID = *req.OwnerID
+	}
+	if req.ReferenceType != nil {
+		existing.ReferenceType = req.ReferenceType
+	}
+	if req.ReferenceID != nil {
+		existing.ReferenceID = req.ReferenceID
 	}
 	if req.Count != nil {
 		existing.Count = *req.Count

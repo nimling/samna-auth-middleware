@@ -26,7 +26,7 @@ type GuestTokenResponse struct {
 	EndsAt          *time.Time `json:"ends_at,omitempty"`
 }
 
-func IssueGuestToken(ctx context.Context, claimID uuid.UUID, issuer string) (*GuestTokenResponse, error) {
+func IssueGuestToken(ctx context.Context, claimID uuid.UUID, userID uuid.UUID, issuer string) (*GuestTokenResponse, error) {
 	d := instance
 
 	app, err := d.GetApp(ctx)
@@ -72,7 +72,6 @@ func IssueGuestToken(ctx context.Context, claimID uuid.UUID, issuer string) (*Gu
 			OwnerID: claim.OwnerID,
 		}
 
-		userID, _ := ctx.Value("user_id").(uuid.UUID)
 		if err := d.NewInsert().Model(&guestUser).Scan(ctx, &guestUser); err != nil {
 			return nil, fmt.Errorf("upsert guest user: %w", err)
 		}

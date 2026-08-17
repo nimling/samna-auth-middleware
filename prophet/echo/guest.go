@@ -11,6 +11,7 @@ import (
 
 type BodyGuest struct {
 	ClaimID uuid.UUID `json:"claim_id"`
+	UserID  uuid.UUID `json:"user_id"`
 }
 
 func PostGuestToken(ctx echo.Context) error {
@@ -21,8 +22,11 @@ func PostGuestToken(ctx echo.Context) error {
 	if body.ClaimID == uuid.Nil {
 		return respond.Error(ctx, http.StatusBadRequest, "claim_id is required")
 	}
+	if body.UserID == uuid.Nil {
+		return respond.Error(ctx, http.StatusBadRequest, "user_id is required")
+	}
 
-	token, err := sdb.IssueGuestToken(ctx.Request().Context(), body.ClaimID, "")
+	token, err := sdb.IssueGuestToken(ctx.Request().Context(), body.ClaimID, body.UserID, "")
 	if err != nil {
 		ctx.Logger().Errorf("PostGuestToken: %v", err)
 		return respond.Error(ctx, http.StatusInternalServerError, "Internal server error")
