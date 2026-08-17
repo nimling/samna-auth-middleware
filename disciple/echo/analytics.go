@@ -10,10 +10,7 @@ import (
 	"github.com/nimling/samna-auth-middleware/analytics"
 	"github.com/nimling/samna-auth-middleware/client"
 	"github.com/nimling/samna-auth-middleware/shared"
-	"github.com/nimling/samna-auth-middleware/utils"
 )
-
-const anonymousCookie = "sauth_anonymous_id"
 
 func forwardContext(ctx echo.Context) client.Forward {
 	f := client.Forward{
@@ -26,39 +23,8 @@ func forwardContext(ctx echo.Context) client.Forward {
 	return f
 }
 
-func anonymousID(ctx echo.Context) string {
-	if cookie, err := ctx.Cookie(anonymousCookie); err == nil && cookie.Value != "" {
-		return cookie.Value
-	}
-	if v := ctx.QueryParam("anonymous_id"); v != "" {
-		return v
-	}
-	return ""
-}
-
-func writeAnonymousCookie(ctx echo.Context, value string) {
-	if value == "" {
-		return
-	}
-	if cookie, err := ctx.Cookie(anonymousCookie); err == nil && cookie.Value == value {
-		return
-	}
-	utils.WriteCookie(ctx, &http.Cookie{
-		Name:     anonymousCookie,
-		Value:    value,
-		Path:     "/",
-		MaxAge:   60 * 60 * 24 * 365,
-		HttpOnly: false,
-		SameSite: http.SameSiteLaxMode,
-	})
-}
-
 func GetConsent(ctx echo.Context) error {
-	id := anonymousID(ctx)
-	if id == "" {
-		id = uuid.NewString()
-	}
-	writeAnonymousCookie(ctx, id)
+	id := analytics.AnonymousID(ctx)
 
 	var state shared.ConsentState
 	forwarded := client.WithForward(ctx.Request().Context(), forwardContext(ctx))
@@ -83,12 +49,9 @@ func PostConsent(ctx echo.Context) error {
 		return respondError(ctx, http.StatusBadRequest, "Bad request")
 	}
 	if body.AnonymousID == "" {
-		body.AnonymousID = anonymousID(ctx)
+		body.AnonymousID = analytics.AnonymousID(ctx)
 	}
-	if body.AnonymousID == "" {
-		body.AnonymousID = uuid.NewString()
-	}
-	writeAnonymousCookie(ctx, body.AnonymousID)
+	analytics.WriteAnonymousID(ctx, body.AnonymousID)
 
 	var state shared.ConsentState
 	forwarded := client.WithForward(ctx.Request().Context(), forwardContext(ctx))
@@ -97,6 +60,16 @@ func PostConsent(ctx echo.Context) error {
 		return respondError(ctx, http.StatusBadGateway, "Consent service unavailable")
 	}
 	return respondJSON(ctx, http.StatusOK, state, 1)
+}
+
+func GetAnalyticsApps(ctx echo.Context) error {
+	items := make([]shared.AnalyticsApp, 0)
+	forwarded := client.WithForward(ctx.Request().Context(), forwardContext(ctx))
+	if err := client.Get(forwarded, "analytics/app", &items); err != nil {
+		ctx.Logger().Errorf("GetAnalyticsApps: %v", err)
+		return respondError(ctx, http.StatusBadGateway, "Analytics service unavailable")
+	}
+	return respondJSON(ctx, http.StatusOK, items, len(items))
 }
 
 func GetAnalyticsEvents(ctx echo.Context) error {
@@ -139,7 +112,7 @@ func PostAnalytics(ctx echo.Context) error {
 		return ctx.NoContent(http.StatusNoContent)
 	}
 	if body.AnonymousID == "" {
-		body.AnonymousID = anonymousID(ctx)
+		body.AnonymousID = analytics.AnonymousID(ctx)
 	}
 	if body.AnonymousID == "" || body.SessionKey == "" {
 		return ctx.NoContent(http.StatusNoContent)

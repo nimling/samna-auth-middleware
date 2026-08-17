@@ -899,6 +899,17 @@ type AnalyticsBatch struct {
 	Events      []AnalyticsEventInput `json:"events"`
 }
 
+type AnalyticsApp struct {
+	ID       uuid.UUID  `bun:"id" json:"id"`
+	Slug     string     `bun:"slug" json:"slug"`
+	Name     string     `bun:"name" json:"name"`
+	AppImage *string    `bun:"app_image" json:"app_image,omitempty"`
+	Sessions int64      `bun:"sessions" json:"sessions"`
+	Events   int64      `bun:"events" json:"events"`
+	Visitors int64      `bun:"visitors" json:"visitors"`
+	LastSeen *time.Time `bun:"last_seen" json:"last_seen,omitempty"`
+}
+
 type SyncEvent struct {
 	bun.BaseModel `bun:"table:claimius.sync_event"`
 

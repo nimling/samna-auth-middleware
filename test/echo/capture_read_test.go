@@ -50,6 +50,29 @@ func TestGetAnalyticsEventsForwardsTheTargetAppAndRange(t *testing.T) {
 	}
 }
 
+func TestGetAnalyticsAppsForwardsWithoutQuery(t *testing.T) {
+	var path, query string
+	captureReadStub(t, &path, &query)
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/api/sauth/analytics/app?app=6f1d4d1e-6a1a-4a53-9a9e-9b0f0a2f6a11", nil)
+	rec := httptest.NewRecorder()
+	ctx := e.NewContext(req, rec)
+
+	if err := saecho.GetAnalyticsApps(ctx); err != nil {
+		t.Fatalf("handler: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if path != "/sam/analytics/app" {
+		t.Fatalf("forward path = %q", path)
+	}
+	if query != "" {
+		t.Fatalf("forward query = %q, want empty", query)
+	}
+}
+
 func TestGetAnalyticsSessionsForwardsTheTargetApp(t *testing.T) {
 	var path, query string
 	captureReadStub(t, &path, &query)

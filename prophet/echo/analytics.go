@@ -12,6 +12,7 @@ import (
 	"github.com/nimling/samna-auth-middleware/pkg/respond"
 	sdb "github.com/nimling/samna-auth-middleware/prophet/sdb"
 	"github.com/nimling/samna-auth-middleware/shared"
+	"github.com/nimling/samna-auth-middleware/utils"
 )
 
 const (
@@ -50,6 +51,33 @@ func forwardedUser(ctx echo.Context) *uuid.UUID {
 		return nil
 	}
 	return &id
+}
+
+// captureApp names the app a capture request belongs to. A disciple reaches
+// the prophet on the sam channel and AppMiddleware has already set app_id. The
+// prophet's own portal reaches these routes from a browser with no app
+// credentials, so the system app it is configured as answers for it.
+func captureApp(ctx echo.Context) (uuid.UUID, bool) {
+	if id, ok := ctx.Get("app_id").(uuid.UUID); ok && id != uuid.Nil {
+		return id, true
+	}
+	slug := utils.Cfg().AppSlug
+	if slug == "" {
+		return uuid.Nil, false
+	}
+	var app shared.SamnaApp
+	err := sdb.Instance().NewSelect().
+		Model(&app).
+		Column("id").
+		Where("slug = ?", slug).
+		Where("sa_deleted_at IS NULL").
+		Limit(1).
+		Scan(ctx.Request().Context())
+	if err != nil || app.ID == uuid.Nil {
+		ctx.Logger().Errorf("captureApp slug=%s: %v", slug, err)
+		return uuid.Nil, false
+	}
+	return app.ID, true
 }
 
 func analyticsEnabled(ctx echo.Context, appID uuid.UUID) bool {
@@ -97,14 +125,14 @@ func timeParam(ctx echo.Context, name string) (*time.Time, bool) {
 }
 
 func GetConsent(ctx echo.Context) error {
-	appID, ok := ctx.Get("app_id").(uuid.UUID)
-	if !ok || appID == uuid.Nil {
+	appID, ok := captureApp(ctx)
+	if !ok {
 		return respond.Error(ctx, http.StatusUnauthorized, "Unauthorized")
 	}
 	if !analyticsEnabled(ctx, appID) {
 		return respond.Error(ctx, http.StatusForbidden, "Forbidden")
 	}
-	anonymousID := ctx.QueryParam("anonymous_id")
+	anonymousID := analytics.AnonymousID(ctx)
 	state, err := analytics.GetConsent(ctx.Request().Context(), appID, forwardedUser(ctx), anonymousID)
 	if err != nil {
 		ctx.Logger().Errorf("GetConsent: %v", err)
@@ -114,8 +142,8 @@ func GetConsent(ctx echo.Context) error {
 }
 
 func PostConsent(ctx echo.Context) error {
-	appID, ok := ctx.Get("app_id").(uuid.UUID)
-	if !ok || appID == uuid.Nil {
+	appID, ok := captureApp(ctx)
+	if !ok {
 		return respond.Error(ctx, http.StatusUnauthorized, "Unauthorized")
 	}
 	if !analyticsEnabled(ctx, appID) {
@@ -126,8 +154,12 @@ func PostConsent(ctx echo.Context) error {
 		return respond.Error(ctx, http.StatusBadRequest, "Bad request")
 	}
 	if body.AnonymousID == "" {
+		body.AnonymousID = analytics.AnonymousID(ctx)
+	}
+	if body.AnonymousID == "" {
 		return respond.Error(ctx, http.StatusBadRequest, "anonymous_id is required")
 	}
+	analytics.WriteAnonymousID(ctx, body.AnonymousID)
 	if body.PolicyVersion == "" {
 		body.PolicyVersion = analytics.PolicyVersion()
 	}
@@ -140,8 +172,8 @@ func PostConsent(ctx echo.Context) error {
 }
 
 func PostAnalytics(ctx echo.Context) error {
-	appID, ok := ctx.Get("app_id").(uuid.UUID)
-	if !ok || appID == uuid.Nil {
+	appID, ok := captureApp(ctx)
+	if !ok {
 		return respond.Error(ctx, http.StatusUnauthorized, "Unauthorized")
 	}
 	if !analyticsEnabled(ctx, appID) {
@@ -150,6 +182,9 @@ func PostAnalytics(ctx echo.Context) error {
 	var body shared.AnalyticsBatch
 	if err := ctx.Bind(&body); err != nil {
 		return ctx.NoContent(http.StatusNoContent)
+	}
+	if body.AnonymousID == "" {
+		body.AnonymousID = analytics.AnonymousID(ctx)
 	}
 	if body.AnonymousID == "" || body.SessionKey == "" {
 		return ctx.NoContent(http.StatusNoContent)
@@ -166,6 +201,22 @@ func PostAnalytics(ctx echo.Context) error {
 		analytics.Post(appID, body.SessionKey, body.Events)
 	}
 	return ctx.NoContent(http.StatusNoContent)
+}
+
+func GetAnalyticsApps(ctx echo.Context) error {
+	reader := forwardedUser(ctx)
+	if reader == nil {
+		return respond.Error(ctx, http.StatusForbidden, "Forbidden")
+	}
+	items := make([]shared.AnalyticsApp, 0)
+	err := sdb.Instance().
+		NewRaw(`SELECT * FROM claimius.get_analytics_apps(?)`, *reader).
+		Scan(ctx.Request().Context(), &items)
+	if err != nil {
+		ctx.Logger().Errorf("GetAnalyticsApps: %v", err)
+		return respond.Error(ctx, http.StatusInternalServerError, "Internal server error")
+	}
+	return respond.JSON(ctx, http.StatusOK, items, len(items))
 }
 
 func GetAnalyticsEvents(ctx echo.Context) error {

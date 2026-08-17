@@ -145,6 +145,28 @@ func RegisterEndpoints(g *echo.Group) {
 
 	stat := g.Group("/analytics")
 	stat.POST("", h.PostAnalytics)
+	stat.GET("/app", h.GetAnalyticsApps)
 	stat.GET("/event", h.GetAnalyticsEvents)
 	stat.GET("/session", h.GetAnalyticsSessions)
+}
+
+// RegisterCapture mounts consent and capture for the prophet's own portal. A
+// disciple reaches the same handlers on the sam channel carrying its app
+// credentials, so it never mounts this. The prophet answers for itself as the
+// system app named by SAUTH_APP_SLUG.
+func RegisterCapture(g *echo.Group) {
+	analytics := g.Group("/analytics")
+	analytics.GET("/consent", h.GetConsent)
+	analytics.POST("/consent", h.PostConsent)
+	analytics.POST("", h.PostAnalytics)
+}
+
+// RegisterCaptureRead mounts the capture read for the prophet's own portal. It
+// answers for the signed in reader, across every producer app their analytics
+// grant covers.
+func RegisterCaptureRead(g *echo.Group) {
+	analytics := g.Group("/analytics")
+	analytics.GET("/app", h.GetAnalyticsApps)
+	analytics.GET("/event", h.GetAnalyticsEvents)
+	analytics.GET("/session", h.GetAnalyticsSessions)
 }

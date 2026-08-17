@@ -385,6 +385,37 @@ $$ LANGUAGE sql STABLE;
 
 COMMENT ON FUNCTION claimius.get_analytics_sessions(UUID, UUID, UUID, TEXT, TIMESTAMPTZ, TIMESTAMPTZ, INTEGER, INTEGER) IS 'Visit read for one person, scoped exactly like get_analytics_events.';
 
+DROP FUNCTION IF EXISTS claimius.get_analytics_apps(UUID);
+
+CREATE OR REPLACE FUNCTION claimius.get_analytics_apps(p_user_id UUID)
+    RETURNS TABLE (
+        id        UUID,
+        slug      TEXT,
+        name      TEXT,
+        app_image TEXT,
+        sessions  BIGINT,
+        events    BIGINT,
+        visitors  BIGINT,
+        last_seen TIMESTAMPTZ
+    ) AS $$
+    SELECT a.id,
+           a.slug,
+           a.name,
+           a.app_image,
+           COUNT(DISTINCT s.id),
+           COALESCE(SUM((SELECT COUNT(*) FROM claimius.analytics_event e WHERE e.session_id = s.id)), 0),
+           COUNT(DISTINCT COALESCE(s.user_id::text, s.anonymous_id)),
+           MAX(s.last_seen_at)
+    FROM claimius.samna_app a
+        LEFT JOIN claimius.analytics_session s ON s.app_id = a.id
+    WHERE a.id IN (SELECT claimius.capture_user_apps(p_user_id))
+      AND a.sa_deleted_at IS NULL
+    GROUP BY a.id, a.slug, a.name, a.app_image
+    ORDER BY a.name;
+$$ LANGUAGE sql STABLE;
+
+COMMENT ON FUNCTION claimius.get_analytics_apps(UUID) IS 'The producer apps one person may read, named, with the volume captured against each. A disciple carries no samna_app replica, so this is where a capture reader learns what an app_id is.';
+
 GRANT EXECUTE ON FUNCTION claimius.get_consent(UUID, UUID, TEXT) TO claimius_writer;
 GRANT EXECUTE ON FUNCTION claimius.get_consent(UUID, UUID, TEXT) TO claimius_reader;
 GRANT EXECUTE ON FUNCTION claimius.post_consent(UUID, TEXT, JSONB, TEXT, UUID, INET, TEXT) TO claimius_writer;
@@ -400,3 +431,5 @@ GRANT EXECUTE ON FUNCTION claimius.get_analytics_events(UUID, UUID, UUID, UUID, 
 GRANT EXECUTE ON FUNCTION claimius.get_analytics_events(UUID, UUID, UUID, UUID, TEXT, TEXT, TIMESTAMPTZ, TIMESTAMPTZ, INTEGER, INTEGER) TO claimius_reader;
 GRANT EXECUTE ON FUNCTION claimius.get_analytics_sessions(UUID, UUID, UUID, TEXT, TIMESTAMPTZ, TIMESTAMPTZ, INTEGER, INTEGER) TO claimius_writer;
 GRANT EXECUTE ON FUNCTION claimius.get_analytics_sessions(UUID, UUID, UUID, TEXT, TIMESTAMPTZ, TIMESTAMPTZ, INTEGER, INTEGER) TO claimius_reader;
+GRANT EXECUTE ON FUNCTION claimius.get_analytics_apps(UUID) TO claimius_writer;
+GRANT EXECUTE ON FUNCTION claimius.get_analytics_apps(UUID) TO claimius_reader;
