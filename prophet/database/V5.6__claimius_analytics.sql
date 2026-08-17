@@ -393,6 +393,7 @@ CREATE OR REPLACE FUNCTION claimius.get_analytics_apps(p_user_id UUID)
         slug      TEXT,
         name      TEXT,
         app_image TEXT,
+        origin    TEXT,
         sessions  BIGINT,
         events    BIGINT,
         visitors  BIGINT,
@@ -402,6 +403,7 @@ CREATE OR REPLACE FUNCTION claimius.get_analytics_apps(p_user_id UUID)
            a.slug,
            a.name,
            a.app_image,
+           substring(a.redirect_uris[1] FROM '^[a-zA-Z][a-zA-Z0-9+.-]*://[^/]+'),
            COUNT(DISTINCT s.id),
            COALESCE(SUM((SELECT COUNT(*) FROM claimius.analytics_event e WHERE e.session_id = s.id)), 0),
            COUNT(DISTINCT COALESCE(s.user_id::text, s.anonymous_id)),
@@ -410,11 +412,11 @@ CREATE OR REPLACE FUNCTION claimius.get_analytics_apps(p_user_id UUID)
         LEFT JOIN claimius.analytics_session s ON s.app_id = a.id
     WHERE a.id IN (SELECT claimius.capture_user_apps(p_user_id))
       AND a.sa_deleted_at IS NULL
-    GROUP BY a.id, a.slug, a.name, a.app_image
+    GROUP BY a.id, a.slug, a.name, a.app_image, a.redirect_uris
     ORDER BY a.name;
 $$ LANGUAGE sql STABLE;
 
-COMMENT ON FUNCTION claimius.get_analytics_apps(UUID) IS 'The producer apps one person may read, named, with the volume captured against each. A disciple carries no samna_app replica, so this is where a capture reader learns what an app_id is.';
+COMMENT ON FUNCTION claimius.get_analytics_apps(UUID) IS 'The producer apps one person may read, named, with the volume captured against each and the origin its pages are served from. A disciple carries no samna_app replica, so this is where a capture reader learns what an app_id is and where to load the page a heat map overlays.';
 
 GRANT EXECUTE ON FUNCTION claimius.get_consent(UUID, UUID, TEXT) TO claimius_writer;
 GRANT EXECUTE ON FUNCTION claimius.get_consent(UUID, UUID, TEXT) TO claimius_reader;

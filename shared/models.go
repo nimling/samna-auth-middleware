@@ -904,6 +904,7 @@ type AnalyticsApp struct {
 	Slug     string     `bun:"slug" json:"slug"`
 	Name     string     `bun:"name" json:"name"`
 	AppImage *string    `bun:"app_image" json:"app_image,omitempty"`
+	Origin   *string    `bun:"origin" json:"origin,omitempty"`
 	Sessions int64      `bun:"sessions" json:"sessions"`
 	Events   int64      `bun:"events" json:"events"`
 	Visitors int64      `bun:"visitors" json:"visitors"`
