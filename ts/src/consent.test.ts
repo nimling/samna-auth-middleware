@@ -23,9 +23,9 @@ function stubFetch(state: unknown = consentState): Call[] {
   return calls
 }
 
-function banner(): ShadowRoot {
-  const host = document.getElementById('sauth-consent-host')
-  if (!host?.shadowRoot) throw new Error('banner not mounted')
+function sheet(): ShadowRoot {
+  const host = document.getElementById('sauth-consent-sheet')
+  if (!host?.shadowRoot) throw new Error('sheet not mounted')
   return host.shadowRoot
 }
 
@@ -45,26 +45,26 @@ afterEach(() => {
 })
 
 describe('configureConsent', () => {
-  it('mounts the banner when the visitor has not decided', async () => {
+  it('mounts the sheet when the visitor has not decided', async () => {
     stubFetch()
     const { configureConsent } = await import('./consent')
     await configureConsent({ endpoint: '/api' })
-    expect(document.getElementById('sauth-consent-host')).not.toBeNull()
-    expect(banner().querySelector('h2')?.textContent).toContain('Cookies')
+    expect(document.getElementById('sauth-consent-sheet')).not.toBeNull()
+    expect(sheet().querySelector('h2')?.textContent).toContain('Cookies')
   })
 
-  it('leaves the banner closed when a decision is already stored', async () => {
+  it('leaves the sheet closed when a decision is already stored', async () => {
     stubFetch({ ...consentState, decided: true })
     const { configureConsent } = await import('./consent')
     await configureConsent({ endpoint: '/api' })
-    expect(document.getElementById('sauth-consent-host')).toBeNull()
+    expect(document.getElementById('sauth-consent-sheet')).toBeNull()
   })
 
   it('offers one toggle per category and locks the necessary one', async () => {
     stubFetch()
     const { configureConsent } = await import('./consent')
     await configureConsent({ endpoint: '/api' })
-    const inputs = Array.from(banner().querySelectorAll('input[type=checkbox]')) as HTMLInputElement[]
+    const inputs = Array.from(sheet().querySelectorAll('input[type=checkbox]')) as HTMLInputElement[]
     expect(inputs).toHaveLength(4)
     expect(inputs[0].disabled).toBe(true)
     expect(inputs[0].checked).toBe(true)
@@ -74,7 +74,7 @@ describe('configureConsent', () => {
     stubFetch()
     const { configureConsent } = await import('./consent')
     await configureConsent({ endpoint: '/api' })
-    const link = banner().querySelector('a') as HTMLAnchorElement
+    const link = sheet().querySelector('a') as HTMLAnchorElement
     expect(link.href).toBe(consentState.policy_url)
     expect(link.target).toBe('_blank')
   })
@@ -83,7 +83,7 @@ describe('configureConsent', () => {
     stubFetch()
     const { configureConsent } = await import('./consent')
     await configureConsent({ endpoint: '/api' })
-    const root = banner()
+    const root = sheet()
     const customize = buttonNamed(root, 'Customize')
     expect(root.querySelector('.details')?.classList.contains('open')).toBe(false)
     customize.click()
@@ -93,11 +93,11 @@ describe('configureConsent', () => {
 })
 
 describe('a decision', () => {
-  it('posts every category on accept and closes the banner', async () => {
+  it('posts every category on accept and closes the sheet', async () => {
     const calls = stubFetch()
     const { configureConsent } = await import('./consent')
     await configureConsent({ endpoint: '/api' })
-    buttonNamed(banner(), 'Accept all').click()
+    buttonNamed(sheet(), 'Accept all').click()
     await vi.waitFor(() => expect(calls.length).toBe(2))
     const body = JSON.parse(String(calls[1].init?.body))
     expect(body.categories).toEqual({
@@ -106,14 +106,14 @@ describe('a decision', () => {
       analytics: true,
       marketing: true
     })
-    expect(document.getElementById('sauth-consent-host')).toBeNull()
+    expect(document.getElementById('sauth-consent-sheet')).toBeNull()
   })
 
   it('posts only the necessary category on reject', async () => {
     const calls = stubFetch()
     const { configureConsent } = await import('./consent')
     await configureConsent({ endpoint: '/api' })
-    buttonNamed(banner(), 'Reject optional').click()
+    buttonNamed(sheet(), 'Reject optional').click()
     await vi.waitFor(() => expect(calls.length).toBe(2))
     const body = JSON.parse(String(calls[1].init?.body))
     expect(body.categories).toEqual({
@@ -127,8 +127,11 @@ describe('a decision', () => {
   it('carries the per category choices when saved from the detail panel', async () => {
     const calls = stubFetch()
     const { configureConsent } = await import('./consent')
-    await configureConsent({ endpoint: '/api' })
-    const root = banner()
+    await configureConsent({
+      endpoint: '/api',
+      categories: { preferences: false, analytics: false, marketing: false }
+    })
+    const root = sheet()
     buttonNamed(root, 'Customize').click()
     const inputs = Array.from(root.querySelectorAll('input[type=checkbox]')) as HTMLInputElement[]
     inputs[2].checked = true
@@ -141,15 +144,84 @@ describe('a decision', () => {
   })
 })
 
-describe('openConsentBanner', () => {
-  it('reopens the banner after a decision so settings stay reachable', async () => {
+describe('openConsentSheet', () => {
+  it('reopens the sheet after a decision so settings stay reachable', async () => {
     stubFetch({ ...consentState, decided: true })
-    const { configureConsent, openConsentBanner, closeConsentBanner } = await import('./consent')
+    const { configureConsent, openConsentSheet, closeConsentSheet } = await import('./consent')
     await configureConsent({ endpoint: '/api' })
-    expect(document.getElementById('sauth-consent-host')).toBeNull()
-    openConsentBanner()
-    expect(document.getElementById('sauth-consent-host')).not.toBeNull()
-    closeConsentBanner()
-    expect(document.getElementById('sauth-consent-host')).toBeNull()
+    expect(document.getElementById('sauth-consent-sheet')).toBeNull()
+    openConsentSheet()
+    expect(document.getElementById('sauth-consent-sheet')).not.toBeNull()
+    closeConsentSheet()
+    expect(document.getElementById('sauth-consent-sheet')).toBeNull()
+  })
+})
+
+describe('the categories declaration', () => {
+  it('carries every category toggled on when none is declared', async () => {
+    stubFetch()
+    const { configureConsent } = await import('./consent')
+    await configureConsent({ endpoint: '/api' })
+    const root = sheet()
+    buttonNamed(root, 'Customize').click()
+    const inputs = Array.from(root.querySelectorAll('input[type=checkbox]')) as HTMLInputElement[]
+    expect(inputs.length).toBe(4)
+    expect(inputs.map((i) => i.checked)).toEqual([true, true, true, true])
+  })
+
+  it('treats null the same as absent', async () => {
+    stubFetch()
+    const { configureConsent } = await import('./consent')
+    await configureConsent({ endpoint: '/api', categories: null })
+    const root = sheet()
+    buttonNamed(root, 'Customize').click()
+    const inputs = Array.from(root.querySelectorAll('input[type=checkbox]')) as HTMLInputElement[]
+    expect(inputs.length).toBe(4)
+  })
+
+  it('renders only the declared categories and always carries necessary', async () => {
+    stubFetch()
+    const { configureConsent } = await import('./consent')
+    await configureConsent({ endpoint: '/api', categories: { analytics: true } })
+    const root = sheet()
+    buttonNamed(root, 'Customize').click()
+    const names = Array.from(root.querySelectorAll('.category-name')).map((n) => n.textContent)
+    expect(names).toEqual(['Strictly necessary', 'Analytics'])
+  })
+
+  it('starts a declared category off when it is declared false', async () => {
+    stubFetch()
+    const { configureConsent } = await import('./consent')
+    await configureConsent({ endpoint: '/api', categories: { analytics: true, marketing: false } })
+    const root = sheet()
+    buttonNamed(root, 'Customize').click()
+    const inputs = Array.from(root.querySelectorAll('input[type=checkbox]')) as HTMLInputElement[]
+    expect(inputs.map((i) => i.checked)).toEqual([true, true, false])
+  })
+
+  it('grants only the declared categories on accept', async () => {
+    const calls = stubFetch()
+    const { configureConsent } = await import('./consent')
+    await configureConsent({ endpoint: '/api', categories: { analytics: true } })
+    buttonNamed(sheet(), 'Accept all').click()
+    await vi.waitFor(() => expect(calls.length).toBe(2))
+    const body = JSON.parse(String(calls[1].init?.body))
+    expect(body.categories).toEqual({
+      necessary: true,
+      preferences: false,
+      analytics: true,
+      marketing: false
+    })
+  })
+
+  it('keeps a stored decision over the declared default when reopened', async () => {
+    stubFetch({ ...consentState, decided: true, categories: { ...consentState.categories, analytics: false } })
+    const { configureConsent, openConsentSheet } = await import('./consent')
+    await configureConsent({ endpoint: '/api', categories: { analytics: true } })
+    openConsentSheet({ categories: { analytics: true } })
+    const root = sheet()
+    buttonNamed(root, 'Customize').click()
+    const inputs = Array.from(root.querySelectorAll('input[type=checkbox]')) as HTMLInputElement[]
+    expect(inputs.map((i) => i.checked)).toEqual([true, false])
   })
 })

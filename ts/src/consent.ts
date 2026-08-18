@@ -12,12 +12,24 @@ export interface ConsentCopy {
   categories: Record<keyof ConsentCategories, { name: string; description: string }>
 }
 
-export interface ConsentBannerConfig extends AnalyticsConfig {
+/**
+ * Which categories the sheet carries and how each one starts. A key that is
+ * absent is a category this app does not use, so the sheet leaves it out and
+ * the stored decision records it false. The value is the toggle's starting
+ * position, which the visitor is free to change before saving.
+ *
+ * necessary is carried whether or not it is named, is always on, and cannot be
+ * switched off.
+ */
+export type ConsentCategoryDefaults = Partial<Record<keyof ConsentCategories, boolean>>
+
+export interface ConsentSheetConfig extends AnalyticsConfig {
+  categories?: ConsentCategoryDefaults | null
   copy?: Partial<ConsentCopy>
   mount?: HTMLElement
 }
 
-const HOST_ID = 'sauth-consent-host'
+const HOST_ID = 'sauth-consent-sheet'
 
 const defaultCopy: ConsentCopy = {
   title: 'Cookies on this service',
@@ -148,20 +160,55 @@ input:focus-visible ~ .track { outline: 2px solid #1f6feb; outline-offset: 2px; 
 
 const order: Array<keyof ConsentCategories> = ['necessary', 'preferences', 'analytics', 'marketing']
 
+const allCategories: ConsentCategoryDefaults = {
+  necessary: true,
+  preferences: true,
+  analytics: true,
+  marketing: true
+}
+
+/**
+ * Resolves the declaration an app initialised with. Null or absent means the
+ * app takes every category with each one starting on.
+ */
+function declared(categories?: ConsentCategoryDefaults | null): ConsentCategoryDefaults {
+  if (!categories) return { ...allCategories }
+  return { ...categories, necessary: true }
+}
+
+function carried(categories: ConsentCategoryDefaults): Array<keyof ConsentCategories> {
+  return order.filter((key) => categories[key] !== undefined)
+}
+
 let host: HTMLElement | null = null
 
-function removeBanner(): void {
+function removeSheet(): void {
   host?.remove()
   host = null
 }
 
-function render(state: ConsentState, copy: ConsentCopy, mount: HTMLElement): void {
-  removeBanner()
+function render(
+  state: ConsentState,
+  copy: ConsentCopy,
+  mount: HTMLElement,
+  categories: ConsentCategoryDefaults
+): void {
+  removeSheet()
   host = document.createElement('div')
   host.id = HOST_ID
   const root = host.attachShadow({ mode: 'open' })
 
-  const chosen: ConsentCategories = { ...state.categories, necessary: true }
+  const rows = carried(categories)
+  const chosen: ConsentCategories = {
+    necessary: true,
+    preferences: false,
+    analytics: false,
+    marketing: false
+  }
+  for (const key of rows) {
+    chosen[key] = state.decided ? state.categories[key] === true : categories[key] === true
+  }
+  chosen.necessary = true
 
   const sheet = document.createElement('style')
   sheet.textContent = styles
@@ -187,7 +234,7 @@ function render(state: ConsentState, copy: ConsentCopy, mount: HTMLElement): voi
   detailsInner.className = 'details-inner'
   details.appendChild(detailsInner)
 
-  order.forEach((key) => {
+  rows.forEach((key) => {
     const row = document.createElement('div')
     row.className = 'category'
 
@@ -265,16 +312,23 @@ function render(state: ConsentState, copy: ConsentCopy, mount: HTMLElement): voi
   accept.textContent = copy.acceptAll
 
   const decide = (categories: ConsentCategories) => {
-    removeBanner()
+    removeSheet()
     void postConsent(categories)
   }
 
   reject.addEventListener('click', () =>
     decide({ necessary: true, preferences: false, analytics: false, marketing: false })
   )
-  accept.addEventListener('click', () =>
-    decide({ necessary: true, preferences: true, analytics: true, marketing: true })
-  )
+  accept.addEventListener('click', () => {
+    const granted: ConsentCategories = {
+      necessary: true,
+      preferences: false,
+      analytics: false,
+      marketing: false
+    }
+    for (const key of rows) granted[key] = true
+    decide(granted)
+  })
   save.addEventListener('click', () => decide({ ...chosen, necessary: true }))
 
   const spacer = document.createElement('div')
@@ -288,10 +342,10 @@ function render(state: ConsentState, copy: ConsentCopy, mount: HTMLElement): voi
 }
 
 /**
- * Opens the consent banner regardless of whether a decision is already stored,
+ * Opens the consent sheet regardless of whether a decision is already stored,
  * so an app can offer a "cookie settings" control that reopens it.
  */
-export function openConsentBanner(options: ConsentBannerConfig = {}): void {
+export function openConsentSheet(options: ConsentSheetConfig = {}): void {
   const state = getConsentState()
   if (!state) return
   const copy: ConsentCopy = {
@@ -299,24 +353,24 @@ export function openConsentBanner(options: ConsentBannerConfig = {}): void {
     ...options.copy,
     categories: { ...defaultCopy.categories, ...options.copy?.categories }
   }
-  render(state, copy, options.mount ?? document.body)
+  render(state, copy, options.mount ?? document.body, declared(options.categories))
 }
 
 /**
  * Reads consent, starts capture when it is already granted, and shows the
- * banner when the visitor has not decided under the current policy. This is the
+ * sheet when the visitor has not decided under the current policy. This is the
  * single call an app needs.
  */
-export async function configureConsent(options: ConsentBannerConfig = {}): Promise<ConsentState | null> {
+export async function configureConsent(options: ConsentSheetConfig = {}): Promise<ConsentState | null> {
   const state = await configureAnalytics(options)
   if (!state) return null
-  if (!state.decided) openConsentBanner(options)
+  if (!state.decided) openConsentSheet(options)
   return state
 }
 
 /**
- * Removes the banner without recording a decision.
+ * Removes the sheet without recording a decision.
  */
-export function closeConsentBanner(): void {
-  removeBanner()
+export function closeConsentSheet(): void {
+  removeSheet()
 }

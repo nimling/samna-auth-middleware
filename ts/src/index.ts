@@ -44,5 +44,5 @@ export type {
   ConsentCategories,
   ConsentState
 } from './analytics'
-export { configureConsent, openConsentBanner, closeConsentBanner } from './consent'
-export type { ConsentBannerConfig, ConsentCopy } from './consent'
+export { configureConsent, openConsentSheet, closeConsentSheet } from './consent'
+export type { ConsentSheetConfig, ConsentCategoryDefaults, ConsentCopy } from './consent'
