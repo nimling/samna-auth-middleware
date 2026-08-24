@@ -1213,14 +1213,25 @@ BEGIN
                                    sa_description = EXCLUDED.sa_description,
                                    sa_link = EXCLUDED.sa_link,
                                    search_vector = EXCLUDED.search_vector,
-                                   sa_updated_at = now();
+                                   sa_updated_at = now()
+    WHERE claimius.user_object.sa_access        IS DISTINCT FROM EXCLUDED.sa_access
+       OR claimius.user_object.scope            IS DISTINCT FROM EXCLUDED.scope
+       OR claimius.user_object.grants           IS DISTINCT FROM EXCLUDED.grants
+       OR claimius.user_object.direct_grant     IS DISTINCT FROM EXCLUDED.direct_grant
+       OR claimius.user_object.sa_owner_id      IS DISTINCT FROM EXCLUDED.sa_owner_id
+       OR claimius.user_object.sa_location_id   IS DISTINCT FROM EXCLUDED.sa_location_id
+       OR claimius.user_object.sa_root_id       IS DISTINCT FROM EXCLUDED.sa_root_id
+       OR claimius.user_object.sa_name          IS DISTINCT FROM EXCLUDED.sa_name
+       OR claimius.user_object.sa_description   IS DISTINCT FROM EXCLUDED.sa_description
+       OR claimius.user_object.sa_link          IS DISTINCT FROM EXCLUDED.sa_link
+       OR claimius.user_object.search_vector    IS DISTINCT FROM EXCLUDED.search_vector;
 
     INSERT INTO claimius.object_users (id, app_id, object_id, object_type, user_id)
     VALUES (
                claimius.composite_id(p_app_id::TEXT, p_object_type, p_object_id::TEXT, p_user_id::TEXT),
                p_app_id, p_object_id, p_object_type, p_user_id
            )
-    ON CONFLICT (id) DO UPDATE SET sa_updated_at = now();
+    ON CONFLICT (id) DO NOTHING;
 END;
 $$ LANGUAGE plpgsql;
 

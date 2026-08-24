@@ -215,7 +215,6 @@ func GetSyncEvents(ctx echo.Context) error {
 		return respond.Error(ctx, http.StatusInternalServerError, "Internal server error")
 	}
 
-	maxSeq := seq
 	payloads := make([]SyncPayload, 0, len(events))
 	for _, event := range events {
 		payloads = append(payloads, SyncPayload{
@@ -224,12 +223,14 @@ func GetSyncEvents(ctx echo.Context) error {
 			EventType: event.EventType,
 			Payload:   event.Payload,
 		})
-		if event.Seq > maxSeq {
-			maxSeq = event.Seq
-		}
 	}
 
-	if err := syncArmPush(sdb.Instance(), ctx.Request().Context(), appID, maxSeq); err != nil {
+	// The incoming seq is the disciple's proof of application: it only advances
+	// its cursor after every payload applied. What was served is not proof, and
+	// a disciple that fails to apply re-requests from the same point, so arming
+	// on the served position would report consumption that never happened and
+	// let the trim delete events still owed.
+	if err := syncArmPush(sdb.Instance(), ctx.Request().Context(), appID, seq); err != nil {
 		ctx.Logger().Errorf("delta arm push %s: %v", appID, err)
 	}
 

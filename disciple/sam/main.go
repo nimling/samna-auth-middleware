@@ -182,51 +182,58 @@ func ApplyPayload(ctx context.Context, payload SyncPayload) error {
 }
 
 type claimBindingEnvelope struct {
-	ID      *uuid.UUID `json:"id"`
-	ClaimID *uuid.UUID `json:"claim_id"`
-	UserID  *uuid.UUID `json:"user_id"`
+	ID         *uuid.UUID `json:"id"`
+	ClaimID    *uuid.UUID `json:"claim_id"`
+	UserID     *uuid.UUID `json:"user_id"`
+	ObjectType *string    `json:"object_type"`
+	ObjectID   *uuid.UUID `json:"object_id"`
 }
 
-func recomputeExternal(ctx context.Context, tx bun.Tx, eventType string, raw json.RawMessage) error {
+// ClaimAreas resolves the claim areas a synced payload moves. A claim payload
+// names itself, a binding names the claim it binds, and a claim_object linking
+// one claim to another moves both. Any other event type moves no claim area.
+func ClaimAreas(eventType string, raw json.RawMessage) ([]uuid.UUID, error) {
 	var envelope claimBindingEnvelope
 	switch eventType {
 	case "claimius.claim":
 		if err := json.Unmarshal(raw, &envelope); err != nil {
-			return fmt.Errorf("unmarshal claim envelope: %w", err)
+			return nil, fmt.Errorf("unmarshal claim envelope: %w", err)
 		}
 		envelope.ClaimID = envelope.ID
 	case "claimius.claim_object", "claimius.user_claim":
 		if err := json.Unmarshal(raw, &envelope); err != nil {
-			return fmt.Errorf("unmarshal claim binding envelope: %w", err)
+			return nil, fmt.Errorf("unmarshal claim binding envelope: %w", err)
 		}
 	default:
-		return nil
+		return nil, nil
 	}
 
-	userIDs := make([]uuid.UUID, 0, 1)
-	if envelope.UserID != nil {
-		userIDs = append(userIDs, *envelope.UserID)
-	} else if envelope.ClaimID != nil {
-		if err := tx.NewSelect().
-			Model((*shared.UserClaim)(nil)).
-			Column("user_id").
-			Where("claim_id = ?", *envelope.ClaimID).
-			Where("sa_deleted_at IS NULL").
-			Scan(ctx, &userIDs); err != nil {
-			return fmt.Errorf("select claim holders: %w", err)
-		}
+	areas := make([]uuid.UUID, 0, 2)
+	if envelope.ClaimID != nil {
+		areas = append(areas, *envelope.ClaimID)
 	}
-
-	if _, err := tx.ExecContext(ctx, "SET LOCAL claimius.replay_mode = 'false'"); err != nil {
-		return fmt.Errorf("clear replay_mode: %w", err)
+	if eventType == "claimius.claim_object" &&
+		envelope.ObjectType != nil && *envelope.ObjectType == "claimius.claim" &&
+		envelope.ObjectID != nil {
+		areas = append(areas, *envelope.ObjectID)
 	}
-	defer func() {
-		_, _ = tx.ExecContext(ctx, "SET LOCAL claimius.replay_mode = 'true'")
-	}()
+	return areas, nil
+}
 
-	for _, userID := range userIDs {
-		if _, err := tx.ExecContext(ctx, "SELECT claimius.recompute_external_access(?)", userID); err != nil {
-			return fmt.Errorf("recompute external access for %s: %w", userID, err)
+// recomputeExternal marks the claim areas a payload moved as outstanding. The
+// disciple carries external tables the prophet knows nothing about, so their
+// access settles locally, and the replay guard on the claim trigger means a
+// synced payload raises nothing by itself. Marking an area costs one row
+// whatever the claim reaches, and reconcile_if_pending settles it on the next
+// read that targets it.
+func recomputeExternal(ctx context.Context, tx bun.Tx, eventType string, raw json.RawMessage) error {
+	areas, err := ClaimAreas(eventType, raw)
+	if err != nil {
+		return err
+	}
+	for _, claimID := range areas {
+		if _, err := tx.ExecContext(ctx, "SELECT claimius._raise_claim_diff(?)", claimID); err != nil {
+			return fmt.Errorf("raise claim diff for %s: %w", claimID, err)
 		}
 	}
 	return nil

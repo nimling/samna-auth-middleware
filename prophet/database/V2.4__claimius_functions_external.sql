@@ -4087,3 +4087,38 @@ COMMENT ON FUNCTION claimius.notify_user(UUID, TEXT, TEXT, JSONB, TEXT, TEXT, TE
 
 GRANT EXECUTE ON FUNCTION claimius.notify_user(UUID, TEXT, TEXT, JSONB, TEXT, TEXT, TEXT, UUID, UUID, UUID, INTERVAL, UUID[])
     TO claimius_writer, claimius_admin;
+
+-- ----------------------------------------------------------------------------
+-- trim_sync_event
+-- Removes outbox rows every registered consumer has already applied.
+-- prophet_state.last_applied_seq is the per app cursor, advanced when an app
+-- asks for what comes after it, so a row at or below the minimum across the
+-- apps still in contact is owed to nobody. An app whose last contact is older
+-- than p_stale_after is treated as gone rather than allowed to pin the
+-- watermark forever, which is how an outbox grows without bound while looking
+-- healthy. With no registered consumer nothing is published and nothing is
+-- removed. Returns the number of rows deleted.
+-- ----------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION claimius.trim_sync_event(
+    p_stale_after   INTERVAL DEFAULT INTERVAL '7 days'
+) RETURNS BIGINT AS $$
+DECLARE
+    v_watermark BIGINT;
+    v_deleted   BIGINT;
+BEGIN
+    SELECT min(last_applied_seq) INTO v_watermark
+    FROM claimius.prophet_state
+    WHERE last_contact_at IS NOT NULL
+      AND last_contact_at > now() - p_stale_after;
+
+    IF v_watermark IS NULL OR v_watermark <= 0 THEN
+        RETURN 0;
+    END IF;
+
+    DELETE FROM claimius.sync_event WHERE seq <= v_watermark;
+    GET DIAGNOSTICS v_deleted = ROW_COUNT;
+    RETURN v_deleted;
+END;
+$$ LANGUAGE plpgsql;
+
+COMMENT ON FUNCTION claimius.trim_sync_event(INTERVAL) IS 'Deletes sync_event rows at or below the lowest cursor among consumers still in contact. Run on a schedule.';

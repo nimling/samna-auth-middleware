@@ -587,6 +587,13 @@ BEGIN
         RETURN coalesce(NEW, OLD);
     END IF;
 
+    -- sync_event is an outbox. A deployment with no registered consumer in
+    -- prophet_state publishes to nobody, so the row would never be read and
+    -- never be trimmed. A pure disciple is exactly that case.
+    IF NOT EXISTS (SELECT 1 FROM claimius.prophet_state) THEN
+        RETURN coalesce(NEW, OLD);
+    END IF;
+
     v_type := TG_TABLE_SCHEMA || '.' || TG_TABLE_NAME;
 
     IF TG_OP = 'DELETE' THEN
