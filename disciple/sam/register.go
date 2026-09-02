@@ -35,6 +35,8 @@ func RegisterCapture(g *echo.Group) {
 	analytics.GET("/consent", h.GetConsent)
 	analytics.POST("/consent", h.PostConsent)
 	analytics.POST("", h.PostAnalytics)
+	analytics.POST("/capture", h.PostAnalyticsCapture)
+	analytics.GET("/capture/due", h.GetAnalyticsCaptureDue)
 }
 
 func RegisterCaptureRead(g *echo.Group) {
@@ -42,4 +44,5 @@ func RegisterCaptureRead(g *echo.Group) {
 	analytics.GET("/app", h.GetAnalyticsApps)
 	analytics.GET("/event", h.GetAnalyticsEvents)
 	analytics.GET("/session", h.GetAnalyticsSessions)
+	analytics.GET("/capture", h.GetAnalyticsCapture)
 }

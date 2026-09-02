@@ -911,6 +911,27 @@ type AnalyticsApp struct {
 	LastSeen *time.Time `bun:"last_seen" json:"last_seen,omitempty"`
 }
 
+type AnalyticsCapture struct {
+	bun.BaseModel `bun:"table:claimius.analytics_capture"`
+
+	ID            uuid.UUID `bun:"id,pk,default:gen_random_uuid()" json:"id"`
+	AppID         uuid.UUID `bun:"app_id" json:"app_id"`
+	Path          string    `bun:"path" json:"path"`
+	ViewportWidth int       `bun:"viewport_width" json:"viewport_width"`
+	PageHeight    int       `bun:"page_height" json:"page_height"`
+	ContentType   string    `bun:"content_type" json:"content_type"`
+	Image         []byte    `bun:"image" json:"image"`
+	CapturedAt    time.Time `bun:"captured_at,default:now()" json:"captured_at"`
+}
+
+type AnalyticsCaptureInput struct {
+	Path          string `json:"path" validate:"required"`
+	ViewportWidth int    `json:"viewport_width" validate:"required"`
+	PageHeight    int    `json:"page_height"`
+	ContentType   string `json:"content_type"`
+	Image         string `json:"image" validate:"required"`
+}
+
 type SyncEvent struct {
 	bun.BaseModel `bun:"table:claimius.sync_event"`
 

@@ -1,6 +1,7 @@
 package echo
 
 import (
+	"encoding/base64"
 	"net/http"
 	"strconv"
 	"time"
@@ -16,6 +17,8 @@ import (
 )
 
 const (
+	captureBytesMax      = 8 << 20
+	captureMaxAge        = "7 days"
 	headerForwardedFor   = "SAuth-Forwarded-For"
 	headerForwardedUser  = "SAuth-Forwarded-User"
 	headerForwardedAgent = "SAuth-Forwarded-Agent"
@@ -304,4 +307,95 @@ func intParam(ctx echo.Context, name string, fallback int) int {
 		return fallback
 	}
 	return v
+}
+
+func PostAnalyticsCapture(ctx echo.Context) error {
+	appID, ok := captureApp(ctx)
+	if !ok {
+		return respond.Error(ctx, http.StatusUnauthorized, "Unauthorized")
+	}
+	if !analyticsEnabled(ctx, appID) {
+		return respond.Error(ctx, http.StatusForbidden, "Forbidden")
+	}
+	var body shared.AnalyticsCaptureInput
+	if err := ctx.Bind(&body); err != nil {
+		return ctx.NoContent(http.StatusNoContent)
+	}
+	if body.Path == "" || body.ViewportWidth <= 0 || body.Image == "" {
+		return ctx.NoContent(http.StatusNoContent)
+	}
+	if body.ContentType == "" {
+		body.ContentType = "image/png"
+	}
+	raw, err := base64.StdEncoding.DecodeString(body.Image)
+	if err != nil {
+		return respond.Error(ctx, http.StatusBadRequest, "image must be base64")
+	}
+	if len(raw) > captureBytesMax {
+		return respond.Error(ctx, http.StatusRequestEntityTooLarge, "image is too large")
+	}
+	_, err = sdb.Instance().
+		NewRaw(`SELECT claimius.post_analytics_capture(?, ?, ?, ?, ?, ?)`,
+			appID, body.Path, body.ViewportWidth, body.PageHeight, body.ContentType, raw).
+		Exec(ctx.Request().Context())
+	if err != nil {
+		ctx.Logger().Errorf("PostAnalyticsCapture: %v", err)
+		return respond.Error(ctx, http.StatusInternalServerError, "Internal server error")
+	}
+	return ctx.NoContent(http.StatusNoContent)
+}
+
+func GetAnalyticsCaptureDue(ctx echo.Context) error {
+	appID, ok := captureApp(ctx)
+	if !ok {
+		return respond.Error(ctx, http.StatusUnauthorized, "Unauthorized")
+	}
+	path := ctx.QueryParam("path")
+	width := intParam(ctx, "viewport_width", 0)
+	if path == "" || width <= 0 {
+		return respond.Error(ctx, http.StatusBadRequest, "path and viewport_width are required")
+	}
+	var due bool
+	err := sdb.Instance().
+		NewRaw(`SELECT claimius.analytics_capture_due(?, ?, ?, ?::interval)`,
+			appID, path, width, captureMaxAge).
+		Scan(ctx.Request().Context(), &due)
+	if err != nil {
+		ctx.Logger().Errorf("GetAnalyticsCaptureDue: %v", err)
+		return respond.Error(ctx, http.StatusInternalServerError, "Internal server error")
+	}
+	return respond.JSON(ctx, http.StatusOK, due, 1)
+}
+
+func GetAnalyticsCapture(ctx echo.Context) error {
+	reader := forwardedUser(ctx)
+	if reader == nil {
+		return respond.Error(ctx, http.StatusForbidden, "Forbidden")
+	}
+	producer, ok := uuidParam(ctx, "app")
+	if !ok || producer == nil {
+		return respond.Error(ctx, http.StatusBadRequest, "app must be a uuid")
+	}
+	path := ctx.QueryParam("path")
+	if path == "" {
+		return respond.Error(ctx, http.StatusBadRequest, "path is required")
+	}
+	var width *int
+	if raw := intParam(ctx, "viewport_width", 0); raw > 0 {
+		width = &raw
+	}
+	items := make([]shared.AnalyticsCapture, 0)
+	err := sdb.Instance().
+		NewRaw(`SELECT c.* FROM claimius.get_analytics_capture(?, ?, ?) c
+			WHERE c.app_id IN (SELECT claimius.capture_user_apps(?))`,
+			*producer, path, width, *reader).
+		Scan(ctx.Request().Context(), &items)
+	if err != nil {
+		ctx.Logger().Errorf("GetAnalyticsCapture: %v", err)
+		return respond.Error(ctx, http.StatusInternalServerError, "Internal server error")
+	}
+	if len(items) == 0 {
+		return ctx.NoContent(http.StatusNotFound)
+	}
+	return respond.JSON(ctx, http.StatusOK, items[0], 1)
 }

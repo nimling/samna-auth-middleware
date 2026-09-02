@@ -145,3 +145,33 @@ describe('flush', () => {
     expect(ingest).toContain('https://nim.io/api/analytics')
   })
 })
+
+describe('capture', () => {
+  it('asks whether a picture is due only once a path is viewed under an analytics grant', async () => {
+    stubBrowser()
+    const granted = { ...consentState, categories: { ...consentState.categories, analytics: true } }
+    const calls = stubFetch(() => envelope(granted))
+    const { configureAnalytics, postView } = await import('./analytics')
+    await configureAnalytics({ endpoint: '/api', worker: false })
+    postView('/service/due-once')
+    await new Promise((resolve) => setTimeout(resolve, 2100))
+    const due = calls
+      .map((c) => String(c.url))
+      .filter((u) => u.includes('/analytics/capture/due') && u.includes('due-once'))
+    expect(due.length).toBe(1)
+    expect(due[0]).toContain('path=%2Fservice%2Fdue-once')
+  })
+
+  it('never asks while the analytics category is withheld', async () => {
+    stubBrowser()
+    const calls = stubFetch(() => envelope(consentState))
+    const { configureAnalytics, postView } = await import('./analytics')
+    await configureAnalytics({ endpoint: '/api', worker: false })
+    postView('/service/withheld')
+    await new Promise((resolve) => setTimeout(resolve, 2100))
+    const asked = calls
+      .map((c) => String(c.url))
+      .filter((u) => u.includes('/analytics/capture') && u.includes('withheld'))
+    expect(asked).toEqual([])
+  })
+})

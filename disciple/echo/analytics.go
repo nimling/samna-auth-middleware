@@ -93,7 +93,7 @@ func GetAnalyticsSessions(ctx echo.Context) error {
 }
 
 func passthroughQuery(ctx echo.Context) string {
-	allowed := []string{"app", "type", "path", "session_id", "visitor", "anonymous_id", "from", "to", "limit", "offset"}
+	allowed := []string{"app", "type", "path", "session_id", "visitor", "anonymous_id", "from", "to", "limit", "offset", "viewport_width"}
 	values := url.Values{}
 	for _, key := range allowed {
 		if v := ctx.QueryParam(key); v != "" {
@@ -122,4 +122,39 @@ func PostAnalytics(ctx echo.Context) error {
 		ctx.Logger().Errorf("PostAnalytics: %v", err)
 	}
 	return ctx.NoContent(http.StatusNoContent)
+}
+
+func PostAnalyticsCapture(ctx echo.Context) error {
+	var body shared.AnalyticsCaptureInput
+	if err := ctx.Bind(&body); err != nil {
+		return ctx.NoContent(http.StatusNoContent)
+	}
+	if body.Path == "" || body.ViewportWidth <= 0 || body.Image == "" {
+		return ctx.NoContent(http.StatusNoContent)
+	}
+	forwarded := client.WithForward(ctx.Request().Context(), forwardContext(ctx))
+	if err := client.Post(forwarded, "analytics/capture", body, nil); err != nil {
+		ctx.Logger().Errorf("PostAnalyticsCapture: %v", err)
+	}
+	return ctx.NoContent(http.StatusNoContent)
+}
+
+func GetAnalyticsCaptureDue(ctx echo.Context) error {
+	var due bool
+	forwarded := client.WithForward(ctx.Request().Context(), forwardContext(ctx))
+	if err := client.Get(forwarded, "analytics/capture/due"+passthroughQuery(ctx), &due); err != nil {
+		ctx.Logger().Errorf("GetAnalyticsCaptureDue: %v", err)
+		return respondError(ctx, http.StatusBadGateway, "Analytics service unavailable")
+	}
+	return respondJSON(ctx, http.StatusOK, due, 1)
+}
+
+func GetAnalyticsCapture(ctx echo.Context) error {
+	var item shared.AnalyticsCapture
+	forwarded := client.WithForward(ctx.Request().Context(), forwardContext(ctx))
+	if err := client.Get(forwarded, "analytics/capture"+passthroughQuery(ctx), &item); err != nil {
+		ctx.Logger().Errorf("GetAnalyticsCapture: %v", err)
+		return respondError(ctx, http.StatusBadGateway, "Analytics service unavailable")
+	}
+	return respondJSON(ctx, http.StatusOK, item, 1)
 }

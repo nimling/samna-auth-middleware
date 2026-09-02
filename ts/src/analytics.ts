@@ -21,6 +21,8 @@ export interface AnalyticsConfig {
   endpoint?: string
   consentPath?: string
   ingestPath?: string
+  capturePath?: string
+  captureImage?: boolean
   flushIntervalMs?: number
   maxBatch?: number
   pointerSampleMs?: number
@@ -44,11 +46,13 @@ const defaults: Required<Omit<AnalyticsConfig, 'onConsent'>> = {
   endpoint: '',
   consentPath: '/analytics/consent',
   ingestPath: '/analytics',
+  capturePath: '/analytics/capture',
   flushIntervalMs: 10000,
   maxBatch: 200,
   pointerSampleMs: 100,
   scrollSampleMs: 250,
   captureText: false,
+  captureImage: true,
   worker: true
 }
 
@@ -58,6 +62,8 @@ let queue: AnalyticsEventInput[] = []
 let sessionKey = ''
 let anonymousId = ''
 let flushTimer: ReturnType<typeof setInterval> | null = null
+const captured = new Set<string>()
+const captureSettleMs = 2000
 let worker: Worker | null = null
 let started = false
 let detach: Array<() => void> = []
@@ -307,12 +313,71 @@ function attach(): void {
   }, { passive: true })
 }
 
+function captureUrl(suffix: string): string {
+  const path = `${config.endpoint.replace(/\/$/, '')}${config.capturePath}${suffix}`
+  if (typeof location === 'undefined') return path
+  return new URL(path, location.origin).toString()
+}
+
+async function captureDue(path: string, width: number): Promise<boolean> {
+  const url = captureUrl(`/due?path=${encodeURIComponent(path)}&viewport_width=${width}`)
+  const response = await fetch(url, { credentials: 'include' })
+  if (!response.ok) return false
+  const envelope = (await response.json()) as { data?: boolean }
+  return envelope.data === true
+}
+
+/**
+ * Rasterises the page and posts it, so a reader can lay a heat field over a
+ * picture of what the visitor saw. A site that answers X-Frame-Options cannot
+ * be framed at capture time, which is why the picture is taken here.
+ *
+ * The rasteriser is loaded on demand and only when the store says no fresh
+ * picture is held, so the ordinary visit never pays for it.
+ */
+async function postCapture(path: string): Promise<void> {
+  const width = window.innerWidth
+  if (!(await captureDue(path, width))) return
+  const { default: html2canvas } = await import('html2canvas')
+  const canvas = await html2canvas(document.documentElement, {
+    width,
+    windowWidth: width,
+    scale: 1,
+    useCORS: true,
+    logging: false
+  })
+  const body = JSON.stringify({
+    path,
+    viewport_width: width,
+    page_height: canvas.height,
+    content_type: 'image/png',
+    image: canvas.toDataURL('image/png').split(',')[1] ?? ''
+  })
+  await fetch(captureUrl(''), {
+    method: 'POST',
+    body,
+    headers: csrfHeaders(),
+    credentials: 'include'
+  })
+}
+
+function scheduleCapture(path: string): void {
+  if (!config.captureImage || captured.has(path)) return
+  if (consent?.categories?.analytics !== true) return
+  captured.add(path)
+  setTimeout(() => {
+    postCapture(path).catch(() => captured.delete(path))
+  }, captureSettleMs)
+}
+
 /**
  * Records a page view. Single page apps call this on every route change,
  * because a history navigation fires no load event.
  */
 export function postView(path?: string, title?: string): void {
-  push('view', { path: path ?? location.pathname + location.search, title: title ?? document.title })
+  const here = path ?? location.pathname + location.search
+  push('view', { path: here, title: title ?? document.title })
+  scheduleCapture(here)
 }
 
 function start(): void {
