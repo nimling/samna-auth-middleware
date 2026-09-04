@@ -3,13 +3,24 @@ package analytics
 import (
 	"context"
 	"sync"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 	"github.com/nimling/samna-auth-middleware/shared"
 )
 
-const jobBuffer = 4096
+const (
+	jobBuffer = 4096
+	// foldInterval is how often the heat grid is refolded and the raw tier
+	// expired. Hourly, because a reader looking at today wants the field to
+	// be roughly current and nothing here is worth a tighter loop.
+	foldInterval = time.Hour
+	// rawRetentionDays is how long a positioned signal survives in
+	// analytics_event after it has been folded into the grid. It exists so
+	// the bucket size can be changed and the grid rebuilt.
+	rawRetentionDays = 30
+)
 
 type job struct {
 	appID      uuid.UUID
@@ -40,6 +51,7 @@ func Init(db *shared.DB) error {
 		running:  true,
 	}
 	go run.writeLoop(context.Background())
+	go run.foldLoop(context.Background())
 	db.Logger.Info("analytics runner started")
 	return nil
 }

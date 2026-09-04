@@ -158,3 +158,13 @@ func GetAnalyticsCapture(ctx echo.Context) error {
 	}
 	return respondJSON(ctx, http.StatusOK, item, 1)
 }
+
+func GetAnalyticsHeat(ctx echo.Context) error {
+	items := make([]shared.AnalyticsHeatPoint, 0)
+	forwarded := client.WithForward(ctx.Request().Context(), forwardContext(ctx))
+	if err := client.Get(forwarded, "analytics/heat"+passthroughQuery(ctx), &items); err != nil {
+		ctx.Logger().Errorf("GetAnalyticsHeat: %v", err)
+		return respondError(ctx, http.StatusBadGateway, "Analytics service unavailable")
+	}
+	return respondJSON(ctx, http.StatusOK, items, len(items))
+}

@@ -45,4 +45,5 @@ func RegisterCaptureRead(g *echo.Group) {
 	analytics.GET("/event", h.GetAnalyticsEvents)
 	analytics.GET("/session", h.GetAnalyticsSessions)
 	analytics.GET("/capture", h.GetAnalyticsCapture)
+	analytics.GET("/heat", h.GetAnalyticsHeat)
 }

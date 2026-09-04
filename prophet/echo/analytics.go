@@ -399,3 +399,42 @@ func GetAnalyticsCapture(ctx echo.Context) error {
 	}
 	return respond.JSON(ctx, http.StatusOK, items[0], 1)
 }
+
+func GetAnalyticsHeat(ctx echo.Context) error {
+	reader := forwardedUser(ctx)
+	if reader == nil {
+		return respond.Error(ctx, http.StatusForbidden, "Forbidden")
+	}
+	producer, ok := uuidParam(ctx, "app")
+	if !ok || producer == nil {
+		return respond.Error(ctx, http.StatusBadRequest, "app must be a uuid")
+	}
+	path := ctx.QueryParam("path")
+	if path == "" {
+		return respond.Error(ctx, http.StatusBadRequest, "path is required")
+	}
+	var width *int
+	if raw := intParam(ctx, "viewport_width", 0); raw > 0 {
+		width = &raw
+	}
+	from, ok := timeParam(ctx, "from")
+	if !ok {
+		return respond.Error(ctx, http.StatusBadRequest, "from must be an RFC3339 timestamp")
+	}
+	until, ok := timeParam(ctx, "to")
+	if !ok {
+		return respond.Error(ctx, http.StatusBadRequest, "to must be an RFC3339 timestamp")
+	}
+	items := make([]shared.AnalyticsHeatPoint, 0)
+	err := sdb.Instance().
+		NewRaw(`SELECT h.* FROM claimius.get_analytics_heat(?, ?, ?, ?, ?::date, ?::date) h
+			WHERE ? IN (SELECT claimius.capture_user_apps(?))`,
+			*producer, path, width, textParam(ctx, "type"), from, until,
+			*producer, *reader).
+		Scan(ctx.Request().Context(), &items)
+	if err != nil {
+		ctx.Logger().Errorf("GetAnalyticsHeat: %v", err)
+		return respond.Error(ctx, http.StatusInternalServerError, "Internal server error")
+	}
+	return respond.JSON(ctx, http.StatusOK, items, len(items))
+}

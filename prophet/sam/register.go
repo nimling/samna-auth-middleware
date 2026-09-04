@@ -148,6 +148,7 @@ func RegisterEndpoints(g *echo.Group) {
 	stat.POST("/capture", h.PostAnalyticsCapture)
 	stat.GET("/capture/due", h.GetAnalyticsCaptureDue)
 	stat.GET("/capture", h.GetAnalyticsCapture)
+	stat.GET("/heat", h.GetAnalyticsHeat)
 	stat.GET("/app", h.GetAnalyticsApps)
 	stat.GET("/event", h.GetAnalyticsEvents)
 	stat.GET("/session", h.GetAnalyticsSessions)
@@ -175,4 +176,5 @@ func RegisterCaptureRead(g *echo.Group) {
 	analytics.GET("/event", h.GetAnalyticsEvents)
 	analytics.GET("/session", h.GetAnalyticsSessions)
 	analytics.GET("/capture", h.GetAnalyticsCapture)
+	analytics.GET("/heat", h.GetAnalyticsHeat)
 }

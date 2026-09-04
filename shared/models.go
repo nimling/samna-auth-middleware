@@ -924,6 +924,13 @@ type AnalyticsCapture struct {
 	CapturedAt    time.Time `bun:"captured_at,default:now()" json:"captured_at"`
 }
 
+type AnalyticsHeatPoint struct {
+	X        int   `bun:"x" json:"x"`
+	Y        int   `bun:"y" json:"y"`
+	Weight   int64 `bun:"weight" json:"weight"`
+	Sessions int64 `bun:"sessions" json:"sessions"`
+}
+
 type AnalyticsCaptureInput struct {
 	Path          string `json:"path" validate:"required"`
 	ViewportWidth int    `json:"viewport_width" validate:"required"`
