@@ -618,6 +618,7 @@ type GraphNode struct {
 
 type SamnaClient struct {
 	bun.BaseModel `bun:"table:claimius.samna_client"`
+	nimbody.Body  `bun:"-" json:"-"`
 
 	ID          uuid.UUID  `bun:"id,pk,default:gen_random_uuid()" json:"id"`
 	Name        string     `bun:"name" json:"name"`

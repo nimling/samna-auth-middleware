@@ -49,6 +49,29 @@ func TestClaim_CreatorEmbedJSONRoundTrip(t *testing.T) {
 	}
 }
 
+func TestSamnaClient_WriteRoundTrip(t *testing.T) {
+	owner := uuid.New()
+	c := sdb.SamnaClient{Name: "Deploy key", OwnerID: owner}
+	raw, err := c.MarshalWrite()
+	if err != nil {
+		t.Fatalf("marshal write: %v", err)
+	}
+	if !strings.Contains(string(raw), `"name":"Deploy key"`) || !strings.Contains(string(raw), fmt.Sprintf(`"owner_id":"%s"`, owner)) {
+		t.Fatalf("expected the name and the owner on the write body, got %s", raw)
+	}
+	id, clientID := uuid.New(), uuid.New()
+	answer := fmt.Sprintf(`{"id":"%s","name":"Deploy key","client_id":"%s","status":"active","owner_id":"%s","secret":"only-once"}`, id, clientID, owner)
+	if err := c.UnmarshalWrite([]byte(answer)); err != nil {
+		t.Fatalf("unmarshal write: %v", err)
+	}
+	if c.ID != id || c.ClientID != clientID || c.Secret == nil || *c.Secret != "only-once" {
+		t.Fatalf("the prophet's answer did not land on the model, got %+v", c)
+	}
+	if c.PatchBody() != nil {
+		t.Fatalf("a model bound from no request carries no patch body, got %v", c.PatchBody())
+	}
+}
+
 func TestClaimObject_NoOverlayShadowsAccessBitmask(t *testing.T) {
 	var m sdb.ClaimAccess = 4
 
