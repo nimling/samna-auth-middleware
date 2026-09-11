@@ -175,3 +175,29 @@ describe('capture', () => {
     expect(asked).toEqual([])
   })
 })
+
+describe('heat', () => {
+  it('folds pointer samples into one heat event per page instead of one event per sample', async () => {
+    stubBrowser()
+    const handlers = new Map<string, (ev: unknown) => void>()
+    const doc = globalThis.document as unknown as Record<string, unknown>
+    doc.addEventListener = (type: string, handler: (ev: unknown) => void) => void handlers.set(type, handler)
+    doc.visibilityState = 'visible'
+    const granted = { ...consentState, categories: { ...consentState.categories, analytics: true } }
+    const calls = stubFetch(() => envelope(granted))
+    const { configureAnalytics, flush } = await import('./analytics')
+    await configureAnalytics({ endpoint: '/api', worker: false, pointerSampleMs: 0, heatCellPx: 16 })
+    const move = handlers.get('pointermove')
+    expect(move).toBeTypeOf('function')
+    move!({ pageX: 20, pageY: 40 })
+    move!({ pageX: 25, pageY: 47 })
+    move!({ pageX: 100, pageY: 40 })
+    flush()
+    const ingest = calls.filter((c) => String(c.url).endsWith('/api/analytics'))
+    const body = JSON.parse(String(ingest[ingest.length - 1]?.init?.body)) as { events: { type: string; payload: { cells?: number[][] } }[] }
+    const heat = body.events.filter((e) => e.type === 'heat')
+    expect(heat.length).toBe(1)
+    expect(heat[0]?.payload.cells).toEqual([[1, 2, 2], [6, 2, 1]])
+    expect(body.events.filter((e) => e.type === 'pointer')).toEqual([])
+  })
+})

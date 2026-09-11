@@ -27,6 +27,7 @@ export interface AnalyticsConfig {
   maxBatch?: number
   pointerSampleMs?: number
   scrollSampleMs?: number
+  heatCellPx?: number
   captureText?: boolean
   worker?: boolean
   onConsent?: (state: ConsentState) => void
@@ -51,24 +52,89 @@ const defaults: Required<Omit<AnalyticsConfig, 'onConsent'>> = {
   maxBatch: 200,
   pointerSampleMs: 100,
   scrollSampleMs: 250,
+  heatCellPx: 16,
   captureText: false,
   captureImage: true,
   worker: true
 }
 
+/**
+ * The batch a flush drains. Discrete events are kept as they came. Pointer
+ * samples are folded into heat cells per page and viewport width as they
+ * arrive, so a session moving the mouse for an hour sends a few hundred cell
+ * counts rather than tens of thousands of positions. The cell edge matches
+ * the grid the prophet folds into, so the server adds the counts straight in.
+ *
+ * The class is self contained on purpose: its source is stringified into the
+ * worker, so it may not reach anything outside itself.
+ */
+class Batch {
+  events: AnalyticsEventInput[] = []
+  heat = new Map<string, { path: string; width: number; at: number; cells: Map<number, number> }>()
+  cell: number
+
+  constructor(cell: number) {
+    this.cell = cell
+  }
+
+  event(e: AnalyticsEventInput): void {
+    this.events.push(e)
+  }
+
+  pointer(path: string, width: number, x: number, y: number, at: number): void {
+    const key = `${path}|${width}`
+    let page = this.heat.get(key)
+    if (!page) {
+      page = { path, width, at, cells: new Map<number, number>() }
+      this.heat.set(key, page)
+    }
+    const bx = Math.floor(x / this.cell)
+    const by = Math.floor(y / this.cell)
+    const id = bx * 1000000 + by
+    page.cells.set(id, (page.cells.get(id) ?? 0) + 1)
+  }
+
+  size(): number {
+    return this.events.length + this.heat.size
+  }
+
+  drain(): AnalyticsEventInput[] {
+    const out = this.events
+    this.events = []
+    for (const page of this.heat.values()) {
+      const cells: number[][] = []
+      for (const [id, count] of page.cells) {
+        cells.push([Math.floor(id / 1000000), id % 1000000, count])
+      }
+      out.push({
+        type: 'heat',
+        path: page.path,
+        payload: { viewport_width: page.width, source: 'pointer', cells },
+        occurred_at: page.at
+      })
+    }
+    this.heat.clear()
+    return out
+  }
+}
+
+const workerSource = `const Batch=(${Batch.toString()});
+let batch=null,cfg=null,timer=null;
+function flush(headers){if(!batch||!cfg)return;const events=batch.drain();if(!events.length)return;if(headers)cfg.headers=headers;let body;try{body=JSON.stringify({anonymous_id:cfg.anonymousId,session_key:cfg.sessionKey,context:cfg.context,events})}catch(x){return}try{fetch(cfg.url,{method:'POST',body:body,headers:cfg.headers,credentials:'include',keepalive:true}).catch(function(){})}catch(x){}}
+self.onmessage=function(e){const m=e.data;switch(m.k){case'start':cfg=m;batch=new Batch(m.cell);if(timer)clearInterval(timer);timer=setInterval(function(){flush()},m.interval);break;case'ctx':if(cfg){cfg.context=m.context;cfg.headers=m.headers}break;case'e':if(batch){batch.event(m.e);if(batch.size()>=cfg.maxBatch)flush()}break;case'p':if(batch)batch.pointer(m.path,m.width,m.x,m.y,m.at);break;case'flush':flush(m.headers);break;case'stop':flush(m.headers);if(timer)clearInterval(timer);timer=null;break}}`
+
 let config = { ...defaults } as Required<Omit<AnalyticsConfig, 'onConsent'>> & Pick<AnalyticsConfig, 'onConsent'>
 let consent: ConsentState | null = null
-let queue: AnalyticsEventInput[] = []
+let batch: Batch | null = null
 let sessionKey = ''
 let anonymousId = ''
+let context: Record<string, unknown> = {}
 let flushTimer: ReturnType<typeof setInterval> | null = null
 const captured = new Set<string>()
 const captureSettleMs = 2000
 let worker: Worker | null = null
 let started = false
 let detach: Array<() => void> = []
-
-const workerSource = `self.onmessage=function(e){try{fetch(e.data.url,{method:'POST',body:e.data.body,headers:e.data.headers,credentials:'include',keepalive:true}).catch(function(){})}catch(x){}}`
 
 function csrfHeaders(): Record<string, string> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' }
@@ -140,6 +206,16 @@ function sessionContext(): Record<string, unknown> {
   }
 }
 
+function refreshContext(): void {
+  context = sessionContext()
+  worker?.postMessage({ k: 'ctx', context, headers: csrfHeaders() })
+}
+
+function lowEnd(): boolean {
+  const nav = typeof navigator === 'undefined' ? undefined : (navigator as Navigator & { connection?: { saveData?: boolean } })
+  return nav?.connection?.saveData === true || (nav?.hardwareConcurrency ?? 4) <= 2
+}
+
 function selectorFor(el: Element | null): string {
   if (!el) return ''
   const parts: string[] = []
@@ -174,8 +250,23 @@ function labelFor(el: Element | null): string | undefined {
 
 function push(type: string, payload: Record<string, unknown>): void {
   if (!started) return
-  queue.push({ type, path: location.pathname, payload, occurred_at: Date.now() })
-  if (queue.length >= config.maxBatch) flush()
+  const event: AnalyticsEventInput = { type, path: location.pathname, payload, occurred_at: Date.now() }
+  if (worker) {
+    worker.postMessage({ k: 'e', e: event })
+    return
+  }
+  batch?.event(event)
+  if (batch && batch.size() >= config.maxBatch) flush()
+}
+
+function pushPointer(x: number, y: number): void {
+  if (!started) return
+  const at = Date.now()
+  if (worker) {
+    worker.postMessage({ k: 'p', path: location.pathname, width: window.innerWidth, x, y, at })
+    return
+  }
+  batch?.pointer(location.pathname, window.innerWidth, x, y, at)
 }
 
 function send(body: string, beacon: boolean): void {
@@ -186,28 +277,28 @@ function send(body: string, beacon: boolean): void {
       return
     } catch {}
   }
-  if (worker) {
-    try {
-      worker.postMessage({ url, body, headers: csrfHeaders() })
-      return
-    } catch {}
-  }
   try {
     fetch(url, { method: 'POST', body, headers: csrfHeaders(), credentials: 'include', keepalive: true }).catch(() => {})
   } catch {}
 }
 
 /**
- * Flushes the queue. Failures are swallowed on purpose: capture must never
- * surface an error into the page it is measuring.
+ * Flushes the batch. With a worker the queue lives there and this only asks it
+ * to post; without one the batch is drained and posted from here. Failures are
+ * swallowed on purpose: capture must never surface an error into the page it
+ * is measuring.
  */
 export function flush(beacon = false): void {
-  if (!started || queue.length === 0) return
-  const events = queue
-  queue = []
+  if (!started) return
+  if (worker) {
+    worker.postMessage({ k: 'flush', headers: csrfHeaders() })
+    return
+  }
+  if (!batch || batch.size() === 0) return
+  const events = batch.drain()
   let body: string
   try {
-    body = JSON.stringify({ anonymous_id: anonymousId, session_key: sessionKey, context: sessionContext(), events })
+    body = JSON.stringify({ anonymous_id: anonymousId, session_key: sessionKey, context, events })
   } catch {
     return
   }
@@ -244,28 +335,11 @@ function attach(): void {
   }, { capture: true, passive: true })
 
   let lastPointer = 0
-  let pending: PointerEvent | null = null
-  let frame = 0
   listen(document, 'pointermove', (ev) => {
     const now = Date.now()
     if (now - lastPointer < config.pointerSampleMs) return
     lastPointer = now
-    pending = ev
-    if (frame) return
-    frame = requestAnimationFrame(() => {
-      frame = 0
-      if (!pending) return
-      push('pointer', {
-        x: pending.clientX,
-        y: pending.clientY,
-        page_x: pending.pageX,
-        page_y: pending.pageY,
-        viewport_width: window.innerWidth,
-        viewport_height: window.innerHeight,
-        pointer_type: pending.pointerType
-      })
-      pending = null
-    })
+    pushPointer(ev.pageX, ev.pageY)
   }, { capture: true, passive: true })
 
   let lastScroll = 0
@@ -310,6 +384,7 @@ function attach(): void {
 
   listen(window, 'resize', () => {
     push('resize', { viewport_width: window.innerWidth, viewport_height: window.innerHeight })
+    refreshContext()
   }, { passive: true })
 }
 
@@ -327,17 +402,32 @@ async function captureDue(path: string, width: number): Promise<boolean> {
   return envelope.data === true
 }
 
+function whenIdle(): Promise<void> {
+  return new Promise((resolve) => {
+    const idle = (window as Window & { requestIdleCallback?: (cb: () => void, options?: { timeout: number }) => number })
+      .requestIdleCallback
+    if (typeof idle === 'function') idle(() => resolve(), { timeout: 10000 })
+    else setTimeout(resolve, 0)
+  })
+}
+
 /**
  * Rasterises the page and posts it, so a reader can lay a heat field over a
  * picture of what the visitor saw. A site that answers X-Frame-Options cannot
  * be framed at capture time, which is why the picture is taken here.
  *
- * The rasteriser is loaded on demand and only when the store says no fresh
- * picture is held, so the ordinary visit never pays for it.
+ * The rasteriser is loaded on demand, only when the store says no fresh
+ * picture is held, and only once the main thread is idle, so the ordinary
+ * visit never pays for it. The picture goes as webp, a fraction of the png.
  */
 async function postCapture(path: string): Promise<void> {
   const width = window.innerWidth
   if (!(await captureDue(path, width))) return
+  await whenIdle()
+  if (document.visibilityState === 'hidden') {
+    captured.delete(path)
+    return
+  }
   const { default: html2canvas } = await import('html2canvas')
   const canvas = await html2canvas(document.documentElement, {
     width,
@@ -346,12 +436,14 @@ async function postCapture(path: string): Promise<void> {
     useCORS: true,
     logging: false
   })
+  const data = canvas.toDataURL('image/webp', 0.8)
+  const contentType = data.startsWith('data:image/webp') ? 'image/webp' : 'image/png'
   const body = JSON.stringify({
     path,
     viewport_width: width,
     page_height: canvas.height,
-    content_type: 'image/png',
-    image: canvas.toDataURL('image/png').split(',')[1] ?? ''
+    content_type: contentType,
+    image: (contentType === 'image/webp' ? data : canvas.toDataURL('image/png')).split(',')[1] ?? ''
   })
   await fetch(captureUrl(''), {
     method: 'POST',
@@ -362,7 +454,7 @@ async function postCapture(path: string): Promise<void> {
 }
 
 function scheduleCapture(path: string): void {
-  if (!config.captureImage || captured.has(path)) return
+  if (!config.captureImage || captured.has(path) || lowEnd()) return
   if (consent?.categories?.analytics !== true) return
   captured.add(path)
   setTimeout(() => {
@@ -384,16 +476,31 @@ function start(): void {
   if (started || typeof window === 'undefined') return
   started = true
   sessionKey = ensureSessionKey()
+  context = sessionContext()
   if (config.worker && typeof Worker !== 'undefined') {
     try {
       worker = new Worker(URL.createObjectURL(new Blob([workerSource], { type: 'text/javascript' })))
+      worker.postMessage({
+        k: 'start',
+        url: ingestUrl(),
+        headers: csrfHeaders(),
+        anonymousId,
+        sessionKey,
+        context,
+        cell: config.heatCellPx,
+        interval: config.flushIntervalMs,
+        maxBatch: config.maxBatch
+      })
     } catch {
       worker = null
     }
   }
+  if (!worker) {
+    batch = new Batch(config.heatCellPx)
+    flushTimer = setInterval(() => flush(), config.flushIntervalMs)
+  }
   attach()
   postView()
-  flushTimer = setInterval(() => flush(), config.flushIntervalMs)
 }
 
 /**
@@ -402,15 +509,20 @@ function start(): void {
  */
 export function stopAnalytics(): void {
   if (!started) return
-  flush(true)
+  if (worker) {
+    worker.postMessage({ k: 'stop', headers: csrfHeaders() })
+    const held = worker
+    setTimeout(() => held.terminate(), 1000)
+    worker = null
+  } else {
+    flush(true)
+  }
   started = false
   detach.forEach((off) => off())
   detach = []
   if (flushTimer) clearInterval(flushTimer)
   flushTimer = null
-  if (worker) worker.terminate()
-  worker = null
-  queue = []
+  batch = null
 }
 
 /**
