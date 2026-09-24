@@ -52,7 +52,8 @@ Runnable examples live under [example/prophet](example/prophet) and [example/dis
 The `smw` package validates requests against the Samna Auth service following OAuth 2.0 and OIDC. Its entrypoints:
 
 - `smw.AppMiddleware` is internal. It guards the endpoints apps use to reach the prophet, authenticating the app slug and secret and setting the app context.
-- `smw.UserAuthMiddleware(opts)` authenticates browser and bearer users. It checks a bearer token, then a session cookie, then client credentials, and reads the resolved OIDC endpoints from the config that `sdb.Init` loaded. Pass `nil` to take the slug, secret, redirect, and page redirect from the config.
+- `smw.UserAuthMiddleware(opts)` authenticates browser and bearer users. It checks a bearer token, then a session cookie, then client credentials, and reads the resolved OIDC endpoints from the config that `sdb.Init` loaded. Pass `nil` to take the slug, secret, redirect, and page redirect from the config. Once the actor is known it stamps the request context with the actor's claimius `sa_root_id` and `sa_owner_id` through `nimtel.Organization`, so every span and every log line written with that context carries `samna.sa_root_id` and `samna.sa_owner_id`. A service never calls the stamp itself.
+- `smw.TelemetryMiddleware()` is the OpenTelemetry server span middleware named after the app slug. Mount it once on the echo instance before the auth middleware; the service starts the SDK with `nimtel.Init` at boot and the platform provides the collector through the standard `OTEL_EXPORTER_OTLP_*` variables.
 - `smw.ClientAuthMiddleware()` authenticates service to service callers by their client credentials.
 
 Client credentials arrive as HTTP basic auth or as `client_id` and `client_secret` form values, and the client id becomes the actor, so a machine is authorized by the same claims a human is. [Machine clients](docs/clients.md) covers creating one, granting it a claim, and calling with it.

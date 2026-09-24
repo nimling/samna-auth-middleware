@@ -29,6 +29,7 @@ func UserAuthMiddleware(opts *UserAuthOptions) echo.MiddlewareFunc {
 	case shared.DebugModeUser:
 		return func(next echo.HandlerFunc) echo.HandlerFunc {
 			return func(ctx echo.Context) error {
+				proceed := stamped(next)
 				ctx.Set(UserIDKey, *config.DebugUserID)
 				if forwardErr := forwardUserToken(ctx); forwardErr != nil {
 					return respondAuthError(ctx, forwardErr)
@@ -36,16 +37,17 @@ func UserAuthMiddleware(opts *UserAuthOptions) echo.MiddlewareFunc {
 				if forwardErr := forwardUserExternal(ctx); forwardErr != nil {
 					return respondAuthError(ctx, forwardErr)
 				}
-				return next(ctx)
+				return proceed(ctx)
 			}
 		}
 	case shared.DebugModeClients:
 		return func(next echo.HandlerFunc) echo.HandlerFunc {
 			return func(ctx echo.Context) error {
+				proceed := stamped(next)
 				clientErr := authenticateClient(ctx, config.DebugClients)
 				if errors.Is(clientErr, ErrorCredentialMissing) {
 					if config.Optional {
-						return next(ctx)
+						return proceed(ctx)
 					}
 					return ctx.String(http.StatusUnauthorized, "Unauthorized")
 				}
@@ -58,7 +60,7 @@ func UserAuthMiddleware(opts *UserAuthOptions) echo.MiddlewareFunc {
 				if forwardErr := forwardUserExternal(ctx); forwardErr != nil {
 					return respondAuthError(ctx, forwardErr)
 				}
-				return next(ctx)
+				return proceed(ctx)
 			}
 		}
 	}
@@ -81,18 +83,19 @@ func UserAuthMiddleware(opts *UserAuthOptions) echo.MiddlewareFunc {
 
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(ctx echo.Context) error {
+			proceed := stamped(next)
 			if bearerErr := authenticateBearer(ctx, config, jwksClient.Keyfunc); !errors.Is(bearerErr, ErrorCredentialMissing) {
 				if bearerErr != nil {
 					return respondAuthError(ctx, bearerErr)
 				}
-				return next(ctx)
+				return proceed(ctx)
 			}
 
 			if cookieErr := authenticateCookie(ctx, config, jwksClient.Keyfunc); !errors.Is(cookieErr, ErrorCredentialMissing) {
 				if cookieErr != nil {
 					return respondAuthError(ctx, cookieErr)
 				}
-				return next(ctx)
+				return proceed(ctx)
 			}
 
 			if clientErr := authenticateClient(ctx, nil); !errors.Is(clientErr, ErrorCredentialMissing) {
@@ -105,11 +108,11 @@ func UserAuthMiddleware(opts *UserAuthOptions) echo.MiddlewareFunc {
 				if forwardErr := forwardUserExternal(ctx); forwardErr != nil {
 					return respondAuthError(ctx, forwardErr)
 				}
-				return next(ctx)
+				return proceed(ctx)
 			}
 
 			if config.Optional {
-				return next(ctx)
+				return proceed(ctx)
 			}
 			return respondUnauthenticated(ctx)
 		}
