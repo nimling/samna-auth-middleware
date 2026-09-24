@@ -144,6 +144,29 @@ analytics.GET("/event", saecho.GetAnalyticsEvents)
 analytics.GET("/session", saecho.GetAnalyticsSessions)
 ```
 
+## Uptime status
+
+`getAppStatus(endpoint, slug)` reads the prophet's public status route,
+`GET <endpoint>/api/app/<slug>/status`, with plain `fetch` and no framework, so
+a nimpress page or any web can draw an app's uptime. It resolves to a
+`MonitorStatus`: the app's enabled monitors with `last_checked_at`, `last_ok`
+and their per day `days`, and the open incidents. It throws `ErrNotFound` for
+an unknown app and an `Error` for any other failure.
+
+```ts
+import { getAppStatus } from '@nimling/samna-auth-middleware'
+
+const status = await getAppStatus('https://auth.example.com', 'nimployer')
+for (const monitor of status.monitors) {
+  console.log(monitor.name, monitor.last_ok, monitor.days?.length)
+}
+```
+
+The types `Monitor`, `MonitorCheck`, `MonitorCheckDay`, `MonitorIncident`,
+`MonitorStatus`, `Beat`, `BeatCheck` and `Heartbeat` mirror the Go json. A
+disciple that mounts `saecho.GetUptimeStatus` serves the same shape from its
+own origin, so a page can also read it from there without knowing the prophet.
+
 ## Build and publish
 
 ```bash

@@ -80,6 +80,19 @@ sauth.POST("/analytics", saecho.PostAnalytics)
 
 The browser half is one call, `configureConsent({ endpoint: '/api/sauth' })`, which reads consent, starts capture only once the analytics category is granted, and raises the banner when the visitor has not decided under the current policy. The policy link and version arrive in the consent response, resolved on the prophet from its endpoint and its `/legal/cookie-policy` page.
 
+## Uptime
+
+The prophet probes the app from outside; `uptime.Init` is the app reporting from inside. Call it once after `sdb.Init`, hand it the checks that decide whether the app is healthy, and it registers the app's `heartbeat` monitor on the prophet and beats on the interval. The [Uptime](../README.md#uptime) section of the readme carries the options, the handlers and the prophet contract.
+
+```go
+uptime.Init(e.Logger, uptime.Options{
+	Version: version,
+	Checks:  []uptime.Check{{Name: "database", Run: sdb.Instance().PingContext}},
+})
+```
+
+`saecho.GetUptime` answers with the app's own last beat and `saecho.GetUptimeStatus` proxies the prophet's public status for the app's slug. Mount either where the app wants the view; neither is part of `sam.RegisterEndpoints`.
+
 ## Notes
 
 There is no inbound sync endpoint on a disciple. The disciple reaches out to the prophet.

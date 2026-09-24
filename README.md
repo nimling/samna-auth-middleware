@@ -30,6 +30,7 @@ A binary is one role. Both roles wire the same four identifiers.
 | `client` | `client` | `client` | HTTP client for the Samna Auth API. |
 | `utils` | `utils` | `utils` | Config loader, cookies, and debug helpers. |
 | `database` | `prophet/database` | `disciple/database` | The canonical `claimius` SQL set for the role. |
+| `uptime` | | `uptime` | The heartbeat reporter. `uptime.Init(logger, opts)` registers the app's `heartbeat` monitor and beats to the prophet. |
 
 ## Getting started
 
@@ -64,6 +65,57 @@ After a successful pass the user id and access token sit in the context:
 userID := ctx.Get(smw.UserIDKey).(uuid.UUID)
 accessToken := ctx.Get(smw.AccessTokenKey).(string)
 ```
+
+## Uptime
+
+The prophet probes every app from outside on its `monitor` rows. The `uptime` package is the inside half: a disciple imports it, calls it once at boot, and from then on the app reports its own health to the prophet on the app key, with the checks it chose to run. Its entrypoints:
+
+- `uptime.Init(logger, opts)` reads the app slug, secret and endpoint from the same config the `client` package uses, registers one monitor named `heartbeat` of kind `heartbeat` for the app if none exists, and starts a goroutine that runs the checks and posts a beat every `opts.Interval`, default sixty seconds. A registration or beat that fails is logged and retried on the next tick; nothing here is fatal. Debug mode disables it the way it disables the sync pull loop.
+- `uptime.Options` carries `Interval`, `Version`, the string reported with every beat, and `Checks`, a list of `uptime.Check{Name, Run}` the app supplies. A check is any `func(ctx context.Context) error`, a database ping being the usual one. A check that returns an error fails the beat and carries its message.
+- `uptime.Stop()` ends the goroutine. `uptime.GetHeartbeat()` returns the app's own last beat, its checks, its version and whether the prophet accepted it.
+
+```go
+uptime.Init(e.Logger, uptime.Options{
+	Version: version,
+	Checks: []uptime.Check{
+		{Name: "database", Run: sdb.Instance().PingContext},
+	},
+})
+defer uptime.Stop()
+```
+
+Two handlers in `disciple/echo` give a disciple a view of it without knowing the prophet. `GetUptime` answers with the last `Heartbeat`, and `GetUptimeStatus` proxies the prophet's public status page for the app's own slug, so a page the disciple serves can draw its uptime:
+
+```go
+api.GET("/uptime", saecho.GetUptime)
+e.GET("/api/uptime/status", saecho.GetUptimeStatus)
+```
+
+The typescript package mirrors the types and reads the public status directly with `getAppStatus(endpoint, slug)`, so a page served from anywhere can draw the same view.
+
+### The prophet contract
+
+The reporter speaks to three routes under `/api/app/:app_slug` on the prophet, all with the `SAuth-App-Slug` and `SAuth-App-Secret` headers behind `ClientAuthMiddleware`.
+
+1. `GET /monitor/client` lists the app's monitors. The reporter reads it first and reuses the monitor named `heartbeat` when one exists, so a restart never registers twice.
+
+2. `POST /monitor/client` with `{"name": "heartbeat", "kind": "heartbeat", "interval_seconds": <interval>}` creates it. `heartbeat` is a monitor kind beside `http`, `tcp` and `disciple`. It has no `target`, the scheduler never probes it, and `interval_seconds` is the beat interval the app promised.
+
+3. `POST /monitor/:id/beat/client` with the beat body records one `monitor_check` row with `ok`, `latency_ms` and, when the beat failed, `error` set to the failed checks' messages, and answers with that `MonitorCheck`. The monitor must belong to the calling app and be of kind `heartbeat`.
+
+```json
+{
+  "ok": true,
+  "latency_ms": 12,
+  "version": "1.4.2",
+  "checks": [
+    {"name": "database", "ok": true},
+    {"name": "cache", "ok": false, "error": "dial tcp: connection refused"}
+  ]
+}
+```
+
+A beat is a check, so the incident state machine is unchanged: three failed beats open an incident, the first passing beat resolves it. The scheduler adds one rule for the kind: a `heartbeat` monitor whose newest check is older than two intervals is marked with a failed `monitor_check` whose `error` is `missed heartbeat`, so an app that stops beating goes down the same way an app that answers a probe with an error does. The public `GET /status` lists the heartbeat beside the other monitors with its `last_checked_at`, `last_ok` and `days`.
 
 ## Configuration
 
