@@ -22,10 +22,10 @@ test target='':
     set -e
     if [ -z "{{target}}" ]; then
         go test ./...
-        bash test/sql/run.sh
+        bash test/run.sh
     else
         go test ./{{target}}/...
     fi
 
-test-sql:
-    bash test/sql/run.sh
+test-db:
+    bash test/run.sh

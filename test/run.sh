@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-root="$(cd "$(dirname "$0")/../.." && pwd)"
+root="$(cd "$(dirname "$0")/.." && pwd)"
 name="samna-mw-test-pg-$$"
 port="${CLAIMIUS_TEST_PORT:-55439}"
 
@@ -67,3 +67,27 @@ done
 load "go_disciple" "$root/disciple/database" $(ls "$root/disciple/database/migrations"/V*.sql | sort -V)
 (cd "$root" && PGDATABASE=go_disciple SAUTH_DEBUG_USER_ID=a0000000-0000-4000-8000-00000000000a \
     go test -tags dbtest -count=1 ./shared/...)
+
+load "hurl_disciple" "$root/disciple/database" $(ls "$root/disciple/database/migrations"/V*.sql | sort -V) "$root/test/hurl/seed.sql"
+http_port="${CLAIMIUS_TEST_HTTP_PORT:-18089}"
+server_dir="$(mktemp -d)"
+(cd "$root" && go build -o "$server_dir/example-disciple" ./example/disciple)
+PGDATABASE=hurl_disciple PORT="$http_port" SAUTH_DEBUG_USER_ID=a0000000-0000-4000-8000-00000000000a \
+    "$server_dir/example-disciple" >"$server_dir/server.log" 2>&1 &
+server_pid=$!
+trap 'kill "$server_pid" 2>/dev/null; docker stop "$name" >/dev/null' EXIT
+for _ in $(seq 1 60); do
+    if curl -s -o /dev/null "http://localhost:$http_port/api/root"; then break; fi
+    sleep 1
+done
+curl -s -o /dev/null "http://localhost:$http_port/api/root" || { echo "example disciple did not start"; cat "$server_dir/server.log"; exit 1; }
+hurl --test \
+    --variable base="http://localhost:$http_port" \
+    --variable user_a=a0000000-0000-4000-8000-00000000000a \
+    --variable root=10000000-0000-4000-8000-000000000001 \
+    --variable alpha=10000000-0000-4000-8000-000000000011 \
+    --variable bravo=10000000-0000-4000-8000-000000000012 \
+    --variable charlie=10000000-0000-4000-8000-000000000013 \
+    --variable grand=10000000-0000-4000-8000-000000000111 \
+    --variable missing=99999999-0000-4000-8000-000000000999 \
+    "$root"/test/hurl/*.hurl

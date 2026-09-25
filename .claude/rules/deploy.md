@@ -20,7 +20,7 @@ This repo publishes two artefacts: the Go module consumed via `go get github.com
 
 ## Always
 
-1. Update or add Go tests under `test/` for any change that has an observable contract on the Go side.
+1. Update or add Go tests beside the package they cover, as `<package>/<name>_test.go`, for any change that has an observable contract on the Go side. Database backed Go tests carry the `dbtest` build tag, SQL tests live in `test/sql/<role>/`, hurl tests in `test/hurl/`, and `just test` runs all of them against a throwaway local Postgres.
 
 2. Update or add typescript tests beside the module they cover as `ts/src/<name>.test.ts` for any change that has an observable contract on the typescript side.
 
