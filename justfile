@@ -21,7 +21,11 @@ test target='':
     #!/usr/bin/env bash
     set -e
     if [ -z "{{target}}" ]; then
-        go test ./test/...
+        go test ./...
+        bash test/sql/run.sh
     else
-        go test ./test/{{target}}/...
+        go test ./{{target}}/...
     fi
+
+test-sql:
+    bash test/sql/run.sh

@@ -1,4 +1,4 @@
-package smw
+package smw_test
 
 import (
 	"net/http"

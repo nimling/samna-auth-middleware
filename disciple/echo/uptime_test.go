@@ -1,4 +1,4 @@
-package echo
+package echo_test
 
 import (
 	"encoding/json"

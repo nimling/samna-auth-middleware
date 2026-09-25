@@ -1,4 +1,4 @@
-package db
+package shared_test
 
 import (
 	"encoding/json"
