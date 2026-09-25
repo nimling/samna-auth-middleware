@@ -149,6 +149,14 @@ describe('flush', () => {
 })
 
 describe('capture', () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] })
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
   it('posts one snapshot of a viewed path under an analytics grant', async () => {
     stubBrowser()
     const granted = { ...consentState, categories: { ...consentState.categories, analytics: true }, captured: [] }
@@ -157,7 +165,9 @@ describe('capture', () => {
     await configureAnalytics({ endpoint: '/api', worker: false })
     postView('/service/snap-once')
     postView('/service/snap-once')
-    await new Promise((resolve) => setTimeout(resolve, 2100))
+    await vi.advanceTimersByTimeAsync(2500)
+    await vi.dynamicImportSettled()
+    await vi.advanceTimersByTimeAsync(0)
     const posts = calls.filter((c) => String(c.url).includes('/analytics/capture?path=%2Fservice%2Fsnap-once'))
     expect(posts.length).toBe(1)
     expect(posts[0]?.init?.method).toBe('POST')
@@ -171,7 +181,7 @@ describe('capture', () => {
     const { configureAnalytics, postView } = await import('./analytics')
     await configureAnalytics({ endpoint: '/api', worker: false })
     postView('/service/held')
-    await new Promise((resolve) => setTimeout(resolve, 2100))
+    await vi.advanceTimersByTimeAsync(2500)
     const posts = calls.filter((c) => String(c.url).includes('/analytics/capture?path=%2Fservice%2Fheld'))
     expect(posts).toEqual([])
   })
@@ -182,7 +192,7 @@ describe('capture', () => {
     const { configureAnalytics, postView } = await import('./analytics')
     await configureAnalytics({ endpoint: '/api', worker: false })
     postView('/service/withheld')
-    await new Promise((resolve) => setTimeout(resolve, 2100))
+    await vi.advanceTimersByTimeAsync(2500)
     const asked = calls
       .map((c) => String(c.url))
       .filter((u) => u.includes('/analytics/capture') && u.includes('withheld'))
