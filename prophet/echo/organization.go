@@ -22,8 +22,8 @@ func GetOrganizations(ctx echo.Context) error {
 	if err := sdb.Instance().NewSelect().
 		Model(&orgs).
 		ExcludeColumn("sa_deleted_at").
-		Where("app_id = ?", appID).
-		Where("sa_deleted_at IS NULL").
+		Where("claimius.app_has_object(?, 'claimius.organization', ?TableAlias.id)", appID).
+		Where("?TableAlias.sa_deleted_at IS NULL").
 		Scan(ctx.Request().Context()); err != nil {
 		ctx.Logger().Errorf("GetOrganizations: %v", err)
 		return respond.Error(ctx, http.StatusInternalServerError, "Internal server error")
