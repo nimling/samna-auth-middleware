@@ -1,4 +1,4 @@
-package sam
+package sam_test
 
 import (
 	"context"

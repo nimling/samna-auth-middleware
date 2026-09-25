@@ -1,4 +1,4 @@
-package echo
+package client_test
 
 import (
 	"context"

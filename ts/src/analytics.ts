@@ -15,6 +15,7 @@ export interface ConsentState {
   decided: boolean
   categories: ConsentCategories
   granted_at?: string
+  captured?: string[]
 }
 
 export interface AnalyticsConfig {
@@ -388,18 +389,10 @@ function attach(): void {
   }, { passive: true })
 }
 
-function captureUrl(suffix: string): string {
-  const path = `${config.endpoint.replace(/\/$/, '')}${config.capturePath}${suffix}`
-  if (typeof location === 'undefined') return path
-  return new URL(path, location.origin).toString()
-}
-
-async function captureDue(path: string, width: number): Promise<boolean> {
-  const url = captureUrl(`/due?path=${encodeURIComponent(path)}&viewport_width=${width}`)
-  const response = await fetch(url, { credentials: 'include' })
-  if (!response.ok) return false
-  const envelope = (await response.json()) as { data?: boolean }
-  return envelope.data === true
+function captureUrl(path: string): string {
+  const url = `${config.endpoint.replace(/\/$/, '')}${config.capturePath}?path=${encodeURIComponent(path)}`
+  if (typeof location === 'undefined') return url
+  return new URL(url, location.origin).toString()
 }
 
 function whenIdle(): Promise<void> {
@@ -411,43 +404,25 @@ function whenIdle(): Promise<void> {
   })
 }
 
-/**
- * Rasterises the page and posts it, so a reader can lay a heat field over a
- * picture of what the visitor saw. A site that answers X-Frame-Options cannot
- * be framed at capture time, which is why the picture is taken here.
- *
- * The rasteriser is loaded on demand, only when the store says no fresh
- * picture is held, and only once the main thread is idle, so the ordinary
- * visit never pays for it. The picture goes as webp, a fraction of the png.
- */
 async function postCapture(path: string): Promise<void> {
-  const width = window.innerWidth
-  if (!(await captureDue(path, width))) return
   await whenIdle()
   if (document.visibilityState === 'hidden') {
     captured.delete(path)
     return
   }
-  const { default: html2canvas } = await import('html2canvas')
-  const canvas = await html2canvas(document.documentElement, {
-    width,
-    windowWidth: width,
-    scale: 1,
-    useCORS: true,
-    logging: false
+  const { snapshot } = await import('rrweb-snapshot')
+  const tree = snapshot(document, {
+    maskAllInputs: true,
+    maskTextSelector: config.captureText ? null : '*',
+    inlineStylesheet: true
   })
-  const data = canvas.toDataURL('image/webp', 0.8)
-  const contentType = data.startsWith('data:image/webp') ? 'image/webp' : 'image/png'
-  const body = JSON.stringify({
-    path,
-    viewport_width: width,
-    page_height: canvas.height,
-    content_type: contentType,
-    image: (contentType === 'image/webp' ? data : canvas.toDataURL('image/png')).split(',')[1] ?? ''
-  })
-  await fetch(captureUrl(''), {
+  if (!tree) {
+    captured.delete(path)
+    return
+  }
+  await fetch(captureUrl(path), {
     method: 'POST',
-    body,
+    body: JSON.stringify(tree),
     headers: csrfHeaders(),
     credentials: 'include'
   })
@@ -456,6 +431,7 @@ async function postCapture(path: string): Promise<void> {
 function scheduleCapture(path: string): void {
   if (!config.captureImage || captured.has(path) || lowEnd()) return
   if (consent?.categories?.analytics !== true) return
+  if (consent.captured?.includes(path)) return
   captured.add(path)
   setTimeout(() => {
     postCapture(path).catch(() => captured.delete(path))

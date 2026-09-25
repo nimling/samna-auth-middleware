@@ -1,4 +1,4 @@
-package bff
+package bff_test
 
 import (
 	"encoding/json"

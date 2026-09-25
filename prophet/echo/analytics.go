@@ -1,7 +1,8 @@
 package echo
 
 import (
-	"encoding/base64"
+	"encoding/json"
+	"io"
 	"net/http"
 	"strconv"
 	"time"
@@ -17,8 +18,6 @@ import (
 )
 
 const (
-	captureBytesMax      = 8 << 20
-	captureMaxAge        = "7 days"
 	headerForwardedFor   = "SAuth-Forwarded-For"
 	headerForwardedUser  = "SAuth-Forwarded-User"
 	headerForwardedAgent = "SAuth-Forwarded-Agent"
@@ -141,7 +140,24 @@ func GetConsent(ctx echo.Context) error {
 		ctx.Logger().Errorf("GetConsent: %v", err)
 		return respond.Error(ctx, http.StatusInternalServerError, "Internal server error")
 	}
+	if err := captured(ctx, appID, state); err != nil {
+		ctx.Logger().Errorf("GetConsent captured: %v", err)
+		return respond.Error(ctx, http.StatusInternalServerError, "Internal server error")
+	}
 	return respond.JSON(ctx, http.StatusOK, state, 1)
+}
+
+// captured fills the paths the app holds a fresh snapshot for, so the browser
+// learns in the consent answer which pages need no capture instead of asking
+// once per view.
+func captured(ctx echo.Context, appID uuid.UUID, state *shared.ConsentState) error {
+	state.Captured = make([]string, 0)
+	if !state.Categories.Analytics {
+		return nil
+	}
+	return sdb.Instance().
+		NewRaw(`SELECT claimius.get_analytics_captured(?, ?::interval)`, appID, analytics.CaptureMaxAge).
+		Scan(ctx.Request().Context(), &state.Captured)
 }
 
 func PostConsent(ctx echo.Context) error {
@@ -169,6 +185,10 @@ func PostConsent(ctx echo.Context) error {
 	state, err := analytics.PostConsent(ctx.Request().Context(), appID, body, forwardedUser(ctx), forwardedIP(ctx), forwardedAgent(ctx))
 	if err != nil {
 		ctx.Logger().Errorf("PostConsent: %v", err)
+		return respond.Error(ctx, http.StatusInternalServerError, "Internal server error")
+	}
+	if err := captured(ctx, appID, state); err != nil {
+		ctx.Logger().Errorf("PostConsent captured: %v", err)
 		return respond.Error(ctx, http.StatusInternalServerError, "Internal server error")
 	}
 	return respond.JSON(ctx, http.StatusOK, state, 1)
@@ -317,54 +337,32 @@ func PostAnalyticsCapture(ctx echo.Context) error {
 	if !analyticsEnabled(ctx, appID) {
 		return respond.Error(ctx, http.StatusForbidden, "Forbidden")
 	}
-	var body shared.AnalyticsCaptureInput
-	if err := ctx.Bind(&body); err != nil {
+	path := ctx.QueryParam("path")
+	if path == "" {
 		return ctx.NoContent(http.StatusNoContent)
 	}
-	if body.Path == "" || body.ViewportWidth <= 0 || body.Image == "" {
+	body, err := io.ReadAll(io.LimitReader(ctx.Request().Body, analytics.CaptureBytesMax+1))
+	if err != nil || len(body) == 0 {
 		return ctx.NoContent(http.StatusNoContent)
 	}
-	if body.ContentType == "" {
-		body.ContentType = "image/png"
+	if len(body) > analytics.CaptureBytesMax {
+		return respond.Error(ctx, http.StatusRequestEntityTooLarge, "snapshot is too large")
 	}
-	raw, err := base64.StdEncoding.DecodeString(body.Image)
-	if err != nil {
-		return respond.Error(ctx, http.StatusBadRequest, "image must be base64")
+	if !json.Valid(body) {
+		return respond.Error(ctx, http.StatusBadRequest, "snapshot must be json")
 	}
-	if len(raw) > captureBytesMax {
-		return respond.Error(ctx, http.StatusRequestEntityTooLarge, "image is too large")
+	contentType := ctx.Request().Header.Get(echo.HeaderContentType)
+	if contentType == "" {
+		contentType = echo.MIMEApplicationJSON
 	}
 	_, err = sdb.Instance().
-		NewRaw(`SELECT claimius.post_analytics_capture(?, ?, ?, ?, ?, ?)`,
-			appID, body.Path, body.ViewportWidth, body.PageHeight, body.ContentType, raw).
+		NewRaw(`SELECT claimius.post_analytics_capture(?, ?, ?, ?)`, appID, path, contentType, body).
 		Exec(ctx.Request().Context())
 	if err != nil {
 		ctx.Logger().Errorf("PostAnalyticsCapture: %v", err)
 		return respond.Error(ctx, http.StatusInternalServerError, "Internal server error")
 	}
 	return ctx.NoContent(http.StatusNoContent)
-}
-
-func GetAnalyticsCaptureDue(ctx echo.Context) error {
-	appID, ok := captureApp(ctx)
-	if !ok {
-		return respond.Error(ctx, http.StatusUnauthorized, "Unauthorized")
-	}
-	path := ctx.QueryParam("path")
-	width := intParam(ctx, "viewport_width", 0)
-	if path == "" || width <= 0 {
-		return respond.Error(ctx, http.StatusBadRequest, "path and viewport_width are required")
-	}
-	var due bool
-	err := sdb.Instance().
-		NewRaw(`SELECT claimius.analytics_capture_due(?, ?, ?, ?::interval)`,
-			appID, path, width, captureMaxAge).
-		Scan(ctx.Request().Context(), &due)
-	if err != nil {
-		ctx.Logger().Errorf("GetAnalyticsCaptureDue: %v", err)
-		return respond.Error(ctx, http.StatusInternalServerError, "Internal server error")
-	}
-	return respond.JSON(ctx, http.StatusOK, due, 1)
 }
 
 func GetAnalyticsCapture(ctx echo.Context) error {
@@ -380,15 +378,11 @@ func GetAnalyticsCapture(ctx echo.Context) error {
 	if path == "" {
 		return respond.Error(ctx, http.StatusBadRequest, "path is required")
 	}
-	var width *int
-	if raw := intParam(ctx, "viewport_width", 0); raw > 0 {
-		width = &raw
-	}
 	items := make([]shared.AnalyticsCapture, 0)
 	err := sdb.Instance().
-		NewRaw(`SELECT c.* FROM claimius.get_analytics_capture(?, ?, ?) c
+		NewRaw(`SELECT c.* FROM claimius.get_analytics_capture(?, ?) c
 			WHERE c.app_id IN (SELECT claimius.capture_user_apps(?))`,
-			*producer, path, width, *reader).
+			*producer, path, *reader).
 		Scan(ctx.Request().Context(), &items)
 	if err != nil {
 		ctx.Logger().Errorf("GetAnalyticsCapture: %v", err)
@@ -398,6 +392,39 @@ func GetAnalyticsCapture(ctx echo.Context) error {
 		return ctx.NoContent(http.StatusNotFound)
 	}
 	return respond.JSON(ctx, http.StatusOK, items[0], 1)
+}
+
+func GetAnalyticsSummary(ctx echo.Context) error {
+	reader := forwardedUser(ctx)
+	if reader == nil {
+		return respond.Error(ctx, http.StatusForbidden, "Forbidden")
+	}
+	producer, ok := uuidParam(ctx, "app")
+	if !ok || producer == nil {
+		return respond.Error(ctx, http.StatusBadRequest, "app must be a uuid")
+	}
+	from, ok := timeParam(ctx, "from")
+	if !ok {
+		return respond.Error(ctx, http.StatusBadRequest, "from must be an RFC3339 timestamp")
+	}
+	until, ok := timeParam(ctx, "to")
+	if !ok {
+		return respond.Error(ctx, http.StatusBadRequest, "to must be an RFC3339 timestamp")
+	}
+	var raw string
+	err := sdb.Instance().
+		NewRaw(`SELECT claimius.get_analytics_summary(?, ?, ?, ?)`, *reader, *producer, from, until).
+		Scan(ctx.Request().Context(), &raw)
+	if err != nil {
+		ctx.Logger().Errorf("GetAnalyticsSummary: %v", err)
+		return respond.Error(ctx, http.StatusInternalServerError, "Internal server error")
+	}
+	var item shared.AnalyticsSummary
+	if err := json.Unmarshal([]byte(raw), &item); err != nil {
+		ctx.Logger().Errorf("GetAnalyticsSummary decode: %v", err)
+		return respond.Error(ctx, http.StatusInternalServerError, "Internal server error")
+	}
+	return respond.JSON(ctx, http.StatusOK, item, 1)
 }
 
 func GetAnalyticsHeat(ctx echo.Context) error {

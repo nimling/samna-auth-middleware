@@ -611,6 +611,17 @@ CREATE TABLE IF NOT EXISTS claimius.claim_graph_cache (
 COMMENT ON TABLE claimius.claim_graph_cache IS 'Per user cache of get_claim_graph default shape. Trigger invalidated.';
 COMMENT ON COLUMN claimius.claim_graph_cache.graph IS 'JSON array of {object_id, object_type, label, parent_id, data} tuples.';
 
+CREATE TABLE IF NOT EXISTS claimius.object_usage (
+    user_id      UUID NOT NULL,
+    object_type  TEXT NOT NULL,
+    object_id    UUID NOT NULL,
+    used_count   BIGINT NOT NULL DEFAULT 0,
+    last_used_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (user_id, object_type, object_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_object_usage_user_count ON claimius.object_usage (user_id, used_count DESC);
+
 -- ----------------------------------------------------------------------------
 -- 8. Audit
 -- ----------------------------------------------------------------------------

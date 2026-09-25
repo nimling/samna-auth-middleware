@@ -878,6 +878,7 @@ type ConsentState struct {
 	Decided       bool               `json:"decided"`
 	Categories    ConsentCategories  `json:"categories"`
 	GrantedAt     *time.Time         `json:"granted_at,omitzero"`
+	Captured      []string           `json:"captured"`
 }
 
 type ConsentRequest struct {
@@ -915,14 +916,37 @@ type AnalyticsApp struct {
 type AnalyticsCapture struct {
 	bun.BaseModel `bun:"table:claimius.analytics_capture"`
 
-	ID            uuid.UUID `bun:"id,pk,default:gen_random_uuid()" json:"id"`
-	AppID         uuid.UUID `bun:"app_id" json:"app_id"`
-	Path          string    `bun:"path" json:"path"`
-	ViewportWidth int       `bun:"viewport_width" json:"viewport_width"`
-	PageHeight    int       `bun:"page_height" json:"page_height"`
-	ContentType   string    `bun:"content_type" json:"content_type"`
-	Image         []byte    `bun:"image" json:"image"`
-	CapturedAt    time.Time `bun:"captured_at,default:now()" json:"captured_at"`
+	ID          uuid.UUID       `bun:"id,pk,default:gen_random_uuid()" json:"id"`
+	AppID       uuid.UUID       `bun:"app_id" json:"app_id"`
+	Path        string          `bun:"path" json:"path"`
+	ContentType string          `bun:"content_type" json:"content_type"`
+	Body        json.RawMessage `bun:"body" json:"body"`
+	CapturedAt  time.Time       `bun:"captured_at,default:now()" json:"captured_at"`
+}
+
+type AnalyticsActor struct {
+	ID          string     `json:"id"`
+	UserID      *string    `json:"user_id,omitempty"`
+	AnonymousID string     `json:"anonymous_id"`
+	IP          *string    `json:"ip,omitempty"`
+	UserAgent   *string    `json:"user_agent,omitempty"`
+	Sessions    int64      `json:"sessions"`
+	Events      int64      `json:"events"`
+	LastSeen    *time.Time `json:"last_seen,omitempty"`
+	Path        *string    `json:"path,omitempty"`
+}
+
+type AnalyticsPath struct {
+	Path          string `json:"path"`
+	Events        int64  `json:"events"`
+	Sessions      int64  `json:"sessions"`
+	ViewportWidth *int   `json:"viewport_width,omitempty"`
+}
+
+type AnalyticsSummary struct {
+	Actors []AnalyticsActor `json:"actors"`
+	Paths  []AnalyticsPath  `json:"paths"`
+	Types  []string         `json:"types"`
 }
 
 type AnalyticsHeatPoint struct {
@@ -930,14 +954,6 @@ type AnalyticsHeatPoint struct {
 	Y        int   `bun:"y" json:"y"`
 	Weight   int64 `bun:"weight" json:"weight"`
 	Sessions int64 `bun:"sessions" json:"sessions"`
-}
-
-type AnalyticsCaptureInput struct {
-	Path          string `json:"path" validate:"required"`
-	ViewportWidth int    `json:"viewport_width" validate:"required"`
-	PageHeight    int    `json:"page_height"`
-	ContentType   string `json:"content_type"`
-	Image         string `json:"image" validate:"required"`
 }
 
 type SyncEvent struct {

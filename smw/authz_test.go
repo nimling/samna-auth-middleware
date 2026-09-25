@@ -1,4 +1,4 @@
-package authz
+package smw_test
 
 import (
 	"context"

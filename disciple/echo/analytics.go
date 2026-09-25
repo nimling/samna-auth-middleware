@@ -1,6 +1,7 @@
 package echo
 
 import (
+	"io"
 	"net/http"
 	"net/url"
 
@@ -125,28 +126,32 @@ func PostAnalytics(ctx echo.Context) error {
 }
 
 func PostAnalyticsCapture(ctx echo.Context) error {
-	var body shared.AnalyticsCaptureInput
-	if err := ctx.Bind(&body); err != nil {
+	if ctx.QueryParam("path") == "" {
 		return ctx.NoContent(http.StatusNoContent)
 	}
-	if body.Path == "" || body.ViewportWidth <= 0 || body.Image == "" {
+	body, err := io.ReadAll(io.LimitReader(ctx.Request().Body, analytics.CaptureBytesMax+1))
+	if err != nil || len(body) == 0 {
 		return ctx.NoContent(http.StatusNoContent)
+	}
+	if len(body) > analytics.CaptureBytesMax {
+		return respondError(ctx, http.StatusRequestEntityTooLarge, "snapshot is too large")
 	}
 	forwarded := client.WithForward(ctx.Request().Context(), forwardContext(ctx))
-	if err := client.Post(forwarded, "analytics/capture", body, nil); err != nil {
+	forwarded = client.WithContentType(forwarded, ctx.Request().Header.Get(echo.HeaderContentType))
+	if err := client.Post(forwarded, "analytics/capture"+passthroughQuery(ctx), body, nil); err != nil {
 		ctx.Logger().Errorf("PostAnalyticsCapture: %v", err)
 	}
 	return ctx.NoContent(http.StatusNoContent)
 }
 
-func GetAnalyticsCaptureDue(ctx echo.Context) error {
-	var due bool
+func GetAnalyticsSummary(ctx echo.Context) error {
+	var item shared.AnalyticsSummary
 	forwarded := client.WithForward(ctx.Request().Context(), forwardContext(ctx))
-	if err := client.Get(forwarded, "analytics/capture/due"+passthroughQuery(ctx), &due); err != nil {
-		ctx.Logger().Errorf("GetAnalyticsCaptureDue: %v", err)
+	if err := client.Get(forwarded, "analytics/summary"+passthroughQuery(ctx), &item); err != nil {
+		ctx.Logger().Errorf("GetAnalyticsSummary: %v", err)
 		return respondError(ctx, http.StatusBadGateway, "Analytics service unavailable")
 	}
-	return respondJSON(ctx, http.StatusOK, due, 1)
+	return respondJSON(ctx, http.StatusOK, item, 1)
 }
 
 func GetAnalyticsCapture(ctx echo.Context) error {
