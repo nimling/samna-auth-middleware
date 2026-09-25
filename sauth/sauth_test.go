@@ -11,12 +11,12 @@ import (
 type model struct {
 	ID         uuid.UUID  `json:"id"`
 	Name       string     `json:"name"`
-	AppID      uuid.UUID  `json:"-" sauth:"app_id"`
+	AppID      uuid.UUID  `json:"-" sauth:"app_id" bun:"app_id"`
 	Internal   string     `json:"-"`
 	Hidden     string     `json:"-" sauth:"-"`
 	Plain      string     `json:"plain,omitempty"`
 	Ptr        *string    `json:"ptr,omitempty"`
-	Override   string     `json:"local_name" sauth:"wire_name"`
+	Override   string     `json:"local_name" sauth:"wire_name" bun:"wire_name"`
 	Count      int        `json:"count,omitempty"`
 	Created    *uuid.UUID `json:"created,omitempty"`
 	Untagged   string
