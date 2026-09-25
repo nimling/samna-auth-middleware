@@ -31,8 +31,8 @@
     "prepare": "pnpm run build"
   },
   "dependencies": {
-    "html2canvas": "1.4.1",
-    "jose": "^5.9.6"
+    "jose": "^5.9.6",
+    "rrweb-snapshot": "2.1.4"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

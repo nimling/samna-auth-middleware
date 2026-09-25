@@ -12,6 +12,12 @@ import (
 
 const (
 	jobBuffer = 4096
+	// CaptureBytesMax bounds one page snapshot. A serialised document with its
+	// stylesheets inlined runs to a few hundred kilobytes on a dense page.
+	CaptureBytesMax = 8 << 20
+	// CaptureMaxAge is how long a snapshot answers for a page before a visiting
+	// browser is asked to take another.
+	CaptureMaxAge = "7 days"
 	// foldInterval is how often the heat grid is refolded and the raw tier
 	// expired. Hourly, because a reader looking at today wants the field to
 	// be roughly current and nothing here is worth a tighter loop.
