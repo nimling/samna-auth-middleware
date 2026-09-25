@@ -1,5 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
+vi.mock('rrweb-snapshot', () => ({ snapshot: () => ({ type: 0, childNodes: [], id: 1 }) }))
+
 type Call = { url: unknown; init: RequestInit | undefined }
 
 function stubFetch(responder: (url: string, init?: RequestInit) => Response): Call[] {
@@ -147,19 +149,31 @@ describe('flush', () => {
 })
 
 describe('capture', () => {
-  it('asks whether a picture is due only once a path is viewed under an analytics grant', async () => {
+  it('posts one snapshot of a viewed path under an analytics grant', async () => {
     stubBrowser()
-    const granted = { ...consentState, categories: { ...consentState.categories, analytics: true } }
+    const granted = { ...consentState, categories: { ...consentState.categories, analytics: true }, captured: [] }
     const calls = stubFetch(() => envelope(granted))
     const { configureAnalytics, postView } = await import('./analytics')
     await configureAnalytics({ endpoint: '/api', worker: false })
-    postView('/service/due-once')
+    postView('/service/snap-once')
+    postView('/service/snap-once')
     await new Promise((resolve) => setTimeout(resolve, 2100))
-    const due = calls
-      .map((c) => String(c.url))
-      .filter((u) => u.includes('/analytics/capture/due') && u.includes('due-once'))
-    expect(due.length).toBe(1)
-    expect(due[0]).toContain('path=%2Fservice%2Fdue-once')
+    const posts = calls.filter((c) => String(c.url).includes('/analytics/capture?path=%2Fservice%2Fsnap-once'))
+    expect(posts.length).toBe(1)
+    expect(posts[0]?.init?.method).toBe('POST')
+    expect(JSON.parse(String(posts[0]?.init?.body))).toEqual({ type: 0, childNodes: [], id: 1 })
+  })
+
+  it('skips a path the consent answer already holds a snapshot for', async () => {
+    stubBrowser()
+    const granted = { ...consentState, categories: { ...consentState.categories, analytics: true }, captured: ['/service/held'] }
+    const calls = stubFetch(() => envelope(granted))
+    const { configureAnalytics, postView } = await import('./analytics')
+    await configureAnalytics({ endpoint: '/api', worker: false })
+    postView('/service/held')
+    await new Promise((resolve) => setTimeout(resolve, 2100))
+    const posts = calls.filter((c) => String(c.url).includes('/analytics/capture?path=%2Fservice%2Fheld'))
+    expect(posts).toEqual([])
   })
 
   it('never asks while the analytics category is withheld', async () => {
