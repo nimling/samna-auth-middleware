@@ -35,7 +35,7 @@ func (d *DB) MutationAccess(ctx context.Context, userID, objectID uuid.UUID, obj
 	}
 	claims := make([]AccessClaim, 0)
 	err := d.NewRaw(
-		"SELECT * FROM claimius.mutation_access(?, ?, ?, ?)",
+		"SELECT * FROM claimius.mutation_access(?, ?::text, ?, ?)",
 		userID, objectID, objectType, requiredAccess,
 	).Scan(ctx, &claims)
 	if err != nil {
@@ -132,7 +132,7 @@ func (d *DB) MutationAccessMany(ctx context.Context, requests []AccessRequest) (
 			g.sa_location_id,
 			g.direct_grant
 		FROM inputs
-		LEFT JOIN LATERAL claimius.resolve_access(inputs.user_id, inputs.object_id, inputs.object_type, inputs.required_access) g ON TRUE
+		LEFT JOIN LATERAL claimius.resolve_access(inputs.user_id, inputs.object_id::text, inputs.object_type, inputs.required_access) g ON TRUE
 		ORDER BY inputs.idx
 	`, pq.Array(userIDs), pq.Array(objectIDs), pq.Array(objectTypes), pq.Array(requiredAccesses)).Scan(ctx, &rows)
 	set := make(AccessClaimSet, len(requests))
@@ -244,11 +244,11 @@ func (d *DB) ScopeAccess(ctx context.Context, userID uuid.UUID, scopePath string
 	return result, nil
 }
 
-func (d *DB) UserAccess(ctx context.Context, actorID, targetUserID uuid.UUID, requiredAccess ClaimAccess) (*AccessUser, error) {
+func (d *DB) UserAccess(ctx context.Context, actorID uuid.UUID, target string, requiredAccess ClaimAccess) (*AccessUser, error) {
 	users := make([]AccessUser, 0)
 	err := d.NewSelect().
 		TableExpr(`claimius.get_user_access(?, ?, ?) AS u`,
-			actorID, targetUserID, requiredAccess).
+			actorID, target, requiredAccess).
 		Column("u.*").
 		Scan(ctx, &users)
 	if err != nil {
@@ -272,9 +272,11 @@ func (d *DB) RootAccess(ctx context.Context, userID uuid.UUID, requiredAccess Cl
 				SELECT DISTINCT c.sa_root_id
 				FROM claimius.user_claim uc
 				JOIN claimius.claim c ON c.id = uc.claim_id
+				JOIN claimius.organization o ON o.id = c.sa_root_id AND o.sa_deleted_at IS NULL
 				WHERE uc.user_id = ?
 				  AND uc.sa_deleted_at IS NULL
 				  AND c.sa_deleted_at IS NULL
+				ORDER BY c.sa_root_id
 				LIMIT 1
 			),
 			?,

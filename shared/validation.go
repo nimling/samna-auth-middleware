@@ -375,9 +375,7 @@ func (o *Organization) ValidatePut() error {
 		return errors.New("name required")
 	}
 	switch o.Type {
-	case ORGANIZATION_TYPE_COMPANY, ORGANIZATION_TYPE_CHILD:
-	case "":
-		return errors.New("type required")
+	case "", ORGANIZATION_TYPE_COMPANY, ORGANIZATION_TYPE_CHILD:
 	case ORGANIZATION_TYPE_SYSTEM:
 		return errors.New("type system not allowed")
 	default:

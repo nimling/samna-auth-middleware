@@ -58,8 +58,6 @@ const (
 )
 
 var (
-	ApplyWithAccess      = shared.ApplyWithAccess
-	ApplyWithCreator     = shared.ApplyWithCreator
 	AuditWhere           = shared.AuditWhere
 	ClaimWhere           = shared.ClaimWhere
 	ErrNoAccess          = shared.ErrNoAccess
