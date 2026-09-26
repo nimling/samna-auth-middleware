@@ -258,6 +258,11 @@ func (d *DB) UserAccess(ctx context.Context, actorID uuid.UUID, target string, r
 		return nil, ErrInternalServer
 	}
 	if len(users) == 0 {
+		_, gateErr := d.NewRaw("SELECT * FROM claimius.mutation_access(?, ?, ?, ?)", actorID, target, OBJECT_TYPE_USER, requiredAccess).Exec(ctx)
+		var pgErr pgdriver.Error
+		if errors.As(gateErr, &pgErr) && pgErr.Field('C') == "P0404" {
+			return nil, ErrNotFound
+		}
 		return nil, ErrNoAccess
 	}
 	return &users[0], nil

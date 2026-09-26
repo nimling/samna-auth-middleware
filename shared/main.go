@@ -36,6 +36,14 @@ var ErrSecretExpired = errors.New("secret expired")
 // GetApp reads the system app row from claimius.get_app. The prophet
 // holds the full row including key and seed material.
 func (d *DB) GetApp(ctx context.Context) (*SamnaApp, error) {
+	if seed := utils.Cfg().DebugSeed; seed != "" && GetDebugMode() != DebugModeNone {
+		app, err := d.GetAppEnv(ctx)
+		if err != nil {
+			return nil, err
+		}
+		app.PrivateSeed = seed
+		return app, nil
+	}
 	var app SamnaApp
 	if err := d.NewRaw(`SELECT * FROM claimius.get_app() LIMIT 1`).Scan(ctx, &app); err != nil {
 		return nil, fmt.Errorf("no claimius app registered: %w", err)

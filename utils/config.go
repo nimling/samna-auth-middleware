@@ -16,8 +16,9 @@ type Config struct {
 	ClientTimeout string
 	DebugUserID   string
 	DebugClients  string
+	DebugSeed     string
 
-	Issuer       string
+	Issuer      string
 	TokenURL     url.URL
 	JWKSURL      url.URL
 	AuthDisabled bool
@@ -36,6 +37,7 @@ func loadConfig() {
 	cfg.ClientTimeout = os.Getenv("SAUTH_CLIENT_TIMEOUT")
 	cfg.DebugUserID = os.Getenv("SAUTH_DEBUG_USER_ID")
 	cfg.DebugClients = os.Getenv("SAUTH_DEBUG_CLIENTS")
+	cfg.DebugSeed = os.Getenv("SAUTH_DEBUG_PRIVATE_SEED")
 }
 
 func Cfg() *Config {

@@ -4,6 +4,7 @@ package shared_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/google/uuid"
@@ -200,5 +201,41 @@ func TestDeleteTakesTheRecordIDFromTheModel(t *testing.T) {
 	}
 	if !deleted {
 		t.Fatalf("organization %s was not soft deleted", org.ID)
+	}
+}
+
+func TestUserAccessSeparatesMissingFromForbidden(t *testing.T) {
+	db := database(t)
+	ctx := context.Background()
+	if _, err := db.UserAccess(ctx, userA, uuid.Nil.String(), sdb.ACCESS_READ); !errors.Is(err, sdb.ErrNotFound) {
+		t.Fatalf("an unknown user must be not found, got %v", err)
+	}
+	if _, err := db.UserAccess(ctx, userB, "ext-c", sdb.ACCESS_WRITE); !errors.Is(err, sdb.ErrNoAccess) {
+		t.Fatalf("an existing user out of reach must be forbidden, got %v", err)
+	}
+}
+
+func TestDebugSeedEncryptsAndResolvesASecret(t *testing.T) {
+	t.Setenv("SAUTH_DEBUG_PRIVATE_SEED", "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
+	t.Setenv("SAUTH_APP_SLUG", "debug-disciple")
+	db := database(t)
+	ctx := context.Background()
+	ac, err := db.MutationAccess(ctx, userA, orgRoot, sdb.OBJECT_TYPE_ORGANIZATION, sdb.ACCESS_WRITE)
+	if err != nil {
+		t.Fatalf("access: %v", err)
+	}
+	secret := sdb.SamnaSecret{Key: "debug_seed_" + uuid.NewString(), Value: "plain", OwnerID: orgRoot}
+	if err := db.NewInsert().Model(&secret).Access(ac).Scan(ctx, &secret); err != nil {
+		t.Fatalf("insert secret: %v", err)
+	}
+	if secret.Value == "plain" {
+		t.Fatal("secret value was stored unencrypted")
+	}
+	plain, err := secret.Resolve(ctx, db)
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if plain != "plain" {
+		t.Fatalf("resolved %q, expected plain", plain)
 	}
 }
