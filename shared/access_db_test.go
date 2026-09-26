@@ -183,13 +183,13 @@ func TestDeleteTakesTheRecordIDFromTheModel(t *testing.T) {
 	if err != nil {
 		t.Fatalf("access: %v", err)
 	}
-	org, err := db.InsertRootOrganization(ctx, ac, &sdb.Organization{Name: "Deleted by model", Type: sdb.ORGANIZATION_TYPE_COMPANY})
-	if err != nil {
-		t.Fatalf("insert root organization: %v", err)
+	org := sdb.Organization{Name: "Deleted by model", Type: sdb.ORGANIZATION_TYPE_CHILD, OwnerID: orgRoot}
+	if err := db.NewInsert().Model(&org).Access(ac).Scan(ctx, &org); err != nil {
+		t.Fatalf("insert child organization: %v", err)
 	}
 	owner, err := db.MutationAccess(ctx, userA, org.ID, sdb.OBJECT_TYPE_ORGANIZATION, sdb.ACCESS_WRITE)
 	if err != nil {
-		t.Fatalf("access on the new root: %v", err)
+		t.Fatalf("access on the new child: %v", err)
 	}
 	target := sdb.Organization{ID: org.ID}
 	if err := db.NewDelete().Model(&target).Access(owner).Scan(ctx, &target); err != nil {
@@ -258,5 +258,25 @@ func TestUpdateTakesTheRecordIDFromTheModel(t *testing.T) {
 	}
 	if stored != name {
 		t.Fatalf("expected name %q, got %q", name, stored)
+	}
+}
+
+func TestInsertRootOrganizationBindsNoForeignClaim(t *testing.T) {
+	db := database(t)
+	ctx := context.Background()
+	ac, err := db.MutationAccess(ctx, userA, orgRoot, sdb.OBJECT_TYPE_ORGANIZATION, sdb.ACCESS_WRITE)
+	if err != nil {
+		t.Fatalf("access: %v", err)
+	}
+	org, err := db.InsertRootOrganization(ctx, ac, &sdb.Organization{Name: "Unbound root", Type: sdb.ORGANIZATION_TYPE_COMPANY})
+	if err != nil {
+		t.Fatalf("insert root organization: %v", err)
+	}
+	var bindings int
+	if err := db.NewRaw(`SELECT count(*) FROM claimius.claim_object WHERE object_id = ? AND sa_deleted_at IS NULL`, org.ID).Scan(ctx, &bindings); err != nil {
+		t.Fatalf("count bindings: %v", err)
+	}
+	if bindings != 0 {
+		t.Fatalf("a new root must carry no binding to the actor's claim until its owner claim is created, found %d", bindings)
 	}
 }

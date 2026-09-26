@@ -91,6 +91,9 @@ func (d *DB) insertOrganization(ctx context.Context, ac *AccessClaim, org *Organ
 			Exec(ctx, org); err != nil {
 			return err
 		}
+		if org.OwnerID == org.ID {
+			return nil
+		}
 		var bindingRootID uuid.UUID
 		if err := tx.NewRaw(`SELECT sa_root_id FROM claimius.organization WHERE id = ? AND sa_deleted_at IS NULL`, bindingOwnerID).Scan(ctx, &bindingRootID); err != nil {
 			return err
