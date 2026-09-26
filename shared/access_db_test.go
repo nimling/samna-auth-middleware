@@ -239,3 +239,24 @@ func TestDebugSeedEncryptsAndResolvesASecret(t *testing.T) {
 		t.Fatalf("resolved %q, expected plain", plain)
 	}
 }
+
+func TestUpdateTakesTheRecordIDFromTheModel(t *testing.T) {
+	db := database(t)
+	ctx := context.Background()
+	ac, err := db.MutationAccess(ctx, userA, orgGrand, sdb.OBJECT_TYPE_ORGANIZATION, sdb.ACCESS_WRITE)
+	if err != nil {
+		t.Fatalf("access: %v", err)
+	}
+	name := "Grand " + uuid.NewString()[:8]
+	target := sdb.Organization{ID: orgGrand, Name: name}
+	if err := db.NewUpdate().Model(&target).Access(ac).Scan(ctx, &target); err != nil {
+		t.Fatalf("update by model id: %v", err)
+	}
+	var stored string
+	if err := db.NewRaw(`SELECT name FROM claimius.organization WHERE id = ?`, orgGrand).Scan(ctx, &stored); err != nil {
+		t.Fatalf("read back: %v", err)
+	}
+	if stored != name {
+		t.Fatalf("expected name %q, got %q", name, stored)
+	}
+}

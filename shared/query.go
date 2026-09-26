@@ -561,6 +561,9 @@ func (q *UpdateQuery) buildBun() *bun.UpdateQuery {
 }
 
 func (q *UpdateQuery) Exec(ctx context.Context, dest ...any) (sql.Result, error) {
+	if q.recordID == uuid.Nil {
+		q.recordID = recordIDFromModel(q.db, q.model)
+	}
 	if handled, err := q.execClaimius(ctx, dest...); handled {
 		return nil, err
 	}
@@ -568,6 +571,9 @@ func (q *UpdateQuery) Exec(ctx context.Context, dest ...any) (sql.Result, error)
 }
 
 func (q *UpdateQuery) Scan(ctx context.Context, dest ...any) error {
+	if q.recordID == uuid.Nil {
+		q.recordID = recordIDFromModel(q.db, q.model)
+	}
 	if handled, err := q.execClaimius(ctx, dest...); handled {
 		return err
 	}
@@ -706,44 +712,47 @@ func (q *DeleteQuery) buildBun() *bun.DeleteQuery {
 	return bq
 }
 
-func (q *DeleteQuery) ensureRecordID() {
-	if q.recordID != uuid.Nil || q.model == nil {
-		return
+func recordIDFromModel(d *DB, model any) uuid.UUID {
+	if model == nil {
+		return uuid.Nil
 	}
-	switch modelTableName(q.db, q.model) {
+	switch modelTableName(d, model) {
 	case "claimius.user_claim":
-		if m, ok := embeddedPtr(q.model, reflect.TypeOf(UserClaim{})).(*UserClaim); ok {
-			q.recordID = m.UserID
+		if m, ok := embeddedPtr(model, reflect.TypeOf(UserClaim{})).(*UserClaim); ok {
+			return m.UserID
 		}
 	case "claimius.claim_object":
-		if m, ok := embeddedPtr(q.model, reflect.TypeOf(ClaimObject{})).(*ClaimObject); ok && m.ObjectID != nil {
-			q.recordID = *m.ObjectID
+		if m, ok := embeddedPtr(model, reflect.TypeOf(ClaimObject{})).(*ClaimObject); ok && m.ObjectID != nil {
+			return *m.ObjectID
 		}
 	case "claimius.claim":
-		if m, ok := embeddedPtr(q.model, reflect.TypeOf(Claim{})).(*Claim); ok {
-			q.recordID = m.ID
+		if m, ok := embeddedPtr(model, reflect.TypeOf(Claim{})).(*Claim); ok {
+			return m.ID
 		}
 	case "claimius.organization":
-		if m, ok := embeddedPtr(q.model, reflect.TypeOf(Organization{})).(*Organization); ok {
-			q.recordID = m.ID
+		if m, ok := embeddedPtr(model, reflect.TypeOf(Organization{})).(*Organization); ok {
+			return m.ID
 		}
 	case "claimius.location":
-		if m, ok := embeddedPtr(q.model, reflect.TypeOf(Location{})).(*Location); ok {
-			q.recordID = m.ID
+		if m, ok := embeddedPtr(model, reflect.TypeOf(Location{})).(*Location); ok {
+			return m.ID
 		}
 	case "claimius.user_relation":
-		if m, ok := embeddedPtr(q.model, reflect.TypeOf(UserRelation{})).(*UserRelation); ok {
-			q.recordID = m.ID
+		if m, ok := embeddedPtr(model, reflect.TypeOf(UserRelation{})).(*UserRelation); ok {
+			return m.ID
 		}
 	case "claimius.samna_secret":
-		if m, ok := embeddedPtr(q.model, reflect.TypeOf(SamnaSecret{})).(*SamnaSecret); ok {
-			q.recordID = m.ID
+		if m, ok := embeddedPtr(model, reflect.TypeOf(SamnaSecret{})).(*SamnaSecret); ok {
+			return m.ID
 		}
 	}
+	return uuid.Nil
 }
 
 func (q *DeleteQuery) Exec(ctx context.Context, dest ...any) (sql.Result, error) {
-	q.ensureRecordID()
+	if q.recordID == uuid.Nil {
+		q.recordID = recordIDFromModel(q.db, q.model)
+	}
 	if handled, err := q.execClaimius(ctx, dest...); handled {
 		return nil, err
 	}
@@ -751,7 +760,9 @@ func (q *DeleteQuery) Exec(ctx context.Context, dest ...any) (sql.Result, error)
 }
 
 func (q *DeleteQuery) Scan(ctx context.Context, dest ...any) error {
-	q.ensureRecordID()
+	if q.recordID == uuid.Nil {
+		q.recordID = recordIDFromModel(q.db, q.model)
+	}
 	if handled, err := q.execClaimius(ctx, dest...); handled {
 		return err
 	}
@@ -860,10 +871,15 @@ func (q *DeleteQuery) execClaimius(ctx context.Context, dest ...any) (bool, erro
 func (q *InsertQuery) Built() (any, *AccessClaim) { return q.model, q.accessClaim }
 
 func (q *UpdateQuery) Built() (any, *AccessClaim, uuid.UUID) {
+	if q.recordID == uuid.Nil {
+		q.recordID = recordIDFromModel(q.db, q.model)
+	}
 	return q.model, q.accessClaim, q.recordID
 }
 
 func (q *DeleteQuery) Built() (any, *AccessClaim, uuid.UUID) {
-	q.ensureRecordID()
+	if q.recordID == uuid.Nil {
+		q.recordID = recordIDFromModel(q.db, q.model)
+	}
 	return q.model, q.accessClaim, q.recordID
 }
