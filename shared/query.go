@@ -719,6 +719,26 @@ func (q *DeleteQuery) ensureRecordID() {
 		if m, ok := embeddedPtr(q.model, reflect.TypeOf(ClaimObject{})).(*ClaimObject); ok && m.ObjectID != nil {
 			q.recordID = *m.ObjectID
 		}
+	case "claimius.claim":
+		if m, ok := embeddedPtr(q.model, reflect.TypeOf(Claim{})).(*Claim); ok {
+			q.recordID = m.ID
+		}
+	case "claimius.organization":
+		if m, ok := embeddedPtr(q.model, reflect.TypeOf(Organization{})).(*Organization); ok {
+			q.recordID = m.ID
+		}
+	case "claimius.location":
+		if m, ok := embeddedPtr(q.model, reflect.TypeOf(Location{})).(*Location); ok {
+			q.recordID = m.ID
+		}
+	case "claimius.user_relation":
+		if m, ok := embeddedPtr(q.model, reflect.TypeOf(UserRelation{})).(*UserRelation); ok {
+			q.recordID = m.ID
+		}
+	case "claimius.samna_secret":
+		if m, ok := embeddedPtr(q.model, reflect.TypeOf(SamnaSecret{})).(*SamnaSecret); ok {
+			q.recordID = m.ID
+		}
 	}
 }
 

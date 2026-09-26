@@ -174,3 +174,31 @@ func TestInsertRootOrganizationKeepsItsOwnID(t *testing.T) {
 		t.Fatalf("root %s must own and root itself, got owner %s root %s", org.ID, stored.OwnerID, stored.RootID)
 	}
 }
+
+func TestDeleteTakesTheRecordIDFromTheModel(t *testing.T) {
+	db := database(t)
+	ctx := context.Background()
+	ac, err := db.MutationAccess(ctx, userA, orgRoot, sdb.OBJECT_TYPE_ORGANIZATION, sdb.ACCESS_WRITE)
+	if err != nil {
+		t.Fatalf("access: %v", err)
+	}
+	org, err := db.InsertRootOrganization(ctx, ac, &sdb.Organization{Name: "Deleted by model", Type: sdb.ORGANIZATION_TYPE_COMPANY})
+	if err != nil {
+		t.Fatalf("insert root organization: %v", err)
+	}
+	owner, err := db.MutationAccess(ctx, userA, org.ID, sdb.OBJECT_TYPE_ORGANIZATION, sdb.ACCESS_WRITE)
+	if err != nil {
+		t.Fatalf("access on the new root: %v", err)
+	}
+	target := sdb.Organization{ID: org.ID}
+	if err := db.NewDelete().Model(&target).Access(owner).Scan(ctx, &target); err != nil {
+		t.Fatalf("delete by model id: %v", err)
+	}
+	var deleted bool
+	if err := db.NewRaw(`SELECT sa_deleted_at IS NOT NULL FROM claimius.organization WHERE id = ?`, org.ID).Scan(ctx, &deleted); err != nil {
+		t.Fatalf("read back: %v", err)
+	}
+	if !deleted {
+		t.Fatalf("organization %s was not soft deleted", org.ID)
+	}
+}
