@@ -789,9 +789,11 @@ BEGIN
 
     IF (NEW.private_seed IS NULL OR NEW.private_seed = '')
        AND NEW.sa_owner_id IS NOT NULL AND NEW.sa_owner_id <> NEW.id THEN
-        SELECT o.private_seed INTO NEW.private_seed
-        FROM claimius.organization o
-        WHERE o.id = NEW.sa_owner_id;
+        NEW.private_seed := coalesce((
+            SELECT o.private_seed
+            FROM claimius.organization o
+            WHERE o.id = NEW.sa_owner_id
+        ), '');
     END IF;
 
     -- Caller already provided sa_root_id: trust it.

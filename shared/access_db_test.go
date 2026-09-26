@@ -149,3 +149,28 @@ func TestRootAccessSkipsSoftDeletedRoot(t *testing.T) {
 		t.Fatal("root access resolved to a soft deleted root")
 	}
 }
+
+func TestInsertRootOrganizationKeepsItsOwnID(t *testing.T) {
+	db := database(t)
+	ctx := context.Background()
+	ac, err := db.MutationAccess(ctx, userA, orgRoot, sdb.OBJECT_TYPE_ORGANIZATION, sdb.ACCESS_WRITE)
+	if err != nil {
+		t.Fatalf("access: %v", err)
+	}
+	org, err := db.InsertRootOrganization(ctx, ac, &sdb.Organization{Name: "Fresh root", Type: sdb.ORGANIZATION_TYPE_COMPANY})
+	if err != nil {
+		t.Fatalf("insert root organization: %v", err)
+	}
+	var stored struct {
+		ID          uuid.UUID `bun:"id"`
+		OwnerID     uuid.UUID `bun:"sa_owner_id"`
+		RootID      uuid.UUID `bun:"sa_root_id"`
+		PrivateSeed string    `bun:"private_seed"`
+	}
+	if err := db.NewRaw(`SELECT id, sa_owner_id, sa_root_id, private_seed FROM claimius.organization WHERE id = ?`, org.ID).Scan(ctx, &stored); err != nil {
+		t.Fatalf("read back %s: %v", org.ID, err)
+	}
+	if stored.OwnerID != org.ID || stored.RootID != org.ID {
+		t.Fatalf("root %s must own and root itself, got owner %s root %s", org.ID, stored.OwnerID, stored.RootID)
+	}
+}

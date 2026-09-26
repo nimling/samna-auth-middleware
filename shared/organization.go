@@ -79,10 +79,14 @@ func (d *DB) insertOrganization(ctx context.Context, ac *AccessClaim, org *Organ
 	if bindingOwnerID == uuid.Nil {
 		bindingOwnerID = ac.OwnerID
 	}
+	excluded := []string{"sa_created_at", "sa_updated_at", "sa_deleted_at"}
+	if org.ID == uuid.Nil {
+		excluded = append(excluded, "id")
+	}
 	err := d.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
 		if _, err := tx.NewInsert().
 			Model(org).
-			ExcludeColumn("id", "sa_created_at", "sa_updated_at", "sa_deleted_at").
+			ExcludeColumn(excluded...).
 			Returning("*").
 			Exec(ctx, org); err != nil {
 			return err
