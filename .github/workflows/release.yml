@@ -12,10 +12,64 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check migration versions match the tag
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          base="${tag%%-*}"
+          suffix="${tag#*-}"
+          if [ "$suffix" = "$tag" ]; then
+            expected="V${base}"
+          else
+            counter="$(printf '%s' "$suffix" | sed 's/[^0-9]*//' | sed 's/^0*//')"
+            expected="V${base}.${counter:-0}"
+          fi
+          echo "tag $GITHUB_REF_NAME expects migration prefix $expected"
+          status=0
+          for role in prophet disciple; do
+            dir="$role/database/migrations"
+            [ -d "$dir" ] || continue
+            for file in "$dir"/*.sql; do
+              [ -e "$file" ] || continue
+              name="$(basename "$file")"
+              case "$name" in
+                "$expected"__claimius_*.sql) ;;
+                V*__claimius_*.sql)
+                  if git rev-parse -q --verify "$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null):$file" >/dev/null 2>&1; then
+                    continue
+                  fi
+                  echo "::error file=$file::$name is new in this tag but does not carry $expected"
+                  status=1
+                  ;;
+                *)
+                  echo "::error file=$file::$name does not match V<version>__claimius_<name>.sql"
+                  status=1
+                  ;;
+              esac
+            done
+          done
+          exit $status
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+
+      - name: Build bff artifacts
+        env:
+          GOPRIVATE: github.com/nimling/*
+        run: |
+          git config --global url."https://${{ secrets.DOCKER_PACKAGE_READ }}@github.com/".insteadOf "https://github.com/"
+          mkdir -p dist
+          GOOS=linux GOARCH=amd64 go build -o dist/sauth-bff-linux-amd64 ./cmd/bff
+          GOOS=darwin GOARCH=arm64 go build -o dist/sauth-bff-darwin-arm64 ./cmd/bff
+          GOOS=darwin GOARCH=amd64 go build -o dist/sauth-bff-darwin-amd64 ./cmd/bff
 
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
           generate_release_notes: true
+          files: dist/sauth-bff-*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

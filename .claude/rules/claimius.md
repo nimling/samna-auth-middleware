@@ -12,23 +12,28 @@ description: |
    sa_parent_id sa_location_id sa_created_by sa_deleted_at app_id, deny
    is_deny inherits cascaded_from grants direct_grant, samna_app samna_user
    samna_client samna_secret inheritance_info table_info sync_event,
+   app_object app_object_ids apps_for_object link_app_object app_has_object
+   unlink_app_object create_root_organization, scope claim ScopeAccess
+   jsonb_path_exists machine client service to service client credentials,
    init_prophet init_disciple init_hybrid init_claimius_tables
    init_claimius_internal ensure_app_user merge_user migrate_root,
    calc_object_access calc_hierarchical_access calc_claim_access
-   emit_sync_event audit_trigger replay_mode reconcile_queue
+   emit_sync_event audit_trigger replay_mode reconcile_queue access_diff
    prophet_state disciple_state, register a table for access control,
    permission template, role grant claimius_writer claimius_reader
    claimius_disciple_client, org chart access graph hierarchy rendering,
    full text search over accessible objects.
 hard_constraints:
    - reads always go through `get_*` functions, never direct SELECT on claimius tables
-   - writes go through a write function when one exists; otherwise direct INSERT/UPDATE on the prophet side is fine. Triggers fire either way and maintain `user_object`.
+   - writes go through a write function when one exists; otherwise direct INSERT/UPDATE on the prophet side is fine. Triggers fire either way: they settle `user_object` for the acting user and mark the area in `access_diff` for everyone else.
+   - `user_object` for a user other than the writer is settled by that user's next read, through `reconcile_if_pending`. Never assume another user's row exists immediately after a write.
    - hard delete is forbidden in app code; default is soft delete via `sa_deleted_at`
    - `sa_created_by` is a `user_claim.id`, not a `samna_user.user_id`
    - `samna_user.user_id` is the human stable identifier; `samna_user.id` is the row PK
    - tree roots are self referential. Orgs root when `sa_owner_id == sa_root_id == id`. Locations and parenthood tables root when `sa_parent_id == sa_root_id == id`. No nullable parents.
    - `sa_parent_id` and `sa_root_id` come together or not at all
    - every materialized state query must filter on `app_id`
+   - `organization` and `location` are the exception: no `app_id` column, scoped through `claimius.app_object` links, filtered with `app_object_ids(app_id, object_type)`
    - registered external tables may omit the `app_id` column. Claimius infers it from `get_app_id()` at trigger time. On prophets that host more than one app the column is required, and registration is rejected without it.
    - object types are always schema qualified like `public.device`, never bare `device`
    - `claimius.replay_mode` is set ONLY by the disciple sync layer, never by app code
@@ -41,6 +46,8 @@ do_not_invent: true
 # Claimius rules
 
 This project uses **Claimius** for access control. Claimius is a Postgres schema named `claimius` that materializes user access into a denormalized index. Application code reads through `get_*` functions, never direct SELECTs against claimius tables.
+
+Materialization is paid on read, not on write. A write settles the acting user, so a writer reads its own change back inside the same request, and records the changed area in `claimius.access_diff`. The next read that targets that area recalculates it for every user in it and clears the row, first come first serve. An area nobody reads is never computed. This keeps write cost constant in the number of users and is why a write must never assume another user's `user_object` row exists yet.
 
 This document is a usage guide. It tells you which functions to call, which tables you may write to, and which patterns to follow. It does not describe how the engine computes access. Trust the engine and call the documented entry points.
 
@@ -97,7 +104,7 @@ The `get_*` family:
    - `start_id` is an org to root from. NULL means all roots.
    - `depth` is levels of descent. 0 means unlimited.
    - Each row has fields `object_id`, `object_type`, `label`, `parent_id`, and `data jsonb`. `object_type` is schema qualified, like `'claimius.organization'` or `'public.bookable'`.
-   - `data` always carries `access_level` and `level` plus per type fallback fields with `sa_` prefixes stripped, so `owner_id` rather than `sa_owner_id`.
+   - `data` always carries `access`, the bitwise mask from `user_object.sa_access`, and `level`, plus per type fallback fields with `sa_` prefixes stripped, so `owner_id` rather than `sa_owner_id`.
 - `get_claim_graph(user, app, start_id?, depth?, min_level?)` — access graph covering the user, other users seen, claims, user_claims, claim_object connectors, and reachable objects.
    - `start_id` is a single claim. NULL means all claims the user holds.
    - `depth` 0 includes cascaded objects. depth >= 1 returns direct only.
@@ -125,23 +132,27 @@ DECLARE
     v_claim_id UUID;
 BEGIN
     v_result := claimius.create_claim(
-        p_app_id          => $app_id,
-        p_name            => 'Editor',
-        p_sa_access_level => 5,
-        p_sa_owner_id     => $org_id,
-        p_sa_root_id      => $root_org_id,
-        p_sa_created_by   => $user_claim_id
+        p_app_id        => $app_id,
+        p_name          => 'Editor',
+        p_description   => 'Read and write',
+        p_sa_access     => 6,
+        p_sa_owner_id   => $org_id,
+        p_sa_root_id    => $root_org_id,
+        p_sa_created_by => $user_claim_id
     );
     v_claim_id := (v_result -> 'claim' ->> 'id')::UUID;
 END $$;
 
 -- Direct INSERT is fine on tables without a write function. Calc triggers
--- attached to the table maintain everything afterward.
+-- attached to the table maintain everything afterward. organization and
+-- location carry no app_id; link the row to the app afterwards.
 INSERT INTO claimius.organization (
-    app_id, name, sa_owner_id, sa_root_id, sa_level, sa_created_by
+    name, sa_owner_id, sa_root_id, sa_level, sa_created_by
 ) VALUES (
-    $app_id, 'Acme NYC', $parent_org_id, $parent_org_root_id, 1, $user_claim_id
-);
+    'Acme NYC', $parent_org_id, $parent_org_root_id, 1, $user_claim_id
+) RETURNING id INTO v_org_id;
+
+SELECT claimius.link_app_object($app_id, 'claimius.organization', v_org_id, $user_claim_id);
 ```
 
 Tables that have a write function:
@@ -159,11 +170,13 @@ Tables that have a write function:
 Tables where direct INSERT/UPDATE is the documented path:
 
 - `samna_app`. Use `init_prophet` for the FIRST app only.
-- `organization`
+- `organization`. Prefer `create_root_organization` for roots; it links `app_object` for you.
 - `location`
 - `samna_client`, `samna_secret`
 - `object_field`, `user_field`, `user_relation`
 - `prophet_state`, `disciple_state`
+
+`app_object` has write functions and is never written directly: `link_app_object`, `unlink_app_object`. Both maintain the materialized access rows for the pair.
 
 You may NEVER write directly to:
 
@@ -172,6 +185,7 @@ You may NEVER write directly to:
 - `sync_event`. Append only, written by triggers.
 - `audit`. Write via `claimius.write_audit` if you must.
 - `reconcile_queue`. Managed by sync layer.
+- `access_diff`. Written by the calc triggers, cleared by the read that settles the area.
 
 ### `sa_created_by` is `user_claim.id`, never `samna_user.user_id`
 
@@ -199,13 +213,47 @@ For root creation with an idempotency guard on app and name, use `claimius.creat
 
 ### App scoping
 
-Every materialized state row carries `app_id`. The same human user gets one `samna_user` row per app, all sharing the same `user_id`. Disciples only know about their own app's rows. The prophet holds rows for every app.
+There are two scoping mechanisms and the table decides which one applies.
 
-When writing a query that hits any of `samna_user`, `user_claim`, `user_object`, `object_users`, `user_users`, `user_relation`, `user_field`, always include `app_id` in the filter.
+Own `app_id` column. `samna_user`, `claim`, `user_claim`, `claim_object`, `user_object`, `object_users`, `user_users`, `user_relation`, `user_field`, `object_field`, `samna_client`, `samna_secret`, `audit`. One row belongs to exactly one app. The same human user gets one `samna_user` row per app, all sharing the same `user_id`. Any query hitting these tables includes `app_id` in the filter.
+
+`app_object` links. `organization` and `location` carry no `app_id` column. They are shared hierarchy objects, and an object belongs to every app holding a live `claimius.app_object` row for it. One organization can serve several apps without duplication.
+
+The helpers on the prophet:
+
+- `app_object_ids(app_id, object_type)` returns the object ids of one type linked to an app. This is the filter to use in place of `app_id = ?` for organizations and locations.
+- `apps_for_object(object_type, object_id)` returns the app ids holding a live link to one object.
+- `app_has_object(app_id, object_type, object_id)` is the boolean guard.
+- `link_app_object(app_id, object_type, object_id, created_by)` creates the link and materializes access for the pair. Idempotent.
+- `unlink_app_object` soft deletes the link and purges the materialized rows it granted.
+- `create_root_organization(app_id, name, ...)` creates the root and links it in one call, idempotent on app and name.
+
+The unique index is `(app_id, object_type, object_id)` where `sa_deleted_at IS NULL`, so a live link is unique per app and object.
+
+Disciples do not carry `app_object` at all, and their `organization` and `location` tables have no `app_id`. A disciple mirrors exactly one app, so every row it holds is already in scope. The sync layer strips `app_id` from each payload before upsert, and the prophet selects organizations and locations for the snapshot through `app_object_ids`. Write the app filter on the prophet side only.
+
+### Access bits
+
+`sa_access` is an INTEGER bitwise mask on `claim`, `claim_object` and `user_object`. Check with `(stored & required) = required`. The Go constants are `shared.ClaimAccess` in `shared/models.go`.
+
+| Bit | Value | Constant |
+|-----|-------|----------|
+| owner | `0x01` | `ACCESS_OWNER` |
+| write | `0x02` | `ACCESS_WRITE` |
+| read | `0x04` | `ACCESS_READ` |
+| execute | `0x08` | `ACCESS_EXECUTE` |
+| deny | `0x10` | `ACCESS_DENY` |
+| member | `0x20` | `ACCESS_MEMBER` |
+
+`ACCESS_ALL` is owner, write, read and execute unioned, so `15`. Common grants: read only is `4`, read with write is `6`, read with execute is `12`.
+
+On a grant claim with the deny bit clear, `create_claim` expands the mask: owner implies write, read and execute; write implies read and execute; execute implies read. The member bit stands alone. A `claim_object.sa_access` of NULL inherits the claim mask at read time.
+
+There is no access level. Any column, parameter or payload key naming one is wrong.
 
 ### Deny semantics
 
-To deny, create a claim with `is_deny = TRUE` and a specific `sa_access_level`, then bind it via `assign_claim_object`. Calc functions remove blocked grants from `user_object` at write time, so reads never need to filter for denies.
+To deny, create a claim with the deny bit `0x10` set on `sa_access` and the other bits enumerating which permissions to subtract, then bind it via `assign_claim_object`. Deny claims store the supplied bits verbatim, so any subset of read, write, execute and owner can be denied. Calc functions remove blocked grants from `user_object` at write time, so reads never need to filter for denies.
 
 ### Adding a column to a registered table
 
@@ -282,7 +330,7 @@ SELECT EXISTS (
 SELECT * FROM claimius.get_objects($user_id, $app_id, 'public.device', 8);
 ```
 
-Returns object_id, sa_access_level, denormalized name, description, and link, plus tree position columns. Already filtered for active claims, soft delete, and time validity.
+Returns object_id, sa_access as a bitwise mask, denormalized name, description, and link, plus tree position columns. Already filtered for active claims, soft delete, and time validity.
 
 ### You're rendering an org chart in a frontend
 
@@ -294,11 +342,15 @@ SELECT * FROM claimius.get_owner_graph($user_id, $app_id);
 SELECT * FROM claimius.get_owner_graph($user_id, $app_id, $start_org_id, 2);
 ```
 
-Returns flat rows with fields `object_id`, `object_type`, `label`, `parent_id`, and `data`. `object_type` is schema qualified, like `'claimius.organization'` or `'public.bookable'`. The `data` jsonb always carries `access_level` and `level`. Render as a tree in the frontend by grouping on `parent_id`. To enrich rows with table specific fields, write your own wrapper that UNIONs claimius's output with rows from your app tables filtered through `claimius.get_objects`.
+Returns flat rows with fields `object_id`, `object_type`, `label`, `parent_id`, and `data`. `object_type` is schema qualified, like `'claimius.organization'` or `'public.bookable'`. The `data` jsonb always carries `access`, the bitwise mask, and `level`. Render as a tree in the frontend by grouping on `parent_id`. To enrich rows with table specific fields, write your own wrapper that UNIONs claimius's output with rows from your app tables filtered through `claimius.get_objects`.
 
 ### A claim grant should expire automatically
 
 Pass `p_starts_at` or `p_ends_at` to `assign_claim_user`. `get_*` functions filter by current time. No background job required; expiration is read time.
+
+### A user cannot see something another user just created
+
+Expected until that user reads. The write marked the area in `access_diff` and settled only the writer. The next `get_*` call for the other user claims the area, recalculates it, and clears the row. If it persists past a read, check that the read entered through a `get_*` function rather than a direct SELECT, since `reconcile_if_pending` runs at the top of the `get_*` family and nowhere else.
 
 ### The disciple keeps falling behind on sync
 
@@ -328,6 +380,8 @@ To force a refresh, call `claimius.recompute_user_object($app_id, $user_id, $obj
 - Hard delete in app code on a registered table.
 - Adding an FK from app tables to `samna_user.id`. Use `samna_user.user_id`.
 - A query against `samna_user` without `app_id` in the filter.
+- A query filtering `organization` or `location` by `app_id`. That column does not exist; use `app_object_ids`.
+- Direct INSERT/UPDATE on `app_object`. Use `link_app_object` and `unlink_app_object`.
 - Editing `user_object` rows directly to change access.
 - Overriding `claimius.replay_mode` outside the disciple sync layer.
 - Calling `migrate_root` without flagging for human review.

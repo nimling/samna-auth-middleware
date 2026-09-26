@@ -26,15 +26,35 @@ Capabilities split on whether the runtime can hold a confidential client secret.
 
 ### Requires `client_id` and `client_secret`, server only
 
-These flows hold a confidential secret and must run on a first-party backend. They are not implemented in this package today; the Go middleware in `client/auth.go` is the canonical source.
+These flows hold a confidential secret and must run on a first-party backend.
 
-1. Authorization code exchange at `/oauth/token`.
+1. Authorization code exchange at `/oauth/token`, through `postAuthCode`.
 
-2. Refresh token exchange at `/oauth/token`.
+2. Refresh token exchange at `/oauth/token`, through `postRefreshToken`.
 
-3. Service-to-service client credentials grant.
+3. Service to service calls with client credentials, through `createServiceClient`.
 
 4. Local schema sync. The Go middleware's `sync.PullSnapshot` is the only implementation; a browser cannot hold the resulting database.
+
+### Service to service
+
+`createServiceClient` calls another Samna service with a machine client's credentials. It sends HTTP basic auth, unwraps the response envelope and returns `data`, and maps 401, 403, 404, 400 and 409 onto the exported `Err*` sentinels. 204 resolves to `undefined`.
+
+```ts
+import { createServiceClient } from '@nimling/samna-auth-middleware'
+
+const api = createServiceClient({
+  baseUrl: process.env.CONTENT_BASE_URL!,
+  clientId: process.env.CONTENT_CLIENT_ID!,
+  clientSecret: process.env.CONTENT_CLIENT_SECRET!
+})
+
+const articles = await api.get<Article[]>('/api/article')
+```
+
+The client id becomes the actor on the serving side, so what comes back is decided by the claims bound to that client. To act on behalf of a signed in human on the same call, pass `userToken` or `userExternalId` in the per call options; they travel as `SAuth-User-Token` and `SAuth-User-ID`.
+
+Creating the client and granting it a claim happens on the prophet. See `docs/clients.md` in the repo root.
 
 ## Best practice: never ship client credentials to a plain frontend
 
@@ -67,10 +87,10 @@ import {
   startLogin,
   endSession,
   createAuthFetch,
-  validateAccessToken,
-  fetchOIDCConfiguration,
+  validateToken,
+  getOpenIDConfiguration,
   getJWKS,
-  type SessionUser
+  type ClaimUser
 } from '@nimling/samna-auth-middleware'
 
 configureEdge({
@@ -78,12 +98,74 @@ configureEdge({
   clientSlug: 'docs'
 })
 
-const user: SessionUser | null = await readSessionFromDocument()
+const user: ClaimUser | null = await readSessionFromDocument()
 
 startLogin('microsoft', window.location.pathname)
 
 const url = getLoginUrl(undefined, '/protected')
 ```
+
+## Consent and analytics
+
+One call reads the visitor's consent, starts capture when the analytics category
+is granted, and shows the banner when no decision is stored under the current
+policy. Nothing it does can throw into the host app.
+
+```ts
+import { configureConsent, postView } from '@nimling/samna-auth-middleware'
+
+await configureConsent({ endpoint: '/api' })
+
+router.afterEach((to) => postView(to.fullPath))
+```
+
+The decision is stored against the account on the prophet, so one answer covers
+every app the person signs in to. Reopen the banner from a settings control with
+`openConsentBanner()`.
+
+The backend half mounts the same way every other saecho handler does. Put it
+outside any group that requires a session, because an anonymous visitor reaches
+consent before they have one:
+
+```go
+sauth := e.Group("/api/sauth")
+sauth.GET("/consent", saecho.GetConsent)
+sauth.POST("/consent", saecho.PostConsent)
+sauth.POST("/analytics", saecho.PostAnalytics)
+```
+
+The read routes answer with what was recorded about other people, so they belong
+on a group that requires a session, behind whatever page grant gates the
+consumer's admin surface:
+
+```go
+analytics := api.Group("/analytics")
+analytics.GET("/event", saecho.GetAnalyticsEvents)
+analytics.GET("/session", saecho.GetAnalyticsSessions)
+```
+
+## Uptime status
+
+`getAppStatus(endpoint, slug)` reads the prophet's public status route,
+`GET <endpoint>/api/app/<slug>/status`, with plain `fetch` and no framework, so
+a nimpress page or any web can draw an app's uptime. It resolves to a
+`MonitorStatus`: the app's enabled monitors with `last_checked_at`, `last_ok`
+and their per day `days`, and the open incidents. It throws `ErrNotFound` for
+an unknown app and an `Error` for any other failure.
+
+```ts
+import { getAppStatus } from '@nimling/samna-auth-middleware'
+
+const status = await getAppStatus('https://auth.example.com', 'nimployer')
+for (const monitor of status.monitors) {
+  console.log(monitor.name, monitor.last_ok, monitor.days?.length)
+}
+```
+
+The types `Monitor`, `MonitorCheck`, `MonitorCheckDay`, `MonitorIncident`,
+`MonitorStatus`, `Beat`, `BeatCheck` and `Heartbeat` mirror the Go json. A
+disciple that mounts `saecho.GetUptimeStatus` serves the same shape from its
+own origin, so a page can also read it from there without knowing the prophet.
 
 ## Build and publish
 

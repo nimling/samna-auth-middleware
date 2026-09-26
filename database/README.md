@@ -72,16 +72,16 @@ The role is determined at init time by which init function is called: `init_prop
 Migrations are flyway compatible. Run them in order:
 
 ```
-V0.0__roles.sql              Defines claimius_admin, _writer, _reader, _disciple_client
-V1.0__baseline.sql           All tables, indexes, comments, enums
-V2.1__functions_base.sql     Utilities: composite_id, decompose_id, tree primitives
-V2.2__functions_internal.sql Tree builders, calc helpers, recompute_user_object
-V2.3__functions_access.sql   Trigger functions: calc_object_access, calc_hierarchical_access,
-                             calc_claim_access, emit_sync_event, audit_trigger
-V2.4__functions_external.sql Public surface: get_*, search_objects, claim management,
-                             merge_user, init_*, ensure_app_user
-V3.0__triggers.sql           Attaches trigger functions to internal tables
-VX.0__init.sql               Calls init_claimius_internal()
+V1.0__claimius_roles.sql              Defines claimius_admin, _writer, _reader, _disciple_client
+V1.1__claimius_baseline.sql           All tables, indexes, comments, enums
+V2.1__claimius_functions_base.sql     Utilities: composite_id, decompose_id, tree primitives
+V2.2__claimius_functions_internal.sql Tree builders, calc helpers, recompute_user_object
+V2.3__claimius_functions_access.sql   Trigger functions: calc_object_access, calc_hierarchical_access,
+                                      calc_claim_access, emit_sync_event, audit_trigger
+V2.4__claimius_functions_external.sql Public surface: get_*, search_objects, claim management,
+                                      merge_user, init_*, ensure_app_user
+V3.0__claimius_triggers.sql           Attaches trigger functions to internal tables
+V4.0__claimius_init.sql               Calls init_claimius_internal()
 ```
 
 After Claimius migrations finish, the implementing app runs:
@@ -545,7 +545,6 @@ SELECT claimius.ensure_app_user(
     p_first_name => :first,
     p_last_name  => :last,
     p_user_name  => :user_name,
-    p_user_image => :user_image,
     p_email      => :email
 );
 ```

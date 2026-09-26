@@ -1,8 +1,8 @@
 # Samna Auth Middleware
 
-Go libraries for integrating with the Samna Auth service. Provides JWT middleware, a sync engine for keeping a local copy of auth data, Echo HTTP handlers, a client library for API calls, direct database access, and the canonical SQL schema.
+Go libraries for integrating with the Samna Auth service. The module ships two roles that share one symmetric surface: a prophet, the source of truth that serves the sync feed and the full admin API, and a disciple, a local replica that pulls from the prophet and consumes tokens.
 
-All consuming services run a local PostgreSQL database with the `samna_auth` schema. On startup the sync engine pulls a full snapshot from the auth server, and incremental updates arrive via the sync endpoint. This local copy powers middleware decisions, graph queries, and claim resolution without round trips to the auth server.
+Every consuming service runs a local PostgreSQL database with the `claimius` schema. The prophet holds every app; a disciple mirrors exactly one. This local copy powers middleware decisions, graph queries, and claim resolution without round trips to the auth server.
 
 ## Installation
 
@@ -10,301 +10,168 @@ All consuming services run a local PostgreSQL database with the `samna_auth` sch
 go get github.com/nimling/samna-auth-middleware
 ```
 
+## The two roles
+
+| Role | Holds | Sync | API |
+|------|-------|------|-----|
+| Prophet | Full app row with key and seed material | Serves the snapshot and delta feed | `sam.RegisterEndpoints` mounts the full admin API |
+| Disciple | App identity from the environment | Pulls in the background via `sam.SyncStart` | `sam.RegisterEndpoints` mounts the me and login routes |
+
+A binary is one role. Both roles wire the same four identifiers.
+
 ## Packages
 
-| Package | Description |
-|---------|-------------|
-| `middleware` | Echo middleware for JWT validation, token refresh, and client authentication |
-| `sync` | Pull based sync engine that keeps the local auth database up to date |
-| `echo` | Echo HTTP handlers bridging the client and database layers |
-| `client` | HTTP client for the Samna Auth API (framework agnostic) |
-| `db` | Database layer for direct PostgreSQL access via Bun ORM |
-| `database` | Canonical SQL schema, functions, views, and triggers for `samna_auth` |
-| `utils` | Cookie management, environment helpers, and debug utilities |
+| Package | Prophet import | Disciple import | Role |
+|---------|----------------|-----------------|------|
+| `sdb` | `prophet/sdb` | `disciple/sdb` | Database layer. `sdb.Init(logger)` connects the pool and loads config once. |
+| `echo` | `prophet/echo` | `disciple/echo` | The individual HTTP handlers. |
+| `sam` | `prophet/sam` | `disciple/sam` | `sam.RegisterEndpoints(group)`, and on the disciple `sam.SyncStart(ctx)`. |
+| `smw` | `smw` | `smw` | Middleware, shared by both roles. |
+| `client` | `client` | `client` | HTTP client for the Samna Auth API. |
+| `utils` | `utils` | `utils` | Config loader, cookies, and debug helpers. |
+| `database` | `prophet/database` | `disciple/database` | The canonical `claimius` SQL set for the role. |
+| `uptime` | | `uptime` | The heartbeat reporter. `uptime.Init(logger, opts)` registers the app's `heartbeat` monitor and beats to the prophet. |
 
-## Examples
+## Getting started
 
-| Example | Description | When to use |
-|---------|-------------|-------------|
-| [basic](example/basic) | Minimal setup with middleware, sync, and a single protected route | Starting a new service that needs user authentication |
-| [echo_handlers](example/echo_handlers) | Full API with all handler groups mounted | Building a service that proxies the full auth API |
-| [client_only](example/client_only) | Direct HTTP calls to the auth server without local database | Service to service calls where you already have a bearer token |
+Follow the walkthrough for your role:
 
-Each example has a `.env.example` file. Copy it to `.env` and fill in your values before running.
+- [Prophet](docs/prophet.md)
+- [Disciple](docs/disciple.md)
 
-```bash
-cd example/basic
-cp .env.example .env
-go run main.go
-```
+Then the cross cutting topics:
 
-## Startup Sequence
+- [Sync](docs/sync.md), the disciple pull loop
+- [App scoping](docs/app_scoping.md), `app_id` columns and `app_object` links
+- [Machine clients](docs/clients.md), service to service calls with client credentials
+- [Marshalling](docs/marshalling.md), the JSON shape over the wire
 
-Every service using this library follows the same pattern:
-
-1. Register `sync.PullSnapshot` as the sync function
-2. Call `db.Init()` which connects to PostgreSQL, runs the initial snapshot sync, and retries up to 5 times on failure
-3. Mount the middleware and handlers
-
-```go
-db.RegisterSyncFunc(sync.PullSnapshot)
-db.Init(e.Logger)
-```
-
-The sync endpoint (`saecho.PostSync`) receives incremental updates from the auth server. Mount it so your local database stays current:
-
-```go
-e.POST("/sync", saecho.PostSync)
-```
+Runnable examples live under [example/prophet](example/prophet) and [example/disciple](example/disciple). Each has a `.env.example`; copy it to `.env`, fill it in, and run `go run main.go`.
 
 ## Middleware
 
-The middleware validates requests against the Samna Auth service. It handles JWT token validation, token refresh, and authorization code exchange following OAuth 2.0 and OIDC standards.
+The `smw` package validates requests against the Samna Auth service following OAuth 2.0 and OIDC. Its entrypoints:
 
-### Authentication Flow
+- `smw.AppMiddleware` is internal. It guards the endpoints apps use to reach the prophet, authenticating the app slug and secret and setting the app context.
+- `smw.UserAuthMiddleware(opts)` authenticates browser and bearer users. It checks a bearer token, then a session cookie, then client credentials, and reads the resolved OIDC endpoints from the config that `sdb.Init` loaded. Pass `nil` to take the slug, secret, redirect, and page redirect from the config. Once the actor is known it stamps the request context with the actor's claimius `sa_root_id` and `sa_owner_id` through `nimtel.Organization`, so every span and every log line written with that context carries `samna.sa_root_id` and `samna.sa_owner_id`. A service never calls the stamp itself.
+- `smw.TelemetryMiddleware()` is the OpenTelemetry server span middleware named after the app slug. Mount it once on the echo instance before the auth middleware; the service starts the SDK with `nimtel.Init` at boot and the platform provides the collector through the standard `OTEL_EXPORTER_OTLP_*` variables.
+- `smw.ClientAuthMiddleware()` authenticates service to service callers by their client credentials.
 
-1. Check `Authorization` header for a `Bearer` token
-2. Check `sauth_access_token` cookie if no header present
-3. Validate the token using JWKS, verify issuer and expiration
-4. If valid, set `user_id` and `access_token` in the Echo context
-5. If expired, check for `sauth_auth_code` query parameter and exchange it
-6. If no auth code, attempt refresh using `sauth_refresh_token` cookie
-7. If all fail, return `401 Unauthorized`
+Client credentials arrive as HTTP basic auth or as `client_id` and `client_secret` form values, and the client id becomes the actor, so a machine is authorized by the same claims a human is. [Machine clients](docs/clients.md) covers creating one, granting it a claim, and calling with it.
 
-### User Authentication
+After a successful pass the user id and access token sit in the context:
 
 ```go
-e.Use(middleware.AuthMiddlewareEnv())
+userID := ctx.Get(smw.UserIDKey).(uuid.UUID)
+accessToken := ctx.Get(smw.AccessTokenKey).(string)
 ```
 
-Or with manual configuration:
+## Uptime
+
+The prophet probes every app from outside on its `monitor` rows. The `uptime` package is the inside half: a disciple imports it, calls it once at boot, and from then on the app reports its own health to the prophet on the app key, with the checks it chose to run. Its entrypoints:
+
+- `uptime.Init(logger, opts)` reads the app slug, secret and endpoint from the same config the `client` package uses, registers one monitor named `heartbeat` of kind `heartbeat` for the app if none exists, and starts a goroutine that runs the checks and posts a beat every `opts.Interval`, default sixty seconds. A registration or beat that fails is logged and retried on the next tick; nothing here is fatal. Debug mode disables it the way it disables the sync pull loop.
+- `uptime.Options` carries `Interval`, `Version`, the string reported with every beat, and `Checks`, a list of `uptime.Check{Name, Run}` the app supplies. A check is any `func(ctx context.Context) error`, a database ping being the usual one. A check that returns an error fails the beat and carries its message.
+- `uptime.Stop()` ends the goroutine. `uptime.GetHeartbeat()` returns the app's own last beat, its checks, its version and whether the prophet accepted it.
 
 ```go
-config := &middleware.AuthMiddlewareConfig{
-    ClientSlug:   "myapp",
-    ClientSecret: "your-secret",
-    RedirectURI:  "https://myapp.example.com/callback",
-}
-e.Use(middleware.AuthMiddleware(config))
+uptime.Init(e.Logger, uptime.Options{
+	Version: version,
+	Checks: []uptime.Check{
+		{Name: "database", Run: sdb.Instance().PingContext},
+	},
+})
+defer uptime.Stop()
 ```
 
-### Client Authentication
-
-For service to service calls using client key and secret headers:
+Two handlers in `disciple/echo` give a disciple a view of it without knowing the prophet. `GetUptime` answers with the last `Heartbeat`, and `GetUptimeStatus` proxies the prophet's public status page for the app's own slug, so a page the disciple serves can draw its uptime:
 
 ```go
-e.Use(middleware.Auth(&middleware.AuthOptions{
-    ClientAuth: &middleware.ClientAuthOptions{},
-}))
+api.GET("/uptime", saecho.GetUptime)
+e.GET("/api/uptime/status", saecho.GetUptimeStatus)
 ```
 
-### Combined Authentication
+The typescript package mirrors the types and reads the public status directly with `getAppStatus(endpoint, slug)`, so a page served from anywhere can draw the same view.
 
-`Auth` chains user and client authentication. Client credentials are read per OAuth 2.1: `Authorization: Basic base64(client_id:client_secret)` or form fields `client_id` and `client_secret`. Bearer tokens take precedence; if no bearer token is present, client credentials are evaluated.
+### The prophet contract
 
-```go
-e.Use(middleware.Auth(nil))
-```
+The reporter speaks to three routes under `/api/app/:app_slug` on the prophet, all with the `SAuth-App-Slug` and `SAuth-App-Secret` headers behind `ClientAuthMiddleware`.
 
-### Context Values
+1. `GET /monitor/client` lists the app's monitors. The reporter reads it first and reuses the monitor named `heartbeat` when one exists, so a restart never registers twice.
 
-After successful authentication:
+2. `POST /monitor/client` with `{"name": "heartbeat", "kind": "heartbeat", "interval_seconds": <interval>}` creates it. `heartbeat` is a monitor kind beside `http`, `tcp` and `disciple`. It has no `target`, the scheduler never probes it, and `interval_seconds` is the beat interval the app promised.
 
-```go
-userID := ctx.Get(middleware.UserIDKey).(uuid.UUID)
-accessToken := ctx.Get(middleware.AccessTokenKey).(string)
-```
+3. `POST /monitor/:id/beat/client` with the beat body records one `monitor_check` row with `ok`, `latency_ms` and, when the beat failed, `error` set to the failed checks' messages, and answers with that `MonitorCheck`. The monitor must belong to the calling app and be of kind `heartbeat`.
 
-## Sync
-
-The sync package keeps the local `samna_auth` database in sync with the auth server.
-
-### Initial Snapshot
-
-`PullSnapshot` fetches all current auth data and applies it to the local database. This runs automatically during `db.Init()` when a sync function is registered.
-
-### Incremental Sync
-
-`PullSync` fetches events that occurred after the last applied sequence number. Use this for periodic catchup.
-
-### Sync Endpoint
-
-The `saecho.PostSync` handler receives push events from the auth server. It validates the request using app slug and secret headers, applies the payload, and updates the sequence number.
-
-### Supported Entity Types
-
-`organization`, `location`, `samna_user`, `claim`, `user_claim`, `claim_object`, `client_claim`, `samna_client`
-
-## Echo Handlers
-
-Ready to use HTTP handlers that bridge the `client` and `db` packages. Each handler extracts request metadata from the Echo context and delegates to the appropriate layer.
-
-When `SAUTH_DEBUG_USER_ID` is set, handlers query the database directly instead of calling the auth API.
-
-### Login and Logout
-
-```go
-e.GET("/login", saecho.GetLogin)
-e.GET("/login/:provider", saecho.GetLogin)
-e.GET("/logout", saecho.GetLogout)
-```
-
-### Available Handlers
-
-**User**: `GetUsers`, `GetUser`, `GetUserClaims`, `GetUserConnections`, `PostUser`, `PutUser`, `DeleteUser`, `GetUserApps`, `GetUserApp`, `PutUserApp`
-
-**Organization**: `GetOrganizations`, `GetOrganization`, `GetOrganizationGraph`, `GetOrganizationClaims`, `PostOrganization`, `PutOrganization`, `DeleteOrganization`
-
-**Location**: `GetLocations`, `GetLocation`, `GetLocationClaims`, `PostLocation`, `PutLocation`, `DeleteLocation`
-
-**Claim**: `GetClaimGraph`, `GetClaims`, `GetClaim`, `GetClaimAudit`, `PostClaim`, `PutClaim`, `DeleteClaim`, `PostClaimObject`, `DeleteClaimObject`, `PostClaimUser`, `DeleteClaimUser`
-
-**Me**: `GetMe`, `PutMe`, `GetMeClaims`, `PostMeAsset`, `DeleteMeAsset`, `GetMeRelations`, `GetMeModules`, `GetMeOrganizations`, `GetMeLocations`, `GetMeApps`, `GetMeApp`
-
-**Asset**: `GetAssets`, `GetAsset`, `GetAssetData`, `PostAsset`, `PostAssetUpload`, `PutAsset`, `DeleteAsset`
-
-**Sync**: `PostSync`
-
-## Client
-
-The client library makes HTTP calls to the Samna Auth API. It is framework agnostic and takes `context.Context` and `RequestMetadata`.
-
-```go
-meta := client.RequestMetadata{
-    AccessToken: "bearer-token",
-    RequestID:   "req-123",
-    UserIP:      "127.0.0.1",
-}
-
-body, err := client.GetUsers(ctx, meta)
-if err != nil {
-    log.Fatal(err)
-}
-defer body.Close()
-```
-
-The client reads `SAUTH_ENDPOINT`, `SAUTH_APP_SLUG`, and `SAUTH_APP_SECRET` from environment variables.
-
-### Error Handling
-
-```go
-if errors.Is(err, client.ErrNotFound) {
-    // 404
-} else if errors.Is(err, client.ErrForbidden) {
-    // 403
-} else if errors.Is(err, client.ErrBadRequest) {
-    // 400
+```json
+{
+  "ok": true,
+  "latency_ms": 12,
+  "version": "1.4.2",
+  "checks": [
+    {"name": "database", "ok": true},
+    {"name": "cache", "ok": false, "error": "dial tcp: connection refused"}
+  ]
 }
 ```
 
-## Database
+A beat is a check, so the incident state machine is unchanged: three failed beats open an incident, the first passing beat resolves it. The scheduler adds one rule for the kind: a `heartbeat` monitor whose newest check is older than two intervals is marked with a failed `monitor_check` whose `error` is `missed heartbeat`, so an app that stops beating goes down the same way an app that answers a probe with an error does. The public `GET /status` lists the heartbeat beside the other monitors with its `last_checked_at`, `last_ok` and `days`.
 
-The `db` package provides direct PostgreSQL access via Bun ORM with a singleton pattern.
+## Configuration
 
-### Models
+`sdb.Init` reads every `SAUTH_` variable once and shares it across the module. Your own code never reads a `SAUTH_` variable and never passes one to the library; you set the environment and call `sdb.Init`.
 
-`SamnaUser`, `Organization`, `Location`, `Claim`, `UserClaim`, `ClaimObject`, `SamnaClient`, `AccessClaim`, `ObjectField`, `UserField`, `UserRelation`, `Audit`, `UserObject`, `GraphNode`
+| Variable | Role | Description |
+|----------|------|-------------|
+| `SAUTH_ENDPOINT` | both | Base URL of the Samna Auth server |
+| `SAUTH_APP_SLUG` | both | App identifier slug |
+| `SAUTH_APP_SECRET` | disciple | App secret |
+| `SAUTH_REDIRECT_URI` | disciple | OAuth redirect URI for the login flow |
+| `SAUTH_PAGE_REDIRECT` | disciple | Where the callback lands the browser |
+| `SAUTH_DEBUG_USER_ID` | both | UUID that bypasses authentication |
+| `SAUTH_DEBUG_CLIENTS` | both | JSON map of debug client credentials |
+| `PGHOST` `PGPORT` `PGUSER` `PGPASSWORD` `PGDATABASE` `PGSSLMODE` | both | Database connection |
 
-### Access Levels
+At `sdb.Init` the prophet and disciple resolve the OIDC issuer, token, and jwks endpoints once and log them through the echo logger. A miss disables auth and serves an unavailable response rather than failing startup.
 
-| Level | Name | Value |
-|-------|------|-------|
-| System | `ACCESS_LEVEL_SYSTEM` | 0 |
-| Owner | `ACCESS_LEVEL_OWNER` | 1 |
-| Admin | `ACCESS_LEVEL_ADMIN` | 2 |
-| Write | `ACCESS_LEVEL_WRITE` | 3 |
-| Update | `ACCESS_LEVEL_UPDATE` | 4 |
-| Action | `ACCESS_LEVEL_ACTION` | 5 |
-| Read | `ACCESS_LEVEL_READ` | 6 |
-| Member | `ACCESS_LEVEL_MEMBER` | 7 |
-| Guest | `ACCESS_LEVEL_GUEST` | 8 |
+## Object types
 
-### Graph Queries
+Object types are schema qualified going into and out of the database and schema stripped over JSON and HTTP, so a caller sees `device` while the row stores `public.device`.
 
-Two graph functions query the `samna_auth` schema directly:
+## Debug mode
 
-- `GetOwnerGraph` returns organizations and locations visible to a user at a given access level
-- `GetClaimGraph` returns claims, user claims, users, organizations, locations, and unresolved typed object references for domain objects
+Setting `SAUTH_DEBUG_USER_ID` to a valid UUID makes the middleware skip authentication and set that user id directly. Setting `SAUTH_DEBUG_CLIENTS` enables client credential bypass from a static map. Debug mode also skips the sync pull loop.
 
-Both return `[]GraphNode` where each node carries an id, label, type, and JSONB data payload. Consuming services extend the graph by joining their own domain tables onto the unresolved references.
+## Claimius SQL: prophet and disciple sets
 
-## SQL Schema
+The repo ships the Claimius schema as two complete, role tailored SQL sets, both embedded in the module:
 
-The `database/` directory contains Flyway style migrations for the `samna_auth` PostgreSQL schema.
+- `prophet/database` is the full schema, copied as is from the canonical claimius source. It hosts many apps and scopes them two ways: an `app_id` column on most tables, and `claimius.app_object` links for `organization` and `location`, which carry no `app_id`. It is the source of truth: writes fire calc triggers that materialize `user_object` and emit `sync_event` rows for downstream disciples.
+- `disciple/database` is the same schema with `app_id` removed from every table, index, and function, without `app_object`, and with the functions that no consumer calls removed (`init_prophet`, `init_hybrid`, `merge_user`, `recompute_state`). A disciple mirrors exactly one app, so it needs neither mechanism. Its calc engine still runs in debug mode for standalone local writes, and stays dormant under `replay_mode` while sync applies the relation tables shipped from the prophet.
 
-| File | Description |
-|------|-------------|
-| `V1.0__baseline.sql` | Core tables: `samna_user`, `organization`, `location`, `claim`, `user_claim`, `claim_object`, `samna_client` |
-| `V1.1__functions.sql` | Claim management, recursive tree traversal, inheritance, access control, graph functions |
-| `V1.2__views.sql` | `active_claim`, `active_object`, `active_users` views |
-| `V1.3__triggers.sql` | Timestamp update triggers |
-| `V1.4__init.sql` | Calls `init_auth_views` to register domain tables for claim inheritance |
+Both scoping mechanisms exist only on the prophet. `app_id` is read from the deployment env into `prophet_state` at init. The disciple schema knows nothing about either. [App scoping](docs/app_scoping.md) has the full rules.
 
-## Environment Variables
+### Choosing a role at migrate time
 
-### Required
+A consumer picks its role when it pulls the SQL into its own `database` tree, then migrates with smig:
 
-| Variable | Used by | Description |
-|----------|---------|-------------|
-| `SAUTH_ENDPOINT` | middleware, client, sync | Base URL of the Samna Auth server |
-| `SAUTH_APP_SLUG` | middleware, client, sync | App identifier slug |
-| `SAUTH_APP_SECRET` | middleware, client, sync | App secret for authentication |
-| `SAUTH_REDIRECT_URI` | middleware | OAuth redirect URI for auth code exchange |
+```
+# disciple consumer (e.g. bookable_server)
+go run github.com/nimling/samna-auth-middleware/cmd/sqlsync --role=disciple --out=./database/claimius
 
-### Database
-
-| Variable | Description |
-|----------|-------------|
-| `PGHOST` | PostgreSQL host |
-| `PGDATABASE` | Database name |
-| `PGPORT` | PostgreSQL port |
-| `PGUSER` | Database user |
-| `PGPASSWORD` | Database password |
-| `PGSSLMODE` | SSL mode (`disable`, `require`, etc.) |
-
-### Optional
-
-| Variable | Used by | Description |
-|----------|---------|-------------|
-| `SAUTH_COOKIE_DOMAIN` | utils | Cookie domain for cross subdomain cookies |
-| `SAUTH_DEBUG_USER_ID` | middleware, echo | UUID to bypass authentication (see below) |
-
-## Debug Mode
-
-Setting `SAUTH_DEBUG_USER_ID` to a valid UUID enables two levels of bypass:
-
-**Middleware**: Skips all authentication checks and sets the specified user ID directly in the Echo context. No token validation, no refresh, no code exchange.
-
-**Echo Handlers**: Query the database directly instead of calling the auth API. This allows running handlers without a running auth server as long as the database is available. Graph handlers (`GetOrganizationGraph`, `GetClaimGraph`) query the `samna_auth` graph functions directly. Handlers without a database equivalent return `501 Not Implemented`.
-
-```env
-SAUTH_DEBUG_USER_ID=123e4567-e89b-12d3-a456-426614174000
+# prophet consumer (e.g. samna_auth)
+go run github.com/nimling/samna-auth-middleware/cmd/sqlsync --role=prophet --out=./database/claimius
 ```
 
-Or programmatically:
-
-```go
-devUserID := uuid.MustParse("123e4567-e89b-12d3-a456-426614174000")
-config := &middleware.AuthMiddlewareConfig{
-    AuthorizedUserID: &devUserID,
-}
-e.Use(middleware.AuthMiddleware(config))
-```
+The materialized files land where `database/migrate.yml` already points its claimius step, and `smig up` applies them. Each role package also exposes `prophet.WriteSQL(dir)` and `disciple.WriteSQL(dir)` if a consumer wants to drive the export from Go. Because Go compiles only the imported package, a disciple consumer that imports `.../disciple` never pulls the prophet set, and the reverse holds for a prophet consumer importing `.../prophet`.
 
 ## Testing
 
-```bash
-go test ./...
 ```
-
-The token validation test requires:
-
-```env
-SAUTH_JWKS_URL=http://localhost:3201/api/client/sauth/jwks
-TEST_TOKEN_STRING=<valid JWT token>
-TEST_TOKEN_ISS=http://localhost:3201
+just test
 ```
 
 ## License
 
 This project is licensed under the MIT (Martin Invented This) License.
+</content>

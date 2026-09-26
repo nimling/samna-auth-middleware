@@ -94,8 +94,7 @@ func ValidateAppSecret(seed []byte, secret string, storedHash string) bool {
 }
 
 func hashAppSecret(seed []byte, secret string) string {
-	h := sha256.New()
-	h.Write(seed)
+	h := hmac.New(sha256.New, seed)
 	h.Write([]byte(secret))
 	return hex.EncodeToString(h.Sum(nil))
 }

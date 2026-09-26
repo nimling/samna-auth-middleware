@@ -10,12 +10,14 @@ export interface JWKSLike {
 export async function validateToken(
   tokenString: string,
   expectedIssuer: string,
+  audience: string,
   jwks: JWKSLike
 ): Promise<ClaimUser> {
   const keyset = createLocalJWKSet(jwks as never)
   try {
     const { payload } = await jwtVerify<JWTPayload>(tokenString, keyset, {
-      issuer: expectedIssuer
+      issuer: expectedIssuer,
+      audience
     })
     if (!payload.sub) {
       throw new Error('claims subject is missing')

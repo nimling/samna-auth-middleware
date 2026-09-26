@@ -4,10 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/nimling/samna-auth-middleware/utils"
 	"io"
 	"net/http"
 	"net/url"
-	"os"
 	"strings"
 	"time"
 )
@@ -27,7 +27,7 @@ type OpenIDConfiguration struct {
 }
 
 func GetLogin(ctx context.Context, provider *string) (string, error) {
-	endpoint := os.Getenv("SAUTH_ENDPOINT")
+	endpoint := utils.Cfg().Endpoint
 
 	var path string
 	if provider != nil && len(*provider) > 0 {
@@ -47,27 +47,36 @@ func GetLogin(ctx context.Context, provider *string) (string, error) {
 	}
 
 	q := parsed.Query()
-	q.Set("client_slug", os.Getenv("SAUTH_APP_SLUG"))
+	q.Set("client_slug", utils.Cfg().AppSlug)
 	parsed.RawQuery = q.Encode()
 
 	return parsed.String(), nil
 }
 
-func GetLogout(ctx context.Context) (int, error) {
-	c := newClient()
+func GetLogout(ctx context.Context, accessToken string) (int, error) {
+	endpoint := utils.Cfg().Endpoint
 
-	u, err := joinURL(c.apiURL, "logout")
+	u, err := joinURL(endpoint, "sam/logout")
 	if err != nil {
 		return 0, fmt.Errorf("build url: %w", err)
 	}
 
-	body, err := c.client.Get(ctx, u)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {
-		return 0, err
+		return 0, fmt.Errorf("create request: %w", err)
 	}
-	body.Close()
+	req.Header.Set("SAuth-App-Slug", utils.Cfg().AppSlug)
+	req.Header.Set("SAuth-App-Secret", utils.Cfg().AppSecret)
+	req.Header.Set("Authorization", "Bearer "+accessToken)
 
-	return 200, nil
+	httpClient := &http.Client{Timeout: 3 * time.Second}
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return 0, fmt.Errorf("send request: %w", err)
+	}
+	resp.Body.Close()
+
+	return resp.StatusCode, nil
 }
 
 func GetOpenIDConfiguration(ctx context.Context, configURL string) (*OpenIDConfiguration, error) {
@@ -112,8 +121,10 @@ func postToken(ctx context.Context, tokenURL string, slug string, secret string,
 
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("Accept", "application/json")
-	req.Header.Set("SAuth-App-Slug", slug)
-	req.Header.Set("SAuth-App-Secret", secret)
+	if slug != "" {
+		req.Header.Set("SAuth-App-Slug", slug)
+		req.Header.Set("SAuth-App-Secret", secret)
+	}
 
 	httpClient := &http.Client{Timeout: 3 * time.Second}
 	resp, err := httpClient.Do(req)
@@ -129,19 +140,20 @@ func postToken(ctx context.Context, tokenURL string, slug string, secret string,
 		return nil, fmt.Errorf("auth server returned status %d", resp.StatusCode)
 	}
 
-	var token ResponseToken
-	if err = json.NewDecoder(resp.Body).Decode(&token); err != nil {
+	token, err := DecodeJSON[ResponseToken](resp.Body, nil)
+	if err != nil {
 		return nil, fmt.Errorf("decode response: %w", err)
 	}
 
 	return &token, nil
 }
 
-func PostAuthCode(ctx context.Context, tokenURL string, slug string, secret string, code string, redirectURI string) (*ResponseToken, error) {
+func PostAuthCode(ctx context.Context, tokenURL string, slug string, secret string, code string, redirectURI string, codeVerifier string) (*ResponseToken, error) {
 	form := url.Values{}
 	form.Set("grant_type", "authorization_code")
 	form.Set("code", code)
 	form.Set("redirect_uri", redirectURI)
+	form.Set("code_verifier", codeVerifier)
 	return postToken(ctx, tokenURL, slug, secret, form)
 }
 
@@ -150,4 +162,12 @@ func PostRefreshToken(ctx context.Context, tokenURL string, slug string, secret 
 	form.Set("grant_type", "refresh_token")
 	form.Set("refresh_token", refreshToken)
 	return postToken(ctx, tokenURL, slug, secret, form)
+}
+
+func PostClientCredentials(ctx context.Context, tokenURL string, clientID string, clientSecret string) (*ResponseToken, error) {
+	form := url.Values{}
+	form.Set("grant_type", "client_credentials")
+	form.Set("client_id", clientID)
+	form.Set("client_secret", clientSecret)
+	return postToken(ctx, tokenURL, "", "", form)
 }

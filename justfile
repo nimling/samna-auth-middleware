@@ -4,8 +4,12 @@ set export
 default:
     @just --list
 
+install:
+    go install github.com/nimling/sbump/cmd@latest
+    mv "$(go env GOPATH)/bin/cmd" "$(go env GOPATH)/bin/sbump"
+
 deploy:
-    ../sbump/sbump.sh patch --env APP_VERSION --json ts/package.json@.version --push-version --auto --workflow
+    sbump patch --env APP_VERSION --json ts/package.json@.version --push-version --auto --workflow
 
 build:
     go build ./...
@@ -17,7 +21,11 @@ test target='':
     #!/usr/bin/env bash
     set -e
     if [ -z "{{target}}" ]; then
-        go test ./test/...
+        go test ./...
+        bash test/run.sh
     else
-        go test ./test/{{target}}/...
+        go test ./{{target}}/...
     fi
+
+test-db:
+    bash test/run.sh
