@@ -1590,6 +1590,40 @@ $$ LANGUAGE plpgsql;
 
 COMMENT ON FUNCTION claimius._invalidate_claim_graph_cache() IS 'Trigger function. Drops claim_graph_cache rows affected by writes to user_object, user_users, samna_user, claim, claim_object.';
 
+CREATE OR REPLACE FUNCTION claimius._object_has_type(
+    p_object_type   TEXT,
+    p_object_id     UUID,
+    p_type_ids      UUID[]
+) RETURNS BOOLEAN AS $$
+DECLARE
+    v_has_soft  BOOLEAN;
+    v_matches   BOOLEAN;
+BEGIN
+    IF to_regclass(p_object_type) IS NULL OR NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = split_part(p_object_type, '.', 1)
+          AND table_name   = split_part(p_object_type, '.', 2)
+          AND column_name  = 'type_id'
+    ) THEN
+        RETURN FALSE;
+    END IF;
+
+    SELECT has_sa_deleted_at INTO v_has_soft
+    FROM claimius.table_info
+    WHERE object_type = p_object_type;
+
+    EXECUTE format(
+        'SELECT EXISTS (SELECT 1 FROM %I.%I WHERE id = $1 AND type_id = ANY($2)%s)',
+        split_part(p_object_type, '.', 1), split_part(p_object_type, '.', 2),
+        CASE WHEN v_has_soft IS TRUE THEN ' AND sa_deleted_at IS NULL' ELSE '' END
+    ) USING p_object_id, p_type_ids INTO v_matches;
+
+    RETURN v_matches;
+END;
+$$ LANGUAGE plpgsql STABLE;
+
+COMMENT ON FUNCTION claimius._object_has_type(TEXT, UUID, UUID[]) IS 'Predicate: true when the registered row carries a type_id in the given set. False when the table or its type_id column does not exist on this database.';
+
 -- ----------------------------------------------------------------------------
 -- search
 -- Full text search over accessible objects (anything with a user_object row),
@@ -1755,15 +1789,7 @@ BEGIN
                 AND ii.descendant_type = claimius.user_object.object_type
                 AND ii.descendant_id   = claimius.user_object.object_id
           ))
-          AND (p_type_ids IS NULL OR (
-              claimius.user_object.object_type = 'public.bookable'
-              AND EXISTS (
-                  SELECT 1 FROM public.bookable b
-                  WHERE b.id = claimius.user_object.object_id
-                    AND b.type_id = ANY(p_type_ids)
-                    AND b.sa_deleted_at IS NULL
-              )
-          ))
+          AND (p_type_ids IS NULL OR claimius._object_has_type(claimius.user_object.object_type, claimius.user_object.object_id, p_type_ids))
           AND (best.user_claim_id IS NOT NULL OR claimius.user_object.direct_grant)
 
         UNION ALL
@@ -1816,7 +1842,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius.search(UUID, TEXT, TEXT[], INTEGER, UUID[], UUID[], UUID[], UUID, TEXT, UUID[], INTEGER, INTEGER) IS 'Full text search over accessible objects. Includes claimius.claim rows the user holds, skipped when any subtree, parent, or type filter is set. p_owner_subtree_ids scopes via ownership tree. p_parent_id and p_parent_type scope via location or parenthood tree. p_type_ids restricts bookable rows to those whose type_id is in the set. total_count carries the un-capped match count for pagination. Rows tie-break on object_id so offset pagination tiles without overlap or skip.';
+COMMENT ON FUNCTION claimius.search(UUID, TEXT, TEXT[], INTEGER, UUID[], UUID[], UUID[], UUID, TEXT, UUID[], INTEGER, INTEGER) IS 'Full text search over accessible objects. Includes claimius.claim rows the user holds, skipped when any subtree, parent, or type filter is set. p_owner_subtree_ids scopes via ownership tree. p_parent_id and p_parent_type scope via location or parenthood tree. p_type_ids restricts rows to those whose type_id is in the set. total_count carries the un-capped match count for pagination. Rows tie-break on object_id so offset pagination tiles without overlap or skip.';
 
 GRANT EXECUTE ON FUNCTION claimius.search(UUID, TEXT, TEXT[], INTEGER, INTEGER, INTEGER) TO claimius_disciple_client, claimius_writer, claimius_admin, claimius_reader;
 GRANT EXECUTE ON FUNCTION claimius.search(UUID, TEXT, TEXT[], INTEGER, UUID[], UUID[], UUID[], UUID, TEXT, UUID[], INTEGER, INTEGER) TO claimius_disciple_client, claimius_writer, claimius_admin, claimius_reader;

@@ -943,6 +943,10 @@ BEGIN
 
     v_id := claimius.composite_id(p_user_id::TEXT, p_object_type, p_object_id::TEXT);
 
+    IF to_regclass(p_object_type) IS NULL THEN
+        RETURN;
+    END IF;
+
     SELECT has_sa_deleted_at INTO v_has_soft
     FROM claimius.table_info
     WHERE object_type = p_object_type;
