@@ -41,4 +41,4 @@ Every lookup that returns a granted single object, `MutationAccess`, `GetAccess`
 
 ## Where a call runs
 
-Every access call is one statement, sent as a named prepared statement. A service configured with a standby pool sends reads to it; a read that meets an area to settle is refused by the standby with SQLSTATE `25006` and repeated once on the primary. Writes, `WaitForSeq` reads and the usage flush go to the primary. See [Reads](../reads.md) and [Scaling](../scaling.md).
+Every access call is one statement, sent as a named prepared statement. A service configured with a standby pool sends reads to it. A check never writes and always answers there; a listing that meets an area to settle is refused by the standby with SQLSTATE `25006` and repeated once on the primary. Writes, `WaitForSeq` reads and the usage flush go to the primary. See [Reads](../reads.md) and [Scaling](../scaling.md).

@@ -32,10 +32,10 @@ A check against a central service costs at least one network round trip `r_s` pl
 
 ```
 central = r_s + e_s        claimius = c_r / σ,  + 2 L_r when the reader's pairs are not cached
-c_r = t_s + (2C + D + 5) t_d
+c_r = t_s + (2C + L + a + 4) t_d
 ```
 
-Claimius wins when `c_r / σ < r_s + e_s`. With `e_s` at Zanzibar's published median of 3.0 ms or SpiceDB's p95 of 5.76 ms it holds on any machine and any network. With an ideal central service, `e_s = 0`, it holds whenever the round trip to it exceeds 0.2 ms on a `D2ds_v5` or 0.14 ms on the reference node, which is true of any hop between machines. A central evaluation of a rewrite through `n` levels of usersets costs at least `n` dependent lookups; claimius precomputed that reachability in the closure and the per user index, so its evaluation has no term in the depth of the data.
+Claimius wins when `c_r / σ < r_s + e_s`. With `e_s` at Zanzibar's published median of 3.0 ms or SpiceDB's p95 of 5.76 ms it holds on any machine and any network. With an ideal central service, `e_s = 0`, it holds whenever the round trip to it exceeds 0.2 ms on a `D2ds_v5` or 0.14 ms on the reference node, which is true of any hop between machines. A central evaluation of a rewrite through `n` levels of usersets costs at least `n` dependent lookups; claimius stores that reachability as the up set on each object, so its evaluation reads one row for it and has no term in the depth of the data, and the theory behind the bound, and behind the prices of 2013 and today, is in [Theory](./theory.md).
 
 The tail is the tail of one Postgres under the M/M/c queue of [Scaling](./scaling.md), which with exponential service times, a pessimistic assumption for a fixed plan, puts the p95 time in system at 5.5 service times on two threads at `ρ = 0.7` and 3.0 on sixty four at `ρ = 0.85`:
 
@@ -80,12 +80,12 @@ A tuple store writes one tuple per relation: a claim bound to a node and granted
 
 ```
 write:                 r_db + c_w / σ + L_c, 5.2 ms on a D2ds_v5, 1.65 ms on the reference node
-first check of u:      one pair, (t + (C + D + 1) t_d) / σ, about 0.1 ms
+first check of u:      c_r / σ, evaluated from the sources, no settle
 first listing of u:    A_u t / σ, the reader's own slice
 in all:                U_a A t, by readers and the drain, once per database that serves the app's reads
 ```
 
-The write is the same order of work as a tuple store's, and a check after it costs one pair whatever the reach of the binding. What claimius pays that a tuple store does not is the materialized listing, `A_u t` once per reader, which a tuple store pays on every enumeration instead. Claimius wins when a listing is read more than once between changes to its slice.
+The write is the same order of work as a tuple store's, and a check after it costs its evaluation, whatever the reach of the binding. What claimius pays that a tuple store does not is the materialized listing, `A_u t` once per reader, which a tuple store pays on every enumeration instead. Claimius wins when a listing is read more than once between changes to its slice.
 
 ## Availability
 

@@ -18,7 +18,7 @@ lastUpdated: true
 
 3. The claims the user holds are searched by name and description beside the objects, unless a subtree or parent filter is set.
 
-4. `owner_subtree_ids` scopes to everything under given organizations, and `parent_id` with `parent_type` to everything under a location or a parenthood node, each one `inheritance_info` probe per candidate.
+4. `owner_subtree_ids` scopes to everything under given organizations, and `parent_id` with `parent_type` to everything under a location or a parenthood node, each a membership test on the candidate's up set in its `object_info` row, which the candidate already reads for its text.
 
 5. Rows are ordered by `ts_rank × (1 + ln(1 + score))`, with `score` the usage score of [Usage](./usage.md), then by `object_id`, so offset paging tiles without overlap.
 

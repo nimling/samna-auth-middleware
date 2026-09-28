@@ -25,7 +25,7 @@ A request for the page after `seq` is the disciple's proof that it applied every
 
 2. It then fetches pages after the cursor. A page is applied in one transaction under `replay_mode`: every payload upserted or deleted by primary key with `app_id` stripped, the claim areas each claim, binding and grant moves raised in `access_diff`, and the cursor moved, all together. One commit per page, whatever its size.
 
-3. Between pulls the loop drains outstanding `access_diff` areas in transactions of about 1,000 pairs, the slices of the most recently active holders first, so a disciple's reads rarely meet an area the feed raised; see [Materialization](../materialization.md#the-settle-as-a-queue).
+3. Between pulls the loop drains outstanding `access_diff` areas in transactions of about 1,000 pairs, the slices of the holders who pass the drain rule, most recently active first, so a disciple's listings rarely meet an area the feed raised; see [Materialization](../materialization.md#the-settle-as-a-queue).
 
 4. It pulls again as soon as a page is applied. A pull that finds nothing is held open by the prophet, which listens on its feed channel and answers the moment an event of the app commits, or after 25 s with an empty page. A failure doubles the delay up to 30 s.
 
@@ -35,6 +35,6 @@ A snapshot upserts; it never deletes a row the prophet did not send. In debug mo
 
 ## Cost
 
-A page of `n` events costs `n` upserts, the closure edges of its hierarchy rows, one area row per claim it moves, and one commit. With source rows only on the feed, `n` is the number of source changes of the app since the last pull, independent of how many users they reach.
+A page of `n` events costs `n` upserts, the up set rows of its hierarchy rows, one area row per claim it moves, and one commit. With source rows only on the feed, `n` is the number of source changes of the app since the last pull, independent of how many users they reach.
 
 The held pull costs the prophet one parked goroutine per disciple and one `LISTEN` connection per process, and replaces up to ten pulls a second per active disciple and a wait of up to 15 s after an idle period with one pull per page and a wait of half a round trip, the answer's way back. Throughput, staleness, catch up and the page size are derived in [Sync](../sync.md#the-feed-as-a-pipeline).

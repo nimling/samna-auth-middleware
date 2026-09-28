@@ -2,29 +2,29 @@
 layout: doc
 title: Materialization
 description: The per user access index user_object, the per object row object_info, how a write records an area in access_diff, how each reader settles its own slice of it, what each step costs, and why claimius is built this way.
-tags: user_object, object_info, user_users, access_diff, reconcile_if_pending, settle, slice, recompute_user_object, on demand
+tags: user_object, object_info, user_users, access_diff, reconcile_if_pending, settle, slice, drain, raise_count, recompute_user_object, on demand
 lastUpdated: true
 ---
 
 # Materialization
 
-Claimius stores the access relation of [Types](./types.md) per user. A check is then one primary key probe and a listing one index range, whatever the shape of the grants behind it. The work of keeping that index true is split in two: a write records what it changed and settles nothing it did not write; the reader who needs the change settles its own part of it.
+Claimius stores the access relation of [Types](./types.md) per user for the reads that enumerate it. A listing is then one index range, whatever the shape of the grants behind it. A check enumerates nothing: it is evaluated from the grants, the bindings and the object's up set in one statement, and reads no stored access at all; see [Reads](./reads.md). The work of keeping the per user index true is split in two: a write records what it changed and settles nothing it did not write; the reader who lists the change settles its own part of it.
 
 ## The tables
 
 | Table | One row per | Holds |
 |---|---|---|
 | `user_object` | user, app, object | `sa_access`, `grants`, `scope`, `direct_grant`, and the usage counters `used_count`, `last_used_at` |
-| `object_info` | object | What every user sees the same: `sa_owner_id`, `sa_location_id`, `sa_root_id`, `sa_name`, `sa_description`, `sa_link`, `search_vector` |
+| `object_info` | object | What every user sees the same: `sa_owner_id`, `sa_location_id`, `sa_root_id`, `sa_created_by`, `sa_name`, `sa_description`, `sa_link`, `search_vector`, and the up set `owner_ids`, `location_ids`, `parent_ids` |
 | `user_users` | app, viewer, target | That two users share an object, `sharing_object_count`, first and last time |
 | `access_diff` | app and area, and a reader's marker on it | An area whose rows no longer reflect their inputs, and which readers have settled their slice of it |
 | `user_activity` | user, app | `last_used_at`, the latest use the usage flush saw, which orders the drain |
 
-The primary key of `user_object` is `(user_id, app_id, object_type, object_id) INCLUDE (sa_access)`. A check probes it with all four values, a listing reads the reader's range of it, and the mask test of both reads the included column. `user_object_id` in an answer is `composite_id(app_id, user_id, object_type, object_id)`, computed, not stored. `idx_user_object_object (object_id, object_type)` is the one other index, the members of an object.
+The primary key of `user_object` is `(user_id, app_id, object_type, object_id) INCLUDE (sa_access)`. A listing reads the reader's range of it and tests the mask on the included column; the usage flush addresses a pair by all four values. `user_object_id` in an answer is `composite_id(app_id, user_id, object_type, object_id)`, computed, not stored. `idx_user_object_object (object_id, object_type)` is the one other index, the members of an object.
 
 `object_info` is keyed by `(object_type, object_id)` and written by the calc trigger in the transaction of the object's own write. Its search vector is under a GIN index, one entry per object.
 
-`grants` is the array of `{claim_id, access, scope, cascaded_from, tree_type}` that produced the row, the provenance a check turns into an actor token.
+`grants` is the array of `{claim_id, access, scope, cascaded_from, tree_type}` that produced the row, the provenance a listing turns into an actor token per row.
 
 None of these is written by application code. Access changes by changing grants.
 
@@ -54,23 +54,23 @@ An area is the smallest description of what a write changed, keyed on what chang
 | `claim`, `claim_object` | Nothing | `kind = 'claim'` on the claim, and on the linked claim for a composition link |
 | `user_claim` | Nothing | `kind = 'claim'` on the claim with `user_id` the assignee: the assignee's slice |
 
-The id of an area is deterministic on the area, `composite_id('object', app, type, id)`, `composite_id('claim', app, claim)` or `composite_id('claim', app, claim, user)`, so repeated changes collapse into one outstanding row with `ON CONFLICT DO UPDATE`, which moves `sa_updated_at`. Every write is constant in the number of users and in the reach of the claim it touches.
+The id of an area is deterministic on the area, `composite_id('object', app, type, id)`, `composite_id('claim', app, claim)` or `composite_id('claim', app, claim, user)`, so repeated changes collapse into one outstanding row with `ON CONFLICT DO UPDATE`, which moves `sa_updated_at` and adds one to `raise_count`. Every write is constant in the number of users and in the reach of the claim it touches.
 
-## Reads settle their own slice
+## Listings settle their own slice
 
-Every `get_*` computes the ids of the areas it targets and probes `access_diff` once with them.
+Every listing computes the ids of the areas it targets and probes `access_diff` once with them.
 
-1. A single object read, `get_access`, `get_direct_access`, `mutation_access`, `resolve_access`, targets the object areas of the object and of its ancestors, found through `idx_inheritance_info_descendant`, and the claim areas of the claims the reader holds, whole or sliced to the reader.
+1. A listing of one type, `get_objects`, `get_organizations`, `get_locations`, and `ObjectWhere`, targets the object areas of that type and the reader's claim areas.
 
-2. A listing of one type, `get_objects`, `get_organizations`, `get_locations`, targets the object areas of that type and the reader's claim areas.
+2. `search` and the graphs target the reader's claim areas and the object areas under the reader's anchors.
 
-3. `search` and the graphs target the reader's claim areas and the object areas under the reader's anchors.
+3. `get_users`, and the shared visibility branch of `get_user_access` that reads `user_users`, target the reader's claim areas.
 
-The probe is one `= ANY` scan of the `access_diff` primary key with `2C + D + 1` ids for `C` grants and depth `D`, the whole area and the reader's slice of it for each claim, and one per ancestor: a one level index, measured 0.30 ms for the older two step form with 771 areas outstanding in the app. When it finds nothing, and that is the common case, the read answers in the same statement. When it finds both the whole area of a claim and the reader's slice of it, one settle covers both and writes the marker of each.
+The probe is one `= ANY` scan of the `access_diff` primary key with `2C` ids for `C` grants, the whole area and the reader's slice of it for each claim, and one range of `(app_id, object_type, object_id)` for the object areas: one level indexes, measured 0.30 ms for the older two step form with 771 areas outstanding in the app. When it finds nothing, and that is the common case, the listing answers in the same statement. When it finds both the whole area of a claim and the reader's slice of it, one settle covers both and writes the marker of each.
 
 When it finds an area, the reader settles its own slice of it and nothing else: its pairs for the objects of the area. It records that in a marker, an `access_diff` row with `kind` of the area, `user_id` the reader, id `composite_id(area id, user)` and `sa_updated_at` copied from the area as it read it. A later read finds the marker at the same `sa_updated_at` and settles nothing; a write that raised the area again moved `sa_updated_at`, so the next read settles again.
 
-A single object read settles less than its slice. `get_access`, `get_direct_access`, `mutation_access` and `resolve_access` answer one pair, so when they meet an area they settle the reader's pair for the target object alone, from the object's `D + 1` ancestors and the reader's `C` grants, and write no marker: the slice stays outstanding for the reader's next listing or the drain. The cost is `t + (C + D + 1) t_d` whatever the width of the area, where settling the slice would cost `A_u t`: for a reader under a new binding over 20,000 objects, about 0.1 ms on a `D2ds_v5` instead of 0.69 s. The settle of the slice is `ON CONFLICT ... WHERE ... IS DISTINCT FROM`, so the pair settled first is not written again.
+A check settles nothing. `get_access`, `get_direct_access`, `mutation_access` and `resolve_access` evaluate the pair from its sources with the same `_build_grants_for_object` the settle uses, so a check is current the moment a write commits, costs `2C + L + a + 4` descents whether or not an area is outstanding, and leaves the slice for the reader's next listing or the drain. Why the evaluation is cheaper than proving a stored pair current is Result 4 of [Theory](./theory.md).
 
 1. Two readers of one area settle their own slices in parallel; they share no row.
 
@@ -78,11 +78,11 @@ A single object read settles less than its slice. `get_access`, `get_direct_acce
 
 3. The marker records the `sa_updated_at` read at the start of the settle, never the time it ends, so a change committed during a settle under read committed is caught by the next read.
 
-The drain settles the slices no read has reached, off the request path, on the database that serves the reads of the app. A disciple drains between pulls. A prophet drains, on the scheduled run that also calls `trim_sync_event`, the apps it serves reads for: its own apps, and any app with no consumer in contact in `prophet_state`. An app whose disciple is in contact is read on the disciple, so its areas on the prophet are settled only on demand, by the check of a routed write reaching the actor's slice. The drain takes outstanding areas with `FOR UPDATE SKIP LOCKED`, orders their slices by the latest use of the holder in `user_activity`, most recent first, settles them set based with `_settle_object_diff` and `_settle_claim_diff` in transactions of about 1,000 pairs, and deletes the area and its markers when the area's `sa_updated_at` is still the one it read. Why each of these, in numbers, is under [The settle as a queue](#the-settle-as-a-queue).
+The drain settles, off the request path and on the database that serves the reads of the app, the slices a holder is likely to list before the area is raised again. A disciple drains between pulls. A prophet drains, on the scheduled run that also calls `trim_sync_event`, the apps it serves reads for: its own apps, and any app with no consumer in contact in `prophet_state`. An app whose disciple is in contact is read on the disciple, so its areas on the prophet are settled only by a listing made on the prophet. The drain takes outstanding areas with `FOR UPDATE SKIP LOCKED` and takes a holder's slice when the holder's read rate is at least the area's raise rate, `1 / (now − last_used_at) ≥ raise_count / (now − sa_created_at)`, from `user_activity` and the area row; it orders those slices by the latest use of the holder, most recent first, settles them set based with `_settle_object_diff` and `_settle_claim_diff` in transactions of about 1,000 pairs, and deletes the area and its markers when the area's `sa_updated_at` is still the one it read and no holder's slice is left outstanding. A slice the drain does not take waits for its holder's own next listing. Why each of these, in numbers, is under [The settle as a queue](#the-settle-as-a-queue) and Result 6 of [Theory](./theory.md).
 
 ## Settling is set based
 
-`_settle_object_diff` and `_settle_claim_diff` compute every `(user, object)` row of a slice in one statement: the holders of the area's claims, the reader alone on the read path, joined to the area's objects through `inheritance_info`, grants aggregated per pair, denies subtracted by the formula of [Denials](./denials.md), and one `INSERT ... ON CONFLICT (user_id, app_id, object_type, object_id) DO UPDATE ... WHERE ... IS DISTINCT FROM` into `user_object`. Rows whose access vanished are deleted in the same statement. The update sets the access columns only and never the usage counters. The `user_users` increments of the pairs that entered and left are aggregated per `(viewer, target)` in the same statement before they are written; see [Users](./users.md).
+`_settle_object_diff` and `_settle_claim_diff` compute every `(user, object)` row of a slice in one statement: the holders of the area's claims, the reader alone on the read path, joined to the area's objects through the posting lists of `idx_object_info_ancestors`, grants aggregated per pair by `_build_grants_for_object`, denies subtracted by the formula of [Denials](./denials.md), and one `INSERT ... ON CONFLICT (user_id, app_id, object_type, object_id) DO UPDATE ... WHERE ... IS DISTINCT FROM` into `user_object`. Rows whose access vanished are deleted in the same statement. The update sets the access columns only and never the usage counters. The `user_users` increments of the pairs that entered and left are aggregated per `(viewer, target)` in the same statement before they are written; see [Users](./users.md).
 
 Measured with the pair carrying object fields: one statement settled 27,358 pairs in 522 ms, 0.019 ms per pair. Dynamic SQL on the registered table, the `table_info` lookups and the grant aggregation are paid once per slice, not once per pair. The narrow pair writes three heap and index entries where that measurement wrote eleven, so `t` falls toward 6 µs; the tables below keep the measured 0.019 ms.
 
@@ -125,21 +125,21 @@ On a `D2ds_v5` with no other load that is 26 API first writes a second at `k = 3
 T_d = B k Ā t / (φ K)
 ```
 
-For a hundred such writes, 90,000 pairs, at `φ = 0.5`: 12.7 s on a sustained `B2ms`, 5.0 s on a `D2ds_v5`, 0.11 s on the reference node, and a third of each at `t = 6 µs`. A holder is fresh at the earlier of its own first read and the moment the drain reaches its slice. A holder whose first read is a check pays one pair; one whose first read is a listing pays its slice, `A_u t / σ`, 10 ms for 300 objects on a `D2ds_v5`, and the drain then skips that slice, because the marker is already there.
+For a hundred such writes, 90,000 pairs, at `φ = 0.5`: 12.7 s on a sustained `B2ms`, 5.0 s on a `D2ds_v5`, 0.11 s on the reference node, and a third of each at `t = 6 µs`. A holder is fresh at the earlier of its own first read and the moment the drain reaches its slice. A holder whose first read is a check pays nothing, because a check evaluates from the sources; one whose first read is a listing pays its slice, `A_u t / σ`, 10 ms for 300 objects on a `D2ds_v5`, and the drain then skips that slice, because the marker is already there.
 
 ### Why on demand is the right shape
 
 1. The writer's latency and lock time are constant, `c_w / σ + L_c`, where settling in the write costs `k A t / σ` more with every settled pair locked to commit: 31 ms more at `k = 3`, `A = 300` on a `D2ds_v5`, 2.1 s over 20,000 objects.
 
-2. A check waits for one pair and a listing for the reader's own slice, never the area: `1 ≤ A_u ≤ A < U_a A` for any area with two holders.
+2. A check waits for no settle and a listing for the reader's own slice, never the area: `A_u ≤ A < U_a A` for any area with two holders.
 
 3. Repeated raises collapse. An area raised `m` times before it is settled is settled once, because its id is deterministic and the raise is an `ON CONFLICT` update. Settling in the write would pay `m` times.
 
-4. The total is the same as settling eagerly, `U_a A t`, and never more, so none of the above is bought with extra work.
+4. The total is at most that of settling eagerly, `U_a A t`, and less by every slice whose holder neither lists it nor passes the drain rule before the next raise, so none of the above is bought with extra work.
 
 ### Which slice the drain takes first
 
-A slice `j` of processing time `p_j = A_j t` whose holder reads at rate `r_j` and is drained at time `C_j` costs that holder an expected wait of about `r_j C_j p_j`: the chance the read comes first, times the settle it then pays. The total expected wait `Σ r_j p_j C_j` is a weighted completion time, and it is least when slices are taken in decreasing order of `(r_j p_j) / p_j = r_j` ([Smith's rule, weighted shortest processing time](https://en.wikipedia.org/wiki/Single-machine_scheduling#Minimizing_the_sum_of_weighted_completion_times)). The width of the slice cancels. The read rate of a holder is estimated by its latest use, so the drain takes the slices of the most recently active holders first, from `user_activity`, one row per user and app holding the latest `last_used_at` the usage flush wrote for that user. Holders who have not been seen for a long time are drained last, when nothing else waits.
+A slice `j` of processing time `p_j = A_j t` whose holder reads at rate `r_j` and is drained at time `C_j` costs that holder an expected wait of about `r_j C_j p_j`: the chance the read comes first, times the settle it then pays. The total expected wait `Σ r_j p_j C_j` is a weighted completion time, and it is least when slices are taken in decreasing order of `(r_j p_j) / p_j = r_j` ([Smith's rule, weighted shortest processing time](https://en.wikipedia.org/wiki/Single-machine_scheduling#Minimizing_the_sum_of_weighted_completion_times)). The width of the slice cancels. The read rate of a holder is estimated by its latest use, so the drain takes the slices of the most recently active holders first, from `user_activity`, one row per user and app holding the latest `last_used_at` the usage flush wrote for that user. A holder whose read rate is below the area's raise rate is not drained at all: a settle made for it is more likely to be overwritten by the next raise than read, Result 6 of [Theory](./theory.md).
 
 ### The batch
 
@@ -157,7 +157,7 @@ A drain run that finds nothing costs one statement, `t_s / σ`, about 0.1 ms: ru
 
 ## What the index costs to hold
 
-`user_object` holds `Σ_u V_u` rows for users `u` reaching `V_u` objects each. At about 350 bytes a pair with its two indexes, 10,000 users each reaching 2,000 objects is 20 million rows and about 7 GB; `object_info` holds one row per object, a few hundred bytes each. This is the price of a check being one probe, and it is the trade claimius makes: storage grows with users times reach, every read is an index lookup, and no read ever evaluates a tree. When the index outgrows memory the ceiling moves from CPU to IOPS; see [Scaling](./scaling.md).
+`user_object` holds `Σ_u V_u` rows for users `u` reaching `V_u` objects each. At about 350 bytes a pair with its two indexes, 10,000 users each reaching 2,000 objects is 20 million rows and about 7 GB; `object_info` holds one row per object, a few hundred bytes each. This is the price of a listing being one index range, and it is the trade claimius makes: storage grows with users times reach, a listing never evaluates a tree, and a check evaluates only the bounded up set of one object. Why that trade holds at the prices of 2013 and of today is Result 9 of [Theory](./theory.md). When the index outgrows memory the ceiling moves from CPU to IOPS; see [Scaling](./scaling.md).
 
 ## Why claimius is built this way
 

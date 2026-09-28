@@ -66,7 +66,7 @@ Anyone can host a prophet or a disciple, and prophets mirror each other's apps, 
 
 2. Writes of one app are bounded by its home prophet, `ρ K_p / c_w`: 401 API first writes a second on a `D2ds_v5`, 22,700 on the reference node. Federation adds write capacity by adding homes, `Σ_h ρ K_h / c_w`, never by splitting one app's writes between prophets, because one home decides every shared row of its app.
 
-3. The settle of a write is paid where the app is read. A disciple settles its app; the prophet settles only the apps it serves reads for, and for a disciple's app only the slices of the actors whose routed writes it checks. A write therefore costs its settle once in the network, not once per database holding the app.
+3. The settle of a write is paid where the app is read. A disciple settles its app; the prophet settles only the apps it serves reads for, and for a disciple's app only the slices listed on the prophet itself; the check of a routed write evaluates from the sources and settles nothing. A write therefore costs its settle once in the network, not once per database holding the app.
 
 4. The feed costs the prophet `s_e` per delivered event, `K / s_e` deliveries a second, 137,500 on a `D2ds_v5`. At that server's write ceiling, six events a write and fan out three, the feed takes 5 % of it. Fan out never binds before writes do.
 
@@ -84,7 +84,7 @@ The ceiling of the network is therefore per app, the write rate of its home prop
 
 ### Availability by deployment shape
 
-With independent failures, a request succeeds when every component on its path is up. `A_api` is the service tier, `A_db` a database, `A_net` a link, `p` the share of reads that find no area to settle, `R` standbys.
+With independent failures, a request succeeds when every component on its path is up. `A_api` is the service tier, `A_db` a database, `A_net` a link, `p` the share of reads that settle nothing, every check and the listings that find no area, `R` standbys.
 
 | Shape | Read | Shared write |
 |---|---|---|

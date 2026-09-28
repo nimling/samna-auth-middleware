@@ -2,7 +2,7 @@
 layout: doc
 title: Storage
 description: Row widths and sizes of the claimius tables, fill factors, the indexes each table carries, vacuum settings for the tables that churn, and how claimius fits the connection budget.
-tags: storage, fillfactor, autovacuum, index, user_object, inheritance_info, access_diff, sync_event, connection pool
+tags: storage, fillfactor, autovacuum, index, user_object, object_info, access_diff, sync_event, connection pool
 lastUpdated: true
 ---
 
@@ -15,8 +15,7 @@ Measured on the benchmark data set: 782 organizations, 1,000 users, 5,012 grants
 | Table | Rows | Bytes per row, measured | Bytes per row, designed | Grows with |
 |---|---|---|---|---|
 | `user_object` | 393,908 | 606, and 144 more in the pair's inverse row | about 250 with the usage counters, 350 with its two indexes | Users times reach, `Σ_u V_u` |
-| `object_info` | one per object, 20,782 | | about 300 with its GIN entry | Objects, `O` |
-| `inheritance_info` | 142,743 | about 130 with its two covering indexes | the same | Rows times depth, `N(D̄ + 1)` |
+| `object_info` | one per object, 20,782 | | about 450 with its GIN entries and its up set, `3 × 24 + 16 a` bytes of arrays for `a` ancestors | Objects, `O` |
 | `user_users` | 111,472 | about 120 | the same | Pairs of users sharing an object |
 | `access_diff` | 0 to thousands | about 100 | the same, and one marker per reader of an outstanding area | Outstanding areas, drained within seconds |
 | `sync_event` | Source changes over the trim interval | the row as jsonb, about 500 | the same | Writes |
@@ -28,8 +27,7 @@ The measured `user_object` row was wide because of what every user of an object 
 | Table | Indexes |
 |---|---|
 | `user_object` | Primary key `(user_id, app_id, object_type, object_id) INCLUDE (sa_access)`; `idx_user_object_object (object_id, object_type)` |
-| `object_info` | Primary key `(object_type, object_id)`; `(sa_owner_id, sa_name, object_id)`; `(sa_root_id)`; `(sa_location_id, sa_name, object_id)` partial; GIN on `search_vector` |
-| `inheritance_info` | Primary key; the descendant and ancestor covering indexes |
+| `object_info` | Primary key `(object_type, object_id)`; `(sa_owner_id, sa_name, object_id)`; `(sa_root_id)`; `(sa_location_id, sa_name, object_id)` partial; GIN on `search_vector`; `idx_object_info_ancestors`, GIN on `owner_ids || location_ids || parent_ids` |
 | `access_diff` | Primary key `id`; `(app_id, object_type, object_id) WHERE kind = 'object'`; `(app_id, claim_id, user_id) WHERE kind = 'claim'` |
 | `sync_event` | Primary key `seq`; `(app_id, seq)`; BRIN on `written_at` |
 
@@ -44,8 +42,7 @@ Bytes per unit of the designed rows, heap and indexes, from the widths above and
 | Table | Grows with | Bytes per unit |
 |---|---|---|
 | `user_object` | pairs `P = Σ_u V_u = O Ū_o` | 350 |
-| `object_info` | objects `O` | 300 |
-| `inheritance_info` | edges `O (D̄ + 1)` | about 480: 100 heap, 120 primary key, 130 for each covering index |
+| `object_info` | objects `O` | 450: 300 for the rendering and text, 150 for the up set and its postings at `a = 5` |
 | `user_users` | pairs of users sharing an object, `U × Ū_seen`, at most `U²` | 466, measured |
 | `user_claim` | grants `G` | about 400, measured 443 with the `sa_deleted_at` index that goes |
 | `samna_user` | users `U` | 456, measured |
@@ -53,18 +50,17 @@ Bytes per unit of the designed rows, heap and indexes, from the widths above and
 | `audit` | `λ_a × retention` | 330 |
 | `access_diff` | outstanding areas, at most the source rows | about 100 |
 
-A year's growth is the sum of these over what the year adds. The pairs dominate: a year adding 10,000 users who each reach 2,000 objects, 200,000 objects at depth 4, 50,000 grants and 100 visible users each is 7.0 GB of `user_object`, 0.48 GB of closure, 0.47 GB of `user_users`, 0.06 GB of `object_info` and 0.02 GB of grants.
+A year's growth is the sum of these over what the year adds. The pairs dominate: a year adding 10,000 users who each reach 2,000 objects, 200,000 objects at depth 4, 50,000 grants and 100 visible users each is 7.0 GB of `user_object`, 0.47 GB of `user_users`, 0.09 GB of `object_info` with the up set of every object, and 0.02 GB of grants. The up set costs 150 bytes an object where a closure table of one row per ancestor pair costs 2,400; see Result 3 of [Theory](./theory.md).
 
 What must stay in memory is what a read touches, and each index leaves memory at its own threshold. With `E` the cache of a machine, 4 GiB on the Azure servers and 183 GiB on the reference node:
 
 | Index or table | Touched by | Leaves memory when | Azure, `E` = 4 GiB | Reference, 183 GiB |
 |---|---|---|---|---|
-| `user_object` primary key and heap | Every check and listing of an active user | `U_act × V̄ × 350 B > E` | 12 million pairs: 6,100 active users at `V̄ = 2,000` | 560 million pairs: 280,000 active users |
-| `idx_inheritance_info_descendant` | Every check, `D + 1` entries of the object | `O (D̄ + 1) × 130 B > E` | 6.6 million objects at depth 4 | 300 million |
-| `object_info` | Listings, search, graphs | `O × 300 B > E` | 14 million objects | 650 million |
+| `user_object` primary key and heap | Every listing of an active user | `U_act × V̄ × 350 B > E` | 12 million pairs: 6,100 active users at `V̄ = 2,000` | 560 million pairs: 280,000 active users |
+| `object_info` | Every check, and listings, search, graphs | `O × 450 B > E` | 9.5 million objects | 437 million |
 | `user_users` | `get_users` and the settle's increments, never a check | `U × Ū_seen × 466 B > E` | 3,000 users all sharing one object | 20,000 |
 
-The per user index leaves first, and only for the active users: a user who does not read has pairs on disk that no read touches, and the primary key keeps a user's pairs on `⌈V_u / 87⌉` contiguous leaves, so the first read of a returning user costs that many reads and the rest of the session is cached. Past the threshold a check costs two random reads, and the ceiling is `I / 2` of [Scaling](./scaling.md). `user_users` grows with the square of the users who share objects; it sits off the check path, so outgrowing memory slows `get_users` and the settle's increments, not access.
+The per user index leaves first, and only for the active users: a user who does not read has pairs on disk that no read touches, and the primary key keeps a user's pairs on `⌈V_u / 87⌉` contiguous leaves, so the first read of a returning user costs that many reads and the rest of the session is cached. A check never reads the per user index: it reads `object_info` and the bindings, which are shared by every user and leave memory only at the object counts of the table above, and a check that misses them costs two random reads, the ceiling `I / 2` of [Scaling](./scaling.md). `user_users` grows with the square of the users who share objects; it sits off the check path, so outgrowing memory slows `get_users` and the settle's increments, not access.
 
 ## Fill factor and heap only updates
 

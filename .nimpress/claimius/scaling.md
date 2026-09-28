@@ -45,7 +45,7 @@ The calibration core is one performance core of the Apple M3 Pro laptop the benc
 | `t_s`, one client statement: protocol, parse, plan, executor | 60 µs | Measured: the `user_object` primary key probe as one statement took 0.066 ms, of which the descent and two tuples are 2.7 µs |
 | `t_i`, one statement inside PL/pgSQL with a cached plan | 20 µs | Calibrated: a check measured 0.30 to 0.35 ms on the server, and the model puts eight inner statements in it |
 | `t`, one settled pair, set based | 19 µs, about 6 µs on the narrow pair | Measured: 27,358 pairs in 522 ms; the narrow pair writes 3 heap and index entries where the measurement wrote 11 |
-| `c_r`, a check | 0.11 ms | `t_s + (2C + D + 5) t_d` at `C = 5`, `D = 4`, below |
+| `c_r`, a check | 0.11 ms | `t_s + (2C + L + a + 4) t_d` at `C = 5`, `L = 0`, `a = 4`, below |
 | `c_w`, the API first write: a claim, a binding, `k = 3` grants | 1.2 ms | Estimate: about 30 trigger statements at `t_i` and 79 index entries |
 | `a_e`, one feed event applied on a disciple | 80 µs | Estimate: an upsert and its trigger, four inner statements at `t_i` |
 | `s_e`, one feed event served by a prophet | 5 µs | Estimate: `1/204` of a leaf, `1/16` of a heap page, 3 µs of JSON encoding |
@@ -124,7 +124,6 @@ A B-tree page is 8,192 bytes with a 24 byte header and a 16 byte special area; a
 |---|---|---|---|---|---|
 | `user_object` primary key `(user_id, app_id, object_type, object_id) INCLUDE (sa_access)` | 84 B | 87 | 94 | 3 | 4 |
 | `idx_user_object_object (object_id, object_type)`, deduplicated | measured 807 per page | 807 | 10 | 2 | 3 |
-| `idx_inheritance_info_descendant`, covering | 116 B | 63 | 130 | 3 | 4 |
 | `idx_user_claim_user_app (user_id, app_id)` | 44 B | 167, more with deduplication | 49 | 2 | 3 |
 | `idx_sync_event_app_seq (app_id, seq)` | 36 B | 204 | 40 | 2 | 3 |
 | `access_diff` primary key | 28 B | 262 | 31 | 1 | 1 |
@@ -133,11 +132,11 @@ An index with `INCLUDE` columns never deduplicates ([Deduplication](https://www.
 
 ## Cost per operation
 
-Variables: users `U`, objects `O`, tree depth `D`, grants per user `C`, bindings per claim `K_c`, fan out `F`, objects a user reaches `V_u`, pairs in an area `A`, holders of a claim `U_a`, grants in one `user_object` row `G`, matches of a search query `M_q`. Times are calibrated CPU on one core, cached; "misses" are the random reads when nothing but the upper B-tree levels is cached.
+Variables: users `U`, objects `O`, tree depth `D`, grants per user `C`, claims composed by them `L`, ancestors of an object `a`, bindings on an object and its ancestors `B_x`, bindings per claim `K_c`, fan out `F`, objects a user reaches `V_u`, pairs in an area `A`, holders of a claim `U_a`, grants in one `user_object` row `G`, matches of a search query `M_q`. Times are calibrated CPU on one core, cached; "misses" are the random reads when nothing but the upper B-tree levels is cached.
 
 | Operation | Statements | Descents | Heap rows | Tuples | Rows written | WAL | Locks | CPU cached | Misses |
 |---|---|---|---|---|---|---|---|---|---|
-| Check, `mutation_access`, nothing pending | 1 | `2C + D + 5` | `2C + 2` | `3C + 2D + 6` | 0 | 0 | none | `t_s + (2C + D + 5) t_d` = 0.11 ms at `C = 5, D = 4` | 2 |
+| Check, `mutation_access` | 1 | `2C + L + a + 4` | `2C + B_x + 2` | `2C + a + B_x + 3` | 0 | 0 | none | `t_s + (2C + L + a + 4) t_d` = 0.11 ms at `C = 5, L = 0, a = 4` | 2 |
 | Listing, `get_objects` | 1 | `2C + 5 + V_u`, the last `V_u` into the small `object_info` | `V_u` from `object_info` | `V_u` | 0 | 0 | none | `V_u × 0.114 u + t_s`: 0.7 µs a row | `⌈V_u / 87⌉` |
 | Listing ids, `ObjectWhere` | 1 | `2C + 5` | `V_u × f_nv` | `V_u` | 0 | 0 | none | `V_u × 0.03 u`: 0.2 µs a row | `⌈V_u / 87⌉` |
 | Search | 1 | `2C + 5` | `min(V_u, M_q)` | `min(V_u, M_q)` | 0 | 0 | none | `min(V_u, M_q) × (t_d + t_m)`; see [Search](./search.md) | `min(⌈V_u / 87⌉, M_q)` |
@@ -146,7 +145,7 @@ Variables: users `U`, objects `O`, tree depth `D`, grants per user `C`, bindings
 | Grant, `assign_claim_user` | 1 | 16 inserts | 4 written | 0 | 4 | ≈ 2 kB | new rows; `FOR KEY SHARE` on claim, app, organization | ≈ 0.3 ms | constant |
 | Revoke, `remove_user_claim` | 1 | 16 | 4 | 1 | 4 | ≈ 2 kB | the `user_claim` row | ≈ 0.3 ms | constant |
 | Binding, `assign_claim_object` | 1 | one check + 16 inserts | 4 | 0 | 4 | ≈ 2 kB | the claim's area row until commit | ≈ 0.4 ms | constant |
-| First listing of a reader under a raised area; a check settles one pair | 1 | as the read | as the read | `A_u` | `A_u + 1` | `≈ 360 A_u` B | the reader's marker, the reader's pairs | read `+ A_u × t` | `⌈A_u / 87⌉` |
+| First listing of a reader under a raised area | 1 | as the read | as the read | `A_u` | `A_u + 1` | `≈ 360 A_u` B | the reader's marker, the reader's pairs | read `+ A_u × t` | `⌈A_u / 87⌉` |
 | Sync page of `n` events on a disciple | 1 transaction | `n (1 + i_e)` | `n` | `n` | `n + Σ(D + 1) + areas` | `≈ n (payload + 60 i_e)` | the page's rows | `n × a_e` | `≈ n` |
 | Audit row | inside the write | 3 | 1 | 0 | 1 | ≈ 400 B | none | 3.7 µs measured | 0 |
 
@@ -158,7 +157,7 @@ Per row: one index tuple 0.005, one heap tuple 0.01, the mask test 0.005, `G = 1
 
 ### Where the check formula comes from
 
-The reader's grants, one range on `idx_user_claim_user_app` and `C` claim probes; the ancestors of the object, one covering range on `idx_inheritance_info_descendant` returning `D + 1` rows; the outstanding areas, one `= ANY` probe of the `access_diff` primary key with the `2C + D + 1` area ids the reader computes with `composite_id`, the whole area and the reader's slice of it for each claim, a one level index; `samna_user`; the `user_object` pair. At `C = 5`, `D = 4` that is 19 descents, 48 µs, and one client statement, 60 µs: 0.11 ms. The same check written as a PL/pgSQL function of eight statements adds `8 t_i = 160 µs`, 0.27 ms, which is what the benchmark measured. The check is therefore one SQL statement; see [Reads](./reads.md).
+The reader's grants, one range on `idx_user_claim_user_app` and `C` claim probes; the links out of them, `C` probes of `idx_claim_object_lookup`, and the `L` composed claims; the object's `object_info` row, one descent that gives existence, creator and the `a` ancestors of its up set; the bindings on the object and each ancestor, `a + 1` probes of `idx_claim_object_object`, returning `B_x` rows; `samna_user`. At `C = 5`, `L = 0`, `a = 4` that is 19 descents, 48 µs, and one client statement, 60 µs: 0.11 ms. The same check written as a PL/pgSQL function of eight statements adds `8 t_i = 160 µs`, 0.27 ms, which is what the benchmark measured. The check is therefore one SQL statement, and it evaluates rather than reads a stored pair, because proving a stored pair current costs `3C + D + 5` descents and a settle; see [Reads](./reads.md) and Result 4 of [Theory](./theory.md).
 
 ## Transactions per API request
 
@@ -230,7 +229,7 @@ With writes, `c_d = (1 − w) c_r + w (c_w + U_a A t)` and the inequality of the
 | 10,000 | 190 ms | `w = 0.1 %` |
 | 41,564, a root binding in the benchmark | 0.79 s | `w = 0.02 %` |
 
-The settle is CPU on the database whichever path pays it, the first reader or the drain, so this inequality holds for both. What the on demand settle changes is who waits: a writer never waits on `S`, a check waits on one pair, and a listing on `A_u t / σ`, its own slice.
+The settle is CPU on the database whichever path pays it, the first reader or the drain, so this inequality holds for both. What the on demand settle changes is who waits: a writer never waits on `S`, a check waits on nothing because it evaluates, and a listing on `A_u t / σ`, its own slice.
 
 When the cache is exceeded, `c_d` gains `2 L_r` a check and the IOPS cap binds, `X ≤ I / 2`. The cache holds `E / w_pair` pairs: 12 million on either Azure server, 560 million on the reference node, at the 350 bytes of the narrow pair.
 
@@ -241,7 +240,7 @@ Claimius is API first. The write a person makes is one request: create a claim, 
 | Step | Cost |
 |---|---|
 | The request, one transaction on the prophet | `≈ 7 + 4k` heap rows, `≈ 31 + 16k` index entries, `≈ 30` trigger statements: `c_w ≈ 1.2 ms` at `k = 3`, one commit, about 10 kB of WAL plus page images |
-| The first read of one holder under the node | A check: its one pair, `(t + (C + D + 1) t_d) / σ`, about 0.1 ms on a `D2ds_v5`. A listing: its slice, `A × t / σ`, 10 ms for 300 objects, 0.69 s for 20,000 |
+| The first read of one holder under the node | A check: nothing beyond its evaluation, `c_r / σ`. A listing: its slice, `A × t / σ`, 10 ms for 300 objects, 0.69 s for 20,000 |
 | Every holder who reads, over the life of the area | `R_a × A × t` on the request path, `R_a ≤ U_a` |
 | The drain, off the request path | `(U_a − R_a) × A × t` |
 | The same grants settled eagerly in the write | `k × A × t` inside the writer's transaction, every pair locked until commit |
@@ -283,7 +282,7 @@ Each row names the dominant term, the mechanism, the formula before and after, a
 | Index entries per settled pair | `user_object` carries its primary key and `idx_user_object_object` only | 8 to 9 across `user_object` and `object_users` | 2 | 4 |
 | Pages dirtied by one user's slice of `n` pairs | The primary key orders a user's pairs together | `n` leaves of the id index | `⌈n / 87⌉` | up to 87, and as many fewer page images after a checkpoint ([WAL configuration, full_page_writes](https://www.postgresql.org/docs/17/runtime-config-wal.html)) |
 | Settled pair time `t` | The two lines above | 19 µs | about 6 µs | about 3 |
-| First read after a binding | A listing settles the reader's slice; a check settles the one pair it answers | `U_a × A × t` | `A × t` for a listing, `t + (C + D + 1) t_d` for a check | `U_a`, and `A` more for a check |
+| First read after a binding | A listing settles the reader's slice; a check evaluates and settles nothing | `U_a × A × t` | `A × t` for a listing, 0 for a check | `U_a` for a listing; the check never waits |
 | Settle on the prophet | The prophet drains only the apps it serves reads for | `U_a A t` per app on the prophet and again on its disciple | on the disciple only, and on the prophet for the actors of routed writes | `1 + P_a` databases to 1, per write |
 | Reader wait under a backlog | The drain orders slices by their holder's latest use | first in, first out | the order of least expected wait | see [Materialization](./materialization.md) |
 | Grant latency and lock time | A grant raises the assignee's slice instead of settling it | `a + A_c × t`, measured 3.5 ms at 33 objects, 6.6 ms at 166 | `a`, constant | `1 + A_c t / a` |

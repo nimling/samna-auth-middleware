@@ -25,18 +25,18 @@ A write changes a source row: a registered row, an organization, a location, a c
 
 `claim`, `user_claim` and `claim_object` also accept a direct insert from a handler, because their before triggers enforce every invariant whatever the path in; the functions are the ergonomic form for SQL callers. Every write function returns one jsonb object keyed by the table it wrote, unpacked with `->` and `->>`.
 
-Never written by hand: `user_object`, `object_info`, `user_users`, `inheritance_info`, `table_info`, `sync_event`, `access_diff`, `reconcile_queue`, `claim_graph_cache`, `user_activity`. `audit` is written through `write_audit`.
+Never written by hand: `user_object`, `object_info`, `user_users`, `table_info`, `sync_event`, `access_diff`, `reconcile_queue`, `claim_graph_cache`, `user_activity`. `audit` is written through `write_audit`.
 
 ## What a write does
 
-| Write | Closure | Synchronous settle | Area |
+| Write | Up set | Synchronous settle | Area |
 |---|---|---|---|
-| Registered row insert | `D + 1` edges | The actor's pair; the `object_info` row | Object |
+| Registered row insert | The row's arrays, its parent's with the parent prepended | The actor's pair; the `object_info` row | Object |
 | Registered row rename | none | The `object_info` row | none |
-| Registered row owner or location move | `D` edges out, `D` in | The actor's pair; the `object_info` row | Object |
-| Registered row soft delete | Edges removed | The actor's pair removed; the `object_info` row | Object |
-| Organization or location insert | `D + 1` edges | The actor's pair; the `object_info` row | Object with cascade |
-| Subtree move within its root | `n_S × D` edges each way | The actor's pair | Object with cascade |
+| Registered row owner or location move | The row's arrays rewritten | The actor's pair; the `object_info` row | Object |
+| Registered row soft delete | Out of every posting list with the row | The actor's pair removed; the `object_info` row | Object |
+| Organization or location insert | The row's arrays, its parent's with the parent prepended | The actor's pair; the `object_info` row | Object with cascade |
+| Subtree move within its root | The arrays of the `n_S` rows that move | The actor's pair | Object with cascade |
 | `claim`, `claim_object` | none | none | Claim |
 | `user_claim` | none | none | The assignee's slice of the claim |
 | `samna_user` soft delete | none | Grants, relations and fields soft deleted by `tg_cascade_user_soft_delete` | The user's claims |
@@ -45,10 +45,10 @@ Every write is constant in the number of users and in the reach of the claim it 
 
 | Write | Cost |
 |---|---|
-| A registered row | `(D + 1)` closure rows, one settled pair, one `object_info` row, one area row |
+| A registered row | One `object_info` row with its up set, one settled pair, one area row |
 | A grant or revoke | One `user_claim` row, one area row, its `sync_event` and `audit` rows; measured with the older synchronous settle at 3.5 ms for 33 objects and 6.6 ms for 166, the difference being the settle it no longer does |
-| A binding or claim change | One row, one area row; `A × 0.019 ms` for each holder who reads, the rest in the drain |
-| A move of `n_S` nodes | `2 × n_S × D` closure rows, the rest later |
+| A binding or claim change | One row, one area row; `A × 0.019 ms` for each holder who lists, the drain for the holders likely to list before the next change |
+| A move of `n_S` nodes | `n_S` `object_info` rows, the rest later |
 
 ## One request, one transaction
 

@@ -2,7 +2,7 @@
 layout: doc
 title: Locations
 description: The location tree, how a row pins into it with sa_location_id, and how a location is also a node of its owner's ownership tree.
-tags: location, sa_location_id, sa_parent_id, location tree, inheritance_info
+tags: location, sa_location_id, sa_parent_id, location tree, location_ids, owner_ids
 lastUpdated: true
 ---
 
@@ -26,11 +26,11 @@ A location is where something is. A building holds floors, a floor holds rooms, 
 
 3. Any registered row pins into the location tree with `sa_location_id`. An organization may pin itself too. A claim on a building reaches every row pinned anywhere inside it, whoever owns that row.
 
-## The closure
+## The up set
 
-The location tree lives in `inheritance_info` with `tree_type = 'location'`, maintained incrementally exactly as the ownership tree is: `D + 1` edges for a new node, `n_S × D` edges each way for a subtree move within its root. A row pinned with `sa_location_id` gets its self edge and one edge per location above its pin. See [Organizations](./organizations.md) for the cost argument.
+A location's `object_info` row carries its parent chain in `location_ids` and its owner's chain in `owner_ids`. A row pinned with `sa_location_id` carries the pin and the chain above it in `location_ids`, and in `owner_ids` its own owner chain followed by the owner chain of every location above its pin, so a claim on the organization that owns a building reaches every row pinned in it through one membership test. Inserts and moves cost what they cost in the ownership tree; see [Organizations](./organizations.md) and [Objects](./objects.md#the-up-set).
 
-Ancestors of a pinned row are the union of three sets, each one indexed lookup on `idx_inheritance_info_descendant`: its location chain, the owning organization chain of each location in that chain, and its own ownership chain. `get_location_ancestors` returns the first two, `get_ancestors` all three tagged by tree.
+`get_location_ancestors` returns the location chain and the owners of each location on it, `get_ancestors` every array of the row tagged by tree.
 
 ## Linking and reading
 

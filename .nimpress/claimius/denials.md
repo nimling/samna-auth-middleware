@@ -38,7 +38,7 @@ Written as a formula over the grant masks of one user on one object, with `G_d`,
 sa_access = close( (G_d | G_c) & ~X_d  |  G_i & ~(X_d | X_i) )
 ```
 
-where `close(m)` removes owner unless write, read and execute are present, write unless read and execute are present, and execute unless read is present. `_apply_denies` computes it at settle time, so a read never sees a deny and never evaluates one. This is the deny overrides combining rule of [XACML 3.0, appendix C](https://docs.oasis-open.org/xacml/3.0/xacml-3.0-core-spec-os-en.html), evaluated once per settle instead of on every request.
+where `close(m)` removes owner unless write, read and execute are present, write unless read and execute are present, and execute unless read is present. `_build_grants_for_object` computes it over the derivations of one pair, for a check and for the settle alike, so a listing reads the result and a check evaluates it over the bounded bindings of one object. This is the deny overrides combining rule of [XACML 3.0, appendix C](https://docs.oasis-open.org/xacml/3.0/xacml-3.0-core-spec-os-en.html). A deny is negation over the derivations of the same pair only, which keeps the access relation a nonrecursive stratified view and its maintenance exact; see Result 1 of [Theory](./theory.md).
 
 ## What a creator keeps
 

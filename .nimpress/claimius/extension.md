@@ -20,11 +20,11 @@ Claimius becomes a PostgreSQL extension. It is configured on two things: the acc
 
 ## What today's design already leads into
 
-1. The per user index. `user_object` is the reverse index keyed by user. A row level security policy of the form `EXISTS (SELECT 1 FROM claimius.user_object WHERE id = composite_id(app, current user, type, row id) AND sa_access & 4 = 4)` is one primary key probe per row, the same probe a check costs today ([PostgreSQL, Row Security Policies](https://www.postgresql.org/docs/17/ddl-rowsecurity.html)).
+1. The per user index. `user_object` is the reverse index keyed by user. A row level security policy of the form `EXISTS (SELECT 1 FROM claimius.user_object WHERE id = composite_id(app, current user, type, row id) AND sa_access & 4 = 4)` is one primary key probe per row, the probe `ObjectWhere` makes today ([PostgreSQL, Row Security Policies](https://www.postgresql.org/docs/17/ddl-rowsecurity.html)).
 
 2. The read functions. Every read goes through `get_*` with the user and the app as its first arguments. In the extension those arguments come from the session, not from the caller.
 
-3. The on demand settle. A policy that reads `user_object` needs the rows it reads to be settled. The settle already runs at the entry of every read and is targeted by object and user, which is exactly what a policy evaluation targets.
+3. The on demand settle and the evaluated check. A policy that reads `user_object` needs the rows it reads to be settled, and the settle already runs at the entry of every listing, targeted by type and user, which is what a policy over one table targets. A policy on a single row can instead call the check, which evaluates from the sources and needs no settle.
 
 4. The role grant model. `claimius_reader` already sees no table, only functions. A leased login is a reader whose functions and policies take the user from the session.
 

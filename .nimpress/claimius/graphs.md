@@ -24,7 +24,7 @@ A graph of a large tree is read a window at a time.
 
 1. `start_id` roots the window at one organization for the owner graph, one claim for the claim graph.
 
-2. `depth` bounds the levels below the start, 0 meaning all. Each level is one join on `inheritance_info` at `depth = level`, index only.
+2. `depth` bounds the levels below the start, 0 meaning all. Level `d` below a node `y` is the set of objects whose up set holds `y` at position `d`, read from the posting list of `y` in `idx_object_info_ancestors`, and level 1 from the owner and location indexes of `object_info` in name order.
 
 3. `width` bounds the children kept per parent and type, 0 meaning all. Children are numbered with `row_number() OVER (PARTITION BY parent_id, object_type ORDER BY ...)` and kept while the number is at most `width`.
 
@@ -43,7 +43,7 @@ n_r = Σ_{i=0..d−1} min(F, W)^i × r(F)          r(F) = F  ranked by usage
                                                r(F) = min(F, W / v)  ranked by name
 ```
 
-each at `t_n ≈ 2 t_d`, the reader's `user_object` probe and the node's `object_info` row, the closure row itself read index only, plus the sort. `v` is the share of a parent's children the reader can see.
+each at `t_n ≈ 2 t_d`, the reader's `user_object` probe and the node's `object_info` row, which also carries its up set, plus the sort. `v` is the share of a parent's children the reader can see.
 
 1. Ranked by usage the score is the reader's own, so no index can order the children and every one of the `F` is read. The window costs in the fan out of what it expands.
 

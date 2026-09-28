@@ -8,7 +8,7 @@ lastUpdated: true
 
 # Claimius
 
-Claimius is a PostgreSQL schema named `claimius`. It is the access control system every Samna service runs inside its own database. It answers one question, what may this user or client do to this object, and it answers it with an index lookup in the database that already holds the service's data.
+Claimius is a PostgreSQL schema named `claimius`. It is the access control system every Samna service runs inside its own database. It answers one question, what may this user or client do to this object, and it answers it with a handful of index lookups in the database that already holds the service's data.
 
 Claimius owns and validates its own types. It never constructs or reads the implementing side's data. To claimius an object is a relation: an `object_type` and `object_id` pair that a `claim_object` binds and that `user_object` computes access for. The implementing side registers its tables with `init_claimius_tables`, binds claims to its rows, and reads the answer through functions, not tables.
 
@@ -30,7 +30,7 @@ Claimius owns and validates its own types. It never constructs or reads the impl
 | [Denials](./denials.md) | Deny claims, direct and cascaded deny, what a creator keeps, a worked scenario |
 | [Redaction](./redaction.md) | Field scope on an object binding and how several grants combine |
 | [Capabilities](./capabilities.md) | Scope grants with no object: page and functional access, and where claimius stops |
-| [Objects](./objects.md) | Registration, `table_info`, `inheritance_info`, the `sa_*` columns, `object_field` |
+| [Objects](./objects.md) | Registration, `table_info`, the up set of every object, the `sa_*` columns, `object_field` |
 | [Apps](./apps.md) | `samna_app`, `app_object`, app scoped tables |
 | [Materialization](./materialization.md) | `user_object`, `object_info`, `user_users`, `access_diff`, the reader's slice, and why |
 | [Reads](./reads.md) | The read surface, what each read costs, and why a read writes only its settle |
@@ -45,6 +45,7 @@ Claimius owns and validates its own types. It never constructs or reads the impl
 | [Storage](./storage.md) | Row widths, indexes, fill factors, vacuum, time ordered data, connections |
 | [Scaling](./scaling.md) | Every cost as a formula in the hardware it runs on, the ceilings on the Azure servers of today and a self hosted reference node, the bottleneck, and the configuration the formulas choose |
 | [Comparison](./comparison.md) | Claimius against Zanzibar, SpiceDB, OpenFGA and Auth0 FGA, Ory Keto and Entra ID, dimension by dimension, with the condition under which claimius wins |
+| [Theory](./theory.md) | Claimius as a Datalog program, and the proofs that fix its methodology: the up set, the check evaluated from its sources, the per user index for listings, maintenance by counting, the drain rule, and the prices of 2013 and 2026 in the materialization break-even |
 | [The extension, future work](./extension.md) | Where claimius is going once hosting allows it |
 
 ## The middleware
@@ -62,7 +63,7 @@ Claimius owns and validates its own types. It never constructs or reads the impl
 
 2. Every write records the area it changed in `access_diff` and settles at most the actor's own pair of the row it wrote. No write enumerates the users an area touches, and none grows with the reach of a claim.
 
-3. Every read settles its own part of the areas it targets before it answers, the one pair of a single object read or the slice of a listing, then reads `user_object` by primary key or by the reader's own range of it. A read never pays for a user it is not about.
+3. A check evaluates the pair from its grants, the bindings on the object and the object's up set in one statement and writes nothing. A listing settles the reader's own slice of the areas it targets, then reads the reader's own range of `user_object`. A read never pays for a user it is not about.
 
 4. The answer lives in the service's own Postgres. A disciple answers every access question from its own replica, without a network call to the prophet.
 

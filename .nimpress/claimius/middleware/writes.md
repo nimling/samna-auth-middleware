@@ -32,7 +32,7 @@ err = sdb.Instance().NewInsert().Model(&location).Access(ac).Scan(ctx, &location
 
 3. The prophet's answer carries the sequence of the change. A later read on the disciple that must see it waits on `WaitForSeq`, the consistency token of [Sync](../sync.md).
 
-4. The write settles the actor on the prophet and, through the local upsert, on the disciple; every other user settles on their next read. See [Materialization](../materialization.md).
+4. The write settles the actor on the prophet and, through the local upsert, on the disciple; every other user's check sees it at once, because a check evaluates from the sources, and every other user's listing settles on its next read. See [Materialization](../materialization.md).
 
 ## Debug mode
 

@@ -29,7 +29,7 @@ Three hierarchies carry a binding downward: ownership through `sa_owner_id`, loc
 Written as relational algebra over those tables, the access a user `u` holds on an object `o` is
 
 ```
-A(u, o) = π mask ( σ user_id = u (user_claim) ⋈ claim ⋈ claim_object ⋈ σ descendant = o (inheritance_info) )
+A(u, o) = π mask ( σ user_id = u (user_claim) ⋈ claim ⋈ claim_object ⋈ σ ancestor ∈ up(o) (object_info) )
 ```
 
 with the deny subtraction of [Denials](./denials.md) applied to the result. Every question claimius answers is this relation or a projection of it. A check fixes `u` and `o`. A listing fixes `u` and `object_type`. A member listing fixes `o`. Claimius stores the relation materialized per user in `user_object`, so each of those is an index range on one table. See [Materialization](./materialization.md).
@@ -46,7 +46,7 @@ with the deny subtraction of [Denials](./denials.md) applied to the result. Ever
 
 5. Groups. A group is a claim held by its members. Nested groups are one level of composition. Membership without permission is the member bit, 32, with no other bit set.
 
-6. Resource hierarchies. Folders, buildings, departments, product trees: the ownership, location and parenthood trees, precomputed in the `inheritance_info` closure.
+6. Resource hierarchies. Folders, buildings, departments, product trees: the ownership, location and parenthood trees, precomputed as the up set on each `object_info` row.
 
 7. Delegation. An actor acts for a target by holding a grant that covers the target's `samna_user` row. The row written carries the actor's `user_claim.id` in `sa_created_by` and the target's `user_id` as its subject. See [Users](./users.md).
 
@@ -54,8 +54,8 @@ with the deny subtraction of [Denials](./denials.md) applied to the result. Ever
 
 ## What the small type set buys
 
-1. One shape for every grant. Every grant path is `user_claim → claim → claim_object → inheritance_info`. Four indexes serve all of them: `idx_user_claim_user_app`, the claim primary key, `idx_claim_object_lookup` and the two covering indexes on `inheritance_info`. A general tuple store needs an index per relation shape it rewrites through.
+1. One shape for every grant. Every grant path is `user_claim → claim → claim_object → object_info`. Five indexes serve all of them: `idx_user_claim_user_app`, the claim primary key, `idx_claim_object_lookup`, `idx_claim_object_object` and the `object_info` primary key, with `idx_object_info_ancestors` for the objects under a node. A general tuple store needs an index per relation shape it rewrites through.
 
-2. A bounded evaluation. With single hop composition and three trees, the ancestors of an object number at most `3(D + 1)` for depth `D`, and the bindings that can reach it are the bindings on those ancestors. Settling one pair is `O(D + C)` index probes for a user holding `C` claims. There is no recursive rewrite whose depth depends on the data, the case where the Zanzibar evaluation fans out and which Zanzibar bounds with Leopard, its precomputed index of group to group reachability ([Pang et al. 2019, section 3.2.4](https://www.usenix.org/system/files/atc19-pang.pdf)). The `inheritance_info` closure is that precomputed reachability for all three trees.
+2. A bounded evaluation. With single hop composition and three trees, the ancestors of an object number at most `D_q + D_l + D_o (D_l + 2)` for the parenthood, location and ownership depths, and the bindings that can reach it are the bindings on those ancestors. Settling one pair is `O(D + C)` index probes for a user holding `C` claims. There is no recursive rewrite whose depth depends on the data, the case where the Zanzibar evaluation fans out and which Zanzibar bounds with Leopard, its precomputed index of group to group reachability ([Pang et al. 2019, section 3.2.4](https://www.usenix.org/system/files/atc19-pang.pdf)). The up set on `object_info` is that precomputed reachability for all three trees, and why its bound keeps claimius below the lower bound for dynamic reachability is Result 2 of [Theory](./theory.md).
 
 3. A fixed read surface. The same `get_*` functions answer every consumer, because every consumer's objects enter through the same binding shape. Nothing about a consumer's schema reaches a claimius function body.

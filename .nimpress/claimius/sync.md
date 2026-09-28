@@ -15,11 +15,11 @@ A prophet appends every change to a source row of an app to `sync_event`. A disc
 | Carried | Never carried |
 |---|---|
 | `samna_user`, `samna_client`, `samna_secret` as ciphertext | `user_object`, `object_info`, `user_users` |
-| `organization`, `location` the app reaches through `app_object` | `inheritance_info`, `table_info`, `access_diff` |
+| `organization`, `location` the app reaches through `app_object` | `table_info`, `access_diff` |
 | `claim`, `claim_object`, `user_claim` | `claim_graph_cache`, `reconcile_queue`, `audit` |
 | `object_field`, `user_field`, `user_relation` | `samna_app`, and every key and seed |
 
-The feed carries source rows, the inputs of access, and never the access computed from them. A disciple derives its closure, its `user_object`, `object_info` and `user_users` itself, with the same triggers and the same settle as the prophet.
+The feed carries source rows, the inputs of access, and never the access computed from them. A disciple derives its up sets, its `user_object`, `object_info` and `user_users` itself, with the same triggers and the same settle as the prophet.
 
 ### Why source rows only
 
@@ -43,7 +43,7 @@ A hierarchy event with no app would be read by every pull of every app and teste
 
 1. A disciple applies a page of events in one transaction under `replay_mode`, upserting each by its primary key. Delivery is at least once and every apply is idempotent: the same event twice produces the same row.
 
-2. `replay_mode` marks rows as arriving from the prophet. The checks that authorize an actor, composition rules and escalation guards, are skipped, because the prophet made them. The derived state is maintained as for any write: closure edges, and an area in `access_diff` for every applied claim, binding, grant and hierarchy row, settled by the disciple's next read or its drain.
+2. `replay_mode` marks rows as arriving from the prophet. The checks that authorize an actor, composition rules and escalation guards, are skipped, because the prophet made them. The derived state is maintained as for any write: the up set on `object_info`, and an area in `access_diff` for every applied claim, binding, grant and hierarchy row, settled by the disciple's next listing or its drain.
 
 3. `disciple_state.last_applied_seq` moves to the last applied sequence in the same transaction as the page. A failed page rolls back whole and is fetched again from the same cursor. The page commits with `synchronous_commit = off` ([PostgreSQL, Asynchronous Commit](https://www.postgresql.org/docs/17/wal-async-commit.html)): a crash can lose the last pages applied, but it loses the cursor that recorded them in the same transaction, so they are fetched again and nothing is lost that the feed does not still hold. The apply therefore never waits for a WAL flush, and `L_c` leaves the staleness and the page cycle below.
 
