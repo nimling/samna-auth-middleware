@@ -69,14 +69,15 @@ The handlers are the same shape as every other one in `disciple/echo`, so a cons
 
 ```go
 sauth := e.Group("/api/sauth")
-sauth.GET("/consent", saecho.GetConsent)
-sauth.POST("/consent", saecho.PostConsent)
+sauth.GET("/analytics/consent", saecho.GetConsent)
+sauth.POST("/analytics/consent", saecho.PostConsent)
 sauth.POST("/analytics", saecho.PostAnalytics)
+sauth.POST("/analytics/capture", saecho.PostAnalyticsCapture)
 ```
 
-`sam.RegisterCapture(group)` mounts those three in one call, and `sam.RegisterEndpoints` already includes it. Mount either on a group with no session requirement: a visitor answers the banner before they have a session, and capture has to reach anonymous visitors too.
+`sam.RegisterCapture(group)` mounts those four in one call, and `sam.RegisterEndpoints` already includes it. Mount either on a group with no session requirement: a visitor answers the banner before they have a session, and capture has to reach anonymous visitors too.
 
-`sam.RegisterCaptureRead(group)` mounts `GET /event` and `GET /session`. Those read across visitors, so they belong behind a session and behind whatever page grant gates the consumer's admin surface.
+`sam.RegisterCaptureRead(group)` mounts `GET /analytics/app`, `/analytics/event`, `/analytics/session`, `/analytics/capture`, `/analytics/heat` and `/analytics/summary`. Those read across visitors, so they belong behind a session and behind whatever page grant gates the consumer's admin surface.
 
 The browser half is one call, `configureConsent({ endpoint: '/api/sauth' })`, which reads consent, starts capture only once the analytics category is granted, and raises the banner when the visitor has not decided under the current policy. The policy link and version arrive in the consent response, resolved on the prophet from its endpoint and its `/legal/cookie-policy` page.
 
@@ -95,7 +96,7 @@ uptime.Init(e.Logger, uptime.Options{
 
 ## Notes
 
-There is no inbound sync endpoint on a disciple. The disciple reaches out to the prophet.
+Sync is pull only. There is no inbound sync endpoint on a disciple and none on the prophet; the disciple reaches out to `GET /sam/sync/snapshot` and `GET /sam/sync/:seq` through `sam.SyncStart`.
 
-Object types come back schema stripped over JSON and stay schema qualified in the database.
+Object types are schema qualified over JSON and in the database alike. A disciple's own tables are qualified by the consumer: a bare `table:` tag on a model reads as the `public` schema, and `init_claimius_tables` raises on an unqualified name.
 </content>

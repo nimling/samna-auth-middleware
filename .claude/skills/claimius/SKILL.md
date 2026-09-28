@@ -21,7 +21,7 @@ The mistakes that historically caused damage:
 8. Confusing `sa_created_by`, a `user_claim.id`, with a user identifier.
 9. Hard deleting from registered tables.
 10. Reparenting organizations across roots.
-11. Adding `p_system_app_secret` or any equivalent to `init_prophet`. The app secret is consumer facing, generated externally on demand by the implementing service, written via UPDATE to `samna_app.app_secret`. It is NOT a bootstrap input. `private_key` and `private_seed` ARE init inputs because those are fixed identity. `app_secret` is rotatable credentials and lives outside init.
+11. Adding `p_system_app_secret` or any equivalent to `init`. The app secret is consumer facing, generated externally on demand by the implementing service, written via UPDATE to `samna_app.app_secret`. It is NOT a bootstrap input. `private_key` and `private_seed` ARE init inputs because those are fixed identity. `app_secret` is rotatable credentials and lives outside init.
 
 If you are about to do any of those, STOP and explain to the user what you're considering. Get explicit confirmation before proceeding.
 
@@ -49,7 +49,7 @@ NO. Always use `get_*` functions:
 - `get_direct_access(user_id, app_id, object_id, object_type)` to find the closest user_claim via ancestor walk when `get_access` returns nothing
 - `get_objects(user_id, app_id, object_type, min_level)` to list visible objects
 - `get_organizations`, `get_locations`, `get_users`, `get_claims`, `get_audit`, `get_secrets` for typed lists
-- `get_owner_graph`, `get_claim_graph` for hierarchy and access visualizations. Both take optional `start_id` and `depth` for subgraph queries. Both cover all registered tables in the deployment. Output rows have fields `object_id`, `object_type`, `label`, `parent_id`, and `data jsonb` where `object_type` is schema qualified. `data` always carries `access_level` and `level` plus per type fallback fields with `sa_` prefixes stripped.
+- `get_owner_graph`, `get_claim_graph` for hierarchy and access visualizations. Both take optional `start_id` and `depth` for subgraph queries. Both cover all registered tables in the deployment. Output rows have fields `object_id`, `object_type`, `label`, `parent_id`, and `data jsonb` where `object_type` is schema qualified. `data` always carries `access` and `level` plus per type fallback fields with `sa_` prefixes stripped.
 - `search(user_id, app_id, query, types, min_level, limit, offset)` for full text search
 
 ### "Should I INSERT/UPDATE a claimius table directly?"
@@ -64,13 +64,13 @@ It depends on the table.
 - `samna_user` per app row creation → `ensure_app_user`
 - Cross app moves → `merge_user`
 - Cross root moves → `migrate_root`
-- Bootstrap → `init_prophet`, `init_disciple` requiring `p_disciple_app_slug`, `init_hybrid` requiring both `p_system_app_slug` and `p_disciple_app_slug`
+- Bootstrap → `init`, which on the prophet set takes the system app fields and on the disciple set takes `p_disciple_app_slug`; the prophet set also carries `init_disciple` and `init_hybrid`, the latter requiring both `p_system_app_slug` and `p_disciple_app_slug`
 - External table registration → `init_claimius_tables`
 - Self identity → `get_prophet_app()` returns the system app on prophet and hybrid, raises on disciple. `get_disciple_app()` returns the upstream app on disciple and hybrid, raises on prophet. Both return `SETOF claimius.samna_app`. Scalar UUID variants `get_prophet_app_id()`, `get_disciple_app_id()`, and `get_app_id()` are available for column DEFAULTs and other places that reject subqueries. `get_app_id()` resolves to the prophet/system app id on prophet and hybrid, disciple app id on pure disciple. Use these instead of maintaining a local helper.
 
 **Direct INSERT/UPDATE is fine** on the prophet for:
 
-- `samna_app`. Use `init_prophet` only for the FIRST app.
+- `samna_app`. Use `init` only for the FIRST app.
 - `organization`, `location`
 - `samna_client`, `samna_secret`
 - `object_field`, `user_field`, `user_relation`
@@ -108,7 +108,7 @@ A `user_claim.id`. Not a `samna_user.user_id`. The actor under whose authority t
 
 ### "How do I get the user_claim.id to pass as `sa_created_by` for a write?"
 
-Call `get_access`, `get_objects`, or `search_objects`. Each returns a `user_claim_id` column alongside the access info. That's the actor token. **Contract: when `claim_id` is non null, `user_claim_id` is also populated.** Use it directly:
+Call `get_access`, `get_objects`, or `search`. Each returns a `user_claim_id` column alongside the access info. That's the actor token. **Contract: when `claim_id` is non null, `user_claim_id` is also populated.** Use it directly:
 
 ```sql
 SELECT user_claim_id INTO :acting_user_claim
@@ -146,7 +146,7 @@ Returns object id, denormalized name, description, link, and tree position colum
 
 ### "How do I implement a deny?"
 
-Create a claim with `is_deny = true` and a specific `sa_access_level`. Bind it via `assign_claim_object`. The deny erases grants on the same path at level `<= deny.sa_access_level`. Calc functions process this; you don't filter denies in your reads.
+Create a claim with `is_deny = true` and a specific `sa_access`. Bind it via `assign_claim_object`. The deny erases grants on the same path at level `<= deny.sa_access`. Calc functions process this; you don't filter denies in your reads.
 
 ### "What's a path?"
 
@@ -154,7 +154,7 @@ A path is the pair `tree_type, cascaded_from`. A claim binding cascades through 
 
 ### "Can I have multiple grants on the same object?"
 
-Yes. The `user_object.grants` jsonb array carries one entry per contributing claim. The effective level, `sa_access_level` on the row, is the strongest of contributing levels. Removing one claim's contribution shrinks the array; the row stays as long as some grant or `direct_grant` survives.
+Yes. The `user_object.grants` jsonb array carries one entry per contributing claim. The effective level, `sa_access` on the row, is the strongest of contributing levels. Removing one claim's contribution shrinks the array; the row stays as long as some grant or `direct_grant` survives.
 
 ## Required columns on a registered application table
 
@@ -189,7 +189,7 @@ SELECT claimius.init_claimius_tables('public.my_table');
 
 Tables in claimius reference each other circularly: app↔org, claim→org, user_claim→claim, claim_object→claim+object. Skip a step or do them out of order and either FKs fail or calc triggers misfire.
 
-**Fresh prophet bootstrap** is encapsulated in `init_prophet`. If the user is creating "the first app on this database", call `init_prophet` and don't replicate its body.
+**Fresh prophet bootstrap** is encapsulated in `init`. If the user is creating "the first app on this database", call `init` and don't replicate its body.
 
 **A new app on an existing prophet:**
 
@@ -220,7 +220,7 @@ SELECT claimius.ensure_app_user(
 );
 ```
 
-Idempotent. Inserts the per app `samna_user` row if missing AND grants the app's default claim, `samna_app.claim_id` configured during `init_prophet`, as a `user_claim`. Returns `{"samna_user": {...}, "user_claim": {...}}` when the app has a default claim, or `{"samna_user": {...}}` when it doesn't. The default claim is intentionally minimal: holding it alone grants no resource access. It is the "you have an account in this app" marker. The implementing app grants additional claims later as users earn permissions.
+Idempotent. Inserts the per app `samna_user` row if missing AND grants the app's default claim, `samna_app.claim_id` configured during `init`, as a `user_claim`. Returns `{"samna_user": {...}, "user_claim": {...}}` when the app has a default claim, or `{"samna_user": {...}}` when it doesn't. The default claim is intentionally minimal: holding it alone grants no resource access. It is the "you have an account in this app" marker. The implementing app grants additional claims later as users earn permissions.
 
 ### Granting a permission
 
@@ -231,7 +231,7 @@ SELECT claimius.create_claim(
     p_app_id          => $app_id,
     p_name            => 'Recipe Editor',
     p_description     => 'Can edit recipes in this kitchen',
-    p_sa_access_level => 4,
+    p_sa_access => 4,
     p_sa_owner_id     => $org_id,
     p_sa_root_id      => $root_org_id,
     p_sa_created_by   => $acting_user_claim
@@ -277,7 +277,7 @@ WHERE r.id IN (
 For the basics use `user_object`'s denormalized columns:
 
 ```sql
-SELECT object_id, sa_name, sa_description, sa_access_level
+SELECT object_id, sa_name, sa_description, sa_access
 FROM claimius.get_objects($user_id, $app_id, 'public.recipe', $min_level);
 ```
 

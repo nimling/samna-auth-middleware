@@ -49,7 +49,7 @@ The service's own tables never leave the disciple. The prophet stores the `claim
 
 ## The pull loop
 
-The disciple pulls. There is no inbound sync endpoint on a disciple.
+The disciple pulls. There is no inbound sync endpoint on a disciple and none on the prophet; the prophet serves `GET /sam/sync/snapshot` and `GET /sam/sync/:seq` and nothing pushes.
 
 1. On first start the cursor is zero, so it fetches `sync/snapshot`, upserts every row and records the snapshot sequence.
 2. It then fetches `sync/<cursor>` for deltas, applies them under `replay_mode` and moves `disciple_state.last_applied_seq`.

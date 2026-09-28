@@ -14,7 +14,7 @@ Once your app tables register with Claimius, every read can ask one question: "w
 
 ## Core concepts
 
-**Claim**: a permission template with a numeric `sa_access_level` (lower = stronger; 0 system, 8 guest), an `is_deny` flag, and an `inherits` flag for cascading.
+**Claim**: a permission template with an `sa_access` INTEGER bitwise mask and an `inherits` flag for cascading. The bits are owner `1`, write `2`, read `4`, execute `8`, deny `16` and member `32`; `ACCESS_ALL` is `15`. An access check is `(stored & required) = required`. `create_claim` expands a grant mask: owner implies write, read and execute; write implies read and execute; execute implies read. The member bit stands alone. A claim with the deny bit set is a deny claim, covered in "Deny claims" below. The same mask sits on `claim_object.sa_access`, where NULL inherits the claim mask, and on `user_object.sa_access`, the effective mask per user and object.
 
 **user_claim**: a grant of a claim to a user, optionally time bounded.
 
@@ -69,19 +69,21 @@ The role is determined at init time by which init function is called: `init`, `i
 
 ## Migration layout
 
-Migrations are flyway compatible. Run them in order:
+The prophet base set, read by smig as a git include of `prophet/database` at a pinned ref and applied in version order:
 
 ```
-V0.0__roles.sql              Defines claimius_admin, _writer, _reader, _disciple_client
-V1.0__baseline.sql           All tables, indexes, comments, enums
-V2.1__functions_base.sql     Utilities: composite_id, decompose_id, tree primitives
-V2.2__functions_internal.sql Tree builders, calc helpers, recompute_user_object
-V2.3__functions_access.sql   Trigger functions: calc_object_access, calc_hierarchical_access,
-                             calc_claim_access, emit_sync_event, audit_trigger
-V2.4__functions_external.sql Public surface: get_*, search_objects, claim management,
-                             merge_user, init_*, ensure_app_user
-V3.0__triggers.sql           Attaches trigger functions to internal tables
-VX.0__init.sql               Calls init_claimius_internal()
+V1.0__claimius_roles.sql              claimius_admin, _writer, _reader, _disciple_client
+V1.1__claimius_baseline.sql           All tables, indexes, comments, enums
+V1.2__claimius_notification.sql       Notification tables
+V2.1__claimius_functions_base.sql     Utilities: composite_id, decompose_id, tree primitives
+V2.2__claimius_functions_internal.sql Tree builders, calc helpers, recompute_user_object
+V2.3__claimius_functions_access.sql   Trigger functions: calc_*_access, emit_sync_event, audit
+V2.4__claimius_functions_external.sql Public surface: get_*, search, claim management,
+                                      merge_user, init, ensure_app_user
+V3.0__claimius_triggers.sql           Attaches trigger functions to internal tables
+V4.0__claimius_init.sql               Calls init_claimius_internal()
+V5.x__claimius_*.sql                  Prophet services: session, dpop, rate limit, par,
+                                      jwks, sync feed, app client and bff, analytics
 ```
 
 After Claimius migrations finish, the implementing app runs:
@@ -105,7 +107,7 @@ SELECT claimius.init(
            p_default_claim            => jsonb_build_object(
                'name',            'Guest',
                'description',     'Default claim granted to every regular user on first login. Marks account existence; grants no resource access.',
-               'sa_access_level', 8
+               'sa_access',       4
                                          )
        );
 -- Result shape (JSONB), seven keys:
@@ -141,7 +143,7 @@ SELECT claimius.init_hybrid(
            p_default_claim            => jsonb_build_object(
                'name',            'Guest',
                'description',     'Default claim for new users.',
-               'sa_access_level', 8
+               'sa_access',       4
                                          )
        );
 
@@ -164,8 +166,8 @@ A fresh prophet has nothing in the database. Bringing it up requires a precise o
 3. **System organization** is inserted with `sa_owner_id = sa_root_id = id` (self rooted), and an `app_object` link ties it to the system app.
 4. **App's `sa_owner_id`** is reconciled with an UPDATE to point at the real system org.
 5. **`inheritance_info` self-edge** for the system org is inserted (`ownership` tree, depth 0), bootstrapping the closure for that root.
-6. **System claim** ('System Administrator', level 0) is created, owned by the system org. This claim is sidelined: granted only to the system user, never via `ensure_app_user`.
-   6b. **Default claim** is created from `p_default_claim` (name, description, level supplied by the implementer). Type is `'user'`, `inherits = false`, no `claim_object` binding. Holding this claim alone grants no resource access; it is a "you have an account" marker.
+6. **System claim** ('System Administrator', `sa_access = 15`, `ACCESS_ALL`) is created, owned by the system org. This claim is sidelined: granted only to the system user, never via `ensure_app_user`.
+   6b. **Default claim** is created from `p_default_claim` (`name` and `description` required, `sa_access` mask optional and defaulting to `4`, read). Type is `'user'`, `inherits = false`, no `claim_object` binding. Holding this claim alone grants no resource access; it is a "you have an account" marker.
 7. **App's `claim_id`** is updated to point at the **default claim** (NOT the system claim). This is the claim every regular user receives via `ensure_app_user`.
 8. **claim_object binding** binds the system claim to the system org with `inherits = TRUE` (cascades to everything in the system org tree).
 9. **user_claim** grants the system claim to the system user.
@@ -251,13 +253,14 @@ Implementer middleware should call `claimius.get_disciple_app()` (or `get_discip
 Every read goes through a `get_*` function. The functions self heal (drain `reconcile_queue`), check user status (cascade soft delete if applicable), filter by temporal validity, and return.
 
 ```sql
--- Can this user see this object at admin level (3) or stronger?
+-- Can this user read and write this object? 6 is read (4) with write (2);
+-- a row comes back when (sa_access & 6) = 6.
 SELECT * FROM claimius.get_access(
-    p_user_id     => :user_id,
-    p_app_id      => :app_id,
-    p_object_id   => :object_id,
-    p_object_type => 'public.device',
-    p_min_level   => 3
+    p_user_id         => :user_id,
+    p_app_id          => :app_id,
+    p_object_id       => :object_id,
+    p_object_type     => 'public.device',
+    p_required_access => 6
 );
 
 -- All objects of this type the user can see:
@@ -285,11 +288,11 @@ The contract: when `claim_id` is non null on the returned row, `user_claim_id` i
 -- Read access AND grab the actor token for a follow on write.
 SELECT user_claim_id INTO :acting_user_claim
 FROM claimius.get_access(
-    p_user_id     => :user_id,
-    p_app_id      => :app_id,
-    p_object_id   => :recipe_id,
-    p_object_type => 'public.recipe',
-    p_min_level   => 4
+    p_user_id         => :user_id,
+    p_app_id          => :app_id,
+    p_object_id       => :recipe_id,
+    p_object_type     => 'public.recipe',
+    p_required_access => 2
 );
 
 -- Now use it as the actor for the write.
@@ -306,13 +309,13 @@ Write functions return a single jsonb object keyed by the affected table name(s)
 ```sql
 -- Create a claim
 SELECT claimius.create_claim(
-    p_app_id          => :app_id,
-    p_name            => 'Device Operator',
-    p_description     => 'Read and operate devices',
-    p_sa_access_level => 5,
-    p_sa_owner_id     => :org_id,
-    p_sa_root_id      => :root_org_id,
-    p_sa_created_by   => :acting_user_claim
+    p_app_id        => :app_id,
+    p_name          => 'Device Operator',
+    p_description   => 'Read and operate devices',
+    p_sa_access     => 12,
+    p_sa_owner_id   => :org_id,
+    p_sa_root_id    => :root_org_id,
+    p_sa_created_by => :acting_user_claim
 );
 
 -- Grant a claim to a user
@@ -354,7 +357,7 @@ BEGIN
         p_default_claim            => jsonb_build_object(
             'name',            'Guest',
             'description',     'Default claim for new users.',
-            'sa_access_level', 8
+            'sa_access',       4
         )
     );
 
@@ -364,10 +367,15 @@ BEGIN
 
     -- now use them in subsequent inserts
     INSERT INTO claimius.organization (
-        app_id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by
+        name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by
     ) VALUES (
-        v_app_id, 'Acme NYC', 'office',
+        'Acme NYC', 'office',
         v_org_id, v_org_id, 1,
+        (v_init -> 'user_claim' ->> 'id')::UUID
+    ) RETURNING id INTO v_org_id;
+
+    PERFORM claimius.link_app_object(
+        v_app_id, 'claimius.organization', v_org_id,
         (v_init -> 'user_claim' ->> 'id')::UUID
     );
 END $$;
@@ -441,16 +449,20 @@ Returns `{"organization": {...}}`. After: calc trigger inserts the org's edges i
 
 ```sql
 INSERT INTO claimius.organization (
-    app_id, name, type,
+    name, type,
     sa_owner_id, sa_root_id, sa_level, sa_created_by
 ) VALUES (
-    :app_id, 'Acme NYC', 'office',
+    'Acme NYC', 'office',
     :parent_org_id,
     :parent_org_root_id,    -- same as the parent's sa_root_id
     :parent_level + 1,
     :acting_user_claim
-);
+) RETURNING id;
+
+SELECT claimius.link_app_object(:app_id, 'claimius.organization', :new_org_id, :acting_user_claim);
 ```
+
+`organization` and `location` carry no `app_id` column. They belong to an app through a live `claimius.app_object` row, written by `link_app_object`.
 
 After: calc trigger splices the new org into the existing ownership tree. Anyone with an inheriting claim on an ancestor automatically gets access (recomputed in `user_object`).
 
@@ -461,21 +473,24 @@ A location requires an owning organization. The BEFORE INSERT trigger handles th
 ```sql
 -- Root location: parent and root left out, trigger self references both
 INSERT INTO claimius.location (
-    app_id, sa_owner_id, name, type,
+    sa_owner_id, name, type,
     sa_level, sa_created_by
 ) VALUES (
-    :app_id, :org_id, 'Headquarters', 'building',
+    :org_id, 'Headquarters', 'building',
     0, :acting_user_claim
-);
+) RETURNING id;
 
 -- Child location: only sa_parent_id needs to be set, trigger copies sa_root_id
 INSERT INTO claimius.location (
-    app_id, sa_owner_id, name, type,
+    sa_owner_id, name, type,
     sa_parent_id, sa_level, sa_created_by
 ) VALUES (
-    :app_id, :org_id, 'Conference Room A', 'room',
+    :org_id, 'Conference Room A', 'room',
     :parent_loc_id, :parent_level + 1, :acting_user_claim
-);
+) RETURNING id;
+
+-- Link each new location to the app
+SELECT claimius.link_app_object(:app_id, 'claimius.location', :new_loc_id, :acting_user_claim);
 ```
 
 After: calc trigger updates the location tree and (if applicable) splices the location into the owning org's ownership tree.
@@ -503,13 +518,13 @@ This is the standard pattern whenever you create a new "thing" and want someone 
 ```sql
 -- 1. Create the claim
 SELECT claimius.create_claim(
-    p_app_id          => :app_id,
-    p_name            => 'Admin: Acme NYC',
-    p_description     => 'Full access to Acme NYC and descendants',
-    p_sa_access_level => 1,
-    p_sa_owner_id     => :org_id,
-    p_sa_root_id      => :root_org_id,
-    p_sa_created_by   => :acting_user_claim
+    p_app_id        => :app_id,
+    p_name          => 'Admin: Acme NYC',
+    p_description   => 'Full access to Acme NYC and descendants',
+    p_sa_access     => 15,
+    p_sa_owner_id   => :org_id,
+    p_sa_root_id    => :root_org_id,
+    p_sa_created_by => :acting_user_claim
 );
 
 -- 2. Bind it to the object
@@ -562,13 +577,13 @@ After: nothing else from the Claimius side. The user now has the default claim g
 
 ## Deny claims
 
-Setting `is_deny = true` on a claim flips it to deny semantics. A deny claim with `sa_access_level = N` erases grants at level `<= N` on the same path. Path is identified by `(tree_type, cascaded_from)` in the grants jsonb.
+A claim whose `sa_access` has the deny bit `16` set is a deny claim. `create_claim` stores its bits verbatim, without the grant expansion, and the owner, write, read and execute bits enumerate what it subtracts: `20` (deny with read) removes read, `18` (deny with write) removes write, `31` removes all four. Bind it with `assign_claim_object` like any other claim.
 
-A deny on the bound object itself (non cascading) blocks all paths.
+A deny bound directly on the object subtracts its bits from every grant on that object, on any path.
 
-A deny at level 0 erases direct (creator) grants too.
+A deny that arrives by cascade subtracts its bits from inherited grants in any tree and spares grants bound directly on the object.
 
-Denies are computed inside calc functions; the resulting `user_object` row reflects only surviving grants.
+A grant whose mask reaches `0` after subtraction is dropped. Denies are computed inside calc functions (`_build_grants_for_object`, `_apply_denies`); the resulting `user_object` row reflects only surviving grants, so reads never filter for denies.
 
 ## Sync model
 
@@ -589,38 +604,41 @@ The same composite ids on prophet and disciple guarantee idempotent upserts. App
 
 Two functions return flat node lists suitable for visualizing the deployment's access topology. Both return rows of shape `(object_id UUID, object_type TEXT, label TEXT, parent_id UUID, data JSONB)` so the frontend can pipe them straight into a graph layout (dagre, d3-force, whatever). Both go through `reconcile_if_pending` and `check_user_active` first.
 
-Every row's `data` jsonb contains at minimum two keys:
-- `access_level` (INTEGER or NULL): the user's effective access level for this object, from `user_object.sa_access_level`. NULL for nodes that aren't accessible objects in the standard model (the requesting user themselves, user_claim connectors, claim_object connectors).
-- `level` (INTEGER or NULL): the tree depth of the row in its native hierarchy (orgs and locations have it; other types are NULL).
+Every row's `data` jsonb contains at minimum three keys:
+- `access` (INTEGER or NULL): the bitwise access mask for this node. For objects it is the user's effective mask from `user_object.sa_access`; for a claim or a claim_object connector it is that row's own `sa_access`. NULL for the requesting user and for user_claim connectors.
+- `scope` (JSONB or NULL): the scope payload carried alongside the mask.
+- `level` (INTEGER or NULL): tree depth, never an access value. On organizations and locations it is `sa_level`; on objects reached from a start claim it is the depth below the bound object; NULL elsewhere.
+
+The `p_required_access` argument on both functions is a mask filter: a node or claim passes when `(sa_access & p_required_access) = p_required_access`. The default `0` passes everything.
 
 Additional keys vary by node kind. All field names in `data` use plain naming without `sa_` prefixes (so `owner_id` not `sa_owner_id`, `location_id` not `sa_location_id`, `description` not `sa_description`, etc.).
 
-### `get_owner_graph(p_user_id, p_app_id, p_start_id, p_depth, p_min_level)`
+### `get_owner_graph(p_user_id, p_app_id, p_start_id, p_depth, p_required_access)`
 
 Returns the ownership graph: organizations, locations, and every registered application table that has `sa_owner_id` and/or `sa_location_id`. Rows are scoped to what the calling user has access to via `get_objects`.
 
 Arguments:
 - `p_start_id UUID DEFAULT NULL`: organization id to start from. NULL walks every accessible root org. If the start id is not an accessible org, the function returns empty silently.
 - `p_depth INTEGER DEFAULT 0`: how many levels of descent below the start. 0 means unlimited. The start org is depth 0; its direct children are depth 1; and so on.
-- `p_min_level INTEGER DEFAULT 30`: access level filter passed through to `get_objects`.
+- `p_required_access INTEGER DEFAULT 0`: access mask filter.
 
 Per-row `data` shape:
-- Organizations (`object_type = 'claimius.organization'`): `{ access_level, level, description, type, owner_id }`.
-- Locations (`object_type = 'claimius.location'`): `{ access_level, level, description, type, owner_id, longitude, latitude }`.
-- Other registered tables: `{ access_level, level (NULL), description, owner_id, location_id }`.
+- Organizations (`object_type = 'claimius.organization'`): `{ access, scope, level, description, type, owner_id }`.
+- Locations (`object_type = 'claimius.location'`): `{ access, scope, level, description, type, owner_id, longitude, latitude }`.
+- Other registered tables: `{ access, scope, level (NULL), description, owner_id, location_id }`.
 
 `label` comes from the row's `name` column when available (via `user_object.sa_name`), otherwise the id as fallback.
 
 `parent_id` is the canonical ancestor in priority order: `sa_parent_id`, then `sa_location_id`, then `sa_owner_id`. NULL for tree roots.
 
-### `get_claim_graph(p_user_id, p_app_id, p_start_id, p_depth, p_min_level)`
+### `get_claim_graph(p_user_id, p_app_id, p_start_id, p_depth, p_required_access)`
 
 Returns the access graph: the requesting user, every other user this user can see (via `user_users`), every claim the user holds, the user_claim grants, claim_object connector nodes, and the actual objects reachable through those bindings.
 
 Arguments:
 - `p_start_id UUID DEFAULT NULL`: claim id. NULL includes every claim the user holds. If the start id is not a claim the user holds, the function returns empty silently.
-- `p_depth INTEGER DEFAULT 0`: 0 includes cascaded objects; >= 1 includes only directly-bound objects (no cascade descendants).
-- `p_min_level INTEGER DEFAULT 30`.
+- `p_depth INTEGER DEFAULT 0`: 0 includes cascaded objects. Without a start id, >= 1 includes only directly bound objects. With a start id, >= 1 caps cascade descent at that many levels below each bound object.
+- `p_required_access INTEGER DEFAULT 0`: access mask filter applied to the claims and, without a start id, to the objects.
 
 Topology:
 ```
@@ -633,24 +651,25 @@ claim (parent_id = NULL)
 ```
 
 Per-row `data` shape:
-- The requesting user (`object_type = 'claimius.samna_user'`, parent_id NULL): `{ access_level (NULL), level (NULL), user_id, email, status }`.
-- Other users (`object_type = 'claimius.samna_user'`, parent_id = requesting user id): `{ access_level, level (NULL), user_id, email, status }`.
-- user_claim (`object_type = 'claimius.user_claim'`): `{ access_level (NULL), level (NULL), claim_id, starts_at, ends_at, reason }`.
-- Claim (`object_type = 'claimius.claim'`): `{ access_level (the claim's own level), level (NULL), description, is_deny, inherits, type }`.
-- claim_object connector (`object_type = 'claimius.claim_object'`): `{ access_level (NULL), level (NULL), target_object_id, target_object_type, inherits }`.
-- Reachable object (`object_type = the object's schema-qualified type`): `{ access_level, level (NULL), description, owner_id, location_id, tree_type }`. `tree_type` is `'direct'` for directly-bound objects or `'ownership'`/`'location'`/`'parenthood'` for cascaded ones.
+- The requesting user (`object_type = 'claimius.samna_user'`, parent_id NULL): `{ access (NULL), scope (NULL), level (NULL), user_id, email, external_id, status }`.
+- Other users (`object_type = 'claimius.samna_user'`, parent_id = requesting user id): `{ access, scope, level (NULL), user_id, email, external_id, status }`.
+- user_claim (`object_type = 'claimius.user_claim'`): `{ access (NULL), scope (NULL), level (NULL), claim_id, starts_at, ends_at, reason }`.
+- Claim (`object_type = 'claimius.claim'`): `{ access (the claim's own mask, deny bit included), scope (NULL), level (NULL), description, inherits, type }`.
+- claim_object connector (`object_type = 'claimius.claim_object'`): `{ access (the binding's own mask, NULL when it inherits the claim mask), scope, level (NULL), target_object_id, target_object_type, inherits }`.
+- Reachable object without a start id (`object_type = the object's schema qualified type`): `{ access, scope, level (NULL), description, owner_id, location_id, tree_type }`. `access` is the user's effective mask. `tree_type` is `'direct'` for directly bound objects or `'ownership'`/`'location'`/`'parenthood'` for cascaded ones.
+- Reachable object with a start id: `{ access, deny, scope, level, tree_type }`. `access` is the binding mask with the deny bit removed, `deny` is TRUE when the binding carries the deny bit, and `level` is the depth below the bound object.
 
 ### Extending the graphs
 
-The graph functions surface what claimius knows: the structural ownership chain and the access topology, with object data limited to the columns claimius materializes (`sa_name`, `sa_description`, `sa_access_level`, `sa_owner_id`, `sa_location_id`). If you need richer per-table fields (a bookable's `type_id`, an asset's specifics, etc.) write a wrapper in your own schema that UNIONs claimius's output with rows from your own tables, scoped through `get_objects`:
+The graph functions surface what claimius knows: the structural ownership chain and the access topology, with object data limited to the columns claimius materializes (`sa_name`, `sa_description`, `sa_access`, `scope`, `sa_owner_id`, `sa_location_id`). If you need richer per-table fields from your own tables, write a wrapper in your own schema that UNIONs claimius's output with rows from your own tables, scoped through `get_objects`:
 
 ```sql
-CREATE OR REPLACE FUNCTION public.get_owner_graph(p_user_id UUID, p_start_id UUID DEFAULT NULL, p_depth INTEGER DEFAULT 0, p_min_level INTEGER DEFAULT 30)
+CREATE OR REPLACE FUNCTION public.get_owner_graph(p_user_id UUID, p_start_id UUID DEFAULT NULL, p_depth INTEGER DEFAULT 0, p_required_access INTEGER DEFAULT 0)
    RETURNS TABLE(object_id UUID, object_type TEXT, label TEXT, parent_id UUID, data JSONB) AS $$
 DECLARE
    v_app_id UUID := claimius.get_app_id();
 BEGIN
-   RETURN QUERY SELECT * FROM claimius.get_owner_graph(p_user_id, v_app_id, p_start_id, p_depth, p_min_level);
+   RETURN QUERY SELECT * FROM claimius.get_owner_graph(p_user_id, v_app_id, p_start_id, p_depth, p_required_access);
    -- Add your own enrichment, override per-row data jsonb where you want
    -- richer fields, etc. claimius's rows will still be there with the
    -- canonical schema-qualified types.

@@ -11,7 +11,7 @@ When the user says "deploy" in this repo, execute these steps in order. Stop on 
 
 ## 1. Write or update Go tests for meaningful parts of the change
 
-Every piece of new behaviour in `db/`, `client/`, `sauth/`, `sessions/`, `audit/`, `hook/`, `middleware/`, `sync/`, or `transport/` that has an observable contract needs a test under `test/`. Look at the diff with `git diff` and `git status`, identify the meaningful surface, and either extend an existing test file under `test/<package>/` or add one. Trivial moves and rename only diffs do not need a new test. Anything that changes a return value, a sentinel error, an http status, a SQL function call, a parameter shape, an enum, or a struct field MUST be covered.
+Every piece of new behaviour in `shared/`, `prophet/`, `disciple/`, `smw/`, `client/`, `utils/` or `uptime/` that has an observable contract needs a test beside the package it covers, as `<package>/<name>_test.go`, with the `dbtest` build tag when it needs a database. A SQL contract gets a pgTAP file under `test/sql/<role>/`, one per role that carries the change. Look at the diff with `git diff` and `git status`, identify the meaningful surface, and either extend an existing test file or add one. Trivial moves and rename only diffs do not need a new test. Anything that changes a return value, a sentinel error, an http status, a SQL function call, a parameter shape, an enum, or a struct field MUST be covered.
 
 The test must assert the observable contract, not the internal call graph. Hit the public function, assert on the returned value or error sentinel.
 
@@ -21,16 +21,16 @@ The test must assert the observable contract, not the internal call graph. Hit t
 just test
 ```
 
-Runs `go test ./test/...`. Failure: report the failing test names and stop. Do not commit, do not bump.
+Runs `go test ./...`, then for each role `smig test` on `<role>/database/migrate.yml` fresh and `--from` the last tag, then the `dbtest` tagged Go suites against the container that run keeps. `just test-hurl` runs the hurl files under `test/hurl/` against the example disciple; run it when the change touches a route. Failure: report the failing test names and stop. Do not commit, do not bump.
 
 ## 3. Mirror the Go change to typescript under `ts/`
 
 The typescript package under `ts/src/` mirrors the Go surface that is callable from a browser or node consumer. Walk through the Go diff and apply the equivalent change to `ts/src/`:
 
-1. Type changes in `db/models.go`, `db/consts.go`, or any other Go type that has a counterpart in `ts/src/types.ts` go into `ts/src/types.ts`. Match the json tag, not the Go field name.
+1. Type changes in `shared/models.go` or any other Go type that has a counterpart in `ts/src/types.ts` go into `ts/src/types.ts`. Match the json tag, not the Go field name.
 2. New or changed sentinel errors get a matching named export in `ts/src/`.
 3. New http endpoints, query parameters, header names, or status codes that the typescript client speaks get mirrored into `ts/src/client.ts`, `ts/src/fetch.ts`, or `ts/src/session.ts` as appropriate.
-4. Update the typescript tests under `ts/src/__tests__/` if the contract change has a browser side assertion.
+4. Update the typescript tests beside the module, `ts/src/<name>.test.ts`, if the contract change has a browser side assertion.
 
 If the Go diff has zero browser facing surface, this step is a no-op and the deploy can move on. Document that no-op in the commit message so a reviewer does not wonder.
 
@@ -68,9 +68,9 @@ If the working tree has nothing to commit after the build outputs are excluded b
 just deploy
 ```
 
-Calls `../sbump/sbump.sh patch --env APP_VERSION --json ts/package.json@.version --push-version`. Patch bump, tag write, tag push. The GitHub Actions workflow attached to tag pushes builds and publishes the `@nimling` typescript package; consumers of the Go module pick the new tag up via `go get github.com/nimling/samna-auth-middleware@vX.Y.Z`.
+Calls `sbump patch --env APP_VERSION --json ts/package.json@.version --push-version --auto --workflow`. Patch bump, tag write, tag push. The GitHub Actions workflow attached to tag pushes builds and publishes the `@nimling` typescript package; consumers of the Go module pick the new tag up via `go get github.com/nimling/samna-auth-middleware@vX.Y.Z` and move the `ref` of their claimius git include to the same tag. The module path stays `github.com/nimling/samna-auth-middleware` at every major.
 
-For minor or major releases, use the explicit `major|minor|patch` argument on `sbump.sh` instead of `patch`.
+For minor or major releases, use the explicit `major|minor|patch` argument on `sbump` instead of `patch`.
 
 ## Never
 

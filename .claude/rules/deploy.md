@@ -4,7 +4,7 @@ This repo publishes two artefacts: the Go module consumed via `go get github.com
 
 ## Never
 
-1. Edit `APP_VERSION` in `.env` or `ts/package.json` `version` by hand. `../sbump/sbump.sh` owns both fields. Hand edits drift from the tag and break the cross artefact pair.
+1. Edit `APP_VERSION` in `.env` or `ts/package.json` `version` by hand. `sbump` owns both fields. Hand edits drift from the tag and break the cross artefact pair.
 
 2. Tag manually with `git tag` or `git push --tags`. `just deploy` writes the tag and pushes it as one operation via `sbump`.
 
@@ -20,7 +20,7 @@ This repo publishes two artefacts: the Go module consumed via `go get github.com
 
 ## Always
 
-1. Update or add Go tests beside the package they cover, as `<package>/<name>_test.go`, for any change that has an observable contract on the Go side. Database backed Go tests carry the `dbtest` build tag, SQL tests live in `test/sql/<role>/`, hurl tests in `test/hurl/`, and `just test` runs all of them against a throwaway local Postgres.
+1. Update or add Go tests beside the package they cover, as `<package>/<name>_test.go`, for any change that has an observable contract on the Go side. Database backed Go tests carry the `dbtest` build tag and SQL tests are pgTAP files under `test/sql/<role>/`. `just test` runs `go test ./...`, then per role `smig test` on `<role>/database/migrate.yml` fresh and `--from` the last tag, then the `dbtest` tagged suites against the container that run keeps. Hurl tests live in `test/hurl/` and `just test-hurl` runs them against the example disciple. There is no `test/run.sh`.
 
 2. Update or add typescript tests beside the module they cover as `ts/src/<name>.test.ts` for any change that has an observable contract on the typescript side.
 
@@ -28,8 +28,8 @@ This repo publishes two artefacts: the Go module consumed via `go get github.com
 
 4. Write a single sentence commit message that describes the user visible change. The release notes derive from `git log` after the tag.
 
-5. Use the existing `justfile` recipes: `just test`, `just build`, `just deploy`. Direct `go test`, `go build`, `pnpm build`, or `sbump.sh` invocation drifts from the contract.
+5. Use the existing `justfile` recipes: `just test`, `just test-hurl`, `just build`, `just deploy`. Direct `go test`, `go build`, `pnpm build`, or `sbump` invocation drifts from the contract.
 
 ## Version policy
 
-`just deploy` does a patch bump by default. For minor or major, pass the explicit argument to `sbump.sh` instead. The repo currently does not gate this; the human running the deploy picks the right bump.
+`just deploy` does a patch bump by default. For minor or major, pass the explicit argument to `sbump` instead. The repo currently does not gate this; the human running the deploy picks the right bump.

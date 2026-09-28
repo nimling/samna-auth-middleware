@@ -44,7 +44,7 @@ The synthesized `*AccessClaim` carries `UserObjectID = userID`, `Access = int(re
 
 `claimius.resolve_access` is the non raising dispatcher. It routes audit, user_relation, and samna_user to their bespoke lookups and every other type through `claimius.get_access` then `claimius.get_direct_access`. `MutationAccessMany` runs it per row in a lateral join, which is why the batch never aborts on a denied row. Do not call it for a single object gate; that is what `mutation_access` is for.
 
-`claimius.get_direct_access` carries a required access mask and a raise flag, both defaulted off, so plain callers get the silent ancestor walk while `mutation_access` delegates its raise to it.
+`claimius.get_direct_access` carries a required access mask and a raise flag, both defaulted off, so plain callers get the silent ancestor walk while `mutation_access` delegates its raise to it. The walk honours `inherits` on both the claim and the binding: a binding above the object counts only when `claim.inherits` and `claim_object.inherits` are both set, and a deny bit on the chain removes the grant.
 
 `claimius.get_user_access` owns samna_user identifier resolution: the target arrives as text and resolves across external_id, user_id, and samna_user.id in that order, scoped to the app, non deleted, active. Every samna_user verdict, single or batched, flows through it.
 

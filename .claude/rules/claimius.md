@@ -15,7 +15,7 @@ description: |
    app_object app_object_ids apps_for_object link_app_object app_has_object
    unlink_app_object create_root_organization, scope claim ScopeAccess
    jsonb_path_exists machine client service to service client credentials,
-   init_prophet init_disciple init_hybrid init_claimius_tables
+   init init_disciple init_hybrid init_claimius_tables
    init_claimius_internal ensure_app_user merge_user migrate_root,
    calc_object_access calc_hierarchical_access calc_claim_access
    emit_sync_event audit_trigger replay_mode reconcile_queue access_diff
@@ -113,7 +113,7 @@ The `get_*` family:
 
 ### Writes: function if it exists, direct INSERT otherwise
 
-Write functions return a single jsonb object keyed by the affected table name. `create_claim` returns `{"claim": {...}}`, `assign_claim_user` returns `{"user_claim": {...}}`, `init_prophet` returns six keys: `samna_app`, `samna_user`, `organization`, `claim`, `claim_object`, `user_claim`. Capture and unpack with the `->` and `->>` jsonb operators.
+Write functions return a single jsonb object keyed by the affected table name. `create_claim` returns `{"claim": {...}}`, `assign_claim_user` returns `{"user_claim": {...}}`, `init` returns six keys: `samna_app`, `samna_user`, `organization`, `claim`, `claim_object`, `user_claim`. Capture and unpack with the `->` and `->>` jsonb operators.
 
 ```sql
 -- For claim machinery, ALWAYS use the function. Returns jsonb.
@@ -163,13 +163,13 @@ Tables that have a write function:
 - `samna_user` → `ensure_app_user` for the per app row
 - Cross app moves → `merge_user`
 - Cross root moves → `migrate_root`. Admin only, rare.
-- Bootstrap → `init_prophet`, `init_disciple` requiring `p_disciple_app_slug`, `init_hybrid` requiring both `p_system_app_slug` and `p_disciple_app_slug`
+- Bootstrap → `init`, which on the prophet set takes the system app fields and on the disciple set takes `p_disciple_app_slug`; the prophet set also carries `init_disciple` and `init_hybrid`, the latter requiring both `p_system_app_slug` and `p_disciple_app_slug`
 - Table registration → `init_claimius_tables`
 - Self identity → `get_prophet_app()` returns the system app on prophet and hybrid. `get_disciple_app()` returns the upstream app on disciple and hybrid. Both return `SETOF claimius.samna_app`. Scalar UUID variants `get_prophet_app_id()`, `get_disciple_app_id()`, and `get_app_id()` exist for `DEFAULT` expressions and other places that reject subqueries. `get_app_id()` returns the prophet/system app id on prophet and hybrid, the disciple app id on pure disciple. Use these instead of maintaining a local helper.
 
 Tables where direct INSERT/UPDATE is the documented path:
 
-- `samna_app`. Use `init_prophet` for the FIRST app only.
+- `samna_app`. Use `init` for the FIRST app only.
 - `organization`. Prefer `create_root_organization` for roots; it links `app_object` for you.
 - `location`
 - `samna_client`, `samna_secret`
@@ -201,7 +201,7 @@ The list and graph functions `get_organizations`, `get_locations`, `get_users`, 
 
 ### Composite ids are `<schema>.<table>:<uuid>`
 
-Object types are always schema qualified. `public.device`, never bare `device`. The `init_claimius_tables` function defaults a missing schema to `public`, but stored values are always full.
+Object types are always schema qualified, in the database and on the wire. `public.device`, never bare `device`. `init_claimius_tables` raises on an unqualified name. The one resolver is `shared.ResolveObjectType`: it accepts a qualified string or a bare claimius name and refuses any other bare name, and a model whose `table:` tag carries no schema reads as `public` through `ObjectTypeOf`. The prophet has no resolver of its own.
 
 The composite id format is colon separated: `claimius.composite_id('public.device', 'aaaa...')` returns `'public.device:aaaa...'`.
 
@@ -279,7 +279,7 @@ A prophet has tables that reference each other circularly. Get the order wrong a
 
 ### Fresh prophet bootstrap
 
-Encapsulated in `init_prophet`. Call `init_prophet` and don't replicate its body.
+Encapsulated in `init`. Call `init` and don't replicate its body.
 
 ### A new non system app on an existing prophet
 

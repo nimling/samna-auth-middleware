@@ -54,24 +54,19 @@ A handler asks the database, never its own code, whether an actor may act. See [
 
 ## Schema delivery
 
-The SQL is not copied into consumers. A consumer's `database/migrate.yml` pulls it as two git includes at the same ref its `go.mod` pins, and `smig up` applies them.
+The SQL is not copied into consumers, and a consumer holds none of it on disk. The middleware ships two base sets, `prophet/database` and `disciple/database`, and nothing else for the schema. A consumer's `database/migrate.yml` pulls its role's set as one git include at the same ref its `go.mod` pins, and `smig up` applies it.
 
 ```yaml
 - name: Claimius Schema
   type: base
+  slug: claimius
   git:
     repo: nimling/samna-auth-middleware
-    ref: v1.1.5
+    ref: <tag>
     path: disciple/database
-- name: Claimius Migrations
-  type: migration
-  git:
-    repo: nimling/samna-auth-middleware
-    ref: v1.1.5
-    path: disciple/database/migrations
 ```
 
-A prophet uses `prophet/database` in the same two steps. Migration files are named from the release tag, `V<tag>__claimius_<slug>.sql`, and the release workflow refuses a file that does not match.
+A prophet uses `prophet/database` in the same step. Moving the ref replays the changed base files through smig's preflight. The table alters a consumer needs to reach the new shape are the consumer's own migration, `V2.0.0__claimius_unified.sql` in its own `database/migrations/`; the middleware carries no `migrations/` folder under either role.
 
 ## Configuration
 

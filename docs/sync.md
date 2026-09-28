@@ -10,6 +10,10 @@ sam.SyncStart(ctx)
 
 `SyncStart(ctx context.Context)` is the whole contract. One line in the consumer main, after the database is initialized. It returns immediately. The consumer never spawns the goroutine, never checks debug mode, never writes a restart loop, and never handles a returned error channel.
 
+## Where it pulls from
+
+Sync is pull only. The prophet serves two routes under the `/sam` group, `GET /sam/sync/snapshot` and `GET /sam/sync/:seq`, and nothing pushes to a disciple or to the prophet: there is no inbound sync route on either side. The delta route reads `claimius.get_sync_events`, which returns the rows carrying the app id plus the organization and location rows the app reaches through `app_object`.
+
 ## What travels
 
 The snapshot carries `samna_user`, `organization`, `location`, `claim`, `user_claim`, `claim_object`, `samna_client`, `samna_secret`, `object_field`, `user_field`, `user_relation`, `audit`, `user_object`, `object_users` and `user_users`.

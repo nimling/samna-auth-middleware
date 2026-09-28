@@ -42,4 +42,4 @@ A listing filters through the materialized index with `ObjectWhere(actor, object
 
 ## Graphs
 
-`GetOwnerGraph` and `GetClaimGraph` return flat nodes, `object_id`, `object_type`, `label`, `parent_id` and a `data` payload with the access mask and depth. `GraphWindow{Width, Sort, NextID}` pages a wide level. `PostObjectUsage` records that an actor opened an object, which is what the `usage` sort orders by.
+`GetOwnerGraph(ctx, actor, startID, depth, required)` and `GetClaimGraph(ctx, actor, startID, depth, required)` return flat nodes, `object_id`, `object_type`, `label`, `parent_id` and a `data` payload with the access mask and depth. The graphs cover the shared claimius types and every table registered with `init_claimius_tables`, read from `table_info`. A service that wants its own shapes on top wraps `claimius.get_owner_graph`, `claimius.get_claim_graph` and `claimius.search` in its own SQL; the middleware carries no paging window and no usage record for them.

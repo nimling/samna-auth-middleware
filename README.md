@@ -29,7 +29,7 @@ A binary is one role. Both roles wire the same four identifiers.
 | `smw` | `smw` | `smw` | Middleware, shared by both roles. |
 | `client` | `client` | `client` | HTTP client for the Samna Auth API. |
 | `utils` | `utils` | `utils` | Config loader, cookies, and debug helpers. |
-| `database` | `prophet/database` | `disciple/database` | The canonical `claimius` SQL set for the role. |
+| `database` | `prophet/database` | `disciple/database` | The `claimius` base SQL set for the role, read by a consumer as a smig git include. |
 | `uptime` | | `uptime` | The heartbeat reporter. `uptime.Init(logger, opts)` registers the app's `heartbeat` monitor and beats to the prophet. |
 
 ## Getting started
@@ -136,7 +136,9 @@ At `sdb.Init` the prophet and disciple resolve the OIDC issuer, token, and jwks 
 
 ## Object types
 
-Object types are schema qualified going into and out of the database and schema stripped over JSON and HTTP, so a caller sees `device` while the row stores `public.device`.
+Object types are schema qualified at every boundary, in the database and on the wire. `ObjectType.MarshalJSON` sends the qualified string, so a caller sees `public.device` exactly as the row stores it. `ResolveObjectType` in `shared` is the one resolver: it accepts a qualified string or a bare claimius name such as `organization` and refuses any other bare name, so a consumer qualifies its own types. A model whose `table:` tag carries no schema reads as the `public` schema through `ObjectTypeOf`. `init_claimius_tables` raises on an unqualified name.
+
+The middleware knows the shared claimius types only: `organization`, `location`, `claim`, `claim_object`, `user_claim`, `samna_user`, `samna_client`, `samna_secret` and `user_relation`. A consumer's own tables register with `init_claimius_tables`, and the consumer wraps `claimius.search` and the graph functions in its own SQL for its own shapes.
 
 ## Debug mode
 
@@ -144,32 +146,37 @@ Setting `SAUTH_DEBUG_USER_ID` to a valid UUID makes the middleware skip authenti
 
 ## Claimius SQL: prophet and disciple sets
 
-The repo ships the Claimius schema as two complete, role tailored SQL sets, both embedded in the module:
+The repo ships the Claimius schema as two complete, role tailored base SQL sets, and nothing else for the schema:
 
-- `prophet/database` is the full schema, copied as is from the canonical claimius source. It hosts many apps and scopes them two ways: an `app_id` column on most tables, and `claimius.app_object` links for `organization` and `location`, which carry no `app_id`. It is the source of truth: writes fire calc triggers that materialize `user_object` and emit `sync_event` rows for downstream disciples.
-- `disciple/database` is the same schema with `app_id` removed from every table, index, and function, without `app_object`, and with the functions that no consumer calls removed (`init_prophet`, `init_hybrid`, `merge_user`, `recompute_state`). A disciple mirrors exactly one app, so it needs neither mechanism. Its calc engine still runs in debug mode for standalone local writes, and stays dormant under `replay_mode` while sync applies the relation tables shipped from the prophet.
+- `prophet/database` is the full schema. It hosts many apps and scopes them two ways: an `app_id` column on most tables, and `claimius.app_object` links for `organization` and `location`, which carry no `app_id`. It is the source of truth: writes fire calc triggers that materialize `user_object` and emit `sync_event` rows for downstream disciples.
+- `disciple/database` is the same schema with `app_id` removed from every table, index, and function and without `app_object`. A disciple mirrors exactly one app, so it needs neither mechanism, and it bootstraps with `claimius.init()`. Its calc engine still runs in debug mode for standalone local writes, and stays dormant under `replay_mode` while sync applies the relation tables shipped from the prophet.
 
 Both scoping mechanisms exist only on the prophet. `app_id` is read from the deployment env into `prophet_state` at init. The disciple schema knows nothing about either. [App scoping](docs/app_scoping.md) has the full rules.
 
-### Choosing a role at migrate time
+### Reaching a set from a consumer
 
-A consumer picks its role when it pulls the SQL into its own `database` tree, then migrates with smig:
+A consumer holds none of the SQL on disk. Its `database/migrate.yml` reads the role folder as a smig git include at the ref its `go.mod` pins, and `smig up` applies it:
 
+```yaml
+- name: Claimius Schema
+  type: base
+  slug: claimius
+  git:
+    repo: nimling/samna-auth-middleware
+    ref: <tag>
+    path: disciple/database
 ```
-# disciple consumer (e.g. bookable_server)
-go run github.com/nimling/samna-auth-middleware/cmd/sqlsync --role=disciple --out=./database/claimius
 
-# prophet consumer (e.g. samna_auth)
-go run github.com/nimling/samna-auth-middleware/cmd/sqlsync --role=prophet --out=./database/claimius
-```
-
-The materialized files land where `database/migrate.yml` already points its claimius step, and `smig up` applies them. Each role package also exposes `prophet.WriteSQL(dir)` and `disciple.WriteSQL(dir)` if a consumer wants to drive the export from Go. Because Go compiles only the imported package, a disciple consumer that imports `.../disciple` never pulls the prophet set, and the reverse holds for a prophet consumer importing `.../prophet`.
+A prophet consumer points the same step at `prophet/database`. Moving the ref replays the changed base files through smig's preflight. The table alters a consumer needs to reach the new shape are the consumer's own migration, `V2.0.0__claimius_unified.sql` in its own `database/migrations/`; the middleware carries no `migrations/` folder under either role.
 
 ## Testing
 
 ```
 just test
+just test-hurl
 ```
+
+`just test` runs `go test ./...`, then for each role runs `smig test` on `<role>/database/migrate.yml` fresh and `--from` the last tag, then the `dbtest` tagged Go suites against the container that run keeps. The SQL tests are pgTAP files under `test/sql/<role>/`. `just test-hurl` builds the example disciple against a kept disciple database and runs the hurl files under `test/hurl/` against it.
 
 ## License
 

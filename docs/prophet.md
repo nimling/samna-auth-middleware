@@ -46,7 +46,7 @@ func main() {
 
 2. `smw.AppMiddleware` guards the group the apps reach the prophet through. It authenticates the app slug and secret and sets the app context the handlers rely on. It is internal to the ecosystem.
 
-3. `sam.RegisterEndpoints(group)` mounts the user, organization, location, claim, asset, app, guest, sync, client, secret, search, code and field routes. The sync feed the disciples consume is part of this set.
+3. `sam.RegisterEndpoints(group)` mounts the user, relation, organization, location, claim, asset, app, guest, sync, client, secret, search, code, field and notification routes. The sync feed the disciples consume is part of this set. Organization, location, user, claim, client, secret and relation take `PATCH` beside `PUT`. A grant is addressed by claim and member within the calling app: `PATCH` and `DELETE` on `claim/:claim_id/object/:id` name the bound object, and on `claim/:claim_id/user/:id` the granted user.
 
 4. `smw.UserAuthMiddleware(opts)` protects browser and bearer facing routes. Pass `nil` to take the slug, secret, redirect and page redirect from the config. `smw.ClientAuthMiddleware()` protects service to service routes.
 
@@ -72,7 +72,7 @@ The policy a decision is recorded against and the document the banner links are 
 
 ## Notes
 
-The prophet serves the sync snapshot and delta feed at `sync/snapshot` and `sync/:seq` under the registered group. It does not run `SyncStart`; that is the disciple side.
+Sync is pull only. The prophet serves the snapshot and delta feed at `GET sync/snapshot` and `GET sync/:seq` under the registered group, the delta read through `claimius.get_sync_events`, which scopes organizations and locations through `app_object`. There is no inbound sync route on the prophet and it does not run `SyncStart`; that is the disciple side.
 
-Object types come back schema stripped over JSON and stay schema qualified in the database.
+Object types are schema qualified over JSON and in the database alike.
 </content>
