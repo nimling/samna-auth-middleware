@@ -33,6 +33,7 @@ func RegisterEndpoints(g *echo.Group) {
 	relation.GET("/:id", h.GetRelation)
 	relation.POST("", h.PostRelation)
 	relation.PUT("/:id", h.PutRelation)
+	relation.PATCH("/:id", h.PutRelation)
 	relation.DELETE("/:id", h.DeleteRelation)
 
 	org := g.Group("/organization")
@@ -54,6 +55,7 @@ func RegisterEndpoints(g *echo.Group) {
 	loc.GET("/:id/claim", h.GetLocationClaims)
 	loc.POST("", h.PostLocation)
 	loc.PUT("/:id", h.PutLocation)
+	loc.PATCH("/:id", h.PutLocation)
 	loc.DELETE("/:id", h.DeleteLocation)
 	loc.GET("/:id/audit", h.GetLocationAudit)
 
