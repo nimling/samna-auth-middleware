@@ -347,3 +347,150 @@ CREATE OR REPLACE FUNCTION claimius.get_sync_events(
 $$ LANGUAGE sql STABLE;
 
 COMMENT ON FUNCTION claimius.get_sync_events(UUID, BIGINT, INTEGER) IS 'Delta feed for one app after a sequence. Rows carrying the app id, plus organization and location rows the app reaches through app_object. Other apps'' shared hierarchy rows never leave the prophet.';
+
+CREATE OR REPLACE FUNCTION claimius.get_direct_access(
+    p_user_id       UUID,
+    p_app_id        UUID,
+    p_object_id     UUID,
+    p_object_type   TEXT,
+    p_required      INTEGER DEFAULT 0,
+    p_raise         BOOLEAN DEFAULT FALSE
+) RETURNS TABLE (
+                    user_object_id      UUID,
+                    user_claim_id       UUID,
+                    claim_id            UUID,
+                    claim_name          TEXT,
+                    sa_access           INTEGER,
+                    scope               JSONB,
+                    sa_owner_id         UUID,
+                    sa_root_id          UUID,
+                    sa_location_id      UUID,
+                    direct_grant        BOOLEAN
+                ) AS $$
+DECLARE
+    v_exists   BOOLEAN;
+    v_has_soft BOOLEAN;
+BEGIN
+    PERFORM claimius.reconcile_if_pending(p_app_id, p_user_id);
+
+    IF NOT claimius.check_user_active(p_app_id, p_user_id) THEN
+        RETURN;
+    END IF;
+
+    IF p_object_type = 'claimius.samna_user' AND p_object_id = p_user_id THEN
+        RETURN QUERY
+            SELECT
+                claimius.composite_id(p_app_id::TEXT, p_user_id::TEXT, p_object_type, p_object_id::TEXT),
+                uc.id,
+                uc.claim_id,
+                'self'::TEXT,
+                15,
+                NULL::JSONB,
+                uc.sa_owner_id,
+                c.sa_root_id,
+                NULL::UUID,
+                TRUE
+            FROM claimius.user_claim uc
+            JOIN claimius.claim c
+              ON c.id = uc.claim_id
+             AND c.sa_deleted_at IS NULL
+            WHERE uc.user_id = p_user_id
+              AND uc.app_id = p_app_id
+              AND uc.sa_deleted_at IS NULL
+              AND (uc.starts_at IS NULL OR uc.starts_at <= now())
+              AND (uc.ends_at IS NULL OR uc.ends_at > now())
+            ORDER BY uc.sa_created_at ASC
+            LIMIT 1;
+        RETURN;
+    END IF;
+
+    RETURN QUERY
+        SELECT
+            claimius.composite_id(p_app_id::TEXT, p_user_id::TEXT, p_object_type, p_object_id::TEXT),
+            uc.id,
+            c.id,
+            c.name,
+            (c.sa_access | coalesce(co.sa_access, 0)) & 15,
+            co.scope,
+            co.sa_owner_id,
+            co.sa_root_id,
+            NULL::UUID,
+            FALSE
+        FROM claimius.get_ancestors(p_object_type, p_object_id) a
+                 JOIN claimius.claim_object co
+                      ON co.app_id = p_app_id
+                          AND co.object_type = a.object_type
+                          AND co.object_id = a.object_id
+                          AND co.sa_deleted_at IS NULL
+                 JOIN claimius.user_claim uc
+                      ON uc.claim_id = co.claim_id
+                          AND uc.user_id = p_user_id
+                          AND uc.app_id = p_app_id
+                          AND uc.sa_deleted_at IS NULL
+                          AND (uc.starts_at IS NULL OR uc.starts_at <= now())
+                          AND (uc.ends_at IS NULL OR uc.ends_at > now())
+                 JOIN claimius.claim c
+                      ON c.id = uc.claim_id
+                          AND c.sa_deleted_at IS NULL
+                          AND ((c.sa_access | coalesce(co.sa_access, 0)) & 16) = 0
+                          AND ((((c.sa_access | coalesce(co.sa_access, 0)) & 15) & p_required) = p_required)
+                          AND (a.hop = 0 OR (c.inherits AND co.inherits))
+        WHERE NOT EXISTS (
+            SELECT 1
+            FROM claimius.get_ancestors(p_object_type, p_object_id) da
+                     JOIN claimius.claim_object dco
+                          ON dco.app_id = p_app_id AND dco.object_type = da.object_type
+                              AND dco.object_id = da.object_id
+                              AND dco.sa_deleted_at IS NULL
+                     JOIN claimius.user_claim duc
+                          ON duc.claim_id = dco.claim_id
+                              AND duc.user_id = p_user_id AND duc.app_id = p_app_id
+                              AND duc.sa_deleted_at IS NULL
+                              AND (duc.starts_at IS NULL OR duc.starts_at <= now())
+                              AND (duc.ends_at IS NULL OR duc.ends_at > now())
+                     JOIN claimius.claim dc
+                          ON dc.id = duc.claim_id
+                              AND dc.sa_deleted_at IS NULL
+            WHERE ((dc.sa_access | coalesce(dco.sa_access, 0)) & 16) <> 0
+              AND (da.hop = 0 OR (dc.inherits AND dco.inherits))
+              AND (((dc.sa_access | coalesce(dco.sa_access, 0)) & 15) & p_required) <> 0
+        )
+        ORDER BY a.hop ASC, claimius._popcount((c.sa_access | coalesce(co.sa_access, 0)) & 15) DESC, uc.id ASC
+        LIMIT 1;
+
+    IF FOUND OR NOT p_raise THEN
+        RETURN;
+    END IF;
+
+    IF p_object_type = 'claimius.samna_user' THEN
+        SELECT EXISTS (
+            SELECT 1 FROM claimius.samna_user
+            WHERE user_id = p_object_id
+              AND app_id = p_app_id
+              AND sa_deleted_at IS NULL
+        ) INTO v_exists;
+    ELSE
+        SELECT has_sa_deleted_at INTO v_has_soft
+        FROM claimius.table_info
+        WHERE object_type = p_object_type;
+
+        IF v_has_soft IS TRUE THEN
+            EXECUTE format(
+                'SELECT EXISTS (SELECT 1 FROM %I.%I WHERE id = $1 AND sa_deleted_at IS NULL)',
+                split_part(p_object_type, '.', 1), split_part(p_object_type, '.', 2)
+            ) USING p_object_id INTO v_exists;
+        ELSE
+            EXECUTE format(
+                'SELECT EXISTS (SELECT 1 FROM %I.%I WHERE id = $1)',
+                split_part(p_object_type, '.', 1), split_part(p_object_type, '.', 2)
+            ) USING p_object_id INTO v_exists;
+        END IF;
+    END IF;
+
+    IF v_exists THEN
+        RAISE EXCEPTION 'no access' USING ERRCODE = 'P0403';
+    ELSE
+        RAISE EXCEPTION 'not found' USING ERRCODE = 'P0404';
+    END IF;
+END;
+$$ LANGUAGE plpgsql STABLE;

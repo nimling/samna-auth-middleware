@@ -161,7 +161,7 @@ BEGIN
             uc.id,
             c.id,
             c.name,
-            (c.sa_access | co.sa_access) & 15,
+            (c.sa_access | coalesce(co.sa_access, 0)) & 15,
             co.scope,
             co.sa_owner_id,
             co.sa_root_id,
@@ -183,9 +183,30 @@ BEGIN
                  JOIN claimius.claim c
                       ON c.id = uc.claim_id
                           AND c.sa_deleted_at IS NULL
-                          AND ((c.sa_access | co.sa_access) & 16) = 0
-                          AND ((((c.sa_access | co.sa_access) & 15) & p_required) = p_required)
-        ORDER BY a.hop ASC, claimius._popcount((c.sa_access | co.sa_access) & 15) DESC, uc.id ASC
+                          AND ((c.sa_access | coalesce(co.sa_access, 0)) & 16) = 0
+                          AND ((((c.sa_access | coalesce(co.sa_access, 0)) & 15) & p_required) = p_required)
+                          AND (a.hop = 0 OR (c.inherits AND co.inherits))
+        WHERE NOT EXISTS (
+            SELECT 1
+            FROM claimius.get_ancestors(p_object_type, p_object_id) da
+                     JOIN claimius.claim_object dco
+                          ON dco.object_type = da.object_type
+                              AND dco.object_id = da.object_id
+                              AND dco.sa_deleted_at IS NULL
+                     JOIN claimius.user_claim duc
+                          ON duc.claim_id = dco.claim_id
+                              AND duc.user_id = p_user_id
+                              AND duc.sa_deleted_at IS NULL
+                              AND (duc.starts_at IS NULL OR duc.starts_at <= now())
+                              AND (duc.ends_at IS NULL OR duc.ends_at > now())
+                     JOIN claimius.claim dc
+                          ON dc.id = duc.claim_id
+                              AND dc.sa_deleted_at IS NULL
+            WHERE ((dc.sa_access | coalesce(dco.sa_access, 0)) & 16) <> 0
+              AND (da.hop = 0 OR (dc.inherits AND dco.inherits))
+              AND (((dc.sa_access | coalesce(dco.sa_access, 0)) & 15) & p_required) <> 0
+        )
+        ORDER BY a.hop ASC, claimius._popcount((c.sa_access | coalesce(co.sa_access, 0)) & 15) DESC, uc.id ASC
         LIMIT 1;
 
     IF FOUND OR NOT p_raise THEN
