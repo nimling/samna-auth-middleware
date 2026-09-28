@@ -319,3 +319,31 @@ END;
 $$ LANGUAGE plpgsql;
 
 COMMENT ON FUNCTION claimius.search(UUID, UUID, TEXT, TEXT[], INTEGER, UUID[], UUID[], UUID[], UUID, TEXT, UUID[], INTEGER, INTEGER) IS 'Full text search over accessible objects. Includes claimius.claim rows the user holds, skipped when any subtree, parent, or type filter is set. p_owner_subtree_ids scopes via ownership tree. p_parent_id and p_parent_type scope via location or parenthood tree. p_type_ids restricts rows to those whose type_id is in the set. total_count carries the un-capped match count for pagination. Rows tie-break on object_id so offset pagination tiles without overlap or skip.';
+
+CREATE OR REPLACE FUNCTION claimius.get_sync_events(
+    p_app_id    UUID,
+    p_seq       BIGINT,
+    p_limit     INTEGER DEFAULT 1000
+) RETURNS TABLE (
+    seq         BIGINT,
+    operation   claimius.sync_operation,
+    event_type  TEXT,
+    payload     JSONB,
+    written_at  TIMESTAMPTZ
+) AS $$
+    SELECT e.seq, e.operation, e.event_type, e.payload, e.written_at
+    FROM claimius.sync_event e
+    WHERE e.seq > p_seq
+      AND (
+          e.app_id = p_app_id
+          OR (
+              e.app_id IS NULL
+              AND e.event_type IN ('claimius.organization', 'claimius.location')
+              AND (e.payload ->> 'id')::UUID IN (SELECT claimius.app_object_ids(p_app_id, e.event_type))
+          )
+      )
+    ORDER BY e.seq ASC
+    LIMIT p_limit;
+$$ LANGUAGE sql STABLE;
+
+COMMENT ON FUNCTION claimius.get_sync_events(UUID, BIGINT, INTEGER) IS 'Delta feed for one app after a sequence. Rows carrying the app id, plus organization and location rows the app reaches through app_object. Other apps'' shared hierarchy rows never leave the prophet.';

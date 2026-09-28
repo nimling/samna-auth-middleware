@@ -202,13 +202,10 @@ func GetSyncEvents(ctx echo.Context) error {
 	}
 
 	var events []SyncEvent
-	err := sdb.Instance().NewSelect().
-		Model(&events).
-		Where("seq > ?", seq).
-		Where("(app_id = ? OR app_id IS NULL)", appID).
-		OrderExpr("seq ASC").
-		Limit(1000).
-		Scan(ctx.Request().Context())
+	err := sdb.Instance().NewRaw(
+		"SELECT * FROM claimius.get_sync_events(?, ?, 1000)",
+		appID, seq,
+	).Scan(ctx.Request().Context(), &events)
 
 	if err != nil {
 		ctx.Logger().Errorf("sync events: %v", err)
