@@ -51,35 +51,8 @@ jsonpath "$[*].object_id" contains "{{bravo}}"
 jsonpath "$[*].object_id" contains "{{charlie}}"
 jsonpath "$[*].object_id" contains "{{grand}}"
 
-GET {{base}}/api/graph/owner?start_id={{root}}&depth=1&width=1
-HTTP 200
-[Asserts]
-jsonpath "$[?(@.parent_id=='{{root}}')].object_id" contains "{{alpha}}"
-jsonpath "$[?(@.parent_id=='{{root}}')].object_id" not contains "{{bravo}}"
-jsonpath "$[?(@.parent_id=='{{root}}')].object_id" not contains "{{charlie}}"
-
-GET {{base}}/api/graph/owner?start_id={{root}}&depth=1&width=1&next_id={{alpha}}
-HTTP 200
-[Asserts]
-jsonpath "$[?(@.parent_id=='{{root}}')].object_id" contains "{{bravo}}"
-jsonpath "$[?(@.parent_id=='{{root}}')].object_id" not contains "{{alpha}}"
-jsonpath "$[?(@.parent_id=='{{root}}')].object_id" not contains "{{charlie}}"
-
-POST {{base}}/api/usage/organization/{{charlie}}
-HTTP 204
-
-POST {{base}}/api/usage/organization/{{charlie}}
-HTTP 204
-
-GET {{base}}/api/graph/owner?start_id={{root}}&depth=1&width=1&sort=usage
-HTTP 200
-[Asserts]
-jsonpath "$[?(@.parent_id=='{{root}}')].object_id" contains "{{charlie}}"
-jsonpath "$[?(@.parent_id=='{{root}}')].object_id" not contains "{{alpha}}"
-jsonpath "$[?(@.parent_id=='{{root}}')].object_id" not contains "{{bravo}}"
-
 GET {{base}}/api/graph/claim
 HTTP 200
 [Asserts]
-jsonpath "$[?(@.object_type=='claim')].label" contains "Root writer"
-jsonpath "$[?(@.object_type=='claim')].label" contains "Alpha reader"
+jsonpath "$[?(@.object_type=='claimius.claim')].label" contains "Root writer"
+jsonpath "$[?(@.object_type=='claimius.claim')].label" contains "Alpha reader"

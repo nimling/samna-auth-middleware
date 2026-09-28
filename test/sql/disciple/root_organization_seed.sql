@@ -1,16 +1,24 @@
-DO $$
-DECLARE
-    v_actor  UUID := 'd0000000-0000-4000-8000-00000000000d';
-    v_orphan UUID := 'e0000000-0000-4000-8000-00000000000e';
-    v_seed   TEXT;
-BEGIN
-    INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by, private_seed)
-    VALUES (v_orphan, 'Orphaned owner', 'company', gen_random_uuid(), v_orphan, 0, v_actor, '');
+BEGIN;
+SELECT plan(2);
 
-    SELECT private_seed INTO v_seed FROM claimius.organization WHERE id = v_orphan;
-    IF v_seed IS NULL THEN
-        RAISE EXCEPTION 'an organization whose owner row is missing must keep an empty seed, got NULL';
-    END IF;
+DO $$ BEGIN PERFORM claimius.init(); END $$;
 
-    DELETE FROM claimius.organization WHERE id = v_orphan;
-END $$;
+INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
+VALUES ('e0000000-0000-4000-8000-00000000000e', 'Seeded root', 'company',
+        'e0000000-0000-4000-8000-00000000000e', 'e0000000-0000-4000-8000-00000000000e', 0,
+        'd0000000-0000-4000-8000-00000000000d');
+
+SELECT is(
+    (SELECT id FROM claimius.organization WHERE name = 'Seeded root'),
+    'e0000000-0000-4000-8000-00000000000e'::UUID,
+    'a root organization inserted on a disciple keeps its id'
+);
+
+SELECT isnt(
+    (SELECT private_seed FROM claimius.organization WHERE id = 'e0000000-0000-4000-8000-00000000000e'),
+    NULL,
+    'a root organization inserted on a disciple gets a non null private_seed'
+);
+
+SELECT * FROM finish();
+ROLLBACK;

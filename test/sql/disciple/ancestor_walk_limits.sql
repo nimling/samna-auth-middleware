@@ -1,19 +1,18 @@
 BEGIN;
-
-SELECT claimius.init();
+SELECT plan(4);
 
 DO $$
 DECLARE
-    v_a        UUID := 'a0000000-0000-4000-8000-0000000000d1';
-    v_root     UUID := '10000000-0000-4000-8000-0000000000d1';
-    v_child    UUID := '10000000-0000-4000-8000-0000000000d2';
-    v_other    UUID := '10000000-0000-4000-8000-0000000000d3';
-    v_leaf     UUID := '10000000-0000-4000-8000-0000000000d4';
-    v_writer   UUID;
-    v_fenced   UUID;
-    v_deny     UUID;
-    v_count    INTEGER;
+    v_a      UUID := 'a0000000-0000-4000-8000-0000000000d1';
+    v_root   UUID := '10000000-0000-4000-8000-0000000000d1';
+    v_child  UUID := '10000000-0000-4000-8000-0000000000d2';
+    v_other  UUID := '10000000-0000-4000-8000-0000000000d3';
+    v_leaf   UUID := '10000000-0000-4000-8000-0000000000d4';
+    v_writer UUID;
+    v_fenced UUID;
+    v_deny   UUID;
 BEGIN
+    PERFORM claimius.init();
     PERFORM claimius.ensure_app_user(p_user_id => v_a, p_first_name => 'Ada');
 
     INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
@@ -43,11 +42,6 @@ BEGIN
     );
     PERFORM claimius.assign_claim_user(p_claim_id => v_deny, p_user_id => v_a, p_sa_owner_id => v_root, p_sa_created_by => v_a);
 
-    SELECT count(*) INTO v_count FROM claimius.get_direct_access(v_a, v_child, 'claimius.organization', 2, FALSE);
-    IF v_count <> 0 THEN
-        RAISE EXCEPTION 'a write deny bound to the object must stop the ancestor walk from granting write';
-    END IF;
-
     v_fenced := (claimius.create_claim(
         p_name => 'Other root only', p_description => NULL, p_sa_access => 6,
         p_sa_owner_id => v_other, p_sa_root_id => v_other, p_sa_created_by => v_a, p_inherits => TRUE
@@ -57,16 +51,33 @@ BEGIN
         p_object_id => v_other, p_object_type => 'claimius.organization', p_sa_access => 6, p_inherits => FALSE
     );
     PERFORM claimius.assign_claim_user(p_claim_id => v_fenced, p_user_id => v_a, p_sa_owner_id => v_other, p_sa_created_by => v_a);
-
-    SELECT count(*) INTO v_count FROM claimius.get_direct_access(v_a, v_leaf, 'claimius.organization', 2, FALSE);
-    IF v_count <> 0 THEN
-        RAISE EXCEPTION 'a binding with inherits false must not reach below its object through the ancestor walk';
-    END IF;
-
-    SELECT count(*) INTO v_count FROM claimius.get_direct_access(v_a, v_other, 'claimius.organization', 2, FALSE);
-    IF v_count <> 1 THEN
-        RAISE EXCEPTION 'a binding with inherits false must still grant on its own object, got % rows', v_count;
-    END IF;
 END $$;
 
+SELECT is_empty(
+    $$SELECT 1 FROM claimius.get_direct_access(
+        'a0000000-0000-4000-8000-0000000000d1', '10000000-0000-4000-8000-0000000000d2', 'claimius.organization', 2, FALSE)$$,
+    'a write deny bound to the object stops the ancestor walk from granting write'
+);
+
+SELECT is(
+    (SELECT claim_name FROM claimius.get_direct_access(
+        'a0000000-0000-4000-8000-0000000000d1', '10000000-0000-4000-8000-0000000000d2', 'claimius.organization', 4, FALSE)),
+    'Root writer',
+    'a write deny leaves read on the same object to the inherited claim mask'
+);
+
+SELECT is_empty(
+    $$SELECT 1 FROM claimius.get_direct_access(
+        'a0000000-0000-4000-8000-0000000000d1', '10000000-0000-4000-8000-0000000000d4', 'claimius.organization', 2, FALSE)$$,
+    'a binding with inherits false does not reach below its object through the ancestor walk'
+);
+
+SELECT is(
+    (SELECT count(*) FROM claimius.get_direct_access(
+        'a0000000-0000-4000-8000-0000000000d1', '10000000-0000-4000-8000-0000000000d3', 'claimius.organization', 2, FALSE)),
+    1::BIGINT,
+    'a binding with inherits false still grants on its own object'
+);
+
+SELECT * FROM finish();
 ROLLBACK;

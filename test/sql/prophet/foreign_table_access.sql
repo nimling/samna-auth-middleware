@@ -1,23 +1,21 @@
 BEGIN;
+SELECT plan(4);
 
 DO $$
 DECLARE
-    v_init     JSONB;
-    v_app      UUID;
-    v_a        UUID := 'a0000000-0000-4000-8000-0000000000fa';
-    v_root     UUID := '10000000-0000-4000-8000-0000000000f1';
-    v_foreign  UUID := '20000000-0000-4000-8000-0000000000f2';
-    v_claim    UUID;
-    v_count    INTEGER;
+    v_app     UUID;
+    v_a       UUID := 'a0000000-0000-4000-8000-0000000000fa';
+    v_root    UUID := '10000000-0000-4000-8000-0000000000f1';
+    v_foreign UUID := '20000000-0000-4000-8000-0000000000f2';
+    v_claim   UUID;
 BEGIN
-    v_init := claimius.init(
+    v_app := (claimius.init(
         p_system_app_slug         => 'sqltest_foreign',
         p_system_app_name         => 'SQL foreign test',
         p_system_app_private_key  => 'key',
         p_system_app_private_seed => 'seed',
         p_default_claim           => '{"name": "Member", "description": "Default member claim"}'::JSONB
-    );
-    v_app := (v_init -> 'samna_app' ->> 'id')::UUID;
+    ) -> 'samna_app' ->> 'id')::UUID;
 
     PERFORM claimius.ensure_app_user(p_user_id => v_a, p_app_id => v_app, p_first_name => 'Ada');
 
@@ -35,15 +33,40 @@ BEGIN
         p_app_id => v_app, p_claim_id => v_claim, p_sa_owner_id => v_root, p_sa_root_id => v_root, p_sa_created_by => v_a,
         p_object_id => v_foreign, p_object_type => 'public.sqltest_disciple_only', p_sa_access => 6, p_inherits => TRUE
     );
-
-    SELECT count(*) INTO v_count
-      FROM claimius.claim_object
-     WHERE claim_id = v_claim AND object_type = 'public.sqltest_disciple_only' AND object_id = v_foreign;
-    IF v_count <> 1 THEN
-        RAISE EXCEPTION 'the prophet must store a binding to a table only a disciple holds, got % rows', v_count;
-    END IF;
-
-    PERFORM count(*) FROM claimius.search(v_a, v_app, 'Foreign', NULL::TEXT[], 0, NULL::UUID[], NULL::UUID[], NULL::UUID[], NULL::UUID, NULL::TEXT, 20, 0);
 END $$;
 
+SELECT is(
+    (SELECT count(*) FROM claimius.claim_object
+      WHERE claim_id = (SELECT id FROM claimius.claim WHERE name = 'Disciple writer')
+        AND object_type = 'public.sqltest_disciple_only'
+        AND object_id = '20000000-0000-4000-8000-0000000000f2'),
+    1::BIGINT,
+    'the prophet stores a binding to a table only a disciple holds'
+);
+
+SELECT lives_ok(
+    $$SELECT count(*) FROM claimius.search(
+        'a0000000-0000-4000-8000-0000000000fa', (SELECT id FROM claimius.samna_app WHERE slug = 'sqltest_foreign'),
+        'Foreign', NULL::TEXT[], 0, NULL::UUID[], NULL::UUID[], NULL::UUID[], NULL::UUID, NULL::TEXT, 20, 0)$$,
+    'search settles a claim bound to a table outside table_info without error'
+);
+
+SELECT claimius._raise_claim_diff(
+    (SELECT id FROM claimius.samna_app WHERE slug = 'sqltest_foreign'),
+    (SELECT id FROM claimius.claim WHERE name = 'Disciple writer')
+);
+
+SELECT lives_ok(
+    $$SELECT count(*) FROM claimius.get_organizations(
+        'a0000000-0000-4000-8000-0000000000fa', (SELECT id FROM claimius.samna_app WHERE slug = 'sqltest_foreign'), 4)$$,
+    'a read settles a raised claim diff over a table outside table_info without error'
+);
+
+SELECT is_empty(
+    $$SELECT 1 FROM claimius.access_diff
+       WHERE kind = 'claim' AND claim_id = (SELECT id FROM claimius.claim WHERE name = 'Disciple writer')$$,
+    'the claim diff row clears after the read'
+);
+
+SELECT * FROM finish();
 ROLLBACK;
