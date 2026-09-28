@@ -949,34 +949,23 @@ DROP FUNCTION IF EXISTS claimius.get_claim_graph(UUID, UUID, INTEGER);
 --   p_required_access - access bit filter passed through to get_objects.
 -- ----------------------------------------------------------------------------
 
-DROP FUNCTION IF EXISTS claimius.get_owner_graph(UUID, UUID, INTEGER, INTEGER);
+DROP FUNCTION IF EXISTS claimius.get_owner_graph(UUID, UUID, INTEGER, INTEGER, INTEGER, TEXT, UUID);
 CREATE OR REPLACE FUNCTION claimius.get_owner_graph(
     p_user_id          UUID,
     p_start_id         UUID DEFAULT NULL,
     p_depth            INTEGER DEFAULT 0,
-    p_required_access  INTEGER DEFAULT 0,
-    p_width            INTEGER DEFAULT 0,
-    p_sort             TEXT DEFAULT 'name',
-    p_next_id          UUID DEFAULT NULL
+    p_required_access  INTEGER DEFAULT 0
 ) RETURNS TABLE(object_id UUID, object_type TEXT, label TEXT, parent_id UUID, data JSONB) AS $$
 DECLARE
     v_root_ids      UUID[];
     v_table         RECORD;
     v_sql           TEXT;
-    v_next_rank     BIGINT := 0;
-    v_next_name     TEXT;
-    v_next_type     TEXT;
 BEGIN
     PERFORM claimius.reconcile_if_pending(p_user_id);
 
     IF NOT claimius.check_user_active(p_user_id) THEN
         RETURN;
     END IF;
-
-    CREATE TEMP TABLE IF NOT EXISTS _owner_graph_rows (
-        object_id UUID, object_type TEXT, label TEXT, parent_id UUID, data JSONB
-    ) ON COMMIT DROP;
-    DELETE FROM _owner_graph_rows;
 
     -- Resolve the set of root organizations to walk from.
     -- When p_start_id is null we use every root org the user can see.
@@ -1008,7 +997,7 @@ BEGIN
 
     -- Organizations: walk each root's ownership tree, depth limited.
     -- Recursive CTE bound to the access filter and the depth limit.
-    INSERT INTO _owner_graph_rows
+    RETURN QUERY
         WITH RECURSIVE org_walk AS (
             SELECT o.id, o.name::TEXT AS name, o.description, o.type::TEXT AS type, o.sa_level,
                    o.sa_owner_id, 0 AS lvl
@@ -1076,7 +1065,7 @@ BEGIN
 
     -- Locations: handled explicitly so we keep longitude/latitude in data.
     -- Filtered to locations whose owning org sits in the walked org set.
-    INSERT INTO _owner_graph_rows
+    RETURN QUERY
         SELECT l.id ,
                'claimius.location'::TEXT ,
                l.name::TEXT ,
@@ -1165,72 +1154,12 @@ BEGIN
                             CASE WHEN v_table.has_sa_location_id THEN ' OR EXISTS (SELECT 1 FROM claimius.location loc WHERE loc.id = t.sa_location_id AND loc.sa_owner_id IN (SELECT org_id FROM _owner_graph_orgs))' ELSE '' END
                      );
 
-            EXECUTE 'INSERT INTO _owner_graph_rows ' || v_sql USING p_user_id, p_required_access;
+            RETURN QUERY EXECUTE v_sql USING p_user_id, p_required_access;
         END LOOP;
-
-    IF p_width <= 0 THEN
-        RETURN QUERY SELECT r.object_id, r.object_type, r.label, r.parent_id, r.data FROM _owner_graph_rows r;
-        RETURN;
-    END IF;
-
-    IF p_next_id IS NOT NULL AND p_start_id IS NOT NULL THEN
-        SELECT coalesce(uo.sa_name, p_next_id::TEXT),
-               CASE WHEN p_sort = 'usage' THEN -coalesce(ou.used_count, 0) ELSE 0 END,
-               uo.object_type
-          INTO v_next_name, v_next_rank, v_next_type
-        FROM claimius.user_object uo
-        LEFT JOIN claimius.object_usage ou
-               ON TRUE AND ou.user_id = p_user_id
-              AND ou.object_type = uo.object_type AND ou.object_id = uo.object_id
-        WHERE uo.user_id = p_user_id AND TRUE AND uo.object_id = p_next_id
-        LIMIT 1;
-        IF v_next_name IS NULL THEN
-            v_next_name := p_next_id::TEXT;
-            v_next_rank := 0;
-        END IF;
-    END IF;
-
-    RETURN QUERY
-    WITH RECURSIVE ranked AS (
-        SELECT r.object_id, r.object_type, r.parent_id,
-               CASE WHEN p_sort = 'usage' THEN -coalesce(ou.used_count, 0) ELSE 0 END AS sort_rank,
-               coalesce(r.label, r.object_id::TEXT) AS sort_name
-        FROM _owner_graph_rows r
-        LEFT JOIN claimius.object_usage ou
-               ON p_sort = 'usage'
-              AND TRUE AND ou.user_id = p_user_id
-              AND ou.object_type = r.object_type AND ou.object_id = r.object_id
-    ),
-    windowed AS (
-        SELECT rk.*,
-               ROW_NUMBER() OVER (
-                   PARTITION BY rk.parent_id, rk.object_type
-                   ORDER BY rk.sort_rank, rk.sort_name, rk.object_id
-               ) AS rn
-        FROM ranked rk
-        WHERE p_next_id IS NULL OR p_start_id IS NULL OR rk.parent_id IS DISTINCT FROM p_start_id
-           OR rk.object_type IS DISTINCT FROM v_next_type
-           OR ROW(rk.sort_rank, rk.sort_name, rk.object_id) > ROW(v_next_rank, v_next_name, p_next_id)
-    ),
-    kept AS (
-        SELECT w.object_id, w.object_type
-        FROM windowed w
-        WHERE w.parent_id IS NULL
-           OR NOT EXISTS (SELECT 1 FROM _owner_graph_rows p WHERE p.object_id = w.parent_id)
-        UNION ALL
-        SELECT c.object_id, c.object_type
-        FROM windowed c
-        JOIN kept k ON c.parent_id = k.object_id
-        WHERE c.rn <= p_width
-    )
-    SELECT r.object_id, r.object_type, r.label, r.parent_id, r.data
-    FROM _owner_graph_rows r
-    WHERE EXISTS (SELECT 1 FROM kept k WHERE k.object_id = r.object_id AND k.object_type = r.object_type)
-      AND NOT (p_next_id IS NOT NULL AND r.object_id = p_start_id);
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius.get_owner_graph(UUID, UUID, INTEGER, INTEGER, INTEGER, TEXT, UUID) IS 'Ownership graph (orgs, locations, registered tables with sa_owner_id or sa_location_id) for the user. Optional start org and depth limit.';
+COMMENT ON FUNCTION claimius.get_owner_graph(UUID, UUID, INTEGER, INTEGER) IS 'Ownership graph (orgs, locations, registered tables with sa_owner_id or sa_location_id) for the user. Optional start org and depth limit.';
 
 -- ----------------------------------------------------------------------------
 -- get_claim_graph
@@ -1262,15 +1191,12 @@ COMMENT ON FUNCTION claimius.get_owner_graph(UUID, UUID, INTEGER, INTEGER, INTEG
 --                       effective mask does not cover these bits are excluded.
 -- ----------------------------------------------------------------------------
 
-DROP FUNCTION IF EXISTS claimius.get_claim_graph(UUID, UUID, INTEGER, INTEGER);
+DROP FUNCTION IF EXISTS claimius.get_claim_graph(UUID, UUID, INTEGER, INTEGER, INTEGER, TEXT, UUID);
 CREATE OR REPLACE FUNCTION claimius.get_claim_graph(
     p_user_id          UUID,
     p_start_id         UUID DEFAULT NULL,
     p_depth            INTEGER DEFAULT 0,
-    p_required_access  INTEGER DEFAULT 0,
-    p_width            INTEGER DEFAULT 0,
-    p_sort             TEXT DEFAULT 'name',
-    p_next_id          UUID DEFAULT NULL
+    p_required_access  INTEGER DEFAULT 0
 ) RETURNS TABLE(object_id UUID, object_type TEXT, label TEXT, parent_id UUID, data JSONB) AS $$
 DECLARE
     v_claim_ids     UUID[];
@@ -1292,10 +1218,6 @@ BEGIN
         WHERE TRUE AND c.user_id = p_user_id;
 
         IF v_graph IS NOT NULL THEN
-            IF p_width > 0 THEN
-                RETURN QUERY SELECT * FROM claimius._prune_graph_rows(v_graph, p_user_id, p_start_id, p_width, p_sort, p_next_id);
-                RETURN;
-            END IF;
             RETURN QUERY
                 SELECT (e->>'object_id')::UUID,
                        e->>'object_type',
@@ -1566,11 +1488,6 @@ BEGIN
                 sa_updated_at = EXCLUDED.sa_updated_at;
     END IF;
 
-    IF p_width > 0 THEN
-        RETURN QUERY SELECT * FROM claimius._prune_graph_rows(v_graph, p_user_id, p_start_id, p_width, p_sort, p_next_id);
-        RETURN;
-    END IF;
-
     RETURN QUERY
         SELECT (e->>'object_id')::UUID,
                e->>'object_type',
@@ -1581,7 +1498,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius.get_claim_graph(UUID, UUID, INTEGER, INTEGER, INTEGER, TEXT, UUID) IS 'Access graph: user, other users seen, claims, user_claims, claim_object bindings, reachable objects. Optional start claim and depth limit. Default shape served from claimius.claim_graph_cache.';
+COMMENT ON FUNCTION claimius.get_claim_graph(UUID, UUID, INTEGER, INTEGER) IS 'Access graph: user, other users seen, claims, user_claims, claim_object bindings, reachable objects. Optional start claim and depth limit. Default shape served from claimius.claim_graph_cache.';
 
 CREATE OR REPLACE FUNCTION claimius._invalidate_claim_graph_cache()
     RETURNS TRIGGER AS $$
@@ -1622,6 +1539,7 @@ COMMENT ON FUNCTION claimius._invalidate_claim_graph_cache() IS 'Trigger functio
 DROP FUNCTION IF EXISTS claimius.search_objects(UUID, UUID, TEXT, TEXT[], INTEGER, INTEGER, INTEGER);
 DROP FUNCTION IF EXISTS claimius.search(UUID, UUID, TEXT, TEXT[], INTEGER, UUID[], UUID[], INTEGER, INTEGER);
 
+DROP FUNCTION IF EXISTS claimius.search(UUID, TEXT, TEXT[], INTEGER, UUID[], UUID[], UUID[], UUID, TEXT, UUID[], INTEGER, INTEGER);
 CREATE OR REPLACE FUNCTION claimius.search(
     p_user_id          UUID,
     p_query            TEXT,
@@ -2137,6 +2055,7 @@ BEGIN
         SET first_name    = v_source_app_user.first_name,
             last_name     = v_source_app_user.last_name,
             user_name     = v_source_app_user.user_name,
+            user_image    = v_source_app_user.user_image,
             phone         = v_source_app_user.phone,
             config        = v_source_app_user.config,
             external_id   = coalesce(v_source_app_user.external_id, external_id),
@@ -2282,9 +2201,8 @@ BEGIN
 
     -- Register each new (or existing) table
     FOREACH v_object_type IN ARRAY v_new LOOP
-            -- normalize to schema.table
             IF position('.' IN v_object_type) = 0 THEN
-                v_object_type := 'public.' || v_object_type;
+                RAISE EXCEPTION 'object type % is not schema qualified', v_object_type;
             END IF;
             PERFORM claimius._register_table_info(v_object_type, FALSE);
             PERFORM claimius._attach_calc_trigger(v_object_type);
@@ -2296,9 +2214,6 @@ BEGIN
     PERFORM set_config('claimius.replay_mode', 'true', TRUE);
     BEGIN
         FOREACH v_object_type IN ARRAY v_new LOOP
-                IF position('.' IN v_object_type) = 0 THEN
-                    v_object_type := 'public.' || v_object_type;
-                END IF;
                 PERFORM claimius._bulk_seed_user_object(v_object_type);
                 RAISE NOTICE 'Seeded user_object for %', v_object_type;
             END LOOP;
@@ -2569,10 +2484,9 @@ BEGIN
              claimius.claim, claimius.user_claim, claimius.claim_object,
              claimius.object_field, claimius.user_field, claimius.user_relation,
              claimius.audit, claimius.inheritance_info, claimius.table_info,
-             claimius.notification, claimius.claim_graph_cache, claimius.object_usage
+             claimius.notification, claimius.claim_graph_cache
              TO claimius_disciple_client';
     EXECUTE 'GRANT INSERT, UPDATE, DELETE ON claimius.claim_graph_cache TO claimius_reader';
-    EXECUTE 'GRANT SELECT, INSERT, UPDATE ON claimius.object_usage TO claimius_reader';
     EXECUTE 'GRANT SELECT ON ALL TABLES IN SCHEMA claimius TO claimius_disciple_client';
     EXECUTE 'GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA claimius TO claimius_disciple_client';
 END;
@@ -2585,6 +2499,7 @@ $$ LANGUAGE plpgsql;
 -- user_claim is created here. Idempotent: re-running returns the existing row.
 -- ----------------------------------------------------------------------------
 
+DROP FUNCTION IF EXISTS claimius.ensure_app_user(UUID, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT);
 CREATE OR REPLACE FUNCTION claimius.ensure_app_user(
     p_user_id    UUID,
     p_first_name TEXT DEFAULT NULL,
@@ -2592,7 +2507,8 @@ CREATE OR REPLACE FUNCTION claimius.ensure_app_user(
     p_user_name  TEXT DEFAULT NULL,
     p_email      TEXT DEFAULT NULL,
     p_phone      TEXT DEFAULT NULL,
-    p_external_id TEXT DEFAULT NULL
+    p_external_id TEXT DEFAULT NULL,
+    p_user_image TEXT DEFAULT NULL
 ) RETURNS JSONB AS $$
 DECLARE
     v_user_row    claimius.samna_user;
@@ -2604,12 +2520,12 @@ BEGIN
 
     IF NOT FOUND THEN
         INSERT INTO claimius.samna_user (
-            user_id, first_name, last_name, user_name,
+            user_id, first_name, last_name, user_name, user_image,
             email, phone, external_id, status, type
         )
         VALUES (
                    COALESCE(p_user_id, gen_random_uuid()),
-                   p_first_name, p_last_name, p_user_name,
+                   p_first_name, p_last_name, p_user_name, p_user_image,
                    p_email, p_phone, p_external_id, 'active', 'user'
                )
         RETURNING * INTO v_user_row;
@@ -2619,7 +2535,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius.ensure_app_user(p_user_id uuid, p_first_name text, p_last_name text, p_user_name text, p_email text, p_phone text, p_external_id text) IS 'Upserts the samna_user row. Idempotent. Claim grants arrive via sync on the disciple.';
+COMMENT ON FUNCTION claimius.ensure_app_user(p_user_id uuid, p_first_name text, p_last_name text, p_user_name text, p_email text, p_phone text, p_external_id text, p_user_image text) IS 'Upserts the samna_user row. Idempotent. Claim grants arrive via sync on the disciple.';
 
 DROP FUNCTION IF EXISTS claimius.get_access(UUID, TEXT, INTEGER);
 
@@ -2757,104 +2673,24 @@ CREATE OR REPLACE FUNCTION claimius.graph_type_passes(
     p_include_types   TEXT[],
     p_exclude_types   TEXT[]
 ) RETURNS BOOLEAN AS $$
-    SELECT (p_include_types IS NULL
-            OR array_length(p_include_types, 1) IS NULL
-            OR p_object_type = ANY(p_include_types)
-            OR claimius.normalize_object_type(p_object_type) = ANY(p_include_types))
-       AND NOT (p_exclude_types IS NOT NULL
-            AND array_length(p_exclude_types, 1) IS NOT NULL
-            AND (p_object_type = ANY(p_exclude_types)
-                 OR claimius.normalize_object_type(p_object_type) = ANY(p_exclude_types)));
-$$ LANGUAGE sql IMMUTABLE;
+DECLARE
+    v_norm TEXT := claimius.normalize_object_type(p_object_type);
+BEGIN
+    IF p_include_types IS NOT NULL AND array_length(p_include_types, 1) IS NOT NULL THEN
+        IF NOT (p_object_type = ANY(p_include_types) OR v_norm = ANY(p_include_types)) THEN
+            RETURN FALSE;
+        END IF;
+    END IF;
+    IF p_exclude_types IS NOT NULL AND array_length(p_exclude_types, 1) IS NOT NULL THEN
+        IF p_object_type = ANY(p_exclude_types) OR v_norm = ANY(p_exclude_types) THEN
+            RETURN FALSE;
+        END IF;
+    END IF;
+    RETURN TRUE;
+END;
+$$ LANGUAGE plpgsql IMMUTABLE;
 
 GRANT EXECUTE ON FUNCTION claimius.graph_type_passes(TEXT, TEXT[], TEXT[]) TO claimius_reader, claimius_writer, claimius_admin;
-
-CREATE OR REPLACE FUNCTION claimius._prune_graph_rows(
-    p_graph    JSONB,
-    p_user_id  UUID,
-    p_start_id UUID,
-    p_width    INTEGER,
-    p_sort     TEXT,
-    p_next_id  UUID
-) RETURNS TABLE(object_id UUID, object_type TEXT, label TEXT, parent_id UUID, data JSONB) AS $$
-BEGIN
-    RETURN QUERY
-    WITH RECURSIVE nodes AS (
-        SELECT (e->>'object_id')::UUID       AS object_id,
-               e->>'object_type'             AS object_type,
-               e->>'label'                   AS label,
-               NULLIF(e->>'parent_id', '')::UUID AS parent_id,
-               e->'data'                     AS data
-        FROM jsonb_array_elements(p_graph) AS e
-    ),
-    ranked AS (
-        SELECT n.*,
-               CASE WHEN p_sort = 'usage' THEN -coalesce(ou.used_count, 0) ELSE 0 END AS sort_rank,
-               coalesce(n.label, n.object_id::TEXT) AS sort_name
-        FROM nodes n
-        LEFT JOIN claimius.object_usage ou
-               ON p_sort = 'usage'
-              AND TRUE AND ou.user_id = p_user_id
-              AND ou.object_type = n.object_type AND ou.object_id = n.object_id
-    ),
-    next_tuple AS (
-        SELECT rk.sort_rank, rk.sort_name, rk.object_type
-        FROM ranked rk
-        WHERE p_next_id IS NOT NULL AND rk.object_id = p_next_id
-        LIMIT 1
-    ),
-    windowed AS (
-        SELECT rk.*,
-               ROW_NUMBER() OVER (
-                   PARTITION BY rk.parent_id, rk.object_type
-                   ORDER BY rk.sort_rank, rk.sort_name, rk.object_id
-               ) AS rn
-        FROM ranked rk
-        WHERE p_next_id IS NULL OR p_start_id IS NULL OR rk.parent_id IS DISTINCT FROM p_start_id
-           OR rk.object_type IS DISTINCT FROM (SELECT nt.object_type FROM next_tuple nt)
-           OR ROW(rk.sort_rank, rk.sort_name, rk.object_id) > (SELECT ROW(nt.sort_rank, nt.sort_name, p_next_id) FROM next_tuple nt)
-    ),
-    kept AS (
-        SELECT w.object_id, w.object_type
-        FROM windowed w
-        WHERE w.parent_id IS NULL
-           OR NOT EXISTS (SELECT 1 FROM nodes p WHERE p.object_id = w.parent_id)
-        UNION ALL
-        SELECT c.object_id, c.object_type
-        FROM windowed c
-        JOIN kept k ON c.parent_id = k.object_id
-        WHERE c.rn <= p_width
-    )
-    SELECT n.object_id, n.object_type, n.label, n.parent_id, n.data
-    FROM nodes n
-    WHERE EXISTS (SELECT 1 FROM kept k WHERE k.object_id = n.object_id AND k.object_type = n.object_type)
-      AND NOT (p_next_id IS NOT NULL AND n.object_id = p_start_id);
-END;
-$$ LANGUAGE plpgsql STABLE;
-
-GRANT EXECUTE ON FUNCTION claimius._prune_graph_rows(JSONB, UUID, UUID, INTEGER, TEXT, UUID) TO claimius_reader, claimius_writer, claimius_admin;
-
-CREATE OR REPLACE FUNCTION claimius.touch_object_usage(
-    p_user_id     UUID,
-    p_object_type TEXT,
-    p_object_id   UUID
-) RETURNS VOID AS $$
-    INSERT INTO claimius.object_usage (user_id, object_type, object_id, used_count, last_used_at)
-    VALUES (p_user_id, p_object_type, p_object_id, 1, now())
-    ON CONFLICT (user_id, object_type, object_id)
-    DO UPDATE SET used_count = claimius.object_usage.used_count + 1, last_used_at = now();
-$$ LANGUAGE sql;
-
-GRANT EXECUTE ON FUNCTION claimius.touch_object_usage(UUID, TEXT, UUID) TO claimius_reader, claimius_writer, claimius_admin, claimius_disciple_client;
-
-
-CREATE OR REPLACE FUNCTION claimius.graph_object_types()
-    RETURNS TEXT[] AS $$
-    SELECT coalesce(array_agg(object_type ORDER BY object_type), ARRAY[]::TEXT[])
-    FROM claimius.table_info;
-$$ LANGUAGE sql STABLE;
-
-GRANT EXECUTE ON FUNCTION claimius.graph_object_types() TO claimius_reader, claimius_writer, claimius_admin;
 
 CREATE OR REPLACE FUNCTION claimius.merge_graphs(p_a JSONB, p_b JSONB)
 RETURNS JSONB AS $$
@@ -2890,118 +2726,25 @@ GRANT EXECUTE ON FUNCTION claimius.merge_graphs(JSONB, JSONB) TO claimius_reader
 
 DROP FUNCTION IF EXISTS claimius.get_graph_links_owner(UUID, UUID, INTEGER, TEXT[], TEXT[], UUID, INTEGER);
 
-DROP FUNCTION IF EXISTS claimius.get_graph_links_owner(UUID, INTEGER, TEXT[], TEXT[], UUID, INTEGER);
+DROP FUNCTION IF EXISTS claimius.get_graph_links_owner(UUID, INTEGER, TEXT[], TEXT[], UUID, INTEGER, INTEGER, TEXT, UUID);
+DROP FUNCTION IF EXISTS claimius.get_graph_objects(UUID, INTEGER, TEXT[], TEXT[], UUID[], BOOLEAN, BOOLEAN);
+DROP FUNCTION IF EXISTS claimius.touch_object_usage(UUID, TEXT, UUID);
+DROP FUNCTION IF EXISTS claimius.graph_object_types();
+DROP FUNCTION IF EXISTS claimius._prune_graph_rows(JSONB, UUID, UUID, INTEGER, TEXT, UUID);
 CREATE OR REPLACE FUNCTION claimius.get_graph_links_owner(
     p_user_id         UUID,
     p_required_access INTEGER DEFAULT 4,
     p_include_types   TEXT[] DEFAULT NULL,
     p_exclude_types   TEXT[] DEFAULT NULL,
     p_start_id        UUID DEFAULT NULL,
-    p_depth           INTEGER DEFAULT 0,
-    p_width           INTEGER DEFAULT 0,
-    p_sort            TEXT DEFAULT 'name',
-    p_next_id         UUID DEFAULT NULL
+    p_depth           INTEGER DEFAULT 0
 ) RETURNS JSONB AS $$
 DECLARE
-    v_links     JSONB;
-    v_nodes     JSONB;
-    v_allowed   TEXT[] := claimius.graph_object_types();
-    v_next_rank BIGINT := 0;
-    v_next_name TEXT;
-    v_next_type TEXT;
+    v_links   JSONB;
+    v_allowed TEXT[] := (SELECT coalesce(array_agg(object_type ORDER BY object_type), ARRAY[]::TEXT[]) FROM claimius.table_info);
 BEGIN
     IF NOT claimius.check_user_active(p_user_id) THEN
         RETURN jsonb_build_object('links', '[]'::jsonb);
-    END IF;
-
-    IF p_width > 0 THEN
-        IF p_next_id IS NOT NULL THEN
-            SELECT coalesce(uo.sa_name, p_next_id::TEXT),
-                   CASE WHEN p_sort = 'usage' THEN -coalesce(ou.used_count, 0) ELSE 0 END,
-                   uo.object_type
-              INTO v_next_name, v_next_rank, v_next_type
-            FROM claimius.user_object uo
-            LEFT JOIN claimius.object_usage ou
-                   ON TRUE AND ou.user_id = p_user_id
-                  AND ou.object_type = uo.object_type AND ou.object_id = uo.object_id
-            WHERE uo.user_id = p_user_id AND TRUE AND uo.object_id = p_next_id
-            LIMIT 1;
-            IF v_next_name IS NULL THEN
-                v_next_name := p_next_id::TEXT;
-                v_next_rank := 0;
-            END IF;
-        END IF;
-
-        WITH RECURSIVE scope AS (
-            SELECT uo.object_id, uo.object_type, uo.sa_name
-            FROM claimius.user_object uo
-            WHERE uo.user_id = p_user_id
-              AND TRUE
-              AND (p_required_access = 0 OR (uo.sa_access & p_required_access) = p_required_access)
-              AND uo.object_type = ANY(v_allowed)
-              AND claimius.graph_type_passes(uo.object_type, p_include_types, p_exclude_types)
-        ),
-        roots AS (
-            SELECT s.object_id, s.object_type
-            FROM scope s
-            WHERE (p_start_id IS NOT NULL AND s.object_id = p_start_id)
-               OR (p_start_id IS NULL AND NOT EXISTS (
-                     SELECT 1 FROM claimius.inheritance_info pii
-                     JOIN scope ps ON ps.object_id = pii.ancestor_id AND ps.object_type = pii.ancestor_type
-                     WHERE pii.descendant_id = s.object_id
-                       AND pii.descendant_type = s.object_type
-                       AND pii.depth = 1
-                  ))
-        ),
-        walk AS (
-            SELECT r.object_id, r.object_type,
-                   NULL::TEXT AS source_type, NULL::UUID AS source_id,
-                   NULL::TEXT AS relation_raw, 0 AS lvl
-            FROM roots r
-            UNION ALL
-            SELECT c.object_id, c.object_type, w.object_type, w.object_id, c.relation_raw, w.lvl + 1
-            FROM walk w
-            CROSS JOIN LATERAL (
-                SELECT x.object_id, x.object_type, x.relation_raw
-                FROM (
-                    SELECT s.object_id, s.object_type, ii.tree_type::TEXT AS relation_raw,
-                           ROW_NUMBER() OVER (
-                               PARTITION BY s.object_type
-                               ORDER BY CASE WHEN p_sort = 'usage' THEN -coalesce(ou.used_count, 0) ELSE 0 END,
-                                        coalesce(s.sa_name, s.object_id::TEXT), s.object_id
-                           ) AS rn
-                    FROM claimius.inheritance_info ii
-                    JOIN scope s ON s.object_id = ii.descendant_id AND s.object_type = ii.descendant_type
-                    LEFT JOIN claimius.object_usage ou
-                           ON p_sort = 'usage'
-                          AND TRUE AND ou.user_id = p_user_id
-                          AND ou.object_type = s.object_type AND ou.object_id = s.object_id
-                    WHERE ii.ancestor_id = w.object_id
-                      AND ii.ancestor_type = w.object_type
-                      AND ii.depth = 1
-                      AND (w.lvl > 0 OR p_next_id IS NULL OR p_start_id IS NULL
-                           OR s.object_type IS DISTINCT FROM v_next_type
-                           OR ROW(CASE WHEN p_sort = 'usage' THEN -coalesce(ou.used_count, 0) ELSE 0 END,
-                                  coalesce(s.sa_name, s.object_id::TEXT), s.object_id)
-                            > ROW(v_next_rank, v_next_name, p_next_id))
-                ) x
-                WHERE x.rn <= p_width
-            ) c
-            WHERE p_depth = 0 OR w.lvl < p_depth
-        )
-        SELECT COALESCE(jsonb_agg(jsonb_build_object(
-                   'source_type', claimius.normalize_object_type(w.source_type),
-                   'source_id',   w.source_id,
-                   'target_type', claimius.normalize_object_type(w.object_type),
-                   'target_id',   w.object_id,
-                   'relation',    CASE w.relation_raw WHEN 'ownership' THEN 'owner' ELSE w.relation_raw END
-               )) FILTER (WHERE w.source_id IS NOT NULL), '[]'::jsonb),
-               COALESCE(jsonb_agg(DISTINCT to_jsonb(w.object_id))
-                   FILTER (WHERE NOT (p_next_id IS NOT NULL AND w.lvl = 0)), '[]'::jsonb)
-          INTO v_links, v_nodes
-        FROM walk w;
-
-        RETURN jsonb_build_object('links', v_links, 'node_ids', v_nodes);
     END IF;
 
     WITH ancestor_pool AS (
@@ -3098,30 +2841,23 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql STABLE;
 
-GRANT EXECUTE ON FUNCTION claimius.get_graph_links_owner(UUID, INTEGER, TEXT[], TEXT[], UUID, INTEGER, INTEGER, TEXT, UUID) TO claimius_reader, claimius_writer, claimius_admin;
+GRANT EXECUTE ON FUNCTION claimius.get_graph_links_owner(UUID, INTEGER, TEXT[], TEXT[], UUID, INTEGER) TO claimius_reader, claimius_writer, claimius_admin;
 
 DROP FUNCTION IF EXISTS claimius.get_graph_links_claim(UUID, UUID, INTEGER, TEXT[], TEXT[], UUID, INTEGER);
 
-DROP FUNCTION IF EXISTS claimius.get_graph_links_claim(UUID, INTEGER, TEXT[], TEXT[], UUID, INTEGER);
+DROP FUNCTION IF EXISTS claimius.get_graph_links_claim(UUID, INTEGER, TEXT[], TEXT[], UUID, INTEGER, INTEGER, TEXT, UUID);
 CREATE OR REPLACE FUNCTION claimius.get_graph_links_claim(
     p_user_id         UUID,
     p_required_access INTEGER DEFAULT 0,
     p_include_types   TEXT[] DEFAULT NULL,
     p_exclude_types   TEXT[] DEFAULT NULL,
     p_start_id        UUID DEFAULT NULL,
-    p_depth           INTEGER DEFAULT 0,
-    p_width           INTEGER DEFAULT 0,
-    p_sort            TEXT DEFAULT 'name',
-    p_next_id         UUID DEFAULT NULL
+    p_depth           INTEGER DEFAULT 0
 ) RETURNS JSONB AS $$
 DECLARE
     v_user_row_id UUID;
     v_claim_ids   UUID[];
     v_links       JSONB;
-    v_nodes       JSONB;
-    v_next_rank   BIGINT := 0;
-    v_next_name   TEXT;
-    v_next_type   TEXT;
 BEGIN
     PERFORM claimius.reconcile_if_pending(p_user_id);
 
@@ -3156,210 +2892,29 @@ BEGIN
         v_claim_ids := ARRAY[]::UUID[];
     END IF;
 
-    IF p_width = 0 AND p_next_id IS NULL THEN
-        WITH cascade_edges AS (
-            SELECT DISTINCT ON (co.id, ii.descendant_type, ii.descendant_id, ii.tree_type)
-                   co.id AS co_id,
-                   co.claim_id AS claim_id,
-                   co.reason AS reason,
-                   ii.descendant_type AS target_type,
-                   ii.descendant_id AS target_id,
-                   ii.tree_type::TEXT AS tree_type
-            FROM claimius.claim_object co
-            JOIN claimius.claim c ON c.id = co.claim_id AND c.sa_deleted_at IS NULL
-            JOIN claimius.inheritance_info ii
-                   ON ii.ancestor_type = co.object_type
-                  AND ii.ancestor_id   = co.object_id
-                  AND ii.depth >= 1
-                  AND (p_depth = 0 OR ii.depth <= p_depth)
-            WHERE TRUE
-              AND co.sa_deleted_at IS NULL
-              AND co.inherits = TRUE
-              AND c.inherits = TRUE
-              AND co.claim_id = ANY(v_claim_ids)
-              AND claimius.graph_type_passes(ii.descendant_type, p_include_types, p_exclude_types)
-            ORDER BY co.id, ii.descendant_type, ii.descendant_id, ii.tree_type, ii.depth ASC
-        ),
-        spine AS (
-            SELECT jsonb_build_object(
-                'source_type',  'samna_user',
-                'source_id',    v_user_row_id,
-                'target_type',  'claim',
-                'target_id',    uc.claim_id,
-                'relation',     'holds',
-                'relation_id',  uc.id,
-                'relation_type','user_claim',
-                'reason',       uc.reason,
-                'starts_at',    uc.starts_at,
-                'ends_at',      uc.ends_at
-            ) AS link
-            FROM claimius.user_claim uc
-            WHERE v_user_row_id IS NOT NULL
-              AND uc.user_id = p_user_id
-              AND TRUE
-              AND uc.sa_deleted_at IS NULL
-              AND uc.claim_id = ANY(v_claim_ids)
-
-            UNION ALL
-            SELECT jsonb_build_object(
-                'source_type',  'claim',
-                'source_id',    co.claim_id,
-                'target_type',  claimius.normalize_object_type(co.object_type),
-                'target_id',    co.object_id,
-                'relation',     'direct',
-                'relation_id',  co.id,
-                'relation_type','claim_object',
-                'reason',       co.reason
-            )
-            FROM claimius.claim_object co
-            WHERE TRUE
-              AND co.sa_deleted_at IS NULL
-              AND co.claim_id = ANY(v_claim_ids)
-              AND co.object_id IS NOT NULL
-              AND claimius.graph_type_passes(co.object_type, p_include_types, p_exclude_types)
-
-            UNION ALL
-            SELECT jsonb_build_object(
-                'source_type',  'claim',
-                'source_id',    ce.claim_id,
-                'target_type',  claimius.normalize_object_type(ce.target_type),
-                'target_id',    ce.target_id,
-                'relation',     CASE ce.tree_type WHEN 'ownership' THEN 'owner' ELSE ce.tree_type END,
-                'relation_id',  ce.co_id,
-                'relation_type','claim_object',
-                'reason',       ce.reason
-            )
-            FROM cascade_edges ce
-
-            UNION ALL
-            SELECT jsonb_build_object(
-                'source_type', 'samna_user',
-                'source_id',   v_user_row_id,
-                'target_type', 'samna_user',
-                'target_id',   u.id,
-                'relation',    'visibility'
-            )
-            FROM claimius.samna_user u
-            JOIN claimius.user_users uu ON uu.viewer_id = p_user_id AND TRUE AND uu.target_user_id = u.user_id
-            WHERE v_user_row_id IS NOT NULL
-              AND p_start_id IS NULL
-              AND TRUE
-              AND u.sa_deleted_at IS NULL
-              AND u.id <> v_user_row_id
-
-            UNION ALL
-            SELECT jsonb_build_object(
-                'source_type',  'samna_user',
-                'source_id',    su.id,
-                'target_type',  claimius.normalize_object_type(ur.object_type),
-                'target_id',    ur.object_id,
-                'relation',     'user_relation',
-                'relation_id',  ur.id,
-                'relation_type','user_relation',
-                'reason',       ur.description,
-                'pinned',       ur.pinned,
-                'priority',     ur.priority,
-                'used_at',      ur.used_at
-            )
-            FROM claimius.user_relation ur
-            JOIN claimius.samna_user su ON su.user_id = ur.user_id AND TRUE AND su.sa_deleted_at IS NULL
-            JOIN claimius.user_object uo
-                   ON uo.object_id = ur.object_id AND uo.object_type = ur.object_type
-                  AND uo.user_id = p_user_id AND TRUE
-            WHERE TRUE
-              AND p_start_id IS NULL
-              AND ur.sa_deleted_at IS NULL
-              AND ur.user_id = p_user_id
-              AND claimius.graph_type_passes(ur.object_type, p_include_types, p_exclude_types)
-        )
-        SELECT COALESCE(jsonb_agg(link), '[]'::jsonb) INTO v_links FROM spine;
-
-        RETURN jsonb_build_object('links', v_links);
-    END IF;
-
-    IF p_next_id IS NOT NULL AND p_start_id IS NOT NULL THEN
-        SELECT coalesce(uo.sa_name, p_next_id::TEXT),
-               CASE WHEN p_sort = 'usage' THEN -coalesce(ou.used_count, 0) ELSE 0 END,
-               uo.object_type
-          INTO v_next_name, v_next_rank, v_next_type
-        FROM claimius.user_object uo
-        LEFT JOIN claimius.object_usage ou
-               ON TRUE AND ou.user_id = p_user_id
-              AND ou.object_type = uo.object_type AND ou.object_id = uo.object_id
-        WHERE uo.user_id = p_user_id AND TRUE AND uo.object_id = p_next_id
-        LIMIT 1;
-        IF v_next_name IS NULL THEN
-            v_next_name := p_next_id::TEXT;
-            v_next_rank := 0;
-        END IF;
-    END IF;
-
-    WITH direct_bindings AS (
-        SELECT co.id, co.claim_id, co.object_type, co.object_id, co.reason, co.inherits,
-               ROW_NUMBER() OVER (
-                   PARTITION BY co.claim_id, co.object_type
-                   ORDER BY CASE WHEN p_sort = 'usage' THEN -coalesce(ou.used_count, 0) ELSE 0 END,
-                            coalesce(uo.sa_name, co.object_id::TEXT), co.object_id
-               ) AS rn
-        FROM claimius.claim_object co
-        LEFT JOIN claimius.user_object uo
-               ON uo.user_id = p_user_id AND TRUE
-              AND uo.object_type = co.object_type AND uo.object_id = co.object_id
-        LEFT JOIN claimius.object_usage ou
-               ON p_sort = 'usage'
-              AND TRUE AND ou.user_id = p_user_id
-              AND ou.object_type = co.object_type AND ou.object_id = co.object_id
-        WHERE TRUE
-          AND co.sa_deleted_at IS NULL
-          AND co.claim_id = ANY(v_claim_ids)
-          AND co.object_id IS NOT NULL
-          AND claimius.graph_type_passes(co.object_type, p_include_types, p_exclude_types)
-          AND (p_next_id IS NULL OR p_start_id IS NULL
-               OR co.object_type IS DISTINCT FROM v_next_type
-               OR ROW(CASE WHEN p_sort = 'usage' THEN -coalesce(ou.used_count, 0) ELSE 0 END,
-                      coalesce(uo.sa_name, co.object_id::TEXT), co.object_id)
-                > ROW(v_next_rank, v_next_name, p_next_id))
-    ),
-    kept_bindings AS (
-        SELECT * FROM direct_bindings WHERE p_width = 0 OR rn <= p_width
-    ),
-    cascade_dedup AS (
-        SELECT DISTINCT ON (kb.id, ii.descendant_type, ii.descendant_id, ii.tree_type)
-               kb.id AS co_id,
-               kb.claim_id AS claim_id,
-               kb.reason AS reason,
+    WITH cascade_edges AS (
+        SELECT DISTINCT ON (co.id, ii.descendant_type, ii.descendant_id, ii.tree_type)
+               co.id AS co_id,
+               co.claim_id AS claim_id,
+               co.reason AS reason,
                ii.descendant_type AS target_type,
                ii.descendant_id AS target_id,
-               ii.tree_type::TEXT AS tree_type
-        FROM kept_bindings kb
-        JOIN claimius.claim c ON c.id = kb.claim_id AND c.sa_deleted_at IS NULL AND c.inherits = TRUE
+               ii.tree_type::TEXT AS tree_type,
+               ii.depth AS depth
+        FROM claimius.claim_object co
+        JOIN claimius.claim c ON c.id = co.claim_id AND c.sa_deleted_at IS NULL
         JOIN claimius.inheritance_info ii
-               ON ii.ancestor_type = kb.object_type
-              AND ii.ancestor_id   = kb.object_id
+               ON ii.ancestor_type = co.object_type
+              AND ii.ancestor_id   = co.object_id
               AND ii.depth >= 1
               AND (p_depth = 0 OR ii.depth <= p_depth)
-        WHERE kb.inherits = TRUE
+        WHERE TRUE
+          AND co.sa_deleted_at IS NULL
+          AND co.inherits = TRUE
+          AND c.inherits = TRUE
+          AND co.claim_id = ANY(v_claim_ids)
           AND claimius.graph_type_passes(ii.descendant_type, p_include_types, p_exclude_types)
-        ORDER BY kb.id, ii.descendant_type, ii.descendant_id, ii.tree_type, ii.depth ASC
-    ),
-    cascade_edges AS (
-        SELECT cd.*,
-               ROW_NUMBER() OVER (
-                   PARTITION BY cd.co_id, cd.target_type
-                   ORDER BY CASE WHEN p_sort = 'usage' THEN -coalesce(ou.used_count, 0) ELSE 0 END,
-                            coalesce(uo.sa_name, cd.target_id::TEXT), cd.target_id
-               ) AS crn
-        FROM cascade_dedup cd
-        LEFT JOIN claimius.user_object uo
-               ON uo.user_id = p_user_id AND TRUE
-              AND uo.object_type = cd.target_type AND uo.object_id = cd.target_id
-        LEFT JOIN claimius.object_usage ou
-               ON p_sort = 'usage'
-              AND TRUE AND ou.user_id = p_user_id
-              AND ou.object_type = cd.target_type AND ou.object_id = cd.target_id
-    ),
-    kept_cascades AS (
-        SELECT * FROM cascade_edges WHERE p_width = 0 OR crn <= p_width
+        ORDER BY co.id, ii.descendant_type, ii.descendant_id, ii.tree_type, ii.depth ASC
     ),
     spine AS (
         SELECT jsonb_build_object(
@@ -3374,44 +2929,43 @@ BEGIN
             'starts_at',    uc.starts_at,
             'ends_at',      uc.ends_at
         ) AS link
-        FROM (
-            SELECT uc.*,
-                   ROW_NUMBER() OVER (ORDER BY c.name, uc.claim_id) AS hrn
-            FROM claimius.user_claim uc
-            JOIN claimius.claim c ON c.id = uc.claim_id
-            WHERE v_user_row_id IS NOT NULL
-              AND uc.user_id = p_user_id
-              AND TRUE
-              AND uc.sa_deleted_at IS NULL
-              AND uc.claim_id = ANY(v_claim_ids)
-        ) uc
-        WHERE p_width = 0 OR uc.hrn <= p_width
+        FROM claimius.user_claim uc
+        WHERE v_user_row_id IS NOT NULL
+          AND uc.user_id = p_user_id
+          AND TRUE
+          AND uc.sa_deleted_at IS NULL
+          AND uc.claim_id = ANY(v_claim_ids)
 
         UNION ALL
         SELECT jsonb_build_object(
             'source_type',  'claim',
-            'source_id',    kb.claim_id,
-            'target_type',  claimius.normalize_object_type(kb.object_type),
-            'target_id',    kb.object_id,
+            'source_id',    co.claim_id,
+            'target_type',  claimius.normalize_object_type(co.object_type),
+            'target_id',    co.object_id,
             'relation',     'direct',
-            'relation_id',  kb.id,
+            'relation_id',  co.id,
             'relation_type','claim_object',
-            'reason',       kb.reason
+            'reason',       co.reason
         )
-        FROM kept_bindings kb
+        FROM claimius.claim_object co
+        WHERE TRUE
+          AND co.sa_deleted_at IS NULL
+          AND co.claim_id = ANY(v_claim_ids)
+          AND co.object_id IS NOT NULL
+          AND claimius.graph_type_passes(co.object_type, p_include_types, p_exclude_types)
 
         UNION ALL
         SELECT jsonb_build_object(
             'source_type',  'claim',
-            'source_id',    kc.claim_id,
-            'target_type',  claimius.normalize_object_type(kc.target_type),
-            'target_id',    kc.target_id,
-            'relation',     CASE kc.tree_type WHEN 'ownership' THEN 'owner' ELSE kc.tree_type END,
-            'relation_id',  kc.co_id,
+            'source_id',    ce.claim_id,
+            'target_type',  claimius.normalize_object_type(ce.target_type),
+            'target_id',    ce.target_id,
+            'relation',     CASE ce.tree_type WHEN 'ownership' THEN 'owner' ELSE ce.tree_type END,
+            'relation_id',  ce.co_id,
             'relation_type','claim_object',
-            'reason',       kc.reason
+            'reason',       ce.reason
         )
-        FROM kept_cascades kc
+        FROM cascade_edges ce
 
         UNION ALL
         SELECT jsonb_build_object(
@@ -3421,20 +2975,13 @@ BEGIN
             'target_id',   u.id,
             'relation',    'visibility'
         )
-        FROM (
-            SELECT u.id,
-                   ROW_NUMBER() OVER (
-                       ORDER BY coalesce(nullif(trim(coalesce(u.first_name,'') || ' ' || coalesce(u.last_name,'')), ''), u.email, u.user_id::TEXT), u.id
-                   ) AS vrn
-            FROM claimius.samna_user u
-            JOIN claimius.user_users uu ON uu.viewer_id = p_user_id AND TRUE AND uu.target_user_id = u.user_id
-            WHERE v_user_row_id IS NOT NULL
-              AND p_start_id IS NULL
-              AND TRUE
-              AND u.sa_deleted_at IS NULL
-              AND u.id <> v_user_row_id
-        ) u
-        WHERE p_width = 0 OR u.vrn <= p_width
+        FROM claimius.samna_user u
+        JOIN claimius.user_users uu ON uu.viewer_id = p_user_id AND TRUE AND uu.target_user_id = u.user_id
+        WHERE v_user_row_id IS NOT NULL
+          AND p_start_id IS NULL
+          AND TRUE
+          AND u.sa_deleted_at IS NULL
+          AND u.id <> v_user_row_id
 
         UNION ALL
         SELECT jsonb_build_object(
@@ -3450,43 +2997,24 @@ BEGIN
             'priority',     ur.priority,
             'used_at',      ur.used_at
         )
-        FROM (
-            SELECT ur.*,
-                   ROW_NUMBER() OVER (
-                       ORDER BY coalesce(uo.sa_name, ur.object_id::TEXT), ur.object_id
-                   ) AS rrn
-            FROM claimius.user_relation ur
-            JOIN claimius.user_object uo
-                   ON uo.object_id = ur.object_id AND uo.object_type = ur.object_type
-                  AND uo.user_id = p_user_id AND TRUE
-            WHERE TRUE
-              AND p_start_id IS NULL
-              AND ur.sa_deleted_at IS NULL
-              AND ur.user_id = p_user_id
-              AND claimius.graph_type_passes(ur.object_type, p_include_types, p_exclude_types)
-        ) ur
+        FROM claimius.user_relation ur
         JOIN claimius.samna_user su ON su.user_id = ur.user_id AND TRUE AND su.sa_deleted_at IS NULL
-        WHERE p_width = 0 OR ur.rrn <= p_width
-    ),
-    node_pool AS (
-        SELECT kb.object_id AS node_id FROM kept_bindings kb
-        UNION
-        SELECT kc.target_id FROM kept_cascades kc
+        JOIN claimius.user_object uo
+               ON uo.object_id = ur.object_id AND uo.object_type = ur.object_type
+              AND uo.user_id = p_user_id AND TRUE
+        WHERE TRUE
+          AND p_start_id IS NULL
+          AND ur.sa_deleted_at IS NULL
+          AND ur.user_id = p_user_id
+          AND claimius.graph_type_passes(ur.object_type, p_include_types, p_exclude_types)
     )
-    SELECT COALESCE(jsonb_agg(link), '[]'::jsonb),
-           (SELECT COALESCE(jsonb_agg(to_jsonb(node_id)), '[]'::jsonb) FROM node_pool)
-      INTO v_links, v_nodes
-    FROM spine;
-
-    IF p_width > 0 THEN
-        RETURN jsonb_build_object('links', v_links, 'node_ids', v_nodes);
-    END IF;
+    SELECT COALESCE(jsonb_agg(link), '[]'::jsonb) INTO v_links FROM spine;
 
     RETURN jsonb_build_object('links', v_links);
 END;
 $$ LANGUAGE plpgsql STABLE;
 
-GRANT EXECUTE ON FUNCTION claimius.get_graph_links_claim(UUID, INTEGER, TEXT[], TEXT[], UUID, INTEGER, INTEGER, TEXT, UUID) TO claimius_reader, claimius_writer, claimius_admin;
+GRANT EXECUTE ON FUNCTION claimius.get_graph_links_claim(UUID, INTEGER, TEXT[], TEXT[], UUID, INTEGER) TO claimius_reader, claimius_writer, claimius_admin;
 
 DROP FUNCTION IF EXISTS claimius.create_organization_user(UUID, UUID, UUID, JSONB);
 DROP FUNCTION IF EXISTS claimius.create_organization_user(UUID, UUID, UUID, JSONB, BOOLEAN);
@@ -3566,13 +3094,14 @@ BEGIN
         END IF;
 
         INSERT INTO claimius.samna_user (
-            user_id, first_name, last_name, user_name,
+            user_id, first_name, last_name, user_name, user_image,
             email, phone, external_id, status, type
         ) VALUES (
             COALESCE(v_user_id, gen_random_uuid()),
             NULLIF(p_user ->> 'first_name', ''),
             NULLIF(p_user ->> 'last_name', ''),
             NULLIF(p_user ->> 'user_name', ''),
+            NULLIF(p_user ->> 'user_image', ''),
             NULLIF(p_user ->> 'email', ''),
             NULLIF(p_user ->> 'phone', ''),
             v_external_id,
@@ -3582,13 +3111,14 @@ BEGIN
         RETURNING * INTO v_user_row;
     ELSE
         INSERT INTO claimius.samna_user (
-            user_id, first_name, last_name, user_name,
+            user_id, first_name, last_name, user_name, user_image,
             email, phone, external_id, status, type
         ) VALUES (
             COALESCE(v_user_id, gen_random_uuid()),
             NULLIF(p_user ->> 'first_name', ''),
             NULLIF(p_user ->> 'last_name', ''),
             NULLIF(p_user ->> 'user_name', ''),
+            NULLIF(p_user ->> 'user_image', ''),
             NULLIF(p_user ->> 'email', ''),
             NULLIF(p_user ->> 'phone', ''),
             v_external_id,
@@ -3599,6 +3129,7 @@ BEGIN
             first_name    = COALESCE(EXCLUDED.first_name, claimius.samna_user.first_name),
             last_name     = COALESCE(EXCLUDED.last_name, claimius.samna_user.last_name),
             user_name     = COALESCE(EXCLUDED.user_name, claimius.samna_user.user_name),
+            user_image    = COALESCE(EXCLUDED.user_image, claimius.samna_user.user_image),
             email         = COALESCE(EXCLUDED.email, claimius.samna_user.email),
             phone         = COALESCE(EXCLUDED.phone, claimius.samna_user.phone),
             external_id   = COALESCE(EXCLUDED.external_id, claimius.samna_user.external_id),
@@ -3782,9 +3313,3 @@ COMMENT ON FUNCTION claimius.notify_user(UUID, TEXT, TEXT, JSONB, TEXT, TEXT, TE
 GRANT EXECUTE ON FUNCTION claimius.notify_user(UUID, TEXT, TEXT, JSONB, TEXT, TEXT, TEXT, UUID, UUID, UUID, INTERVAL, UUID[])
     TO claimius_disciple_client, claimius_writer, claimius_admin;
 
-
-ALTER FUNCTION claimius.get_graph_links_owner(UUID, INTEGER, TEXT[], TEXT[], UUID, INTEGER, INTEGER, TEXT, UUID) SET plan_cache_mode = force_custom_plan;
-ALTER FUNCTION claimius.get_graph_links_claim(UUID, INTEGER, TEXT[], TEXT[], UUID, INTEGER, INTEGER, TEXT, UUID) SET plan_cache_mode = force_custom_plan;
-ALTER FUNCTION claimius.get_owner_graph(UUID, UUID, INTEGER, INTEGER, INTEGER, TEXT, UUID) SET plan_cache_mode = force_custom_plan;
-ALTER FUNCTION claimius.get_claim_graph(UUID, UUID, INTEGER, INTEGER, INTEGER, TEXT, UUID) SET plan_cache_mode = force_custom_plan;
-ALTER FUNCTION claimius._prune_graph_rows(JSONB, UUID, UUID, INTEGER, TEXT, UUID) SET plan_cache_mode = force_custom_plan;

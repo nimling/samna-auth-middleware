@@ -136,6 +136,7 @@ CREATE TABLE IF NOT EXISTS claimius.samna_user (
                                                    first_name      VARCHAR(255),
                                                    last_name       VARCHAR(255),
                                                    user_name       TEXT,
+                                                   user_image      TEXT,
                                                    phone           VARCHAR(50),
                                                    email           VARCHAR(255),
                                                    external_id     TEXT DEFAULT NULL,
@@ -151,6 +152,9 @@ COMMENT ON TABLE claimius.samna_user IS 'User record. One row per (user_id, app_
 COMMENT ON COLUMN claimius.samna_user.user_id IS 'Stable application identifier across apps. Used in all references.';
 COMMENT ON COLUMN claimius.samna_user.app_id IS 'Required app scope. Disciples only hold rows for their own app.';
 COMMENT ON COLUMN claimius.samna_user.user_name IS 'Optional display username, distinct from first_name/last_name.';
+ALTER TABLE claimius.samna_user ADD COLUMN IF NOT EXISTS user_image TEXT;
+
+COMMENT ON COLUMN claimius.samna_user.user_image IS 'Optional user image. URL, string, or id that the implementing system recognizes.';
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_samna_user_user_app
     ON claimius.samna_user (user_id, app_id) WHERE sa_deleted_at IS NULL;
@@ -719,18 +723,6 @@ CREATE TABLE IF NOT EXISTS claimius.claim_graph_cache (
 COMMENT ON TABLE claimius.claim_graph_cache IS 'Per user cache of get_claim_graph default shape. Trigger invalidated.';
 COMMENT ON COLUMN claimius.claim_graph_cache.graph IS 'JSON array of {object_id, object_type, label, parent_id, data} tuples.';
 
-CREATE TABLE IF NOT EXISTS claimius.object_usage (
-    app_id       UUID NOT NULL,
-    user_id      UUID NOT NULL,
-    object_type  TEXT NOT NULL,
-    object_id    UUID NOT NULL,
-    used_count   BIGINT NOT NULL DEFAULT 0,
-    last_used_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    PRIMARY KEY (app_id, user_id, object_type, object_id)
-);
-
-CREATE INDEX IF NOT EXISTS idx_object_usage_user_count ON claimius.object_usage (app_id, user_id, used_count DESC);
-
 -- ----------------------------------------------------------------------------
 -- 7.5 App identity helpers
 -- Defined here, before audit and any application table that wants to default
@@ -839,7 +831,7 @@ COMMENT ON FUNCTION claimius.get_app_id() IS 'Returns the deployment own app id.
 -- still write the acting user_claim.id; everything else writes NULL.
 CREATE TABLE IF NOT EXISTS claimius.audit (
                                               id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                                              app_id          UUID NOT NULL DEFAULT claimius.get_disciple_app_id(),
+                                              app_id          UUID NOT NULL DEFAULT claimius.get_app_id(),
                                               operation       VARCHAR NOT NULL,
                                               message         TEXT DEFAULT '',
                                               type            VARCHAR NOT NULL,
