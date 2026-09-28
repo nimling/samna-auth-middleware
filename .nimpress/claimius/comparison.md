@@ -1,142 +1,91 @@
 ---
 layout: doc
 title: Comparison
-description: Claimius against Google Zanzibar, SpiceDB, OpenFGA and Auth0 FGA, Ory Keto and Microsoft Entra ID on check latency, throughput, listing, search, writes, availability, staleness and cost per million checks, each claimius figure a formula in the hardware it runs on, each competitor figure a published one, and for each dimension the condition under which claimius wins.
-tags: comparison, zanzibar, spicedb, authzed, openfga, auth0 fga, ory keto, entra id, latency, throughput, availability, sla, consistency, staleness, cost
+description: Claimius against Google Zanzibar, SpiceDB, OpenFGA and Auth0 FGA, Ory Keto and Microsoft Entra ID, in what each stores, and what each reads, writes and sends over the network per check, per listing and per change, with the condition under which claimius is the better shape.
+tags: comparison, zanzibar, leopard, spicedb, authzed, openfga, auth0 fga, ory keto, entra id, check, listing, consistency, availability
 lastUpdated: true
 ---
 
 # Comparison
 
-Five systems stand where claimius stands. Every claimius figure below is a formula of [Scaling](./scaling.md), instantiated on the `Standard_D2ds_v5` Azure server claimius runs on today and on the self hosted reference node of that file; every competitor figure is published by its vendor or its authors, and says where. For each dimension the comparison ends in an inequality: the condition under which claimius wins.
-
-The symbols are those of [Scaling](./scaling.md): `c_r = 0.11 ms` a check and `t` a settled pair in calibration time, `σ` the speed of one database thread against the calibration core, `K` the capacity of the database in calibration cores, `ρ` its utilization budget, `r_db` the round trip to it, `L_r` a random read.
+Five systems stand where claimius stands. Zanzibar is Google's; SpiceDB, OpenFGA with Auth0 FGA, and Ory Keto implement its model of relation tuples and userset rewrites; Entra ID carries groups and roles in the token. Every claimius figure below is a formula of these files; every other figure is published by its vendor or its authors, and says where.
 
 ## At a glance
 
-| | Claimius | Google Zanzibar | SpiceDB | OpenFGA, Auth0 FGA | Ory Keto | Microsoft Entra ID |
-|---|---|---|---|---|---|---|
-| Where a check runs | In the service's own Postgres | A central service | A central service | A central service | A central service | In the service, from token claims |
-| Check latency | `c_r / σ` in the service's query: 0.2 ms on a `D2ds_v5`, 0.14 ms on the reference node | 3.0 ms p50, 9.46 ms p95, 15.0 ms p99 | 5.76 ms p95 at 1 million a second | p99 under 50 ms for the most complex models | No figure published | Local token validation |
-| Check throughput | `(1 + R) ρ K / c_r` per database, summed over services | Over 10 million a second across the fleet | 1 million a second on SpiceDB Dedicated | No figure published | No figure published | Not a per object decision |
-| Listing | `V_u × 0.043 u`, index only | No list API published | Lookups advised below about 10,000 reachable resources | `ListObjects` up to 1,000 results within 3 s by default | No figure published | Groups and roles in the token, at most 200 groups |
-| Staleness of a read | Current on the prophet; `r_net / 2 + a_e / σ` on a disciple, 0.65 ms in region | Snapshot reads with zookies | `minimize_latency` by default, up to the 5 s quantization window | A 10 s cache in `minimize_latency` | No figure published | The token's lifetime |
-| Availability | That of the service's own database | Above 99.999 % over three years | No figure published | 99.99 % SLA | No figure published | 99.99 % SLA |
-| Cost per million checks | `10^6 c_r p_h / (3600 K)`: 0.011 USD on a `D2ds_v5` at 0.239 USD an hour | Internal | AuthZed Cloud from 2 USD an hour, resource based | Priced by monthly active users, not published | Plan based | Per user licence |
-
-Sources: Zanzibar, [Pang et al. 2019, table 2 and section 4](https://www.usenix.org/system/files/atc19-pang.pdf); SpiceDB, [Google-Scale Authorization: Getting to 1 Million QPS on SpiceDB Dedicated](https://authzed.com/blog/google-scale-authorization), [Consistency](https://authzed.com/docs/spicedb/concepts/consistency), [Commands, `--datastore-revision-quantization-interval`](https://authzed.com/docs/spicedb/concepts/commands), [Protecting a list endpoint](https://authzed.com/docs/spicedb/modeling/protecting-a-list-endpoint), [Pricing](https://authzed.com/pricing); OpenFGA and Auth0 FGA, [Fine Grained Authorization](https://auth0.com/fine-grained-authorization), [Taming P99s in OpenFGA](https://auth0.com/blog/self-tuning-strategy-planner-openfga/), [Consistency modes](https://docs.fga.dev/writing-data/consistency-modes), [Relationship queries](https://openfga.dev/docs/interacting/relationship-queries), [Subscription plans](https://docs.fga.dev/subscription-plans); Ory Keto, [ory/keto](https://github.com/ory/keto); Entra ID, [SLA performance](https://learn.microsoft.com/en-us/entra/identity/monitoring-health/reference-sla-performance), [Access token claims, groups overage](https://learn.microsoft.com/en-us/entra/identity-platform/access-token-claims-reference), [Configurable token lifetimes](https://learn.microsoft.com/en-us/entra/identity-platform/configurable-token-lifetimes); Azure prices from the [Azure retail prices API](https://prices.azure.com/api/retail/prices), Norway East.
-
-## Check latency
-
-A check against a central service costs at least one network round trip `r_s` plus the service's own evaluation `e_s`. A claimius check is a predicate of the query the service sends anyway, so it costs its evaluation and no round trip of its own:
-
-```
-central = r_s + e_s        claimius = c_r / σ,  + 2 L_r when the reader's pairs are not cached
-c_r = t_s + (2C + L + a + 4) t_d
-```
-
-Claimius wins when `c_r / σ < r_s + e_s`. With `e_s` at Zanzibar's published median of 3.0 ms or SpiceDB's p95 of 5.76 ms it holds on any machine and any network. With an ideal central service, `e_s = 0`, it holds whenever the round trip to it exceeds 0.2 ms on a `D2ds_v5` or 0.14 ms on the reference node, which is true of any hop between machines. A central evaluation of a rewrite through `n` levels of usersets costs at least `n` dependent lookups; claimius stores that reachability as the up set on each object, so its evaluation reads one row for it and has no term in the depth of the data, and the theory behind the bound, and behind the prices of 2013 and today, is in [Theory](./theory.md).
-
-The tail is the tail of one Postgres under the M/M/c queue of [Scaling](./scaling.md), which with exponential service times, a pessimistic assumption for a fixed plan, puts the p95 time in system at 5.5 service times on two threads at `ρ = 0.7` and 3.0 on sixty four at `ρ = 0.85`:
-
-| | p50 | p95 | p99 |
+| | Claimius | Zanzibar and the systems built on it | Entra ID |
 |---|---|---|---|
-| Claimius on a `D2ds_v5` at 70 % | 0.29 ms | 1.1 ms | 1.6 ms |
-| The same with every check missing memory, `+ 2 L_r` | 2.3 ms | 3.1 ms | 3.6 ms |
-| Claimius on the reference node at 85 % | 0.10 ms | 0.42 ms | 0.64 ms |
-| Zanzibar, published | 3.0 ms | 9.46 ms | 15.0 ms |
-| SpiceDB at 1 million a second, published | | 5.76 ms | |
+| Where a check runs | In the service's own Postgres | A separate service | In the service, from token claims |
+| Network messages per check | 0 beyond the service's own database | 1 request and answer to the service, plus the service's internal reads | 0 |
+| Stored per grant | 1 `user_claim` row; the pairs it yields, `|T_c|` for its holder | 1 tuple | the group in the token |
+| Stored per object | its closure rows, `Σ_t (d_t + 1)`, and one pair per user reaching it, `U_x` | the tuples naming it | nothing |
+| Check reads | one pair and `2 G_x` grant probes | one lookup per level of rewrite, at least the depth of the chain | the token |
+| Listing reads | one range, `V_{u,τ}` pairs | an enumeration of the reachable graph, capped | the token's groups |
+| Change writes | the source row, one area row, the actor's and assignee's pairs | the tuple, then derived index events | a new token |
 
-A check issued alone, outside the service's query, adds `r_db`, 1 ms on Azure: still below every published central figure.
+## Stored
 
-## Throughput
+A tuple store stores the relation tuples and nothing derived from them, except the group index Zanzibar calls Leopard. The Zanzibar paper states the principle: "To facilitate consistency, Zanzibar avoids storage denormalization and relies only on normalized data" ([Pang et al. 2019](https://www.usenix.org/system/files/atc19-pang.pdf)).
 
-A central service carries every check of every client, so its fleet grows with the sum of the load. Claimius has no shared term:
+Claimius stores the same source rows, one per claim, binding and grant, and three derived relations: the closure, `Σ_x rows(x)` rows, the pairs, `P = Σ_u V_u` rows in `user_object` and `object_users`, and the user pairs, `Σ_u S_u`. The pairs are the one term that grows with users times reach. Claimius pays that storage so that a check and a listing read the answer instead of deriving it; see [Materialization](./materialization.md#why-a-listing-reads-stored-pairs).
+
+## Check
+
+A check against a separate service is at least one request and its answer on the network, plus the service's own evaluation. A Zanzibar check expands the userset rewrites of the relation: a document viewer through a folder chain of depth `D` is `D` dependent lookups, and a group nested `n` deep is a reachability question of `n` hops that Zanzibar answers from Leopard, "a single Zanzibar tuple addition or deletion may yield potentially tens of thousands of discrete Leopard tuple events" to keep it current ([Pang et al. 2019, section 3.2.4](https://www.usenix.org/system/files/atc19-pang.pdf)).
+
+A claimius check is a query in the database the service already reads:
 
 ```
-X_read = Σ_services min(N_a / c_a, (1 + R) ρ K / c_r)
+entries(get_access) = Δ_a + 1 + min(U_x, V_{u,τ}) + 2 G_x + 1
 ```
 
-One `D2ds_v5` carries 4,380 checks a second and one reference node 247,000, each times `1 + R` with `R` standbys taking reads. Claimius wins for every service whose own check rate is below `(1 + R) ρ K / c_r`, because below it the checks cost the service nothing it does not already run. SpiceDB's published million a second is one permissions system; a single claimius service reaches it on reference nodes at `1 + R ≥ 10^6 / 247,000`, a primary and four standbys. Zanzibar's ten million a second is a global fleet, and the claimius formula says what that takes: the sum over services, not one larger service.
+with no term in the depth of the trees, no term in the nesting of claims, which is one hop by construction, and no network message beyond the service's own database connection. It is the better shape whenever the service reads its own database on the request anyway, which is every request that touches data.
 
 ## Listing
 
-A central service answers "which objects may this user see" by enumeration. OpenFGA's `ListObjects` returns at most 1,000 results within a 3 s deadline by default and is meant for small collections; SpiceDB advises its lookup only below about 10,000 reachable resources. Claimius lists by the reader's own range of the `user_object` primary key, in its own order, keyset paged:
+"Which objects may this user see" is the question a relation tuple store answers least well. The Zanzibar paper publishes no list API. OpenFGA's `ListObjects` returns at most 1,000 results by default and is advised for small collections ([OpenFGA, Relationship queries](https://openfga.dev/docs/interacting/relationship-queries)); SpiceDB advises its lookup only below about 10,000 reachable resources ([Protecting a list endpoint](https://authzed.com/docs/spicedb/modeling/protecting-a-list-endpoint)). Each enumerates the reachable graph from the user at read time.
+
+Claimius lists from the reader's range:
 
 ```
-ids:        ⌈V_u / 87⌉ leaf pages, index only, 0.03 u a row
-rendered:   V_u × 0.043 u, 0.26 µs a row: 20,000 rows in 5.2 ms, 9.4 ms on a D2ds_v5
+entries(get_objects) = Δ_a + 1 + V_{u,τ} (2 + 2 G)
 ```
 
-and the implementing side joins that range to its own table in the same query. Claimius wins at every `V_u`: its cost is linear with a constant under a microsecond, where enumeration by a central service is bounded by a deadline.
+linear in what the reader reaches, with no cap, and joined by the implementing side to its own table in the same query. Claimius is the better shape at every `V_{u,τ}`, and the difference grows with it.
 
-## Search
+## Change
 
-No system above searches the text of what a user may reach. A service using one of them searches its own table and filters the `M_q` matches through a batched check, `r_s + M_q e_s`, or lists first and searches the list. Claimius searches inside the reader's reach from whichever side is smaller, `min(V_u c_1, M_q c_2)`, about 5 µs of calibration time a candidate; see [Search](./search.md). It wins whenever `5 µs / σ < e_s` per candidate, which holds against any evaluation that costs more than one index descent.
+A tuple store writes one tuple per relation: a claim bound to a node and granted to `k` users is `1 + k` tuples, and a group index is updated from the changelog afterwards.
 
-## Writes
+Claimius writes the same `2 + k` source rows and, in the same transaction, the closure rows of the claim, one area row, and the actor's and assignees' pairs: `≤ 1 + (1 + k) |T_c|` pairs; see [Writes](./writes.md#one-request-one-transaction). Every other user of the change settles on the first read that meets its area, `|H_c| × |T_c|` pairs once. The write is linear in the reach of the node and in the users it names, and constant in every other user of the app. What claimius pays that a tuple store does not is the materialized pairs, once per change; what it saves is the enumeration a tuple store pays on every listing and the rewrite a tuple store pays on every check. It is the better shape when pairs are read more often than they change, which [Materialization](./materialization.md#why-a-listing-reads-stored-pairs) bounds at a few reads per change.
 
-A tuple store writes one tuple per relation: a claim bound to a node and granted to `k` users is `1 + k` tuples in one transaction of its datastore, and a reachability index such as Zanzibar's Leopard is then updated from the changelog. Claimius writes the same source rows and one area row each, constant in users and in reach:
+## Consistency
 
-```
-write:                 r_db + c_w / σ + L_c, 5.2 ms on a D2ds_v5, 1.65 ms on the reference node
-first check of u:      c_r / σ, evaluated from the sources, no settle
-first listing of u:    A_u t / σ, the reader's own slice
-in all:                U_a A t, by readers and the drain, once per database that serves the app's reads
-```
+| System | A read without a token | A read that must see a write |
+|---|---|---|
+| Claimius | On the prophet, settled before it answers; on a disciple, as of its cursor | Waits until the disciple's cursor reaches the write's sequence |
+| Zanzibar | A snapshot chosen by the server | Zookie |
+| SpiceDB | `minimize_latency`, a quantized revision | `at_least_as_fresh` with a ZedToken ([Consistency](https://authzed.com/docs/spicedb/concepts/consistency)) |
+| Auth0 FGA | `MINIMIZE_LATENCY`, served from a cache | `HIGHER_CONSISTENCY` ([Consistency modes](https://docs.fga.dev/writing-data/consistency-modes)) |
+| Entra ID | The token's claims until it expires | A new token |
 
-The write is the same order of work as a tuple store's, and a check after it costs its evaluation, whatever the reach of the binding. What claimius pays that a tuple store does not is the materialized listing, `A_u t` once per reader, which a tuple store pays on every enumeration instead. Claimius wins when a listing is read more than once between changes to its slice.
+The token is the same idea in each: a sequence, a zookie, a revision. A disciple is not a cache with a window; it applies each event in order, so it is behind by the events it has not pulled and by nothing else.
 
 ## Availability
 
 A request that needs its data and an access decision succeeds when every component on its path is up. With independent failures:
 
 ```
-central: A = A_db × A_net × A_authz        claimius: A = A_db
+separate service:  A = A_db × A_net × A_authz          claimius:  A = A_db
 ```
 
-The claimius decision adds no factor, because it runs in the database the request already needs, in the same query. A central service at 99.99 % multiplies in 52.6 minutes a year before the network to it; Zanzibar's observed 99.999 % multiplies in 5.3. Claimius wins for any `A_authz < 1`. What it costs is freshness while a disciple's prophet is unreachable; see [Prophets and disciples](./prophets.md).
+The claimius decision adds no factor, because it runs in the database the request already needs. Claimius is the better shape for any `A_authz × A_net < 1`. What it costs is freshness while a disciple's prophet is unreachable; see [Prophets and disciples](./prophets.md#failure).
 
-## Staleness and consistency
+## Entra ID
 
-| System | A read without a token | A read that must see a write |
-|---|---|---|
-| Claimius | Current on the prophet; on a disciple `τ_x + r_net / 2 + a_e / σ` behind, 0.65 ms in region and 11 ms from Norway East to West Europe on a `D2ds_v5` | Waits on the write's sequence |
-| Zanzibar | Snapshot reads, chosen by the server | Zookie |
-| SpiceDB | `minimize_latency`, up to the 5 s quantization window | `at_least_as_fresh` with a ZedToken |
-| Auth0 FGA | `MINIMIZE_LATENCY`, a cache of up to 10 s | `HIGHER_CONSISTENCY` |
-| Entra ID | The token's lifetime | A new token |
-
-Claimius wins when its disciple staleness is below the window of the default mode of the other system: by a factor of 450 against SpiceDB's 5 s across regions and 7,700 in region, and by twice that against Auth0 FGA's 10 s. The formula has no term in the window a cache chooses, because a disciple is not a cache: it is a replica that applies each change the moment it commits.
-
-## Cost per million checks
-
-A claimius check costs the share `c_r / K` of its database for its duration, so a million of them cost
-
-```
-10^6 × c_r × p_h / (3600 K)
-```
-
-for a database priced `p_h` an hour: 0.011 USD on a `D2ds_v5` at 0.239 USD an hour and 0.020 USD on a `B2ms` at 0.175 USD, sustained. A central service priced `p_s` an hour and carrying `X` checks a second costs `10^6 p_s / (3600 X)` per million, so claimius is cheaper while
-
-```
-X < p_s K / (c_r p_h)
-```
-
-52,000 checks a second against AuthZed Cloud's entry price of 2 USD an hour, at `D2ds_v5` prices. Below the knee of [Scaling](./scaling.md) the check runs on capacity the service's database already has, and its marginal cost is zero.
-
-## What rests on published figures only
-
-1. Zanzibar's latency and availability are for a system of more than 10,000 servers holding over two trillion relations; SpiceDB's million a second is a dedicated deployment on CockroachDB holding 100 billion relationships. Claimius has not been run at either scale, and no claim is made that it would match them there. What the formulas claim is per service: every service below its own ceiling is answered faster, fresher, more available and cheaper than by any central service.
-
-2. Auth0 FGA publishes an availability SLA and no latency SLA; its own documentation says latency depends on the model, the data and the cache ratio ([Auth0 FGA, Testing latency and throughput](https://docs.fga.dev/best-practices/latency-tests)). Ory Keto publishes no latency or throughput figure.
-
-3. Entra ID's figures cover sign in and token issuance. It does not decide access to an application's objects; an application that needs that decision builds it, which is what claimius is.
+Entra ID carries groups and app roles in the token, at most 200 groups before the token carries an overage claim instead ([Access token claims, groups overage](https://learn.microsoft.com/en-us/entra/identity-platform/access-token-claims-reference)). It stores nothing per object and decides nothing per object: an application that needs to know whether a user may open one document builds that decision, which is what claimius is.
 
 ## Ease of use
 
 1. Claimius has four types and two bindings, and every consumer reads through the same functions. An implementing side registers its tables and binds claims to its rows; it writes no model language.
 
-2. Zanzibar and the systems built on it, SpiceDB, OpenFGA and Ory Keto among them, take a schema of relations and rewrites per namespace. That is more expressive, and every question a service asks depends on it being written correctly.
-
-3. Entra ID carries roles and groups in the token, which is the simplest to consume and stops at the granularity of an app role or a group of at most 200 per token.
+2. Zanzibar and the systems built on it take a schema of relations and rewrites per namespace. That is more expressive, and every question a service asks depends on it being written correctly.

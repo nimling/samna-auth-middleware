@@ -1,142 +1,83 @@
 ---
 layout: doc
 title: Storage
-description: Row widths and sizes of the claimius tables, fill factors, the indexes each table carries, vacuum settings for the tables that churn, and how claimius fits the connection budget.
-tags: storage, fillfactor, autovacuum, index, user_object, object_info, access_diff, sync_event, connection pool
+description: The rows and bytes each claimius table holds as functions of the data, the indexes each carries and the index entries each write costs, the shape of the B-trees a read descends, and the dead rows each maintenance step leaves.
+tags: storage, index, btree, gin, deduplication, user_object, inheritance_info, user_users, sync_event, access_diff, vacuum
 lastUpdated: true
 ---
 
 # Storage
 
-## Sizes
+## Rows per table
 
-Measured on the benchmark data set: 782 organizations, 1,000 users, 5,012 grants, 20,000 registered rows, with the pair carrying its object fields in its own row. The last column is the designed row.
-
-| Table | Rows | Bytes per row, measured | Bytes per row, designed | Grows with |
-|---|---|---|---|---|
-| `user_object` | 393,908 | 606, and 144 more in the pair's inverse row | about 250 with the usage counters, 350 with its two indexes | Users times reach, `Σ_u V_u` |
-| `object_info` | one per object, 20,782 | | about 450 with its GIN entries and its up set, `3 × 24 + 16 a` bytes of arrays for `a` ancestors | Objects, `O` |
-| `user_users` | 111,472 | about 120 | the same | Pairs of users sharing an object |
-| `access_diff` | 0 to thousands | about 100 | the same, and one marker per reader of an outstanding area | Outstanding areas, drained within seconds |
-| `sync_event` | Source changes over the trim interval | the row as jsonb, about 500 | the same | Writes |
-
-The measured `user_object` row was wide because of what every user of an object shares: `search_vector`, 119 bytes, the name, description and link, and the owner, location and root. Those are stored once per object in `object_info`, which is `Ū_o = 19` times fewer rows in the benchmark. What stays on the pair is what differs between users: the mask, the grants that produced it, the scope and the usage. `grants`, 239 bytes on average, is read on every check, which is why it is stored rather than recomputed.
-
-## Indexes
-
-| Table | Indexes |
-|---|---|
-| `user_object` | Primary key `(user_id, app_id, object_type, object_id) INCLUDE (sa_access)`; `idx_user_object_object (object_id, object_type)` |
-| `object_info` | Primary key `(object_type, object_id)`; `(sa_owner_id, sa_name, object_id)`; `(sa_root_id)`; `(sa_location_id, sa_name, object_id)` partial; GIN on `search_vector`; `idx_object_info_ancestors`, GIN on `owner_ids || location_ids || parent_ids` |
-| `access_diff` | Primary key `id`; `(app_id, object_type, object_id) WHERE kind = 'object'`; `(app_id, claim_id, user_id) WHERE kind = 'claim'` |
-| `sync_event` | Primary key `seq`; `(app_id, seq)`; BRIN on `written_at` |
-
-Every index on `user_object` is a write on every settled pair, so it carries two: the primary key, which is the check's probe, the listing's range and the mask test at once, and the members of an object. An index with `INCLUDE` columns never deduplicates ([PostgreSQL, Deduplication](https://www.postgresql.org/docs/17/btree.html#BTREE-DEDUPLICATION)), so a second covering index over the same user range would pay its full width again for nothing. The per object indexes, owner, root, location and text, sit on `object_info`, where they are written once per object instead of once per pair. The primary key orders a user's pairs together, so one user's slice of `n` pairs dirties `⌈n / 87⌉` leaf pages, where a hashed id scatters it over `n`, and after a checkpoint each of those pages is a full page image in the WAL ([WAL configuration, full_page_writes](https://www.postgresql.org/docs/17/runtime-config-wal.html)).
-
-On the write path only indexes a read uses are kept. `sync_event` is read by `(app_id, seq)` and trimmed by `seq`, and its `written_at` follows insertion order, so it is BRIN. The single column `sa_deleted_at` indexes of `claim`, `user_claim` and `claim_object` serve no read, because every read of them filters on a live row inside another index, and are not kept. See [Scaling](./scaling.md) for the entries each write saves.
-
-## Growth and memory
-
-Bytes per unit of the designed rows, heap and indexes, from the widths above and the entry sizes of [Scaling](./scaling.md):
-
-| Table | Grows with | Bytes per unit |
+| Table | Rows | Grows with |
 |---|---|---|
-| `user_object` | pairs `P = Σ_u V_u = O Ū_o` | 350 |
-| `object_info` | objects `O` | 450: 300 for the rendering and text, 150 for the up set and its postings at `a = 5` |
-| `user_users` | pairs of users sharing an object, `U × Ū_seen`, at most `U²` | 466, measured |
-| `user_claim` | grants `G` | about 400, measured 443 with the `sa_deleted_at` index that goes |
-| `samna_user` | users `U` | 456, measured |
-| `sync_event` | per app `min(λ_e × 7 days, N_src)` | about 580 with its two btrees |
-| `audit` | `λ_a × retention` | 330 |
-| `access_diff` | outstanding areas, at most the source rows | about 100 |
+| `user_object` | `P = Σ_u V_u = O Ū_o` | users times reach |
+| `object_users` | `P` | users times reach |
+| `user_users` | `Σ_u S_u ≤ U (U − 1)` | pairs of users sharing an object |
+| `inheritance_info` | `Σ_x Σ_{t ∋ x} (d_t(x) + 1)` | objects times depth |
+| `claim`, `claim_object`, `user_claim` | claims, bindings, grants | the model, never its product |
+| `access_diff` | at most one per claim and one per object raised since the last read in the app | writes between reads |
+| `sync_event` | events since the lowest live cursor | writes and the pairs they touch; see [Sync](./sync.md) |
+| `audit` | audited events | writes |
 
-A year's growth is the sum of these over what the year adds. The pairs dominate: a year adding 10,000 users who each reach 2,000 objects, 200,000 objects at depth 4, 50,000 grants and 100 visible users each is 7.0 GB of `user_object`, 0.47 GB of `user_users`, 0.09 GB of `object_info` with the up set of every object, and 0.02 GB of grants. The up set costs 150 bytes an object where a closure table of one row per ancestor pair costs 2,400; see Result 3 of [Theory](./theory.md).
+On the data set of [the index](./index.md#symbols), `user_object` held 393,908 rows averaging 606 bytes of heap, of which 119 were the search vector and 239 the `grants` array, and `user_users` 111,472 rows of about 120 bytes. The pairs dominate: they are the only table that grows with the product of users and objects, `P = O Ū_o`, and every other table grows with the rows of the model or with its depth.
 
-What must stay in memory is what a read touches, and each index leaves memory at its own threshold. With `E` the cache of a machine, 4 GiB on the Azure servers and 183 GiB on the reference node:
+A closure row is two object pairs, a root, a depth and two timestamps: about 140 bytes of heap and three index entries of about 100 bytes each, so an object at depth `d` in one tree costs about `(d + 1) × 440` bytes of closure.
 
-| Index or table | Touched by | Leaves memory when | Azure, `E` = 4 GiB | Reference, 183 GiB |
-|---|---|---|---|---|
-| `user_object` primary key and heap | Every listing of an active user | `U_act × V̄ × 350 B > E` | 12 million pairs: 6,100 active users at `V̄ = 2,000` | 560 million pairs: 280,000 active users |
-| `object_info` | Every check, and listings, search, graphs | `O × 450 B > E` | 9.5 million objects | 437 million |
-| `user_users` | `get_users` and the settle's increments, never a check | `U × Ū_seen × 466 B > E` | 3,000 users all sharing one object | 20,000 |
+## Indexes and entries per write
 
-The per user index leaves first, and only for the active users: a user who does not read has pairs on disk that no read touches, and the primary key keeps a user's pairs on `⌈V_u / 87⌉` contiguous leaves, so the first read of a returning user costs that many reads and the rest of the session is cached. A check never reads the per user index: it reads `object_info` and the bindings, which are shared by every user and leave memory only at the object counts of the table above, and a check that misses them costs two random reads, the ceiling `I / 2` of [Scaling](./scaling.md). `user_users` grows with the square of the users who share objects; it sits off the check path, so outgrowing memory slows `get_users` and the settle's increments, not access.
-
-## Fill factor and heap only updates
-
-`user_object` is at fill factor 90. Its usage counters are updated in place by every usage flush, no index covers them, and the free space of each page keeps those updates heap only ([PostgreSQL, Heap Only Tuples](https://www.postgresql.org/docs/17/storage-hot.html)). A flush writes a new version of every row it touches, and within the flush's own statement the old versions are still live, so the page must hold `u_p` new versions at once for the `u_p` rows of that page the flush touches:
-
-```
-1 − ff  ≥  u_p × w_heap / 8,192
-```
-
-The settle writes a user's pairs together, so the rows of one heap page are mostly one user's, and `u_p` is the uses of one user on neighbouring objects within one flush interval, one to three in practice. At `w_heap ≈ 250 B`, fill factor 90 leaves 819 bytes, room for three versions, and 80 would leave room for six. The measurements agree with the inequality: 4,000 of 4,000 updates heap only on a 144 byte row at 90, and 699 of 3,000 on a 606 byte row, where one version barely fits. A settle changes `sa_access`, which the primary key includes, so a settle update is never heap only; the free space is for the flush.
-
-## Vacuum
-
-| Table | Churn | Settings |
+| Table | Indexes | Entries per row written |
 |---|---|---|
-| `access_diff` | Every row is inserted and deleted within seconds | `autovacuum_vacuum_scale_factor = 0`, `autovacuum_vacuum_threshold = 1000` |
-| `sync_event` | Deleted in bulk by `trim_sync_event` | Vacuumed after each trim |
-| `user_object` | Upserts on settle, heap only usage updates pruned on the page | `autovacuum_vacuum_scale_factor = 0.05` |
+| `user_object` | primary key; `(user_id, app_id, object_type, sa_access)`; `(object_id, object_type)`; `(app_id, sa_owner_id)`; `(app_id, sa_location_id)` partial; `(app_id, sa_root_id)`; GIN `jsonb_path_ops` on `grants`; GIN on `search_vector` | 5 or 6 btree, about 6 per derivation in `grants`, one per distinct lexeme |
+| `object_users` | primary key; `(object_id, object_type)`; `(app_id, user_id)` | 3 |
+| `user_users` | primary key; `(app_id, viewer_id)`; `(app_id, target_user_id)` | 3 |
+| `inheritance_info` | primary key; descendant covering; ancestor covering | 3 |
+| `access_diff` | primary key; one of two partial indexes by kind | 2 |
+| `sync_event` | primary key; `(app_id, seq)`; `(event_type, seq)`; `written_at` | 4 |
+| `user_claim` | primary key; live unique `(claim_id, user_id, app_id)`; `(user_id, app_id)`; `claim_id`; `sa_owner_id`; `sa_deleted_at` | 6 |
+| `claim_object` | primary key; `app_id`; `claim_id`; `(object_type, object_id)` partial; `(claim_id)` partial for scope grants; `sa_owner_id`; `sa_deleted_at`; `(claim_id, object_type, object_id)` partial | 6 or 7 |
+| `audit` | primary key; `app_id`; `sa_owner_id`; `sa_created_at`; `(object_type, object_id)` | 5 |
 
-A table whose rows live seconds is small only if it is vacuumed on a count, not on a fraction of its size: a scale factor of zero with a fixed threshold does that ([PostgreSQL, Automatic Vacuuming](https://www.postgresql.org/docs/17/runtime-config-autovacuum.html)). A large table vacuumed at the default 20 % carries a fifth of its size in dead rows before the vacuum starts; at 5 % the settle's dead versions are reclaimed before they cost reads, and the pages a vacuum marks all visible are the pages an index only listing reads without the heap.
+The GIN indexes take their entries through the pending list and merge them in bulk ([PostgreSQL, GIN fast update](https://www.postgresql.org/docs/17/gin.html#GIN-FAST-UPDATE)). A soft delete sets an indexed column, so it is never a heap only update and writes an entry in every index of its table ([PostgreSQL, Heap Only Tuples](https://www.postgresql.org/docs/17/storage-hot.html)).
 
-## Time ordered data
+Per pair written, the materialization therefore writes one `user_object` row with `≈ 6 + 6 G_x + n_w` entries for `n_w` distinct lexemes, on first insert one `object_users` row with 3, and one or two `sync_event` rows with 4 each.
 
-Claimius holds three kinds of rows that arrive in time order and never change after.
+## The shape of a B-tree
 
-| Table | Read by | Leaves by | Stored as |
-|---|---|---|---|
-| `audit` | Time window, object, owner | Age, months | Range partitions by month on `sa_created_at`, BRIN on `sa_created_at`, created and detached by `pg_partman` |
-| `sync_event` | `(app_id, seq)` after a cursor | The lowest live cursor, hours to days | One table, btree on `(app_id, seq)`, trimmed by `trim_sync_event` and vacuumed after |
-| The raw analytics events of the prophet | Time window per app and path | Age, 30 days | The same rule as `audit`, partitioned by day |
-
-1. A table that leaves by age in whole periods is partitioned by that period, so retention is a detach and the planner prunes every period outside a window. Measured on 2,000,000 audit rows over 24 months: a month of 86,111 rows leaves in 0.6 ms, and the last 7 days are read in 3.1 ms with 24 of 25 partitions pruned. See [Audit](./audit.md).
-
-2. A time column that follows insertion order is indexed with BRIN: 32 kB for 2,000,000 rows, where a btree on the same column is 43 MB and costs a btree insert per row ([PostgreSQL, BRIN Indexes](https://www.postgresql.org/docs/17/brin.html)).
-
-3. `sync_event` leaves by cursor, not by period, and after the feed carries source rows only it holds writes over a trim interval, not users times writes. A plain table with a delete per trim is the right size for it.
-
-4. Usage is not time ordered data. It is two counters on a pair, updated in place; see [Usage](./usage.md).
-
-All of this is core Postgres plus `pg_partman`, and runs on Azure Database for PostgreSQL Flexible Server, where `pg_partman` 5.4.3 and `pg_cron` 1.6 are on the allow list for Postgres 17 ([Microsoft Learn, Extensions by engine](https://learn.microsoft.com/en-us/azure/postgresql/extensions/concepts-extensions-by-engine)). `pg_cron` runs the scheduled maintenance of a prophet: the partition upkeep, `trim_sync_event` and the drain of [Materialization](./materialization.md).
-
-## Connections
-
-Claimius runs inside the pools the service already has: each replica has a pool of its own and one for the middleware, `SetMaxOpenConns`, `SetMaxIdleConns` and `SetConnMaxIdleTime` in `shared/main.go`, and every statement runs under `statement_timeout`, 120 s, paired with the driver's read timeout. Claimius adds no connection of its own:
-
-1. A read and its settle are one statement on one pooled connection.
-
-2. The usage flush borrows one connection for one statement every flush interval.
-
-3. The drain borrows one connection per batch, on the prophet's scheduled run and between a disciple's pulls.
-
-### The size of a pool
-
-A connection is held for `T_conn = r_db + c_r / σ` by a check, 1.2 ms on the Azure servers and 0.24 ms on the reference node. By Little's law a pod serving `X_pod` requests a second holds `L = X_pod × T_conn` connections busy on average, and with independent arrivals the busy count is Poisson with mean `L`. A pool of
+A B-tree page is 8,192 bytes with a 24 byte header and a 16 byte special area; an index tuple is an 8 byte header plus its `MAXALIGN`ed key and include columns, plus a 4 byte line pointer ([Database Page Layout](https://www.postgresql.org/docs/17/storage-page-layout.html)). Leaves are filled to 90 % on build, and over 99 % of pages are leaves ([B-Tree Structure](https://www.postgresql.org/docs/17/btree.html#BTREE-STRUCTURE)). With `e` bytes per entry:
 
 ```
-P = q_{0.999}(L)
+B = 8,152 × 0.9 / e                   entries per leaf
+h = 1 + ⌈log_B (N / B)⌉               levels for N entries
 ```
 
-connections makes one request in a thousand wait for one. An Azure pod of 2 vCPUs at its API ceiling of 1,830 requests a second holds `L = 2.2`, so `P = 9`; a reference pod of four cores at 10,700 a second holds `L = 2.5`, so `P = 9`. A pool of 10 covers both, per pool, where the stack's budget gives 25.
+The levels above the leaves are `1 / B` of the index, so a descent reads `h` pages of which all but the leaf are shared by every descent.
 
-The database, for its part, is kept busy by `h n × T_conn / (c_r / σ)` connections, 12 on a `D2ds_v5` and 111 on the reference node. More than that across all pods cannot make it faster; they queue inside it instead of in the pools. A server shared by many services therefore sits behind a pooler in transaction mode whose pool is that number ([PgBouncer, features](https://www.pgbouncer.org/features.html)), which claimius allows because it holds no session state across transactions; its named prepared statements become the pooler's protocol level ones.
+1. The pair primary key is one UUID, `e = 28`, `B ≈ 262`: three levels hold 18 million pairs.
 
-### The idle count
+2. `idx_user_object_user_type` has no include columns, so it deduplicates: every pair of one user, app, type and mask shares one key and adds a 6 byte heap pointer to its posting list ([Deduplication](https://www.postgresql.org/docs/17/btree.html#BTREE-DEDUPLICATION)). The reader's range of `V_{u,τ}` pairs with `m` distinct masks is then about `⌈(V_{u,τ} × 6 + m × 68) / 7,337⌉` leaf pages, and a listing's further cost is the `V_{u,τ}` heap rows it reads for `grants` and the rendering fields.
 
-A pool that keeps fewer idle connections than it has busy ones closes a connection whenever the busy count falls and opens one whenever it rises again. Simulating the pool of `database/sql` under Poisson arrivals and exponential holds with mean busy count `L`, the connections opened per request are:
+3. `idx_inheritance_info_descendant` and `idx_inheritance_info_ancestor` carry include columns, so they never deduplicate and every closure row pays its full entry, about 100 bytes.
 
-| `L` | 2 kept idle | 4 | 8 | 12 |
-|---|---|---|---|---|
-| 1 | 0.147 | 0.014 | under 0.0001 | under 0.0001 |
-| 2 | 0.228 | 0.063 | 0.0009 | 0.0001 |
-| 4 | 0.279 | 0.118 | 0.016 | 0.0007 |
-| 8 | 0.304 | 0.154 | 0.048 | 0.012 |
+## What must stay cached
 
-An open costs a TCP and TLS handshake, a SCRAM exchange whose client side runs 4,096 PBKDF2 iterations by default ([PostgreSQL, `scram_iterations`](https://www.postgresql.org/docs/17/runtime-config-connection.html#GUC-SCRAM-ITERATIONS)), and a backend start: three round trips or more and, assumed, about a millisecond of database CPU, several times the 0.2 ms of the check it serves on an Azure server. At `L = 2` with two kept idle, 23 % of requests pay it. The idle count therefore equals the pool size, and `SetConnMaxIdleTime` of 15 s closes what an idle period leaves open: scaling down is the idle timeout's work, not the idle count's.
+A check touches one pair, its `G_x` grants in `idx_user_claim_unique` and their claims; a listing touches the reader's range and its `V_{u,τ}` heap rows; a settle touches the closure of the area and the bindings on it. The per pair data of the users who read is the part that grows with users times reach:
 
-### The budget
+```
+working set ≈ U_active × V̄ × (606 + entries of one pair) bytes
+```
 
-The per replica budget of the stack sums both pools and every dedicated `LISTEN` connection, and the replica budgeting inequality of the stack sums that over `maxReplicas`. At 10 per pool a replica holds at most 20, plus its listeners. A prophet adds one dedicated `LISTEN` connection per process for the feed, which holds a pull open until the next event commits; see [Sync](./sync.md).
+When it exceeds the cache, a listing reads up to `V_{u,τ}` heap pages from storage, and a check two: its pair's leaf and heap page. The closure and the model's own tables grow with objects and grants, not with users, and leave the cache last.
+
+## Dead rows each step leaves
+
+1. A pair recompute that changes nothing writes nothing, because its upsert updates only when a column is distinct.
+
+2. A `user_users` refresh deletes and inserts every row of its viewer: `S_u` dead rows per refresh, whether the counts changed or not.
+
+3. An area is inserted by the write and deleted by the settle: one dead row per settled area.
+
+4. `trim_sync_event` deletes every event below the watermark in one statement.
+
+Autovacuum starts on a table when its dead rows exceed `autovacuum_vacuum_threshold + autovacuum_vacuum_scale_factor × rows`, 50 plus a fifth of the table by default ([PostgreSQL, Automatic Vacuuming](https://www.postgresql.org/docs/17/runtime-config-autovacuum.html)). `access_diff` holds few live rows and turns them over on every settle, so its threshold is reached on a count of settles; `user_users` turns over `S_u` rows per refresh, so it is the derived table that makes the most dead rows per write.

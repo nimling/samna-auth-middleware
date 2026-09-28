@@ -1,81 +1,99 @@
 ---
 layout: doc
 title: Reads
-description: The claimius read surface, what each read does, what it costs in index probes and time, the check evaluated from the sources of access, and the rule that a listing writes nothing but the settle of the areas it targets.
-tags: get_access, get_direct_access, mutation_access, resolve_access, _build_grants_for_object, get_objects, get_users, get_claims, read purity, plan cache
+description: The claimius read surface, what each read function reads and writes in index entries and rows as a function of the data, and why a check and a listing are independent of tree depth and of the number of users.
+tags: get_access, get_direct_access, mutation_access, resolve_access, get_objects, get_users, get_claims, get_audit, _best_grant, reconcile_if_pending, read cost
 lastUpdated: true
 ---
 
 # Reads
 
-Every read takes the user and the app first and checks that the user is active. A check answers from the sources of access, evaluated in one statement; a listing settles the reader's slice of the areas it targets and answers from `user_object`. Soft deleted rows, expired grants and denies never reach the caller.
+Every read function takes the user and the app first. It runs `reconcile_if_pending(app, user)`, which settles the outstanding areas the read meets, then `check_user_active`, one probe, and then answers from `user_object` or the base relations. Soft deleted rows, grants outside their window and denied bits never reach the caller.
 
 ## The surface
 
-| Function | Answers | Cost |
-|---|---|---|
-| `get_access(user, app, object_id, object_type, required)` | The strongest grant on one object, at most one row, with `user_claim_id` | One evaluation of `_build_grants_for_object` and `_best_grant`, below |
-| `get_direct_access(user, app, object_id, object_type, required, raise)` | The closest, strongest grant on any ancestor | The same evaluation, its first row by hops |
-| `resolve_access(user, app, object_id text, object_type, required)` | The verdict for any type, text id | Dispatch to the two above, or to the audit, relation and user lookups |
-| `mutation_access(user, object_id text, object_type, required)` | The gate: a row, `P0403` or `P0404` | `resolve_access` plus one existence probe on a miss |
-| `get_user_access(actor, app, target, required)` | The actor's access on a user named three ways | One resolution query over `samna_user`, then the grant branches |
-| `get_objects(user, app, object_type, required)` | Every reachable object of a type, with rendering fields and `user_claim_id` | One range of the `user_object` primary key, `V` rows, joined to `object_info` |
-| `get_organizations`, `get_locations`, `get_users`, `get_claims`, `get_secrets`, `get_audit` | Listings by type | One index range each |
-| `search`, `get_owner_graph`, `get_claim_graph` | See [Search](./search.md) and [Graphs](./graphs.md) | |
+| Function | Answers |
+|---|---|
+| `get_access(user, app, object_id, object_type, required)` | The chosen grant on one object, at most one row, with `user_claim_id` |
+| `get_direct_access(user, app, object_id, object_type, required, raise)` | The closest, strongest grant bound on the object or an ancestor |
+| `resolve_access(user, app, object_id text, object_type, required)` | The verdict for any type: audit, relation and user lookups, otherwise the two above |
+| `mutation_access(user, object_id text, object_type, required)` | The gate: a row, `P0403` or `P0404` |
+| `get_user_access(actor, app, target, required)` | The actor's access on a user named three ways; see [Users](./users.md) |
+| `get_objects(user, app, object_type, required)` | Every object of a type the user reaches, with rendering fields and `user_claim_id` |
+| `get_organizations`, `get_locations` | `get_objects` intersected with the app's `app_object` links |
+| `get_users`, `get_claims`, `get_audit`, `get_secrets` | Listings by type |
+| `search`, `get_owner_graph`, `get_claim_graph` | See [Search](./search.md) and [Graphs](./graphs.md) |
+
+## What every read pays first
+
+`reconcile_if_pending` reads the app's `Δ_a` outstanding areas and, for each claim area, tests the reader's grants and links against it. With nothing outstanding it reads `Δ_a = 0` rows and writes nothing. When it finds areas it settles them for every user they reach, at the cost of [Materialization](./materialization.md#what-a-settle-costs), inside the read.
 
 ## What a check costs
 
-A check is one SQL statement, `STABLE`, evaluated from the sources of access: `_build_grants_for_object` returns the derivations of the pair and `_best_grant` picks the answer. It reads, in the order the rows are indexed:
+`get_access` reads the pair and chooses a grant:
 
-1. The reader's grants, one range on `idx_user_claim_user_app` and `C` claim probes.
+1. The pair, filtered on `user_id`, `app_id`, `object_type`, `object_id` and the mask. The planner answers it from the shorter of two ranges: `idx_user_object_object` returns the `U_x` pairs of the object, `idx_user_object_user_type` the `V_{u,τ}` pairs of the reader's type with the mask tested in the index. The pair's primary key, a composite id of the same four values, is not part of the filter.
 
-2. The links out of those claims, `C` probes of `idx_claim_object_lookup`, and the `L` claims they compose.
+2. `_best_grant` over the pair's `G_x` derivations: per derivation one probe of `idx_user_claim_unique` for the live grant inside its window and one `claim` primary key probe.
 
-3. The object's `object_info` row by primary key: one descent that proves the object exists, gives its creator, and gives its up set in `owner_ids`, `location_ids` and `parent_ids`, `a` ancestors; see [Objects](./objects.md#the-up-set).
+3. The owner's root, one `organization` probe.
 
-4. The bindings on the object and on each ancestor, `a + 1` probes of `idx_claim_object_object`, kept when their claim is one of the reader's or composed by one of them. When an ancestor carries many bindings of claims the reader does not hold, the planner probes `idx_claim_object_lookup` with the reader's claims instead.
+```
+entries(get_access) = Δ_a + 1 + min(U_x, V_{u,τ}) + 2 G_x + 1          rows written = 0 when Δ_a = 0
+```
 
-5. `check_user_active`, one probe of `idx_samna_user_user_app`.
+Nothing in it depends on the depth of the trees, the number of claims bound above the object, or the number of users beyond `U_x`: the derivation was paid when the pair was settled. That is the point of storing the pair.
 
-6. The derivations combined by the formula of [Denials](./denials.md), the scope merged by [Redaction](./redaction.md), and the best grant chosen: fewest hops, most bits, oldest claim.
+## What a walk to the closest grant costs
 
-That is `2C + L + a + 4` descents and one statement: `t_s + (2C + L + a + 4) × t_d`, 0.11 ms at `C = 5`, `L = 0`, `a = 4`, from the constants of [Scaling](./scaling.md). It does not depend on the number of users, objects or the size of the trees, it never waits on a settle, and it is current the moment a grant, a binding or a move commits.
+`get_direct_access` answers without `user_object`, for a caller that expects to act on an object whose pair is not there:
 
-Why the check is evaluated and not read from `user_object`: a pair maintained on demand must be proved current before it is trusted, and the proof reads the same grants and ancestors and adds one probe per claim, `3C + D + 5` descents against `2C + L + a + 4`, and a settle when it finds an area. The evaluation is cheaper, writes nothing and has no staleness. The settle writes `user_object` from the same `_build_grants_for_object`, so a listing and a check agree by construction. The proof is Result 4 of [Theory](./theory.md).
+1. `get_ancestors`: the object's ownership chain, its location chain and, for each location on it, the owner's chain, and its parenthood chain, one range of `idx_inheritance_info_descendant` each. With `a'_x = d_o + d_l + d_q + Σ_{l on the location chain} (d(owner(l)) + 1)` ancestors this reads `a'_x + O(1)` entries.
 
-Why one statement: a statement costs 60 µs from a client and 20 µs inside a function, a descent 2.5 µs. The same check written as eight PL/pgSQL statements measured 0.30 to 0.35 ms on the server, 0.39 to 0.44 ms with the round trip, and the model gives 0.27 ms; the statements, not the probes, were the cost.
+2. The bindings on each ancestor, `idx_claim_object_object`, joined to the reader's live grant on each and its claim. A binding on an ancestor above hop 0 counts only when claim and binding both inherit.
 
-Why no round trip of its own: on any network the round trip to the database costs more than the check. A check issued alone takes `r_db + c_r / σ`, of which the wire is `r_db / (r_db + c_r / σ)`: 83 % on the Azure servers, 42 % on the reference node. A service reads the object anyway, so the check rides in that query as a predicate, the `get_access` evaluation for the row's id, and the read of one object costs the service one round trip, not two. On the Azure servers that cuts the latency the check adds from 1.2 ms to 0.2 ms.
+3. The same walk again for denies, in a `NOT EXISTS`: a deny on any ancestor that covers a required bit empties the answer.
+
+4. The first row by hops, then bits, then grant id.
+
+```
+entries(get_direct_access) ≈ 2 (a'_x + 3 B'_x) + O(1)
+```
+
+for `B'_x` bindings on those ancestors. Its location term follows each location's owner, a wider set of ancestors than the closure the settle reads; see [Locations](./locations.md).
+
+## What the gate costs
+
+`mutation_access` calls `resolve_access`, which tries `get_access` and on a miss `get_direct_access`; on a second miss `mutation_access` calls `get_direct_access` again with `raise`, which probes the object's live row once and raises `P0403` or `P0404`. A hit costs one check; a miss costs one check, two walks and one probe, and runs `reconcile_if_pending` three times. For `claimius.samna_user` the target is resolved in the app's `samna_user` rows by `external_id`, `user_id` or `id`; `external_id` carries no index there, so the resolution reads the app's `U` user rows.
 
 ## What a listing costs
 
-A listing reads the reader's range of the `user_object` primary key for one type, tests the mask on the included `sa_access`, resolves each row's best grant against the reader's grants, fetched once and hashed, and takes the rendering fields from `object_info` by primary key. Measured on the pair carrying its own fields: 288 rows in 1.18 ms, 20,000 rows in 14.4 ms, about 0.7 µs per row, of which the sort was the largest term above a few thousand rows. The rows are returned in the order of the primary key, `(object_type, object_id)` within the reader's range, which the index already holds, and paged by keyset on `object_id`, so the sort is gone: 0.043 cost units a row instead of 0.114, and a page of `l` rows reads `l` entries whatever page it is. A caller that needs only ids, the `ObjectWhere` filter an implementing side puts on its own table, reads the primary key alone, index only: `⌈V / 87⌉` leaf pages, 230 for 20,000 rows, where reading the heap row of each took 15,778 page reads.
+`get_objects` reads the reader's range of `idx_user_object_user_type` for one type, the heap row of each pair for its `grants`, name and owner, and chooses a grant per row:
 
-## A check writes nothing, a listing writes only its settle
+```
+entries(get_objects) = Δ_a + 1 + V_{u,τ} (1 + 2 G + 1)          comparisons = V_{u,τ} log₂ V_{u,τ}
+```
 
-A check is a pure read. Every listing, `get_objects`, `get_organizations`, `get_locations`, `get_users`, `search` and the graphs, is a read with one side effect: the settle of the reader's own slice of the `access_diff` areas it targets, described in [Materialization](./materialization.md). Nothing else in a read path writes.
+Rows are ordered by the number of bits set, then `object_id`, and returned whole; the implementing side joins the range to its own table or pages over it. A listing is linear in what the reader reaches and independent of the depth of the trees, the number of bindings and the number of other users.
+
+| Listing | Reads |
+|---|---|
+| `get_organizations`, `get_locations` | One range of `app_object_ids` for the type intersected with `get_objects` |
+| `get_users` | `S_u` rows of `idx_user_users_viewer`, the reader's grants and their bindings on `claimius.samna_user`, then one `samna_user` probe per target |
+| `get_claims(user, app, required)` | Every live claim row, each tested against the reader's grants and pairs with two probes |
+| `get_claims(user, app, object_id, object_type)` | The reader's pair on the object and the claims of its `G_x` derivations |
+| `get_audit` | The app's audit rows newest first through `idx_audit_sa_created_at`, kept when their owner is among the reader's organizations, until `limit + offset` are kept |
+
+## A check writes nothing, a read writes only its settle
+
+Every read function is `VOLATILE` in effect, because `reconcile_if_pending` locks with `FOR UPDATE SKIP LOCKED` and writes when it finds an area. Nothing else in a read path writes.
 
 1. No cascade runs in a read. The soft delete of a user cascades to its grants, relations and field values through `tg_cascade_user_soft_delete`, once, in the write that deleted the user. `check_user_active` is a predicate.
 
-2. The settle locks only the reader's marker and the reader's own `user_object` rows it upserts, for the duration of one short statement. Two readers of one area settle their own slices without meeting; two requests of the same reader coalesce on the marker.
+2. A settle locks the areas it takes and the pairs it writes, for one statement each. A concurrent read that meets an area being settled skips it and reads the pairs as they stand.
 
-3. Every statement runs under `statement_timeout`, 120 s, and every session under `idle_in_transaction_session_timeout`, 60 s, on every server, paired with the Go driver's read timeout. A backend whose client has gone cannot run on.
-
-4. `get_access`, `get_direct_access`, `mutation_access`, `resolve_access` and the helpers they call, `_build_grants_for_object` and `_best_grant`, are `LANGUAGE sql STABLE`, which the planner inlines into the calling query ([PostgreSQL wiki, Inlining of SQL functions](https://wiki.postgresql.org/wiki/Inlining_of_SQL_functions)). A function that settles cannot be `STABLE`, because `STABLE` promises no database modification ([PostgreSQL, CREATE FUNCTION](https://www.postgresql.org/docs/17/sql-createfunction.html)); the listings that call `reconcile_if_pending` are `VOLATILE` and say so. The one check branch that reads a listing relation, the shared visibility branch of `get_user_access` on `user_users`, settles the reader's slice first like a listing.
-
-### Why
-
-The rule that a read does not write came from one incident, on 2026-06-11, on the dev server of Bookable. `check_user_active` ran at the top of every `get_*` and, for a soft deleted actor, called `cascade_user_soft_delete`, three `UPDATE` statements on every read. The actor was the soft deleted synthetic debug user. One `/api/me` held its locks for more than 21 minutes, and a `get_user_access` backend kept running for more than 50 minutes after its Go client disconnected at the 120 s read timeout, because the server had no `statement_timeout`. The dev server ran on a Burstable instance out of CPU credits, with five second tickers opening transactions, and replicas crashed on connection exhaustion. The user's words that afternoon: "one /api/me request alone drives the server to 62 %", then "and it is not timing out either!?", then "cancel 1901 and set the three timeouts".
-
-The fixes were the trigger for the cascade, the server timeouts, the connection pool shape, and slower tickers. What the incident proves is narrower than "a read must not write": a read must not run an unbounded write it did not need, and no statement may outlive its client. The settle is bounded to the areas the read targets, set based, coalesced, and capped by the same timeouts.
+3. Every statement runs under `statement_timeout` and every session under `idle_in_transaction_session_timeout`, so no statement outlives its client.
 
 ## Plans
 
-The read functions are called with the same argument shapes millions of times. PL/pgSQL caches a plan per statement and, under `plan_cache_mode = auto`, switches to a generic plan after five executions when its estimated cost is close to the custom plans ([PostgreSQL, PREPARE](https://www.postgresql.org/docs/17/sql-prepare.html)). Every hot statement in a read filters on an equality over indexed columns, so its generic plan is the same index path as its custom plans and the switch is free. The listings, whose row counts vary from one user to the next by orders of magnitude, filter on the reader's own index range, so the plan does not depend on the count either.
-
-The client side matches it: the middleware sends each access statement as a named prepared statement, so a call pays bind and execute, not parse and plan, about 25 µs where an unnamed statement pays 60 µs.
-
-## Where a read runs
-
-A check writes nothing and runs on a hot standby as well as on the primary ([Hot Standby](https://www.postgresql.org/docs/17/hot-standby.html)). A listing whose area probe finds nothing runs there too; a listing that finds an area settles, which a standby refuses with SQLSTATE `25006`, and the middleware repeats that one call on the primary. The standby answers as of its replay position, the same consistency a disciple has against its prophet, and a reader that must see a write it just made reads the primary. With `R` standbys taking reads, one service's database ceiling is `(1 + R) ρ K / c_r` for a database of `K` calibration cores, where one primary alone saturates behind 2.7 API cores per database core of the same class, 5.5 vCPUs of API per `D2ds_v5`; see [Scaling](./scaling.md).
-
+PL/pgSQL caches a plan per statement and, under `plan_cache_mode = auto`, switches to a generic plan after five executions when its estimated cost is close to the custom plans ([PostgreSQL, PREPARE](https://www.postgresql.org/docs/17/sql-prepare.html)). Every hot statement of a read filters on equalities over indexed columns, so its generic plan is the same index path as its custom plans. The listings, whose row counts vary from one user to the next by orders of magnitude, read the reader's own index range, so the plan does not depend on the count either. A client that sends each access statement as a named prepared statement pays bind and execute per call, and parse and plan once per connection.
