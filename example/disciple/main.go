@@ -43,7 +43,6 @@ func main() {
 	api.GET("/api/root", GetRootAccess)
 	api.GET("/api/graph/owner", GetOwnerGraph)
 	api.GET("/api/graph/claim", GetClaimGraph)
-	api.POST("/api/usage/:type/:id", PostUsage)
 
 	sam.SyncStart(context.Background())
 
@@ -138,13 +137,9 @@ func GetRootAccess(ctx echo.Context) error {
 	return ctx.JSON(http.StatusOK, ac)
 }
 
-func graphWindow(ctx echo.Context) shared.GraphWindow {
-	return shared.GraphWindow{Width: intQuery(ctx, "width", 0), Sort: ctx.QueryParam("sort"), NextID: uuidQuery(ctx, "next_id")}
-}
-
 func GetOwnerGraph(ctx echo.Context) error {
 	nodes, err := sdb.Instance().GetOwnerGraph(ctx.Request().Context(), actor(ctx), uuidQuery(ctx, "start_id"),
-		intQuery(ctx, "depth", 0), shared.ClaimAccess(intQuery(ctx, "access", int(shared.ACCESS_READ))), graphWindow(ctx))
+		intQuery(ctx, "depth", 0), shared.ClaimAccess(intQuery(ctx, "access", int(shared.ACCESS_READ))))
 	if err != nil {
 		return accessError(ctx, err)
 	}
@@ -153,20 +148,9 @@ func GetOwnerGraph(ctx echo.Context) error {
 
 func GetClaimGraph(ctx echo.Context) error {
 	nodes, err := sdb.Instance().GetClaimGraph(ctx.Request().Context(), actor(ctx), uuidQuery(ctx, "start_id"),
-		intQuery(ctx, "depth", 0), shared.ClaimAccess(intQuery(ctx, "access", int(shared.ACCESS_READ))), graphWindow(ctx))
+		intQuery(ctx, "depth", 0), shared.ClaimAccess(intQuery(ctx, "access", int(shared.ACCESS_READ))))
 	if err != nil {
 		return accessError(ctx, err)
 	}
 	return ctx.JSON(http.StatusOK, nodes)
-}
-
-func PostUsage(ctx echo.Context) error {
-	objectID, err := uuid.Parse(ctx.Param("id"))
-	if err != nil {
-		return ctx.JSON(http.StatusBadRequest, map[string]string{"error": "id must be a uuid"})
-	}
-	if err := sdb.Instance().PostObjectUsage(ctx.Request().Context(), actor(ctx), "claimius."+ctx.Param("type"), objectID); err != nil {
-		return accessError(ctx, err)
-	}
-	return ctx.NoContent(http.StatusNoContent)
 }

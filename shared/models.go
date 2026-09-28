@@ -26,15 +26,8 @@ func StripObjectSchema(qualified string) string {
 	return qualified
 }
 
-func QualifyObjectTypeWith(s string, defaultSchema string) string {
-	if s == "" || strings.IndexByte(s, '.') >= 0 {
-		return s
-	}
-	return defaultSchema + "." + s
-}
-
 func (o ObjectType) MarshalJSON() ([]byte, error) {
-	return json.Marshal(StripObjectSchema(string(o)))
+	return json.Marshal(string(o))
 }
 
 func (o ObjectType) Value() (driver.Value, error) {
@@ -57,10 +50,6 @@ func (o *ObjectType) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-func QualifyObjectType(s string) string {
-	return QualifyObjectTypeWith(s, "claimius")
-}
-
 var bareObjectTypes = map[string]ObjectType{
 	StripObjectSchema(OBJECT_TYPE_USER):          OBJECT_TYPE_USER,
 	StripObjectSchema(OBJECT_TYPE_ORGANIZATION):  OBJECT_TYPE_ORGANIZATION,
@@ -74,7 +63,7 @@ var bareObjectTypes = map[string]ObjectType{
 	StripObjectSchema(OBJECT_TYPE_SAMNA_SECRET):  OBJECT_TYPE_SAMNA_SECRET,
 }
 
-// ResolveObjectType returns a qualified ObjectType. Bare claimius types resolve to claimius.X. Unknown bare names default to public.X. Already qualified strings pass through.
+// ResolveObjectType returns a qualified ObjectType. Bare claimius types resolve to claimius.X. Already qualified strings pass through. Any other bare name is refused: a consumer qualifies its own types.
 func ResolveObjectType(s string) (ObjectType, error) {
 	if s == "" {
 		return "", fmt.Errorf("object_type is required")
@@ -85,7 +74,7 @@ func ResolveObjectType(s string) (ObjectType, error) {
 	if strings.IndexByte(s, '.') >= 0 {
 		return ObjectType(s), nil
 	}
-	return ObjectType("public." + s), nil
+	return "", fmt.Errorf("object_type must be schema qualified: %q", s)
 }
 
 type ClaimAccess int
@@ -316,6 +305,7 @@ type SamnaUser struct {
 	Phone      *string          `bun:"phone" json:"phone,omitempty"`
 	Email      string           `bun:"email" json:"email"`
 	ExternalID *string          `bun:"external_id" json:"external_id,omitempty"`
+	UserImage  *string          `bun:"user_image" json:"user_image,omitempty"`
 	Status     *string          `bun:"status,default:'active'" json:"status,omitempty"`
 	Type       *string          `bun:"type,default:'user'" json:"-"`
 	Config     *json.RawMessage `bun:"config" json:"config,omitzero"`
@@ -469,7 +459,11 @@ func ObjectTypeOf(model any) (ObjectType, error) {
 	for _, part := range strings.Split(bm.Tag.Get("bun"), ",") {
 		part = strings.TrimSpace(part)
 		if strings.HasPrefix(part, "table:") {
-			return ResolveObjectType(strings.TrimPrefix(part, "table:"))
+			table := strings.TrimPrefix(part, "table:")
+			if strings.IndexByte(table, '.') < 0 {
+				table = "public." + table
+			}
+			return ObjectType(table), nil
 		}
 	}
 	return "", fmt.Errorf("bun.BaseModel has no table tag")
@@ -586,6 +580,7 @@ type Creator struct {
 	Phone      *string   `bun:"phone,scanonly" json:"phone,omitempty"`
 	Email      string    `bun:"email,scanonly" json:"email"`
 	ExternalID *string   `bun:"external_id,scanonly" json:"external_id,omitempty"`
+	UserImage  *string   `bun:"user_image,scanonly" json:"user_image,omitempty"`
 	Status     *string   `bun:"status,scanonly" json:"status,omitempty"`
 	CreatedAt  time.Time `bun:"created_at,scanonly" json:"created_at"`
 	UpdatedAt  time.Time `bun:"updated_at,scanonly" json:"updated_at"`

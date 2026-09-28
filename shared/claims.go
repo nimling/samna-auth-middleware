@@ -143,42 +143,22 @@ func (d *DB) GetObjectClaims(ctx context.Context, userID, objectID uuid.UUID, ob
 	return claims, err
 }
 
-type GraphWindow struct {
-	Width  int
-	Sort   string
-	NextID *uuid.UUID
-}
-
-func (w GraphWindow) sort() string {
-	if w.Sort == "" {
-		return "name"
-	}
-	return w.Sort
-}
-
-func (d *DB) GetOwnerGraph(ctx context.Context, userID uuid.UUID, startID *uuid.UUID, depth int, requiredAccess ClaimAccess, window GraphWindow) ([]GraphNode, error) {
+func (d *DB) GetOwnerGraph(ctx context.Context, userID uuid.UUID, startID *uuid.UUID, depth int, requiredAccess ClaimAccess) ([]GraphNode, error) {
 	nodes := make([]GraphNode, 0)
 	err := d.NewSelect().
-		TableExpr("claimius.get_owner_graph(p_user_id := ?, p_start_id := ?, p_depth := ?, p_required_access := ?, p_width := ?, p_sort := ?, p_next_id := ?) AS graph",
-			userID, startID, depth, requiredAccess, window.Width, window.sort(), window.NextID).
+		TableExpr("claimius.get_owner_graph(p_user_id := ?, p_start_id := ?, p_depth := ?, p_required_access := ?) AS graph", userID, startID, depth, requiredAccess).
 		Column("graph.*").
 		Scan(ctx, &nodes)
 	return nodes, err
 }
 
-func (d *DB) GetClaimGraph(ctx context.Context, userID uuid.UUID, startID *uuid.UUID, depth int, requiredAccess ClaimAccess, window GraphWindow) ([]GraphNode, error) {
+func (d *DB) GetClaimGraph(ctx context.Context, userID uuid.UUID, startID *uuid.UUID, depth int, requiredAccess ClaimAccess) ([]GraphNode, error) {
 	nodes := make([]GraphNode, 0)
 	err := d.NewSelect().
-		TableExpr("claimius.get_claim_graph(p_user_id := ?, p_start_id := ?, p_depth := ?, p_required_access := ?, p_width := ?, p_sort := ?, p_next_id := ?) AS graph",
-			userID, startID, depth, requiredAccess, window.Width, window.sort(), window.NextID).
+		TableExpr("claimius.get_claim_graph(p_user_id := ?, p_start_id := ?, p_depth := ?, p_required_access := ?) AS graph", userID, startID, depth, requiredAccess).
 		Column("graph.*").
 		Scan(ctx, &nodes)
 	return nodes, err
-}
-
-func (d *DB) PostObjectUsage(ctx context.Context, userID uuid.UUID, objectType string, objectID uuid.UUID) error {
-	_, err := d.NewRaw("SELECT claimius.touch_object_usage(?, ?, ?)", userID, objectType, objectID).Exec(ctx)
-	return err
 }
 
 func (d *DB) insertClaim(ctx context.Context, ac *AccessClaim, claim *Claim) (*Claim, error) {

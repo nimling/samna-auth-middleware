@@ -24,6 +24,7 @@ type BodyUser struct {
 	Phone      string     `json:"phone"`
 	Email      string     `json:"email"`
 	ExternalID *string    `json:"external_id"`
+	UserImage  *string    `json:"user_image"`
 	ClaimID    *uuid.UUID `json:"claim_id"`
 	AppID      *uuid.UUID `json:"app_id"`
 	Reason     *string    `json:"reason"`
@@ -611,8 +612,8 @@ func getUserLocations(ctx echo.Context, userID uuid.UUID) ([]Location, error) {
 func postUser(ctx echo.Context, req BodyUser, userName string) (*SamnaUser, error) {
 	var userID uuid.UUID
 	err := sdb.Instance().NewRaw(
-		"SELECT (claimius.ensure_app_user(?, ?, ?, ?, ?, ?, ?, ?) -> 'samna_user' ->> 'user_id')::uuid",
-		req.UserID, *req.AppID, req.FirstName, req.LastName, userName, req.Email, req.Phone, req.ExternalID,
+		"SELECT (claimius.ensure_app_user(?, ?, ?, ?, ?, ?, ?, ?, ?) -> 'samna_user' ->> 'user_id')::uuid",
+		req.UserID, *req.AppID, req.FirstName, req.LastName, userName, req.Email, req.Phone, req.ExternalID, req.UserImage,
 	).Scan(ctx.Request().Context(), &userID)
 	if err != nil {
 		ctx.Logger().Errorf("ensure_app_user: %v", err)

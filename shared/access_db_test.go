@@ -218,6 +218,7 @@ func TestUserAccessSeparatesMissingFromForbidden(t *testing.T) {
 func TestDebugSeedEncryptsAndResolvesASecret(t *testing.T) {
 	t.Setenv("SAUTH_DEBUG_PRIVATE_SEED", "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
 	t.Setenv("SAUTH_APP_SLUG", "debug-disciple")
+	t.Setenv("SAUTH_DEBUG_USER_ID", userA.String())
 	db := database(t)
 	ctx := context.Background()
 	ac, err := db.MutationAccess(ctx, userA, orgRoot, sdb.OBJECT_TYPE_ORGANIZATION, sdb.ACCESS_WRITE)
