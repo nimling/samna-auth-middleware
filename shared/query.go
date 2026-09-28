@@ -460,13 +460,21 @@ func setStructUUID(v reflect.Value, field string, val uuid.UUID, onlyIfZero bool
 		return
 	}
 	f := v.FieldByName(field)
-	if !f.IsValid() || !f.CanSet() || f.Type() != reflect.TypeOf(uuid.UUID{}) {
+	if !f.IsValid() || !f.CanSet() {
 		return
 	}
-	if onlyIfZero && f.Interface().(uuid.UUID) != uuid.Nil {
-		return
+	switch f.Type() {
+	case reflect.TypeOf(uuid.UUID{}):
+		if onlyIfZero && f.Interface().(uuid.UUID) != uuid.Nil {
+			return
+		}
+		f.Set(reflect.ValueOf(val))
+	case reflect.TypeOf(&uuid.UUID{}):
+		if onlyIfZero && !f.IsNil() && *f.Interface().(*uuid.UUID) != uuid.Nil {
+			return
+		}
+		f.Set(reflect.ValueOf(&val))
 	}
-	f.Set(reflect.ValueOf(val))
 }
 
 
