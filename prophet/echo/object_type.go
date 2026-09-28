@@ -61,10 +61,13 @@ func ResolveObjectType(s string) (ObjectType, error) {
 	if q, ok := bareObjectTypes[s]; ok {
 		return q, nil
 	}
-	if q, ok := bareObjectTypes[StripObjectSchema(s)]; ok {
-		return q, nil
+	if strings.IndexByte(s, '.') >= 0 {
+		if q, ok := bareObjectTypes[StripObjectSchema(s)]; ok && strings.HasPrefix(s, "claimius.") {
+			return q, nil
+		}
+		return ObjectType(s), nil
 	}
-	return "", fmt.Errorf("unknown object_type: %q", s)
+	return ObjectType("public." + s), nil
 }
 
 func (o *ObjectType) UnmarshalJSON(data []byte) error {
