@@ -943,7 +943,7 @@ BEGIN
 
     v_id := claimius.composite_id(p_user_id::TEXT, p_object_type, p_object_id::TEXT);
 
-    IF to_regclass(p_object_type) IS NULL THEN
+    IF NOT EXISTS (SELECT 1 FROM claimius.table_info WHERE object_type = p_object_type) THEN
         RETURN;
     END IF;
 

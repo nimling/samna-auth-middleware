@@ -357,7 +357,7 @@ func searchClaimius(ctx echo.Context, userID, appID uuid.UUID, query string, req
 		        is_direct_grant AS is_direct_grant,
 		        rank            AS rank,
 		        total_count     AS total_count
-		   FROM claimius.search(?, ?, ?, ?::text[], ?, ?, ?, ?, ?, ?, NULL::uuid[], ?, ?)`,
+		   FROM claimius.search(?, ?, ?, ?::text[], ?, ?, ?, ?, ?, ?, ?, ?)`,
 		userID, appID, query, searchTypeArray(req.ObjectTypes), access,
 		searchUUIDArray(req.IDs), searchUUIDArray(req.ExcludeIDs),
 		searchUUIDArray(req.OwnerIDs), req.ParentID, req.ParentType,

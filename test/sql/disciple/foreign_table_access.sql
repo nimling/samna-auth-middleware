@@ -7,8 +7,6 @@ DECLARE
     v_a        UUID := 'a0000000-0000-4000-8000-0000000000fa';
     v_root     UUID := '10000000-0000-4000-8000-0000000000f1';
     v_app_ref  UUID := '20000000-0000-4000-8000-0000000000f2';
-    v_typed    UUID := '30000000-0000-4000-8000-0000000000f3';
-    v_type     UUID := '40000000-0000-4000-8000-0000000000f4';
     v_claim    UUID;
     v_count    INTEGER;
 BEGIN
@@ -41,22 +39,6 @@ BEGIN
     SELECT count(*) INTO v_count FROM claimius.access_diff WHERE kind = 'claim' AND claim_id = v_claim;
     IF v_count <> 0 THEN
         RAISE EXCEPTION 'a claim bound to a table the disciple does not hold must settle on read, % diff rows left', v_count;
-    END IF;
-
-    CREATE TABLE public.sqltest_typed (id UUID PRIMARY KEY, type_id UUID);
-    INSERT INTO public.sqltest_typed (id, type_id) VALUES (v_typed, v_type);
-
-    IF NOT claimius._object_has_type('public.sqltest_typed', v_typed, ARRAY[v_type]) THEN
-        RAISE EXCEPTION '_object_has_type must match a row whose type_id is in the set';
-    END IF;
-    IF claimius._object_has_type('public.sqltest_typed', v_typed, ARRAY[gen_random_uuid()]) THEN
-        RAISE EXCEPTION '_object_has_type must refuse a row whose type_id is outside the set';
-    END IF;
-    IF claimius._object_has_type('public.sqltest_absent', v_typed, ARRAY[v_type]) THEN
-        RAISE EXCEPTION '_object_has_type must answer false for a table that does not exist';
-    END IF;
-    IF claimius._object_has_type('claimius.organization', v_root, ARRAY[v_type]) THEN
-        RAISE EXCEPTION '_object_has_type must answer false for a table without type_id';
     END IF;
 END $$;
 

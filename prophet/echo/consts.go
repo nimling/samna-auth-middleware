@@ -2,7 +2,6 @@ package echo
 
 type ClaimAccess int
 type ClaimType string
-type ObjectType string
 type OrganizationType string
 type LocationType string
 type AssetStatus string
