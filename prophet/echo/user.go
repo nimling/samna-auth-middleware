@@ -396,13 +396,16 @@ func PostUserTokenValidate(ctx echo.Context) error {
 		return respond.Error(ctx, http.StatusInternalServerError, "Internal server error")
 	}
 
-	var user SamnaUser
+	var match struct {
+		UserID  uuid.UUID `bun:"user_id"`
+		OwnerID uuid.UUID `bun:"sa_owner_id"`
+	}
 	err = sdb.Instance().NewRaw(
-		"SELECT u.* FROM claimius.samna_user u JOIN claimius.user_token t ON t.user_id = u.user_id AND t.app_id = u.app_id "+
-			"WHERE u.app_id = ? AND u.sa_deleted_at IS NULL AND t.sa_deleted_at IS NULL AND t.external_id = (?::jsonb ->> t.id_claim) "+
+		"SELECT t.user_id, t.sa_owner_id FROM claimius.user_token t JOIN claimius.samna_user u ON u.user_id = t.user_id AND u.app_id = t.app_id "+
+			"WHERE t.app_id = ? AND u.sa_deleted_at IS NULL AND t.sa_deleted_at IS NULL AND t.external_id = (?::jsonb ->> t.id_claim) "+
 			"ORDER BY t.sa_created_at DESC LIMIT 1",
 		appID, string(claimsJSON),
-	).Scan(ctx.Request().Context(), &user)
+	).Scan(ctx.Request().Context(), &match)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return respond.Error(ctx, http.StatusUnauthorized, "Unauthorized")
@@ -411,7 +414,22 @@ func PostUserTokenValidate(ctx echo.Context) error {
 		return respond.Error(ctx, http.StatusInternalServerError, "Internal server error")
 	}
 
-	return respond.JSON(ctx, http.StatusOK, user, 1)
+	var user SamnaUser
+	if err := sdb.Instance().NewSelect().
+		Model(&user).
+		Where("user_id = ?", match.UserID).
+		Where("app_id = ?", appID).
+		Where("sa_deleted_at IS NULL").
+		Limit(1).
+		Scan(ctx.Request().Context()); err != nil {
+		ctx.Logger().Errorf("validate token user: %v", err)
+		return respond.Error(ctx, http.StatusInternalServerError, "Internal server error")
+	}
+
+	return respond.JSON(ctx, http.StatusOK, struct {
+		SamnaUser
+		OwnerID uuid.UUID `json:"owner_id"`
+	}{user, match.OwnerID}, 1)
 }
 
 func PostUserExternal(ctx echo.Context) error {

@@ -25,7 +25,10 @@ func (d *DB) ValidateToken(ctx context.Context, token string) (*SamnaUser, uuid.
 	if err := client.Post(ctx, "user/token/validate", body, &user); err != nil {
 		return nil, uuid.Nil, err
 	}
-	return &user, uuid.Nil, nil
+	if user.OwnerID == nil || *user.OwnerID == uuid.Nil {
+		return nil, uuid.Nil, fmt.Errorf("token validation carried no owner")
+	}
+	return &user, *user.OwnerID, nil
 }
 
 func (d *DB) validateTokenDebug(ctx context.Context, token string) (*SamnaUser, uuid.UUID, error) {
@@ -88,10 +91,8 @@ func (d *DB) ResolveExternalUser(ctx context.Context, callerID uuid.UUID, extern
 		}
 		return nil, fmt.Errorf("resolve external user: %w", err)
 	}
-	if ownerID != uuid.Nil && callerID != uuid.Nil {
-		if !d.HasAccess(ctx, callerID, ownerID, OBJECT_TYPE_ORGANIZATION, ACCESS_READ) {
-			return nil, nil
-		}
+	if ownerID == uuid.Nil || callerID == uuid.Nil || !d.HasAccess(ctx, callerID, ownerID, OBJECT_TYPE_ORGANIZATION, ACCESS_READ) {
+		return nil, nil
 	}
 	fetched, ferr := d.GetUser(ctx, userID, userID)
 	if ferr != nil {

@@ -124,11 +124,9 @@ func forwardUserToken(ctx echo.Context) error {
 	if user == nil || user.UserID == uuid.Nil {
 		return ErrorUserTokenNotRecognized
 	}
-	if ownerID != uuid.Nil {
-		clientID, _ := ctx.Get(UserIDKey).(uuid.UUID)
-		if !sdb.Instance().HasAccess(ctx.Request().Context(), clientID, ownerID, shared.OBJECT_TYPE_ORGANIZATION, shared.ACCESS_READ) {
-			return ErrorUserTokenNotRecognized
-		}
+	clientID, _ := ctx.Get(UserIDKey).(uuid.UUID)
+	if ownerID == uuid.Nil || !sdb.Instance().HasAccess(ctx.Request().Context(), clientID, ownerID, shared.OBJECT_TYPE_ORGANIZATION, shared.ACCESS_READ) {
+		return ErrorUserTokenNotRecognized
 	}
 	ctx.Set(UserIDKey, user.UserID)
 	return nil
@@ -138,6 +136,9 @@ func forwardUserExternal(ctx echo.Context) error {
 	externalID := ctx.Request().Header.Get(userExternalHeader)
 	if externalID == "" {
 		return nil
+	}
+	if ctx.Request().Header.Get(userTokenHeader) != "" {
+		return ErrorForbidden
 	}
 	clientID, _ := ctx.Get(UserIDKey).(uuid.UUID)
 	user, err := sdb.Instance().ResolveExternalUser(ctx.Request().Context(), clientID, externalID)
