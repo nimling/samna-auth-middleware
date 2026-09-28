@@ -68,6 +68,9 @@ load "go_disciple" "$root/disciple/database" $(ls "$root/disciple/database/migra
 (cd "$root" && PGDATABASE=go_disciple SAUTH_DEBUG_USER_ID=a0000000-0000-4000-8000-00000000000a \
     go test -tags dbtest -count=1 ./shared/...)
 
+load "go_prophet" "$root/prophet/database" $(ls "$root/prophet/database/migrations"/V*.sql | sort -V)
+(cd "$root" && PGDATABASE=go_prophet go test -tags dbtest -count=1 ./prophet/...)
+
 load "hurl_disciple" "$root/disciple/database" $(ls "$root/disciple/database/migrations"/V*.sql | sort -V) "$root/test/hurl/seed.sql"
 http_port="${CLAIMIUS_TEST_HTTP_PORT:-18089}"
 server_dir="$(mktemp -d)"

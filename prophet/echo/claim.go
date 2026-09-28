@@ -183,9 +183,30 @@ func PostClaimObject(ctx echo.Context) error {
 
 func PatchClaimObject(ctx echo.Context) error {
 	appID, _ := ctx.Get("app_id").(uuid.UUID)
-	claimObjectID, err := uuid.Parse(ctx.Param("id"))
+	claimID, err := uuid.Parse(ctx.Param("claim_id"))
+	if err != nil {
+		return respond.Error(ctx, http.StatusBadRequest, "claim_id must be a uuid")
+	}
+	objectID, err := uuid.Parse(ctx.Param("id"))
 	if err != nil {
 		return respond.Error(ctx, http.StatusBadRequest, "id must be a uuid")
+	}
+	var claimObjectID uuid.UUID
+	if err := sdb.Instance().NewSelect().
+		TableExpr("claimius.claim_object").
+		Column("id").
+		Where("claim_id = ?", claimID).
+		Where("object_id = ?", objectID).
+		Where("app_id = ?", appID).
+		Where("sa_deleted_at IS NULL").
+		OrderExpr("sa_created_at DESC").
+		Limit(1).
+		Scan(ctx.Request().Context(), &claimObjectID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return respond.Error(ctx, http.StatusNotFound, "Not found")
+		}
+		ctx.Logger().Errorf("PatchClaimObject lookup: %v", err)
+		return respond.Error(ctx, http.StatusInternalServerError, "Internal server error")
 	}
 	patch := &ClaimObject{}
 	if err := patch.Bind(ctx); err != nil {
@@ -285,9 +306,31 @@ func PostClaimUser(ctx echo.Context) error {
 }
 
 func PatchClaimUser(ctx echo.Context) error {
-	userClaimID, err := uuid.Parse(ctx.Param("id"))
+	appID, _ := ctx.Get("app_id").(uuid.UUID)
+	claimID, err := uuid.Parse(ctx.Param("claim_id"))
+	if err != nil {
+		return respond.Error(ctx, http.StatusBadRequest, "claim_id must be a uuid")
+	}
+	userID, err := uuid.Parse(ctx.Param("id"))
 	if err != nil {
 		return respond.Error(ctx, http.StatusBadRequest, "id must be a uuid")
+	}
+	var userClaimID uuid.UUID
+	if err := sdb.Instance().NewSelect().
+		TableExpr("claimius.user_claim").
+		Column("id").
+		Where("claim_id = ?", claimID).
+		Where("user_id = ?", userID).
+		Where("app_id = ?", appID).
+		Where("sa_deleted_at IS NULL").
+		OrderExpr("sa_created_at DESC").
+		Limit(1).
+		Scan(ctx.Request().Context(), &userClaimID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return respond.Error(ctx, http.StatusNotFound, "Not found")
+		}
+		ctx.Logger().Errorf("PatchClaimUser lookup: %v", err)
+		return respond.Error(ctx, http.StatusInternalServerError, "Internal server error")
 	}
 	patch := &UserClaim{}
 	if err := patch.Bind(ctx); err != nil {
