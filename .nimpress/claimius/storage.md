@@ -28,7 +28,7 @@ The measured `user_object` row was wide because of what every user of an object 
 | Table | Indexes |
 |---|---|
 | `user_object` | Primary key `(user_id, app_id, object_type, object_id) INCLUDE (sa_access)`; `idx_user_object_object (object_id, object_type)` |
-| `object_info` | Primary key `(object_type, object_id)`; `(sa_owner_id)`; `(sa_root_id)`; `(sa_location_id)` partial; GIN on `search_vector` |
+| `object_info` | Primary key `(object_type, object_id)`; `(sa_owner_id, sa_name, object_id)`; `(sa_root_id)`; `(sa_location_id, sa_name, object_id)` partial; GIN on `search_vector` |
 | `inheritance_info` | Primary key; the descendant and ancestor covering indexes |
 | `access_diff` | Primary key `id`; `(app_id, object_type, object_id) WHERE kind = 'object'`; `(app_id, claim_id, user_id) WHERE kind = 'claim'` |
 | `sync_event` | Primary key `seq`; `(app_id, seq)`; BRIN on `written_at` |
@@ -37,9 +37,44 @@ Every index on `user_object` is a write on every settled pair, so it carries two
 
 On the write path only indexes a read uses are kept. `sync_event` is read by `(app_id, seq)` and trimmed by `seq`, and its `written_at` follows insertion order, so it is BRIN. The single column `sa_deleted_at` indexes of `claim`, `user_claim` and `claim_object` serve no read, because every read of them filters on a live row inside another index, and are not kept. See [Scaling](./scaling.md) for the entries each write saves.
 
+## Growth and memory
+
+Bytes per unit of the designed rows, heap and indexes, from the widths above and the entry sizes of [Scaling](./scaling.md):
+
+| Table | Grows with | Bytes per unit |
+|---|---|---|
+| `user_object` | pairs `P = Σ_u V_u = O Ū_o` | 350 |
+| `object_info` | objects `O` | 300 |
+| `inheritance_info` | edges `O (D̄ + 1)` | about 480: 100 heap, 120 primary key, 130 for each covering index |
+| `user_users` | pairs of users sharing an object, `U × Ū_seen`, at most `U²` | 466, measured |
+| `user_claim` | grants `G` | about 400, measured 443 with the `sa_deleted_at` index that goes |
+| `samna_user` | users `U` | 456, measured |
+| `sync_event` | per app `min(λ_e × 7 days, N_src)` | about 580 with its two btrees |
+| `audit` | `λ_a × retention` | 330 |
+| `access_diff` | outstanding areas, at most the source rows | about 100 |
+
+A year's growth is the sum of these over what the year adds. The pairs dominate: a year adding 10,000 users who each reach 2,000 objects, 200,000 objects at depth 4, 50,000 grants and 100 visible users each is 7.0 GB of `user_object`, 0.48 GB of closure, 0.47 GB of `user_users`, 0.06 GB of `object_info` and 0.02 GB of grants.
+
+What must stay in memory is what a read touches, and each index leaves memory at its own threshold. With `E` the cache of a machine, 4 GiB on the Azure servers and 183 GiB on the reference node:
+
+| Index or table | Touched by | Leaves memory when | Azure, `E` = 4 GiB | Reference, 183 GiB |
+|---|---|---|---|---|
+| `user_object` primary key and heap | Every check and listing of an active user | `U_act × V̄ × 350 B > E` | 12 million pairs: 6,100 active users at `V̄ = 2,000` | 560 million pairs: 280,000 active users |
+| `idx_inheritance_info_descendant` | Every check, `D + 1` entries of the object | `O (D̄ + 1) × 130 B > E` | 6.6 million objects at depth 4 | 300 million |
+| `object_info` | Listings, search, graphs | `O × 300 B > E` | 14 million objects | 650 million |
+| `user_users` | `get_users` and the settle's increments, never a check | `U × Ū_seen × 466 B > E` | 3,000 users all sharing one object | 20,000 |
+
+The per user index leaves first, and only for the active users: a user who does not read has pairs on disk that no read touches, and the primary key keeps a user's pairs on `⌈V_u / 87⌉` contiguous leaves, so the first read of a returning user costs that many reads and the rest of the session is cached. Past the threshold a check costs two random reads, and the ceiling is `I / 2` of [Scaling](./scaling.md). `user_users` grows with the square of the users who share objects; it sits off the check path, so outgrowing memory slows `get_users` and the settle's increments, not access.
+
 ## Fill factor and heap only updates
 
-`user_object` is at fill factor 90. Its usage counters are updated in place by every usage flush, no index covers them, and the free tenth of each page keeps those updates heap only: measured 4,000 of 4,000 on the table that carried them before ([PostgreSQL, Heap Only Tuples](https://www.postgresql.org/docs/17/storage-hot.html)). A settle changes `sa_access`, which the primary key includes, so a settle update is never heap only; the free space is for the flush.
+`user_object` is at fill factor 90. Its usage counters are updated in place by every usage flush, no index covers them, and the free space of each page keeps those updates heap only ([PostgreSQL, Heap Only Tuples](https://www.postgresql.org/docs/17/storage-hot.html)). A flush writes a new version of every row it touches, and within the flush's own statement the old versions are still live, so the page must hold `u_p` new versions at once for the `u_p` rows of that page the flush touches:
+
+```
+1 − ff  ≥  u_p × w_heap / 8,192
+```
+
+The settle writes a user's pairs together, so the rows of one heap page are mostly one user's, and `u_p` is the uses of one user on neighbouring objects within one flush interval, one to three in practice. At `w_heap ≈ 250 B`, fill factor 90 leaves 819 bytes, room for three versions, and 80 would leave room for six. The measurements agree with the inequality: 4,000 of 4,000 updates heap only on a 144 byte row at 90, and 699 of 3,000 on a 606 byte row, where one version barely fits. A settle changes `sa_access`, which the primary key includes, so a settle update is never heap only; the free space is for the flush.
 
 ## Vacuum
 
@@ -73,7 +108,7 @@ All of this is core Postgres plus `pg_partman`, and runs on Azure Database for P
 
 ## Connections
 
-Claimius runs inside the pool the service already has. The budget of the Samna stack gives each replica 25 connections of its own and 25 for the middleware's pool, idle connections closed after 15 seconds, lifetimes of two minutes, and a server side `statement_timeout` of 120 s paired with the driver's read timeout. Claimius adds no connection of its own:
+Claimius runs inside the pools the service already has: each replica has a pool of its own and one for the middleware, `SetMaxOpenConns`, `SetMaxIdleConns` and `SetConnMaxIdleTime` in `shared/main.go`, and every statement runs under `statement_timeout`, 120 s, paired with the driver's read timeout. Claimius adds no connection of its own:
 
 1. A read and its settle are one statement on one pooled connection.
 
@@ -81,8 +116,31 @@ Claimius runs inside the pool the service already has. The budget of the Samna s
 
 3. The drain borrows one connection per batch, on the prophet's scheduled run and between a disciple's pulls.
 
-The per replica budget of 50, plus any dedicated `LISTEN` connection a service opens, is what the replica budgeting inequality of the stack sums over its `maxReplicas`.
+### The size of a pool
 
-Claimius holds no session state across transactions: every read and write is one transaction, prepared statements aside. A server shared by many services can therefore sit behind a pooler in transaction mode, where the server connections number the pooler's pool, not `Σ maxReplicas × 50` ([PgBouncer, features](https://www.pgbouncer.org/features.html)); the prepared statements are then the pooler's protocol level ones.
+A connection is held for `T_conn = r_db + c_r / σ` by a check, 1.2 ms on the Azure servers and 0.24 ms on the reference node. By Little's law a pod serving `X_pod` requests a second holds `L = X_pod × T_conn` connections busy on average, and with independent arrivals the busy count is Poisson with mean `L`. A pool of
 
-A prophet adds one dedicated `LISTEN` connection per process for the feed, which holds a pull open until the next event commits; see [Sync](./sync.md). It counts in the per replica budget like any other listener.
+```
+P = q_{0.999}(L)
+```
+
+connections makes one request in a thousand wait for one. An Azure pod of 2 vCPUs at its API ceiling of 1,830 requests a second holds `L = 2.2`, so `P = 9`; a reference pod of four cores at 10,700 a second holds `L = 2.5`, so `P = 9`. A pool of 10 covers both, per pool, where the stack's budget gives 25.
+
+The database, for its part, is kept busy by `h n × T_conn / (c_r / σ)` connections, 12 on a `D2ds_v5` and 111 on the reference node. More than that across all pods cannot make it faster; they queue inside it instead of in the pools. A server shared by many services therefore sits behind a pooler in transaction mode whose pool is that number ([PgBouncer, features](https://www.pgbouncer.org/features.html)), which claimius allows because it holds no session state across transactions; its named prepared statements become the pooler's protocol level ones.
+
+### The idle count
+
+A pool that keeps fewer idle connections than it has busy ones closes a connection whenever the busy count falls and opens one whenever it rises again. Simulating the pool of `database/sql` under Poisson arrivals and exponential holds with mean busy count `L`, the connections opened per request are:
+
+| `L` | 2 kept idle | 4 | 8 | 12 |
+|---|---|---|---|---|
+| 1 | 0.147 | 0.014 | under 0.0001 | under 0.0001 |
+| 2 | 0.228 | 0.063 | 0.0009 | 0.0001 |
+| 4 | 0.279 | 0.118 | 0.016 | 0.0007 |
+| 8 | 0.304 | 0.154 | 0.048 | 0.012 |
+
+An open costs a TCP and TLS handshake, a SCRAM exchange whose client side runs 4,096 PBKDF2 iterations by default ([PostgreSQL, `scram_iterations`](https://www.postgresql.org/docs/17/runtime-config-connection.html#GUC-SCRAM-ITERATIONS)), and a backend start: three round trips or more and, assumed, about a millisecond of database CPU, several times the 0.2 ms of the check it serves on an Azure server. At `L = 2` with two kept idle, 23 % of requests pay it. The idle count therefore equals the pool size, and `SetConnMaxIdleTime` of 15 s closes what an idle period leaves open: scaling down is the idle timeout's work, not the idle count's.
+
+### The budget
+
+The per replica budget of the stack sums both pools and every dedicated `LISTEN` connection, and the replica budgeting inequality of the stack sums that over `maxReplicas`. At 10 per pool a replica holds at most 20, plus its listeners. A prophet adds one dedicated `LISTEN` connection per process for the feed, which holds a pull open until the next event commits; see [Sync](./sync.md).

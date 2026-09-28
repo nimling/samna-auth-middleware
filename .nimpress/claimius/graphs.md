@@ -36,8 +36,25 @@ Why keyset paging: an offset reads again every skipped sibling on every page; a 
 
 ## Cost
 
-A window rooted at `start_id` with depth `d` reads the closure rows under the start to depth `d`, index only through `idx_inheritance_info_ancestor`, the reader's `user_object` rows for them by primary key, and their labels from `object_info`, one row per object shared by every reader. Measured: the owner graph of a user reaching 10 organizations and 288 rows in 4.5 ms; the claim graph of the same user in 4.3 ms; the owner graph from the root to depth 2 for a user reaching everything in 43 ms.
+A window rooted at `start_id` with depth `d` and width `W`, over a tree of fan out `F`, returns `n_w = Σ_{i=1..d} min(F, W)^i` nodes. To keep the best `W` children of a parent it must rank them, so it reads rows
+
+```
+n_r = Σ_{i=0..d−1} min(F, W)^i × r(F)          r(F) = F  ranked by usage
+                                               r(F) = min(F, W / v)  ranked by name
+```
+
+each at `t_n ≈ 2 t_d`, the reader's `user_object` probe and the node's `object_info` row, the closure row itself read index only, plus the sort. `v` is the share of a parent's children the reader can see.
+
+1. Ranked by usage the score is the reader's own, so no index can order the children and every one of the `F` is read. The window costs in the fan out of what it expands.
+
+2. Ranked by name the order is the same for every reader, so `object_info` carries it: `(sa_owner_id, sa_name, object_id)` and `(sa_location_id, sa_name, object_id)` give the children of an owner or a location in label order, and the window reads them in that order, probing the reader's primary key for each, until `W` are visible: `W / v` rows. Those two indexes replace the single column indexes on `sa_owner_id` and `sa_location_id`, so an `object_info` write touches as many indexes as before. The gain is `F v / W`: an organization holding 10,000 rows shown fifty at a time reads 50 rows instead of 10,000, 0.25 ms of calibration time instead of 50 ms.
+
+3. `next_id` continues from the row value `(sa_name, object_id)` of the last child, so every page costs `W / v`, whatever page it is.
+
+Measured on the older shape: the owner graph of a user reaching 10 organizations and 288 rows in 4.5 ms; the claim graph of the same user in 4.3 ms; the owner graph from the root to depth 2 for a user reaching everything in 43 ms.
 
 ## The claim graph cache
 
-The default shape of the claim graph, no start, unlimited depth, no mask, is stored per user in `claim_graph_cache` as one jsonb array and served from it. A trigger drops the user's entry when one of the user's `user_object` rows, `user_users` rows or the user's `samna_user` row changes, and drops the app's entries when a claim or binding of the app changes. Windows are cut from the cached array with the same numbering as above.
+The default shape of the claim graph, no start, unlimited depth, no mask, is stored per user in `claim_graph_cache` as one jsonb array with the time it was built, and served from it. The entry is dropped when one of the user's `user_object` rows, `user_users` rows or the user's `samna_user` row changes, all of which are written per user. A change to a claim or a binding is not propagated to the entries at write time, because the holders of a claim are exactly the users a write must never enumerate. The read validates instead: it compares the entry's build time with the latest `sa_updated_at` among the user's `user_claim` rows, the `C` claims they grant and those claims' `claim_object` rows, soft deleted ones included, one range of `idx_user_claim_user_app`, `C` claim probes and `C` binding ranges, and rebuilds when one is newer. Windows are cut from the cached array with the same numbering as above.
+
+Why validation on read: with `λ_c` the rate of claim and binding changes in the app, `N_c` its claims and `r_g` the rate at which one user opens the claim graph, dropping every entry of the app on every change gives a hit ratio of `r_g / (r_g + λ_c)` and costs a delete per cached user on each change; validating against the user's own claims gives `r_g / (r_g + λ_c C / N_c)` and costs nothing on a write. An app with a change a minute across 1,000 claims, whose users open the graph once an hour and hold five claims, gets 1.6 % hits the first way and 77 % the second.

@@ -23,7 +23,7 @@ A use is a single object resolution that granted access: `get_access`, `mutation
 
 1. The middleware counts uses in process and flushes them in batches through `touch_object_usage(app_id, user_ids, object_types, object_ids, counts, last_used_at)`, one statement over arrays. See [Middleware](./middleware/index.md).
 
-2. The statement updates existing `user_object` rows only, in primary key order: `used_count = used_count + count`, `last_used_at = greatest(last_used_at, last)`. A use always follows a granted check, so the pair exists. A pair that vanished between the use and the flush, a revoke, is skipped.
+2. The statement updates existing `user_object` rows only, in primary key order: `used_count = used_count + count`, `last_used_at = greatest(last_used_at, last)`. A use always follows a granted check, so the pair exists. A pair that vanished between the use and the flush, a revoke, is skipped. The same statement upserts, for each user in the batch, the latest `last_used_at` into `user_activity (user_id, app_id, last_used_at)`, one row per user and app, which the drain reads to take the slices of the most recently active holders first; see [Materialization](./materialization.md#which-slice-the-drain-takes-first).
 
 3. The read functions stay free of the write. The flush pays one transaction and one commit per batch, where a write inside every check would pay one per use.
 
@@ -64,4 +64,4 @@ The score is computed at read time from the two columns, so time passing writes 
 
 ## Never synced
 
-Usage is local to the database where the use happened. A disciple's users use the disciple. `user_object` is derived state and never enters `sync_event`, so usage never crosses from a disciple to the prophet or between disciples. See [Sync](./sync.md).
+Usage is local to the database where the use happened. A disciple's users use the disciple. `user_object` and `user_activity` are derived state and never enter `sync_event`, so usage never crosses from a disciple to the prophet or between disciples. See [Sync](./sync.md).

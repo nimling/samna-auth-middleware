@@ -24,13 +24,20 @@ lastUpdated: true
 
 ## Cost
 
-For a user reaching `V_u` objects and a query matching `M_q` objects of the app:
+For a user reaching `V_u` objects, a query matching `M_q` objects of the app, and a page of `l` rows after `o`, with the constants of [Scaling](./scaling.md):
 
 ```
-cost = min( V_u × (probe of object_info + text test),  M_q × probe of user_object )
+n    = V_u or M_q, whichever side the cheaper term below reads
+c_1  = t_d + t_m        a row of the reader's range: its object_info probe and the text test
+c_2  = t_g + t_d        a match of the GIN index: its posting and the reader's primary key probe
+cost = min(V_u c_1, M_q c_2) + n (t_rank + t_h) + 2 n log₂(o + l) × cpu_operator_cost
 ```
 
-Measured with the text on every pair and only the first path: 0.44 ms for a user reaching 288 rows; 70 to 199 ms for a user reaching 20,000 rows with a query that matches all of them, the cost being 15,778 heap reads of 606 byte rows. On the first path the reader's range is now index only, `⌈V_u / 87⌉` leaf pages, and the object side is `object_info`, one row per object, cached long before the per user index is. A selective query, `M_q ≪ V_u`, takes the second path and costs `M_q` probes whatever the reader reaches.
+`t_m` and `t_rank` are the text test and `ts_rank` on a short vector, estimated at about 1 µs each, `t_g` a posting entry, well under a descent, and `t_h` the heap fetch of the pair's usage columns, a cached tuple or one random read. Both paths cost about one descent a candidate, so the planner takes the reader's range when `V_u < M_q` and the text index when `M_q < V_u`, and a search costs about 5 µs of calibration time per candidate whichever it takes: 0.25 ms for a query matching 50 objects, 100 ms for one matching all of a reader's 20,000, each divided by `σ` on a machine, 0.45 ms and 180 ms on a `D2ds_v5`.
+
+Measured with the text on every pair and only the first path: 0.44 ms for a user reaching 288 rows; 70 to 199 ms for a user reaching 20,000 rows with a query that matches all of them, the cost being 15,778 heap reads of 606 byte rows. On the first path the reader's range is now index only, `⌈V_u / 87⌉` leaf pages, and the object side is `object_info`, one row per object, cached long before the per user index is.
+
+A ranked page needs every candidate ranked, so page `o / l` costs the same `n` as the first; the total count comes with it at no extra cost. A client that reads many pages narrows the query instead, which lowers `M_q` and with it `n`.
 
 Why the text is per object: a text index across pairs would return every user's matching rows and discard all but the reader's, `M_q × Ū_o` entries for `M_q` answers. Across objects it returns each object once, and the reader's primary key keeps only what the reader reaches. The planner picks the path from the estimated `M_q` against the reader's range, which is the inequality above.
 

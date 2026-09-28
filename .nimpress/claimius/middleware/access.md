@@ -33,7 +33,7 @@ A handler never decides access in its own code. It asks the database through a l
 
 ## Listings
 
-`ObjectWhere(actor, objectType, required)`, `UserWhere`, `ClaimWhere` and `AuditWhere` return a predicate the implementing side puts on its own query, `table.id IN (SELECT object_id FROM claimius.get_objects(...))`. The implementing side's table is joined to the actor's own index range, so a listing is one query and the planner sees both sides. A listing carries no `UserClaimID`; acting on a row in it goes through `MutationAccess`.
+`ObjectWhere(actor, objectType, required)`, `UserWhere`, `ClaimWhere` and `AuditWhere` return a predicate the implementing side puts on its own query, `table.id IN (SELECT object_id FROM claimius.get_objects(...))`. The implementing side's table is joined to the actor's own index range, so a listing is one query and the planner sees both sides. A listing carries no `UserClaimID`; acting on a row in it goes through `MutationAccess`. Given the id of the one row a query reads, `ObjectWhere(actor, objectType, required, objectID)` returns the `get_access` probe for that id instead, so the read of one object carries its check in the service's own query and pays no round trip for it; the range would read `V_u` entries to keep one. See [Reads](../reads.md).
 
 ## Usage
 

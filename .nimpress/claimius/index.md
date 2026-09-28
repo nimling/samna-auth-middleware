@@ -43,8 +43,8 @@ Claimius owns and validates its own types. It never constructs or reads the impl
 | [Security](./security.md) | Roles, secrets, ephemeral tables, soft delete, a compromised disciple |
 | [Audit](./audit.md) | Why the trail is written by the database in the transaction of the change |
 | [Storage](./storage.md) | Row widths, indexes, fill factors, vacuum, time ordered data, connections |
-| [Scaling](./scaling.md) | The cost of every operation, the transactions of a request, where the bottleneck is, the ceiling of the network, and what lowers each term |
-| [Comparison](./comparison.md) | Claimius against Google Zanzibar, Auth0 FGA and Microsoft Entra ID |
+| [Scaling](./scaling.md) | Every cost as a formula in the hardware it runs on, the ceilings on the Azure servers of today and a self hosted reference node, the bottleneck, and the configuration the formulas choose |
+| [Comparison](./comparison.md) | Claimius against Zanzibar, SpiceDB, OpenFGA and Auth0 FGA, Ory Keto and Entra ID, dimension by dimension, with the condition under which claimius wins |
 | [The extension, future work](./extension.md) | Where claimius is going once hosting allows it |
 
 ## The middleware
@@ -62,7 +62,7 @@ Claimius owns and validates its own types. It never constructs or reads the impl
 
 2. Every write records the area it changed in `access_diff` and settles at most the actor's own pair of the row it wrote. No write enumerates the users an area touches, and none grows with the reach of a claim.
 
-3. Every read settles its own slice of the areas it targets before it answers, then reads `user_object` by primary key or by the reader's own range of it. A read never pays for a user it is not about.
+3. Every read settles its own part of the areas it targets before it answers, the one pair of a single object read or the slice of a listing, then reads `user_object` by primary key or by the reader's own range of it. A read never pays for a user it is not about.
 
 4. The answer lives in the service's own Postgres. A disciple answers every access question from its own replica, without a network call to the prophet.
 

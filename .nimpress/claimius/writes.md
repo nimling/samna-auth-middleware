@@ -25,7 +25,7 @@ A write changes a source row: a registered row, an organization, a location, a c
 
 `claim`, `user_claim` and `claim_object` also accept a direct insert from a handler, because their before triggers enforce every invariant whatever the path in; the functions are the ergonomic form for SQL callers. Every write function returns one jsonb object keyed by the table it wrote, unpacked with `->` and `->>`.
 
-Never written by hand: `user_object`, `object_info`, `user_users`, `inheritance_info`, `table_info`, `sync_event`, `access_diff`, `reconcile_queue`, `claim_graph_cache`. `audit` is written through `write_audit`.
+Never written by hand: `user_object`, `object_info`, `user_users`, `inheritance_info`, `table_info`, `sync_event`, `access_diff`, `reconcile_queue`, `claim_graph_cache`, `user_activity`. `audit` is written through `write_audit`.
 
 ## What a write does
 

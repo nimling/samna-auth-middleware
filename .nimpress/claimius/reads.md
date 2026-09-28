@@ -31,7 +31,7 @@ A check is one SQL statement, and resolves in the order the rows are indexed.
 
 2. The ancestors of the object, one covering range on `idx_inheritance_info_descendant`, `D + 1` rows.
 
-3. The outstanding areas, one `= ANY` probe of the `access_diff` primary key with the `C + D + 1` area ids computed by `composite_id`. In the common case it finds nothing and the statement goes on; when it finds an area the entry point takes the settling branch of [Materialization](./materialization.md) first.
+3. The outstanding areas, one `= ANY` probe of the `access_diff` primary key with the `2C + D + 1` area ids computed by `composite_id`, the whole area and the reader's slice of it for each claim and one per ancestor. In the common case it finds nothing and the statement goes on; when it finds an area the entry point takes the settling branch of [Materialization](./materialization.md) first.
 
 4. `check_user_active`, one probe of `idx_samna_user_user_app`.
 
@@ -43,9 +43,11 @@ That is `2C + D + 5` descents, `2C + 2` heap rows and one statement: `t_s + (2C 
 
 Why one statement: a statement costs 60 µs from a client and 20 µs inside a function, a descent 2.5 µs. The same check written as eight PL/pgSQL statements measured 0.30 to 0.35 ms on the server, 0.39 to 0.44 ms with the round trip, and the model gives 0.27 ms; the statements, not the probes, were the cost. The settling branch is PL/pgSQL because it writes, and it runs only when step 3 finds an area.
 
+Why no round trip of its own: on any network the round trip to the database costs more than the check. A check issued alone takes `r_db + c_r / σ`, of which the wire is `r_db / (r_db + c_r / σ)`: 83 % on the Azure servers, 42 % on the reference node. A service reads the object anyway, so the check rides in that query as a predicate, the `get_access` probe for the row's id, and the read of one object costs the service one round trip, not two. On the Azure servers that cuts the latency the check adds from 1.2 ms to 0.2 ms.
+
 ## What a listing costs
 
-A listing reads the reader's range of the `user_object` primary key for one type, tests the mask on the included `sa_access`, resolves each row's best grant against the reader's grants, fetched once and hashed, and takes the rendering fields from `object_info` by primary key. Measured on the pair carrying its own fields: 288 rows in 1.18 ms, 20,000 rows in 14.4 ms, about 0.7 µs per row, of which the sort by mask and id is the largest term above a few thousand rows. A caller that needs only ids, the `ObjectWhere` filter an implementing side puts on its own table, reads the primary key alone, index only: `⌈V / 87⌉` leaf pages, 230 for 20,000 rows, where reading the heap row of each took 15,778 page reads.
+A listing reads the reader's range of the `user_object` primary key for one type, tests the mask on the included `sa_access`, resolves each row's best grant against the reader's grants, fetched once and hashed, and takes the rendering fields from `object_info` by primary key. Measured on the pair carrying its own fields: 288 rows in 1.18 ms, 20,000 rows in 14.4 ms, about 0.7 µs per row, of which the sort was the largest term above a few thousand rows. The rows are returned in the order of the primary key, `(object_type, object_id)` within the reader's range, which the index already holds, and paged by keyset on `object_id`, so the sort is gone: 0.043 cost units a row instead of 0.114, and a page of `l` rows reads `l` entries whatever page it is. A caller that needs only ids, the `ObjectWhere` filter an implementing side puts on its own table, reads the primary key alone, index only: `⌈V / 87⌉` leaf pages, 230 for 20,000 rows, where reading the heap row of each took 15,778 page reads.
 
 ## A read writes only its settle
 
@@ -73,4 +75,4 @@ The client side matches it: the middleware sends each access statement as a name
 
 ## Where a read runs
 
-A read whose area probe finds nothing writes nothing, and runs on a hot standby as well as on the primary ([Hot Standby](https://www.postgresql.org/docs/17/hot-standby.html)). A read that finds an area settles, which a standby refuses with SQLSTATE `25006`, and the middleware repeats that one call on the primary. The standby answers as of its replay position, the same consistency a disciple has against its prophet, and a reader that must see a write it just made reads the primary. With `R` standbys taking reads, one service's database ceiling is `(1 + R) × 0.7 k / c_r` for `k` cores, where one primary alone saturates at 5.5 API cores per 2 vCores; see [Scaling](./scaling.md).
+A read whose area probe finds nothing writes nothing, and runs on a hot standby as well as on the primary ([Hot Standby](https://www.postgresql.org/docs/17/hot-standby.html)). A read that finds an area settles, which a standby refuses with SQLSTATE `25006`, and the middleware repeats that one call on the primary. The standby answers as of its replay position, the same consistency a disciple has against its prophet, and a reader that must see a write it just made reads the primary. With `R` standbys taking reads, one service's database ceiling is `(1 + R) ρ K / c_r` for a database of `K` calibration cores, where one primary alone saturates behind 2.7 API cores per database core of the same class, 5.5 vCPUs of API per `D2ds_v5`; see [Scaling](./scaling.md).

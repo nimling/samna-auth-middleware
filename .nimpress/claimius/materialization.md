@@ -18,6 +18,7 @@ Claimius stores the access relation of [Types](./types.md) per user. A check is 
 | `object_info` | object | What every user sees the same: `sa_owner_id`, `sa_location_id`, `sa_root_id`, `sa_name`, `sa_description`, `sa_link`, `search_vector` |
 | `user_users` | app, viewer, target | That two users share an object, `sharing_object_count`, first and last time |
 | `access_diff` | app and area, and a reader's marker on it | An area whose rows no longer reflect their inputs, and which readers have settled their slice of it |
+| `user_activity` | user, app | `last_used_at`, the latest use the usage flush saw, which orders the drain |
 
 The primary key of `user_object` is `(user_id, app_id, object_type, object_id) INCLUDE (sa_access)`. A check probes it with all four values, a listing reads the reader's range of it, and the mask test of both reads the included column. `user_object_id` in an answer is `composite_id(app_id, user_id, object_type, object_id)`, computed, not stored. `idx_user_object_object (object_id, object_type)` is the one other index, the members of an object.
 
@@ -65,9 +66,11 @@ Every `get_*` computes the ids of the areas it targets and probes `access_diff` 
 
 3. `search` and the graphs target the reader's claim areas and the object areas under the reader's anchors.
 
-The probe is one `= ANY` scan of the `access_diff` primary key with `C + D + 1` ids for `C` grants and depth `D`: a one level index, measured 0.30 ms for the older two step form with 771 areas outstanding in the app. When it finds nothing, and that is the common case, the read answers in the same statement.
+The probe is one `= ANY` scan of the `access_diff` primary key with `2C + D + 1` ids for `C` grants and depth `D`, the whole area and the reader's slice of it for each claim, and one per ancestor: a one level index, measured 0.30 ms for the older two step form with 771 areas outstanding in the app. When it finds nothing, and that is the common case, the read answers in the same statement. When it finds both the whole area of a claim and the reader's slice of it, one settle covers both and writes the marker of each.
 
 When it finds an area, the reader settles its own slice of it and nothing else: its pairs for the objects of the area. It records that in a marker, an `access_diff` row with `kind` of the area, `user_id` the reader, id `composite_id(area id, user)` and `sa_updated_at` copied from the area as it read it. A later read finds the marker at the same `sa_updated_at` and settles nothing; a write that raised the area again moved `sa_updated_at`, so the next read settles again.
+
+A single object read settles less than its slice. `get_access`, `get_direct_access`, `mutation_access` and `resolve_access` answer one pair, so when they meet an area they settle the reader's pair for the target object alone, from the object's `D + 1` ancestors and the reader's `C` grants, and write no marker: the slice stays outstanding for the reader's next listing or the drain. The cost is `t + (C + D + 1) t_d` whatever the width of the area, where settling the slice would cost `A_u t`: for a reader under a new binding over 20,000 objects, about 0.1 ms on a `D2ds_v5` instead of 0.69 s. The settle of the slice is `ON CONFLICT ... WHERE ... IS DISTINCT FROM`, so the pair settled first is not written again.
 
 1. Two readers of one area settle their own slices in parallel; they share no row.
 
@@ -75,7 +78,7 @@ When it finds an area, the reader settles its own slice of it and nothing else: 
 
 3. The marker records the `sa_updated_at` read at the start of the settle, never the time it ends, so a change committed during a settle under read committed is caught by the next read.
 
-The drain settles every slice no read has reached, off the request path. The scheduled maintenance that runs `trim_sync_event` on a prophet, and the pull loop between pulls on a disciple, take outstanding areas with `FOR UPDATE SKIP LOCKED` in batches, settle their holders' slices set based with `_settle_object_diff` and `_settle_claim_diff`, and delete the area and its markers when the area's `sa_updated_at` is still the one they read.
+The drain settles the slices no read has reached, off the request path, on the database that serves the reads of the app. A disciple drains between pulls. A prophet drains, on the scheduled run that also calls `trim_sync_event`, the apps it serves reads for: its own apps, and any app with no consumer in contact in `prophet_state`. An app whose disciple is in contact is read on the disciple, so its areas on the prophet are settled only on demand, by the check of a routed write reaching the actor's slice. The drain takes outstanding areas with `FOR UPDATE SKIP LOCKED`, orders their slices by the latest use of the holder in `user_activity`, most recent first, settles them set based with `_settle_object_diff` and `_settle_claim_diff` in transactions of about 1,000 pairs, and deletes the area and its markers when the area's `sa_updated_at` is still the one it read. Why each of these, in numbers, is under [The settle as a queue](#the-settle-as-a-queue).
 
 ## Settling is set based
 
@@ -87,14 +90,70 @@ Measured with the pair carrying object fields: one statement settled 27,358 pair
 
 With `t = 0.019 ms` per settled pair, a reader's slice of `A_u` pairs costs `A_u × t` on the reader's request, and an area of `U_a` holders over `A` objects costs `U_a × A × t` in all, paid by the readers who read and the drain for the rest.
 
-| Area | Reader's slice `A_u` | On the first reader | In all |
+| Area | Reader's slice `A_u` | On the reader's first listing | In all |
 |---|---|---|---|
 | One new row under a leaf, 18 users reach it | 1 | 0.02 ms | 0.3 ms |
 | A binding change on a leaf claim, 6 holders, 33 objects | 33 | 0.6 ms | 3.8 ms |
 | A binding change on a root claim, 2 holders, 20,782 objects | 20,782 | 0.39 s | 0.8 s |
 | The same at 10,000 users, 1,000,000 objects, 20 root holders | 1,000,000 | 19 s | 380 s, in the drain |
 
-A settle statement runs under `statement_timeout`, 120 s, which bounds one statement at 6.3 million pairs. The drain settles a large area in slices by holder, each slice its own statement and transaction. A reader whose own slice exceeds what a request should wait for, a holder of a root binding over a million objects, is the case the drain exists for: it runs within seconds of the write, so the reader of a wide area finds its slice settled.
+A settle statement runs under `statement_timeout`, 120 s, which bounds one statement at `120 s × σ / t` pairs, 6.3 million on the calibration core and 3.5 million on a `D2ds_v5`. The drain settles a large area in slices by holder, each slice its own statement and transaction. A reader whose own slice exceeds what a request should wait for, a holder of a root binding over a million objects, is the case the drain exists for: it runs within seconds of the write, so the reader of a wide area finds its slice settled.
+
+## The settle as a queue
+
+The settle is a queue of pairs. Writes put pairs in; readers and the drain take them out. The constants and the machines are those of [Scaling](./scaling.md): `K` the capacity of the database in calibration cores, `σ` the speed of one of its threads, `L_c` its commit latency.
+
+### Arrival
+
+The API first write, a claim bound to a node of `A` objects and granted to `k` users, arrives at `λ_w` and leaves `k A` pairs to settle on each database that serves the app's reads: the disciple, and the prophet only for an app it serves reads for. Every other write leaves fewer: a registered row one pair per user who reaches it, a grant `A_c` pairs for its assignee. The work arriving is `λ_w k Ā t` calibration seconds a second.
+
+### Service and stability
+
+A reader takes its own slice, `A_u t / σ`, on its request; the drain takes the rest at the share `φ` of `K` that the reads leave. Whoever takes a pair, the database spends `t` on it, so the queue is stable while
+
+```
+X_r c_r + λ_w (c_w + k Ā t)  ≤  ρ K
+```
+
+On a `D2ds_v5` with no other load that is 26 API first writes a second at `k = 3`, `Ā = 300`, `t = 19 µs`, and 73 at the narrow pair's 6 µs; on the reference node 1,490 and 4,120. The write itself is 7 % of the sum at 19 µs: the settle is the cost of a write, and `t` is the constant worth lowering.
+
+### A burst
+
+`B` writes arriving together leave `Q_0 = B k Ā` pairs, drained in
+
+```
+T_d = B k Ā t / (φ K)
+```
+
+For a hundred such writes, 90,000 pairs, at `φ = 0.5`: 12.7 s on a sustained `B2ms`, 5.0 s on a `D2ds_v5`, 0.11 s on the reference node, and a third of each at `t = 6 µs`. A holder is fresh at the earlier of its own first read and the moment the drain reaches its slice. A holder whose first read is a check pays one pair; one whose first read is a listing pays its slice, `A_u t / σ`, 10 ms for 300 objects on a `D2ds_v5`, and the drain then skips that slice, because the marker is already there.
+
+### Why on demand is the right shape
+
+1. The writer's latency and lock time are constant, `c_w / σ + L_c`, where settling in the write costs `k A t / σ` more with every settled pair locked to commit: 31 ms more at `k = 3`, `A = 300` on a `D2ds_v5`, 2.1 s over 20,000 objects.
+
+2. A check waits for one pair and a listing for the reader's own slice, never the area: `1 ≤ A_u ≤ A < U_a A` for any area with two holders.
+
+3. Repeated raises collapse. An area raised `m` times before it is settled is settled once, because its id is deterministic and the raise is an `ON CONFLICT` update. Settling in the write would pay `m` times.
+
+4. The total is the same as settling eagerly, `U_a A t`, and never more, so none of the above is bought with extra work.
+
+### Which slice the drain takes first
+
+A slice `j` of processing time `p_j = A_j t` whose holder reads at rate `r_j` and is drained at time `C_j` costs that holder an expected wait of about `r_j C_j p_j`: the chance the read comes first, times the settle it then pays. The total expected wait `Σ r_j p_j C_j` is a weighted completion time, and it is least when slices are taken in decreasing order of `(r_j p_j) / p_j = r_j` ([Smith's rule, weighted shortest processing time](https://en.wikipedia.org/wiki/Single-machine_scheduling#Minimizing_the_sum_of_weighted_completion_times)). The width of the slice cancels. The read rate of a holder is estimated by its latest use, so the drain takes the slices of the most recently active holders first, from `user_activity`, one row per user and app holding the latest `last_used_at` the usage flush wrote for that user. Holders who have not been seen for a long time are drained last, when nothing else waits.
+
+### The batch
+
+A drain transaction pays `t_s / σ + L_c` of overhead and holds the locks of its pairs for `b t / σ`. The overhead stays under a share `ε` of the work and the lock time under `τ_lock` when
+
+```
+(t_s / σ + L_c) / (ε t / σ)  ≤  b  ≤  τ_lock σ / t
+```
+
+At `ε = 5 %` and `τ_lock = 50 ms`, a `D2ds_v5` gives `1,220 ≤ b ≤ 1,450` and the reference node `105 ≤ b ≤ 2,100`. A batch of 1,000 pairs is within both, a larger slice is split by object range into batches of that size, and a reader that meets a batch in progress waits at most `τ_lock` on the marker.
+
+### The cadence and the size of `access_diff`
+
+A drain run that finds nothing costs one statement, `t_s / σ`, about 0.1 ms: run every second it is 0.01 % of a core, so the prophet runs it every second and a disciple after every page. Outstanding rows are bounded by the distinct areas, at most one per claim, one per claim and holder, and one per object, so `access_diff` is bounded by the source rows and never by time; a slice left for a long absent holder costs one row of about 100 bytes and nothing on any read, because the probe descends a one level index whatever its size.
 
 ## What the index costs to hold
 
