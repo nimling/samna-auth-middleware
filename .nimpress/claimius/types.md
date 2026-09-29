@@ -66,7 +66,7 @@ Every question claimius answers is `A` or a projection of it: a check fixes `u` 
 
 ## Why the model stays below the reachability bound
 
-**Claim.** A model whose group nesting or composition is transitive over data must solve dynamic reachability, for which no algorithm has both update and query time polynomially below the edge count `m`. The recursion of claimius is bounded by the depth of three trees, and a derivation reads a number of index entries independent of `m`.
+A model whose group nesting or composition is transitive over data must solve dynamic reachability, for which no algorithm has both update and query time polynomially below the edge count `m`. The recursion of claimius is bounded by the depth of three trees, and a derivation reads a number of index entries independent of `m`.
 
 **Proof.**
 
@@ -80,4 +80,4 @@ Every question claimius answers is `A` or a projection of it: a check fixes `u` 
 
 **Sources.** R. Pang et al., [Zanzibar: Google's Consistent, Global Authorization System](https://www.usenix.org/system/files/atc19-pang.pdf), USENIX ATC 2019, sections 2 and 3.2.4. M. Henzinger, S. Krinninger, D. Nanongkai, T. Saranurak, [Unifying and Strengthening Hardness for Dynamic Problems via the Online Matrix-Vector Multiplication Conjecture](https://arxiv.org/abs/1511.06773), STOC 2015. P. W. L. Fong, [Relationship-Based Access Control: Protection Model and Policy Language](https://pages.cpsc.ucalgary.ca/~pwlfong/Pub/codaspy2011.pdf), CODASPY 2011, section 4.3.
 
-**For claimius.** Zanzibar pays the bound with Leopard, a precomputed group to group index of which the paper says "a single Zanzibar tuple addition or deletion may yield potentially tens of thousands of discrete Leopard tuple events". Claimius does not pay it, because its only recursion is three trees of bounded depth. Three trees and one hop are the condition under which a derivation is constant in the size of the data; see [Theory](./theory.md#result-2-the-model-stays-below-the-reachability-bound).
+Zanzibar pays the bound with Leopard, a precomputed group to group index of which the paper says "a single Zanzibar tuple addition or deletion may yield potentially tens of thousands of discrete Leopard tuple events". Claimius does not pay it, because its only recursion is three trees of bounded depth, stored where they move. Three trees and one hop are the condition under which a derivation is constant in the size of the data.

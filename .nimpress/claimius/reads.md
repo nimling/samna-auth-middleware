@@ -86,7 +86,29 @@ entries(page) = s + h + p (3 + 2 G)           rows sorted = 0
 
 for a page of `p` rows, a descent of `h` levels and the settle `s` of the reader's share, which runs before the range is read and does not depend on the page. Rows come in `object_id` order straight from the index, and the next page starts after the last `object_id` of this one. Without `limit` the page is the whole range, `p = V_{u,τ}`. The mask test is written `(sa_access & required) >= required`, the equality for a submask of `required`, which the planner estimates as a range rather than a point, so it keeps the ordered scan instead of sorting a bitmap scan.
 
-Measured at `V_{u,τ} = 5,000` among 200,160 pairs, a page of 50 read 50 entries of the `user_object` indexes and 110 across the schema with no sort, where the unpaged listing read 5,000 and 10,010 and sorted 5,000 rows. A page is linear in its own size and independent of the depth of the trees, the number of bindings, the number of other users and the size of the reader's range. The argument that storing the pairs is right is [Result 4](./theory.md#result-4-a-listing-reads-stored-pairs).
+Measured at `V_{u,τ} = 5,000` among 200,160 pairs, a page of 50 read 50 entries of the `user_object` indexes and 110 across the schema with no sort, where the unpaged listing read 5,000 and 10,010 and sorted 5,000 rows. A page is linear in its own size and independent of the depth of the trees, the number of bindings, the number of other users and the size of the reader's range.
+
+### Why the pairs are stored
+
+Storing `A` per pair and listing it from the reader's range costs less than deriving each listed pair from the base relations whenever a pair is listed at least as often as its inputs change, and a pair whose inputs change without being read costs one area row and nothing else. Let `R_x = 6 + 4a_x + 2t_x + 4B_x` be the index entries one pair's derivation reads, [Materialization](./materialization.md#recomputing-a-share), and `c = 3 + 2 G_x` the entries a stored listing reads per row, the pair, its `object_info` row, the root organization and `2 G_x` grant probes.
+
+1. Derived at read time, a listing of `u` over type `τ` must enumerate the candidates: the descendants of every inheriting binding the reader holds, with multiplicity `δ ≥ 1` for overlapping bindings, and derive each, `δ R_x + c` entries per listed row, then sort, since the candidates come in no key order.
+
+2. Stored, a listing reads `c` per row in `object_id` order and sorts nothing. A change of the pair's inputs raises one area row; the pair is recomputed only when the reader next reads, once however many changes came before: `min(W, L)` recomputes of `R_x` over `L` listings and `W` changes.
+
+3. Stored wins when
+
+```
+L c + min(W, L) R_x  <  L (δ R_x + c)    ⟺    min(W, L) < δ L
+```
+
+which holds for every `δ ≥ 1` and `L ≥ 1`, and holds strictly when `W < L` or `δ > 1`. With `L = 0` the stored side pays `W` area raises and no recompute, the derived side nothing.
+
+4. The rows of an area whose holder never reads are never recomputed, so the stored side's work is bounded by reads, not by changes.
+
+So `user_object` is the listing index. `get_objects`, `search` and the graphs read it after the reader's share settles, and the check reads the same stored pair, so a listing row and a check agree by construction.
+
+**Sources.** E. N. Hanson, [A Performance Analysis of View Materialization Strategies](https://www2.eecs.berkeley.edu/Pubs/TechRpts/1986/789.html), SIGMOD 1987. R. Chirkova and J. Yang, [Materialized Views](https://dsf.berkeley.edu/cs286/papers/mv-fntdb2012.pdf), Foundations and Trends in Databases 2012, on deferred maintenance.
 
 ## The other listings
 

@@ -8,7 +8,7 @@ lastUpdated: true
 
 # Materialization
 
-Claimius stores the access relation `A` of [the model](./index.md#the-access-of-a-pair) per pair in `user_object`, so a check reads one pair and a listing one index range. A write does not settle the users it affects. It settles its own actor on the rows it names and records what changed as one area row; each user then settles its own part of the area when it reads, a check the one pair it asks about, a listing its whole share. The proofs are [Result 1](./theory.md#result-1-access-is-a-nonrecursive-view) and [Result 5](./theory.md#result-5-the-settle-is-per-pair-and-per-reader).
+Claimius stores the access relation `A` of [the model](./index.md#the-access-of-a-pair) per pair in `user_object`, so a check reads one pair and a listing one index range. A write does not settle the users it affects. It settles its own actor on the rows it names and records what changed as one area row; each user then settles its own part of the area when it reads, a check the one pair it asks about, a listing its whole share. Why recomputing an area is exact is shown in [the model](./index.md#why-the-view-is-maintained-exactly), and why settling per pair and per reader returns current pairs in [Why a settle returns current pairs](#why-a-settle-returns-current-pairs).
 
 ## The tables
 
@@ -46,7 +46,7 @@ A disciple carries the same tables without `app_id`, keyed `(user_id, object_typ
 R(u, S) = 3 + 2C + Σ_{x ∈ S} R_x          R_x = 6 + 4 a_x + 2 t_x + 4 B_x
 ```
 
-with `t_x ≤ 3` the trees holding `x`. The descents that find nothing are counted as one entry. Nothing in `R` grows with `U`, `O` or the number of claims in the app; it grows with the reader's grants, the depth of `x` and the bindings on its chain, which is [Result 2](./theory.md#result-2-the-model-stays-below-the-reachability-bound). The derivations are then settled in memory by `_apply_denies`, `G × X` mask operations for `G` grants and `X` denies on the pair.
+with `t_x ≤ 3` the trees holding `x`. The descents that find nothing are counted as one entry. Nothing in `R` grows with `U`, `O` or the number of claims in the app; it grows with the reader's grants, the depth of `x` and the bindings on its chain, which keeps the model [below the reachability bound](./types.md#why-the-model-stays-below-the-reachability-bound). The derivations are then settled in memory by `_apply_denies`, `G × X` mask operations for `G` grants and `X` denies on the pair.
 
 ### What a changed pair writes
 
@@ -61,7 +61,7 @@ The pairs of `S` that no derivation and no creation reaches, or whose object is 
 | A pair inserted or deleted on `x`, not a claim | up to `2 (U_x − 1)` `user_users` rows, from `U_x` entries read | 3 per row written |
 | Any pair written | one delete probe of `claim_graph_cache` for its user | 0 or 1 row |
 
-The `user_users` counting is a statement trigger over the pairs of the statement; see [Users](./users.md) and [Result 7](./theory.md#result-7-counting-keeps-userusers-exact). Before `d4c71ff` a settled pair wrote 19 index entries, one per index of the per object columns and the GIN postings of `grants` and the search vector; it now writes 2.
+The `user_users` counting is a statement trigger over the pairs of the statement; see [Users](./users.md#why-the-count-is-exact). Before `d4c71ff` a settled pair wrote 19 index entries, one per index of the per object columns and the GIN postings of `grants` and the search vector; it now writes 2.
 
 ## Writes raise areas
 
@@ -142,15 +142,43 @@ An area clears after each of its holders has read once, or the drain settled the
 
 A binding change on a claim `c` costs the writer its own row, its actor's two pairs and one area row. Each holder `j` that reads pays its share, about `|T_c|` pairs, once per raise it reads after; a holder that never reads pays nothing. So the total is `Σ_{j reads} R(j, share_j)`, never `|H_c| × |T_c|` inside one transaction, and never more than the holders that read.
 
+### Why a settle returns current pairs
+
+A check that settles only the pair it asks about, when an open area covers that pair, and a listing that settles only the reader's own share of each area it meets, return the pairs a full recompute would:
+
+1. A pair `(u, x)` can be stale only when an open area's support contains it, by [the model](./index.md#why-the-view-is-maintained-exactly). `reconcile_if_pending(app, u, τ, x)` tests exactly those areas: an object area on `x`, or on an ancestor of `x` with `cascade`; a claim area of a claim `u` holds, links to, or was assigned (`user_id = u`), whose bindings, live or removed, sit on `x` or an ancestor, directly or through a claim it links to, or whose claim the pair's `grants` name as `claim_id` or `composed_from`, or which is `x` itself. An area is skipped only when `access_diff_user` records `u` at the area's current `raise_count`. When any area is open the pair is recomputed, so the pair read is current.
+
+2. A listing settles, through `_settle_diff_share`, the reader's share of every open object area of the app and of every claim area of a claim the reader holds, links to or was assigned, and records it at `raise_count`. A later raise increments `raise_count`, which makes the record stale and the share open again.
+
+3. The share of an area is the slice of the change's support that can hold a pair of `u`, as defined above, with bindings changed since the area opened counted too, so settling it leaves every pair of `u` in the area current.
+
+4. An area is deleted by `_clear_diff` only when every user `_diff_holders` returns has a record at the current `raise_count`, under `FOR UPDATE SKIP LOCKED` and a matching `raise_count`, so a raise that lands between the test and the delete keeps the row.
+
+5. So each holder pays its own share when it reads, and a holder who never reads pays nothing.
+
+**Sources.** Deferred, per query maintenance of materialized views: R. Chirkova and J. Yang, [Materialized Views](https://dsf.berkeley.edu/cs286/papers/mv-fntdb2012.pdf), Foundations and Trends in Databases 2012, on lazy and deferred maintenance.
+
 ## The drain
 
-`drain_access_diff(p_limit_pairs)` settles shares ahead of their reads, outside any request, under the rule of [Result 6](./theory.md#result-6-the-drain-rule): holder `j` of area `a` is taken when its read rate is at least the area's raise rate,
+`drain_access_diff(p_limit_pairs)` settles shares ahead of their reads, outside any request, under the drain rule: holder `j` of area `a` is taken when its read rate is at least the area's raise rate,
 
 ```
 r̂_j = 1 / (now − user_activity.last_used_at)      λ̂_a = raise_count / (now − access_diff.sa_created_at)      take when r̂_j ≥ λ̂_a
 ```
 
 tested as `now − sa_created_at ≥ raise_count × (now − last_used_at)`. A holder with no `user_activity` row is never drained. Shares are taken most recently active user first, at most `p_limit_pairs` of them, each through `_settle_diff_share`, so a share a read is settling at the same moment is skipped. On a prophet it drains only the areas of its own system app and of apps with no consumer in `sync_consumer` in contact for 7 days; the areas of an app a disciple serves are drained on that disciple, so each settle is paid once. A disciple drains every area it holds. It returns the shares settled.
+
+### Why the drain rule
+
+Settling a holder's share ahead of its read is worth its cost only when the holder is likelier to read before the area is raised again than after. Take the reads of holder `j` as a Poisson process of rate `r_j` and the raises of area `a` as one of rate `λ_a`. A share settled ahead costs its recompute `R_j`. If the holder reads before the next raise the settle is used, and the read finds nothing open; if the area is raised first the share opens again and the settle is wasted. For independent exponential clocks the read comes first with probability `r_j / (r_j + λ_a)`, so the expected useful part of `R_j` is
+
+```
+R_j · r_j / (r_j + λ_a)  ≥  R_j / 2    exactly when    r_j ≥ λ_a
+```
+
+Below that most of the drain's work is thrown away, and the holder pays the same `R_j` on its own read, once. The estimators are rows claimius already holds, and the test above is the rule multiplied out. A holder with no `user_activity` row is never drained; its share waits for its own read.
+
+**Sources.** The minimum of two exponential random variables: any text on Poisson processes, for example [the exponential distribution](https://en.wikipedia.org/wiki/Exponential_distribution#Distribution_of_the_minimum_of_exponential_random_variables).
 
 ## Rebuilding
 

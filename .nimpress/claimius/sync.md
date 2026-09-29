@@ -40,7 +40,19 @@ A position on the feed is `(txid, seq)`, written `<txid>.<seq>` on the wire. `ge
 
 in `(txid, seq)` order, 1,000 by default, through one range of `idx_sync_event_app_txid_seq`. A pull with `n_a` of the app's events after its cursor reads `n_a` entries and no other app's.
 
-Sequences are taken at insert and become visible at commit, so a higher `seq` can commit before a lower one. The feed serves only events whose transaction is below the `xmin` of its snapshot, transactions that have all ended, and every event written later carries a `txid` at or above that `xmin`, so it sorts after every event already served. A cursor therefore never passes an event still to be served, whatever order transactions commit in; the proof is [Theory, Result 9](./theory.md#result-9-the-cursor-below-the-snapshot-xmin).
+Sequences are taken at insert and become visible at commit, so a higher `seq` can commit before a lower one, and a cursor on `seq` alone would pass the lower one over. A consumer that pages in `(txid, seq)` order and moves its cursor to the last event of each page never passes over an event, whatever order transactions commit in. Let the reading snapshot have `xmin`, the lowest transaction id still running when it was taken:
+
+1. The feed serves an event only when `txid < xmin`, or when it is the reader's own transaction. A transaction id below `xmin` belongs to a transaction that has ended; an event of an aborted transaction does not exist, so every served event is committed and visible.
+
+2. Every event not yet visible to the snapshot belongs to a transaction running at the snapshot or started after it. A running transaction has `txid ≥ xmin` by the definition of `xmin`; a later one has `txid ≥ xmax ≥ xmin`, since transaction ids are assigned in increasing order and `xid8` never wraps.
+
+3. Hence every event served later has `txid ≥ xmin > txid(c)` for the cursor `c` taken from this page, so it sorts after `c`. Events below `xmin` not served because of the page limit sort after `c` as well, and come on the next page.
+
+4. The events of one transaction share its `txid` and become visible together, so their `seq` order within the transaction is complete when any of them is served.
+
+The snapshot sent to a new consumer carries the cursor `(xmin, 0)` of the snapshot it was read under, so the feed resumes exactly after it.
+
+**Sources.** [PostgreSQL, Transaction ID and Snapshot Information Functions](https://www.postgresql.org/docs/17/functions-info.html#FUNCTIONS-PG-SNAPSHOT): `pg_current_xact_id`, `pg_current_snapshot`, `pg_snapshot_xmin`, and the definition of `xmin` as the earliest transaction still active. [PostgreSQL, Sequence Manipulation Functions](https://www.postgresql.org/docs/17/functions-sequence.html), on `nextval` never being rolled back.
 
 `app_handover` events travel only with `peer = true`, to a peer prophet mirroring the app, never to a disciple.
 

@@ -40,7 +40,7 @@ The claimius count is fixed by the pair: one probe of the reconcile queue, two o
 
 ## First check after a grant
 
-A grant raises one area keyed on the claim and the one user it names. The grantee's next check finds the area open over its pair and settles that one pair before it answers: the covering test reads the object's `a_x` ancestors, the reader's `C` grants and their links, and the areas on them, about `4 (C + a_x) + 2 ≈ 38` entries, and the recompute of one pair reads `3 + C + 8 + 4 a_x + 4 B_x = 52` entries and writes the pair, two index entries, and the `user_users` counts against the `U_x − 1 = 49` other users of the object, 50 entries read and at most 98 rows written. In all about 100 entries read and one pair written, once; the check after it is the plain check. The measured reduction: a first check over an area of four objects held by three users settled 12 pairs before and 1 after ([Theory, Result 5](./theory.md#result-5-the-settle-is-per-pair-and-per-reader)).
+A grant raises one area keyed on the claim and the one user it names. The grantee's next check finds the area open over its pair and settles that one pair before it answers: the covering test reads the object's `a_x` ancestors, the reader's `C` grants and their links, and the areas on them, about `4 (C + a_x) + 2 ≈ 38` entries, and the recompute of one pair reads `3 + C + 8 + 4 a_x + 4 B_x = 52` entries and writes the pair, two index entries, and the `user_users` counts against the `U_x − 1 = 49` other users of the object, 50 entries read and at most 98 rows written. In all about 100 entries read and one pair written, once; the check after it is the plain check. The measured reduction: a first check over an area of four objects held by three users settled 12 pairs before and 1 after; see [Materialization](./materialization.md#why-a-settle-returns-current-pairs).
 
 A tuple store pays nothing extra: the check after a grant is the same check, given a token at least as fresh as the write.
 
@@ -102,7 +102,7 @@ A new object under a node at depth 4:
 | Zanzibar and descendants | the source tuples only: `U · C = 5·10⁴` memberships, the bindings, and `O = 10⁶` parent tuples, about `1.05·10⁶`; "Zanzibar avoids storage denormalization and relies only on normalized data" ([Pang et al. 2019, section 3](https://www.usenix.org/system/files/atc19-pang.pdf)) |
 | Entra ID | the directory's groups and memberships; nothing per object |
 
-**Claimius loses** this dimension by about two orders of magnitude on this set: `P` grows with users times reach. It pays that storage so that a check and a listing read the answer instead of deriving it, which wins whenever a pair is read more often than its inputs change; see [Theory, Result 4](./theory.md#result-4-a-listing-reads-stored-pairs).
+**Claimius loses** this dimension by about two orders of magnitude on this set: `P` grows with users times reach. It pays that storage so that a check and a listing read the answer instead of deriving it, which wins whenever a pair is read more often than its inputs change; see [Reads](./reads.md#why-the-pairs-are-stored).
 
 ## Time until a revoke takes effect
 

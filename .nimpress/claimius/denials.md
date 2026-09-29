@@ -39,7 +39,7 @@ A(u, x) = ⋁_g a_g | [made(u, x)] close(15 & ~X_d)
 
 The member bit is masked off every derivation, `& 15`, so it never reaches `user_object`.
 
-The cost is `G_x × X` mask operations for `G_x` grants and `X` denies on one pair, in memory, paid once per recompute of the pair; with no deny and no scope the function returns the grants unchanged with one aggregate. The read of a pair is the same with or without denies. This is the deny overrides combining rule of [XACML 3.0, appendix C](https://docs.oasis-open.org/xacml/3.0/xacml-3.0-core-spec-os-en.html), scoped by class. A deny is negation over the derivations of the same pair only, which keeps the access relation a nonrecursive stratified view and its maintenance exact; see [Theory](./theory.md#result-1-access-is-a-nonrecursive-view).
+The cost is `G_x × X` mask operations for `G_x` grants and `X` denies on one pair, in memory, paid once per recompute of the pair; with no deny and no scope the function returns the grants unchanged with one aggregate. The read of a pair is the same with or without denies. This is the deny overrides combining rule of [XACML 3.0, appendix C](https://docs.oasis-open.org/xacml/3.0/xacml-3.0-core-spec-os-en.html), scoped by class. A deny is negation over the derivations of the same pair only, which keeps the access relation a nonrecursive stratified view and its maintenance exact; see [the model](./index.md#why-the-view-is-maintained-exactly).
 
 ## Denies scoped to fields
 

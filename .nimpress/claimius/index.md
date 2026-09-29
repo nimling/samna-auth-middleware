@@ -22,7 +22,6 @@ Claimius owns and validates its own types. It reads no more of the implementing 
 
 | File | Covers |
 |---|---|
-| [Theory](./theory.md) | The results the design rests on, each with its proof and its sources |
 | [Types](./types.md) | The four types, the access relation, how the common models reduce to them, the reachability bound |
 | [Organizations](./organizations.md) | Roots, children, the ownership closure and what each write costs it |
 | [Locations](./locations.md) | The location closure, pins, a location in two trees |
@@ -57,7 +56,7 @@ Claimius owns and validates its own types. It reads no more of the implementing 
 
 ## The model
 
-Claimius is one fixed program over its tables. Writing authorization as Datalog is the approach of logic based security languages such as J. DeTreville's [Binder](https://www.microsoft.com/en-us/research/wp-content/uploads/2016/02/tr-2002-21.pdf); claimius's rules never change, which is what lets each result in these files be proved once.
+Claimius is one fixed program over its tables. Writing authorization as Datalog is the approach of logic based security languages such as J. DeTreville's [Binder](https://www.microsoft.com/en-us/research/wp-content/uploads/2016/02/tr-2002-21.pdf); claimius's rules never change, which is what lets each property in these files be proved once.
 
 ### Base relations
 
@@ -137,6 +136,24 @@ M(u, x, f) = ⋁ over grants and the creator of a(f)               the field mas
 
 A grant left with no bit is dropped. `A(u, x) ≠ 0` is a row of `user_object` with `sa_access = A`, the surviving derivations in `grants`, the field masks in `scope`, NULL when every field carries the same mask, and `direct_grant` for the creator. See [Denials](./denials.md) and [Redaction](./redaction.md). The time window of a grant is not part of `A`: the reads keep a derivation only while its grant is inside its window; see [Claims](./claims.md#time-windows).
 
+### Why the view is maintained exactly
+
+With `anc_t` stored in `inheritance_info`, the access relation `A` is a nonrecursive stratified Datalog program: no tuple of `A` takes part in the derivation of another tuple of `A`. Every change to the base relations is therefore maintained exactly by recomputing the pairs its support can reach, and never needs a delete and rederive step.
+
+1. The rules for `reach` in [Derivations](#derivations) read `grant`, `claim`, `bind`, `link`, `creator` and `anc_t`. The composition rules consume a binding of the linked claim, `bind(c, y, b, _, _)`, and never a `link` of `c`; `_build_grants_for_objects` joins `claim_object link` once and then `claim_object co` on `co.claim_id = link.object_id`, with no second hop. No rule has `reach` or `A` in its body, so the dependency graph is acyclic.
+
+2. `A` aggregates the derivations of one pair `(u, x)` and applies negation, the deny terms of `_apply_denies`, to derivations of that same pair only. Aggregation and negation over a lower stratum are stratified.
+
+3. The only recursion is `anc_t`. Each tree is acyclic by the types of its edges: an organization goes up only to organizations, a location to locations and to its owner, a registered row to its owner, its pin and its own parent, and every root points at itself, `sa_owner_id = id` or `sa_parent_id = id`, which `up_t` excludes. `calc_hierarchical_access` refuses a change of `sa_root_id` outside replay, and `_splice_subtree` drops a subtree whose new parent lies inside it, so no cycle is ever stored.
+
+4. Gupta, Mumick and Subrahmanian prove that for nonrecursive views, with negation and aggregation, the counting algorithm computes exactly the view tuples inserted or deleted, where DRed, needed for recursive views, first deletes a superset and rederives it. By 1 to 3 the first case applies.
+
+5. The support of a change is an area. A change to claim `c`, to one of its bindings or to a link into or out of it changes `reach` only for holders of `c` or of a claim linking to `c`, on objects of `T_c` and on the pairs whose `grants` name `c`: the claim area. A change to a grant of `c` changes only the assignee's slice of it: the claim area with `user_id`. A change to an object `x` changes `reach` only on `x` and, when `x` is a node, on `desc(x)`: the object area, with `cascade`. So recomputing the pairs of an area touches every pair the change can affect.
+
+Single hop composition keeps the program nonrecursive, and a nonrecursive program needs only first order deltas, each found by key. The `grants` array of a pair is its why provenance, `user_users.sharing_object_count` the derivation count of the counting algorithm on `A ⋈_x A` (see [Users](./users.md#why-the-count-is-exact)), and an `access_diff` row the key of a change's support. A transitive link would make `reach` recursive and every settle a DRed step with overdeletion.
+
+**Sources.** A. Gupta, I. S. Mumick, V. S. Subrahmanian, [Maintaining Views Incrementally](https://dl.acm.org/doi/10.1145/170035.170066), SIGMOD 1993. The overdeletion of DRed: B. Motik et al., [Incremental Update of Datalog Materialisation: the Backward/Forward Algorithm](https://www.cs.ox.ac.uk/people/boris.motik/pubs/mnph15incremental-BF.pdf), AAAI 2015. Stored derivations as provenance: T. J. Green, G. Karvounarakis, V. Tannen, [Provenance Semirings](https://web.cs.ucdavis.edu/~green/papers/pods07.pdf), PODS 2007.
+
 ### What claimius stores beyond the base relations
 
 | Stored | Holds | Rows |
@@ -148,6 +165,22 @@ A grant left with no bit is dropped. `A(u, x) ≠ 0` is a row of `user_object` w
 | `access_diff`, `access_diff_user` | the open areas of changes and the shares settled of each | at most one area per claim, per assignment and per object raised |
 | `user_activity` | when each user last used each app | one per user and app that used it |
 | `claim_graph_cache` | the default claim graph of a user with the snapshot it was built under | one per user who opened it |
+
+These are exactly the relations without which a query of the model reads more than its own answer. For each, the cheapest plan without it:
+
+1. Without `inheritance_info`, every derivation walks `a_x` levels one dependent probe at a time and a settle finds `desc(y)` one node at a time. It is the only recursion, so nothing else replaces it.
+
+2. Without `user_object`, a listing derives `δ R_x` entries per row and sorts; see [Reads](./reads.md#why-the-pairs-are-stored).
+
+3. Without `object_info`, the name, owner, location and search vector of an object are either read from the implementing side's table per row, one dynamic statement per type, or copied onto each of its `U_x` pairs; a rename would then rewrite `U_x` rows and raise an area for every holder. With it, a rename writes one row and raises nothing.
+
+4. Without `user_users`, `get_users` for `u` is the self join `Σ_{x ∈ V_u} U_x` per call, where the stored relation is one range of `S_u` rows.
+
+5. `access_diff` and `access_diff_user` are the state of lazy maintenance, `user_activity` the estimator of the drain rule; see [Materialization](./materialization.md).
+
+6. `claim_graph_cache` stores a rendering, not a relation of the model, validated on read; see [Graphs](./graphs.md). `reconcile_queue` holds recomputes that failed.
+
+Nothing else is materialized. The member listing of an object is the reverse index `idx_user_object_object_user` on the same rows, not a second table.
 
 ### The queries
 
@@ -189,7 +222,7 @@ Every formula in these files uses these symbols.
 
 1. Access is a mask on a binding. A claim says what may be done, a `user_claim` says who holds it, a `claim_object` says what it covers. Nothing else grants access, except the creator of a row.
 
-2. The only recursion is the up edge of three trees, stored as a closure. Composition is one hop. The access relation is therefore a nonrecursive view over stored relations, maintained exactly by recomputing the pairs a change can affect; see [Theory](./theory.md#result-1-access-is-a-nonrecursive-view).
+2. The only recursion is the up edge of three trees, stored as a closure. Composition is one hop. The access relation is therefore a nonrecursive view over stored relations, maintained exactly by recomputing the pairs a change can affect; see [Why the view is maintained exactly](#why-the-view-is-maintained-exactly).
 
 3. A write settles only its actor's pairs on the rows it names, and records the rest as one area row keyed on what changed. A check settles the one pair it asks about; a listing settles the reader's own share of each area it meets. An area clears when every holder has settled it, and a share no one reads is never computed.
 

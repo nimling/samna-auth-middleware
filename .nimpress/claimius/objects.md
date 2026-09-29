@@ -83,7 +83,7 @@ insert: rows(x)        move: n_S (d + d')        delete or restore: Σ_{x ∈ S}
 
 3. The cost is storage, `d + 1` rows per object and tree, and a move rewrites `n_S` times the depth above it, the cost Karwin derives for closure tables, which `_splice_subtree` pays exactly.
 
-**Sources.** [PostgreSQL, Index-Only Scans and Covering Indexes](https://www.postgresql.org/docs/17/indexes-index-only-scans.html). J. Bulánek, M. Koucký, M. Saks, [Tight Lower Bounds for the Online Labeling Problem](https://iuuk.mff.cuni.cz/~koucky/papers/monlab.pdf), STOC 2012. B. Karwin, [Moving Subtrees in Closure Table Hierarchies](https://www.percona.com/blog/moving-subtrees-in-closure-table/). See [Theory](./theory.md#result-3-the-closure-table-against-labeling).
+**Sources.** [PostgreSQL, Index-Only Scans and Covering Indexes](https://www.postgresql.org/docs/17/indexes-index-only-scans.html). J. Bulánek, M. Koucký, M. Saks, [Tight Lower Bounds for the Online Labeling Problem](https://iuuk.mff.cuni.cz/~koucky/papers/monlab.pdf), STOC 2012. B. Karwin, [Moving Subtrees in Closure Table Hierarchies](https://www.percona.com/blog/moving-subtrees-in-closure-table/).
 
 ## object_info
 
