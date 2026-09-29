@@ -9,9 +9,10 @@ import (
 // RegisterEndpoints mounts the full prophet API on the passed group. It carries
 // the user, organization, location, claim, asset, app, sync, client, secret,
 // search, code, field and guest routes that apps and browsers reach the prophet
-// through. A write answers with the sync sequence of its change.
+// through. A write answers with the sync sequence of its change. A write for an
+// app another prophet decides is refused with the prophet that decides it.
 func RegisterEndpoints(g *echo.Group) {
-	g.Use(smw.SyncSeq)
+	g.Use(smw.SyncSeq, smw.AppHome)
 
 	user := g.Group("/user")
 	user.GET("", h.GetUsers)

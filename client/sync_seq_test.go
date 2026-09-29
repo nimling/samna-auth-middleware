@@ -2,8 +2,10 @@ package client_test
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	sclient "github.com/nimling/samna-auth-middleware/client"
@@ -44,5 +46,57 @@ func TestSyncCursorOrdersByTransactionThenSequence(t *testing.T) {
 		if _, err := sclient.ParseSyncCursor(bad); err == nil {
 			t.Fatalf("%q must not parse", bad)
 		}
+	}
+}
+
+func TestWithTargetReachesAnotherProphetAndRecordsWhoAnswered(t *testing.T) {
+	var slug, secret string
+	peer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		slug, secret = r.Header.Get("SAuth-App-Slug"), r.Header.Get("SAuth-App-Secret")
+		w.Header().Set(sclient.HeaderProphet, "peer")
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"data":[],"count":0}`))
+	}))
+	defer peer.Close()
+	t.Setenv("SAUTH_ENDPOINT", "http://127.0.0.1:1")
+
+	var prophet string
+	ctx := sclient.WithProphet(sclient.WithTarget(context.Background(), sclient.Target{Endpoint: peer.URL, Slug: "mirrored", Secret: "s"}), &prophet)
+	if err := sclient.Get(ctx, "sync/0.0", nil); err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if slug != "mirrored" || secret != "s" || prophet != "peer" {
+		t.Fatalf("the request must go to the target as its app and record who answered, got %q %q %q", slug, secret, prophet)
+	}
+}
+
+func TestARefusalNamingTheHomeIsNotHome(t *testing.T) {
+	prophet := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set(sclient.HeaderHome, "elsewhere")
+		w.WriteHeader(http.StatusConflict)
+	}))
+	defer prophet.Close()
+	t.Setenv("SAUTH_ENDPOINT", prophet.URL)
+
+	err := sclient.Post(context.Background(), "claim", map[string]string{}, nil)
+	if !errors.Is(err, sclient.ErrNotHome) || !errors.Is(err, sclient.ErrConflict) || !strings.Contains(err.Error(), "elsewhere") {
+		t.Fatalf("a 409 naming a home must be ErrNotHome carrying it, got %v", err)
+	}
+}
+
+func TestBindPointsRequestsAtTheBoundProphet(t *testing.T) {
+	var hit bool
+	bound := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hit = true
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"data":{},"count":1}`))
+	}))
+	defer bound.Close()
+	t.Setenv("SAUTH_ENDPOINT", "http://127.0.0.1:1")
+	sclient.Bind(bound.URL)
+	defer sclient.Bind("")
+
+	if err := sclient.Post(context.Background(), "organization", map[string]string{}, nil); err != nil || !hit {
+		t.Fatalf("a request must go to the bound prophet, got %v hit=%v", err, hit)
 	}
 }

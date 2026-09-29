@@ -328,6 +328,7 @@ type SamnaApp struct {
 	PrivateKey    string       `bun:"private_key,notnull" json:"private_key,omitempty"`
 	PrivateSeed   string       `bun:"private_seed,notnull" json:"private_seed,omitempty"`
 	AppSecret     *string      `bun:"app_secret" json:"app_secret,omitempty"`
+	HomeProphet   *string      `bun:"home_prophet" json:"home_prophet,omitempty"`
 	SecretVersion int          `bun:"secret_version,notnull,default:1" json:"-"`
 	ClaimID       *uuid.UUID   `bun:"claim_id,type:uuid" json:"claim_id,omitempty"`
 	Style         *ObjectStyle `bun:"style,type:jsonb" json:"style,omitempty"`

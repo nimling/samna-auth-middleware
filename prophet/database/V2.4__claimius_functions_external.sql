@@ -3307,17 +3307,23 @@ COMMENT ON FUNCTION claimius.init_disciple(p_disciple_app_slug text) IS 'Bootstr
 
 -- ----------------------------------------------------------------------------
 -- init_hybrid
--- Hybrid: instance acts as a disciple to an upstream prophet AND as a
--- prophet for downstream disciples. Combines init and init_disciple
--- behavior plus role grants for both.
+-- Hybrid: a prophet that is home for its own system app and mirrors one app
+-- of an upstream prophet as its peer, the way prophets federate. Runs init,
+-- then registers the upstream in prophet_peer, from where the peer pull
+-- consumes the upstream's feed of that app under replay_mode.
 -- ----------------------------------------------------------------------------
+
+DROP FUNCTION IF EXISTS claimius.init_hybrid(TEXT, TEXT, TEXT, TEXT, TEXT, UUID, TEXT, TEXT, TEXT, TEXT, UUID[], JSONB, TEXT, TEXT, TEXT, UUID, JSONB);
 
 CREATE OR REPLACE FUNCTION claimius.init_hybrid(
     p_system_app_slug          TEXT,
     p_system_app_name          TEXT,
     p_system_app_private_key   TEXT,
     p_system_app_private_seed  TEXT,
-    p_disciple_app_slug        TEXT,
+    p_upstream_prophet         TEXT,
+    p_upstream_endpoint        TEXT,
+    p_upstream_app_slug        TEXT,
+    p_upstream_app_secret      TEXT,
     p_system_user_id           UUID DEFAULT NULL,
     p_system_app_redirect_uri  TEXT DEFAULT '',
     p_system_app_sync_uri      TEXT DEFAULT '',
@@ -3334,6 +3340,14 @@ CREATE OR REPLACE FUNCTION claimius.init_hybrid(
 DECLARE
     v_result JSONB;
 BEGIN
+    IF coalesce(p_upstream_prophet, '') = '' OR coalesce(p_upstream_endpoint, '') = ''
+        OR coalesce(p_upstream_app_slug, '') = '' OR coalesce(p_upstream_app_secret, '') = '' THEN
+        RAISE EXCEPTION 'init_hybrid: the upstream prophet, its endpoint, the mirrored app slug and its secret are required.';
+    END IF;
+    IF p_upstream_prophet = p_system_app_slug THEN
+        RAISE EXCEPTION 'init_hybrid: the upstream prophet % is this prophet.', p_upstream_prophet;
+    END IF;
+
     v_result := claimius.init(
             p_system_app_slug, p_system_app_name,
             p_system_app_private_key, p_system_app_private_seed,
@@ -3344,14 +3358,22 @@ BEGIN
             p_system_claim_name, p_system_claim_id,
             p_default_claim
                 );
-    PERFORM claimius.init_disciple(p_disciple_app_slug);
-    PERFORM claimius._grant_hybrid_roles();
-    RAISE NOTICE 'Hybrid initialized.';
+
+    INSERT INTO claimius.prophet_peer (prophet, endpoint, app_slug, app_secret, sa_created_by)
+    VALUES (p_upstream_prophet, p_upstream_endpoint, p_upstream_app_slug, p_upstream_app_secret,
+            (v_result -> 'user_claim' ->> 'id')::UUID)
+    ON CONFLICT (app_slug) DO UPDATE SET
+        prophet    = EXCLUDED.prophet,
+        endpoint   = EXCLUDED.endpoint,
+        app_secret = EXCLUDED.app_secret,
+        status     = 'active';
+
+    RAISE NOTICE 'Hybrid initialized, mirroring app % from prophet %.', p_upstream_app_slug, p_upstream_prophet;
     RETURN v_result;
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius.init_hybrid(p_system_app_slug text, p_system_app_name text, p_system_app_private_key text, p_system_app_private_seed text, p_disciple_app_slug text, p_system_user_id uuid, p_system_app_redirect_uri text, p_system_app_sync_uri text, p_system_app_contact_email text, p_system_app_image text, p_system_app_provider_ids uuid[], p_system_app_style jsonb, p_system_app_description text, p_system_org_name text, p_system_claim_name text, p_system_claim_id uuid, p_default_claim jsonb) IS 'Bootstrap as a hybrid (prophet + disciple).';
+COMMENT ON FUNCTION claimius.init_hybrid(p_system_app_slug text, p_system_app_name text, p_system_app_private_key text, p_system_app_private_seed text, p_upstream_prophet text, p_upstream_endpoint text, p_upstream_app_slug text, p_upstream_app_secret text, p_system_user_id uuid, p_system_app_redirect_uri text, p_system_app_sync_uri text, p_system_app_contact_email text, p_system_app_image text, p_system_app_provider_ids uuid[], p_system_app_style jsonb, p_system_app_description text, p_system_org_name text, p_system_claim_name text, p_system_claim_id uuid, p_default_claim jsonb) IS 'Bootstrap as a hybrid: a prophet mirroring one app of an upstream prophet registered as its peer.';
 
 -- ----------------------------------------------------------------------------
 -- Role grant helpers
@@ -3368,6 +3390,7 @@ BEGIN
              claimius.assign_claim_object, claimius.update_claim_object, claimius.remove_claim_object,
              claimius.merge_user, claimius.migrate_root,
              claimius.init, claimius.init_disciple, claimius.init_hybrid,
+             claimius.offer_handover, claimius.accept_handover, claimius.apply_peer_event,
              claimius.init_claimius_tables, claimius.init_claimius_internal,
              claimius.recompute_state
              FROM claimius_reader';
@@ -3385,6 +3408,7 @@ BEGIN
              claimius.notification, claimius.prophet_state, claimius.sync_consumer
              TO claimius_writer';
     EXECUTE 'GRANT INSERT, UPDATE, DELETE ON claimius.claim_graph_cache TO claimius_writer';
+    EXECUTE 'GRANT UPDATE ON claimius.prophet_peer TO claimius_writer';
     EXECUTE 'REVOKE INSERT, UPDATE, DELETE ON claimius.claim_graph_cache FROM claimius_reader';
     EXECUTE 'GRANT SELECT ON ALL TABLES IN SCHEMA claimius TO claimius_writer';
 END;
@@ -3399,6 +3423,7 @@ BEGIN
              claimius.assign_claim_object, claimius.update_claim_object, claimius.remove_claim_object,
              claimius.merge_user, claimius.migrate_root,
              claimius.init, claimius.init_disciple, claimius.init_hybrid,
+             claimius.offer_handover, claimius.accept_handover, claimius.apply_peer_event,
              claimius.init_claimius_tables, claimius.init_claimius_internal,
              claimius.recompute_state
              FROM claimius_reader';
@@ -3416,13 +3441,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-CREATE OR REPLACE FUNCTION claimius._grant_hybrid_roles()
-    RETURNS VOID AS $$
-BEGIN
-    PERFORM claimius._grant_prophet_roles();
-    PERFORM claimius._grant_disciple_roles();
-END;
-$$ LANGUAGE plpgsql;
+DROP FUNCTION IF EXISTS claimius._grant_hybrid_roles();
 
 REVOKE INSERT, UPDATE, DELETE ON claimius.claim_graph_cache FROM claimius_reader;
 
@@ -4445,3 +4464,306 @@ END;
 $$ LANGUAGE plpgsql;
 
 COMMENT ON FUNCTION claimius.trim_sync_event(INTERVAL) IS 'Deletes sync_event rows at or below the lowest (txid, seq) cursor among consumers still in contact, then each app''s events beyond as many as its source rows, recording the highest position removed per app in prophet_state (trimmed_txid, trimmed_seq). Run on a schedule.';
+
+-- ----------------------------------------------------------------------------
+-- offer_handover
+-- The home of an app offers it to a peer prophet. From the offer on this
+-- prophet decides none of the app's writes, so the peer, which mirrors the
+-- app and receives the offer on its feed, holds every row the app will have
+-- when it accepts. An offer is not withdrawn: a withdrawal racing the
+-- acceptance would leave the app two homes.
+-- ----------------------------------------------------------------------------
+
+CREATE OR REPLACE FUNCTION claimius.offer_handover(
+    p_app_id        UUID,
+    p_to_prophet    TEXT,
+    p_sa_created_by UUID
+) RETURNS JSONB AS $$
+DECLARE
+    v_local TEXT := (SELECT slug FROM claimius.get_app());
+    v_app   claimius.samna_app;
+    v_home  TEXT;
+    v_row   claimius.app_handover;
+BEGIN
+    SELECT * INTO v_app FROM claimius.samna_app WHERE id = p_app_id AND sa_deleted_at IS NULL FOR UPDATE;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'offer_handover: app % not found', p_app_id USING ERRCODE = 'P0404';
+    END IF;
+
+    v_home := claimius.get_app_home(p_app_id);
+    IF v_home IS NOT NULL THEN
+        RAISE EXCEPTION 'offer_handover: app % is decided by prophet %, only its home offers it', v_app.slug, v_home
+            USING ERRCODE = 'P0409', HINT = v_home;
+    END IF;
+
+    IF NOT EXISTS (SELECT 1 FROM claimius.prophet_peer WHERE prophet = p_to_prophet AND prophet <> v_local AND status = 'active') THEN
+        RAISE EXCEPTION 'offer_handover: % is not an active peer of this prophet', p_to_prophet USING ERRCODE = 'P0409';
+    END IF;
+
+    INSERT INTO claimius.app_handover (app_id, from_prophet, to_prophet, sa_created_by)
+    VALUES (p_app_id, v_local, p_to_prophet, p_sa_created_by)
+    RETURNING * INTO v_row;
+
+    PERFORM claimius.write_audit(p_app_id, 'insert', 'info', 'claimius.app_handover', v_row.id, v_app.sa_owner_id,
+                                 p_sa_created_by, format('app %s offered to prophet %s', v_app.slug, p_to_prophet));
+
+    RETURN jsonb_build_object('app_handover', to_jsonb(v_row));
+END;
+$$ LANGUAGE plpgsql;
+
+COMMENT ON FUNCTION claimius.offer_handover(UUID, TEXT, UUID) IS 'Offers an app this prophet is home for to an active peer. The app''s writes are refused here from the offer on. Returns {"app_handover": {...}}.';
+
+-- ----------------------------------------------------------------------------
+-- accept_handover
+-- The peer an app was offered to takes it. The offer reached this prophet
+-- on the app's feed from its home, so the acceptance is only possible here
+-- for an app this prophet mirrors from the prophet that offered it. The
+-- acceptance makes this prophet the home and travels back on the app's feed
+-- from here, where the old home learns it.
+-- ----------------------------------------------------------------------------
+
+CREATE OR REPLACE FUNCTION claimius.accept_handover(
+    p_handover_id   UUID,
+    p_sa_created_by UUID
+) RETURNS JSONB AS $$
+DECLARE
+    v_local TEXT := (SELECT slug FROM claimius.get_app());
+    v_row   claimius.app_handover;
+    v_app   claimius.samna_app;
+BEGIN
+    SELECT * INTO v_row FROM claimius.app_handover WHERE id = p_handover_id FOR UPDATE;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'accept_handover: handover % not found', p_handover_id USING ERRCODE = 'P0404';
+    END IF;
+
+    SELECT * INTO v_app FROM claimius.samna_app WHERE id = v_row.app_id FOR UPDATE;
+
+    IF v_row.status <> 'offered' THEN
+        RAISE EXCEPTION 'accept_handover: handover of app % is %', v_app.slug, v_row.status USING ERRCODE = 'P0409';
+    END IF;
+    IF v_row.to_prophet <> v_local THEN
+        RAISE EXCEPTION 'accept_handover: app % is offered to prophet %, not this one', v_app.slug, v_row.to_prophet
+            USING ERRCODE = 'P0409', HINT = v_row.to_prophet;
+    END IF;
+    IF v_app.home_prophet IS DISTINCT FROM v_row.from_prophet THEN
+        RAISE EXCEPTION 'accept_handover: app % is not mirrored from prophet %', v_app.slug, v_row.from_prophet
+            USING ERRCODE = 'P0409';
+    END IF;
+
+    UPDATE claimius.app_handover SET status = 'accepted' WHERE id = v_row.id RETURNING * INTO v_row;
+    UPDATE claimius.samna_app SET home_prophet = NULL WHERE id = v_row.app_id;
+
+    PERFORM claimius.write_audit(v_row.app_id, 'update', 'info', 'claimius.app_handover', v_row.id, v_app.sa_owner_id,
+                                 p_sa_created_by, format('app %s accepted from prophet %s', v_app.slug, v_row.from_prophet));
+
+    RETURN jsonb_build_object('app_handover', to_jsonb(v_row));
+END;
+$$ LANGUAGE plpgsql;
+
+COMMENT ON FUNCTION claimius.accept_handover(UUID, UUID) IS 'Accepts a handover offered to this prophet by the home of an app it mirrors, and makes this prophet the app''s home. Returns {"app_handover": {...}}.';
+
+-- ----------------------------------------------------------------------------
+-- _check_peer_row
+-- Whether a row a peer's feed carries may apply here. Ids are random, so a
+-- row id held here by another app, or by an app another prophet decides, is
+-- a collision: the row is refused rather than merged. NULL when the row may
+-- apply, otherwise the reason.
+-- ----------------------------------------------------------------------------
+
+CREATE OR REPLACE FUNCTION claimius._check_peer_row(
+    p_prophet       TEXT,
+    p_app_slug      TEXT,
+    p_event_type    TEXT,
+    p_payload       JSONB
+) RETURNS TEXT AS $$
+DECLARE
+    v_id        UUID := (p_payload ->> 'id')::UUID;
+    v_app       claimius.samna_app;
+    v_home      TEXT;
+    v_other     UUID;
+BEGIN
+    SELECT * INTO v_app FROM claimius.samna_app WHERE slug = p_app_slug;
+    v_home := claimius.get_app_home(v_app.id);
+
+    IF p_event_type = 'claimius.samna_app' THEN
+        IF p_payload ->> 'slug' IS DISTINCT FROM p_app_slug THEN
+            RETURN format('the feed of app %s carries app %s', p_app_slug, p_payload ->> 'slug');
+        END IF;
+        IF v_app.id IS NOT NULL AND v_app.id <> v_id THEN
+            RETURN format('slug %s is held here by app %s', p_app_slug, v_app.id);
+        END IF;
+        IF v_app.id IS NULL AND EXISTS (SELECT 1 FROM claimius.samna_app WHERE id = v_id) THEN
+            RETURN format('id %s is held here by another app', v_id);
+        END IF;
+    ELSIF v_app.id IS NULL THEN
+        RETURN format('app %s is not mirrored here', p_app_slug);
+    END IF;
+
+    IF v_app.id IS NOT NULL AND v_home IS DISTINCT FROM p_prophet THEN
+        RETURN format('app %s is decided by %s, not prophet %s', p_app_slug, coalesce(v_home, 'this prophet'), p_prophet);
+    END IF;
+
+    IF p_event_type IN ('claimius.organization', 'claimius.location') THEN
+        SELECT ao.app_id INTO v_other
+        FROM claimius.app_object ao
+        WHERE ao.object_type = p_event_type
+          AND ao.object_id = v_id
+          AND ao.sa_deleted_at IS NULL
+          AND claimius.get_app_home(ao.app_id) IS DISTINCT FROM p_prophet
+        LIMIT 1;
+        IF v_other IS NOT NULL THEN
+            RETURN format('%s %s is held here by app %s of another home', p_event_type, v_id, v_other);
+        END IF;
+    ELSIF p_event_type NOT IN ('claimius.samna_app', 'claimius.app_handover') THEN
+        EXECUTE format('SELECT app_id FROM claimius.%I WHERE id = $1', split_part(p_event_type, '.', 2))
+            INTO v_other USING v_id;
+        IF v_other IS NOT NULL AND v_other <> v_app.id THEN
+            RETURN format('%s %s is held here by app %s', p_event_type, v_id, v_other);
+        END IF;
+    ELSIF p_event_type = 'claimius.app_handover' THEN
+        SELECT h.app_id INTO v_other FROM claimius.app_handover h WHERE h.id = v_id;
+        IF v_other IS NOT NULL AND v_other <> v_app.id THEN
+            RETURN format('%s %s is held here by app %s', p_event_type, v_id, v_other);
+        END IF;
+    END IF;
+
+    RETURN NULL;
+END;
+$$ LANGUAGE plpgsql STABLE;
+
+COMMENT ON FUNCTION claimius._check_peer_row(TEXT, TEXT, TEXT, JSONB) IS 'Reason a row from a peer''s feed of an app is refused, or NULL when it may apply: the app must be decided by that peer, and the row id must not be held here by another app or by an app another prophet decides.';
+
+-- ----------------------------------------------------------------------------
+-- apply_peer_event
+-- Applies one row of a peer's feed of an app this prophet mirrors, under
+-- replay_mode, in the shape the feed carries it. A colliding row is refused
+-- and recorded in peer_collision. An organization or location is linked to
+-- the mirrored app; its delete is the app's unlink. The app row keeps the
+-- peer as its home. A handover this prophet offered comes back accepted on
+-- the new home's feed, and moves the app's home there. Returns false when
+-- the row was refused.
+-- ----------------------------------------------------------------------------
+
+CREATE OR REPLACE FUNCTION claimius.apply_peer_event(
+    p_prophet       TEXT,
+    p_app_slug      TEXT,
+    p_operation     TEXT,
+    p_event_type    TEXT,
+    p_payload       JSONB
+) RETURNS BOOLEAN AS $$
+DECLARE
+    v_local     TEXT := (SELECT slug FROM claimius.get_app());
+    v_payload   JSONB := p_payload - 'txid';
+    v_id        UUID := (p_payload ->> 'id')::UUID;
+    v_table     TEXT := split_part(p_event_type, '.', 2);
+    v_app_id    UUID;
+    v_held      claimius.app_handover;
+    v_reason    TEXT;
+    v_cols      TEXT;
+    v_new       TEXT;
+    v_old       TEXT;
+    v_row       JSONB;
+    v_changed   BOOLEAN := TRUE;
+BEGIN
+    IF NOT claimius.in_replay_mode() THEN
+        RAISE EXCEPTION 'apply_peer_event: a peer''s feed applies under replay_mode';
+    END IF;
+    IF p_event_type NOT IN ('claimius.samna_app', 'claimius.app_handover', 'claimius.organization', 'claimius.location',
+                            'claimius.samna_user', 'claimius.claim', 'claimius.user_claim', 'claimius.claim_object',
+                            'claimius.samna_client', 'claimius.samna_secret', 'claimius.object_field',
+                            'claimius.user_field', 'claimius.user_relation') THEN
+        RAISE EXCEPTION 'apply_peer_event: unknown event type %', p_event_type;
+    END IF;
+    IF p_operation NOT IN ('upsert', 'delete') THEN
+        RAISE EXCEPTION 'apply_peer_event: unknown operation %', p_operation;
+    END IF;
+
+    IF p_event_type = 'claimius.app_handover' THEN
+        SELECT * INTO v_held FROM claimius.app_handover WHERE id = v_id;
+        IF FOUND AND v_held.from_prophet = v_local AND v_held.to_prophet = p_prophet
+            AND v_held.status = 'offered' AND p_payload ->> 'status' = 'accepted' THEN
+            UPDATE claimius.app_handover SET status = 'accepted', sa_updated_at = (p_payload ->> 'sa_updated_at')::TIMESTAMPTZ
+            WHERE id = v_id;
+            UPDATE claimius.samna_app SET home_prophet = p_prophet WHERE id = v_held.app_id;
+            RETURN TRUE;
+        END IF;
+        IF FOUND AND v_held.status = p_payload ->> 'status' AND v_held.from_prophet = p_payload ->> 'from_prophet'
+            AND v_held.to_prophet = p_payload ->> 'to_prophet' AND v_held.app_id = (p_payload ->> 'app_id')::UUID THEN
+            RETURN TRUE;
+        END IF;
+        IF FOUND THEN
+            v_reason := format('handover %s held here as %s from %s to %s', v_id, v_held.status, v_held.from_prophet, v_held.to_prophet);
+        ELSIF p_payload ->> 'from_prophet' IS DISTINCT FROM p_prophet THEN
+            v_reason := format('prophet %s carries a handover from %s', p_prophet, p_payload ->> 'from_prophet');
+        END IF;
+    END IF;
+
+    v_reason := coalesce(v_reason, claimius._check_peer_row(p_prophet, p_app_slug, p_event_type, v_payload));
+    IF v_reason IS NOT NULL THEN
+        INSERT INTO claimius.peer_collision (prophet, app_slug, object_type, object_id, reason, payload)
+        VALUES (p_prophet, p_app_slug, p_event_type, v_id, v_reason, p_payload);
+        RETURN FALSE;
+    END IF;
+
+    SELECT id INTO v_app_id FROM claimius.samna_app WHERE slug = p_app_slug;
+
+    IF p_operation = 'delete' THEN
+        IF v_table IN ('organization', 'location') THEN
+            PERFORM claimius.unlink_app_object(v_app_id, p_event_type, v_id);
+            RETURN TRUE;
+        END IF;
+        EXECUTE format('DELETE FROM claimius.%I t WHERE t.id = $1 RETURNING to_jsonb(t)', v_table) INTO v_row USING v_id;
+        v_changed := v_row IS NOT NULL;
+    ELSE
+        IF v_table = 'samna_app' THEN
+            v_payload := v_payload || jsonb_build_object('home_prophet', p_prophet);
+        ELSIF v_table = 'samna_user' THEN
+            UPDATE claimius.samna_user SET sa_deleted_at = now()
+            WHERE user_id = (v_payload ->> 'user_id')::UUID
+              AND app_id = v_app_id
+              AND id <> v_id
+              AND sa_deleted_at IS NULL;
+        ELSIF v_table IN ('organization', 'location') THEN
+            PERFORM claimius.link_app_object(v_app_id, p_event_type, v_id, (v_payload ->> 'sa_created_by')::UUID);
+        END IF;
+
+        SELECT string_agg(quote_ident(a.attname), ', ' ORDER BY a.attnum),
+               string_agg('EXCLUDED.' || quote_ident(a.attname), ', ' ORDER BY a.attnum),
+               string_agg('t.' || quote_ident(a.attname), ', ' ORDER BY a.attnum)
+        INTO v_cols, v_new, v_old
+        FROM pg_attribute a
+        WHERE a.attrelid = format('claimius.%I', v_table)::REGCLASS
+          AND a.attnum > 0
+          AND NOT a.attisdropped
+          AND a.attgenerated = ''
+          AND v_payload ? a.attname::TEXT;
+
+        EXECUTE format(
+            'INSERT INTO claimius.%1$I AS t (%2$s) SELECT %2$s FROM jsonb_populate_record(NULL::claimius.%1$I, $1) '
+            'ON CONFLICT (id) DO UPDATE SET (%2$s) = ROW(%3$s) WHERE ROW(%4$s) IS DISTINCT FROM ROW(%3$s) '
+            'RETURNING to_jsonb(t)',
+            v_table, v_cols, v_new, v_old)
+            INTO v_row USING v_payload;
+        v_changed := v_row IS NOT NULL;
+    END IF;
+
+    IF NOT v_changed THEN
+        RETURN TRUE;
+    END IF;
+
+    IF v_table = 'claim' THEN
+        PERFORM claimius._raise_claim_diff(v_app_id, v_id);
+    ELSIF v_table = 'user_claim' THEN
+        PERFORM claimius._raise_claim_diff(v_app_id, (v_row ->> 'claim_id')::UUID, (v_row ->> 'user_id')::UUID);
+    ELSIF v_table = 'claim_object' THEN
+        PERFORM claimius._raise_claim_diff(v_app_id, (v_row ->> 'claim_id')::UUID);
+        IF v_row ->> 'object_type' = 'claimius.claim' THEN
+            PERFORM claimius._raise_claim_diff(v_app_id, (v_row ->> 'object_id')::UUID);
+        END IF;
+    END IF;
+
+    RETURN TRUE;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = claimius, pg_temp;
+
+COMMENT ON FUNCTION claimius.apply_peer_event(TEXT, TEXT, TEXT, TEXT, JSONB) IS 'Applies one row of a peer''s feed of a mirrored app under replay_mode, refusing and recording a colliding id in peer_collision. Returns false for a refused row.';

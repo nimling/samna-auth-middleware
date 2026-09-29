@@ -2,7 +2,7 @@
 layout: doc
 title: Sync in Go
 description: The /sam/sync routes on the prophet, the pull loop SyncStart on the disciple, pages applied in one transaction, backoff, reconciling from a snapshot, and the drain between pulls.
-tags: SyncStart, LeadSync, PullSync, PullSnapshot, ApplyPage, ApplyPayload, advisory lock, /sam/sync, backoff, snapshot, drain
+tags: SyncStart, PeerSyncStart, Replica, Move, LeadSync, PullSync, PullSnapshot, ApplyPage, ApplyPayload, binding, SAuth-Prophet, SAuth-Home, advisory lock, /sam/sync, backoff, snapshot, drain
 lastUpdated: true
 ---
 
@@ -32,6 +32,14 @@ A request for the page after a cursor is the disciple's proof that it applied ev
 5. A cursor above the prophet's sequence for the app, a `409` answer to a pull, or ten failed pulls trigger a fresh snapshot, and the snapshot's transaction writes an audit row naming the cursor: none of them recovers by retrying. The `409` is the prophet's judgement that the snapshot is cheaper than the backlog, which holds once the backlog exceeds the app's source rows; see [Sync](../sync.md#catch-up). An empty pull is the normal answer of an idle app and triggers nothing.
 
 A snapshot upserts; it never deletes a row the prophet did not send. In debug mode the loop does not start.
+
+## One prophet per replica
+
+The loop runs on a `sam.Replica`: `sam.Disciple()` for the disciple database, or a prophet mirroring an app of a peer. A replica relies on exactly one prophet. Every pull names it in `prophet`, and the prophet answers with its own slug in `SAuth-Prophet`; the disciple keeps both in `disciple_state.prophet` and `disciple_state.endpoint`, binds on its first answer, and routes its writes there through `client.Bind` on every pod. A prophet serves the pull only when `check_sync_home` agrees: it is the app's home and the consumer is unbound, bound to it, or bound to a prophet that handed the app over to it and saw the handover accepted. Otherwise it answers `409` with the prophet the consumer stays with in `SAuth-Home`, which the client returns as `client.ErrNotHome`, never as a snapshot.
+
+When the configured endpoint differs from the bound one, `Replica.Move` asks the configured prophet for its snapshot, naming the bound prophet, at most once a minute. A refusal keeps the disciple on its prophet, cursor and replica untouched; an answer is applied as the snapshot and rebinds the disciple, cursor included, in one transaction. A page answered by a prophet other than the bound one sends the disciple to the snapshot instead of applying it.
+
+`sam.PeerSyncStart(ctx, db)` runs the same loop on a prophet for every row of `prophet_peer`, one leader per row, as a consumer named by the row id and authenticated as the mirrored app. It pulls with `peer=true`, which serves the column shaped `get_peer_snapshot` and the app's handovers, and applies each row through `claimius.apply_peer_event` under `replay_mode`. It pulls while the row is active and the peer decides the app, and stops once this prophet accepts the app. No drain runs there; the prophet schedules its own.
 
 ## Cost
 

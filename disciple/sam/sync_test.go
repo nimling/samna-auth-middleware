@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/nimling/samna-auth-middleware/client"
 	sam "github.com/nimling/samna-auth-middleware/disciple/sam"
 	"github.com/uptrace/bun"
@@ -103,7 +104,8 @@ func TestGetSyncPageAsksTheProphetToHoldAndNamesTheConsumer(t *testing.T) {
 	defer prophet.Close()
 	t.Setenv("SAUTH_ENDPOINT", prophet.URL)
 
-	payloads, err := sam.GetSyncPage(context.Background(), "70000000-0000-4000-8000-000000000001", client.SyncCursor{Txid: 3, Seq: 7})
+	state := sam.State{ID: uuid.MustParse("70000000-0000-4000-8000-000000000001"), Cursor: client.SyncCursor{Txid: 3, Seq: 7}}
+	payloads, _, err := (&sam.Replica{}).GetSyncPage(context.Background(), state)
 	if err != nil {
 		t.Fatalf("pull: %v", err)
 	}
@@ -122,7 +124,41 @@ func TestGetSyncPageTurnsAConflictIntoASnapshot(t *testing.T) {
 	defer prophet.Close()
 	t.Setenv("SAUTH_ENDPOINT", prophet.URL)
 
-	if _, err := sam.GetSyncPage(context.Background(), "", client.SyncCursor{Seq: 7}); !errors.Is(err, sam.ErrSnapshotRequired) {
+	if _, _, err := (&sam.Replica{}).GetSyncPage(context.Background(), sam.State{Cursor: client.SyncCursor{Seq: 7}}); !errors.Is(err, sam.ErrSnapshotRequired) {
 		t.Fatalf("a 409 from the prophet must require the snapshot, got %v", err)
+	}
+}
+
+func TestGetSyncPageNamesTheBoundProphetAndWhoAnswered(t *testing.T) {
+	var bound string
+	prophet := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		bound = r.URL.Query().Get("prophet")
+		w.Header().Set(client.HeaderProphet, "home")
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"data":[],"count":0}`))
+	}))
+	defer prophet.Close()
+	t.Setenv("SAUTH_ENDPOINT", prophet.URL)
+
+	_, answered, err := (&sam.Replica{}).GetSyncPage(context.Background(), sam.State{Prophet: "home", Endpoint: prophet.URL})
+	if err != nil {
+		t.Fatalf("pull: %v", err)
+	}
+	if bound != "home" || answered != "home" {
+		t.Fatalf("the pull must name the bound prophet and report who answered, got %q and %q", bound, answered)
+	}
+}
+
+func TestGetSyncPageKeepsARefusalNamingTheHomeApartFromASnapshot(t *testing.T) {
+	prophet := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set(client.HeaderHome, "next")
+		w.WriteHeader(http.StatusConflict)
+	}))
+	defer prophet.Close()
+	t.Setenv("SAUTH_ENDPOINT", prophet.URL)
+
+	_, _, err := (&sam.Replica{}).GetSyncPage(context.Background(), sam.State{Prophet: "old"})
+	if !errors.Is(err, client.ErrNotHome) || errors.Is(err, sam.ErrSnapshotRequired) {
+		t.Fatalf("a prophet refusing the disciple must not send it to the snapshot, got %v", err)
 	}
 }

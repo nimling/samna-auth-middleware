@@ -38,11 +38,8 @@ DECLARE
     v_op            TEXT;
     v_actor         UUID;
     v_structural    BOOLEAN := TRUE;
+    v_replay        BOOLEAN := claimius.in_replay_mode();
 BEGIN
-    IF claimius.in_replay_mode() THEN
-        RETURN coalesce(NEW, OLD);
-    END IF;
-
     v_object_type := TG_TABLE_SCHEMA || '.' || TG_TABLE_NAME;
     v_op := TG_OP;
 
@@ -83,8 +80,10 @@ BEGIN
 
     -- The acting user materializes immediately so a writer reads its own work
     -- back within the same request. Every other user settles when it reads.
+    -- A row a peer's feed carries under replay has no local actor, so only
+    -- its area is raised.
     FOREACH v_app_id IN ARRAY v_app_ids LOOP
-        v_actor := claimius._actor_user_for_row(v_app_id, v_object_type, coalesce(NEW, OLD));
+        v_actor := CASE WHEN v_replay THEN NULL ELSE claimius._actor_user_for_row(v_app_id, v_object_type, coalesce(NEW, OLD)) END;
         IF v_actor IS NOT NULL THEN
             PERFORM claimius.recompute_user_object(v_app_id, v_actor, v_object_type, v_obj_id);
         END IF;
@@ -239,10 +238,6 @@ COMMENT ON FUNCTION claimius._retree_object(TEXT, UUID, JSONB, JSONB) IS 'Moves 
 CREATE OR REPLACE FUNCTION claimius.calc_object_trees()
     RETURNS TRIGGER AS $$
 BEGIN
-    IF claimius.in_replay_mode() THEN
-        RETURN coalesce(NEW, OLD);
-    END IF;
-
     PERFORM claimius._retree_object(
             TG_TABLE_SCHEMA || '.' || TG_TABLE_NAME, (coalesce(NEW, OLD)).id, to_jsonb(OLD), to_jsonb(NEW));
     RETURN coalesce(NEW, OLD);
@@ -278,12 +273,9 @@ DECLARE
     v_old_parent    UUID;
     v_new_parent    UUID;
     v_actor         UUID;
+    v_replay        BOOLEAN := claimius.in_replay_mode();
     v_renamed       BOOLEAN := FALSE;
 BEGIN
-    IF claimius.in_replay_mode() THEN
-        RETURN coalesce(NEW, OLD);
-    END IF;
-
     v_object_type := TG_TABLE_SCHEMA || '.' || TG_TABLE_NAME;
     v_op := TG_OP;
 
@@ -304,7 +296,7 @@ BEGIN
 
     -- New organizations and locations inherit the app links of their owning
     -- organization so apps linked to a tree see rows added under it.
-    IF v_op = 'INSERT' AND v_object_type IN ('claimius.organization', 'claimius.location') THEN
+    IF v_op = 'INSERT' AND NOT v_replay AND v_object_type IN ('claimius.organization', 'claimius.location') THEN
         PERFORM claimius.link_app_object(a, v_object_type, v_obj_id, (to_jsonb(NEW) ->> 'sa_created_by')::UUID)
         FROM claimius.apps_for_object('claimius.organization', (to_jsonb(NEW) ->> 'sa_owner_id')::UUID) a
         WHERE (to_jsonb(NEW) ->> 'sa_owner_id')::UUID <> v_obj_id;
@@ -326,7 +318,7 @@ BEGIN
     END IF;
 
     -- Cross root reparenting is not allowed
-    IF v_op = 'UPDATE' AND v_old_root_id IS DISTINCT FROM v_root_id THEN
+    IF v_op = 'UPDATE' AND v_old_root_id IS DISTINCT FROM v_root_id AND NOT v_replay THEN
         RAISE EXCEPTION 'Cross root reparenting is not allowed. Use migrate_root() if absolutely required.';
     END IF;
 
@@ -343,7 +335,7 @@ BEGIN
         IF v_new_parent <> v_obj_id THEN
             PERFORM claimius._splice_subtree(v_tree, v_object_type, v_obj_id, v_root_id, v_new_parent);
         END IF;
-    ELSIF NOT v_was_active OR NOT EXISTS (
+    ELSIF NOT v_was_active OR v_old_root_id IS DISTINCT FROM v_root_id OR NOT EXISTS (
         SELECT 1 FROM claimius.inheritance_info e
         WHERE e.tree_type = v_tree
           AND e.descendant_type = v_object_type
@@ -386,9 +378,11 @@ BEGIN
 
     -- The acting user materializes immediately so a writer reads its own work
     -- back within the same request. One diff carries the row and its subtree,
-    -- and the closure walk runs once, inside the read that claims the area.
+    -- and the closure walk runs once, inside the read that claims the area. A
+    -- row a peer's feed carries under replay has no local actor, so only its
+    -- area is raised.
     FOREACH v_app_id IN ARRAY v_app_ids LOOP
-        v_actor := claimius._actor_user_for_row(v_app_id, v_object_type, coalesce(NEW, OLD));
+        v_actor := CASE WHEN v_replay THEN NULL ELSE claimius._actor_user_for_row(v_app_id, v_object_type, coalesce(NEW, OLD)) END;
         IF v_actor IS NOT NULL THEN
             PERFORM claimius.recompute_user_object(v_app_id, v_actor, v_object_type, v_obj_id);
         END IF;
@@ -769,6 +763,68 @@ END;
 $$ LANGUAGE plpgsql;
 
 COMMENT ON FUNCTION claimius.emit_app_object_sync_event() IS 'Trigger on app_object. Publishes the linked row to the app on link and its delete on unlink.';
+
+-- ----------------------------------------------------------------------------
+-- get_app_home
+-- The prophet that decides an app's writes when it is not this one: the
+-- app's home_prophet, or the peer this prophet offered the app to while the
+-- offer stands. NULL when this prophet decides them.
+-- ----------------------------------------------------------------------------
+
+CREATE OR REPLACE FUNCTION claimius.get_app_home(p_app_id UUID)
+    RETURNS TEXT AS $$
+    SELECT coalesce(a.home_prophet, h.to_prophet)
+    FROM claimius.samna_app a
+        LEFT JOIN claimius.app_handover h
+            ON h.app_id = a.id
+           AND h.status = 'offered'
+           AND a.home_prophet IS NULL
+    WHERE a.id = p_app_id;
+$$ LANGUAGE sql STABLE;
+
+COMMENT ON FUNCTION claimius.get_app_home(UUID) IS 'Slug of the prophet deciding the app''s writes when it is not this one: its home_prophet, or the target of this prophet''s standing handover offer. NULL when this prophet is the app''s home.';
+
+-- ----------------------------------------------------------------------------
+-- enforce_app_home
+-- Trigger on the source tables. A row of an app another prophet decides is
+-- written here only by the replay of that prophet's feed, so the app keeps a
+-- single writer. An organization or location belongs to the apps it is
+-- linked to, and is refused when any of them is decided elsewhere.
+-- ----------------------------------------------------------------------------
+
+CREATE OR REPLACE FUNCTION claimius.enforce_app_home()
+    RETURNS TRIGGER AS $$
+DECLARE
+    v_row   JSONB := to_jsonb(coalesce(NEW, OLD));
+    v_type  TEXT := TG_TABLE_SCHEMA || '.' || TG_TABLE_NAME;
+    v_home  TEXT;
+BEGIN
+    IF claimius.in_replay_mode() THEN
+        RETURN coalesce(NEW, OLD);
+    END IF;
+
+    IF v_row ? 'app_id' THEN
+        v_home := claimius.get_app_home((v_row ->> 'app_id')::UUID);
+    ELSE
+        SELECT claimius.get_app_home(ao.app_id) INTO v_home
+        FROM claimius.app_object ao
+        WHERE ao.object_type = v_type
+          AND ao.object_id = (v_row ->> 'id')::UUID
+          AND ao.sa_deleted_at IS NULL
+          AND claimius.get_app_home(ao.app_id) IS NOT NULL
+        LIMIT 1;
+    END IF;
+
+    IF v_home IS NOT NULL THEN
+        RAISE EXCEPTION '% % belongs to an app decided by prophet %, its writes go there', v_type, v_row ->> 'id', v_home
+            USING ERRCODE = 'P0409', HINT = v_home;
+    END IF;
+
+    RETURN coalesce(NEW, OLD);
+END;
+$$ LANGUAGE plpgsql;
+
+COMMENT ON FUNCTION claimius.enforce_app_home() IS 'Trigger on the source tables. Refuses, with SQLSTATE P0409 and the home in the hint, a write outside replay to a row of an app another prophet decides.';
 
 -- ----------------------------------------------------------------------------
 -- notify_sync_event

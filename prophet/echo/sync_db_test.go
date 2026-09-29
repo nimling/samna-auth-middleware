@@ -194,3 +194,59 @@ func TestSyncEventsSendsAStaleCursorToTheSnapshot(t *testing.T) {
 		t.Fatalf("a cursor at the head must be served, got %d", rec.Code)
 	}
 }
+
+func TestSyncEventsServesAConsumerBoundElsewhereOnlyUnderAnAgreedHandover(t *testing.T) {
+	appID, _ := getGrantFixture(t)
+	head := getAppHead(t, appID)
+
+	rec := getSyncPage(appID, head, "prophet=gotest_old")
+	if rec.Code != http.StatusConflict || rec.Header().Get(client.HeaderHome) != "gotest_old" {
+		t.Fatalf("a consumer bound to another prophet without a handover must be refused and keep it, got %d %q", rec.Code, rec.Header().Get(client.HeaderHome))
+	}
+	rec = getSyncPage(appID, head, "prophet=gotest")
+	if rec.Code != http.StatusOK || rec.Header().Get(client.HeaderProphet) != "gotest" {
+		t.Fatalf("a consumer bound here must be served and told the prophet's slug, got %d %q", rec.Code, rec.Header().Get(client.HeaderProphet))
+	}
+
+	var handover uuid.UUID
+	if err := psdb.Instance().NewRaw(`
+		INSERT INTO claimius.app_handover (app_id, from_prophet, to_prophet, status, sa_created_by)
+		VALUES (?, 'gotest_old', 'gotest', 'accepted', ?) RETURNING id
+	`, appID, grantUser).Scan(context.Background(), &handover); err != nil {
+		t.Fatalf("record handover: %v", err)
+	}
+	defer psdb.Instance().ExecContext(context.Background(), `DELETE FROM claimius.app_handover WHERE id = ?`, handover)
+
+	if rec := getSyncPage(appID, getAppHead(t, appID), "prophet=gotest_old"); rec.Code != http.StatusOK {
+		t.Fatalf("a consumer of the prophet that handed the app over must be served once the handover is agreed, got %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestAppHomeRefusesAWriteForAnAppAnotherProphetDecides(t *testing.T) {
+	appID, _ := getGrantFixture(t)
+	ctx := context.Background()
+	if _, err := psdb.Instance().ExecContext(ctx, `UPDATE claimius.samna_app SET home_prophet = 'gotest_elsewhere' WHERE id = ?`, otherApp); err != nil {
+		t.Fatalf("mirror app: %v", err)
+	}
+	defer psdb.Instance().ExecContext(ctx, `UPDATE claimius.samna_app SET home_prophet = NULL WHERE id = ?`, otherApp)
+
+	write := func(method string, app uuid.UUID) (*httptest.ResponseRecorder, bool) {
+		reached := false
+		rec := httptest.NewRecorder()
+		c := echo.New().NewContext(httptest.NewRequest(method, "/", nil), rec)
+		c.Set("app_id", app)
+		c.Set("request_id", uuid.New())
+		_ = smw.AppHome(func(c echo.Context) error { reached = true; return c.NoContent(http.StatusOK) })(c)
+		return rec, reached
+	}
+
+	if rec, reached := write(http.MethodPost, otherApp); reached || rec.Code != http.StatusConflict || rec.Header().Get(client.HeaderHome) != "gotest_elsewhere" {
+		t.Fatalf("a write for an app a peer decides must be refused naming the peer, got %d %q reached=%v", rec.Code, rec.Header().Get(client.HeaderHome), reached)
+	}
+	if _, reached := write(http.MethodGet, otherApp); !reached {
+		t.Fatal("a read of a mirrored app must pass")
+	}
+	if _, reached := write(http.MethodPatch, appID); !reached {
+		t.Fatal("a write for an app decided here must pass")
+	}
+}

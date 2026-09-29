@@ -123,6 +123,29 @@ type SyncSnapshotResponse struct {
 	client.SyncCursor
 }
 
+// checkSyncHome answers whether this prophet serves the app's feed to the
+// consumer, which names the prophet it is bound to. A consumer this prophet
+// does not serve is refused with 409 and the prophet it stays with in
+// HeaderHome; a served one is told the slug this prophet answers under, the
+// one it binds to. It reports whether the request was refused.
+func checkSyncHome(ctx echo.Context, appID uuid.UUID) (bool, error) {
+	var home struct {
+		Prophet string         `bun:"prophet"`
+		Home    sql.NullString `bun:"home"`
+	}
+	if err := sdb.Instance().NewRaw("SELECT (SELECT slug FROM claimius.get_app()) AS prophet, claimius.check_sync_home(?, ?) AS home",
+		appID, ctx.QueryParam("prophet")).Scan(ctx.Request().Context(), &home); err != nil {
+		ctx.Logger().Errorf("sync home %s: %v", appID, err)
+		return true, respond.Error(ctx, http.StatusInternalServerError, "Internal server error")
+	}
+	if home.Home.Valid {
+		ctx.Response().Header().Set(client.HeaderHome, home.Home.String)
+		return true, respond.Error(ctx, http.StatusConflict, "The app's feed is served to this consumer by prophet "+home.Home.String)
+	}
+	ctx.Response().Header().Set(client.HeaderProphet, home.Prophet)
+	return false, nil
+}
+
 func getSyncConsumer(ctx echo.Context) (uuid.UUID, error) {
 	raw := ctx.QueryParam("consumer")
 	if raw == "" {
@@ -136,6 +159,15 @@ func GetSyncSnapshot(ctx echo.Context) error {
 	consumerID, err := getSyncConsumer(ctx)
 	if err != nil {
 		return respond.Error(ctx, http.StatusBadRequest, "Bad request")
+	}
+	peer := false
+	if err := echo.QueryParamsBinder(ctx).Bool("peer", &peer).BindError(); err != nil {
+		return respond.Error(ctx, http.StatusBadRequest, "Bad request")
+	}
+	if appID != uuid.Nil {
+		if refused, err := checkSyncHome(ctx, appID); refused {
+			return err
+		}
 	}
 
 	tables := []struct {
@@ -161,32 +193,40 @@ func GetSyncSnapshot(ctx echo.Context) error {
 
 	reqCtx := ctx.Request().Context()
 	err = sdb.Instance().RunInTx(reqCtx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true}, func(txCtx context.Context, tx bun.Tx) error {
-		for _, t := range tables {
-			q := tx.NewSelect().Model(t.model)
-			if t.eventType == "claimius.organization" || t.eventType == "claimius.location" {
-				if appID != uuid.Nil {
-					q = q.Where("id IN (SELECT claimius.app_object_ids(?, ?))", appID, t.eventType)
+		if peer {
+			if err := tx.NewRaw("SELECT 'upsert' AS operation, event_type, payload FROM claimius.get_peer_snapshot(?)", appID).
+				Scan(txCtx, &records); err != nil {
+				ctx.Logger().Errorf("peer snapshot %s: %v", appID, err)
+				return err
+			}
+		} else {
+			for _, t := range tables {
+				q := tx.NewSelect().Model(t.model)
+				if t.eventType == "claimius.organization" || t.eventType == "claimius.location" {
+					if appID != uuid.Nil {
+						q = q.Where("id IN (SELECT claimius.app_object_ids(?, ?))", appID, t.eventType)
+					}
+				} else if t.filterApp && appID != uuid.Nil {
+					q = q.Where("app_id = ?", appID)
 				}
-			} else if t.filterApp && appID != uuid.Nil {
-				q = q.Where("app_id = ?", appID)
-			}
-			if err := q.Scan(txCtx); err != nil {
-				ctx.Logger().Errorf("snapshot %s: %v", t.eventType, err)
-				return err
-			}
+				if err := q.Scan(txCtx); err != nil {
+					ctx.Logger().Errorf("snapshot %s: %v", t.eventType, err)
+					return err
+				}
 
-			items, err := sauth.MarshalRows(t.model)
-			if err != nil {
-				ctx.Logger().Errorf("snapshot marshal %s: %v", t.eventType, err)
-				return err
-			}
+				items, err := sauth.MarshalRows(t.model)
+				if err != nil {
+					ctx.Logger().Errorf("snapshot marshal %s: %v", t.eventType, err)
+					return err
+				}
 
-			for _, item := range items {
-				records = append(records, SyncPayload{
-					Operation: "upsert",
-					EventType: t.eventType,
-					Payload:   item,
-				})
+				for _, item := range items {
+					records = append(records, SyncPayload{
+						Operation: "upsert",
+						EventType: t.eventType,
+						Payload:   item,
+					})
+				}
 			}
 		}
 
@@ -218,14 +258,17 @@ func GetSyncSnapshot(ctx echo.Context) error {
 // GetSyncEvents serves the page of the app's events after the cursor. With
 // wait set it holds an empty answer open up to wait seconds, at most
 // SyncHoldMax, and answers the moment an event of the app commits. A cursor the feed cannot
-// serve answers 409 and the consumer takes the snapshot.
+// serve answers 409 and the consumer takes the snapshot. A consumer this prophet
+// does not serve the app to answers 409 naming the prophet it stays with. A
+// peer prophet is served the app's handovers too.
 func GetSyncEvents(ctx echo.Context) error {
 	seq, err := client.ParseSyncCursor(ctx.Param("cursor"))
 	if err != nil {
 		return respond.Error(ctx, http.StatusBadRequest, "Bad request")
 	}
 	wait := 0
-	if err := echo.QueryParamsBinder(ctx).Int("wait", &wait).BindError(); err != nil {
+	peer := false
+	if err := echo.QueryParamsBinder(ctx).Int("wait", &wait).Bool("peer", &peer).BindError(); err != nil {
 		return respond.Error(ctx, http.StatusBadRequest, "Bad request")
 	}
 	consumerID, err := getSyncConsumer(ctx)
@@ -236,6 +279,9 @@ func GetSyncEvents(ctx echo.Context) error {
 	appID, _ := ctx.Get("app_id").(uuid.UUID)
 	if appID == uuid.Nil {
 		return respond.Error(ctx, http.StatusUnauthorized, "Unauthorized")
+	}
+	if refused, err := checkSyncHome(ctx, appID); refused {
+		return err
 	}
 
 	reqCtx := ctx.Request().Context()
@@ -262,7 +308,7 @@ func GetSyncEvents(ctx echo.Context) error {
 	if hold > SyncHoldMax {
 		hold = SyncHoldMax
 	}
-	events, err := getSyncPage(reqCtx, sdb.Instance(), appID, seq, hold)
+	events, err := getSyncPage(reqCtx, sdb.Instance(), appID, seq, hold, peer)
 	if err != nil {
 		ctx.Logger().Errorf("sync events: %v", err)
 		return respond.Error(ctx, http.StatusInternalServerError, "Internal server error")
@@ -281,7 +327,7 @@ func GetSyncEvents(ctx echo.Context) error {
 	return respond.JSON(ctx, http.StatusOK, payloads, len(payloads))
 }
 
-func getSyncPage(ctx context.Context, d *shared.DB, appID uuid.UUID, seq client.SyncCursor, hold time.Duration) ([]SyncEvent, error) {
+func getSyncPage(ctx context.Context, d *shared.DB, appID uuid.UUID, seq client.SyncCursor, hold time.Duration, peer bool) ([]SyncEvent, error) {
 	var wake <-chan struct{}
 	if hold > 0 {
 		if feed := getSyncFeed(d); feed != nil {
@@ -295,7 +341,7 @@ func getSyncPage(ctx context.Context, d *shared.DB, appID uuid.UUID, seq client.
 	pending := false
 	for {
 		var events []SyncEvent
-		if err := d.NewRaw("SELECT * FROM claimius.get_sync_events(?, ?, ?, 1000)", appID, seq.Txid, seq.Seq).Scan(ctx, &events); err != nil {
+		if err := d.NewRaw("SELECT * FROM claimius.get_sync_events(?, ?, ?, 1000, ?)", appID, seq.Txid, seq.Seq, peer).Scan(ctx, &events); err != nil {
 			return nil, err
 		}
 		if len(events) > 0 || wake == nil {

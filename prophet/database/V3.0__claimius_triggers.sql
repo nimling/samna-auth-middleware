@@ -19,6 +19,9 @@
 --   tg_emit_sync_event      AFTER INSERT/UPDATE/DELETE: on the source tables
 --                           and app_object. Publishes to sync_event. The
 --                           derived user_object and user_users never publish.
+--   tg_enforce_app_home     BEFORE INSERT/UPDATE/DELETE: on the source
+--                           tables. Refuses a write outside replay to a row
+--                           of an app another prophet decides.
 --   tg_count_user_users_*   AFTER INSERT/DELETE per statement: on user_object.
 --                           Counts the pairs entering and leaving into
 --                           user_users.
@@ -72,6 +75,14 @@ CREATE TRIGGER tg_update_timestamp BEFORE UPDATE ON claimius.audit
 
 DROP TRIGGER IF EXISTS tg_update_timestamp ON claimius.user_relation;
 CREATE TRIGGER tg_update_timestamp BEFORE UPDATE ON claimius.user_relation
+    FOR EACH ROW EXECUTE FUNCTION claimius.update_timestamp();
+
+DROP TRIGGER IF EXISTS tg_update_timestamp ON claimius.prophet_peer;
+CREATE TRIGGER tg_update_timestamp BEFORE UPDATE ON claimius.prophet_peer
+    FOR EACH ROW EXECUTE FUNCTION claimius.update_timestamp();
+
+DROP TRIGGER IF EXISTS tg_update_timestamp ON claimius.app_handover;
+CREATE TRIGGER tg_update_timestamp BEFORE UPDATE ON claimius.app_handover
     FOR EACH ROW EXECUTE FUNCTION claimius.update_timestamp();
 
 DROP TRIGGER IF EXISTS tg_update_timestamp ON claimius.object_field;
@@ -273,6 +284,64 @@ CREATE TRIGGER tg_emit_sync_event AFTER INSERT OR UPDATE OR DELETE ON claimius.u
 DROP TRIGGER IF EXISTS tg_emit_sync_event ON claimius.user_relation;
 CREATE TRIGGER tg_emit_sync_event AFTER INSERT OR UPDATE OR DELETE ON claimius.user_relation
     FOR EACH ROW EXECUTE FUNCTION claimius.emit_sync_event();
+
+DROP TRIGGER IF EXISTS tg_emit_sync_event ON claimius.app_handover;
+CREATE TRIGGER tg_emit_sync_event AFTER INSERT OR UPDATE OR DELETE ON claimius.app_handover
+    FOR EACH ROW EXECUTE FUNCTION claimius.emit_sync_event();
+
+-- ----------------------------------------------------------------------------
+-- Home enforcement: BEFORE INSERT/UPDATE/DELETE on the source tables. A row
+-- of an app another prophet decides is written only by the replay of that
+-- prophet's feed.
+-- ----------------------------------------------------------------------------
+
+DROP TRIGGER IF EXISTS tg_enforce_app_home ON claimius.samna_user;
+CREATE TRIGGER tg_enforce_app_home BEFORE INSERT OR UPDATE OR DELETE ON claimius.samna_user
+    FOR EACH ROW EXECUTE FUNCTION claimius.enforce_app_home();
+
+DROP TRIGGER IF EXISTS tg_enforce_app_home ON claimius.samna_client;
+CREATE TRIGGER tg_enforce_app_home BEFORE INSERT OR UPDATE OR DELETE ON claimius.samna_client
+    FOR EACH ROW EXECUTE FUNCTION claimius.enforce_app_home();
+
+DROP TRIGGER IF EXISTS tg_enforce_app_home ON claimius.samna_secret;
+CREATE TRIGGER tg_enforce_app_home BEFORE INSERT OR UPDATE OR DELETE ON claimius.samna_secret
+    FOR EACH ROW EXECUTE FUNCTION claimius.enforce_app_home();
+
+DROP TRIGGER IF EXISTS tg_enforce_app_home ON claimius.organization;
+CREATE TRIGGER tg_enforce_app_home BEFORE INSERT OR UPDATE OR DELETE ON claimius.organization
+    FOR EACH ROW EXECUTE FUNCTION claimius.enforce_app_home();
+
+DROP TRIGGER IF EXISTS tg_enforce_app_home ON claimius.location;
+CREATE TRIGGER tg_enforce_app_home BEFORE INSERT OR UPDATE OR DELETE ON claimius.location
+    FOR EACH ROW EXECUTE FUNCTION claimius.enforce_app_home();
+
+DROP TRIGGER IF EXISTS tg_enforce_app_home ON claimius.claim;
+CREATE TRIGGER tg_enforce_app_home BEFORE INSERT OR UPDATE OR DELETE ON claimius.claim
+    FOR EACH ROW EXECUTE FUNCTION claimius.enforce_app_home();
+
+DROP TRIGGER IF EXISTS tg_enforce_app_home ON claimius.user_claim;
+CREATE TRIGGER tg_enforce_app_home BEFORE INSERT OR UPDATE OR DELETE ON claimius.user_claim
+    FOR EACH ROW EXECUTE FUNCTION claimius.enforce_app_home();
+
+DROP TRIGGER IF EXISTS tg_enforce_app_home ON claimius.claim_object;
+CREATE TRIGGER tg_enforce_app_home BEFORE INSERT OR UPDATE OR DELETE ON claimius.claim_object
+    FOR EACH ROW EXECUTE FUNCTION claimius.enforce_app_home();
+
+DROP TRIGGER IF EXISTS tg_enforce_app_home ON claimius.object_field;
+CREATE TRIGGER tg_enforce_app_home BEFORE INSERT OR UPDATE OR DELETE ON claimius.object_field
+    FOR EACH ROW EXECUTE FUNCTION claimius.enforce_app_home();
+
+DROP TRIGGER IF EXISTS tg_enforce_app_home ON claimius.user_field;
+CREATE TRIGGER tg_enforce_app_home BEFORE INSERT OR UPDATE OR DELETE ON claimius.user_field
+    FOR EACH ROW EXECUTE FUNCTION claimius.enforce_app_home();
+
+DROP TRIGGER IF EXISTS tg_enforce_app_home ON claimius.user_relation;
+CREATE TRIGGER tg_enforce_app_home BEFORE INSERT OR UPDATE OR DELETE ON claimius.user_relation
+    FOR EACH ROW EXECUTE FUNCTION claimius.enforce_app_home();
+
+DROP TRIGGER IF EXISTS tg_enforce_app_home ON claimius.app_object;
+CREATE TRIGGER tg_enforce_app_home BEFORE INSERT OR UPDATE OR DELETE ON claimius.app_object
+    FOR EACH ROW EXECUTE FUNCTION claimius.enforce_app_home();
 
 -- ----------------------------------------------------------------------------
 -- Self root triggers: BEFORE INSERT, set self referencing root values when

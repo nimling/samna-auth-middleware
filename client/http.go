@@ -125,6 +125,39 @@ func ParseSyncCursor(s string) (SyncCursor, error) {
 	return SyncCursor{Txid: t, Seq: q}, nil
 }
 
+// HeaderProphet carries, on a prophet's answer to a sync pull, the slug the
+// prophet names itself by, the one a consumer binds to.
+const HeaderProphet = "SAuth-Prophet"
+
+// HeaderHome carries, on a prophet's refusal of an app it does not decide or a
+// consumer bound elsewhere, the slug of the prophet the request belongs on.
+const HeaderHome = "SAuth-Home"
+
+type prophetKey struct{}
+
+// WithProphet returns a context whose answers record, in prophet, the slug of
+// the prophet that answered.
+func WithProphet(ctx context.Context, prophet *string) context.Context {
+	return context.WithValue(ctx, prophetKey{}, prophet)
+}
+
+type targetKey struct{}
+
+// Target names the prophet a request goes to and the app it authenticates as,
+// for a caller that reaches a prophet other than the configured one: a
+// prophet pulling a peer's feed, or a disciple asking another prophet to take
+// it over.
+type Target struct {
+	Endpoint string
+	Slug     string
+	Secret   string
+}
+
+// WithTarget returns a context whose requests go to t.
+func WithTarget(ctx context.Context, t Target) context.Context {
+	return context.WithValue(ctx, targetKey{}, t)
+}
+
 type syncSeqKey struct{}
 
 // WithSyncSeq returns a context whose writes record the prophet position of
@@ -252,6 +285,9 @@ func (e *httpClient) execute(ctx context.Context, method string, reqBody any, ta
 			*seq = v
 		}
 	}
+	if prophet, ok := ctx.Value(prophetKey{}).(*string); ok && resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		*prophet = resp.Header.Get(HeaderProphet)
+	}
 
 	switch {
 	case resp.StatusCode >= 200 && resp.StatusCode < 300:
@@ -262,6 +298,9 @@ func (e *httpClient) execute(ctx context.Context, method string, reqBody any, ta
 		return nil, ErrForbidden
 	case resp.StatusCode == http.StatusNotFound:
 		return nil, ErrNotFound
+	case resp.StatusCode == http.StatusConflict && resp.Header.Get(HeaderHome) != "":
+		resp.Body.Close()
+		return nil, fmt.Errorf("%w, the prophet is %s", ErrNotHome, resp.Header.Get(HeaderHome))
 	case resp.StatusCode == http.StatusConflict:
 		return nil, ErrConflict
 	case resp.StatusCode == http.StatusBadRequest:
@@ -290,7 +329,7 @@ func decodeInto(body io.ReadCloser, out any) error {
 }
 
 func Get(ctx context.Context, path string, out any) error {
-	c := newClient()
+	c := newClient(ctx)
 	u, err := joinURL(c.apiURL, path)
 	if err != nil {
 		return fmt.Errorf("build url: %w", err)
@@ -303,7 +342,7 @@ func Get(ctx context.Context, path string, out any) error {
 }
 
 func Post(ctx context.Context, path string, payload any, out any) error {
-	c := newClient()
+	c := newClient(ctx)
 	u, err := joinURL(c.apiURL, path)
 	if err != nil {
 		return fmt.Errorf("build url: %w", err)
@@ -316,7 +355,7 @@ func Post(ctx context.Context, path string, payload any, out any) error {
 }
 
 func Put(ctx context.Context, path string, payload any, out any) error {
-	c := newClient()
+	c := newClient(ctx)
 	u, err := joinURL(c.apiURL, path)
 	if err != nil {
 		return fmt.Errorf("build url: %w", err)
@@ -329,7 +368,7 @@ func Put(ctx context.Context, path string, payload any, out any) error {
 }
 
 func Patch(ctx context.Context, path string, payload any, out any) error {
-	c := newClient()
+	c := newClient(ctx)
 	u, err := joinURL(c.apiURL, path)
 	if err != nil {
 		return fmt.Errorf("build url: %w", err)
@@ -342,7 +381,7 @@ func Patch(ctx context.Context, path string, payload any, out any) error {
 }
 
 func Delete(ctx context.Context, path string, payload any, out any) error {
-	c := newClient()
+	c := newClient(ctx)
 	u, err := joinURL(c.apiURL, path)
 	if err != nil {
 		return fmt.Errorf("build url: %w", err)

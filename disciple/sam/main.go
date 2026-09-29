@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/labstack/echo/v4"
 	"github.com/nimling/samna-auth-middleware/client"
 	sdb "github.com/nimling/samna-auth-middleware/disciple/sdb"
 	"github.com/nimling/samna-auth-middleware/internal/store"
@@ -29,33 +28,109 @@ const (
 	syncHoldMargin             = 10 * time.Second
 	drainInterval              = time.Second
 	drainPairs                 = 1000
+	moveInterval               = time.Minute
 )
 
-// reportStalledCursor records that the disciple has stopped making progress at
+// Replica is one consumer of one app's feed and the database it applies the
+// feed into: the disciple database, or a prophet mirroring an app of a peer
+// prophet. Either relies on exactly one prophet, whose feed its cursor is a
+// position on.
+type Replica struct {
+	DB   *shared.DB
+	Peer *shared.ProphetPeer
+}
+
+// Disciple is the replica of the disciple's own database.
+func Disciple() *Replica {
+	return &Replica{DB: sdb.Instance().DB}
+}
+
+// State is a replica's place on its prophet's feed: the consumer id the
+// prophet keeps the replica's cursor under, the cursor, and the prophet the
+// replica is bound to with the endpoint it answers on.
+type State struct {
+	ID       uuid.UUID
+	Cursor   client.SyncCursor
+	Prophet  string
+	Endpoint string
+}
+
+// reportStalledCursor records that the replica has stopped making progress at
 // its cursor. Two patterns produce this and neither recovers on its own: a
 // cursor the prophet's feed cannot serve, which the prophet answers with 409,
 // and an event the replica cannot apply, which fails forever. The loop answers
 // both with a snapshot, and the snapshot's transaction audits the reconcile
 // with the message this returns.
-func reportStalledCursor(ctx context.Context, log echo.Logger, reason string) string {
-	seq, err := GetSeq(ctx)
+func (r *Replica) reportStalledCursor(ctx context.Context, reason string) string {
+	state, err := r.GetState(ctx)
 	if err != nil {
-		log.Errorf("disciple sync: read cursor before reconcile: %v", err)
+		r.DB.Logger.Errorf("sync: read cursor before reconcile: %v", err)
 		return fmt.Sprintf("cursor %s, reconciled from a fresh snapshot", reason)
 	}
-	log.Warnf("disciple sync: cursor %s %s, reconciling from snapshot", seq, reason)
-	return fmt.Sprintf("cursor %s %s, reconciled from a fresh snapshot", seq, reason)
+	r.DB.Logger.Warnf("sync: cursor %s %s, reconciling from snapshot", state.Cursor, reason)
+	return fmt.Sprintf("cursor %s %s, reconciled from a fresh snapshot", state.Cursor, reason)
 }
 
 // SyncStart launches the background pull loop that keeps the disciple database
 // current. Call it once after the server starts, on every pod. Only the pod
-// holding the disciple's sync lock pulls; the others wait to take over. It runs
-// until the context ends and logs failures through the database logger.
+// holding the disciple's sync lock pulls; the others wait to take over. Every
+// pod routes its writes to the prophet the disciple is bound to. It runs until
+// the context ends and logs failures through the database logger.
 func SyncStart(ctx context.Context) {
 	if shared.GetDebugMode() != shared.DebugModeNone {
 		return
 	}
-	go LeadSync(ctx, sdb.Instance().DB, SyncLockKey(utils.Cfg().AppSlug), leadInterval, pullLoop)
+	go bindClient(ctx, Disciple(), leadInterval)
+	go LeadSync(ctx, sdb.Instance().DB, SyncLockKey(utils.Cfg().AppSlug), leadInterval, Disciple().Pull)
+}
+
+// PeerSyncStart launches, on a prophet, the pull of every app it mirrors from
+// a peer in prophet_peer, through the same pull a disciple runs, into the
+// prophet database db. Call it once after the server starts, on every pod; one
+// pod per mirrored app pulls, and a peer row added later starts within an
+// interval.
+func PeerSyncStart(ctx context.Context, db *shared.DB) {
+	if shared.GetDebugMode() != shared.DebugModeNone {
+		return
+	}
+	go func() {
+		started := make(map[uuid.UUID]bool)
+		for {
+			var peers []shared.ProphetPeer
+			if err := db.NewSelect().Model(&peers).Scan(ctx); err != nil && ctx.Err() == nil {
+				db.Logger.Errorf("peer sync: read prophet_peer: %v", err)
+			}
+			for i := range peers {
+				if started[peers[i].ID] {
+					continue
+				}
+				started[peers[i].ID] = true
+				r := &Replica{DB: db, Peer: &peers[i]}
+				go LeadSync(ctx, db, "claimius.prophet_peer:"+peers[i].ID.String(), leadInterval, r.Pull)
+			}
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(leadInterval):
+			}
+		}
+	}()
+}
+
+// bindClient keeps the requests of this process on the prophet r is bound to,
+// reading the binding every interval, so a pod that does not pull follows a
+// move the pulling pod made.
+func bindClient(ctx context.Context, r *Replica, interval time.Duration) {
+	for {
+		if state, err := r.GetState(ctx); err == nil {
+			client.Bind(state.Endpoint)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(interval):
+		}
+	}
 }
 
 // SyncLockKey names the advisory lock that makes one process the sync consumer
@@ -141,50 +216,72 @@ func discardConn(conn *bun.Conn) {
 	_ = conn.Close()
 }
 
-func pullLoop(ctx context.Context) {
-	log := sdb.Instance().Logger
+// Pull keeps the replica current from its prophet until ctx ends. A disciple
+// also asks the configured prophet to take it over when that is not the one it
+// is bound to, and drains its access areas between pulls. A peer replica pulls
+// while its row is active and the peer decides the app.
+func (r *Replica) Pull(ctx context.Context) {
+	log := r.DB.Logger
 	report := func(err error) {
 		if err != nil && ctx.Err() == nil {
-			log.Errorf("disciple sync: %v", err)
+			log.Errorf("sync: %v", err)
 		}
 	}
-	if seq, err := GetSeq(ctx); err != nil {
+	if state, err := r.GetState(ctx); err != nil {
 		report(fmt.Errorf("get current seq: %w", err))
-	} else if seq.IsZero() {
-		report(PullSnapshot(ctx, ""))
+	} else if state.Cursor.IsZero() {
+		report(r.PullSnapshot(ctx, "", ""))
 	}
 	backoff := time.Second
 	failed := 0
-	var drained time.Time
+	var drained, moved time.Time
 	for {
 		wait := activeInterval
-		_, err := PullSync(ctx)
+		pulling, err := r.pulling(ctx)
 		switch {
-		case errors.Is(err, ErrSnapshotRequired):
-			backoff = time.Second
-			failed = 0
-			report(PullSnapshot(ctx, reportStalledCursor(ctx, log, "was refused by the prophet feed")))
 		case err != nil:
 			report(err)
-			wait = backoff
-			backoff *= 2
-			if backoff > maxBackoff {
-				backoff = maxBackoff
-			}
-			failed++
-			if failed >= failedPullsBeforeReconcile {
-				failed = 0
-				backoff = time.Second
-				reason := fmt.Sprintf("failed to apply %d consecutive pulls, last error %v", failedPullsBeforeReconcile, err)
-				report(PullSnapshot(ctx, reportStalledCursor(ctx, log, reason)))
-			}
+			wait = leadInterval
+		case !pulling:
+			wait = leadInterval
 		default:
-			backoff = time.Second
-			failed = 0
+			if r.Peer == nil && time.Since(moved) >= moveInterval {
+				moved = time.Now()
+				if err := r.Move(ctx); errors.Is(err, client.ErrNotHome) {
+					log.Warnf("sync: %v, keeping the prophet the disciple is bound to", err)
+				} else {
+					report(err)
+				}
+			}
+			_, err := r.PullSync(ctx)
+			switch {
+			case errors.Is(err, client.ErrNotHome):
+				report(err)
+				wait = backoff
+				backoff = min(backoff*2, maxBackoff)
+			case errors.Is(err, ErrSnapshotRequired):
+				backoff = time.Second
+				failed = 0
+				report(r.PullSnapshot(ctx, "", r.reportStalledCursor(ctx, "was refused by the prophet feed")))
+			case err != nil:
+				report(err)
+				wait = backoff
+				backoff = min(backoff*2, maxBackoff)
+				failed++
+				if failed >= failedPullsBeforeReconcile {
+					failed = 0
+					backoff = time.Second
+					reason := fmt.Sprintf("failed to apply %d consecutive pulls, last error %v", failedPullsBeforeReconcile, err)
+					report(r.PullSnapshot(ctx, "", r.reportStalledCursor(ctx, reason)))
+				}
+			default:
+				backoff = time.Second
+				failed = 0
+			}
 		}
-		if time.Since(drained) >= drainInterval {
+		if r.Peer == nil && time.Since(drained) >= drainInterval {
 			drained = time.Now()
-			if _, err := sdb.Instance().PostAccessDiffDrain(ctx, drainPairs); err != nil {
+			if _, err := r.DB.PostAccessDiffDrain(ctx, drainPairs); err != nil {
 				report(fmt.Errorf("drain access_diff: %w", err))
 			}
 		}
@@ -194,6 +291,48 @@ func pullLoop(ctx context.Context) {
 		case <-time.After(wait):
 		}
 	}
+}
+
+// pulling reports whether the replica pulls now. A disciple always does. A
+// peer replica does while its row is active and the peer decides the app,
+// which stops once this prophet accepts the app's handover and decides it
+// itself.
+func (r *Replica) pulling(ctx context.Context) (bool, error) {
+	if r.Peer == nil {
+		return true, nil
+	}
+	if _, err := r.GetState(ctx); err != nil {
+		return false, fmt.Errorf("read peer %s: %w", r.Peer.Prophet, err)
+	}
+	if r.Peer.Status != "active" {
+		return false, nil
+	}
+	var home sql.NullString
+	err := r.DB.NewRaw("SELECT claimius.get_app_home(id) FROM claimius.samna_app WHERE slug = ?", r.Peer.AppSlug).Scan(ctx, &home)
+	if errors.Is(err, sql.ErrNoRows) {
+		return true, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("read home of %s: %w", r.Peer.AppSlug, err)
+	}
+	return home.String == r.Peer.Prophet, nil
+}
+
+// Move asks the configured prophet to take the disciple over when it is not
+// the prophet the disciple is bound to. That prophet serves the disciple only
+// under a handover of the app the bound prophet offered and it accepted; the
+// disciple then takes its snapshot and binds to it, cursor included. Until
+// then it refuses with client.ErrNotHome and the disciple keeps its prophet.
+func (r *Replica) Move(ctx context.Context) error {
+	state, err := r.GetState(ctx)
+	if err != nil {
+		return fmt.Errorf("get current seq: %w", err)
+	}
+	configured := utils.Cfg().Endpoint
+	if r.Peer != nil || state.Endpoint == "" || state.Endpoint == configured {
+		return nil
+	}
+	return r.PullSnapshot(ctx, configured, fmt.Sprintf("moved from prophet %s at %s to %s", state.Prophet, state.Endpoint, configured))
 }
 
 type SyncPayload struct {
@@ -223,36 +362,67 @@ func stripAppID(raw json.RawMessage) json.RawMessage {
 	return cleaned
 }
 
-// ApplyPage applies one page of payloads and moves the cursor from from to to
-// in one transaction under replay_mode, so a page of p events costs one commit
-// and a page that fails anywhere rolls back whole, cursor included, and is
-// pulled again. The commit does not wait for its WAL flush: a page lost to a
-// crash is a cursor that did not move, and the page is pulled again. The
-// cursor moves first and only from the position the page was pulled at, which
-// holds its row for the page and refuses a page another consumer already
-// applied. A snapshot that replaces a stalled replica passes the reconcile
-// message, audited in the same transaction.
-func ApplyPage(ctx context.Context, from, to client.SyncCursor, payloads []SyncPayload, reconcile string) error {
-	return sdb.Instance().DB.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
+// ApplyPage applies one page of payloads and moves the cursor from from to the
+// position of to in one transaction under replay_mode, so a page of p events
+// costs one commit and a page that fails anywhere rolls back whole, cursor
+// included, and is pulled again. The commit does not wait for its WAL flush: a
+// page lost to a crash is a cursor that did not move, and the page is pulled
+// again. The cursor moves first and only from the position the page was
+// pulled at, which holds its row for the page and refuses a page another
+// consumer already applied. A disciple binds to the prophet to names in the
+// same transaction. A snapshot that replaces a stalled replica passes the
+// reconcile message, audited in the same transaction.
+func (r *Replica) ApplyPage(ctx context.Context, from client.SyncCursor, to State, payloads []SyncPayload, reconcile string) error {
+	return r.DB.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
 		if _, err := tx.ExecContext(ctx, "SET LOCAL claimius.replay_mode = 'true'"); err != nil {
 			return fmt.Errorf("set replay_mode: %w", err)
 		}
 		if _, err := tx.ExecContext(ctx, "SET LOCAL synchronous_commit = off"); err != nil {
 			return fmt.Errorf("set synchronous_commit: %w", err)
 		}
-		if err := UpdateSeq(ctx, tx, from, to); err != nil {
+		if err := r.UpdateSeq(ctx, tx, from, to); err != nil {
 			return err
 		}
 		for _, payload := range payloads {
-			if err := ApplyPayload(ctx, tx, payload); err != nil {
+			var err error
+			if r.Peer != nil {
+				err = r.applyPeerPayload(ctx, tx, payload)
+			} else {
+				err = ApplyPayload(ctx, tx, payload)
+			}
+			if err != nil {
 				return fmt.Errorf("apply %s seq %s: %w", payload.EventType, payload.SyncCursor, err)
 			}
 		}
-		if reconcile != "" {
-			return sdb.Write(ctx, tx, "disciple sync reconcile", "update", "claimius.disciple_state", uuid.Nil, uuid.Nil, nil, reconcile)
+		if reconcile == "" {
+			return nil
 		}
-		return nil
+		if r.Peer != nil {
+			var appID uuid.UUID
+			if err := tx.NewRaw("SELECT id FROM claimius.samna_app WHERE slug = ?", r.Peer.AppSlug).Scan(ctx, &appID); err != nil {
+				return fmt.Errorf("read mirrored app %s: %w", r.Peer.AppSlug, err)
+			}
+			return shared.WriteAudit(ctx, tx, &appID, "peer sync reconcile", "update", "claimius.prophet_peer", r.Peer.ID, uuid.Nil, nil, reconcile)
+		}
+		return sdb.Write(ctx, tx, "disciple sync reconcile", "update", "claimius.disciple_state", uuid.Nil, uuid.Nil, nil, reconcile)
 	})
+}
+
+// applyPeerPayload applies one row of the peer's feed on the mirroring
+// prophet. A row whose id this prophet holds for another app, or for an app
+// another prophet decides, is refused and recorded in peer_collision by the
+// database, and the page goes on.
+func (r *Replica) applyPeerPayload(ctx context.Context, tx bun.Tx, payload SyncPayload) error {
+	var applied bool
+	if err := tx.NewRaw("SELECT claimius.apply_peer_event(?, ?, ?, ?, ?)",
+		r.Peer.Prophet, r.Peer.AppSlug, payload.Operation, payload.EventType, string(payload.Payload)).Scan(ctx, &applied); err != nil {
+		return err
+	}
+	if !applied {
+		r.DB.Logger.Warnf("peer sync: %s %s from prophet %s refused, recorded in claimius.peer_collision",
+			payload.EventType, payload.SyncCursor, r.Peer.Prophet)
+	}
+	return nil
 }
 
 func ApplyPayload(ctx context.Context, tx bun.Tx, payload SyncPayload) error {
@@ -449,14 +619,24 @@ func deleteEntity[T any](ctx context.Context, tx bun.Tx, id json.RawMessage) err
 	return nil
 }
 
-// UpdateSeq moves the cursor from from to to. A page moves it forward; a
-// snapshot sets it to the snapshot's position, below a cursor the prophet no
-// longer serves when that is what sent the disciple to the snapshot.
-func UpdateSeq(ctx context.Context, tx bun.Tx, from, to client.SyncCursor) error {
-	result, err := tx.NewUpdate().
-		Model((*shared.DiscipleState)(nil)).
-		Set("last_applied_txid = ?", to.Txid).
-		Set("last_applied_seq = ?", to.Seq).
+// UpdateSeq moves the cursor from from to the position of to. A page moves it
+// forward; a snapshot sets it to the snapshot's position, below a cursor the
+// prophet no longer serves when that is what sent the replica to the
+// snapshot, or on another prophet's feed when the snapshot moved a disciple
+// there. A disciple takes the prophet and endpoint to names as its binding.
+func (r *Replica) UpdateSeq(ctx context.Context, tx bun.Tx, from client.SyncCursor, to State) error {
+	q := tx.NewUpdate()
+	if r.Peer != nil {
+		q = q.Model((*shared.ProphetPeer)(nil)).Where("id = ?", r.Peer.ID)
+	} else {
+		q = q.Model((*shared.DiscipleState)(nil))
+		if to.Prophet != "" {
+			q = q.Set("prophet = ?", to.Prophet).Set("endpoint = ?", to.Endpoint)
+		}
+	}
+	result, err := q.
+		Set("last_applied_txid = ?", to.Cursor.Txid).
+		Set("last_applied_seq = ?", to.Cursor.Seq).
 		Set("sa_updated_at = ?", time.Now()).
 		Where("last_applied_txid = ?", from.Txid).
 		Where("last_applied_seq = ?", from.Seq).
@@ -474,27 +654,52 @@ func UpdateSeq(ctx context.Context, tx bun.Tx, from, to client.SyncCursor) error
 	return nil
 }
 
-// GetState reads the disciple's cursor row. Its id names the disciple database
-// to the prophet as a sync consumer. A disciple with no row yet reads as a zero
-// state.
-func GetState(ctx context.Context) (shared.DiscipleState, error) {
-	var state shared.DiscipleState
-	err := sdb.Instance().DB.NewSelect().
-		Model(&state).
+// GetState reads the replica's state row. Its id names the replica to the
+// prophet as a sync consumer. A disciple with no row yet reads as a zero
+// state. A peer replica rereads its prophet_peer row into r.Peer, so a
+// changed endpoint, credential or status takes effect on the next pull.
+func (r *Replica) GetState(ctx context.Context) (State, error) {
+	if r.Peer != nil {
+		var peer shared.ProphetPeer
+		if err := r.DB.NewSelect().Model(&peer).Where("id = ?", r.Peer.ID).Scan(ctx); err != nil {
+			return State{}, err
+		}
+		*r.Peer = peer
+		return State{
+			ID:       peer.ID,
+			Cursor:   client.SyncCursor{Txid: peer.LastAppliedTxid, Seq: peer.LastAppliedSeq},
+			Prophet:  peer.Prophet,
+			Endpoint: peer.Endpoint,
+		}, nil
+	}
+	var row shared.DiscipleState
+	err := r.DB.NewSelect().
+		Model(&row).
 		Limit(1).
 		Scan(ctx)
 	if errors.Is(err, sql.ErrNoRows) {
-		return shared.DiscipleState{}, nil
+		return State{}, nil
 	}
-	return state, err
+	if err != nil {
+		return State{}, err
+	}
+	state := State{ID: row.ID, Cursor: row.Cursor()}
+	if row.Prophet != nil {
+		state.Prophet = *row.Prophet
+	}
+	if row.Endpoint != nil {
+		state.Endpoint = *row.Endpoint
+	}
+	return state, nil
 }
 
+// GetSeq reads the disciple's cursor.
 func GetSeq(ctx context.Context) (client.SyncCursor, error) {
-	state, err := GetState(ctx)
+	state, err := Disciple().GetState(ctx)
 	if err != nil {
 		return client.SyncCursor{}, err
 	}
-	return state.Cursor(), nil
+	return state.Cursor, nil
 }
 
 // WaitForSeq waits until the disciple's cursor reaches target, the position a

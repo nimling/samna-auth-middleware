@@ -2,7 +2,7 @@
 layout: doc
 title: Prophets and disciples
 description: The authority and its mirrors, what each holds and trusts, why ids are random and what that costs in collision probability, how prophets federate, what each role reads and writes per request, and what happens when any of them fails.
-tags: prophet, disciple, hybrid, federation, init, init_disciple, init_hybrid, trust, uuid, availability, failure
+tags: prophet, disciple, hybrid, federation, init, init_disciple, init_hybrid, prophet_peer, home_prophet, app_handover, peer_collision, trust, uuid, availability, failure
 lastUpdated: true
 ---
 
@@ -60,6 +60,18 @@ Prophets federate by mirroring each other's apps. A prophet that serves users of
 4. Moving a disciple to another prophet is a change of home. It works only when the new prophet holds the disciple's app with the same ids, and the disciple starts again from the new prophet's snapshot with its cursor at zero.
 
 A disciple of a mirror is `h` feeds from the home: a change reaches it after `h` pulls, one per hop, and a write routed from it travels `h` hops to the home and back.
+
+### How it is kept
+
+1. A prophet's admin writes one `prophet_peer` row per app it mirrors: the peer's slug, its endpoint, and the slug and secret of the app, which the peer's `/sam` app auth checks as it does a disciple's. The pull is the disciple's, a consumer of the peer's feed of that app, applied by `apply_peer_event` under `replay_mode`. The mirrored `samna_app` row carries the peer in `home_prophet`; an app homed here carries NULL. A mirror serves the app's feed to no consumer: `check_sync_home` sends them to the home, so today `h` is 1.
+
+2. `get_app_home` names the prophet deciding an app's writes when it is not this one. `/sam` refuses a write for such an app with `409` and the home in `SAuth-Home`, and the `tg_enforce_app_home` trigger refuses any write to its rows outside replay with SQLSTATE `P0409`, so each app has one writer. Refusing keeps the writer single without a second hop; forwarding would put the home's availability on the local request anyway.
+
+3. A mirrored row whose id this prophet holds for another app, or for an app another prophet decides, is refused on apply and written to `peer_collision` with its payload, and the page goes on. With the bound above, such a row is a seeding mistake, not chance.
+
+4. A handover moves a home. The home calls `offer_handover(app, peer)` and decides none of the app's writes from then; the offer reaches the peer on the app's feed, and the peer's `accept_handover` makes it the home. The acceptance travels back on the new home's feed, where the old home, pulling the app from the new one, records it and moves `home_prophet`. A disciple bound to the old home is served by the new one only after that acceptance; before it the new prophet refuses and the disciple keeps its prophet. An offer is not withdrawn: a withdrawal racing the acceptance would leave two homes.
+
+5. An organization or location belongs to the home of the apps it is linked to; one shared by apps of two homes is refused as a collision.
 
 ## Failure
 

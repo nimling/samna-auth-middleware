@@ -5,9 +5,13 @@ package sam_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -78,7 +82,7 @@ func TestApplyPageCommitsOrRollsBackWhole(t *testing.T) {
 		organizationPayload(step(from, 1), lost),
 		{SyncCursor: step(from, 2), Operation: "upsert", EventType: "claimius.unknown", Payload: json.RawMessage(`{}`)},
 	}
-	if err := sam.ApplyPage(ctx, from, step(from, 2), failing, ""); err == nil {
+	if err := sam.Disciple().ApplyPage(ctx, from, sam.State{Cursor: step(from, 2)}, failing, ""); err == nil {
 		t.Fatal("a page carrying an event the replica cannot apply must fail")
 	}
 	if organizationExists(t, db, lost) {
@@ -88,7 +92,7 @@ func TestApplyPageCommitsOrRollsBackWhole(t *testing.T) {
 		t.Fatalf("a failed page must leave the cursor at %s, got %s", from, got)
 	}
 
-	if err := sam.ApplyPage(ctx, from, step(from, 1), []sam.SyncPayload{organizationPayload(step(from, 1), kept)}, ""); err != nil {
+	if err := sam.Disciple().ApplyPage(ctx, from, sam.State{Cursor: step(from, 1)}, []sam.SyncPayload{organizationPayload(step(from, 1), kept)}, ""); err != nil {
 		t.Fatalf("apply page: %v", err)
 	}
 	if !organizationExists(t, db, kept) {
@@ -98,7 +102,7 @@ func TestApplyPageCommitsOrRollsBackWhole(t *testing.T) {
 		t.Fatalf("an applied page must move the cursor to %s, got %s", step(from, 1), got)
 	}
 
-	if err := sam.ApplyPage(ctx, from, step(from, 1), []sam.SyncPayload{organizationPayload(step(from, 1), lost)}, ""); err == nil {
+	if err := sam.Disciple().ApplyPage(ctx, from, sam.State{Cursor: step(from, 1)}, []sam.SyncPayload{organizationPayload(step(from, 1), lost)}, ""); err == nil {
 		t.Fatal("a page pulled at a cursor another consumer already moved must be refused")
 	}
 	if organizationExists(t, db, lost) {
@@ -117,7 +121,7 @@ func TestLeadSyncRunsOneConsumer(t *testing.T) {
 		return func(ctx context.Context) {
 			for ctx.Err() == nil {
 				seq, err := sam.GetSeq(ctx)
-				if err == nil && sam.ApplyPage(ctx, seq, step(seq, 1), nil, "") == nil {
+				if err == nil && sam.Disciple().ApplyPage(ctx, seq, sam.State{Cursor: step(seq, 1)}, nil, "") == nil {
 					mu.Lock()
 					applied[name]++
 					mu.Unlock()
@@ -180,7 +184,7 @@ func TestWaitForSeqReturnsOnceTheCursorReachesTheWrite(t *testing.T) {
 
 	go func() {
 		time.Sleep(200 * time.Millisecond)
-		if err := sam.ApplyPage(ctx, from, step(from, 3), nil, ""); err != nil {
+		if err := sam.Disciple().ApplyPage(ctx, from, sam.State{Cursor: step(from, 3)}, nil, ""); err != nil {
 			t.Errorf("apply page: %v", err)
 		}
 	}()
@@ -210,12 +214,12 @@ func TestApplyPageSkipsUnchangedRows(t *testing.T) {
 	}
 
 	from := cursor(t)
-	if err := sam.ApplyPage(ctx, from, step(from, 1), []sam.SyncPayload{organizationPayload(step(from, 1), id)}, ""); err != nil {
+	if err := sam.Disciple().ApplyPage(ctx, from, sam.State{Cursor: step(from, 1)}, []sam.SyncPayload{organizationPayload(step(from, 1), id)}, ""); err != nil {
 		t.Fatalf("apply page: %v", err)
 	}
 	written := version()
 
-	if err := sam.ApplyPage(ctx, step(from, 1), step(from, 2), []sam.SyncPayload{organizationPayload(step(from, 2), id)}, ""); err != nil {
+	if err := sam.Disciple().ApplyPage(ctx, step(from, 1), sam.State{Cursor: step(from, 2)}, []sam.SyncPayload{organizationPayload(step(from, 2), id)}, ""); err != nil {
 		t.Fatalf("apply the same row again: %v", err)
 	}
 	if got := version(); got != written {
@@ -224,10 +228,80 @@ func TestApplyPageSkipsUnchangedRows(t *testing.T) {
 
 	renamed := organizationPayload(step(from, 3), id)
 	renamed.Payload = json.RawMessage(strings.Replace(string(renamed.Payload), `"name":"Page"`, `"name":"Renamed"`, 1))
-	if err := sam.ApplyPage(ctx, step(from, 2), step(from, 3), []sam.SyncPayload{renamed}, ""); err != nil {
+	if err := sam.Disciple().ApplyPage(ctx, step(from, 2), sam.State{Cursor: step(from, 3)}, []sam.SyncPayload{renamed}, ""); err != nil {
 		t.Fatalf("apply a changed row: %v", err)
 	}
 	if got := version(); got == written {
 		t.Fatal("a changed row must be written")
+	}
+}
+
+func getFakeProphet(name string, cursor client.SyncCursor, org uuid.UUID, serves func(bound string) bool) *httptest.Server {
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		bound := r.URL.Query().Get("prophet")
+		if !serves(bound) {
+			w.Header().Set(client.HeaderHome, bound)
+			w.WriteHeader(http.StatusConflict)
+			return
+		}
+		w.Header().Set(client.HeaderProphet, name)
+		w.Header().Set("Content-Type", "application/json")
+		if strings.HasSuffix(r.URL.Path, "/sync/snapshot") {
+			snapshot, _ := json.Marshal(sam.SnapshotResponse{Records: []sam.SyncPayload{organizationPayload(cursor, org)}, SyncCursor: cursor})
+			fmt.Fprintf(w, `{"data":%s,"count":1}`, snapshot)
+			return
+		}
+		w.Write([]byte(`{"data":[],"count":0}`))
+	}))
+}
+
+func TestDiscipleMovesOnlyToAProphetThatTookItsAppOver(t *testing.T) {
+	db := database(t)
+	ctx := context.Background()
+	if _, err := db.ExecContext(ctx, `UPDATE claimius.disciple_state SET prophet = NULL, endpoint = NULL`); err != nil {
+		t.Fatalf("unbind: %v", err)
+	}
+	disciple := sam.Disciple()
+	start := cursor(t)
+	oldOrg, nextOrg := uuid.New(), uuid.New()
+	var agreed atomic.Bool
+
+	old := getFakeProphet("gotest_old", client.SyncCursor{Txid: start.Txid + 10}, oldOrg, func(string) bool { return true })
+	defer old.Close()
+	next := getFakeProphet("gotest_next", client.SyncCursor{Txid: 7}, nextOrg, func(bound string) bool {
+		return bound == "gotest_old" && agreed.Load()
+	})
+	defer next.Close()
+
+	t.Setenv("SAUTH_ENDPOINT", old.URL)
+	if err := disciple.PullSnapshot(ctx, "", ""); err != nil {
+		t.Fatalf("first snapshot: %v", err)
+	}
+	bound, err := disciple.GetState(ctx)
+	if err != nil || bound.Prophet != "gotest_old" || bound.Endpoint != old.URL {
+		t.Fatalf("the first answer must bind the disciple to the prophet that gave it, got %+v %v", bound, err)
+	}
+
+	t.Setenv("SAUTH_ENDPOINT", next.URL)
+	if err := disciple.Move(ctx); !errors.Is(err, client.ErrNotHome) {
+		t.Fatalf("a prophet without an agreed handover must refuse the disciple, got %v", err)
+	}
+	if kept, _ := disciple.GetState(ctx); kept != bound || organizationExists(t, db, nextOrg) {
+		t.Fatalf("a refused move must keep the prophet, the cursor and the replica, got %+v", kept)
+	}
+	if _, err := disciple.PullSync(ctx); err != nil {
+		t.Fatalf("a refused disciple must keep pulling from its prophet, got %v", err)
+	}
+
+	agreed.Store(true)
+	if err := disciple.Move(ctx); err != nil {
+		t.Fatalf("a prophet that took the app over must serve the disciple, got %v", err)
+	}
+	moved, err := disciple.GetState(ctx)
+	if err != nil || moved.Prophet != "gotest_next" || moved.Endpoint != next.URL || moved.Cursor != (client.SyncCursor{Txid: 7}) {
+		t.Fatalf("an agreed move must bind the disciple to the new prophet at its snapshot's position, got %+v %v", moved, err)
+	}
+	if !organizationExists(t, db, nextOrg) {
+		t.Fatal("an agreed move must apply the new prophet's snapshot")
 	}
 }

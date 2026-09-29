@@ -11,7 +11,8 @@
 --   5. Registry                 table_info, inheritance_info
 --   6. Materialized access      user_object, object_info, user_users
 --   7. Sync                     sync_event, prophet_state, disciple_state,
---                               reconcile_queue
+--                               reconcile_queue, prophet_peer, app_handover,
+--                               peer_collision
 --   8. Audit                    audit
 --   9. Extensibility            object_field, user_field, user_relation
 --
@@ -120,6 +121,10 @@ COMMENT ON COLUMN claimius.samna_app.claim_id IS 'Default claim granted to users
 COMMENT ON COLUMN claimius.samna_app.style IS 'UI styling configuration as JSON.';
 COMMENT ON COLUMN claimius.samna_app.sa_owner_id IS 'Organization that owns this app.';
 COMMENT ON COLUMN claimius.samna_app.sa_created_by IS 'user_claim.id of the actor who created this app.';
+
+ALTER TABLE claimius.samna_app ADD COLUMN IF NOT EXISTS home_prophet TEXT;
+
+COMMENT ON COLUMN claimius.samna_app.home_prophet IS 'The prophet that decides the app''s writes, by its prophet_peer.prophet slug. NULL when this prophet is the app''s home.';
 
 CREATE INDEX IF NOT EXISTS idx_samna_app_sa_deleted_at ON claimius.samna_app (sa_deleted_at);
 CREATE INDEX IF NOT EXISTS idx_samna_app_status ON claimius.samna_app (status);
@@ -771,6 +776,85 @@ CREATE TABLE IF NOT EXISTS claimius.disciple_state (
 ALTER TABLE claimius.disciple_state ADD COLUMN IF NOT EXISTS last_applied_txid BIGINT NOT NULL DEFAULT 0;
 
 COMMENT ON TABLE claimius.disciple_state IS 'Singleton consumption cursor for the disciple: the prophet feed position (last_applied_txid, last_applied_seq) applied locally.';
+
+ALTER TABLE claimius.disciple_state ADD COLUMN IF NOT EXISTS prophet TEXT;
+ALTER TABLE claimius.disciple_state ADD COLUMN IF NOT EXISTS endpoint TEXT;
+
+COMMENT ON COLUMN claimius.disciple_state.prophet IS 'Slug of the one prophet the disciple is bound to, as that prophet names itself on its feed. The cursor is a position on its feed alone. NULL until the first answer.';
+COMMENT ON COLUMN claimius.disciple_state.endpoint IS 'Where the bound prophet answers. The disciple keeps pulling and routing writes there until another prophet serves it under an agreed handover.';
+
+-- prophet_peer
+-- One app this prophet mirrors from a peer prophet: the peer's slug, where it
+-- answers, the app credential its /sam app auth checks, and this prophet's
+-- place on the peer's feed of that app. A prophet mirrors an app from one
+-- peer at a time. Written by the prophet's own admin; the pull names itself
+-- to the peer as the consumer id.
+CREATE TABLE IF NOT EXISTS claimius.prophet_peer (
+                                                     id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                                                     prophet             TEXT NOT NULL,
+                                                     endpoint            TEXT NOT NULL,
+                                                     app_slug            TEXT NOT NULL,
+                                                     app_secret          TEXT NOT NULL,
+                                                     status              TEXT NOT NULL DEFAULT 'active',
+                                                     last_applied_txid   BIGINT NOT NULL DEFAULT 0,
+                                                     last_applied_seq    BIGINT NOT NULL DEFAULT 0,
+                                                     sa_created_by       UUID NOT NULL,
+                                                     sa_created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+                                                     sa_updated_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+                                                     CONSTRAINT prophet_peer_status CHECK (status IN ('active', 'suspended'))
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_prophet_peer_app_slug ON claimius.prophet_peer (app_slug);
+CREATE INDEX IF NOT EXISTS idx_prophet_peer_prophet ON claimius.prophet_peer (prophet);
+
+COMMENT ON TABLE claimius.prophet_peer IS 'Apps this prophet mirrors from peer prophets, one peer per app, with the credential and the cursor of the pull. Admin managed.';
+COMMENT ON COLUMN claimius.prophet_peer.prophet IS 'The peer''s slug, the name it answers its feed under and samna_app.home_prophet refers to.';
+COMMENT ON COLUMN claimius.prophet_peer.endpoint IS 'Base url of the peer. Its /sam serves the feed.';
+COMMENT ON COLUMN claimius.prophet_peer.app_slug IS 'Slug of the mirrored app, the one the pull authenticates as.';
+COMMENT ON COLUMN claimius.prophet_peer.app_secret IS 'Raw app secret the peer''s /sam app auth validates.';
+
+-- app_handover
+-- Moving an app's home between two prophets. The current home offers the
+-- app to a peer and from then decides none of its writes; the peer, which
+-- mirrors the app and so receives the offer on the app's feed, accepts it
+-- and becomes the home. The old home learns the acceptance from the new
+-- home's feed. Only an accepted handover lets the new home serve a disciple
+-- still bound to the old one.
+CREATE TABLE IF NOT EXISTS claimius.app_handover (
+                                                     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                                                     app_id          UUID NOT NULL REFERENCES claimius.samna_app(id),
+                                                     from_prophet    TEXT NOT NULL,
+                                                     to_prophet      TEXT NOT NULL,
+                                                     status          TEXT NOT NULL DEFAULT 'offered',
+                                                     sa_created_by   UUID NOT NULL,
+                                                     sa_created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+                                                     sa_updated_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+                                                     CONSTRAINT app_handover_status CHECK (status IN ('offered', 'accepted'))
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_app_handover_offered ON claimius.app_handover (app_id) WHERE status = 'offered';
+CREATE INDEX IF NOT EXISTS idx_app_handover_app ON claimius.app_handover (app_id, from_prophet, to_prophet);
+
+COMMENT ON TABLE claimius.app_handover IS 'Offered and accepted moves of an app''s home between prophets. Travels on the app''s feed to peers only.';
+
+-- peer_collision
+-- A row a peer's feed carried whose id this prophet already holds for
+-- another app, or for an app another prophet decides. It is refused, never
+-- merged, and recorded here with the payload it carried.
+CREATE TABLE IF NOT EXISTS claimius.peer_collision (
+                                                       id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                                                       prophet         TEXT NOT NULL,
+                                                       app_slug        TEXT NOT NULL,
+                                                       object_type     TEXT NOT NULL,
+                                                       object_id       UUID,
+                                                       reason          TEXT NOT NULL,
+                                                       payload         JSONB NOT NULL,
+                                                       sa_created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_peer_collision_object ON claimius.peer_collision (object_type, object_id);
+
+COMMENT ON TABLE claimius.peer_collision IS 'Mirrored rows refused on apply because their id is held locally by another app or another home.';
 
 -- reconcile_queue
 -- Disciple side retry queue. When applying a sync_event fails, the

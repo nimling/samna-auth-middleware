@@ -978,12 +978,33 @@ type DiscipleState struct {
 	ID              uuid.UUID `bun:"id,pk,type:uuid,default:gen_random_uuid()" json:"id"`
 	LastAppliedTxid int64     `bun:"last_applied_txid,default:0" json:"last_applied_txid"`
 	LastAppliedSeq  int64     `bun:"last_applied_seq,default:0" json:"last_applied_seq"`
+	Prophet         *string   `bun:"prophet" json:"prophet"`
+	Endpoint        *string   `bun:"endpoint" json:"endpoint"`
 	UpdatedAt       time.Time `bun:"sa_updated_at,default:now()" json:"updated_at"`
 }
 
 // Cursor is the prophet feed position the disciple applied.
 func (s DiscipleState) Cursor() client.SyncCursor {
 	return client.SyncCursor{Txid: s.LastAppliedTxid, Seq: s.LastAppliedSeq}
+}
+
+// ProphetPeer is one app a prophet mirrors from a peer prophet: the peer, the
+// app credential its /sam checks, and the prophet's place on the peer's feed
+// of the app.
+type ProphetPeer struct {
+	bun.BaseModel `bun:"table:claimius.prophet_peer"`
+
+	ID              uuid.UUID `bun:"id,pk,type:uuid,default:gen_random_uuid()" json:"id"`
+	Prophet         string    `bun:"prophet" json:"prophet"`
+	Endpoint        string    `bun:"endpoint" json:"endpoint"`
+	AppSlug         string    `bun:"app_slug" json:"app_slug"`
+	AppSecret       string    `bun:"app_secret" json:"-"`
+	Status          string    `bun:"status,default:'active'" json:"status"`
+	LastAppliedTxid int64     `bun:"last_applied_txid,default:0" json:"last_applied_txid"`
+	LastAppliedSeq  int64     `bun:"last_applied_seq,default:0" json:"last_applied_seq"`
+	CreatedBy       uuid.UUID `bun:"sa_created_by" json:"created_by"`
+	CreatedAt       time.Time `bun:"sa_created_at,default:now()" json:"created_at"`
+	UpdatedAt       time.Time `bun:"sa_updated_at,default:now()" json:"updated_at"`
 }
 
 type SearchResult struct {

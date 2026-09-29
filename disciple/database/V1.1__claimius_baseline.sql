@@ -638,6 +638,12 @@ ALTER TABLE claimius.disciple_state ADD COLUMN IF NOT EXISTS last_applied_txid B
 
 COMMENT ON TABLE claimius.disciple_state IS 'Singleton consumption cursor for the disciple: the prophet feed position (last_applied_txid, last_applied_seq) applied locally.';
 
+ALTER TABLE claimius.disciple_state ADD COLUMN IF NOT EXISTS prophet TEXT;
+ALTER TABLE claimius.disciple_state ADD COLUMN IF NOT EXISTS endpoint TEXT;
+
+COMMENT ON COLUMN claimius.disciple_state.prophet IS 'Slug of the one prophet the disciple is bound to, as that prophet names itself on its feed. The cursor is a position on its feed alone. NULL until the first answer.';
+COMMENT ON COLUMN claimius.disciple_state.endpoint IS 'Where the bound prophet answers. The disciple keeps pulling and routing writes there until another prophet serves it under an agreed handover.';
+
 -- reconcile_queue
 -- Disciple side retry queue. When applying a sync_event fails, the
 -- (user, object, type) triple is queued here. reconcile_if_pending drains
