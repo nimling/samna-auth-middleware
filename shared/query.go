@@ -111,18 +111,27 @@ func ClaimWhere(userID uuid.UUID, requiredAccess ClaimAccess) string {
 }
 
 func ObjectWhere(q *bun.SelectQuery, userID uuid.UUID, objectType string, requiredAccess ClaimAccess, objectID *uuid.UUID, after *uuid.UUID, limit int) *bun.SelectQuery {
+	table := "?TableAlias"
+	if _, ok := q.GetModel().(bun.TableModel); !ok {
+		table = q.GetTableName()
+		if i := strings.LastIndex(strings.ToUpper(table), " AS "); i >= 0 {
+			table = strings.TrimSpace(table[i+4:])
+		}
+	}
 	if objectID != nil {
 		return q.
-			Where("?TableAlias.id = ?", *objectID).
+			Where(table+".id = ?", *objectID).
 			Where("EXISTS (SELECT 1 FROM claimius.get_access(?, ?, ?, ?))", userID, *objectID, objectType, int(requiredAccess))
 	}
 	var pageLimit any
 	if limit > 0 {
 		pageLimit = limit
 	}
-	return q.
-		Where("?TableAlias.id IN (SELECT object_id FROM claimius.get_objects(?, ?, ?, ?, ?))", userID, objectType, int(requiredAccess), after, pageLimit).
-		OrderExpr("?TableAlias.id")
+	q = q.Where(table+".id IN (SELECT object_id FROM claimius.get_objects(?, ?, ?, ?, ?))", userID, objectType, int(requiredAccess), after, pageLimit)
+	if after != nil || limit > 0 {
+		q = q.OrderExpr(table + ".id")
+	}
+	return q
 }
 
 func AuditWhere(userID uuid.UUID, requiredAccess ClaimAccess) string {

@@ -344,7 +344,7 @@ CREATE OR REPLACE FUNCTION claimius.get_objects(
                    direct_grant        BOOLEAN
                ) AS $$
 BEGIN
-    PERFORM claimius.reconcile_if_pending(p_user_id);
+    PERFORM claimius.reconcile_if_pending(p_user_id, p_object_type);
 
     IF NOT claimius.check_user_active(p_user_id) THEN
         RETURN;
@@ -397,7 +397,7 @@ CREATE OR REPLACE FUNCTION claimius.get_organizations(
     p_limit            INTEGER DEFAULT NULL
 ) RETURNS SETOF claimius.organization AS $$
 BEGIN
-    PERFORM claimius.reconcile_if_pending(p_user_id);
+    PERFORM claimius.reconcile_if_pending(p_user_id, 'claimius.organization');
 
     IF NOT claimius.check_user_active(p_user_id) THEN
         RETURN;
@@ -428,7 +428,7 @@ CREATE OR REPLACE FUNCTION claimius.get_locations(
     p_limit            INTEGER DEFAULT NULL
 ) RETURNS SETOF claimius.location AS $$
 BEGIN
-    PERFORM claimius.reconcile_if_pending(p_user_id);
+    PERFORM claimius.reconcile_if_pending(p_user_id, 'claimius.location');
 
     IF NOT claimius.check_user_active(p_user_id) THEN
         RETURN;
@@ -1153,6 +1153,70 @@ CREATE OR REPLACE FUNCTION claimius._window_graph(
 $$ LANGUAGE sql STABLE;
 
 COMMENT ON FUNCTION claimius._window_graph(JSONB, UUID, INTEGER, TEXT, UUID) IS 'The nodes of a graph kept when each parent shows at most p_width children of each type, 0 meaning all, in name order or by the reader''s decayed usage with p_sort ''usage'', continuing after p_next_id when given.';
+
+-- ----------------------------------------------------------------------------
+-- _window_links
+-- The window of a link graph, the same window _window_graph gives a node
+-- graph: every link target is a node whose parent is the link source, and a
+-- source no link targets is a top node. A link is kept when its target is
+-- kept under its source. Types are matched back to the registered type they
+-- normalize from, labels come from object_info, the claim or the samna_user
+-- row, so name and usage order read as they do on the nodes.
+-- ----------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION claimius._window_links(
+    p_links     JSONB,
+    p_user_id   UUID,
+    p_width     INTEGER,
+    p_sort      TEXT,
+    p_next_id   UUID
+) RETURNS JSONB AS $$
+    WITH link AS (
+        SELECT l.value AS link,
+               l.value ->> 'source_type' AS source_type,
+               (l.value ->> 'source_id')::UUID AS source_id,
+               l.value ->> 'target_type' AS target_type,
+               (l.value ->> 'target_id')::UUID AS target_id
+        FROM jsonb_array_elements(coalesce(p_links, '[]'::JSONB)) AS l
+    ),
+    node AS (
+        SELECT DISTINCT target_type AS short_type, target_id AS object_id, source_id AS parent_id FROM link
+        UNION
+        SELECT DISTINCT s.source_type, s.source_id, NULL::UUID FROM link s
+        WHERE NOT EXISTS (SELECT 1 FROM link t WHERE t.target_id = s.source_id AND t.target_type = s.source_type)
+    ),
+    typed AS (
+        SELECT n.short_type, n.object_id, n.parent_id,
+               coalesce((SELECT ti.object_type FROM claimius.table_info ti
+                         WHERE claimius.normalize_object_type(ti.object_type) = n.short_type
+                         ORDER BY ti.object_type LIMIT 1), n.short_type) AS object_type
+        FROM node n
+    ),
+    kept AS (
+        SELECT w.object_id, w.object_type, w.parent_id
+        FROM claimius._window_graph(
+            (SELECT coalesce(jsonb_agg(jsonb_build_object(
+                        'object_id', t.object_id,
+                        'object_type', t.object_type,
+                        'label', coalesce(
+                            (SELECT oi.sa_name FROM claimius.object_info oi WHERE oi.object_type = t.object_type AND oi.object_id = t.object_id),
+                            (SELECT c.name FROM claimius.claim c WHERE t.object_type = 'claimius.claim' AND c.id = t.object_id),
+                            (SELECT concat_ws(' ', su.first_name, su.last_name) FROM claimius.samna_user su
+                             WHERE t.object_type = 'claimius.samna_user' AND su.id = t.object_id),
+                            t.object_id::TEXT),
+                        'parent_id', t.parent_id)), '[]'::JSONB)
+             FROM typed t),
+            p_user_id, p_width, p_sort, p_next_id) w
+    )
+    SELECT coalesce(jsonb_agg(l.link), '[]'::JSONB)
+    FROM link l
+    WHERE EXISTS (
+        SELECT 1 FROM kept k JOIN typed t ON t.object_id = k.object_id AND t.object_type = k.object_type
+        WHERE t.short_type = l.target_type
+          AND k.object_id = l.target_id
+          AND k.parent_id IS NOT DISTINCT FROM l.source_id)
+$$ LANGUAGE sql STABLE;
+
+COMMENT ON FUNCTION claimius._window_links(JSONB, UUID, INTEGER, TEXT, UUID) IS 'The links of a link graph kept by the window _window_graph gives its nodes: a link stays when its target is kept under its source.';
 
 
 -- ----------------------------------------------------------------------------
@@ -2463,8 +2527,18 @@ $$ LANGUAGE plpgsql;
 COMMENT ON FUNCTION claimius.merge_user(p_target_user_id uuid, p_source_user_id uuid, p_acting_user_claim uuid) IS 'Reassigns all data from source user_id to target user_id across apps.';
 
 -- ============================================================================
--- migrate_root: cross root organization migration. Should be called rarely
--- since calc_hierarchical_access blocks cross root reparenting in the trigger.
+-- migrate_root: cross root migration. Should be called rarely since
+-- calc_hierarchical_access blocks cross root reparenting in the trigger.
+-- Hangs the object, with its subtree, directly under p_new_root_id, a root of
+-- the same type. The subtree is walked through the object's own parent
+-- column, sa_owner_id for an organization and sa_parent_id otherwise, and
+-- every node in it takes the new root, the object the new root as parent, in
+-- one statement the trigger lets through under claimius.migrating_root. The
+-- trigger keeps the closure incrementally and raises the object area of each
+-- node it moves, so every holder on either side settles. For an organization
+-- the rows of registered tables it owns whose sa_root_id names the old
+-- organization root, those with no parenthood of their own, take the new
+-- one.
 -- ============================================================================
 
 CREATE OR REPLACE FUNCTION claimius.migrate_root(
@@ -2473,50 +2547,66 @@ CREATE OR REPLACE FUNCTION claimius.migrate_root(
     p_new_root_id   UUID
 ) RETURNS VOID AS $$
 DECLARE
+    v_parts   TEXT[] := claimius.split_object_type(p_object_type);
+    v_parent  TEXT := CASE WHEN p_object_type = 'claimius.organization' THEN 'sa_owner_id' ELSE 'sa_parent_id' END;
     v_old_root UUID;
-    v_schema TEXT;
-    v_table TEXT;
-    v_parts TEXT[];
-    v_sql TEXT;
+    v_is_root BOOLEAN;
+    v_moved   UUID[];
+    v_table   RECORD;
 BEGIN
-    v_parts := claimius.split_object_type(p_object_type);
-    v_schema := v_parts[1];
-    v_table := v_parts[2];
-
-    PERFORM set_config('claimius.replay_mode', 'true', TRUE);
-
-    v_sql := format('SELECT sa_root_id FROM %I.%I WHERE id = $1', v_schema, v_table);
-    EXECUTE v_sql INTO v_old_root USING p_object_id;
-
-    -- Walk every descendant in the old tree and rewrite sa_root_id
-    EXECUTE format('
-        WITH RECURSIVE descendants AS (
-            SELECT id FROM %I.%I WHERE id = $1
-            UNION ALL
-            SELECT t.id FROM %I.%I t JOIN descendants d ON t.sa_parent_id = d.id
-            WHERE t.id <> t.sa_parent_id
-        )
-        UPDATE %I.%I SET sa_root_id = $2 WHERE id IN (SELECT id FROM descendants)
-    ', v_schema, v_table, v_schema, v_table, v_schema, v_table)
-        USING p_object_id, p_new_root_id;
-
-    PERFORM set_config('claimius.replay_mode', 'false', TRUE);
-
-    -- Rebuild both old and new trees
-    IF p_object_type = 'claimius.organization' THEN
-        PERFORM claimius.build_ownership_tree(v_old_root);
-        PERFORM claimius.build_ownership_tree(p_new_root_id);
-    ELSIF p_object_type = 'claimius.location' THEN
-        PERFORM claimius.build_location_tree(v_old_root);
-        PERFORM claimius.build_location_tree(p_new_root_id);
-    ELSE
-        PERFORM claimius.build_parenthood_tree(p_object_type, v_old_root);
-        PERFORM claimius.build_parenthood_tree(p_object_type, p_new_root_id);
+    EXECUTE format('SELECT sa_root_id FROM %I.%I WHERE id = $1 AND sa_deleted_at IS NULL', v_parts[1], v_parts[2])
+        INTO v_old_root USING p_object_id;
+    IF v_old_root IS NULL THEN
+        RAISE EXCEPTION 'migrate_root: % % not found', p_object_type, p_object_id USING ERRCODE = '22023';
     END IF;
+
+    EXECUTE format('SELECT %1$I = id AND sa_root_id = id FROM %2$I.%3$I WHERE id = $1 AND sa_deleted_at IS NULL', v_parent, v_parts[1], v_parts[2])
+        INTO v_is_root USING p_new_root_id;
+    IF v_is_root IS NOT TRUE THEN
+        RAISE EXCEPTION 'migrate_root: % is not a live root of %', p_new_root_id, p_object_type USING ERRCODE = '22023';
+    END IF;
+
+    EXECUTE format('
+        WITH RECURSIVE subtree AS (
+            SELECT id FROM %1$I.%2$I WHERE id = $1
+            UNION
+            SELECT t.id FROM %1$I.%2$I t JOIN subtree s ON t.%3$I = s.id
+            WHERE t.id <> t.%3$I
+        )
+        SELECT array_agg(id) FROM subtree', v_parts[1], v_parts[2], v_parent)
+        INTO v_moved USING p_object_id;
+    IF p_new_root_id = ANY(v_moved) THEN
+        RAISE EXCEPTION 'migrate_root: % lies inside the subtree of %', p_new_root_id, p_object_id USING ERRCODE = '22023';
+    END IF;
+
+    PERFORM set_config('claimius.migrating_root', 'on', TRUE);
+
+    EXECUTE format('
+        UPDATE %1$I.%2$I
+        SET sa_root_id = $2,
+            %3$I = CASE WHEN id = $3 THEN $2 ELSE %3$I END
+        WHERE id = ANY($1)', v_parts[1], v_parts[2], v_parent)
+        USING v_moved, p_new_root_id, p_object_id;
+
+    IF p_object_type = 'claimius.organization' THEN
+        FOR v_table IN
+            SELECT ti.schema_name, ti.table_name
+            FROM claimius.table_info ti
+            WHERE ti.has_sa_owner_id
+              AND ti.has_sa_root_id
+              AND NOT ti.has_sa_parent_id
+              AND ti.object_type <> 'claimius.organization'
+        LOOP
+            EXECUTE format('UPDATE %I.%I SET sa_root_id = $1 WHERE sa_owner_id = ANY($2) AND sa_root_id = $3', v_table.schema_name, v_table.table_name)
+                USING p_new_root_id, v_moved, v_old_root;
+        END LOOP;
+    END IF;
+
+    PERFORM set_config('claimius.migrating_root', 'off', TRUE);
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius.migrate_root(p_object_type text, p_object_id uuid, p_new_root_id uuid) IS 'Admin function: cross root migration. Use only when absolutely required.';
+COMMENT ON FUNCTION claimius.migrate_root(p_object_type text, p_object_id uuid, p_new_root_id uuid) IS 'Admin function: hangs an object with its subtree under a root of another tree, walking organizations through sa_owner_id, moving the closure incrementally, rerooting the owned rows without parenthood and raising the areas it moves. Use only when absolutely required.';
 
 -- ============================================================================
 -- Init functions
@@ -2835,38 +2925,6 @@ $$ LANGUAGE plpgsql;
 COMMENT ON FUNCTION claimius.init(p_disciple_app_slug text) IS 'Bootstrap as a disciple. Ensures the sync cursor row and grants disciple roles. App identity comes from env. State arrives from prophet via sync.';
 
 -- ----------------------------------------------------------------------------
--- Role grant helpers
--- ----------------------------------------------------------------------------
-
-CREATE OR REPLACE FUNCTION claimius._grant_disciple_roles()
-    RETURNS VOID AS $$
-BEGIN
-    EXECUTE 'GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA claimius TO claimius_reader';
-    EXECUTE 'REVOKE EXECUTE ON FUNCTION claimius.create_claim, claimius.update_claim, claimius.remove_claim,
-             claimius.assign_claim_user, claimius.update_claim_user, claimius.remove_user_claim,
-             claimius.assign_claim_object, claimius.update_claim_object, claimius.remove_claim_object,
-             claimius.merge_user, claimius.migrate_root,
-             claimius.init,
-             claimius.init_claimius_tables, claimius.init_claimius_internal,
-             claimius.recompute_state
-             FROM claimius_reader';
-    EXECUTE 'GRANT INSERT, UPDATE, DELETE ON claimius.user_object, claimius.object_info, claimius.user_users,
-             claimius.disciple_state, claimius.samna_user, claimius.samna_client,
-             claimius.samna_secret, claimius.organization, claimius.location,
-             claimius.claim, claimius.user_claim, claimius.claim_object,
-             claimius.object_field, claimius.user_field, claimius.user_relation,
-             claimius.audit, claimius.inheritance_info, claimius.table_info,
-             claimius.notification, claimius.claim_graph_cache
-             TO claimius_disciple_client';
-    EXECUTE 'REVOKE INSERT, UPDATE, DELETE ON claimius.claim_graph_cache FROM claimius_reader';
-    EXECUTE 'GRANT SELECT ON ALL TABLES IN SCHEMA claimius TO claimius_disciple_client';
-    EXECUTE 'GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA claimius TO claimius_disciple_client';
-END;
-$$ LANGUAGE plpgsql;
-
-REVOKE INSERT, UPDATE, DELETE ON claimius.claim_graph_cache FROM claimius_reader;
-
--- ----------------------------------------------------------------------------
 -- ensure_app_user
 -- When a user logs in for the first time, upserts the samna_user row. On the
 -- disciple there is no app default claim: claim grants arrive via sync, so no
@@ -3099,6 +3157,7 @@ $$ LANGUAGE plpgsql IMMUTABLE;
 GRANT EXECUTE ON FUNCTION claimius.merge_graphs(JSONB, JSONB) TO claimius_reader, claimius_writer, claimius_admin;
 
 DROP FUNCTION IF EXISTS claimius.get_graph_links_owner(UUID, UUID, INTEGER, TEXT[], TEXT[], UUID, INTEGER);
+DROP FUNCTION IF EXISTS claimius.get_graph_links_owner(UUID, INTEGER, TEXT[], TEXT[], UUID, INTEGER);
 
 DROP FUNCTION IF EXISTS claimius.get_graph_links_owner(UUID, INTEGER, TEXT[], TEXT[], UUID, INTEGER, INTEGER, TEXT, UUID);
 DROP FUNCTION IF EXISTS claimius.get_graph_objects(UUID, INTEGER, TEXT[], TEXT[], UUID[], BOOLEAN, BOOLEAN);
@@ -3111,12 +3170,19 @@ CREATE OR REPLACE FUNCTION claimius.get_graph_links_owner(
     p_include_types   TEXT[] DEFAULT NULL,
     p_exclude_types   TEXT[] DEFAULT NULL,
     p_start_id        UUID DEFAULT NULL,
-    p_depth           INTEGER DEFAULT 0
+    p_depth           INTEGER DEFAULT 0,
+    p_width           INTEGER DEFAULT 0,
+    p_sort            TEXT DEFAULT 'name',
+    p_next_id         UUID DEFAULT NULL
 ) RETURNS JSONB AS $$
 DECLARE
     v_links   JSONB;
     v_allowed TEXT[] := (SELECT coalesce(array_agg(object_type ORDER BY object_type), ARRAY[]::TEXT[]) FROM claimius.table_info);
 BEGIN
+    IF p_sort IS NULL OR p_sort NOT IN ('name', 'usage') OR p_width IS NULL OR p_width < 0 THEN
+        RAISE EXCEPTION 'graph window: p_sort is name or usage and p_width at least 0' USING ERRCODE = '22023';
+    END IF;
+
     IF NOT claimius.check_user_active(p_user_id) THEN
         RETURN jsonb_build_object('links', '[]'::jsonb);
     END IF;
@@ -3211,13 +3277,18 @@ BEGIN
         'relation',    CASE relation_raw WHEN 'ownership' THEN 'owner' ELSE relation_raw END
     )), '[]'::jsonb) INTO v_links FROM edges;
 
+    IF p_width > 0 OR p_next_id IS NOT NULL THEN
+        v_links := claimius._window_links(v_links, p_user_id, p_width, p_sort, p_next_id);
+    END IF;
+
     RETURN jsonb_build_object('links', v_links);
 END;
 $$ LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = claimius, pg_temp;
 
-GRANT EXECUTE ON FUNCTION claimius.get_graph_links_owner(UUID, INTEGER, TEXT[], TEXT[], UUID, INTEGER) TO claimius_reader, claimius_writer, claimius_admin;
+GRANT EXECUTE ON FUNCTION claimius.get_graph_links_owner(UUID, INTEGER, TEXT[], TEXT[], UUID, INTEGER, INTEGER, TEXT, UUID) TO claimius_reader, claimius_writer, claimius_admin;
 
 DROP FUNCTION IF EXISTS claimius.get_graph_links_claim(UUID, UUID, INTEGER, TEXT[], TEXT[], UUID, INTEGER);
+DROP FUNCTION IF EXISTS claimius.get_graph_links_claim(UUID, INTEGER, TEXT[], TEXT[], UUID, INTEGER);
 
 DROP FUNCTION IF EXISTS claimius.get_graph_links_claim(UUID, INTEGER, TEXT[], TEXT[], UUID, INTEGER, INTEGER, TEXT, UUID);
 CREATE OR REPLACE FUNCTION claimius.get_graph_links_claim(
@@ -3226,13 +3297,20 @@ CREATE OR REPLACE FUNCTION claimius.get_graph_links_claim(
     p_include_types   TEXT[] DEFAULT NULL,
     p_exclude_types   TEXT[] DEFAULT NULL,
     p_start_id        UUID DEFAULT NULL,
-    p_depth           INTEGER DEFAULT 0
+    p_depth           INTEGER DEFAULT 0,
+    p_width           INTEGER DEFAULT 0,
+    p_sort            TEXT DEFAULT 'name',
+    p_next_id         UUID DEFAULT NULL
 ) RETURNS JSONB AS $$
 DECLARE
     v_user_row_id UUID;
     v_claim_ids   UUID[];
     v_links       JSONB;
 BEGIN
+    IF p_sort IS NULL OR p_sort NOT IN ('name', 'usage') OR p_width IS NULL OR p_width < 0 THEN
+        RAISE EXCEPTION 'graph window: p_sort is name or usage and p_width at least 0' USING ERRCODE = '22023';
+    END IF;
+
     PERFORM claimius.reconcile_if_pending(p_user_id);
 
     IF NOT claimius.check_user_active(p_user_id) THEN
@@ -3384,11 +3462,15 @@ BEGIN
     )
     SELECT COALESCE(jsonb_agg(link), '[]'::jsonb) INTO v_links FROM spine;
 
+    IF p_width > 0 OR p_next_id IS NOT NULL THEN
+        v_links := claimius._window_links(v_links, p_user_id, p_width, p_sort, p_next_id);
+    END IF;
+
     RETURN jsonb_build_object('links', v_links);
 END;
 $$ LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = claimius, pg_temp;
 
-GRANT EXECUTE ON FUNCTION claimius.get_graph_links_claim(UUID, INTEGER, TEXT[], TEXT[], UUID, INTEGER) TO claimius_reader, claimius_writer, claimius_admin;
+GRANT EXECUTE ON FUNCTION claimius.get_graph_links_claim(UUID, INTEGER, TEXT[], TEXT[], UUID, INTEGER, INTEGER, TEXT, UUID) TO claimius_reader, claimius_writer, claimius_admin;
 
 DROP FUNCTION IF EXISTS claimius.create_organization_user(UUID, UUID, UUID, JSONB);
 DROP FUNCTION IF EXISTS claimius.create_organization_user(UUID, UUID, UUID, JSONB, BOOLEAN);

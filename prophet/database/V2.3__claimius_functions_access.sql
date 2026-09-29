@@ -253,7 +253,7 @@ COMMENT ON FUNCTION claimius.calc_object_trees() IS 'Trigger on owned tables out
 -- membership in ownership and location trees. An insert writes the node's
 -- d + 1 rows, a reparent splices its subtree, a delete drops its subtree, and
 -- a restore rebuilds only the restored subtree. Disallows cross root
--- reparenting.
+-- reparenting outside migrate_root.
 -- ----------------------------------------------------------------------------
 
 CREATE OR REPLACE FUNCTION claimius.calc_hierarchical_access()
@@ -318,7 +318,8 @@ BEGIN
     END IF;
 
     -- Cross root reparenting is not allowed
-    IF v_op = 'UPDATE' AND v_old_root_id IS DISTINCT FROM v_root_id AND NOT v_replay THEN
+    IF v_op = 'UPDATE' AND v_old_root_id IS DISTINCT FROM v_root_id AND NOT v_replay
+        AND current_setting('claimius.migrating_root', TRUE) IS DISTINCT FROM 'on' THEN
         RAISE EXCEPTION 'Cross root reparenting is not allowed. Use migrate_root() if absolutely required.';
     END IF;
 
@@ -394,12 +395,14 @@ BEGIN
 
     RETURN coalesce(NEW, OLD);
 EXCEPTION WHEN OTHERS THEN
-    PERFORM claimius.write_audit(
-            v_app_id, v_op, 'error', v_object_type, v_obj_id,
-            coalesce((to_jsonb(coalesce(NEW, OLD)) ->> 'sa_owner_id')::UUID, '00000000-0000-0000-0000-000000000000'::UUID),
-            coalesce((to_jsonb(coalesce(NEW, OLD)) ->> 'sa_created_by')::UUID, '00000000-0000-0000-0000-000000000000'::UUID),
-            SQLERRM
-            );
+    IF coalesce(v_app_id, v_app_ids[1]) IS NOT NULL THEN
+        PERFORM claimius.write_audit(
+                coalesce(v_app_id, v_app_ids[1]), v_op, 'error', v_object_type, v_obj_id,
+                coalesce((to_jsonb(coalesce(NEW, OLD)) ->> 'sa_owner_id')::UUID, '00000000-0000-0000-0000-000000000000'::UUID),
+                coalesce((to_jsonb(coalesce(NEW, OLD)) ->> 'sa_created_by')::UUID, '00000000-0000-0000-0000-000000000000'::UUID),
+                SQLERRM
+                );
+    END IF;
     RAISE;
 END;
 $$ LANGUAGE plpgsql;
@@ -528,12 +531,22 @@ COMMENT ON FUNCTION claimius.calc_claim_access() IS 'Trigger on claim, claim_obj
 -- BEFORE INSERT/UPDATE trigger on claim_object. Enforces composition link
 -- invariants: no self loop, no reverse link cycle, caller has read on
 -- target claim. Bypassed during disciple replay.
+-- The first binding of an app that carries no live binding yet may
+-- come from an actor of another app who holds owner on the organization
+-- owning the samna_app row, judged in the actor's own app, the app of its
+-- user_claim. That is how a new app on a prophet receives its first claim.
+-- The first binding on a samna_user that a claim of the binding's owning
+-- organization is assigned to may come from an actor holding owner on that
+-- organization. That is how create_organization_user binds a new user's
+-- virtual claim.
 -- ----------------------------------------------------------------------------
 
 CREATE OR REPLACE FUNCTION claimius._check_claim_composition()
     RETURNS TRIGGER AS $$
 DECLARE
     v_user_id      UUID;
+    v_actor_app_id UUID;
+    v_app_owner_id UUID;
     v_has_access   BOOLEAN;
     v_actor_access INTEGER;
     v_effective    INTEGER;
@@ -562,7 +575,7 @@ BEGIN
              OR NEW.claim_id IS DISTINCT FROM OLD.claim_id
              OR NEW.object_id IS DISTINCT FROM OLD.object_id)
     THEN
-        SELECT uc.user_id INTO v_user_id
+        SELECT uc.user_id, uc.app_id INTO v_user_id, v_actor_app_id
         FROM claimius.user_claim uc
         WHERE uc.id = NEW.sa_created_by
           AND uc.sa_deleted_at IS NULL;
@@ -576,6 +589,63 @@ BEGIN
               AND app_id      = NEW.app_id
               AND object_type = NEW.object_type
               AND object_id   = NEW.object_id;
+
+            IF (coalesce(v_effective, 0) & ~coalesce(v_actor_access, 0) & 15) <> 0
+                AND v_actor_app_id IS DISTINCT FROM NEW.app_id
+                AND NOT EXISTS (
+                    SELECT 1 FROM claimius.claim_object co
+                    WHERE co.app_id = NEW.app_id
+                      AND co.sa_deleted_at IS NULL)
+            THEN
+                SELECT a.sa_owner_id INTO v_app_owner_id
+                FROM claimius.samna_app a
+                WHERE a.id = NEW.app_id
+                  AND a.sa_deleted_at IS NULL;
+
+                IF v_app_owner_id IS NOT NULL THEN
+                    PERFORM claimius.reconcile_if_pending(v_actor_app_id, v_user_id, 'claimius.organization', v_app_owner_id);
+
+                    IF EXISTS (
+                        SELECT 1 FROM claimius.user_object
+                        WHERE user_id     = v_user_id
+                          AND app_id      = v_actor_app_id
+                          AND object_type = 'claimius.organization'
+                          AND object_id   = v_app_owner_id
+                          AND (sa_access & 1) <> 0)
+                    THEN
+                        v_actor_access := 15;
+                    END IF;
+                END IF;
+            END IF;
+
+            IF (coalesce(v_effective, 0) & ~coalesce(v_actor_access, 0) & 15) <> 0
+                AND NEW.object_type = 'claimius.samna_user'
+                AND NOT EXISTS (
+                    SELECT 1 FROM claimius.claim_object co
+                    WHERE co.app_id = NEW.app_id
+                      AND co.object_type = 'claimius.samna_user'
+                      AND co.object_id = NEW.object_id
+                      AND co.sa_deleted_at IS NULL)
+                AND EXISTS (
+                    SELECT 1 FROM claimius.user_claim m
+                    WHERE m.app_id = NEW.app_id
+                      AND m.user_id = NEW.object_id
+                      AND m.sa_owner_id = NEW.sa_owner_id
+                      AND m.sa_deleted_at IS NULL)
+            THEN
+                PERFORM claimius.reconcile_if_pending(NEW.app_id, v_user_id, 'claimius.organization', NEW.sa_owner_id);
+
+                IF EXISTS (
+                    SELECT 1 FROM claimius.user_object
+                    WHERE user_id     = v_user_id
+                      AND app_id      = NEW.app_id
+                      AND object_type = 'claimius.organization'
+                      AND object_id   = NEW.sa_owner_id
+                      AND (sa_access & 1) <> 0)
+                THEN
+                    v_actor_access := 15;
+                END IF;
+            END IF;
 
             IF (coalesce(v_effective, 0) & ~coalesce(v_actor_access, 0) & 15) <> 0 THEN
                 RAISE EXCEPTION 'cannot grant more access than held: user % holds % on % %, requested %',
@@ -631,7 +701,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius._check_claim_composition() IS 'BEFORE INSERT/UPDATE trigger on claim_object. Rejects a grant whose effective mask hands out more access than the actor holds on the object, denies and removals exempt. Enforces composition link invariants: no self loop, no reverse link cycle, caller has read on target claim. Bypassed during disciple replay.';
+COMMENT ON FUNCTION claimius._check_claim_composition() IS 'BEFORE INSERT/UPDATE trigger on claim_object. Rejects a grant whose effective mask hands out more access than the actor holds on the object, denies and removals exempt. The first binding of an app may come from an actor of another app holding owner on the organization that owns the app, judged in the actor''s own app. The first binding on a samna_user holding a claim assigned under the binding''s owning organization may come from an actor holding owner on that organization. Enforces composition link invariants: no self loop, no reverse link cycle, caller has read on target claim. Bypassed during disciple replay.';
 
 DROP TRIGGER IF EXISTS tg_check_claim_composition ON claimius.claim_object;
 CREATE TRIGGER tg_check_claim_composition
@@ -864,14 +934,20 @@ COMMENT ON FUNCTION claimius.notify_sync_event() IS 'Statement trigger on sync_e
 -- settled, since the rest of the reader's share is still open.
 --
 -- Called without one, the read is a listing and settles the reader's share of
--- every area it meets: every object area of the app and the claim areas of
--- the reader's claims. Each share is set based, one recompute per object
--- type, and is recorded in access_diff_user at the area's raise_count, so the
--- reader never settles the same raise twice. The area row is cleared
--- once every holder has settled it. A reader locks the areas it takes
--- FOR KEY SHARE SKIP LOCKED, which writers raising the area again do not
--- wait on, and its own share of an area with a transaction advisory lock, so
--- two reads of one user never settle the same share at once.
+-- the areas it needs: the object areas of the app of the type it lists, with
+-- p_object_type, or that cascade over that type, every object area without
+-- one, and the claim areas of the reader's claims. It takes at most
+-- _object_lock_budget of them, oldest first, and leaves the rest to the next
+-- read and the drain. Each share is set based, one recompute per object type,
+-- and is recorded in access_diff_user at the area's raise_count, so the
+-- reader never settles the same raise twice. The area row is cleared once
+-- every holder has settled it. A reader locks the areas it takes FOR KEY
+-- SHARE SKIP LOCKED, which writers raising the area again do not wait on,
+-- and its whole share with one transaction advisory lock, so two reads of one
+-- user never settle it at once; a read that finds it held settles nothing.
+-- A batch big enough to spend the per object lock budget takes every object
+-- at once instead, so however many areas are open the read holds a bounded
+-- number of locks.
 --
 -- The retry queue. reconcile_queue holds sync event applications that failed.
 -- A check drains the pair it asks about, a listing every pair of the reader.
@@ -884,8 +960,9 @@ CREATE OR REPLACE FUNCTION claimius.reconcile_if_pending(
     RETURNS VOID AS $$
 DECLARE
     v_row       RECORD;
-    v_diff      RECORD;
     v_open      BOOLEAN;
+    v_areas     UUID[];
+    v_area      UUID;
 BEGIN
     IF p_app_id IS NULL OR p_user_id IS NULL THEN
         RETURN;
@@ -997,12 +1074,20 @@ BEGIN
             -- leave the pair outstanding for the next reader
             NULL;
         END;
-    ELSE
-        FOR v_diff IN
-            SELECT d.* FROM claimius.access_diff d
+    ELSIF pg_try_advisory_xact_lock(hashtextextended('claimius.share:' || p_app_id::TEXT || ':' || p_user_id::TEXT, 0)) THEN
+        v_areas := ARRAY(
+            SELECT d.id FROM claimius.access_diff d
             WHERE d.app_id = p_app_id
               AND (
-                      d.kind = 'object'
+                      (d.kind = 'object' AND (
+                          p_object_type IS NULL
+                          OR d.object_type = p_object_type
+                          OR (d.cascade AND EXISTS (
+                              SELECT 1 FROM claimius.inheritance_info e
+                              WHERE e.ancestor_type = d.object_type
+                                AND e.ancestor_id = d.object_id
+                                AND e.descendant_type = p_object_type
+                                AND e.depth > 0))))
                       OR d.user_id = p_user_id
                       OR (d.user_id IS NULL AND EXISTS (
                           SELECT 1 FROM claimius.user_claim uc
@@ -1026,9 +1111,14 @@ BEGIN
                   SELECT 1 FROM claimius.access_diff_user du
                   WHERE du.diff_id = d.id AND du.user_id = p_user_id AND du.raise_count = d.raise_count)
             ORDER BY d.sa_created_at, d.id
-            FOR KEY SHARE OF d SKIP LOCKED
-        LOOP
-            PERFORM claimius._settle_diff_share(p_app_id, p_user_id, v_diff.id);
+            LIMIT claimius._object_lock_budget()
+            FOR KEY SHARE OF d SKIP LOCKED);
+
+        IF cardinality(v_areas) * 4 > claimius._object_lock_budget() THEN
+            PERFORM claimius._lock_all_objects();
+        END IF;
+        FOREACH v_area IN ARRAY v_areas LOOP
+            PERFORM claimius._settle_diff_share(p_app_id, p_user_id, v_area);
         END LOOP;
 
         FOR v_row IN
@@ -1048,7 +1138,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius.reconcile_if_pending(UUID, UUID, TEXT, UUID) IS 'Settles what a read meets and drains reconcile_queue. With a target it recomputes the one pair when an open area covers it; without one it settles the reader''s share of every open area, set based, and records it in access_diff_user. Called at read entry points.';
+COMMENT ON FUNCTION claimius.reconcile_if_pending(UUID, UUID, TEXT, UUID) IS 'Settles what a read meets and drains reconcile_queue. With a target it recomputes the one pair when an open area covers it; without one it settles the reader''s share of at most _object_lock_budget open areas it needs, of p_object_type when given, set based, under one share lock and a bounded number of object locks, and records it in access_diff_user. Called at read entry points.';
 
 -- drain_access_diff
 -- Settles, outside any request, the shares of open areas whose holders are
@@ -1059,7 +1149,9 @@ COMMENT ON FUNCTION claimius.reconcile_if_pending(UUID, UUID, TEXT, UUID) IS 'Se
 -- fails the test, or whose holder has never used the app, waits for the
 -- holder's own read. Shares are taken most recent user first, at most
 -- p_limit_pairs of them, each through _settle_diff_share, so a share a read is
--- settling at the same moment is skipped. The prophet drains the areas of its
+-- settling at the same moment is skipped. A drain holds the share locks of at
+-- most 64 users and stops once its per object locks near _object_lock_budget,
+-- leaving the rest to the next drain. The prophet drains the areas of its
 -- own app and of every app no disciple has been in contact with for 7 days;
 -- the areas of an app a disciple serves are drained there, so each settle is
 -- paid once. Run by a scheduled job. Returns the shares settled.
@@ -1069,6 +1161,7 @@ CREATE OR REPLACE FUNCTION claimius.drain_access_diff(
 DECLARE
     v_share     RECORD;
     v_settled   INTEGER := 0;
+    v_users     UUID[] := '{}';
 BEGIN
     FOR v_share IN
         SELECT s.app_id, s.user_id, s.diff_id
@@ -1092,6 +1185,11 @@ BEGIN
         ORDER BY s.last_used_at DESC, s.diff_id, s.user_id
         LIMIT greatest(p_limit_pairs, 0)
     LOOP
+        EXIT WHEN coalesce(nullif(current_setting('claimius.object_locks', TRUE), ''), '0')::INTEGER * 2 >= claimius._object_lock_budget();
+        IF NOT v_share.user_id = ANY(v_users) THEN
+            CONTINUE WHEN cardinality(v_users) >= 64;
+            v_users := v_users || v_share.user_id;
+        END IF;
         IF claimius._settle_diff_share(v_share.app_id, v_share.user_id, v_share.diff_id) THEN
             v_settled := v_settled + 1;
         END IF;

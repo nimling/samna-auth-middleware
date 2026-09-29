@@ -1313,29 +1313,92 @@ $$ LANGUAGE plpgsql;
 
 COMMENT ON FUNCTION claimius._write_object_info(TEXT, UUID[]) IS 'Writes the object_info rows of a set of objects of one type from the rows themselves: upserts the live ones where a field differs, deletes the ones gone or soft deleted.';
 
--- _lock_objects
--- Takes the transaction advisory lock of every object named, one key per
--- object_type:object_id, in sorted key order. A settle takes the locks of
--- every object it will write before its first write, so two settles that
--- overlap acquire their common objects in one order and cannot deadlock. A
--- lock already held is taken again without waiting and without reordering.
-CREATE OR REPLACE FUNCTION claimius._lock_objects(p_keys TEXT[])
-    RETURNS VOID AS $$
+-- _object_lock_budget
+-- The most per object locks one transaction takes, and the most areas one
+-- read or one drain settles. Each lock is an entry in the shared lock table,
+-- which holds max_locks_per_transaction times max_connections of them for the
+-- whole server, so a transaction keeps well under one connection's share.
+CREATE OR REPLACE FUNCTION claimius._object_lock_budget()
+    RETURNS INTEGER AS $$
+    SELECT 512
+$$ LANGUAGE sql IMMUTABLE;
+
+COMMENT ON FUNCTION claimius._object_lock_budget() IS 'The most per object locks one transaction takes and the most areas one read or drain settles.';
+
+-- _lock_all_objects
+-- Takes every object at once: the exclusive transaction advisory lock that
+-- every per object locker holds shared, one lock in place of any number. A
+-- transaction that holds per object locks already would have to upgrade and
+-- may deadlock doing it, so it is refused, FALSE. TRUE once held.
+CREATE OR REPLACE FUNCTION claimius._lock_all_objects()
+    RETURNS BOOLEAN AS $$
 DECLARE
-    v_key BIGINT;
+    v_held INTEGER := coalesce(nullif(current_setting('claimius.object_locks', TRUE), ''), '0')::INTEGER;
 BEGIN
-    FOR v_key IN
-        SELECT DISTINCT hashtextextended(k, 0)
-        FROM unnest(p_keys) AS k
-        WHERE k IS NOT NULL
-        ORDER BY 1
-    LOOP
-        PERFORM pg_advisory_xact_lock(v_key);
-    END LOOP;
+    IF v_held < 0 THEN
+        RETURN TRUE;
+    END IF;
+    IF v_held > 0 THEN
+        RETURN FALSE;
+    END IF;
+    PERFORM pg_advisory_xact_lock(hashtext('claimius._lock_objects'), 0);
+    PERFORM set_config('claimius.object_locks', '-1', TRUE);
+    RETURN TRUE;
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius._lock_objects(TEXT[]) IS 'Takes the per object transaction advisory locks of a set of object_type:object_id keys in sorted key order.';
+COMMENT ON FUNCTION claimius._lock_all_objects() IS 'Takes every object under one exclusive lock when the transaction holds no per object lock yet. TRUE once held.';
+
+-- _lock_objects
+-- Takes the transaction advisory lock of every object named, one key per
+-- object_type:object_id, in sorted key order, under the lock every object
+-- shares. A settle takes the locks of every object it will write before its
+-- first write, so two settles that overlap acquire their common objects in
+-- one order and cannot deadlock. A lock already held is taken again without
+-- waiting and without reordering. The locks a transaction has taken are
+-- counted in claimius.object_locks, and past _object_lock_budget the
+-- transaction takes every object at once instead, so it never holds more
+-- than the budget. Crossing it while per object locks are held upgrades the
+-- shared lock, which can deadlock with a transaction waiting on one of them,
+-- so a settle that knows it will cross takes every object before its first
+-- lock.
+CREATE OR REPLACE FUNCTION claimius._lock_objects(p_keys TEXT[])
+    RETURNS VOID AS $$
+DECLARE
+    v_held INTEGER := coalesce(nullif(current_setting('claimius.object_locks', TRUE), ''), '0')::INTEGER;
+    v_keys BIGINT[];
+    v_key  BIGINT;
+BEGIN
+    IF v_held < 0 THEN
+        RETURN;
+    END IF;
+
+    v_keys := ARRAY(
+        SELECT DISTINCT hashtextextended(k, 0)
+        FROM unnest(p_keys) AS k
+        WHERE k IS NOT NULL
+        ORDER BY 1);
+    IF cardinality(v_keys) = 0 THEN
+        RETURN;
+    END IF;
+
+    IF v_held + cardinality(v_keys) > claimius._object_lock_budget() THEN
+        PERFORM pg_advisory_xact_lock(hashtext('claimius._lock_objects'), 0);
+        PERFORM set_config('claimius.object_locks', '-1', TRUE);
+        RETURN;
+    END IF;
+
+    IF v_held = 0 THEN
+        PERFORM pg_advisory_xact_lock_shared(hashtext('claimius._lock_objects'), 0);
+    END IF;
+    FOREACH v_key IN ARRAY v_keys LOOP
+        PERFORM pg_advisory_xact_lock(v_key);
+    END LOOP;
+    PERFORM set_config('claimius.object_locks', (v_held + cardinality(v_keys))::TEXT, TRUE);
+END;
+$$ LANGUAGE plpgsql;
+
+COMMENT ON FUNCTION claimius._lock_objects(TEXT[]) IS 'Takes the per object transaction advisory locks of a set of object_type:object_id keys in sorted key order, under the lock every object shares, or every object at once past _object_lock_budget.';
 
 -- recompute_user_object
 -- The single function that recomputes user_object for one user on a set of
@@ -1349,6 +1412,7 @@ COMMENT ON FUNCTION claimius._lock_objects(TEXT[]) IS 'Takes the per object tran
 -- held. A pair holds only the per user columns; a pair written on an object
 -- that has no object_info row yet brings one, so no pair is ever without its
 -- object's fields. Returns whether the user's pair set changed.
+DROP FUNCTION IF EXISTS claimius._direct_grant_for_object(UUID, UUID, TEXT, UUID);
 DROP FUNCTION IF EXISTS claimius.recompute_user_object(UUID, UUID, TEXT, UUID);
 CREATE OR REPLACE FUNCTION claimius.recompute_user_object(
     p_app_id        UUID,
@@ -2572,8 +2636,9 @@ COMMENT ON FUNCTION claimius._clear_diff(UUID, UUID) IS 'Deletes an access_diff 
 -- Settles one user's share of one area and records it: the object or claim
 -- settle, set based, then the done record at the area's raise_count, then the
 -- clear. The area is taken FOR KEY SHARE SKIP LOCKED, which a writer raising
--- it again does not wait on, and the share under a transaction advisory lock,
--- so two settles of one share never run at once. A share already settled at
+-- it again does not wait on, and the share under the transaction advisory
+-- lock of the user's whole share, one lock however many areas it settles,
+-- so two settles of one user's share never run at once. A share already settled at
 -- the current raise, an area gone or held, and a settle that fails are left
 -- as they are and answer FALSE.
 -- ----------------------------------------------------------------------------
@@ -2597,7 +2662,7 @@ BEGIN
         RETURN FALSE;
     END IF;
 
-    IF NOT pg_try_advisory_xact_lock(hashtextextended(v_diff.id::TEXT || ':' || p_user_id::TEXT, 0)) THEN
+    IF NOT pg_try_advisory_xact_lock(hashtextextended('claimius.share:' || p_app_id::TEXT || ':' || p_user_id::TEXT, 0)) THEN
         RETURN FALSE;
     END IF;
 

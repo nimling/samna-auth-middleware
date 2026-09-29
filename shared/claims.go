@@ -25,7 +25,7 @@ func (d *DB) GetAccess(ctx context.Context, userID, objectID uuid.UUID, objectTy
 	if len(claims) == 0 {
 		return nil, ErrNoAccess
 	}
-	d.Usage.Add(userID, objectType, objectID)
+	d.Usage.Add(nil, userID, objectType, objectID)
 	return &claims[0], nil
 }
 

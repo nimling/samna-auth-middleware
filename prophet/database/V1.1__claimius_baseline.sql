@@ -1138,6 +1138,36 @@ CREATE TABLE IF NOT EXISTS claimius.audit (
                                               PRIMARY KEY (id, sa_created_at)
 ) PARTITION BY RANGE (sa_created_at);
 
+-- _match_audit_partition_grants
+-- Makes one partition of audit hold exactly the grants the partitioned table
+-- holds, the owner and PUBLIC aside: every other grant on the partition is
+-- revoked, then each grant on the partitioned table is given. So the
+-- unpartitioned audit an older set left behind, now audit_default, keeps
+-- none of its own.
+CREATE OR REPLACE FUNCTION claimius._match_audit_partition_grants(p_partition REGCLASS)
+    RETURNS VOID AS $$
+DECLARE
+    v_acl RECORD;
+BEGIN
+    FOR v_acl IN
+        SELECT DISTINCT pg_get_userbyid(a.grantee) AS grantee
+        FROM pg_class c, aclexplode(c.relacl) a
+        WHERE c.oid = p_partition AND a.grantee <> 0 AND a.grantee <> c.relowner
+    LOOP
+        EXECUTE format('REVOKE ALL ON %s FROM %I', p_partition, v_acl.grantee);
+    END LOOP;
+    FOR v_acl IN
+        SELECT a.privilege_type, pg_get_userbyid(a.grantee) AS grantee
+        FROM pg_class c, aclexplode(c.relacl) a
+        WHERE c.oid = 'claimius.audit'::REGCLASS AND a.grantee <> 0 AND a.grantee <> c.relowner
+    LOOP
+        EXECUTE format('GRANT %s ON %s TO %I', v_acl.privilege_type, p_partition, v_acl.grantee);
+    END LOOP;
+END;
+$$ LANGUAGE plpgsql;
+
+COMMENT ON FUNCTION claimius._match_audit_partition_grants(REGCLASS) IS 'Makes one audit partition hold exactly the grants of the partitioned table, owner and PUBLIC aside.';
+
 DO $$
 DECLARE
     v_acl RECORD;
@@ -1153,6 +1183,7 @@ BEGIN
     LOOP
         EXECUTE format('GRANT %s ON claimius.audit TO %I', v_acl.privilege_type, v_acl.grantee);
     END LOOP;
+    PERFORM claimius._match_audit_partition_grants('claimius.audit_default');
     IF to_regproc('claimius.update_timestamp') IS NOT NULL THEN
         CREATE TRIGGER tg_update_timestamp BEFORE UPDATE ON claimius.audit
             FOR EACH ROW EXECUTE FUNCTION claimius.update_timestamp();
@@ -1187,6 +1218,7 @@ BEGIN
     EXECUTE format('WITH moved AS (DELETE FROM claimius.audit_default WHERE sa_created_at >= $1 AND sa_created_at < $2 RETURNING *)
                     INSERT INTO claimius.%I SELECT * FROM moved', v_name) USING v_from, v_to;
     EXECUTE format('ALTER TABLE claimius.audit ATTACH PARTITION claimius.%I FOR VALUES FROM (%L) TO (%L)', v_name, v_from, v_to);
+    PERFORM claimius._match_audit_partition_grants(('claimius.' || quote_ident(v_name))::REGCLASS);
 EXCEPTION WHEN duplicate_table THEN
     RETURN;
 END;

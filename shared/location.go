@@ -35,10 +35,14 @@ func (d *DB) GetLocations(ctx context.Context, userID uuid.UUID, requiredAccess 
 }
 
 func (d *DB) GetLocationsQuery(locs *[]Location, userID uuid.UUID, requiredAccess ClaimAccess, after *uuid.UUID, limit int) *bun.SelectQuery {
-	return ObjectWhere(d.NewSelect().
+	q := d.NewSelect().
 		Model(locs).
 		Where("location.sa_deleted_at IS NULL").
-		ExcludeColumn("sa_deleted_at"), userID, string(OBJECT_TYPE_LOCATION), requiredAccess, nil, after, limit)
+		ExcludeColumn("sa_deleted_at")
+	if after == nil && limit == 0 {
+		q = q.OrderExpr("?TableAlias.id")
+	}
+	return ObjectWhere(q, userID, string(OBJECT_TYPE_LOCATION), requiredAccess, nil, after, limit)
 }
 
 func (d *DB) GetChildLocations(ctx context.Context, startID uuid.UUID) ([]uuid.UUID, error) {

@@ -153,3 +153,32 @@ func TestGraphQueries_BindTheWindow(t *testing.T) {
 		t.Fatalf("an empty window is every child in name order:\nwant %s\ngot  %s", want, claim)
 	}
 }
+
+func TestObjectWhere_OrdersOnlyAPage(t *testing.T) {
+	db := offlineDB()
+	userID := uuid.MustParse("a0000000-0000-4000-8000-00000000000a")
+	orgs := make([]sdb.Organization, 0)
+	got := sdb.ObjectWhere(db.NewSelect().Model(&orgs).OrderExpr(`"organization".name`), userID, "claimius.organization", sdb.ACCESS_READ, nil, nil, 0).String()
+	if !strings.HasSuffix(got, `ORDER BY "organization".name`) {
+		t.Fatalf("an unpaged listing must keep the caller's order alone: %s", got)
+	}
+	after := uuid.MustParse("10000000-0000-4000-8000-000000000011")
+	got = sdb.ObjectWhere(db.NewSelect().Model(&orgs), userID, "claimius.organization", sdb.ACCESS_READ, nil, &after, 25).String()
+	if !strings.HasSuffix(got, `ORDER BY "organization".id`) {
+		t.Fatalf("a page must order on the id its cursor continues from: %s", got)
+	}
+}
+
+func TestObjectWhere_ResolvesTheTableWithoutAModel(t *testing.T) {
+	db := offlineDB()
+	userID := uuid.MustParse("a0000000-0000-4000-8000-00000000000a")
+	for query, want := range map[*bun.SelectQuery]string{
+		db.NewSelect().Table("public.asset").Column("id"):                `"public"."asset".id IN (SELECT object_id FROM claimius.get_objects(`,
+		db.NewSelect().TableExpr("public.asset AS a").ColumnExpr("a.id"): `a.id IN (SELECT object_id FROM claimius.get_objects(`,
+	} {
+		got := sdb.ObjectWhere(query, userID, "public.asset", sdb.ACCESS_READ, nil, nil, 10).String()
+		if !strings.Contains(got, want) || strings.Contains(got, "?TableAlias") {
+			t.Fatalf("a query without a model must name its table:\nwant %s\ngot  %s", want, got)
+		}
+	}
+}

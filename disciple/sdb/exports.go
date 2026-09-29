@@ -15,6 +15,7 @@ type (
 	CreateVirtualClaimParams = shared.CreateVirtualClaimParams
 	Creator                  = shared.Creator
 	GraphNode                = shared.GraphNode
+	GraphWindow              = shared.GraphWindow
 	Location                 = shared.Location
 	LocationType             = shared.LocationType
 	ObjectType               = shared.ObjectType
