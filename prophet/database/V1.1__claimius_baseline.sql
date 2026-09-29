@@ -654,6 +654,26 @@ CREATE INDEX IF NOT EXISTS idx_user_object_object_user ON claimius.user_object (
 -- from user_object, so the table goes.
 DROP TABLE IF EXISTS claimius.object_users;
 
+-- object_usage
+-- Held the usage of each pair apart from the pair, where user_object now
+-- carries it. Its counts are added into the pairs that exist, each pair
+-- takes the later of the two last_used_at, and the table goes.
+DO $$
+BEGIN
+    IF to_regclass('claimius.object_usage') IS NULL THEN
+        RETURN;
+    END IF;
+    UPDATE claimius.user_object uo
+    SET used_count = uo.used_count + ou.used_count,
+        last_used_at = greatest(uo.last_used_at, ou.last_used_at)
+    FROM claimius.object_usage ou
+    WHERE ou.app_id = uo.app_id
+      AND ou.user_id = uo.user_id
+      AND ou.object_type = uo.object_type
+      AND ou.object_id = uo.object_id;
+    DROP TABLE claimius.object_usage;
+END $$;
+
 -- user_users
 -- Records that two users in the same app share at least one accessible
 -- object. Used by get_users to list visible users. Kept by counting: a pair

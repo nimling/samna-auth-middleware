@@ -94,7 +94,7 @@ Nothing is recorded in `access_diff_user`: the rest of the reader's share is sti
 
 ## A listing settles the reader's share
 
-Every listing, search and graph begins with `reconcile_if_pending(app, u)`, and `get_objects`, `get_organizations` and `get_locations` pass the type they list, `reconcile_if_pending(app, u, τ)`. It first takes the transaction advisory lock of the reader's whole share, one key per app and user, with `pg_try_advisory_xact_lock`; a read that finds it held by another read of the same user settles nothing and reads the pairs as they stand. Holding it, it reads the app's open areas `Δ_a` the read needs: with `τ` the `object` areas on an object of type `τ` or with `cascade` on an ancestor of an object of type `τ`, one closure probe per such area, and without `τ` every `object` area; then every `claim` area with `user_id = u`, and every other `claim` area of a claim `u` holds or links to. Each is tested against `access_diff_user` at its `raise_count`, and at most `_object_lock_budget()`, 512, are taken, oldest first by `sa_created_at`, `FOR KEY SHARE SKIP LOCKED`; the rest wait for the next read or the drain. For each it calls `_settle_diff_share`:
+Every listing, search and graph begins with `reconcile_if_pending(app, u)`, and `get_objects`, `get_organizations` and `get_locations` pass the type they list, `reconcile_if_pending(app, u, τ)`. It first takes the transaction advisory lock of the reader's whole share, one key per app and user, with `pg_try_advisory_xact_lock`; a read that finds it held by another read of the same user settles nothing and reads the pairs as they stand. Holding it, it reads the app's open areas `Δ_a` the read needs: with `τ` the `object` areas on an object of type `τ` or with `cascade` on an ancestor of an object of type `τ`, one closure probe per such area, and without `τ` every `object` area; then every `claim` area with `user_id = u`, and every other `claim` area of a claim `u` holds or links to. Each is tested against `access_diff_user` at its `raise_count`, and every one open is taken, oldest first by `sa_created_at`, `FOR KEY SHARE SKIP LOCKED`, however many there are; no area the read needs is left for a later read. For each it calls `_settle_diff_share`:
 
 1. It takes the area `FOR KEY SHARE SKIP LOCKED`, which a writer raising the area again does not wait on, and the share lock of the reader, which the read already holds, so two reads of one user never settle at once and a share lock is one lock however many areas are settled under it; an area held by another settle is skipped and read as it stands.
 
@@ -114,7 +114,7 @@ Every advisory lock a transaction holds is an entry in the server's shared lock 
 
 1. A read holds one share lock, whatever number of areas it settles.
 
-2. A listing of one type settles only the areas that can hold a pair of that type, and at most 512 of them per call.
+2. A listing of one type settles only the areas that can hold a pair of that type, and all of them. The number of areas does not bound the locks: items 1 and 3 do, so a listing needs no cap on the areas it settles.
 
 3. `_lock_objects` counts the per object locks the transaction holds in `claimius.object_locks`. The first call of a transaction takes the covering lock every per object locker holds shared, `hashtext('claimius._lock_objects')`. A call that would carry the count past 512 takes the covering lock exclusive instead, one lock standing for every object, and every later call in the transaction returns at once. So a transaction holds at most 512 per object locks, the covering lock and its share locks.
 
@@ -126,7 +126,7 @@ With `A_u` the reader's open areas that a read needs:
 
 ```
 share locks     = 1
-areas settled   = min(A_u, 512), the oldest
+areas settled   = A_u, oldest first
 object locks    ≤ 512, then one exclusive covering lock in place of any more, taken first when areas settled > 128
 ```
 
@@ -172,7 +172,7 @@ A check that settles only the pair it asks about, when an open area covers that 
 
 2. A listing of type `τ` settles, through `_settle_diff_share`, the reader's share of every open object area that can hold a pair of type `τ`, one on an object of type `τ` or one with `cascade` over a descendant of type `τ`, a listing without a type every open object area, and every claim area of a claim the reader holds, links to or was assigned, and records it at `raise_count`. An object area of another type without such a descendant has a support with no pair of type `τ`, so leaving it open leaves no pair the listing returns stale. A later raise increments `raise_count`, which makes the record stale and the share open again.
 
-3. The bound is part of the claim. A listing settles at most 512 areas, the oldest, and a read that finds the reader's share lock held by another read of the same user settles none. The pairs it returns are current when the reader has at most 512 open areas it needs and no other read of the reader is settling; otherwise the areas left open settle on the next read or the drain, and the pairs they cover are read as they stand until then.
+3. A listing settles every area it needs, however many are open, so a revoke among thousands of open areas is settled before the listing reads its pairs and the listing never returns an object the reader no longer reaches. The one exception is a read that finds the reader's share lock held by another read of the same user: it settles none and reads the pairs as they stand, which the other read is bringing current.
 
 4. The share of an area is the slice of the change's support that can hold a pair of `u`, as defined above, with bindings changed since the area opened counted too, so settling it leaves every pair of `u` in the area current.
 

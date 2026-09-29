@@ -17,7 +17,7 @@ Two overloads of `search` return ranked matches across every type the user reach
 
 ## How it runs
 
-1. `reconcile_if_pending(app, u)` settles the reader's share of the open areas, every object area and the reader's claim areas, at most 512 of them, as a listing without a type does; see [Materialization](./materialization.md#a-listing-settles-the-readers-share).
+1. `reconcile_if_pending(app, u)` settles the reader's share of the open areas, every object area and the reader's claim areas, all of them, as a listing without a type does; see [Materialization](./materialization.md#a-listing-settles-the-readers-share).
 
 2. The query is parsed with `websearch_to_tsquery('simple', query)`, the syntax users already type: words, quoted phrases, `or`, a leading minus ([PostgreSQL, Parsing Queries](https://www.postgresql.org/docs/17/textsearch-controls.html#TEXTSEARCH-PARSING-QUERIES)). The `simple` configuration does no stemming, so names and codes in any language match as written.
 

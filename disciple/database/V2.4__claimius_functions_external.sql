@@ -1161,10 +1161,16 @@ COMMENT ON FUNCTION claimius._window_graph(JSONB, UUID, INTEGER, TEXT, UUID) IS 
 -- source no link targets is a top node. A link is kept when its target is
 -- kept under its source. Types are matched back to the registered type they
 -- normalize from, labels come from object_info, the claim or the samna_user
--- row, so name and usage order read as they do on the nodes.
+-- row, so name and usage order read as they do on the nodes. p_nodes names
+-- the graph's nodes by short type and id, and one no link targets is a top
+-- node too, so a root or a start that keeps no child is windowed like any
+-- other. Returns the kept links and node_ids, the ids of every kept node, the
+-- object set of the window.
 -- ----------------------------------------------------------------------------
+DROP FUNCTION IF EXISTS claimius._window_links(JSONB, UUID, INTEGER, TEXT, UUID);
 CREATE OR REPLACE FUNCTION claimius._window_links(
     p_links     JSONB,
+    p_nodes     JSONB,
     p_user_id   UUID,
     p_width     INTEGER,
     p_sort      TEXT,
@@ -1183,6 +1189,12 @@ CREATE OR REPLACE FUNCTION claimius._window_links(
         UNION
         SELECT DISTINCT s.source_type, s.source_id, NULL::UUID FROM link s
         WHERE NOT EXISTS (SELECT 1 FROM link t WHERE t.target_id = s.source_id AND t.target_type = s.source_type)
+        UNION
+        SELECT DISTINCT n.value ->> 'object_type', (n.value ->> 'object_id')::UUID, NULL::UUID
+        FROM jsonb_array_elements(coalesce(p_nodes, '[]'::JSONB)) AS n
+        WHERE NOT EXISTS (
+            SELECT 1 FROM link t
+            WHERE t.target_id = (n.value ->> 'object_id')::UUID AND t.target_type = n.value ->> 'object_type')
     ),
     typed AS (
         SELECT n.short_type, n.object_id, n.parent_id,
@@ -1207,16 +1219,21 @@ CREATE OR REPLACE FUNCTION claimius._window_links(
              FROM typed t),
             p_user_id, p_width, p_sort, p_next_id) w
     )
-    SELECT coalesce(jsonb_agg(l.link), '[]'::JSONB)
-    FROM link l
-    WHERE EXISTS (
-        SELECT 1 FROM kept k JOIN typed t ON t.object_id = k.object_id AND t.object_type = k.object_type
-        WHERE t.short_type = l.target_type
-          AND k.object_id = l.target_id
-          AND k.parent_id IS NOT DISTINCT FROM l.source_id)
+    SELECT jsonb_build_object(
+        'links', (
+            SELECT coalesce(jsonb_agg(l.link), '[]'::JSONB)
+            FROM link l
+            WHERE EXISTS (
+                SELECT 1 FROM kept k JOIN typed t ON t.object_id = k.object_id AND t.object_type = k.object_type
+                WHERE t.short_type = l.target_type
+                  AND k.object_id = l.target_id
+                  AND k.parent_id IS NOT DISTINCT FROM l.source_id)),
+        'node_ids', (
+            SELECT coalesce(jsonb_agg(DISTINCT to_jsonb(k.object_id)), '[]'::JSONB)
+            FROM kept k))
 $$ LANGUAGE sql STABLE;
 
-COMMENT ON FUNCTION claimius._window_links(JSONB, UUID, INTEGER, TEXT, UUID) IS 'The links of a link graph kept by the window _window_graph gives its nodes: a link stays when its target is kept under its source.';
+COMMENT ON FUNCTION claimius._window_links(JSONB, JSONB, UUID, INTEGER, TEXT, UUID) IS 'The links of a link graph kept by the window _window_graph gives its nodes, a link staying when its target is kept under its source, with node_ids, the ids of every kept node, p_nodes no link targets windowed as top nodes.';
 
 
 -- ----------------------------------------------------------------------------
@@ -2845,6 +2862,65 @@ $$ LANGUAGE plpgsql;
 COMMENT ON FUNCTION claimius.init_claimius_internal() IS 'Registers internal claimius.* tables in table_info. Called once at schema bootstrap.';
 
 -- ----------------------------------------------------------------------------
+-- _restamp_created_by
+-- Rewrites a sa_created_by an older set wrote as a user id to the
+-- user_claim.id it stands for, wherever that is unambiguous: the stamp is the
+-- user_id of a samna_user that holds exactly one live user_claim. A disciple
+-- mirrors one app, so every row and every user_claim is in the row's app.
+-- Every other stamp is left as it is, one that already names a user_claim.id
+-- included, so a second run rewrites nothing. The rows are written under
+-- replay_mode: a recompute finds the same user as the creator either way, so
+-- no pair moves. audit is an append only record and keeps what it holds. Run
+-- by the base set on every replay. Returns the rows rewritten.
+-- ----------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION claimius._restamp_created_by()
+    RETURNS INTEGER AS $$
+DECLARE
+    v_table   RECORD;
+    v_count   INTEGER;
+    v_total   INTEGER := 0;
+    v_replay  TEXT := coalesce(nullif(current_setting('claimius.replay_mode', TRUE), ''), 'false');
+BEGIN
+    PERFORM set_config('claimius.replay_mode', 'true', TRUE);
+    BEGIN
+        FOR v_table IN
+            SELECT ti.object_type, ti.table_name
+            FROM claimius.table_info ti
+            WHERE ti.schema_name = 'claimius'
+              AND ti.has_sa_created_by
+              AND ti.object_type <> 'claimius.audit'
+            ORDER BY 1
+        LOOP
+            EXECUTE format($q$
+                UPDATE claimius.%1$I r
+                SET sa_created_by = s.user_claim_id
+                FROM (
+                    SELECT t.id, (array_agg(uc.id))[1] AS user_claim_id
+                    FROM claimius.%1$I t
+                        JOIN claimius.user_claim uc
+                            ON uc.user_id = t.sa_created_by
+                           AND uc.sa_deleted_at IS NULL
+                    WHERE NOT EXISTS (SELECT 1 FROM claimius.user_claim x WHERE x.id = t.sa_created_by)
+                      AND EXISTS (SELECT 1 FROM claimius.samna_user u WHERE u.user_id = t.sa_created_by)
+                    GROUP BY t.id
+                    HAVING count(DISTINCT uc.id) = 1
+                ) s
+                WHERE r.id = s.id$q$, v_table.table_name);
+            GET DIAGNOSTICS v_count = ROW_COUNT;
+            v_total := v_total + v_count;
+        END LOOP;
+    EXCEPTION WHEN OTHERS THEN
+        PERFORM set_config('claimius.replay_mode', v_replay, TRUE);
+        RAISE;
+    END;
+    PERFORM set_config('claimius.replay_mode', v_replay, TRUE);
+    RETURN v_total;
+END;
+$$ LANGUAGE plpgsql;
+
+COMMENT ON FUNCTION claimius._restamp_created_by() IS 'Rewrites each sa_created_by that is the user_id of a samna_user holding exactly one live user_claim to that user_claim.id, under replay_mode, and leaves every other stamp. audit keeps its own. Idempotent. Run by the base set. Returns the rows rewritten.';
+
+-- ----------------------------------------------------------------------------
 -- create_root_organization
 -- Creates a new root organization (one with no parent in the ownership
 -- tree). Two phase self reference is handled internally so callers do not
@@ -3177,6 +3253,7 @@ CREATE OR REPLACE FUNCTION claimius.get_graph_links_owner(
 ) RETURNS JSONB AS $$
 DECLARE
     v_links   JSONB;
+    v_nodes   JSONB;
     v_allowed TEXT[] := (SELECT coalesce(array_agg(object_type ORDER BY object_type), ARRAY[]::TEXT[]) FROM claimius.table_info);
 BEGIN
     IF p_sort IS NULL OR p_sort NOT IN ('name', 'usage') OR p_width IS NULL OR p_width < 0 THEN
@@ -3275,10 +3352,16 @@ BEGIN
         'target_type', claimius.normalize_object_type(target_type),
         'target_id',   target_id,
         'relation',    CASE relation_raw WHEN 'ownership' THEN 'owner' ELSE relation_raw END
-    )), '[]'::jsonb) INTO v_links FROM edges;
+    )), '[]'::jsonb),
+           CASE WHEN p_width > 0 OR p_next_id IS NOT NULL THEN (
+               SELECT coalesce(jsonb_agg(DISTINCT jsonb_build_object(
+                          'object_type', claimius.normalize_object_type(s.object_type),
+                          'object_id', s.object_id)), '[]'::jsonb)
+               FROM in_scope s) END
+    INTO v_links, v_nodes FROM edges;
 
     IF p_width > 0 OR p_next_id IS NOT NULL THEN
-        v_links := claimius._window_links(v_links, p_user_id, p_width, p_sort, p_next_id);
+        RETURN claimius._window_links(v_links, v_nodes, p_user_id, p_width, p_sort, p_next_id);
     END IF;
 
     RETURN jsonb_build_object('links', v_links);
@@ -3306,6 +3389,7 @@ DECLARE
     v_user_row_id UUID;
     v_claim_ids   UUID[];
     v_links       JSONB;
+    v_nodes       JSONB;
 BEGIN
     IF p_sort IS NULL OR p_sort NOT IN ('name', 'usage') OR p_width IS NULL OR p_width < 0 THEN
         RAISE EXCEPTION 'graph window: p_sort is name or usage and p_width at least 0' USING ERRCODE = '22023';
@@ -3463,7 +3547,11 @@ BEGIN
     SELECT COALESCE(jsonb_agg(link), '[]'::jsonb) INTO v_links FROM spine;
 
     IF p_width > 0 OR p_next_id IS NOT NULL THEN
-        v_links := claimius._window_links(v_links, p_user_id, p_width, p_sort, p_next_id);
+        v_nodes := (SELECT coalesce(jsonb_agg(jsonb_build_object('object_type', 'claim', 'object_id', c)), '[]'::jsonb)
+                    FROM unnest(v_claim_ids) AS c)
+                || CASE WHEN v_user_row_id IS NULL THEN '[]'::jsonb
+                        ELSE jsonb_build_array(jsonb_build_object('object_type', 'samna_user', 'object_id', v_user_row_id)) END;
+        RETURN claimius._window_links(v_links, v_nodes, p_user_id, p_width, p_sort, p_next_id);
     END IF;
 
     RETURN jsonb_build_object('links', v_links);

@@ -1,5 +1,5 @@
 BEGIN;
-SELECT plan(23);
+SELECT plan(24);
 
 CREATE FUNCTION pg_temp.app() RETURNS UUID AS $$
     SELECT id FROM claimius.samna_app WHERE slug = 'sqltest_usage'
@@ -77,7 +77,7 @@ SELECT is((SELECT used_count FROM pg_temp.pair('a0000000-0000-4000-8000-00000000
     'repeats of a pair in one flush add up');
 SELECT is((SELECT last_used_at FROM pg_temp.pair('a0000000-0000-4000-8000-0000000000e1', '10000000-0000-4000-8000-0000000000e3')), now(),
     'the flush stamps last_used_at');
-SELECT is_empty($$SELECT 1 FROM claimius.user_object WHERE user_id = 'a0000000-0000-4000-8000-0000000000e2'$$,
+SELECT is_empty($$SELECT 1 FROM claimius.user_object WHERE user_id = 'a0000000-0000-4000-8000-0000000000e2' AND object_type = 'claimius.organization'$$,
     'a pair that is not settled is not made by usage');
 SELECT set_eq($$SELECT user_id FROM claimius.user_activity WHERE app_id = pg_temp.app()$$,
     $$VALUES ('a0000000-0000-4000-8000-0000000000e1'::UUID), ('a0000000-0000-4000-8000-0000000000e2'::UUID)$$,
@@ -163,6 +163,9 @@ SELECT is((SELECT count(*) FROM claimius.get_objects('a0000000-0000-4000-8000-00
     'a revoked grant empties the reader''s listing');
 SELECT is_empty($$SELECT 1 FROM claimius.user_object WHERE user_id = 'a0000000-0000-4000-8000-0000000000e1' AND used_count > 0$$,
     'the usage leaves with the pairs');
+
+SELECT is(to_regclass('claimius.object_usage'), NULL,
+    'object_usage is retired, its usage kept on the pairs');
 
 SELECT * FROM finish();
 ROLLBACK;

@@ -20,11 +20,13 @@ INSERT INTO superseded VALUES
         ('claimius.build_ownership_tree(uuid)'),
         ('claimius.build_parenthood_tree(text,uuid)'),
         ('claimius.ensure_app_user(uuid,uuid,text,text,text,text,text,text)'),
+        ('claimius.ensure_app_user(uuid,uuid,text,text,text,text,text,text,text)'),
         ('claimius.get_analytics_capture(uuid,text,integer)'),
         ('claimius.get_claim_graph(uuid,uuid,uuid,integer,integer)'),
         ('claimius.get_direct_access(uuid,uuid,uuid,text)'),
         ('claimius.get_graph_links_claim(uuid,uuid,integer,text[],text[],uuid,integer)'),
         ('claimius.get_graph_links_owner(uuid,uuid,integer,text[],text[],uuid,integer)'),
+        ('claimius._window_links(jsonb,uuid,uuid,integer,text,uuid)'),
         ('claimius.get_graph_objects(uuid,uuid,integer,text[],text[],uuid[],boolean,boolean)'),
         ('claimius.get_locations(uuid,uuid,integer)'),
         ('claimius.get_objects(uuid,uuid,text,integer)'),
@@ -48,7 +50,7 @@ SELECT is_empty($$
     WHERE EXISTS (
         SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
         WHERE n.nspname = 'claimius' AND p.oid::REGPROCEDURE::TEXT = s.signature)
-$$, 'no function v1.1.0-alpha0078, v1.1.9 or the link graphs before their window carried that a fresh build lacks survives the replay');
+$$, 'no function v1.1.0-alpha0078, v1.1.9 or an earlier form of this set carried that a fresh build lacks survives the replay');
 
 SELECT * FROM finish();
 ROLLBACK;

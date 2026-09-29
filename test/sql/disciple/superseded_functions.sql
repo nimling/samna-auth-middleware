@@ -22,6 +22,7 @@ INSERT INTO superseded VALUES
         ('claimius.get_direct_access(uuid,uuid,text)'),
         ('claimius.get_graph_links_claim(uuid,integer,text[],text[],uuid,integer)'),
         ('claimius.get_graph_links_owner(uuid,integer,text[],text[],uuid,integer)'),
+        ('claimius._window_links(jsonb,uuid,integer,text,uuid)'),
         ('claimius.get_graph_objects(uuid,integer,text[],text[],uuid[],boolean,boolean)'),
         ('claimius.get_locations(uuid,integer)'),
         ('claimius.get_objects(uuid,text,integer)'),

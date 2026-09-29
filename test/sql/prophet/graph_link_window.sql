@@ -1,5 +1,5 @@
 BEGIN;
-SELECT plan(6);
+SELECT plan(9);
 
 DO $$
 DECLARE
@@ -7,6 +7,7 @@ DECLARE
     v_sys   UUID := '00000000-0000-4000-8000-000000000f70';
     v_root  UUID := '10000000-0000-4000-8000-000000000f70';
     v_crew  UUID;
+    v_reader UUID;
 BEGIN
     v_app := (claimius.init(
         p_system_app_slug         => 'sqltest_link_window',
@@ -16,7 +17,8 @@ BEGIN
         p_default_claim           => '{"name": "Member", "description": "Default member claim"}'::JSONB
     ) -> 'samna_app' ->> 'id')::UUID;
 
-    PERFORM claimius.ensure_app_user(p_user_id => 'a0000000-0000-4000-8000-000000000f71', p_app_id => v_app, p_first_name => 'Linker');
+    v_reader := (claimius.ensure_app_user(p_user_id => 'a0000000-0000-4000-8000-000000000f71', p_app_id => v_app, p_first_name => 'Linker')
+        -> 'user_claim' ->> 'id')::UUID;
     INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
     VALUES (v_root, 'Link root', 'company', v_root, v_root, 0, v_sys);
     PERFORM claimius.link_app_object(v_app, 'claimius.organization', v_root);
@@ -34,6 +36,12 @@ BEGIN
         p_object_id => v_root, p_object_type => 'claimius.organization', p_inherits => TRUE);
     PERFORM claimius.assign_claim_user(p_app_id => v_app, p_claim_id => v_crew, p_user_id => 'a0000000-0000-4000-8000-000000000f71',
         p_sa_owner_id => v_root, p_sa_created_by => v_sys);
+    INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
+    VALUES ('10000000-0000-4000-8000-000000000f7f', 'Lone root', 'company', '10000000-0000-4000-8000-000000000f7f', '10000000-0000-4000-8000-000000000f7f', 0, v_reader);
+    PERFORM claimius.link_app_object(v_app, 'claimius.organization', '10000000-0000-4000-8000-000000000f7f');
+    PERFORM claimius.create_claim(
+        p_app_id => v_app, p_name => 'Empty claim', p_description => NULL, p_sa_access => 4,
+        p_sa_owner_id => v_root, p_sa_root_id => v_root, p_sa_created_by => v_sys);
     PERFORM claimius.get_objects('a0000000-0000-4000-8000-000000000f71', v_app, 'claimius.organization');
 END $$;
 
@@ -70,6 +78,27 @@ SELECT is((
 SELECT throws_ok($$SELECT claimius.get_graph_links_owner('a0000000-0000-4000-8000-000000000f71',
         (SELECT id FROM claimius.samna_app WHERE slug = 'sqltest_link_window'), 4, NULL, NULL, NULL, 0, 2, 'size', NULL)$$,
     '22023', NULL, 'a sort other than name or usage is refused');
+
+CREATE FUNCTION pg_temp.owner_window(p_start UUID, p_width INTEGER, p_next UUID) RETURNS JSONB AS $$
+    SELECT claimius.get_graph_links_owner(
+        'a0000000-0000-4000-8000-000000000f71', (SELECT id FROM claimius.samna_app WHERE slug = 'sqltest_link_window'),
+        4, NULL, NULL, p_start, 0, p_width, 'name', p_next)
+$$ LANGUAGE sql;
+
+SELECT set_eq($$SELECT (n #>> '{}')::UUID FROM jsonb_array_elements(pg_temp.owner_window('10000000-0000-4000-8000-000000000f70', 2, NULL) -> 'node_ids') n
+              WHERE n #>> '{}' LIKE '10000000-%'$$,
+    $$VALUES ('10000000-0000-4000-8000-000000000f70'::UUID), ('10000000-0000-4000-8000-000000000f71'::UUID), ('10000000-0000-4000-8000-000000000f72'::UUID)$$,
+    'a window returns its node_ids, the start with the organizations it keeps');
+SELECT ok(pg_temp.owner_window(NULL, 2, NULL) -> 'node_ids' ? '10000000-0000-4000-8000-000000000f7f'
+      AND NOT EXISTS (
+          SELECT 1 FROM jsonb_array_elements(pg_temp.owner_window(NULL, 2, NULL) -> 'links') l
+          WHERE '10000000-0000-4000-8000-000000000f7f' IN (l ->> 'source_id', l ->> 'target_id')),
+    'a root that keeps no child has no link and is still in node_ids');
+SELECT ok((claimius.get_graph_links_claim(
+        'a0000000-0000-4000-8000-000000000f71', (SELECT id FROM claimius.samna_app WHERE slug = 'sqltest_link_window'),
+        0, NULL, NULL, (SELECT id FROM claimius.claim WHERE name = 'Empty claim'), 0, 2, 'name', NULL) -> 'node_ids')
+      ? (SELECT id::TEXT FROM claimius.claim WHERE name = 'Empty claim'),
+    'a start claim that keeps no child is in node_ids of the claim links');
 
 SELECT * FROM finish();
 ROLLBACK;

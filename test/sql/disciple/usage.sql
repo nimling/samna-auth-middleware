@@ -1,5 +1,5 @@
 BEGIN;
-SELECT plan(22);
+SELECT plan(23);
 
 CREATE FUNCTION pg_temp.pair(p_user UUID, p_object UUID) RETURNS TABLE (used_count BIGINT, last_used_at TIMESTAMPTZ, sa_access INTEGER) AS $$
     SELECT uo.used_count, uo.last_used_at, uo.sa_access FROM claimius.user_object uo
@@ -145,6 +145,9 @@ SELECT is((SELECT count(*) FROM claimius.get_objects('a0000000-0000-4000-8000-00
     'a revoked grant empties the reader''s listing');
 SELECT is_empty($$SELECT 1 FROM claimius.user_object WHERE user_id = 'a0000000-0000-4000-8000-0000000000e1' AND used_count > 0$$,
     'the usage leaves with the pairs');
+
+SELECT is(to_regclass('claimius.object_usage'), NULL,
+    'object_usage is retired, its usage kept on the pairs');
 
 SELECT * FROM finish();
 ROLLBACK;

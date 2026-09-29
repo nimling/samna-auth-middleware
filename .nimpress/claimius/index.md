@@ -120,7 +120,7 @@ reach(u, c, 4, direct) ← grant(_, u, c) ; grant(_, u, a), bind(a, c, b, _, _),
 made(u, x)             ← creator(x, g), grant(g, u, _) ; creator(x, u)
 ```
 
-The creator of a row is the user behind its `sa_created_by`, a grant, or the user it names directly, which is how the bootstrap grant `ensure_app_user` writes is stamped. The last rule but one is the claim itself as an object: holding a claim, or holding a claim bound on it, reads it. The composition rules consume a binding of the linked claim and never another link, so a link is followed once. `_build_grants_for_objects` evaluates exactly these rules, set based, for one user on a set of objects of one type.
+The creator of a row is the user behind its `sa_created_by`, a grant. A stamp that names a user directly, as a v1.1.9 set wrote, reads as that user until the base set rewrites it to the grant, see [Users](./users.md#one-identity-one-row-per-app). The last rule but one is the claim itself as an object: holding a claim, or holding a claim bound on it, reads it. The composition rules consume a binding of the linked claim and never another link, so a link is followed once. `_build_grants_for_objects` evaluates exactly these rules, set based, for one user on a set of objects of one type.
 
 ### The access of a pair
 

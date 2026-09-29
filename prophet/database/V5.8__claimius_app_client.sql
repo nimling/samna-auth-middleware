@@ -93,7 +93,8 @@ BEGIN
         p_app_id     => p_app_id,
         p_first_name => p_name,
         p_last_name  => 'Client',
-        p_email      => p_name || '@local'
+        p_email      => p_name || '@local',
+        p_sa_created_by => p_sa_created_by
     );
 
     PERFORM claimius.assign_claim_user(

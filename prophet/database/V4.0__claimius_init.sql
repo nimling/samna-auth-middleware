@@ -2,7 +2,8 @@
 -- Claimius V4.0 Init
 -- ----------------------------------------------------------------------------
 -- Final step in claimius's own migration set. Registers the internal
--- claimius.* tables in table_info, completing schema setup.
+-- claimius.* tables in table_info, completing schema setup, and rewrites the
+-- sa_created_by an older set stamped with a user id where it is unambiguous.
 --
 -- After this file runs, the schema is "ready" for the implementing app to:
 --   1. Run init, init_disciple, or init_hybrid (as appropriate)
@@ -15,6 +16,7 @@
 DO $$
     BEGIN
         PERFORM claimius.init_claimius_internal();
+        PERFORM claimius._restamp_created_by();
         RAISE NOTICE 'Claimius internal tables registered. Schema ready.';
         RAISE NOTICE 'Implementer must now call: init | init_disciple | init_hybrid';
         RAISE NOTICE 'Then: init_claimius_tables(VARIADIC <schema.table list>)';

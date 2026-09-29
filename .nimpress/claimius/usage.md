@@ -12,7 +12,7 @@ Claimius records use in three places: a count on each pair of how often its user
 
 ## The count on the pair
 
-`user_object` carries `used_count` and `last_used_at`: how many successful single object checks of the pair were counted, and when the latest flush that counted one ran. A settle never writes them, so they survive every recompute of the pair, and they leave with the pair.
+`user_object` carries `used_count` and `last_used_at`: how many successful single object checks of the pair were counted, and when the latest flush that counted one ran. A settle never writes them, so they survive every recompute of the pair, and they leave with the pair. The v1.1.9 table `object_usage` held them apart from the pair; the base set retires it on replay, adding its `used_count` into the pair and taking the later `last_used_at` for every pair that exists, then dropping it, so a consumer carries no migration for it.
 
 ### Recording
 

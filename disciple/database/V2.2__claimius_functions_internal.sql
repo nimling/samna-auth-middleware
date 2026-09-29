@@ -1145,16 +1145,16 @@ $$ LANGUAGE plpgsql;
 COMMENT ON FUNCTION claimius._write_object_info(TEXT, UUID[]) IS 'Writes the object_info rows of a set of objects of one type from the rows themselves: upserts the live ones where a field differs, deletes the ones gone or soft deleted.';
 
 -- _object_lock_budget
--- The most per object locks one transaction takes, and the most areas one
--- read or one drain settles. Each lock is an entry in the shared lock table,
--- which holds max_locks_per_transaction times max_connections of them for the
--- whole server, so a transaction keeps well under one connection's share.
+-- The most per object locks one transaction takes. Each lock is an entry in
+-- the shared lock table, which holds max_locks_per_transaction times
+-- max_connections of them for the whole server, so a transaction keeps well
+-- under one connection's share.
 CREATE OR REPLACE FUNCTION claimius._object_lock_budget()
     RETURNS INTEGER AS $$
     SELECT 512
 $$ LANGUAGE sql IMMUTABLE;
 
-COMMENT ON FUNCTION claimius._object_lock_budget() IS 'The most per object locks one transaction takes and the most areas one read or drain settles.';
+COMMENT ON FUNCTION claimius._object_lock_budget() IS 'The most per object locks one transaction takes.';
 
 -- _lock_all_objects
 -- Takes every object at once: the exclusive transaction advisory lock that

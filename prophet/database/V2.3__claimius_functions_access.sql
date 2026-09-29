@@ -936,18 +936,18 @@ COMMENT ON FUNCTION claimius.notify_sync_event() IS 'Statement trigger on sync_e
 -- Called without one, the read is a listing and settles the reader's share of
 -- the areas it needs: the object areas of the app of the type it lists, with
 -- p_object_type, or that cascade over that type, every object area without
--- one, and the claim areas of the reader's claims. It takes at most
--- _object_lock_budget of them, oldest first, and leaves the rest to the next
--- read and the drain. Each share is set based, one recompute per object type,
--- and is recorded in access_diff_user at the area's raise_count, so the
--- reader never settles the same raise twice. The area row is cleared once
--- every holder has settled it. A reader locks the areas it takes FOR KEY
--- SHARE SKIP LOCKED, which writers raising the area again do not wait on,
--- and its whole share with one transaction advisory lock, so two reads of one
--- user never settle it at once; a read that finds it held settles nothing.
--- A batch big enough to spend the per object lock budget takes every object
--- at once instead, so however many areas are open the read holds a bounded
--- number of locks.
+-- one, and the claim areas of the reader's claims. It takes every one of
+-- them, oldest first, however many are open, so a listing never reads a pair
+-- an open area still covers. Each share is set based, one recompute per
+-- object type, and is recorded in access_diff_user at the area's
+-- raise_count, so the reader never settles the same raise twice. The area row
+-- is cleared once every holder has settled it. A reader locks the areas it
+-- takes FOR KEY SHARE SKIP LOCKED, which writers raising the area again do
+-- not wait on, and its whole share with one transaction advisory lock, so two
+-- reads of one user never settle it at once; a read that finds it held
+-- settles nothing. A batch big enough to spend the per object lock budget
+-- takes every object at once instead, so however many areas are open the
+-- read holds a bounded number of locks.
 --
 -- The retry queue. reconcile_queue holds sync event applications that failed.
 -- A check drains the pair it asks about, a listing every pair of the reader.
@@ -1111,7 +1111,6 @@ BEGIN
                   SELECT 1 FROM claimius.access_diff_user du
                   WHERE du.diff_id = d.id AND du.user_id = p_user_id AND du.raise_count = d.raise_count)
             ORDER BY d.sa_created_at, d.id
-            LIMIT claimius._object_lock_budget()
             FOR KEY SHARE OF d SKIP LOCKED);
 
         IF cardinality(v_areas) * 4 > claimius._object_lock_budget() THEN
@@ -1138,7 +1137,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius.reconcile_if_pending(UUID, UUID, TEXT, UUID) IS 'Settles what a read meets and drains reconcile_queue. With a target it recomputes the one pair when an open area covers it; without one it settles the reader''s share of at most _object_lock_budget open areas it needs, of p_object_type when given, set based, under one share lock and a bounded number of object locks, and records it in access_diff_user. Called at read entry points.';
+COMMENT ON FUNCTION claimius.reconcile_if_pending(UUID, UUID, TEXT, UUID) IS 'Settles what a read meets and drains reconcile_queue. With a target it recomputes the one pair when an open area covers it; without one it settles the reader''s share of every open area it needs, of p_object_type when given, set based, under one share lock and a bounded number of object locks, and records it in access_diff_user. Called at read entry points.';
 
 -- drain_access_diff
 -- Settles, outside any request, the shares of open areas whose holders are
