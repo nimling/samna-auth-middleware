@@ -37,6 +37,7 @@ DECLARE
     v_op            TEXT;
     v_actor         UUID;
     v_structural    BOOLEAN := TRUE;
+    v_renamed       BOOLEAN := FALSE;
 BEGIN
     IF claimius.in_replay_mode() THEN
         RETURN coalesce(NEW, OLD);
@@ -69,8 +70,14 @@ BEGIN
     -- Tree maintenance: detach on delete or hard delete; attach on insert
     -- or undelete; reattach on owner/location change. A write that moves
     -- nothing access can follow refreshes what the acting user sees and
-    -- leaves every other user untouched.
+    -- leaves every other user untouched, except a rename: it raises the
+    -- object area so every other reader's denormalized name and
+    -- description settle on its next read.
     v_structural := claimius._retree_object(v_object_type, v_obj_id, to_jsonb(OLD), to_jsonb(NEW));
+    IF v_op = 'UPDATE' THEN
+        v_renamed := (to_jsonb(OLD) ->> 'name') IS DISTINCT FROM (to_jsonb(NEW) ->> 'name')
+                     OR (to_jsonb(OLD) ->> 'description') IS DISTINCT FROM (to_jsonb(NEW) ->> 'description');
+    END IF;
 
     -- The acting user materializes immediately so a writer reads its own work
     -- back within the same request. Every other user settles when it reads.
@@ -80,7 +87,7 @@ BEGIN
             PERFORM claimius.recompute_user_object(v_app_id, v_actor, v_object_type, v_obj_id);
         END IF;
 
-        IF v_structural THEN
+        IF v_structural OR v_renamed THEN
             PERFORM claimius._raise_object_diff(v_app_id, v_object_type, v_obj_id);
         END IF;
     END LOOP;
@@ -518,20 +525,31 @@ DECLARE
     v_user_id      UUID;
     v_has_access   BOOLEAN;
     v_actor_access INTEGER;
+    v_effective    INTEGER;
 BEGIN
     IF claimius.in_replay_mode() THEN
         RETURN NEW;
     END IF;
 
     -- A binding may never hand out more than the actor already holds on the
-    -- object. Denies are restrictive, so they are exempt. No computed access
-    -- counts as none held, so an actor who cannot reach an object cannot
-    -- grant it away. Creating an object records the creator, which computes
-    -- their access before any binding is written.
+    -- object. What it hands out is its effective mask, the claim mask narrowed
+    -- by the binding mask, so a NULL binding mask is judged as the full claim
+    -- mask. Denies are restrictive, so they are exempt, and so is a removal.
+    -- No computed access counts as none held, so an actor who cannot reach an
+    -- object cannot grant it away. Creating an object records the creator,
+    -- which computes their access before any binding is written.
+    SELECT claimius._effective_access(c.sa_access, NEW.sa_access) INTO v_effective
+    FROM claimius.claim c
+    WHERE c.id = NEW.claim_id;
+
     IF NEW.object_id IS NOT NULL
         AND NEW.object_type IS DISTINCT FROM 'claimius.claim'
-        AND NEW.sa_access IS NOT NULL
-        AND (NEW.sa_access & 16) = 0
+        AND NEW.sa_deleted_at IS NULL
+        AND (coalesce(v_effective, 0) & 16) = 0
+        AND (TG_OP = 'INSERT'
+             OR NEW.sa_access IS DISTINCT FROM OLD.sa_access
+             OR NEW.claim_id IS DISTINCT FROM OLD.claim_id
+             OR NEW.object_id IS DISTINCT FROM OLD.object_id)
     THEN
         SELECT uc.user_id INTO v_user_id
         FROM claimius.user_claim uc
@@ -544,12 +562,13 @@ BEGIN
             SELECT max(sa_access) INTO v_actor_access
             FROM claimius.user_object
             WHERE user_id     = v_user_id
+              AND app_id      = NEW.app_id
               AND object_type = NEW.object_type
               AND object_id   = NEW.object_id;
 
-            IF (NEW.sa_access & ~coalesce(v_actor_access, 0) & 15) <> 0 THEN
+            IF (coalesce(v_effective, 0) & ~coalesce(v_actor_access, 0) & 15) <> 0 THEN
                 RAISE EXCEPTION 'cannot grant more access than held: user % holds % on % %, requested %',
-                    v_user_id, coalesce(v_actor_access, 0), NEW.object_type, NEW.object_id, NEW.sa_access;
+                    v_user_id, coalesce(v_actor_access, 0), NEW.object_type, NEW.object_id, v_effective;
             END IF;
         END IF;
     END IF;
@@ -601,7 +620,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius._check_claim_composition() IS 'BEFORE INSERT/UPDATE trigger on claim_object. Rejects a grant handing out more access than the actor holds on the object, denies exempt. Enforces composition link invariants: no self loop, no reverse link cycle, caller has read on target claim. Bypassed during disciple replay.';
+COMMENT ON FUNCTION claimius._check_claim_composition() IS 'BEFORE INSERT/UPDATE trigger on claim_object. Rejects a grant whose effective mask hands out more access than the actor holds on the object, denies and removals exempt. Enforces composition link invariants: no self loop, no reverse link cycle, caller has read on target claim. Bypassed during disciple replay.';
 
 DROP TRIGGER IF EXISTS tg_check_claim_composition ON claimius.claim_object;
 CREATE TRIGGER tg_check_claim_composition
@@ -866,8 +885,8 @@ BEGIN
                                   SELECT 1 FROM claimius.user_object uo
                                   WHERE uo.id = claimius.composite_id(p_app_id::TEXT, p_user_id::TEXT, p_object_type, p_object_id::TEXT)
                                     AND (uo.grants @> jsonb_build_array(jsonb_build_object('claim_id', d.claim_id))
-                                         OR uo.grants @> jsonb_build_array(jsonb_build_object(
-                                                'cascaded_from', jsonb_build_object('type', 'claimius.claim', 'id', d.claim_id))))))
+                                         OR uo.grants @> jsonb_build_array(jsonb_build_object('composed_from', d.claim_id))))
+                              OR (p_object_type = 'claimius.claim' AND p_object_id = d.claim_id))
                     )
                 INTO v_open;
             END IF;

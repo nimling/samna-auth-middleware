@@ -173,33 +173,10 @@ func (d *DB) ScopeAccess(ctx context.Context, userID uuid.UUID, scopePath string
 		ObjectInherit bool             `bun:"object_inherits"`
 	}
 	rows := make([]scopeAccessRow, 0)
-	err := d.NewRaw(`
-		SELECT
-			uc.id                               AS user_claim_id,
-			c.id                                AS claim_id,
-			c.name                              AS claim_name,
-			((c.sa_access | co.sa_access) & 15) AS sa_access,
-			co.sa_owner_id                      AS sa_owner_id,
-			co.sa_root_id                       AS sa_root_id,
-			co.id                               AS object_row_id,
-			co.scope                            AS object_scope,
-			co.sa_access                        AS object_access,
-			co.inherits                         AS object_inherits
-		FROM claimius.user_claim uc
-			JOIN claimius.claim c ON c.id = uc.claim_id
-			JOIN claimius.claim_object co ON co.claim_id = uc.claim_id
-		WHERE uc.user_id = ?
-			AND uc.sa_deleted_at IS NULL
-			AND c.sa_deleted_at IS NULL
-			AND co.sa_deleted_at IS NULL
-			AND (uc.starts_at IS NULL OR uc.starts_at <= now())
-			AND (uc.ends_at IS NULL OR uc.ends_at > now())
-			AND co.object_id IS NULL
-			AND jsonb_path_exists(co.scope, ?::jsonpath)
-			AND ((c.sa_access | co.sa_access) & 16) = 0
-			AND (((c.sa_access | co.sa_access) & 15) & ?) = ?
-		ORDER BY c.id
-	`, userID, scopePath, requiredAccess, requiredAccess).Scan(ctx, &rows)
+	err := d.NewRaw(
+		"SELECT * FROM claimius.get_scope_access(?, ?::jsonpath, ?)",
+		userID, scopePath, requiredAccess,
+	).Scan(ctx, &rows)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return []AccessClaim{}, nil
@@ -226,6 +203,8 @@ func (d *DB) ScopeAccess(ctx context.Context, userID uuid.UUID, scopePath string
 			}
 			byClaim[r.ClaimID] = ac
 			order = append(order, r.ClaimID)
+		} else {
+			ac.Access |= r.Access
 		}
 		ac.Objects = append(ac.Objects, ClaimObject{
 			ID:       r.ObjectRowID,

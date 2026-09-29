@@ -184,3 +184,40 @@ END;
 $$ LANGUAGE plpgsql IMMUTABLE PARALLEL SAFE;
 
 COMMENT ON FUNCTION claimius._popcount(INTEGER) IS 'Bit count of an integer access mask. Used for ranking grants.';
+
+-- _expand_access
+-- Adds the bits a mask implies: owner implies write, read and execute, write
+-- implies read and execute, execute implies read. Every other bit stands.
+CREATE OR REPLACE FUNCTION claimius._expand_access(p INTEGER)
+    RETURNS INTEGER LANGUAGE sql IMMUTABLE PARALLEL SAFE AS $$
+    SELECT p
+        | CASE WHEN p & 1 <> 0 THEN 14 ELSE 0 END
+        | CASE WHEN p & 2 <> 0 THEN 12 ELSE 0 END
+        | CASE WHEN p & 8 <> 0 THEN 4 ELSE 0 END
+$$;
+
+COMMENT ON FUNCTION claimius._expand_access(INTEGER) IS 'The mask with the bits it implies added: owner implies write, read and execute, write implies read and execute, execute implies read.';
+
+-- _effective_access
+-- The mask a grant carries through one binding. A NULL binding mask is the
+-- claim mask; a binding mask narrows the claim mask and never widens it.
+CREATE OR REPLACE FUNCTION claimius._effective_access(p_claim INTEGER, p_binding INTEGER)
+    RETURNS INTEGER LANGUAGE sql IMMUTABLE PARALLEL SAFE AS $$
+    SELECT p_claim & claimius._expand_access(coalesce(p_binding, p_claim))
+$$;
+
+COMMENT ON FUNCTION claimius._effective_access(INTEGER, INTEGER) IS 'Effective mask of a binding: claim & expand(coalesce(binding, claim)).';
+
+-- _close_access
+-- Drops every bit of a mask whose implied bits are not all present, so a
+-- mask a deny subtracted from keeps only what it can still stand on.
+CREATE OR REPLACE FUNCTION claimius._close_access(p INTEGER)
+    RETURNS INTEGER LANGUAGE sql IMMUTABLE PARALLEL SAFE AS $$
+    SELECT (p & ~15)
+        | CASE WHEN p & 4 <> 0 THEN 4 ELSE 0 END
+        | CASE WHEN p & 12 = 12 THEN 8 ELSE 0 END
+        | CASE WHEN p & 14 = 14 THEN 2 ELSE 0 END
+        | CASE WHEN p & 15 = 15 THEN 1 ELSE 0 END
+$$;
+
+COMMENT ON FUNCTION claimius._close_access(INTEGER) IS 'The mask closed under implication: a bit whose implied bits are not all present is dropped.';

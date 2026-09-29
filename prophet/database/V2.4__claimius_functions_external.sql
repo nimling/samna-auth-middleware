@@ -18,7 +18,8 @@
 -- effective access mask covers all bits in p_required_access. Joins
 -- user_object grants array against user_claim and claim, filters by
 -- sa_deleted_at and time validity. Returns one row, picking the grant
--- whose access mask carries the most bits set.
+-- whose access mask carries the most bits set. scope is the settled field
+-- scope of the pair, NULL when every field carries the same mask.
 --
 -- Contract: when claim_id is non-null, user_claim_id is also populated. This
 -- is the actor token callers use as sa_created_by on follow-on writes.
@@ -67,7 +68,7 @@ BEGIN
             best.claim_id,
             best.claim_name,
             best.access_bits,
-            best.grant_scope,
+            uo.scope,
             uo.sa_owner_id,
             (SELECT o.sa_root_id FROM claimius.organization o WHERE o.id = uo.sa_owner_id),
             uo.sa_location_id,
@@ -84,7 +85,14 @@ COMMENT ON FUNCTION claimius.get_access(UUID, UUID, UUID, TEXT, INTEGER) IS 'Str
 -- Locates the closest, highest-privilege user_claim the calling user holds
 -- that's structurally related to the given object. Walks the owner,
 -- location, and parenthood ancestor chains; for each ancestor checks
--- whether the user has any user_claim bound to it via claim_object.
+-- whether the user has any user_claim bound to it via claim_object, or
+-- holds a claim linking to a claim bound to it. A binding carries its
+-- claim mask narrowed by the binding mask, a composed one the bits both
+-- sides carry. The user's denies subtract at every required mask: one
+-- bound on the object itself from every candidate, one on an ancestor from
+-- the candidates found on an ancestor, so a share bound on the object
+-- stands over an ancestor deny. What remains is closed under implication.
+-- A binding scoped only to fields the type lacks grants nothing.
 -- Returns the same row shape as get_access (user_object_id, user_claim_id,
 -- claim_id, sa_access, scope, sa_owner_id, sa_root_id, sa_location_id,
 -- direct_grant). Returns no rows when no claim is found anywhere up the
@@ -155,57 +163,103 @@ BEGIN
     END IF;
 
     RETURN QUERY
+        WITH anc AS MATERIALIZED (
+            SELECT DISTINCT a.object_type, a.object_id, a.hop
+            FROM claimius.get_ancestors(p_object_type, p_object_id) a
+        ),
+        fields AS (
+            SELECT coalesce(array_agg(pa.attname::TEXT), '{}'::TEXT[]) AS names
+            FROM pg_attribute pa
+            WHERE pa.attrelid = to_regclass(p_object_type)
+              AND pa.attnum > 0
+              AND NOT pa.attisdropped
+        ),
+        held AS MATERIALIZED (
+            SELECT uc.id AS user_claim_id, c.id AS claim_id, c.name, c.sa_access, c.inherits
+            FROM claimius.user_claim uc
+                     JOIN claimius.claim c
+                          ON c.id = uc.claim_id
+                              AND c.sa_deleted_at IS NULL
+            WHERE uc.user_id = p_user_id
+              AND uc.app_id = p_app_id
+              AND uc.sa_deleted_at IS NULL
+              AND (uc.starts_at IS NULL OR uc.starts_at <= now())
+              AND (uc.ends_at IS NULL OR uc.ends_at > now())
+        ),
+        derivations AS (
+            SELECT h.user_claim_id, h.claim_id, h.name, a.hop,
+                   claimius._effective_access(h.sa_access, co.sa_access) AS e,
+                   co.scope, co.sa_owner_id, co.sa_root_id
+            FROM anc a
+                     JOIN claimius.claim_object co
+                          ON co.app_id = p_app_id
+                              AND co.object_type = a.object_type
+                              AND co.object_id = a.object_id
+                              AND co.sa_deleted_at IS NULL
+                     JOIN held h ON h.claim_id = co.claim_id
+            WHERE a.hop = 0 OR (h.inherits AND co.inherits)
+
+            UNION ALL
+
+            SELECT h.user_claim_id, h.claim_id, h.name, a.hop,
+                   (claimius._effective_access(h.sa_access, link.sa_access)
+                        & claimius._effective_access(cb.sa_access, co.sa_access) & ~16)
+                   | ((claimius._effective_access(h.sa_access, link.sa_access)
+                        | claimius._effective_access(cb.sa_access, co.sa_access)) & 16),
+                   co.scope, co.sa_owner_id, co.sa_root_id
+            FROM anc a
+                     JOIN claimius.claim_object co
+                          ON co.app_id = p_app_id
+                              AND co.object_type = a.object_type
+                              AND co.object_id = a.object_id
+                              AND co.sa_deleted_at IS NULL
+                     JOIN claimius.claim cb
+                          ON cb.id = co.claim_id
+                              AND cb.sa_deleted_at IS NULL
+                              AND cb.inherits
+                     JOIN claimius.claim_object link
+                          ON link.object_type = 'claimius.claim'
+                              AND link.object_id = co.claim_id
+                              AND link.app_id = p_app_id
+                              AND link.sa_deleted_at IS NULL
+                              AND link.inherits
+                     JOIN held h ON h.claim_id = link.claim_id
+            WHERE (a.hop = 0 OR co.inherits)
+              AND p_object_type <> 'claimius.claim'
+        ),
+        denied AS (
+            SELECT coalesce(bit_or(d.e & 15) FILTER (WHERE d.hop = 0), 0) AS direct_bits,
+                   coalesce(bit_or(d.e & 15), 0) AS all_bits
+            FROM derivations d
+            WHERE (d.e & 16) <> 0
+              AND d.scope IS NULL
+        ),
+        settled AS (
+            SELECT d.*,
+                   claimius._close_access(d.e & 15 & ~CASE WHEN d.hop = 0 THEN x.direct_bits ELSE x.all_bits END) AS access
+            FROM derivations d
+                     CROSS JOIN denied x
+            WHERE (d.e & 16) = 0
+        )
         SELECT
             claimius.composite_id(p_app_id::TEXT, p_user_id::TEXT, p_object_type, p_object_id::TEXT),
-            uc.id,
-            c.id,
-            c.name,
-            (c.sa_access | coalesce(co.sa_access, 0)) & 15,
-            co.scope,
-            co.sa_owner_id,
-            co.sa_root_id,
+            s.user_claim_id,
+            s.claim_id,
+            s.name,
+            s.access,
+            s.scope,
+            s.sa_owner_id,
+            s.sa_root_id,
             NULL::UUID,
             FALSE
-        FROM claimius.get_ancestors(p_object_type, p_object_id) a
-                 JOIN claimius.claim_object co
-                      ON co.app_id = p_app_id
-                          AND co.object_type = a.object_type
-                          AND co.object_id = a.object_id
-                          AND co.sa_deleted_at IS NULL
-                 JOIN claimius.user_claim uc
-                      ON uc.claim_id = co.claim_id
-                          AND uc.user_id = p_user_id
-                          AND uc.app_id = p_app_id
-                          AND uc.sa_deleted_at IS NULL
-                          AND (uc.starts_at IS NULL OR uc.starts_at <= now())
-                          AND (uc.ends_at IS NULL OR uc.ends_at > now())
-                 JOIN claimius.claim c
-                      ON c.id = uc.claim_id
-                          AND c.sa_deleted_at IS NULL
-                          AND ((c.sa_access | coalesce(co.sa_access, 0)) & 16) = 0
-                          AND ((((c.sa_access | coalesce(co.sa_access, 0)) & 15) & p_required) = p_required)
-                          AND (a.hop = 0 OR (c.inherits AND co.inherits))
-        WHERE NOT EXISTS (
-            SELECT 1
-            FROM claimius.get_ancestors(p_object_type, p_object_id) da
-                     JOIN claimius.claim_object dco
-                          ON dco.app_id = p_app_id AND dco.object_type = da.object_type
-                              AND dco.object_id = da.object_id
-                              AND dco.sa_deleted_at IS NULL
-                     JOIN claimius.user_claim duc
-                          ON duc.claim_id = dco.claim_id
-                              AND duc.user_id = p_user_id AND duc.app_id = p_app_id
-                              AND duc.sa_deleted_at IS NULL
-                              AND (duc.starts_at IS NULL OR duc.starts_at <= now())
-                              AND (duc.ends_at IS NULL OR duc.ends_at > now())
-                     JOIN claimius.claim dc
-                          ON dc.id = duc.claim_id
-                              AND dc.sa_deleted_at IS NULL
-            WHERE ((dc.sa_access | coalesce(dco.sa_access, 0)) & 16) <> 0
-              AND (da.hop = 0 OR (dc.inherits AND dco.inherits))
-              AND (((dc.sa_access | coalesce(dco.sa_access, 0)) & 15) & p_required) <> 0
-        )
-        ORDER BY a.hop ASC, claimius._popcount((c.sa_access | coalesce(co.sa_access, 0)) & 15) DESC, uc.id ASC
+        FROM settled s
+        WHERE s.access <> 0
+          AND (s.access & p_required) = p_required
+          AND (jsonb_typeof(s.scope) IS DISTINCT FROM 'object' OR EXISTS (
+              SELECT 1
+              FROM jsonb_object_keys(s.scope) AS k(field), fields f
+              WHERE k.field = ANY(f.names)))
+        ORDER BY s.hop ASC, claimius._popcount(s.access) DESC, s.user_claim_id ASC
         LIMIT 1;
 
     IF FOUND OR NOT p_raise THEN
@@ -224,7 +278,9 @@ BEGIN
         FROM claimius.table_info
         WHERE object_type = p_object_type;
 
-        IF v_has_soft IS TRUE THEN
+        IF v_has_soft IS NULL THEN
+            v_exists := FALSE;
+        ELSIF v_has_soft THEN
             EXECUTE format(
                 'SELECT EXISTS (SELECT 1 FROM %I.%I WHERE id = $1 AND sa_deleted_at IS NULL)',
                 split_part(p_object_type, '.', 1), split_part(p_object_type, '.', 2)
@@ -243,9 +299,9 @@ BEGIN
         RAISE EXCEPTION 'not found' USING ERRCODE = 'P0404';
     END IF;
 END;
-$$ LANGUAGE plpgsql STABLE;
+$$ LANGUAGE plpgsql VOLATILE;
 
-COMMENT ON FUNCTION claimius.get_direct_access(UUID, UUID, UUID, TEXT, INTEGER, BOOLEAN) IS 'Locates the closest, strongest user_claim the user holds related to the given object via ancestor walk. Skips deny bindings.';
+COMMENT ON FUNCTION claimius.get_direct_access(UUID, UUID, UUID, TEXT, INTEGER, BOOLEAN) IS 'Locates the closest, strongest user_claim the user holds related to the given object via ancestor walk, directly or through composition, with the binding narrowing its claim and the user''s denies subtracted by class. VOLATILE: it settles through reconcile_if_pending.';
 
 -- ----------------------------------------------------------------------------
 -- get_objects
@@ -602,8 +658,11 @@ GRANT EXECUTE ON FUNCTION claimius.get_users(UUID, UUID, INTEGER)
 -- audit, user_relation, and samna_user object types to their bespoke lookups
 -- and everything else through get_access then get_direct_access. mutation_access
 -- wraps it and RAISEs P0403 when the object exists but the caller lacks access,
--- P0404 when the object is absent or soft deleted, so the Go side maps one round
--- trip to 200 / 403 / 404.
+-- P0404 when the object is absent or soft deleted, its id is malformed or its
+-- type is not registered, so the Go side maps one round trip to 200 / 403 /
+-- 404. All three are VOLATILE: get_access and get_direct_access settle the
+-- pair through reconcile_if_pending, which writes. resolve_access returns no
+-- row for a malformed id, so a batch never aborts on one.
 -- ----------------------------------------------------------------------------
 
 DROP FUNCTION IF EXISTS claimius.require_access(UUID, UUID, TEXT, INTEGER);
@@ -629,6 +688,11 @@ CREATE OR REPLACE FUNCTION claimius.resolve_access(
                     direct_grant   BOOLEAN
                 ) AS $$
 BEGIN
+    IF p_object_type <> 'claimius.samna_user'
+        AND p_object_id !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN
+        RETURN;
+    END IF;
+
     IF p_object_type = 'claimius.audit' THEN
         RETURN QUERY
             SELECT a.id, NULL::UUID, NULL::UUID, 'audit'::TEXT,
@@ -672,7 +736,7 @@ BEGIN
                g.scope, g.sa_owner_id, g.sa_root_id, g.sa_location_id, g.direct_grant
         FROM claimius.get_direct_access(p_user_id, p_app_id, p_object_id::UUID, p_object_type, p_required) g;
 END;
-$$ LANGUAGE plpgsql STABLE;
+$$ LANGUAGE plpgsql VOLATILE;
 CREATE OR REPLACE FUNCTION claimius.resolve_access(
     p_user_id     UUID,
     p_object_id   TEXT,
@@ -691,7 +755,7 @@ CREATE OR REPLACE FUNCTION claimius.resolve_access(
                     direct_grant   BOOLEAN
                 ) AS $$
     SELECT * FROM claimius.resolve_access(p_user_id, claimius.get_app_id(), p_object_id, p_object_type, p_required);
-$$ LANGUAGE sql STABLE;
+$$ LANGUAGE sql VOLATILE;
 
 
 GRANT EXECUTE ON FUNCTION claimius.resolve_access(UUID, TEXT, TEXT, INTEGER)
@@ -721,6 +785,14 @@ DECLARE
     v_app_id UUID := claimius.get_app_id();
     v_uuid   UUID;
 BEGIN
+    IF p_object_type <> 'claimius.samna_user' AND (
+        p_object_id !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+        OR (p_object_type NOT IN ('claimius.audit', 'claimius.user_relation')
+            AND NOT EXISTS (SELECT 1 FROM claimius.table_info ti WHERE ti.object_type = p_object_type))
+    ) THEN
+        RAISE EXCEPTION 'not found' USING ERRCODE = 'P0404';
+    END IF;
+
     RETURN QUERY
         SELECT * FROM claimius.resolve_access(p_user_id, v_app_id, p_object_id, p_object_type, p_required);
     IF FOUND THEN
@@ -747,9 +819,9 @@ BEGIN
     RETURN QUERY
         SELECT * FROM claimius.get_direct_access(p_user_id, v_app_id, v_uuid, p_object_type, p_required, TRUE);
 END;
-$$ LANGUAGE plpgsql STABLE;
+$$ LANGUAGE plpgsql VOLATILE;
 
-COMMENT ON FUNCTION claimius.mutation_access(UUID, TEXT, TEXT, INTEGER) IS 'Single object access gate. Resolves access through get_access then get_direct_access, returns the strongest AccessClaim row, and RAISEs SQLSTATE P0403 when the object exists but the caller lacks the required access, P0404 when the object is absent or soft deleted. SQL embodiment of the Go MutationAccess resolution in one round trip.';
+COMMENT ON FUNCTION claimius.mutation_access(UUID, TEXT, TEXT, INTEGER) IS 'Single object access gate. Resolves access through get_access then get_direct_access, returns the strongest AccessClaim row, and RAISEs SQLSTATE P0403 when the object exists but the caller lacks the required access, P0404 when the object is absent or soft deleted, the id is malformed or the type is not registered. SQL embodiment of the Go MutationAccess resolution in one round trip. VOLATILE: it settles through reconcile_if_pending.';
 
 GRANT EXECUTE ON FUNCTION claimius.mutation_access(UUID, TEXT, TEXT, INTEGER)
     TO claimius_disciple_client, claimius_writer, claimius_admin, claimius_reader;
@@ -848,10 +920,105 @@ $$ LANGUAGE plpgsql;
 COMMENT ON FUNCTION claimius.get_claims(UUID, UUID, UUID, TEXT) IS 'All claims the user holds against one object.';
 
 -- ----------------------------------------------------------------------------
+-- get_scope_access
+-- The object-less bindings of the user's live grants in the app whose scope
+-- matches a jsonpath, one row per binding. A binding carries its claim mask
+-- narrowed by its own, so a NULL binding mask is the claim mask. A deny
+-- binding matching the same path subtracts its bits from every other, and
+-- what remains is closed under implication. A row whose mask misses
+-- p_required_access is dropped. It reads no user_object and settles nothing.
+-- ----------------------------------------------------------------------------
+
+CREATE OR REPLACE FUNCTION claimius.get_scope_access(
+    p_user_id          UUID,
+    p_app_id           UUID,
+    p_path             JSONPATH,
+    p_required_access  INTEGER DEFAULT 0
+) RETURNS TABLE (
+                    user_claim_id   UUID,
+                    claim_id        UUID,
+                    claim_name      TEXT,
+                    sa_access       INTEGER,
+                    sa_owner_id     UUID,
+                    sa_root_id      UUID,
+                    object_row_id   UUID,
+                    object_scope    JSONB,
+                    object_access   INTEGER,
+                    object_inherits BOOLEAN
+                ) LANGUAGE sql STABLE AS $$
+    WITH bound AS (
+        SELECT uc.id AS held_id,
+               c.id AS held_claim_id,
+               c.name AS held_claim_name,
+               claimius._effective_access(c.sa_access, co.sa_access) AS e,
+               co.sa_owner_id AS binding_owner_id,
+               co.sa_root_id AS binding_root_id,
+               co.id AS binding_id,
+               co.scope AS binding_scope,
+               co.sa_access AS binding_access,
+               co.inherits AS binding_inherits
+        FROM claimius.user_claim uc
+                 JOIN claimius.claim c ON c.id = uc.claim_id
+                 JOIN claimius.claim_object co
+                      ON co.claim_id = uc.claim_id
+                     AND co.app_id = uc.app_id
+        WHERE uc.user_id = p_user_id
+          AND uc.app_id = p_app_id
+          AND uc.sa_deleted_at IS NULL
+          AND c.sa_deleted_at IS NULL
+          AND co.sa_deleted_at IS NULL
+          AND (uc.starts_at IS NULL OR uc.starts_at <= now())
+          AND (uc.ends_at  IS NULL OR uc.ends_at  >  now())
+          AND co.object_id IS NULL
+          AND jsonb_path_exists(co.scope, p_path)
+    ),
+    denied AS (
+        SELECT coalesce(bit_or(b.e & 15), 0) AS bits
+        FROM bound b
+        WHERE (b.e & 16) <> 0
+    ),
+    settled AS (
+        SELECT b.*, claimius._close_access(b.e & 15 & ~x.bits) AS access
+        FROM bound b
+            CROSS JOIN denied x
+        WHERE (b.e & 16) = 0
+    )
+    SELECT s.held_id, s.held_claim_id, s.held_claim_name, s.access, s.binding_owner_id, s.binding_root_id,
+           s.binding_id, s.binding_scope, s.binding_access, s.binding_inherits
+    FROM settled s
+    WHERE s.access <> 0
+      AND (s.access & p_required_access) = p_required_access
+    ORDER BY s.held_claim_id, s.binding_id
+$$;
+
+COMMENT ON FUNCTION claimius.get_scope_access(UUID, UUID, JSONPATH, INTEGER) IS 'Object-less bindings of the user''s live grants whose scope matches a jsonpath, one row per binding, each mask the claim mask narrowed by the binding mask, less the bits of the deny bindings matching the same path, closed under implication.';
+
+CREATE OR REPLACE FUNCTION claimius.get_scope_access(
+    p_user_id          UUID,
+    p_path             JSONPATH,
+    p_required_access  INTEGER DEFAULT 0
+) RETURNS TABLE (
+                    user_claim_id   UUID,
+                    claim_id        UUID,
+                    claim_name      TEXT,
+                    sa_access       INTEGER,
+                    sa_owner_id     UUID,
+                    sa_root_id      UUID,
+                    object_row_id   UUID,
+                    object_scope    JSONB,
+                    object_access   INTEGER,
+                    object_inherits BOOLEAN
+                ) LANGUAGE sql STABLE AS $$
+    SELECT * FROM claimius.get_scope_access(p_user_id, claimius.get_app_id(), p_path, p_required_access);
+$$;
+
+COMMENT ON FUNCTION claimius.get_scope_access(UUID, JSONPATH, INTEGER) IS 'get_scope_access in the system app.';
+
+-- ----------------------------------------------------------------------------
 -- get_access (overload: scope key form)
 -- Strongest active object-less binding whose scope contains p_scope_key and
 -- whose mask covers p_required_access. Returns user_claim_id, claim_id,
--- sa_access, scope.
+-- sa_access, scope. It is get_scope_access at the path of the key.
 -- It reads claim, user_claim and the object-less bindings, never user_object
 -- or an area a diff can hold open, so it settles nothing.
 -- ----------------------------------------------------------------------------
@@ -873,32 +1040,14 @@ BEGIN
     END IF;
 
     RETURN QUERY
-        SELECT uc.id,
-               c.id,
-               (c.sa_access | co.sa_access) & 15,
-               co.scope
-        FROM claimius.user_claim uc
-                 JOIN claimius.claim c ON c.id = uc.claim_id
-                 JOIN claimius.claim_object co
-                      ON co.claim_id = uc.claim_id
-                     AND co.app_id = uc.app_id
-        WHERE uc.user_id = p_user_id
-          AND uc.app_id = p_app_id
-          AND uc.sa_deleted_at IS NULL
-          AND c.sa_deleted_at IS NULL
-          AND co.sa_deleted_at IS NULL
-          AND (uc.starts_at IS NULL OR uc.starts_at <= now())
-          AND (uc.ends_at  IS NULL OR uc.ends_at  >  now())
-          AND co.object_id IS NULL
-          AND co.scope ? p_scope_key
-          AND ((c.sa_access | co.sa_access) & 16) = 0
-          AND (((c.sa_access | co.sa_access) & 15) & p_required_access) = p_required_access
-        ORDER BY claimius._popcount(((c.sa_access | co.sa_access) & 15)) DESC
+        SELECT s.user_claim_id, s.claim_id, s.sa_access, s.object_scope
+        FROM claimius.get_scope_access(p_user_id, p_app_id, ('$.' || to_jsonb(p_scope_key)::TEXT)::JSONPATH, p_required_access) s
+        ORDER BY claimius._popcount(s.sa_access) DESC, s.claim_id
         LIMIT 1;
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius.get_access(UUID, UUID, TEXT, INTEGER) IS 'Strongest active object-less binding whose scope contains p_scope_key and whose mask covers p_required_access.';
+COMMENT ON FUNCTION claimius.get_access(UUID, UUID, TEXT, INTEGER) IS 'Strongest active object-less binding whose scope contains p_scope_key and whose mask covers p_required_access. A NULL binding mask inherits the claim mask, and a deny binding carrying the key subtracts its bits.';
 
 -- ----------------------------------------------------------------------------
 -- get_audit
@@ -1337,7 +1486,7 @@ BEGIN
                ii.descendant_id     AS object_id,
                ii.tree_type::TEXT   AS tree_type,
                ii.depth             AS depth,
-               coalesce(co.sa_access, c.sa_access) AS access,
+               claimius._effective_access(c.sa_access, co.sa_access) AS access,
                co.scope             AS scope
         FROM claimius.claim_object co
                  JOIN claimius.claim c ON c.id = co.claim_id AND c.sa_deleted_at IS NULL
@@ -1829,6 +1978,10 @@ DECLARE
     v_row    claimius.claim;
     v_access INTEGER := p_sa_access;
 BEGIN
+    IF coalesce(v_access, 0) & ~16 = 0 THEN
+        RAISE EXCEPTION 'claim mask % carries no bit besides deny', v_access USING ERRCODE = '22023';
+    END IF;
+
     IF (v_access & 16) = 0 THEN
         IF (v_access & 1) = 1 THEN
             v_access := v_access | 14;
@@ -1852,7 +2005,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius.create_claim(p_app_id uuid, p_name text, p_description text, p_sa_access integer, p_sa_owner_id uuid, p_sa_root_id uuid, p_sa_created_by uuid, p_inherits boolean, p_type claimius.claim_type) IS 'Creates a new claim. p_sa_access is a bitwise mask: 0x01 owner, 0x02 write, 0x04 read, 0x08 execute, 0x10 deny, 0x20 member. On grant claims with the deny bit unset owner implies write+read+execute, write implies read+execute, execute implies read. Member bit 0x20 stands alone. Deny claims store the supplied bits verbatim so callers can deny any subset of read, write, execute, owner.';
+COMMENT ON FUNCTION claimius.create_claim(p_app_id uuid, p_name text, p_description text, p_sa_access integer, p_sa_owner_id uuid, p_sa_root_id uuid, p_sa_created_by uuid, p_inherits boolean, p_type claimius.claim_type) IS 'Creates a new claim. p_sa_access is a bitwise mask: 0x01 owner, 0x02 write, 0x04 read, 0x08 execute, 0x10 deny, 0x20 member. On grant claims with the deny bit unset owner implies write+read+execute, write implies read+execute, execute implies read. Member bit 0x20 stands alone. Deny claims store the supplied bits verbatim so callers can deny any subset of read, write, execute, owner. A mask with no bit besides deny is refused with SQLSTATE 22023.';
 
 -- update_claim
 DROP FUNCTION IF EXISTS claimius.update_claim(UUID, TEXT, TEXT, INTEGER, BOOLEAN, BOOLEAN);
@@ -1869,6 +2022,10 @@ DECLARE
     v_row    claimius.claim;
     v_access INTEGER := p_sa_access;
 BEGIN
+    IF v_access IS NOT NULL AND v_access <> 0 AND v_access & ~16 = 0 THEN
+        RAISE EXCEPTION 'claim mask % carries no bit besides deny', v_access USING ERRCODE = '22023';
+    END IF;
+
     IF v_access IS NOT NULL AND (v_access & 16) = 0 THEN
         IF (v_access & 1) = 1 THEN
             v_access := v_access | 14;
@@ -1892,7 +2049,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius.update_claim(p_claim_id uuid, p_name text, p_description text, p_sa_access integer, p_inherits boolean) IS 'Patches selected fields on a claim. p_sa_access is expanded on grant claims so owner implies write+read+execute, write implies read+execute, execute implies read. Member bit 0x20 stands alone. Deny claims keep the supplied bits verbatim. Empty p_name and zero p_sa_access are treated as preserve so PATCH callers that send only one field do not wipe the others.';
+COMMENT ON FUNCTION claimius.update_claim(p_claim_id uuid, p_name text, p_description text, p_sa_access integer, p_inherits boolean) IS 'Patches selected fields on a claim. p_sa_access is expanded on grant claims so owner implies write+read+execute, write implies read+execute, execute implies read. Member bit 0x20 stands alone. Deny claims keep the supplied bits verbatim. Empty p_name and zero p_sa_access are treated as preserve so PATCH callers that send only one field do not wipe the others. A mask with no bit besides deny is refused with SQLSTATE 22023.';
 
 -- remove_claim
 DROP FUNCTION IF EXISTS claimius.remove_claim(UUID, UUID);

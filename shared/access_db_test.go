@@ -74,6 +74,19 @@ BEGIN
         p_sa_created_by => v_c, p_object_id => v_kept, p_object_type => 'claimius.organization', p_sa_access => 15);
     PERFORM claimius.assign_claim_user(p_claim_id => v_claim, p_user_id => v_c, p_sa_owner_id => v_kept, p_sa_created_by => v_c);
 
+    v_claim := (claimius.create_claim(p_name => 'Time report', p_description => NULL, p_sa_access => 4,
+        p_sa_owner_id => v_kept, p_sa_root_id => v_kept, p_sa_created_by => v_c) -> 'claim' ->> 'id')::UUID;
+    PERFORM claimius.assign_claim_object(p_claim_id => v_claim, p_sa_owner_id => v_kept, p_sa_root_id => v_kept,
+        p_sa_created_by => v_c, p_scope => '{"page": {"time-report": {}}}'::JSONB);
+    PERFORM claimius.assign_claim_user(p_claim_id => v_claim, p_user_id => v_b, p_sa_owner_id => v_kept, p_sa_created_by => v_c);
+    PERFORM claimius.assign_claim_user(p_claim_id => v_claim, p_user_id => v_c, p_sa_owner_id => v_kept, p_sa_created_by => v_c);
+
+    v_claim := (claimius.create_claim(p_name => 'No time report', p_description => NULL, p_sa_access => 20,
+        p_sa_owner_id => v_kept, p_sa_root_id => v_kept, p_sa_created_by => v_c) -> 'claim' ->> 'id')::UUID;
+    PERFORM claimius.assign_claim_object(p_claim_id => v_claim, p_sa_owner_id => v_kept, p_sa_root_id => v_kept,
+        p_sa_created_by => v_c, p_scope => '{"page": {"time-report": {}}}'::JSONB);
+    PERFORM claimius.assign_claim_user(p_claim_id => v_claim, p_user_id => v_c, p_sa_owner_id => v_kept, p_sa_created_by => v_c);
+
     UPDATE claimius.organization SET sa_deleted_at = now() WHERE id = v_dropped;
 END $$;
 `
@@ -321,5 +334,23 @@ func TestGetOrganizationsPagesInKeyOrder(t *testing.T) {
 		if i > 0 && walked[i].String() <= walked[i-1].String() {
 			t.Fatalf("position %d: %s does not follow %s in key order", i, walked[i], walked[i-1])
 		}
+	}
+}
+
+func TestScopeAccessInheritsTheClaimMaskAndSubtractsADeny(t *testing.T) {
+	db := database(t)
+	granted, err := db.ScopeAccess(context.Background(), userB, `$.page."time-report"`, sdb.ACCESS_READ)
+	if err != nil {
+		t.Fatalf("scope access: %v", err)
+	}
+	if len(granted) != 1 || granted[0].Access != sdb.ACCESS_READ {
+		t.Fatalf("expected one read grant through a binding with no mask of its own, got %+v", granted)
+	}
+	denied, err := db.ScopeAccess(context.Background(), userC, `$.page."time-report"`, sdb.ACCESS_READ)
+	if err != nil {
+		t.Fatalf("scope access: %v", err)
+	}
+	if len(denied) != 0 {
+		t.Fatalf("expected the deny on the same path to take the read away, got %+v", denied)
 	}
 }

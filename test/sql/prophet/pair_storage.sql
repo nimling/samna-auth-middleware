@@ -101,9 +101,9 @@ SELECT set_eq('SELECT * FROM pg_temp.stored()', 'SELECT * FROM pg_temp.rebuilt()
 
 SELECT ok(
     pg_temp.sharing('a0000000-0000-4000-8000-0000000000e1', 'a0000000-0000-4000-8000-0000000000e2') >= 4
-    AND pg_temp.sharing('a0000000-0000-4000-8000-0000000000e1', 'a0000000-0000-4000-8000-0000000000e4') = 1
-    AND pg_temp.sharing('a0000000-0000-4000-8000-0000000000e4', 'a0000000-0000-4000-8000-0000000000e1') = 1,
-    'two crew holders share the four organizations and a crew holder shares the one desk child with the desk holder, both directions'
+    AND pg_temp.sharing('a0000000-0000-4000-8000-0000000000e1', 'a0000000-0000-4000-8000-0000000000e4') = 2
+    AND pg_temp.sharing('a0000000-0000-4000-8000-0000000000e4', 'a0000000-0000-4000-8000-0000000000e1') = 2,
+    'two crew holders share the four organizations and a crew holder shares the one desk child and the held default claim with the desk holder, both directions'
 );
 
 DO $$
@@ -149,8 +149,8 @@ SELECT set_eq('SELECT * FROM pg_temp.stored()', 'SELECT * FROM pg_temp.rebuilt()
 SELECT is(
     pg_temp.sharing('a0000000-0000-4000-8000-0000000000e1', 'a0000000-0000-4000-8000-0000000000e4')
         + pg_temp.sharing('a0000000-0000-4000-8000-0000000000e4', 'a0000000-0000-4000-8000-0000000000e1'),
-    0::BIGINT,
-    'the pair of users whose one shared object went has no user_users row left in either direction'
+    2::BIGINT,
+    'the pair of users whose one shared organization went keeps only the held default claim in common, one each direction'
 );
 
 INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)

@@ -293,8 +293,8 @@ CREATE OR REPLACE FUNCTION claimius.capture_user_apps(p_user_id UUID)
           AND (uc.ends_at IS NULL OR uc.ends_at > now())
           AND co.object_id IS NULL
           AND jsonb_path_exists(co.scope, '$.analytics'::jsonpath)
-          AND ((c.sa_access | COALESCE(co.sa_access, c.sa_access)) & 16) = 0
-          AND ((c.sa_access | COALESCE(co.sa_access, c.sa_access)) & 4) = 4
+          AND (claimius._effective_access(c.sa_access, co.sa_access) & 16) = 0
+          AND (claimius._effective_access(c.sa_access, co.sa_access) & 4) = 4
     )
     SELECT app_id FROM granted
     UNION
@@ -323,7 +323,7 @@ CREATE OR REPLACE FUNCTION claimius.analytics_enabled(p_app_id UUID)
           AND (uc.ends_at IS NULL OR uc.ends_at > now())
           AND co.object_id IS NULL
           AND jsonb_path_exists(co.scope, '$.analytics'::jsonpath)
-          AND ((c.sa_access | COALESCE(co.sa_access, c.sa_access)) & 16) = 0
+          AND (claimius._effective_access(c.sa_access, co.sa_access) & 16) = 0
     );
 $$ LANGUAGE sql STABLE;
 
