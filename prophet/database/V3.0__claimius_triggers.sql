@@ -14,8 +14,9 @@
 --                           location, samna_user, etc).
 --   tg_calc_trees           AFTER INSERT/UPDATE/DELETE: on owned tables that
 --                           are not access targets. Keeps their closure rows.
---   tg_emit_sync_event      AFTER INSERT/UPDATE/DELETE: on user_object,
---                           user_users. Publishes to sync_event.
+--   tg_emit_sync_event      AFTER INSERT/UPDATE/DELETE: on the source tables
+--                           and app_object. Publishes to sync_event. The
+--                           derived user_object and user_users never publish.
 --   tg_count_user_users_*   AFTER INSERT/DELETE per statement: on user_object.
 --                           Counts the pairs entering and leaving into
 --                           user_users.
@@ -173,18 +174,6 @@ CREATE TRIGGER tg_calc_trees AFTER INSERT OR UPDATE OR DELETE ON claimius.claim_
     FOR EACH ROW EXECUTE FUNCTION claimius.calc_object_trees();
 
 -- ----------------------------------------------------------------------------
--- Sync event publishers
--- ----------------------------------------------------------------------------
-
-DROP TRIGGER IF EXISTS tg_emit_sync_event ON claimius.user_object;
-CREATE TRIGGER tg_emit_sync_event AFTER INSERT OR UPDATE OR DELETE ON claimius.user_object
-    FOR EACH ROW EXECUTE FUNCTION claimius.emit_sync_event();
-
-DROP TRIGGER IF EXISTS tg_emit_sync_event ON claimius.user_users;
-CREATE TRIGGER tg_emit_sync_event AFTER INSERT OR UPDATE OR DELETE ON claimius.user_users
-    FOR EACH ROW EXECUTE FUNCTION claimius.emit_sync_event();
-
--- ----------------------------------------------------------------------------
 -- user_users counting
 -- ----------------------------------------------------------------------------
 
@@ -197,6 +186,20 @@ DROP TRIGGER IF EXISTS tg_count_user_users_delete ON claimius.user_object;
 CREATE TRIGGER tg_count_user_users_delete AFTER DELETE ON claimius.user_object
     REFERENCING OLD TABLE AS changed
     FOR EACH STATEMENT EXECUTE FUNCTION claimius._count_user_users();
+
+-- ----------------------------------------------------------------------------
+-- Sync event publishers: the source tables only. user_object and user_users
+-- are derived, and a disciple derives them from the source rows it applies.
+-- An app_object link publishes the linked row to the app it links, and an
+-- unlink retracts it.
+-- ----------------------------------------------------------------------------
+
+DROP TRIGGER IF EXISTS tg_emit_sync_event ON claimius.user_object;
+DROP TRIGGER IF EXISTS tg_emit_sync_event ON claimius.user_users;
+
+DROP TRIGGER IF EXISTS tg_emit_sync_event ON claimius.app_object;
+CREATE TRIGGER tg_emit_sync_event AFTER INSERT OR UPDATE OR DELETE ON claimius.app_object
+    FOR EACH ROW EXECUTE FUNCTION claimius.emit_app_object_sync_event();
 
 DROP TRIGGER IF EXISTS tg_emit_sync_event ON claimius.samna_app;
 CREATE TRIGGER tg_emit_sync_event AFTER INSERT OR UPDATE OR DELETE ON claimius.samna_app

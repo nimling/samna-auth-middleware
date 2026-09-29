@@ -383,40 +383,6 @@ type Audit struct {
 	bun.BaseModel `bun:"table:claimius.audit" json:"-"`
 }
 
-type UserObject struct {
-	ID           uuid.UUID        `bun:"id,pk" json:"id"`
-	AppID        uuid.UUID        `bun:"app_id" json:"app_id"`
-	UserID       uuid.UUID        `bun:"user_id" json:"user_id"`
-	ObjectID     uuid.UUID        `bun:"object_id" json:"object_id"`
-	ObjectType   string           `bun:"object_type" json:"object_type"`
-	Access       int              `bun:"sa_access" json:"access"`
-	Scope        *json.RawMessage `bun:"scope,type:jsonb" json:"scope"`
-	Grants       json.RawMessage  `bun:"grants,type:jsonb" json:"grants"`
-	DirectGrant  bool             `bun:"direct_grant" json:"direct_grant"`
-	OwnerID      *uuid.UUID       `bun:"sa_owner_id" json:"owner_id"`
-	LocationID   *uuid.UUID       `bun:"sa_location_id" json:"location_id"`
-	RootID       *uuid.UUID       `bun:"sa_root_id" json:"root_id"`
-	Name         *string          `bun:"sa_name" json:"name"`
-	Description  *string          `bun:"sa_description" json:"description"`
-	Link         *string          `bun:"sa_link" json:"link"`
-	SearchVector *string          `bun:"search_vector" json:"-"`
-	CreatedAt    time.Time        `bun:"sa_created_at" json:"created_at"`
-	UpdatedAt    time.Time        `bun:"sa_updated_at" json:"updated_at"`
-
-	bun.BaseModel `bun:"table:claimius.user_object" json:"-"`
-}
-
-type UserUsers struct {
-	ID              uuid.UUID `bun:"id,pk" json:"id"`
-	AppID           uuid.UUID `bun:"app_id" json:"app_id"`
-	ViewerID        uuid.UUID `bun:"viewer_id" json:"viewer_id"`
-	TargetUserID    uuid.UUID `bun:"target_user_id" json:"target_user_id"`
-	FirstSharedAt   time.Time `bun:"first_shared_at" json:"first_shared_at"`
-	LastSharedAt    time.Time `bun:"last_shared_at" json:"last_shared_at"`
-	SharingObjCount int       `bun:"sharing_object_count" json:"sharing_object_count"`
-	bun.BaseModel   `bun:"table:claimius.user_users" json:"-"`
-}
-
 type SyncEvent struct {
 	Seq           int64           `bun:"seq,pk" json:"seq"`
 	Operation     string          `bun:"operation" json:"operation"`

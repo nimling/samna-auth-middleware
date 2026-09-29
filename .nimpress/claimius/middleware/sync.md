@@ -2,7 +2,7 @@
 layout: doc
 title: Sync in Go
 description: The /sam/sync routes on the prophet, the pull loop SyncStart on the disciple, pages applied in one transaction, backoff, reconciling from a snapshot, and the drain between pulls.
-tags: SyncStart, PullSync, PullSnapshot, ApplyPayload, /sam/sync, backoff, snapshot, drain
+tags: SyncStart, LeadSync, PullSync, PullSnapshot, ApplyPage, ApplyPayload, advisory lock, /sam/sync, backoff, snapshot, drain
 lastUpdated: true
 ---
 
@@ -19,11 +19,11 @@ A request for the page after `seq` is the disciple's proof that it applied every
 
 ## The pull loop
 
-`sam.SyncStart(ctx)` returns at once and owns its goroutine.
+`sam.SyncStart(ctx)` returns at once and owns its goroutine. It runs `LeadSync` on every pod: the pod that takes the session level advisory lock `SyncLockKey(app slug)` on a dedicated connection runs the loop below for as long as it holds it, and checks the connection every 5 s; every other pod tries the lock every 5 s and does no sync work. A holder that stops, or whose connection stops answering, discards the connection, which releases the lock, and the next pod to try takes over.
 
-1. With the cursor at zero it fetches the snapshot, applies it and records the snapshot sequence. The snapshot is upserted only where a row differs, so rows the disciple already holds cost a probe and raise no area.
+1. With the cursor at zero it fetches the snapshot and applies it with the snapshot sequence in one transaction, as a page. The snapshot is upserted only where a row differs, so rows the disciple already holds cost a probe and raise no area.
 
-2. It then fetches pages after the cursor. A page is applied in one transaction under `replay_mode`: every payload upserted or deleted by primary key with `app_id` stripped, the claim areas each claim, binding and grant moves raised in `access_diff`, and the cursor moved, all together. One commit per page, whatever its size.
+2. It then fetches pages after the cursor. A page is applied in one transaction under `replay_mode`: the cursor moved first, from the position the page was pulled at and nowhere else, then every payload upserted or deleted by primary key with `app_id` stripped and the claim areas each claim, binding and grant moves raised in `access_diff`, all together. One commit per page, whatever its size; a page that fails rolls back whole and is pulled again, and a page pulled at a cursor that has since moved is refused.
 
 3. Between pulls the loop drains outstanding `access_diff` areas in transactions of about 1,000 pairs, the slices of the holders who pass the drain rule, most recently active first, so a disciple's listings rarely meet an area the feed raised; see [Materialization](../materialization.md#the-settle-as-a-queue).
 

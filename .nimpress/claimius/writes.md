@@ -42,7 +42,7 @@ A write changes a source row: a registered row, an organization, a location, a c
 | `user_claim` insert or update | none | the actor's and the assignee's pairs on `T_c`, then `F` for each | 1 claim |
 | `samna_user` soft delete | none | per grant of the user, as a `user_claim` update | 1 object, 1 claim per grant |
 
-Every write is constant in the number of users who hold the claims involved: the only users a write settles are its actor and, for a grant, its assignee. A write on a claim is linear in the claim's reach `|T_c|`, and a hierarchy write in the size of its root's closure `N_r`. Each source row written emits one `sync_event` row, and each pair and `user_users` row written one more; see [Sync](./sync.md).
+Every write is constant in the number of users who hold the claims involved: the only users a write settles are its actor and, for a grant, its assignee. A write on a claim is linear in the claim's reach `|T_c|`, and a hierarchy write in the size of its root's closure `N_r`. Each source row written emits one `sync_event` row; pairs and `user_users` rows emit none; see [Sync](./sync.md).
 
 A pair recompute that finds its pair unchanged writes nothing, so the actor's second and later recomputes of the same `T_c` in one transaction cost `R_read` each and no rows.
 

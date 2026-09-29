@@ -7,7 +7,7 @@
 --   calc_hierarchical_access  Fires on hierarchical tables (org, location,
 --                             parenthood enabled tables)
 --   calc_claim_access         Fires on claim, claim_object, user_claim
---   emit_sync_event           Fires on user_object, user_users
+--   emit_sync_event           Fires on the source tables
 --                             to publish into sync_event
 --   audit_trigger             Fires on core auditable tables to write audit
 --   tg_update_timestamp       Generic sa_updated_at maintenance
@@ -634,8 +634,9 @@ $$ LANGUAGE plpgsql;
 
 -- ----------------------------------------------------------------------------
 -- emit_sync_event
--- Trigger function that publishes changes from user_object and user_users
--- into sync_event. Disciples consume from sync_event by seq.
+-- Trigger function that publishes changes to the source tables into
+-- sync_event. Disciples consume from sync_event by seq and derive user_object
+-- and user_users themselves, so the derived tables never publish.
 -- ----------------------------------------------------------------------------
 
 CREATE OR REPLACE FUNCTION claimius.emit_sync_event()
@@ -673,7 +674,57 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius.emit_sync_event() IS 'Trigger on materialized state tables. Publishes into sync_event.';
+COMMENT ON FUNCTION claimius.emit_sync_event() IS 'Trigger on the source tables. Publishes into sync_event.';
+
+-- ----------------------------------------------------------------------------
+-- emit_app_object_sync_event
+-- Trigger function on app_object. An organization or location reaches an
+-- app's disciple through its link, so a link that goes live publishes the
+-- linked row stamped with the app, and a link that ends publishes its delete
+-- to that app alone. The disciple carries no app_object; the linked row is
+-- the source it derives access from.
+-- ----------------------------------------------------------------------------
+
+CREATE OR REPLACE FUNCTION claimius.emit_app_object_sync_event()
+    RETURNS TRIGGER AS $$
+DECLARE
+    v_link      claimius.app_object;
+    v_was_live  BOOLEAN := TG_OP <> 'INSERT' AND (to_jsonb(OLD) ->> 'sa_deleted_at') IS NULL;
+    v_is_live   BOOLEAN := TG_OP <> 'DELETE' AND (to_jsonb(NEW) ->> 'sa_deleted_at') IS NULL;
+    v_payload   JSONB;
+BEGIN
+    IF claimius.in_replay_mode() OR v_was_live = v_is_live THEN
+        RETURN coalesce(NEW, OLD);
+    END IF;
+
+    IF NOT EXISTS (SELECT 1 FROM claimius.prophet_state) THEN
+        RETURN coalesce(NEW, OLD);
+    END IF;
+
+    v_link := coalesce(NEW, OLD);
+
+    IF NOT v_is_live THEN
+        INSERT INTO claimius.sync_event (operation, event_type, payload, app_id)
+        VALUES ('delete', v_link.object_type, jsonb_build_object('id', v_link.object_id), v_link.app_id);
+        RETURN coalesce(NEW, OLD);
+    END IF;
+
+    IF v_link.object_type = 'claimius.organization' THEN
+        SELECT to_jsonb(o) INTO v_payload FROM claimius.organization o WHERE o.id = v_link.object_id;
+    ELSIF v_link.object_type = 'claimius.location' THEN
+        SELECT to_jsonb(l) INTO v_payload FROM claimius.location l WHERE l.id = v_link.object_id;
+    END IF;
+
+    IF v_payload IS NOT NULL THEN
+        INSERT INTO claimius.sync_event (operation, event_type, payload, app_id)
+        VALUES ('upsert', v_link.object_type, v_payload, v_link.app_id);
+    END IF;
+
+    RETURN coalesce(NEW, OLD);
+END;
+$$ LANGUAGE plpgsql;
+
+COMMENT ON FUNCTION claimius.emit_app_object_sync_event() IS 'Trigger on app_object. Publishes the linked row to the app on link and its delete on unlink.';
 
 -- ----------------------------------------------------------------------------
 -- Read time self heal

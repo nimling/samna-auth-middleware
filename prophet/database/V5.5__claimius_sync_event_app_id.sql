@@ -20,6 +20,7 @@ CREATE OR REPLACE FUNCTION claimius.get_sync_events(
     SELECT e.seq, e.operation, e.event_type, e.payload, e.written_at
     FROM claimius.sync_event e
     WHERE e.seq > p_seq
+      AND e.event_type NOT IN ('claimius.user_object', 'claimius.user_users', 'claimius.audit')
       AND (
           e.app_id = p_app_id
           OR (
@@ -32,4 +33,4 @@ CREATE OR REPLACE FUNCTION claimius.get_sync_events(
     LIMIT p_limit;
 $$ LANGUAGE sql STABLE;
 
-COMMENT ON FUNCTION claimius.get_sync_events(UUID, BIGINT, INTEGER) IS 'Delta feed for one app after a sequence. Rows carrying the app id, plus organization and location rows the app reaches through app_object. Other apps'' shared hierarchy rows never leave the prophet.';
+COMMENT ON FUNCTION claimius.get_sync_events(UUID, BIGINT, INTEGER) IS 'Delta feed of source rows for one app after a sequence. Rows carrying the app id, plus organization and location rows the app reaches through app_object. Other apps'' shared hierarchy rows never leave the prophet.';

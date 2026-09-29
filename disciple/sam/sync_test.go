@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	sam "github.com/nimling/samna-auth-middleware/disciple/sam"
+	"github.com/uptrace/bun"
 )
 
 func TestApplyPayload_SkipsSamnaApp(t *testing.T) {
@@ -15,7 +16,7 @@ func TestApplyPayload_SkipsSamnaApp(t *testing.T) {
 		EventType: "claimius.samna_app",
 		Payload:   json.RawMessage(`{"id":"10000000-0000-4000-8000-000000000001","slug":"nimployer"}`),
 	}
-	if err := sam.ApplyPayload(context.Background(), payload); err != nil {
+	if err := sam.ApplyPayload(context.Background(), bun.Tx{}, payload); err != nil {
 		t.Fatalf("samna_app must be skipped without touching the database, got %v", err)
 	}
 }
@@ -27,7 +28,7 @@ func TestApplyPayload_SkipsSamnaAppDelete(t *testing.T) {
 		EventType: "claimius.samna_app",
 		Payload:   json.RawMessage(`{"id":"10000000-0000-4000-8000-000000000001"}`),
 	}
-	if err := sam.ApplyPayload(context.Background(), payload); err != nil {
+	if err := sam.ApplyPayload(context.Background(), bun.Tx{}, payload); err != nil {
 		t.Fatalf("samna_app delete must be skipped without touching the database, got %v", err)
 	}
 }

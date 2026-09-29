@@ -60,9 +60,6 @@ func GetSyncSnapshot(ctx echo.Context) error {
 		{"claimius.object_field", &[]ObjectField{}, true},
 		{"claimius.user_field", &[]UserField{}, true},
 		{"claimius.user_relation", &[]UserRelation{}, true},
-		{"claimius.audit", &[]Audit{}, true},
-		{"claimius.user_object", &[]UserObject{}, true},
-		{"claimius.user_users", &[]UserUsers{}, true},
 	}
 
 	var records []SyncPayload

@@ -15,6 +15,11 @@ type SnapshotResponse struct {
 }
 
 func PullSnapshot(ctx context.Context) error {
+	seq, err := GetSeq(ctx)
+	if err != nil {
+		return fmt.Errorf("get current seq: %w", err)
+	}
+
 	var snapshot SnapshotResponse
 	if err := client.Get(ctx, "sync/snapshot", &snapshot); err != nil {
 		if errors.Is(err, client.ErrNotFound) {
@@ -23,19 +28,7 @@ func PullSnapshot(ctx context.Context) error {
 		return fmt.Errorf("fetch snapshot: %w", err)
 	}
 
-	for _, payload := range snapshot.Records {
-		if err := ApplyPayload(ctx, payload); err != nil {
-			return fmt.Errorf("apply %s: %w", payload.EventType, err)
-		}
-	}
-
-	if snapshot.Seq > 0 {
-		if err := UpdateSeq(ctx, snapshot.Seq); err != nil {
-			return fmt.Errorf("update seq: %w", err)
-		}
-	}
-
-	return nil
+	return ApplyPage(ctx, seq, snapshot.Seq, snapshot.Records)
 }
 
 func PullSync(ctx context.Context) (int, error) {
@@ -51,21 +44,19 @@ func PullSync(ctx context.Context) (int, error) {
 		}
 		return 0, fmt.Errorf("fetch sync: %w", err)
 	}
+	if len(payloads) == 0 {
+		return 0, nil
+	}
 
-	var maxSeq int64
+	maxSeq := seq
 	for _, payload := range payloads {
-		if err := ApplyPayload(ctx, payload); err != nil {
-			return 0, fmt.Errorf("apply %s seq %d: %w", payload.EventType, payload.Seq, err)
-		}
 		if payload.Seq > maxSeq {
 			maxSeq = payload.Seq
 		}
 	}
 
-	if maxSeq > 0 {
-		if err := UpdateSeq(ctx, maxSeq); err != nil {
-			return len(payloads), fmt.Errorf("update seq: %w", err)
-		}
+	if err := ApplyPage(ctx, seq, maxSeq, payloads); err != nil {
+		return 0, err
 	}
 
 	return len(payloads), nil

@@ -7,7 +7,7 @@
 --   calc_hierarchical_access  Fires on hierarchical tables (org, location,
 --                             parenthood enabled tables)
 --   calc_claim_access         Fires on claim, claim_object, user_claim
---   emit_sync_event           Fires on user_object, user_users
+--   emit_sync_event           Fires on the source tables
 --                             to publish into sync_event
 --   audit_trigger             Fires on core auditable tables to write audit
 --   tg_update_timestamp       Generic sa_updated_at maintenance
@@ -599,8 +599,9 @@ $$ LANGUAGE plpgsql;
 
 -- ----------------------------------------------------------------------------
 -- emit_sync_event
--- Trigger function that publishes changes from user_object and user_users
--- into sync_event. Disciples consume from sync_event by seq.
+-- Trigger function that publishes changes to the source tables into
+-- sync_event. Disciples consume from sync_event by seq and derive user_object
+-- and user_users themselves, so the derived tables never publish.
 -- ----------------------------------------------------------------------------
 
 CREATE OR REPLACE FUNCTION claimius.emit_sync_event()
@@ -638,7 +639,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius.emit_sync_event() IS 'Trigger on materialized state tables. Publishes into sync_event.';
+COMMENT ON FUNCTION claimius.emit_sync_event() IS 'Trigger on the source tables. Publishes into sync_event.';
 
 -- ----------------------------------------------------------------------------
 -- Read time self heal

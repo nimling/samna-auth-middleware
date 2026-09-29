@@ -2,6 +2,7 @@ package sam
 
 import (
 	"context"
+	"database/sql/driver"
 	"encoding/json"
 	"fmt"
 	"time"
@@ -12,6 +13,7 @@ import (
 	"github.com/nimling/samna-auth-middleware/internal/store"
 	"github.com/nimling/samna-auth-middleware/sauth"
 	"github.com/nimling/samna-auth-middleware/shared"
+	"github.com/nimling/samna-auth-middleware/utils"
 	"github.com/uptrace/bun"
 )
 
@@ -21,6 +23,7 @@ const (
 	maxBackoff                 = 30 * time.Second
 	emptyPullsBeforeReconcile  = 40
 	failedPullsBeforeReconcile = 10
+	leadInterval               = 5 * time.Second
 )
 
 // reportStalledCursor records that the disciple has stopped making progress at
@@ -47,84 +50,170 @@ func reportStalledCursor(ctx context.Context, log echo.Logger, reason string) {
 }
 
 // SyncStart launches the background pull loop that keeps the disciple database
-// current. Call it once after the server starts. It runs until the context ends
-// and logs failures through the database logger.
+// current. Call it once after the server starts, on every pod. Only the pod
+// holding the disciple's sync lock pulls; the others wait to take over. It runs
+// until the context ends and logs failures through the database logger.
 func SyncStart(ctx context.Context) {
 	if shared.GetDebugMode() != shared.DebugModeNone {
 		return
 	}
+	go LeadSync(ctx, sdb.Instance().DB, SyncLockKey(utils.Cfg().AppSlug), leadInterval, pullLoop)
+}
+
+// SyncLockKey names the advisory lock that makes one process the sync consumer
+// of the disciple database of an app.
+func SyncLockKey(appSlug string) string {
+	return "claimius.disciple_sync:" + appSlug
+}
+
+// LeadSync runs work for as long as this process holds the session level
+// advisory lock on key, on a dedicated connection taken from db. A process that
+// does not get the lock does no sync work and retries every interval, so N pods
+// apply each event once instead of N times. The lock lives and dies with its
+// connection: when the holder goes away the server releases it and another
+// process takes over, and a holder whose connection stops answering cancels
+// its work and discards the connection before it tries again.
+func LeadSync(ctx context.Context, db *shared.DB, key string, interval time.Duration, work func(context.Context)) {
+	for {
+		conn, err := takeSyncLock(ctx, db, key)
+		if err != nil && ctx.Err() == nil {
+			db.Logger.Errorf("disciple sync: take sync lock: %v", err)
+		}
+		if conn != nil {
+			holdSyncLock(ctx, conn, interval, work)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(interval):
+		}
+	}
+}
+
+func takeSyncLock(ctx context.Context, db *shared.DB, key string) (*bun.Conn, error) {
+	conn, err := db.Conn(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var held bool
+	if err := conn.QueryRowContext(ctx, "SELECT pg_try_advisory_lock(hashtextextended(?, 0))", key).Scan(&held); err != nil {
+		discardConn(&conn)
+		return nil, err
+	}
+	if !held {
+		discardConn(&conn)
+		return nil, nil
+	}
+	return &conn, nil
+}
+
+func holdSyncLock(ctx context.Context, conn *bun.Conn, interval time.Duration, work func(context.Context)) {
+	workCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	done := make(chan struct{})
 	go func() {
-		log := sdb.Instance().Logger
-		report := func(err error) {
+		defer close(done)
+		work(workCtx)
+	}()
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-done:
+			discardConn(conn)
+			return
+		case <-ticker.C:
+			checkCtx, stop := context.WithTimeout(ctx, interval)
+			_, err := conn.ExecContext(checkCtx, "SELECT 1")
+			stop()
 			if err != nil {
-				log.Errorf("disciple sync: %v", err)
+				cancel()
+				<-done
+				discardConn(conn)
+				return
 			}
 		}
-		if seq, err := GetSeq(ctx); err != nil {
-			report(fmt.Errorf("get current seq: %w", err))
-		} else if seq == 0 {
-			report(PullSnapshot(ctx))
+	}
+}
+
+// discardConn closes the session behind a connection instead of returning it
+// to the pool, so a session level lock never outlives the process that took it.
+func discardConn(conn *bun.Conn) {
+	_ = conn.Raw(func(any) error { return driver.ErrBadConn })
+	_ = conn.Close()
+}
+
+func pullLoop(ctx context.Context) {
+	log := sdb.Instance().Logger
+	report := func(err error) {
+		if err != nil && ctx.Err() == nil {
+			log.Errorf("disciple sync: %v", err)
 		}
-		backoff := time.Second
-		idle := time.Duration(0)
-		empty := 0
-		failed := 0
-		reconciled := int64(-1)
-		for {
-			wait := activeInterval
-			applied, err := PullSync(ctx)
-			switch {
-			case err != nil:
-				report(err)
-				wait = backoff
-				backoff *= 2
-				if backoff > maxBackoff {
-					backoff = maxBackoff
-				}
-				failed++
-				if failed >= failedPullsBeforeReconcile {
-					failed = 0
-					backoff = time.Second
-					reportStalledCursor(ctx, log, fmt.Sprintf("failed to apply %d consecutive pulls, last error %v", failedPullsBeforeReconcile, err))
+	}
+	if seq, err := GetSeq(ctx); err != nil {
+		report(fmt.Errorf("get current seq: %w", err))
+	} else if seq == 0 {
+		report(PullSnapshot(ctx))
+	}
+	backoff := time.Second
+	idle := time.Duration(0)
+	empty := 0
+	failed := 0
+	reconciled := int64(-1)
+	for {
+		wait := activeInterval
+		applied, err := PullSync(ctx)
+		switch {
+		case err != nil:
+			report(err)
+			wait = backoff
+			backoff *= 2
+			if backoff > maxBackoff {
+				backoff = maxBackoff
+			}
+			failed++
+			if failed >= failedPullsBeforeReconcile {
+				failed = 0
+				backoff = time.Second
+				reportStalledCursor(ctx, log, fmt.Sprintf("failed to apply %d consecutive pulls, last error %v", failedPullsBeforeReconcile, err))
+				report(PullSnapshot(ctx))
+			}
+		case applied > 0:
+			backoff = time.Second
+			idle = 0
+			empty = 0
+			failed = 0
+		default:
+			backoff = time.Second
+			empty++
+			failed = 0
+			if idle == 0 {
+				idle = activeInterval
+			}
+			idle *= 2
+			if idle > maxIdleInterval {
+				idle = maxIdleInterval
+			}
+			wait = idle
+			if empty >= emptyPullsBeforeReconcile {
+				empty = 0
+				seq, err := GetSeq(ctx)
+				if err != nil {
+					report(fmt.Errorf("read cursor before reconcile: %w", err))
+				} else if seq != reconciled {
+					idle = 0
+					reconciled = seq
+					reportStalledCursor(ctx, log, fmt.Sprintf("returned no events %d consecutive pulls", emptyPullsBeforeReconcile))
 					report(PullSnapshot(ctx))
 				}
-			case applied > 0:
-				backoff = time.Second
-				idle = 0
-				empty = 0
-				failed = 0
-			default:
-				backoff = time.Second
-				empty++
-				failed = 0
-				if idle == 0 {
-					idle = activeInterval
-				}
-				idle *= 2
-				if idle > maxIdleInterval {
-					idle = maxIdleInterval
-				}
-				wait = idle
-				if empty >= emptyPullsBeforeReconcile {
-					empty = 0
-					seq, err := GetSeq(ctx)
-					if err != nil {
-						report(fmt.Errorf("read cursor before reconcile: %w", err))
-					} else if seq != reconciled {
-						idle = 0
-						reconciled = seq
-						reportStalledCursor(ctx, log, fmt.Sprintf("returned no events %d consecutive pulls", emptyPullsBeforeReconcile))
-						report(PullSnapshot(ctx))
-					}
-				}
-			}
-			select {
-			case <-ctx.Done():
-				return
-			case <-time.After(wait):
 			}
 		}
-	}()
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(wait):
+		}
+	}
 }
 
 type SyncPayload struct {
@@ -154,31 +243,49 @@ func stripAppID(raw json.RawMessage) json.RawMessage {
 	return cleaned
 }
 
-func ApplyPayload(ctx context.Context, payload SyncPayload) error {
-	if payload.EventType == "claimius.samna_app" {
-		return nil
-	}
-	payload.Payload = stripAppID(payload.Payload)
+// ApplyPage applies one page of payloads and moves the cursor from from to to
+// in one transaction under replay_mode, so a page of p events costs one commit
+// and a page that fails anywhere rolls back whole, cursor included, and is
+// pulled again. The cursor moves first and only from the position the page was
+// pulled at, which holds its row for the page and refuses a page another
+// consumer already applied.
+func ApplyPage(ctx context.Context, from, to int64, payloads []SyncPayload) error {
 	return sdb.Instance().DB.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
 		if _, err := tx.ExecContext(ctx, "SET LOCAL claimius.replay_mode = 'true'"); err != nil {
 			return fmt.Errorf("set replay_mode: %w", err)
 		}
-
-		switch payload.Operation {
-		case "upsert":
-			if err := applyUpsert(ctx, tx, payload.EventType, payload.Payload); err != nil {
-				return err
-			}
-		case "delete":
-			if err := applyDelete(ctx, tx, payload.EventType, payload.Payload); err != nil {
-				return err
-			}
-		default:
-			return fmt.Errorf("unknown sync operation: %s", payload.Operation)
+		if err := UpdateSeq(ctx, tx, from, to); err != nil {
+			return err
 		}
-
-		return recomputeExternal(ctx, tx, payload.EventType, payload.Payload)
+		for _, payload := range payloads {
+			if err := ApplyPayload(ctx, tx, payload); err != nil {
+				return fmt.Errorf("apply %s seq %d: %w", payload.EventType, payload.Seq, err)
+			}
+		}
+		return nil
 	})
+}
+
+func ApplyPayload(ctx context.Context, tx bun.Tx, payload SyncPayload) error {
+	if payload.EventType == "claimius.samna_app" {
+		return nil
+	}
+	payload.Payload = stripAppID(payload.Payload)
+
+	switch payload.Operation {
+	case "upsert":
+		if err := applyUpsert(ctx, tx, payload.EventType, payload.Payload); err != nil {
+			return err
+		}
+	case "delete":
+		if err := applyDelete(ctx, tx, payload.EventType, payload.Payload); err != nil {
+			return err
+		}
+	default:
+		return fmt.Errorf("unknown sync operation: %s", payload.Operation)
+	}
+
+	return recomputeExternal(ctx, tx, payload.EventType, payload.Payload)
 }
 
 type claimBindingEnvelope struct {
@@ -285,12 +392,6 @@ func applyUpsert(ctx context.Context, tx bun.Tx, eventType string, raw json.RawM
 		return upsertEntity[shared.UserField](ctx, tx, raw)
 	case "claimius.user_relation":
 		return upsertEntity[shared.UserRelation](ctx, tx, raw)
-	case "claimius.audit":
-		return upsertEntity[shared.Audit](ctx, tx, raw)
-	case "claimius.user_object":
-		return upsertEntity[shared.UserObject](ctx, tx, raw)
-	case "claimius.user_users":
-		return upsertEntity[shared.UserUsers](ctx, tx, raw)
 	default:
 		return fmt.Errorf("unknown event_type for upsert: %s", eventType)
 	}
@@ -332,12 +433,6 @@ func applyDelete(ctx context.Context, tx bun.Tx, eventType string, raw json.RawM
 		return deleteEntity[shared.UserField](ctx, tx, env.ID)
 	case "claimius.user_relation":
 		return deleteEntity[shared.UserRelation](ctx, tx, env.ID)
-	case "claimius.audit":
-		return deleteEntity[shared.Audit](ctx, tx, env.ID)
-	case "claimius.user_object":
-		return deleteEntity[shared.UserObject](ctx, tx, env.ID)
-	case "claimius.user_users":
-		return deleteEntity[shared.UserUsers](ctx, tx, env.ID)
 	default:
 		return fmt.Errorf("delete not supported for event_type: %s", eventType)
 	}
@@ -364,24 +459,24 @@ func deleteEntity[T any](ctx context.Context, tx bun.Tx, id json.RawMessage) err
 	return nil
 }
 
-func UpdateSeq(ctx context.Context, seq int64) error {
-	return sdb.Instance().DB.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
-		var state shared.DiscipleState
-		if err := tx.NewSelect().
-			Model(&state).
-			Limit(1).
-			Scan(ctx); err != nil {
-			return err
-		}
-		_, err := tx.NewUpdate().
-			Model(&state).
-			Set("last_applied_seq = ?", seq).
-			Set("sa_updated_at = ?", time.Now()).
-			Where("id = ?", state.ID).
-			Where("last_applied_seq < ?", seq).
-			Exec(ctx)
-		return err
-	})
+func UpdateSeq(ctx context.Context, tx bun.Tx, from, to int64) error {
+	result, err := tx.NewUpdate().
+		Model((*shared.DiscipleState)(nil)).
+		Set("last_applied_seq = GREATEST(last_applied_seq, ?)", to).
+		Set("sa_updated_at = ?", time.Now()).
+		Where("last_applied_seq = ?", from).
+		Exec(ctx)
+	if err != nil {
+		return fmt.Errorf("update seq: %w", err)
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("update seq rows: %w", err)
+	}
+	if rows == 0 {
+		return fmt.Errorf("update seq: cursor moved from %d before the page applied", from)
+	}
+	return nil
 }
 
 func GetSeq(ctx context.Context) (int64, error) {

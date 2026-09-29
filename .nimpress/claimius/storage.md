@@ -17,7 +17,7 @@ lastUpdated: true
 | `inheritance_info` | `Σ_x Σ_{t ∋ x} (d_t(x) + 1)` | objects times depth |
 | `claim`, `claim_object`, `user_claim` | claims, bindings, grants | the model, never its product |
 | `access_diff` | at most one per claim and one per object raised since the last read in the app | writes between reads |
-| `sync_event` | events since the lowest live cursor | writes and the pairs they touch; see [Sync](./sync.md) |
+| `sync_event` | events since the lowest live cursor | source rows written; see [Sync](./sync.md) |
 | `audit` | audited events | writes |
 
 On the data set of [the index](./index.md#symbols), `user_object` held 393,908 rows averaging 606 bytes of heap, of which 119 were the search vector and 239 the `grants` array, and `user_users` 111,472 rows of about 120 bytes. The pairs dominate: they are the only table that grows with the product of users and objects, `P = O Ū_o`, and every other table grows with the rows of the model or with its depth.
@@ -39,7 +39,7 @@ A closure row is two object pairs, a root, a depth and two timestamps: about 140
 
 The GIN indexes take their entries through the pending list and merge them in bulk ([PostgreSQL, GIN fast update](https://www.postgresql.org/docs/17/gin.html#GIN-FAST-UPDATE)). A soft delete sets an indexed column, so it is never a heap only update and writes an entry in every index of its table ([PostgreSQL, Heap Only Tuples](https://www.postgresql.org/docs/17/storage-hot.html)).
 
-Per pair written, the materialization therefore writes one `user_object` row with `≈ 6 + 6 G_x + n_w` entries for `n_w` distinct lexemes, one or two `sync_event` rows with 4 each, and on insert or delete one update of each `user_users` row it shares with another user of the object.
+Per pair written, the materialization therefore writes one `user_object` row with `≈ 6 + 6 G_x + n_w` entries for `n_w` distinct lexemes, and on insert or delete one update of each `user_users` row it shares with another user of the object.
 
 ## The shape of a B-tree
 

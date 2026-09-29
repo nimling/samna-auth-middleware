@@ -609,9 +609,10 @@ CREATE TABLE IF NOT EXISTS claimius.sync_event (
 );
 
 COMMENT ON TABLE claimius.sync_event IS 'Append only event stream for prophet to disciple sync.';
-COMMENT ON COLUMN claimius.sync_event.event_type IS 'Source table: claimius.user_object, claimius.user_users, etc.';
+COMMENT ON COLUMN claimius.sync_event.event_type IS 'Source table: claimius.claim, claimius.user_claim, claimius.organization, etc. Derived tables never publish.';
 
-DELETE FROM claimius.sync_event WHERE event_type = 'claimius.object_users';
+DELETE FROM claimius.sync_event
+WHERE event_type IN ('claimius.object_users', 'claimius.user_object', 'claimius.user_users', 'claimius.audit');
 
 CREATE INDEX IF NOT EXISTS idx_sync_event_written_at ON claimius.sync_event (written_at);
 CREATE INDEX IF NOT EXISTS idx_sync_event_type_seq ON claimius.sync_event (event_type, seq);

@@ -1117,15 +1117,27 @@ COMMENT ON FUNCTION claimius.recompute_user_object(UUID, TEXT, UUID[]) IS 'Recom
 -- moves it down, and a row reaching zero is removed. A statement touches the
 -- U_x users of each object it names and nothing of either user's other
 -- objects. Two pairs entering or leaving on the same object in one statement
--- count once per ordered pair of users. Quiet under replay_mode, where the
--- disciple takes user_users from the feed and the bulk seed rebuilds it with
--- _refresh_user_users.
+-- count once per ordered pair of users. Two transactions adding or removing
+-- pairs on one object serialize on an advisory lock per object, taken in
+-- sorted order before the other holders are read, so each reads the pairs
+-- the other committed and no ordered pair is missed or counted twice. Quiet
+-- under replay_mode, where the bulk seed rebuilds it with _refresh_user_users.
 CREATE OR REPLACE FUNCTION claimius._count_user_users()
     RETURNS TRIGGER AS $$
+DECLARE
+    v_key BIGINT;
 BEGIN
     IF claimius.in_replay_mode() THEN
         RETURN NULL;
     END IF;
+
+    FOR v_key IN
+        SELECT DISTINCT hashtextextended(c.object_type || ':' || c.object_id::TEXT, 0)
+        FROM changed c
+        ORDER BY 1
+    LOOP
+        PERFORM pg_advisory_xact_lock(v_key);
+    END LOOP;
 
     IF TG_OP = 'INSERT' THEN
         WITH moved AS (

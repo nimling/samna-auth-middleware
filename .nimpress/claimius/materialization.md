@@ -39,7 +39,7 @@ Claimius stores the access relation `A` of [the model](./index.md#the-model) per
 R_read(u, x) = 2C + L + 2 a_x + B_x + t_x + O(1)
 ```
 
-It writes, when the pair changed: one `user_object` row with its five btree entries, a sixth when pinned, `≈ 5 G_x` entries in the `grants` GIN index and one per lexeme in the search GIN index; on insert or delete the `user_users` counts against the other users of the object, see [Users](./users.md); one `sync_event` row per written row; and one delete probe on `claim_graph_cache`. The upsert is `ON CONFLICT (id) DO UPDATE ... WHERE ... IS DISTINCT FROM`, so a pair whose every column is unchanged writes nothing and fires no trigger. When the object is gone or no derivation survives, it deletes the pair instead.
+It writes, when the pair changed: one `user_object` row with its five btree entries, a sixth when pinned, `≈ 5 G_x` entries in the `grants` GIN index and one per lexeme in the search GIN index; on insert or delete the `user_users` counts against the other users of the object, see [Users](./users.md); and one delete probe on `claim_graph_cache`. The upsert is `ON CONFLICT (id) DO UPDATE ... WHERE ... IS DISTINCT FROM`, so a pair whose every column is unchanged writes nothing and fires no trigger. When the object is gone or no derivation survives, it deletes the pair instead.
 
 ## Writes record areas
 
