@@ -76,17 +76,24 @@ BEGIN
         WHERE id = v_client_pk;
     END IF;
 
-    PERFORM claimius.assign_claim_object(
-        p_app_id        => p_app_id,
-        p_claim_id      => v_claim_id,
-        p_object_id     => v_client_pk,
-        p_object_type   => 'claimius.samna_client',
-        p_sa_owner_id   => v_org_id,
-        p_sa_root_id    => v_org_id,
-        p_sa_created_by => p_sa_created_by,
-        p_inherits      => FALSE,
-        p_reason        => p_claim_name || ' binds to the client row'
-    );
+    IF NOT EXISTS (
+        SELECT 1 FROM claimius.claim_object
+        WHERE app_id = p_app_id AND claim_id = v_claim_id
+          AND object_type = 'claimius.samna_client' AND object_id = v_client_pk
+          AND sa_deleted_at IS NULL
+    ) THEN
+        PERFORM claimius.assign_claim_object(
+            p_app_id        => p_app_id,
+            p_claim_id      => v_claim_id,
+            p_object_id     => v_client_pk,
+            p_object_type   => 'claimius.samna_client',
+            p_sa_owner_id   => v_org_id,
+            p_sa_root_id    => v_org_id,
+            p_sa_created_by => p_sa_created_by,
+            p_inherits      => FALSE,
+            p_reason        => p_claim_name || ' binds to the client row'
+        );
+    END IF;
 
     PERFORM claimius.ensure_app_user(
         p_user_id    => p_client_id,
@@ -97,14 +104,20 @@ BEGIN
         p_sa_created_by => p_sa_created_by
     );
 
-    PERFORM claimius.assign_claim_user(
-        p_app_id        => p_app_id,
-        p_claim_id      => v_claim_id,
-        p_user_id       => p_client_id,
-        p_sa_owner_id   => v_org_id,
-        p_sa_created_by => p_sa_created_by,
-        p_reason        => 'Grant ' || p_name || ' its capability claim'
-    );
+    IF NOT EXISTS (
+        SELECT 1 FROM claimius.user_claim
+        WHERE app_id = p_app_id AND claim_id = v_claim_id AND user_id = p_client_id
+          AND sa_deleted_at IS NULL
+    ) THEN
+        PERFORM claimius.assign_claim_user(
+            p_app_id        => p_app_id,
+            p_claim_id      => v_claim_id,
+            p_user_id       => p_client_id,
+            p_sa_owner_id   => v_org_id,
+            p_sa_created_by => p_sa_created_by,
+            p_reason        => 'Grant ' || p_name || ' its capability claim'
+        );
+    END IF;
 
     RETURN jsonb_build_object(
         'samna_client', jsonb_build_object('id', v_client_pk, 'client_id', p_client_id),
