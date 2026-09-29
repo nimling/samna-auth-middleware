@@ -509,11 +509,15 @@ CREATE TABLE IF NOT EXISTS claimius.sync_event (
                                                    operation       claimius.sync_operation NOT NULL,
                                                    event_type      TEXT NOT NULL,
                                                    payload         JSONB NOT NULL,
-                                                   written_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+                                                   written_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+                                                   txid            XID8 NOT NULL DEFAULT pg_current_xact_id()
 );
+
+ALTER TABLE claimius.sync_event ADD COLUMN IF NOT EXISTS txid XID8 NOT NULL DEFAULT pg_current_xact_id();
 
 COMMENT ON TABLE claimius.sync_event IS 'Append only event stream for prophet to disciple sync.';
 COMMENT ON COLUMN claimius.sync_event.event_type IS 'Source table: claimius.claim, claimius.user_claim, claimius.organization, etc. Derived tables never publish.';
+COMMENT ON COLUMN claimius.sync_event.txid IS 'Transaction that wrote the event. The feed serves an event only once every transaction below it has ended, so a sequence that commits late is never passed over.';
 
 DELETE FROM claimius.sync_event
 WHERE event_type IN ('claimius.object_users', 'claimius.user_object', 'claimius.user_users', 'claimius.audit');

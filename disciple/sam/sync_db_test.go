@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -38,7 +39,7 @@ func organizationPayload(seq int64, id uuid.UUID) sam.SyncPayload {
 		Operation: "upsert",
 		EventType: "claimius.organization",
 		Payload: json.RawMessage(fmt.Sprintf(
-			`{"id":%q,"name":"Page","type":"company","private_seed":"seed","sa_owner_id":%q,"sa_root_id":%q,"sa_level":0,"sa_created_by":%q}`,
+			`{"id":%q,"name":"Page","type":"company","private_seed":"seed","sa_owner_id":%q,"sa_root_id":%q,"sa_level":0,"sa_created_by":%q,"sa_created_at":"2026-01-01T00:00:00Z","sa_updated_at":"2026-01-01T00:00:00Z"}`,
 			id, id, id, id)),
 	}
 }
@@ -164,5 +165,60 @@ func TestLeadSyncRunsOneConsumer(t *testing.T) {
 	}
 	if applied[leader] != before {
 		t.Fatalf("a stopped holder must apply nothing more, %s went from %d to %d", leader, before, applied[leader])
+	}
+}
+
+func TestWaitForSeqReturnsOnceTheCursorReachesTheWrite(t *testing.T) {
+	database(t)
+	ctx := context.Background()
+	from := cursor(t)
+
+	go func() {
+		time.Sleep(200 * time.Millisecond)
+		if err := sam.ApplyPage(ctx, from, from+3, nil); err != nil {
+			t.Errorf("apply page: %v", err)
+		}
+	}()
+	if err := sam.WaitForSeq(ctx, from+3, 5*time.Second); err != nil {
+		t.Fatalf("a wait for a sequence the cursor reaches must return, got %v", err)
+	}
+	if err := sam.WaitForSeq(ctx, from+1000, 200*time.Millisecond); err == nil {
+		t.Fatal("a wait for a sequence the cursor never reaches must time out")
+	}
+}
+
+func TestApplyPageSkipsUnchangedRows(t *testing.T) {
+	db := database(t)
+	ctx := context.Background()
+	id := uuid.New()
+	version := func() string {
+		t.Helper()
+		var xmin string
+		if err := db.NewRaw(`SELECT xmin::TEXT FROM claimius.organization WHERE id = ?`, id).Scan(ctx, &xmin); err != nil {
+			t.Fatalf("read row version: %v", err)
+		}
+		return xmin
+	}
+
+	from := cursor(t)
+	if err := sam.ApplyPage(ctx, from, from+1, []sam.SyncPayload{organizationPayload(from+1, id)}); err != nil {
+		t.Fatalf("apply page: %v", err)
+	}
+	written := version()
+
+	if err := sam.ApplyPage(ctx, from+1, from+2, []sam.SyncPayload{organizationPayload(from+2, id)}); err != nil {
+		t.Fatalf("apply the same row again: %v", err)
+	}
+	if got := version(); got != written {
+		t.Fatalf("a row the disciple already holds unchanged must not be rewritten, version %s became %s", written, got)
+	}
+
+	renamed := organizationPayload(from+3, id)
+	renamed.Payload = json.RawMessage(strings.Replace(string(renamed.Payload), `"name":"Page"`, `"name":"Renamed"`, 1))
+	if err := sam.ApplyPage(ctx, from+2, from+3, []sam.SyncPayload{renamed}); err != nil {
+		t.Fatalf("apply a changed row: %v", err)
+	}
+	if got := version(); got == written {
+		t.Fatal("a changed row must be written")
 	}
 }

@@ -15,7 +15,7 @@ Sync is pull. The prophet serves two routes under `/sam`, behind `smw.AppMiddlew
 | `GET /sam/sync/snapshot` | Every source row of the app, organizations and locations through `app_object_ids`, and the prophet's highest sequence |
 | `GET /sam/sync/:seq` | `claimius.get_sync_events(app, seq, 1000)`, the next page after the disciple's cursor, held open up to 25 s while it is empty; a `409` naming the snapshot when the app's events after the cursor outnumber its source rows |
 
-A request for the page after `seq` is the disciple's proof that it applied everything up to `seq`. The prophet records it in `prophet_state.last_applied_seq` and `last_contact_at`, which is what `trim_sync_event` trims against.
+A request for the page after `seq` is the disciple's proof that it applied everything up to `seq`. The disciple names itself by its `disciple_state` id, and the prophet records the cursor per consumer in `sync_consumer` through `update_sync_cursor`, which is what `trim_sync_event` trims against. A write answers with the app's sequence in the `SAuth-Seq` header; the routed query exposes it as `Seq()` and `WaitForSeq` waits on it.
 
 ## The pull loop
 

@@ -1453,7 +1453,9 @@ COMMENT ON FUNCTION claimius.recompute_user_object(UUID, UUID, TEXT, UUID[]) IS 
 -- moves it down, and a row reaching zero is removed. A statement touches the
 -- U_x users of each object it names and nothing of either user's other
 -- objects. Two pairs entering or leaving on the same object in one statement
--- count once per ordered pair of users. Two transactions adding or removing
+-- count once per ordered pair of users. A pair on a claimius.claim moves no
+-- count: holding a claim reads the claim, and a claim is a template, not an
+-- object two users share. Two transactions adding or removing
 -- pairs on one object serialize on an advisory lock per object, held before
 -- the other holders are read, so each reads the pairs the other committed
 -- and no ordered pair is missed or counted twice. A settle and
@@ -1468,7 +1470,7 @@ BEGIN
         RETURN NULL;
     END IF;
 
-    PERFORM claimius._lock_objects(ARRAY(SELECT c.object_type || ':' || c.object_id::TEXT FROM changed c));
+    PERFORM claimius._lock_objects(ARRAY(SELECT c.object_type || ':' || c.object_id::TEXT FROM changed c WHERE c.object_type <> 'claimius.claim'));
 
     IF TG_OP = 'INSERT' THEN
         WITH moved AS (
@@ -1480,8 +1482,9 @@ BEGIN
                    AND o.object_id = c.object_id
                    AND o.user_id <> c.user_id
                 CROSS JOIN LATERAL (VALUES (c.user_id, o.user_id), (o.user_id, c.user_id)) AS d(viewer_id, target_user_id)
-            WHERE d.viewer_id = c.user_id
-               OR NOT EXISTS (SELECT 1 FROM changed n WHERE n.id = o.id)
+            WHERE c.object_type <> 'claimius.claim'
+              AND (d.viewer_id = c.user_id
+                   OR NOT EXISTS (SELECT 1 FROM changed n WHERE n.id = o.id))
         )
         INSERT INTO claimius.user_users (id, app_id, viewer_id, target_user_id, sharing_object_count)
         SELECT claimius.composite_id(m.app_id::TEXT, m.viewer_id::TEXT, m.target_user_id::TEXT),
@@ -1500,6 +1503,7 @@ BEGIN
                    AND o.object_type = c.object_type
                    AND o.object_id = c.object_id
                    AND o.user_id <> c.user_id
+            WHERE c.object_type <> 'claimius.claim'
 
             UNION ALL
 
@@ -1510,6 +1514,7 @@ BEGIN
                    AND o.object_type = c.object_type
                    AND o.object_id = c.object_id
                 CROSS JOIN LATERAL (VALUES (c.user_id, o.user_id), (o.user_id, c.user_id)) AS d(viewer_id, target_user_id)
+            WHERE c.object_type <> 'claimius.claim'
         ),
         delta AS (
             SELECT claimius.composite_id(m.app_id::TEXT, m.viewer_id::TEXT, m.target_user_id::TEXT) AS id,
@@ -1533,7 +1538,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius._count_user_users() IS 'Statement trigger on user_object. Moves user_users.sharing_object_count by one per pair entering or leaving against every other user of the object, both directions, and removes a row at zero. Quiet under replay_mode.';
+COMMENT ON FUNCTION claimius._count_user_users() IS 'Statement trigger on user_object. Moves user_users.sharing_object_count by one per pair entering or leaving against every other user of the object, both directions, and removes a row at zero. A pair on a claimius.claim moves no count: a claim is a template, not a shared object. Quiet under replay_mode.';
 
 -- _refresh_user_users
 -- The bulk rebuild of user_users on both sides of one user from user_object:
@@ -1555,6 +1560,7 @@ BEGIN
                AND other.object_id = mine.object_id
                AND other.user_id <> mine.user_id
         WHERE mine.app_id = p_app_id AND mine.user_id = p_viewer_id
+          AND mine.object_type <> 'claimius.claim'
         GROUP BY other.user_id
     ),
     wanted AS (
@@ -1583,7 +1589,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius._refresh_user_users(p_app_id uuid, p_viewer_id uuid) IS 'Bulk rebuild of the user_users rows on both sides of one user in one app from user_object, rewriting only the counts that changed. For the bulk paths; every other write is counted by _count_user_users.';
+COMMENT ON FUNCTION claimius._refresh_user_users(p_app_id uuid, p_viewer_id uuid) IS 'Bulk rebuild of the user_users rows on both sides of one user in one app from user_object, rewriting only the counts that changed. Pairs on a claimius.claim are not counted. For the bulk paths; every other write is counted by _count_user_users.';
 
 
 -- _affected_users_for_object

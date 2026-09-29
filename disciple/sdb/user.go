@@ -16,7 +16,7 @@ func (d *DB) IssueUserToken(ctx context.Context, ac *AccessClaim, payload SamnaU
 	if err := client.Post(ctx, "user/token", payload, &user); err != nil {
 		return nil, false, err
 	}
-	if err := store.Upsert(ctx, d.DB.DB, &user); err != nil {
+	if _, err := store.Upsert(ctx, d.DB.DB, &user); err != nil {
 		return nil, false, err
 	}
 	return &user, true, nil
@@ -30,7 +30,7 @@ func (d *DB) UpsertUserExternal(ctx context.Context, ac *AccessClaim, payload Sa
 	if err := client.Post(ctx, "user/external", payload, &user); err != nil {
 		return nil, false, err
 	}
-	if err := store.Upsert(ctx, d.DB.DB, &user); err != nil {
+	if _, err := store.Upsert(ctx, d.DB.DB, &user); err != nil {
 		return nil, false, err
 	}
 	return &user, true, nil

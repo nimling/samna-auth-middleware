@@ -3,6 +3,9 @@ package sam_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	sam "github.com/nimling/samna-auth-middleware/disciple/sam"
@@ -86,5 +89,39 @@ func TestClaimAreas_UnrelatedEventMovesNothing(t *testing.T) {
 	}
 	if len(areas) != 0 {
 		t.Fatalf("an unrelated event moves no claim area, got %v", areas)
+	}
+}
+
+func TestGetSyncPageAsksTheProphetToHoldAndNamesTheConsumer(t *testing.T) {
+	var path, wait, consumer string
+	prophet := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path, wait, consumer = r.URL.Path, r.URL.Query().Get("wait"), r.URL.Query().Get("consumer")
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"data":[{"seq":8,"operation":"upsert","event_type":"claimius.claim","payload":{}}],"count":1}`))
+	}))
+	defer prophet.Close()
+	t.Setenv("SAUTH_ENDPOINT", prophet.URL)
+
+	payloads, err := sam.GetSyncPage(context.Background(), "70000000-0000-4000-8000-000000000001", 7)
+	if err != nil {
+		t.Fatalf("pull: %v", err)
+	}
+	if len(payloads) != 1 || payloads[0].Seq != 8 {
+		t.Fatalf("the page must decode, got %v", payloads)
+	}
+	if path != "/sam/sync/7" || wait != "25" || consumer != "70000000-0000-4000-8000-000000000001" {
+		t.Fatalf("the pull must name the cursor, the hold and the consumer, got %s wait=%s consumer=%s", path, wait, consumer)
+	}
+}
+
+func TestGetSyncPageTurnsAConflictIntoASnapshot(t *testing.T) {
+	prophet := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusConflict)
+	}))
+	defer prophet.Close()
+	t.Setenv("SAUTH_ENDPOINT", prophet.URL)
+
+	if _, err := sam.GetSyncPage(context.Background(), "", 7); !errors.Is(err, sam.ErrSnapshotRequired) {
+		t.Fatalf("a 409 from the prophet must require the snapshot, got %v", err)
 	}
 }

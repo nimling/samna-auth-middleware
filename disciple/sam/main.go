@@ -2,8 +2,10 @@ package sam
 
 import (
 	"context"
+	"database/sql"
 	"database/sql/driver"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -19,18 +21,18 @@ import (
 
 const (
 	activeInterval             = 100 * time.Millisecond
-	maxIdleInterval            = 15 * time.Second
 	maxBackoff                 = 30 * time.Second
-	emptyPullsBeforeReconcile  = 40
 	failedPullsBeforeReconcile = 10
 	leadInterval               = 5 * time.Second
+	syncHold                   = 25 * time.Second
+	syncHoldMargin             = 10 * time.Second
 )
 
 // reportStalledCursor records that the disciple has stopped making progress at
 // its cursor. Two patterns produce this and neither recovers on its own: a
-// cursor above the prophet's highest sequence, which yields empty pulls
-// forever, and an event the replica cannot apply, which fails forever. The loop
-// answers both with a snapshot and leaves an audit trail of the reconcile.
+// cursor the prophet's feed cannot serve, which the prophet answers with 409,
+// and an event the replica cannot apply, which fails forever. The loop answers
+// both with a snapshot and leaves an audit trail of the reconcile.
 func reportStalledCursor(ctx context.Context, log echo.Logger, reason string) {
 	seq, err := GetSeq(ctx)
 	if err != nil {
@@ -156,14 +158,16 @@ func pullLoop(ctx context.Context) {
 		report(PullSnapshot(ctx))
 	}
 	backoff := time.Second
-	idle := time.Duration(0)
-	empty := 0
 	failed := 0
-	reconciled := int64(-1)
 	for {
 		wait := activeInterval
-		applied, err := PullSync(ctx)
+		_, err := PullSync(ctx)
 		switch {
+		case errors.Is(err, ErrSnapshotRequired):
+			backoff = time.Second
+			failed = 0
+			reportStalledCursor(ctx, log, "was refused by the prophet feed")
+			report(PullSnapshot(ctx))
 		case err != nil:
 			report(err)
 			wait = backoff
@@ -178,35 +182,9 @@ func pullLoop(ctx context.Context) {
 				reportStalledCursor(ctx, log, fmt.Sprintf("failed to apply %d consecutive pulls, last error %v", failedPullsBeforeReconcile, err))
 				report(PullSnapshot(ctx))
 			}
-		case applied > 0:
-			backoff = time.Second
-			idle = 0
-			empty = 0
-			failed = 0
 		default:
 			backoff = time.Second
-			empty++
 			failed = 0
-			if idle == 0 {
-				idle = activeInterval
-			}
-			idle *= 2
-			if idle > maxIdleInterval {
-				idle = maxIdleInterval
-			}
-			wait = idle
-			if empty >= emptyPullsBeforeReconcile {
-				empty = 0
-				seq, err := GetSeq(ctx)
-				if err != nil {
-					report(fmt.Errorf("read cursor before reconcile: %w", err))
-				} else if seq != reconciled {
-					idle = 0
-					reconciled = seq
-					reportStalledCursor(ctx, log, fmt.Sprintf("returned no events %d consecutive pulls", emptyPullsBeforeReconcile))
-					report(PullSnapshot(ctx))
-				}
-			}
 		}
 		select {
 		case <-ctx.Done():
@@ -246,13 +224,18 @@ func stripAppID(raw json.RawMessage) json.RawMessage {
 // ApplyPage applies one page of payloads and moves the cursor from from to to
 // in one transaction under replay_mode, so a page of p events costs one commit
 // and a page that fails anywhere rolls back whole, cursor included, and is
-// pulled again. The cursor moves first and only from the position the page was
-// pulled at, which holds its row for the page and refuses a page another
-// consumer already applied.
+// pulled again. The commit does not wait for its WAL flush: a page lost to a
+// crash is a cursor that did not move, and the page is pulled again. The
+// cursor moves first and only from the position the page was pulled at, which
+// holds its row for the page and refuses a page another consumer already
+// applied.
 func ApplyPage(ctx context.Context, from, to int64, payloads []SyncPayload) error {
 	return sdb.Instance().DB.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
 		if _, err := tx.ExecContext(ctx, "SET LOCAL claimius.replay_mode = 'true'"); err != nil {
 			return fmt.Errorf("set replay_mode: %w", err)
+		}
+		if _, err := tx.ExecContext(ctx, "SET LOCAL synchronous_commit = off"); err != nil {
+			return fmt.Errorf("set synchronous_commit: %w", err)
 		}
 		if err := UpdateSeq(ctx, tx, from, to); err != nil {
 			return err
@@ -274,7 +257,8 @@ func ApplyPayload(ctx context.Context, tx bun.Tx, payload SyncPayload) error {
 
 	switch payload.Operation {
 	case "upsert":
-		if err := applyUpsert(ctx, tx, payload.EventType, payload.Payload); err != nil {
+		changed, err := applyUpsert(ctx, tx, payload.EventType, payload.Payload)
+		if err != nil || !changed {
 			return err
 		}
 	case "delete":
@@ -354,12 +338,12 @@ func recomputeExternal(ctx context.Context, tx bun.Tx, eventType string, raw jso
 	return nil
 }
 
-func applyUpsert(ctx context.Context, tx bun.Tx, eventType string, raw json.RawMessage) error {
+func applyUpsert(ctx context.Context, tx bun.Tx, eventType string, raw json.RawMessage) (bool, error) {
 	switch eventType {
 	case "claimius.samna_user":
 		var incoming shared.SamnaUser
 		if err := sauth.Unmarshal(raw, &incoming); err != nil {
-			return fmt.Errorf("unmarshal: %w", err)
+			return false, fmt.Errorf("unmarshal: %w", err)
 		}
 		if _, err := tx.NewUpdate().
 			Model((*shared.SamnaUser)(nil)).
@@ -369,7 +353,7 @@ func applyUpsert(ctx context.Context, tx bun.Tx, eventType string, raw json.RawM
 			Where("id <> ?", incoming.ID).
 			Where("sa_deleted_at IS NULL").
 			Exec(ctx); err != nil {
-			return fmt.Errorf("retire superseded samna_user %s: %w", incoming.UserID, err)
+			return false, fmt.Errorf("retire superseded samna_user %s: %w", incoming.UserID, err)
 		}
 		return store.Upsert(ctx, tx, &incoming)
 	case "claimius.samna_client":
@@ -393,14 +377,14 @@ func applyUpsert(ctx context.Context, tx bun.Tx, eventType string, raw json.RawM
 	case "claimius.user_relation":
 		return upsertEntity[shared.UserRelation](ctx, tx, raw)
 	default:
-		return fmt.Errorf("unknown event_type for upsert: %s", eventType)
+		return false, fmt.Errorf("unknown event_type for upsert: %s", eventType)
 	}
 }
 
-func upsertEntity[T any](ctx context.Context, tx bun.Tx, raw json.RawMessage) error {
+func upsertEntity[T any](ctx context.Context, tx bun.Tx, raw json.RawMessage) (bool, error) {
 	var entity T
 	if err := sauth.Unmarshal(raw, &entity); err != nil {
-		return fmt.Errorf("unmarshal: %w", err)
+		return false, fmt.Errorf("unmarshal: %w", err)
 	}
 	return store.Upsert(ctx, tx, &entity)
 }
@@ -459,10 +443,13 @@ func deleteEntity[T any](ctx context.Context, tx bun.Tx, id json.RawMessage) err
 	return nil
 }
 
+// UpdateSeq moves the cursor from from to to. A page moves it forward; a
+// snapshot sets it to the snapshot's sequence, below a cursor the prophet no
+// longer serves when that is what sent the disciple to the snapshot.
 func UpdateSeq(ctx context.Context, tx bun.Tx, from, to int64) error {
 	result, err := tx.NewUpdate().
 		Model((*shared.DiscipleState)(nil)).
-		Set("last_applied_seq = GREATEST(last_applied_seq, ?)", to).
+		Set("last_applied_seq = ?", to).
 		Set("sa_updated_at = ?", time.Now()).
 		Where("last_applied_seq = ?", from).
 		Exec(ctx)
@@ -479,29 +466,47 @@ func UpdateSeq(ctx context.Context, tx bun.Tx, from, to int64) error {
 	return nil
 }
 
-func GetSeq(ctx context.Context) (int64, error) {
+// GetState reads the disciple's cursor row. Its id names the disciple database
+// to the prophet as a sync consumer. A disciple with no row yet reads as a zero
+// state.
+func GetState(ctx context.Context) (shared.DiscipleState, error) {
 	var state shared.DiscipleState
 	err := sdb.Instance().DB.NewSelect().
 		Model(&state).
 		Limit(1).
 		Scan(ctx)
+	if errors.Is(err, sql.ErrNoRows) {
+		return shared.DiscipleState{}, nil
+	}
+	return state, err
+}
+
+func GetSeq(ctx context.Context) (int64, error) {
+	state, err := GetState(ctx)
 	if err != nil {
-		return 0, nil
+		return 0, err
 	}
 	return state.LastAppliedSeq, nil
 }
 
+// WaitForSeq waits until the disciple's cursor reaches targetSeq, the sequence
+// a routed write answered with, so a read that follows sees that write. It
+// gives up after timeout or when ctx ends.
 func WaitForSeq(ctx context.Context, targetSeq int64, timeout time.Duration) error {
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	for {
 		seq, err := GetSeq(ctx)
-		if err != nil {
+		if err != nil && ctx.Err() == nil {
 			return err
 		}
-		if seq >= targetSeq {
+		if err == nil && seq >= targetSeq {
 			return nil
 		}
-		time.Sleep(50 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("timeout waiting for seq %d: %w", targetSeq, ctx.Err())
+		case <-time.After(50 * time.Millisecond):
+		}
 	}
-	return fmt.Errorf("timeout waiting for seq %d", targetSeq)
 }

@@ -9,6 +9,7 @@
 --   calc_claim_access         Fires on claim, claim_object, user_claim
 --   emit_sync_event           Fires on the source tables
 --                             to publish into sync_event
+--   notify_sync_event         Fires on sync_event to wake held pulls
 --   audit_trigger             Fires on core auditable tables to write audit
 --   tg_update_timestamp       Generic sa_updated_at maintenance
 -- ============================================================================
@@ -656,6 +657,8 @@ $$ LANGUAGE plpgsql;
 -- Trigger function that publishes changes to the source tables into
 -- sync_event. Disciples consume from sync_event by seq and derive user_object
 -- and user_users themselves, so the derived tables never publish.
+-- An organization or location carries no app_id, so its change is written
+-- once for every app holding a live link to it, stamped with that app.
 -- ----------------------------------------------------------------------------
 
 CREATE OR REPLACE FUNCTION claimius.emit_sync_event()
@@ -686,14 +689,20 @@ BEGIN
         v_payload := to_jsonb(NEW);
     END IF;
 
-    INSERT INTO claimius.sync_event (operation, event_type, payload, app_id)
-    VALUES (v_op, v_type, v_payload, (v_payload ->> 'app_id')::uuid);
+    IF v_type IN ('claimius.organization', 'claimius.location') THEN
+        INSERT INTO claimius.sync_event (operation, event_type, payload, app_id)
+        SELECT v_op, v_type, v_payload, a.app_id
+        FROM claimius.apps_for_object(v_type, (v_payload ->> 'id')::UUID) AS a(app_id);
+    ELSE
+        INSERT INTO claimius.sync_event (operation, event_type, payload, app_id)
+        VALUES (v_op, v_type, v_payload, (v_payload ->> 'app_id')::uuid);
+    END IF;
 
     RETURN coalesce(NEW, OLD);
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius.emit_sync_event() IS 'Trigger on the source tables. Publishes into sync_event.';
+COMMENT ON FUNCTION claimius.emit_sync_event() IS 'Trigger on the source tables. Publishes into sync_event. An organization or location change is written once per app linked to it.';
 
 -- ----------------------------------------------------------------------------
 -- emit_app_object_sync_event
@@ -744,6 +753,24 @@ END;
 $$ LANGUAGE plpgsql;
 
 COMMENT ON FUNCTION claimius.emit_app_object_sync_event() IS 'Trigger on app_object. Publishes the linked row to the app on link and its delete on unlink.';
+
+-- ----------------------------------------------------------------------------
+-- notify_sync_event
+-- Statement trigger on sync_event. Notifies claimius_sync once per app the
+-- statement wrote events for, with the app id as payload. The notification is
+-- delivered at commit, which is what a held pull on the prophet waits for.
+-- ----------------------------------------------------------------------------
+
+CREATE OR REPLACE FUNCTION claimius.notify_sync_event()
+    RETURNS TRIGGER AS $$
+BEGIN
+    PERFORM pg_notify('claimius_sync', w.app_id::TEXT)
+    FROM (SELECT DISTINCT app_id FROM written WHERE app_id IS NOT NULL) w;
+    RETURN NULL;
+END;
+$$ LANGUAGE plpgsql;
+
+COMMENT ON FUNCTION claimius.notify_sync_event() IS 'Statement trigger on sync_event. Notifies claimius_sync once per app written for, delivered at commit.';
 
 -- ----------------------------------------------------------------------------
 -- Read time self heal

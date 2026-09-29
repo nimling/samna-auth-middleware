@@ -2,10 +2,12 @@ package client
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 )
 
 var ErrBadRequest = errors.New("bad request")
+var ErrConflict = fmt.Errorf("conflict: %w", ErrBadRequest)
 var ErrForbidden = errors.New("forbidden")
 var ErrNotFound = errors.New("not found")
 var ErrUnauthorized = errors.New("unauthorized")

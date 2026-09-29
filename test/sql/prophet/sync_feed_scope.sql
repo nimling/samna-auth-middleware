@@ -1,5 +1,5 @@
 BEGIN;
-SELECT plan(4);
+SELECT plan(5);
 
 DO $$
 DECLARE
@@ -57,6 +57,21 @@ SELECT is_empty(
        JOIN claimius.sync_event s ON s.seq = e.seq
        WHERE s.app_id = '50000000-0000-4000-8000-0000000000b1'$$,
     'the delta feed carries no event stamped for another app'
+);
+
+DO $$
+BEGIN
+    PERFORM claimius.link_app_object('50000000-0000-4000-8000-0000000000b1', 'claimius.organization', '10000000-0000-4000-8000-0000000000e1');
+    CREATE TEMP TABLE before_rename AS SELECT coalesce(max(seq), 0) AS seq FROM claimius.sync_event;
+    UPDATE claimius.organization SET name = 'Mine renamed' WHERE id = '10000000-0000-4000-8000-0000000000e1';
+END $$;
+
+SELECT is(
+    ARRAY(SELECT app_id FROM claimius.sync_event
+           WHERE seq > (SELECT seq FROM before_rename) AND event_type = 'claimius.organization'
+           ORDER BY app_id),
+    ARRAY['50000000-0000-4000-8000-0000000000a1', '50000000-0000-4000-8000-0000000000b1']::UUID[],
+    'an organization change is written once for every app linked to it, stamped with that app'
 );
 
 SELECT * FROM finish();

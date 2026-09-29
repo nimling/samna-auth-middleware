@@ -1,5 +1,5 @@
 BEGIN;
-SELECT plan(13);
+SELECT plan(14);
 
 CREATE FUNCTION pg_temp.stored() RETURNS TABLE (viewer_id UUID, target_user_id UUID, sharing BIGINT) AS $$
     SELECT uu.viewer_id, uu.target_user_id, uu.sharing_object_count::BIGINT
@@ -13,6 +13,7 @@ CREATE FUNCTION pg_temp.rebuilt() RETURNS TABLE (viewer_id UUID, target_user_id 
             ON other.object_type = mine.object_type
            AND other.object_id = mine.object_id
            AND other.user_id <> mine.user_id
+    WHERE mine.object_type <> 'claimius.claim'
     GROUP BY mine.user_id, other.user_id
 $$ LANGUAGE sql;
 
@@ -170,6 +171,38 @@ SELECT has_index('claimius', 'user_object', 'idx_user_object_object_user',
     'the reverse lookup is an index on user_object keyed from the object side');
 
 SELECT hasnt_table('claimius', 'object_users', 'no object_users table remains');
+
+DO $$
+DECLARE
+    v_root  UUID := '10000000-0000-4000-8000-0000000000e0';
+    v_sys   UUID := '00000000-0000-4000-8000-0000000000e0';
+    v_badge UUID;
+    v_user  UUID;
+BEGIN
+    v_badge := (claimius.create_claim(
+        p_name => 'Pairs badge', p_description => NULL, p_sa_access => 4,
+        p_sa_owner_id => v_root, p_sa_root_id => v_root, p_sa_created_by => v_sys
+    ) -> 'claim' ->> 'id')::UUID;
+    FOREACH v_user IN ARRAY ARRAY['a0000000-0000-4000-8000-0000000000e5', 'a0000000-0000-4000-8000-0000000000e6']::UUID[] LOOP
+        PERFORM claimius.ensure_app_user(p_user_id => v_user, p_first_name => 'Badge');
+        PERFORM claimius.assign_claim_user(p_claim_id => v_badge, p_user_id => v_user, p_sa_owner_id => v_root, p_sa_created_by => v_sys);
+    END LOOP;
+END $$;
+
+CREATE TEMP TABLE badge_seen AS
+SELECT u.user_id FROM claimius.get_users('a0000000-0000-4000-8000-0000000000e5') u
+UNION ALL
+SELECT u.user_id FROM claimius.get_users('a0000000-0000-4000-8000-0000000000e6') u;
+
+SELECT ok(
+    (SELECT count(*) FROM claimius.user_object o JOIN claimius.claim c ON c.id = o.object_id
+      WHERE o.object_type = 'claimius.claim' AND c.name = 'Pairs badge'
+        AND o.user_id IN ('a0000000-0000-4000-8000-0000000000e5', 'a0000000-0000-4000-8000-0000000000e6')) = 2
+    AND NOT EXISTS (SELECT 1 FROM badge_seen s
+                     WHERE s.user_id NOT IN ('a0000000-0000-4000-8000-0000000000e5', 'a0000000-0000-4000-8000-0000000000e6'))
+    AND (SELECT count(*) FROM badge_seen) = 2,
+    'two users who share only a held claim each read the claim and do not see each other through get_users'
+);
 
 SELECT * FROM finish();
 ROLLBACK;

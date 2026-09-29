@@ -82,6 +82,31 @@ func forwardFrom(ctx context.Context) (Forward, bool) {
 	return f, ok
 }
 
+// HeaderSyncSeq carries, on the prophet's answer to a write, the highest sync
+// sequence of the calling app once the write has run.
+const HeaderSyncSeq = "SAuth-Seq"
+
+type syncSeqKey struct{}
+
+// WithSyncSeq returns a context whose writes record the prophet sequence of
+// their change in seq, the token a disciple waits on to read its own write.
+func WithSyncSeq(ctx context.Context, seq *int64) context.Context {
+	return context.WithValue(ctx, syncSeqKey{}, seq)
+}
+
+type timeoutKey struct{}
+
+// WithTimeout overrides the request timeout for a request the prophet may hold
+// open, such as a sync pull.
+func WithTimeout(ctx context.Context, d time.Duration) context.Context {
+	return context.WithValue(ctx, timeoutKey{}, d)
+}
+
+func timeoutFrom(ctx context.Context) (time.Duration, bool) {
+	d, ok := ctx.Value(timeoutKey{}).(time.Duration)
+	return d, ok && d > 0
+}
+
 func DecodeJSON[T any](body io.ReadCloser, err error) (T, error) {
 	var zero T
 	if err != nil {
@@ -173,9 +198,20 @@ func (e *httpClient) execute(ctx context.Context, method string, reqBody any, ta
 		req.Header.Set("Content-Type", contentTypeFrom(ctx))
 	}
 
-	resp, err := e.httpClient.Do(req)
+	hc := e.httpClient
+	if d, ok := timeoutFrom(ctx); ok {
+		hc = &http.Client{Timeout: d, Transport: hc.Transport}
+	}
+
+	resp, err := hc.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("send request: %w", err)
+	}
+
+	if seq, ok := ctx.Value(syncSeqKey{}).(*int64); ok && resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		if v, err := strconv.ParseInt(resp.Header.Get(HeaderSyncSeq), 10, 64); err == nil && v > *seq {
+			*seq = v
+		}
 	}
 
 	switch {
@@ -187,7 +223,9 @@ func (e *httpClient) execute(ctx context.Context, method string, reqBody any, ta
 		return nil, ErrForbidden
 	case resp.StatusCode == http.StatusNotFound:
 		return nil, ErrNotFound
-	case resp.StatusCode == http.StatusBadRequest || resp.StatusCode == http.StatusConflict:
+	case resp.StatusCode == http.StatusConflict:
+		return nil, ErrConflict
+	case resp.StatusCode == http.StatusBadRequest:
 		return nil, ErrBadRequest
 	default:
 		return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)

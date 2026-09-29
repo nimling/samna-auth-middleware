@@ -20,6 +20,8 @@
 --   tg_count_user_users_*   AFTER INSERT/DELETE per statement: on user_object.
 --                           Counts the pairs entering and leaving into
 --                           user_users.
+--   tg_notify_sync_event    AFTER INSERT per statement: on sync_event.
+--                           Notifies claimius_sync per app written for.
 -- ============================================================================
 
 -- ----------------------------------------------------------------------------
@@ -196,6 +198,11 @@ CREATE TRIGGER tg_count_user_users_delete AFTER DELETE ON claimius.user_object
 
 DROP TRIGGER IF EXISTS tg_emit_sync_event ON claimius.user_object;
 DROP TRIGGER IF EXISTS tg_emit_sync_event ON claimius.user_users;
+
+DROP TRIGGER IF EXISTS tg_notify_sync_event ON claimius.sync_event;
+CREATE TRIGGER tg_notify_sync_event AFTER INSERT ON claimius.sync_event
+    REFERENCING NEW TABLE AS written
+    FOR EACH STATEMENT EXECUTE FUNCTION claimius.notify_sync_event();
 
 DROP TRIGGER IF EXISTS tg_emit_sync_event ON claimius.app_object;
 CREATE TRIGGER tg_emit_sync_event AFTER INSERT OR UPDATE OR DELETE ON claimius.app_object

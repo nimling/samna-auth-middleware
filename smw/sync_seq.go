@@ -1,24 +1,38 @@
 package smw
 
 import (
+	"net/http"
 	"strconv"
 
+	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
+	"github.com/nimling/samna-auth-middleware/client"
 	sdb "github.com/nimling/samna-auth-middleware/prophet/sdb"
 )
 
-// SyncSeq stamps the current sync sequence header on prophet responses so a
-// disciple can tell how far ahead the prophet is.
+// SyncSeq stamps, on a successful prophet answer to a write, the highest sync
+// sequence of the calling app once the write has run. A disciple that routed
+// the write waits until its cursor reaches it before it reads its own write.
 func SyncSeq(next echo.HandlerFunc) echo.HandlerFunc {
 	return func(ctx echo.Context) error {
-		var seq int64
-		err := sdb.Instance().NewSelect().
-			TableExpr("claimius.sync_event").
-			ColumnExpr("COALESCE(MAX(seq), 0)").
-			Scan(ctx.Request().Context(), &seq)
-		if err == nil {
-			ctx.Response().Header().Set("SAuth-Seq", strconv.FormatInt(seq, 10))
+		switch ctx.Request().Method {
+		case http.MethodGet, http.MethodHead, http.MethodOptions:
+			return next(ctx)
 		}
+		res := ctx.Response()
+		res.Before(func() {
+			appID, _ := ctx.Get("app_id").(uuid.UUID)
+			if appID == uuid.Nil || res.Status < 200 || res.Status >= 300 {
+				return
+			}
+			var seq int64
+			if err := sdb.Instance().NewRaw("SELECT claimius.get_sync_seq(?)", appID).
+				Scan(ctx.Request().Context(), &seq); err != nil {
+				ctx.Logger().Errorf("sync seq %s: %v", appID, err)
+				return
+			}
+			res.Header().Set(client.HeaderSyncSeq, strconv.FormatInt(seq, 10))
+		})
 		return next(ctx)
 	}
 }

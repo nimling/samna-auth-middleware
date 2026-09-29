@@ -3,13 +3,16 @@ package sam
 import (
 	"github.com/labstack/echo/v4"
 	h "github.com/nimling/samna-auth-middleware/prophet/echo"
+	"github.com/nimling/samna-auth-middleware/smw"
 )
 
 // RegisterEndpoints mounts the full prophet API on the passed group. It carries
 // the user, organization, location, claim, asset, app, sync, client, secret,
 // search, code, field and guest routes that apps and browsers reach the prophet
-// through.
+// through. A write answers with the sync sequence of its change.
 func RegisterEndpoints(g *echo.Group) {
+	g.Use(smw.SyncSeq)
+
 	user := g.Group("/user")
 	user.GET("", h.GetUsers)
 	user.GET("/:id", h.GetUser)

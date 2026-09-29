@@ -3122,7 +3122,7 @@ BEGIN
              claimius.samna_app, claimius.samna_user, claimius.samna_client, claimius.samna_secret,
              claimius.organization, claimius.location,
              claimius.object_field, claimius.user_field, claimius.user_relation,
-             claimius.notification, claimius.prophet_state
+             claimius.notification, claimius.prophet_state, claimius.sync_consumer
              TO claimius_writer';
     EXECUTE 'GRANT INSERT, UPDATE, DELETE ON claimius.claim_graph_cache TO claimius_writer';
     EXECUTE 'GRANT INSERT, UPDATE, DELETE ON claimius.claim_graph_cache TO claimius_reader';
@@ -4036,36 +4036,136 @@ GRANT EXECUTE ON FUNCTION claimius.notify_user(UUID, TEXT, TEXT, JSONB, TEXT, TE
     TO claimius_writer, claimius_admin;
 
 -- ----------------------------------------------------------------------------
+-- count_sync_source_rows
+-- The source rows of one app the snapshot ships: the rows of the mirrored
+-- tables carrying the app id and the organizations and locations linked to
+-- it. With p_limit the count stops there, so a caller comparing it against a
+-- smaller number pays for that number of rows and not for the app.
+-- ----------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION claimius.count_sync_source_rows(
+    p_app_id    UUID,
+    p_limit     BIGINT DEFAULT NULL
+) RETURNS BIGINT AS $$
+DECLARE
+    v_table TEXT;
+    v_total BIGINT := 0;
+    v_n     BIGINT;
+BEGIN
+    FOREACH v_table IN ARRAY ARRAY['samna_user', 'claim', 'user_claim', 'claim_object', 'samna_client',
+                                   'samna_secret', 'object_field', 'user_field', 'user_relation'] LOOP
+        EXIT WHEN p_limit IS NOT NULL AND v_total >= p_limit;
+        EXECUTE format('SELECT count(*) FROM (SELECT 1 FROM claimius.%I WHERE app_id = $1 LIMIT $2) t', v_table)
+            INTO v_n USING p_app_id, p_limit - v_total;
+        v_total := v_total + v_n;
+    END LOOP;
+
+    IF p_limit IS NULL OR v_total < p_limit THEN
+        SELECT count(*) INTO v_n
+        FROM (SELECT 1 FROM claimius.app_object ao
+              WHERE ao.app_id = p_app_id
+                AND ao.object_type IN ('claimius.organization', 'claimius.location')
+                AND ao.sa_deleted_at IS NULL
+              LIMIT p_limit - v_total) t;
+        v_total := v_total + v_n;
+    END IF;
+
+    RETURN v_total;
+END;
+$$ LANGUAGE plpgsql STABLE;
+
+COMMENT ON FUNCTION claimius.count_sync_source_rows(UUID, BIGINT) IS 'Source rows of one app the sync snapshot ships, counted up to p_limit when given.';
+
+-- ----------------------------------------------------------------------------
+-- update_sync_cursor
+-- Records that one consumer of an app applied everything up to p_seq, which
+-- it proves by asking for what comes after it. The app's prophet_state row
+-- carries the lowest cursor among its consumers in contact and the contact
+-- itself.
+-- ----------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION claimius.update_sync_cursor(
+    p_app_id        UUID,
+    p_consumer_id   UUID,
+    p_seq           BIGINT
+) RETURNS VOID AS $$
+    INSERT INTO claimius.sync_consumer (app_id, consumer_id, last_applied_seq, last_contact_at)
+    VALUES (p_app_id, p_consumer_id, p_seq, now())
+    ON CONFLICT (app_id, consumer_id) DO UPDATE SET
+        last_applied_seq = EXCLUDED.last_applied_seq,
+        last_contact_at  = EXCLUDED.last_contact_at;
+
+    INSERT INTO claimius.prophet_state (app_id, last_applied_seq, sync_mode, last_contact_at, next_attempt_at)
+    VALUES (p_app_id, p_seq, 'active', now(), now())
+    ON CONFLICT (app_id) DO UPDATE SET
+        last_applied_seq = (SELECT min(c.last_applied_seq) FROM claimius.sync_consumer c
+                            WHERE c.app_id = p_app_id AND c.last_contact_at > now() - INTERVAL '7 days'),
+        sync_mode        = 'active',
+        sync_failures    = 0,
+        last_contact_at  = now(),
+        next_attempt_at  = now(),
+        sa_updated_at    = now();
+$$ LANGUAGE sql;
+
+COMMENT ON FUNCTION claimius.update_sync_cursor(UUID, UUID, BIGINT) IS 'Moves one consumer''s cursor for an app and records the contact on the app''s prophet_state row.';
+
+-- ----------------------------------------------------------------------------
 -- trim_sync_event
--- Removes outbox rows every registered consumer has already applied.
--- prophet_state.last_applied_seq is the per app cursor, advanced when an app
--- asks for what comes after it, so a row at or below the minimum across the
--- apps still in contact is owed to nobody. An app whose last contact is older
--- than p_stale_after is treated as gone rather than allowed to pin the
--- watermark forever, which is how an outbox grows without bound while looking
--- healthy. With no registered consumer nothing is published and nothing is
--- removed. Returns the number of rows deleted.
+-- Removes outbox rows every consumer has already applied, and caps each app's
+-- outbox at its source rows. sync_consumer holds one cursor per consumer,
+-- advanced when it asks for what comes after it, so a row at or below the
+-- minimum across the consumers still in contact is owed to nobody. A consumer
+-- whose last contact is older than p_stale_after is treated as gone rather
+-- than allowed to pin the watermark forever. Past that, an app's events
+-- beyond as many as it has source rows are removed: a consumer further behind
+-- is cheaper served by the snapshot. The highest sequence removed per app is
+-- kept in prophet_state.trimmed_seq, and check_sync_cursor sends a consumer
+-- below it to the snapshot. Returns the number of rows deleted.
 -- ----------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION claimius.trim_sync_event(
     p_stale_after   INTERVAL DEFAULT INTERVAL '7 days'
 ) RETURNS BIGINT AS $$
 DECLARE
     v_watermark BIGINT;
-    v_deleted   BIGINT;
+    v_deleted   BIGINT := 0;
+    v_n         BIGINT;
+    v_app       UUID;
+    v_cut       BIGINT;
 BEGIN
     SELECT min(last_applied_seq) INTO v_watermark
-    FROM claimius.prophet_state
-    WHERE last_contact_at IS NOT NULL
-      AND last_contact_at > now() - p_stale_after;
+    FROM claimius.sync_consumer
+    WHERE last_contact_at > now() - p_stale_after;
 
-    IF v_watermark IS NULL OR v_watermark <= 0 THEN
-        RETURN 0;
+    IF v_watermark > 0 THEN
+        WITH gone AS (
+            DELETE FROM claimius.sync_event WHERE seq <= v_watermark
+            RETURNING app_id, seq
+        ),
+        marked AS (
+            UPDATE claimius.prophet_state ps
+            SET trimmed_seq = greatest(ps.trimmed_seq, g.seq)
+            FROM (SELECT app_id, max(seq) AS seq FROM gone WHERE app_id IS NOT NULL GROUP BY app_id) g
+            WHERE ps.app_id = g.app_id
+        )
+        SELECT count(*) INTO v_n FROM gone;
+        v_deleted := v_n;
     END IF;
 
-    DELETE FROM claimius.sync_event WHERE seq <= v_watermark;
-    GET DIAGNOSTICS v_deleted = ROW_COUNT;
+    FOR v_app IN SELECT ps.app_id FROM claimius.prophet_state ps LOOP
+        v_cut := NULL;
+        SELECT e.seq INTO v_cut
+        FROM claimius.sync_event e
+        WHERE e.app_id = v_app
+        ORDER BY e.seq DESC
+        OFFSET claimius.count_sync_source_rows(v_app) LIMIT 1;
+        CONTINUE WHEN v_cut IS NULL;
+
+        DELETE FROM claimius.sync_event WHERE app_id = v_app AND seq <= v_cut;
+        GET DIAGNOSTICS v_n = ROW_COUNT;
+        UPDATE claimius.prophet_state SET trimmed_seq = greatest(trimmed_seq, v_cut) WHERE app_id = v_app;
+        v_deleted := v_deleted + v_n;
+    END LOOP;
+
     RETURN v_deleted;
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius.trim_sync_event(INTERVAL) IS 'Deletes sync_event rows at or below the lowest cursor among consumers still in contact. Run on a schedule.';
+COMMENT ON FUNCTION claimius.trim_sync_event(INTERVAL) IS 'Deletes sync_event rows at or below the lowest cursor among consumers still in contact, then each app''s events beyond as many as its source rows, recording the highest removed per app in prophet_state.trimmed_seq. Run on a schedule.';

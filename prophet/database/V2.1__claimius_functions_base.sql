@@ -40,12 +40,15 @@ COMMENT ON FUNCTION claimius.split_object_type(TEXT) IS 'Splits a schema.table s
 CREATE OR REPLACE FUNCTION claimius.update_timestamp()
     RETURNS TRIGGER AS $$
 BEGIN
+    IF claimius.in_replay_mode() AND NEW.sa_updated_at IS DISTINCT FROM OLD.sa_updated_at THEN
+        RETURN NEW;
+    END IF;
     NEW.sa_updated_at = now();
     RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius.update_timestamp() IS 'Trigger function. Sets sa_updated_at = now() on UPDATE.';
+COMMENT ON FUNCTION claimius.update_timestamp() IS 'Trigger function. Sets sa_updated_at = now() on UPDATE. Under replay_mode a row applied from the prophet keeps the sa_updated_at it carries, so the replica matches its source and an unchanged row compares equal.';
 
 -- get_table_columns
 -- Returns the column names for a (schema qualified) table.

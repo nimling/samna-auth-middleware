@@ -606,11 +606,15 @@ CREATE TABLE IF NOT EXISTS claimius.sync_event (
                                                    operation       claimius.sync_operation NOT NULL,
                                                    event_type      TEXT NOT NULL,
                                                    payload         JSONB NOT NULL,
-                                                   written_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+                                                   written_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+                                                   txid            XID8 NOT NULL DEFAULT pg_current_xact_id()
 );
+
+ALTER TABLE claimius.sync_event ADD COLUMN IF NOT EXISTS txid XID8 NOT NULL DEFAULT pg_current_xact_id();
 
 COMMENT ON TABLE claimius.sync_event IS 'Append only event stream for prophet to disciple sync.';
 COMMENT ON COLUMN claimius.sync_event.event_type IS 'Source table: claimius.claim, claimius.user_claim, claimius.organization, etc. Derived tables never publish.';
+COMMENT ON COLUMN claimius.sync_event.txid IS 'Transaction that wrote the event. The feed serves an event only once every transaction below it has ended, so a sequence that commits late is never passed over.';
 
 DELETE FROM claimius.sync_event
 WHERE event_type IN ('claimius.object_users', 'claimius.user_object', 'claimius.user_users', 'claimius.audit');
@@ -632,14 +636,37 @@ CREATE TABLE IF NOT EXISTS claimius.prophet_state (
                                                       sync_failures       INTEGER NOT NULL DEFAULT 0,
                                                       next_attempt_at     TIMESTAMPTZ,
                                                       last_contact_at     TIMESTAMPTZ,
+                                                      trimmed_seq         BIGINT NOT NULL DEFAULT 0,
                                                       sa_updated_at       TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+ALTER TABLE claimius.prophet_state ADD COLUMN IF NOT EXISTS trimmed_seq BIGINT NOT NULL DEFAULT 0;
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_prophet_state_system_singleton
     ON claimius.prophet_state (system_app_slug)
     WHERE system_app_slug IS NOT NULL;
 
-COMMENT ON TABLE claimius.prophet_state IS 'Per app publishing cursor. system_app_slug marks the deployment system app row.';
+COMMENT ON TABLE claimius.prophet_state IS 'Per app publishing state. last_applied_seq is the lowest cursor among the app''s consumers in contact, trimmed_seq the highest of the app''s events trim_sync_event removed. system_app_slug marks the deployment system app row.';
+
+-- sync_consumer
+-- One cursor per consumer of an app. A consumer is one disciple database,
+-- named by the id of its disciple_state row, so two disciples of one app never
+-- share a cursor and trimming waits for the slowest of them.
+CREATE TABLE IF NOT EXISTS claimius.sync_consumer (
+                                                      app_id              UUID NOT NULL REFERENCES claimius.samna_app(id),
+                                                      consumer_id         UUID NOT NULL,
+                                                      last_applied_seq    BIGINT NOT NULL DEFAULT 0,
+                                                      last_contact_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+                                                      PRIMARY KEY (app_id, consumer_id)
+);
+
+COMMENT ON TABLE claimius.sync_consumer IS 'Per consumer sync cursor: the sequence a disciple database last proved it applied by asking for what comes after it.';
+
+INSERT INTO claimius.sync_consumer (app_id, consumer_id, last_applied_seq, last_contact_at)
+SELECT ps.app_id, '00000000-0000-0000-0000-000000000000', ps.last_applied_seq, ps.last_contact_at
+FROM claimius.prophet_state ps
+WHERE ps.last_contact_at IS NOT NULL
+ON CONFLICT (app_id, consumer_id) DO NOTHING;
 
 -- disciple_state
 -- Singleton cursor on the disciple side. Tracks the highest sync_event.seq

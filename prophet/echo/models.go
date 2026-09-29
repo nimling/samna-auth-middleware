@@ -401,6 +401,7 @@ type ProphetState struct {
 	SyncFailures   int        `bun:"sync_failures,notnull,default:0" json:"sync_failures"`
 	NextAttemptAt  *time.Time `bun:"next_attempt_at" json:"next_attempt_at,omitempty"`
 	LastContactAt  *time.Time `bun:"last_contact_at" json:"last_contact_at,omitempty"`
+	TrimmedSeq     int64      `bun:"trimmed_seq,notnull,default:0" json:"trimmed_seq"`
 	UpdatedAt      time.Time  `bun:"sa_updated_at" json:"updated_at"`
 	bun.BaseModel  `bun:"table:claimius.prophet_state" json:"-"`
 }

@@ -39,7 +39,10 @@ func patchBody(model any) map[string]any {
 	return nil
 }
 
-type InsertQuery struct{ s *shared.InsertQuery }
+type InsertQuery struct {
+	s   *shared.InsertQuery
+	seq int64
+}
 
 func (d *DB) NewInsert() *InsertQuery { return &InsertQuery{s: d.DB.NewInsert()} }
 
@@ -67,6 +70,7 @@ func (q *InsertQuery) Exec(ctx context.Context, dest ...any) (sql.Result, error)
 	if err != nil {
 		return nil, err
 	}
+	ctx = client.WithSyncSeq(ctx, &q.seq)
 	var raw json.RawMessage
 	if err := client.Post(ctx, path, json.RawMessage(body), &raw); err != nil {
 		return nil, err
@@ -75,7 +79,7 @@ func (q *InsertQuery) Exec(ctx context.Context, dest ...any) (sql.Result, error)
 		if err := unmarshalModel(model, raw); err != nil {
 			return nil, err
 		}
-		if err := store.Upsert(ctx, instance.DB.DB, model); err != nil {
+		if _, err := store.Upsert(ctx, instance.DB.DB, model); err != nil {
 			return nil, err
 		}
 	}
@@ -90,6 +94,11 @@ func (q *InsertQuery) Exec(ctx context.Context, dest ...any) (sql.Result, error)
 	return nil, nil
 }
 
+// Seq is the prophet sequence of the routed write once it ran, the token
+// sam.WaitForSeq takes to read the write back on this disciple. It is zero in
+// debug mode, where the write is local.
+func (q *InsertQuery) Seq() int64 { return q.seq }
+
 func (q *InsertQuery) Scan(ctx context.Context, dest ...any) error {
 	if shared.GetDebugMode() != shared.DebugModeNone {
 		return q.s.Scan(ctx, dest...)
@@ -98,7 +107,10 @@ func (q *InsertQuery) Scan(ctx context.Context, dest ...any) error {
 	return err
 }
 
-type UpdateQuery struct{ s *shared.UpdateQuery }
+type UpdateQuery struct {
+	s   *shared.UpdateQuery
+	seq int64
+}
 
 func (d *DB) NewUpdate() *UpdateQuery { return &UpdateQuery{s: d.DB.NewUpdate()} }
 
@@ -131,6 +143,7 @@ func (q *UpdateQuery) Exec(ctx context.Context, dest ...any) (sql.Result, error)
 		}
 		payload = json.RawMessage(body)
 	}
+	ctx = client.WithSyncSeq(ctx, &q.seq)
 	var raw json.RawMessage
 	if err := client.Patch(ctx, path, payload, &raw); err != nil {
 		return nil, err
@@ -139,7 +152,7 @@ func (q *UpdateQuery) Exec(ctx context.Context, dest ...any) (sql.Result, error)
 		if err := unmarshalModel(model, raw); err != nil {
 			return nil, err
 		}
-		if err := store.Upsert(ctx, instance.DB.DB, model); err != nil {
+		if _, err := store.Upsert(ctx, instance.DB.DB, model); err != nil {
 			return nil, err
 		}
 	}
@@ -154,6 +167,9 @@ func (q *UpdateQuery) Exec(ctx context.Context, dest ...any) (sql.Result, error)
 	return nil, nil
 }
 
+// Seq is the prophet sequence of the routed write, as on InsertQuery.
+func (q *UpdateQuery) Seq() int64 { return q.seq }
+
 func (q *UpdateQuery) Scan(ctx context.Context, dest ...any) error {
 	if shared.GetDebugMode() != shared.DebugModeNone {
 		return q.s.Scan(ctx, dest...)
@@ -162,7 +178,10 @@ func (q *UpdateQuery) Scan(ctx context.Context, dest ...any) error {
 	return err
 }
 
-type DeleteQuery struct{ s *shared.DeleteQuery }
+type DeleteQuery struct {
+	s   *shared.DeleteQuery
+	seq int64
+}
 
 func (d *DB) NewDelete() *DeleteQuery { return &DeleteQuery{s: d.DB.NewDelete()} }
 
@@ -181,6 +200,7 @@ func (q *DeleteQuery) Exec(ctx context.Context, dest ...any) (sql.Result, error)
 	if err != nil {
 		return nil, err
 	}
+	ctx = client.WithSyncSeq(ctx, &q.seq)
 	var raw json.RawMessage
 	if err := client.Delete(ctx, path, nil, &raw); err != nil {
 		return nil, err
@@ -189,7 +209,7 @@ func (q *DeleteQuery) Exec(ctx context.Context, dest ...any) (sql.Result, error)
 		if err := unmarshalModel(model, raw); err != nil {
 			return nil, err
 		}
-		if err := store.Upsert(ctx, instance.DB.DB, model); err != nil {
+		if _, err := store.Upsert(ctx, instance.DB.DB, model); err != nil {
 			return nil, err
 		}
 	}
@@ -203,6 +223,9 @@ func (q *DeleteQuery) Exec(ctx context.Context, dest ...any) (sql.Result, error)
 	}
 	return nil, nil
 }
+
+// Seq is the prophet sequence of the routed write, as on InsertQuery.
+func (q *DeleteQuery) Seq() int64 { return q.seq }
 
 func (q *DeleteQuery) Scan(ctx context.Context, dest ...any) error {
 	if shared.GetDebugMode() != shared.DebugModeNone {

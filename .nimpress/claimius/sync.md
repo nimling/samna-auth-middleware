@@ -41,17 +41,11 @@ For the request of [Writes](./writes.md#one-request-one-transaction), a claim bo
 
 ## The feed as a pipeline
 
-1. A prophet writes events in its transactions. Every event of an app carries the app's id; an organization or location event carries none, because the row has no `app_id`.
+1. A prophet writes events in its transactions, each stamped with its `txid`. Every event of an app carries the app's id; an organization or location, whose row has no `app_id`, is written once for every app linked to it through `app_object`, stamped with that app. A statement trigger notifies `claimius_sync` with the app id, delivered at commit.
 
-2. `get_sync_events(app_id, seq, limit)` returns the events after a sequence in `seq` order, 1,000 by default: the app's own, one range of `idx_sync_event_app_seq`, and every organization and location event after the cursor whose row the app reaches through `app_object_ids`. With `n_a` events of the app and `h` hierarchy events of every app after the cursor, a pull reads
+2. `get_sync_events(app_id, seq, limit)` returns the app's events after a sequence in `seq` order, 1,000 by default, one range of `idx_sync_event_app_seq`. With `n_a` events of the app after the cursor a pull reads `n_a` entries. Another app's rows never leave the prophet.
 
-```
-entries = n_a + 2h
-```
-
-entries, one per event and one `app_object` probe per hierarchy event, and returns the `n_a` and the hierarchy events of its own app. Another app's rows never leave the prophet.
-
-3. Sequences are handed out at insert and become visible at commit, so the feed serves the committed events above the cursor in allocation order.
+3. Sequences are handed out at insert and become visible at commit, so a higher sequence can commit before a lower one. The feed serves only events whose `txid` is below the `xmin` of the reading snapshot, the transactions every one of which has ended, so a cursor never passes over a sequence that commits late.
 
 4. A disciple applies a page in one transaction under `replay_mode`, each event by its primary key: the calc triggers settle no actor but keep the closure and raise the object areas a structural row moves. For a `claim`, `claim_object` or `user_claim` event the disciple raises the claim areas it moves in its own `access_diff`, one or two rows, so every pair it holds, on the shared types and on its own registered tables, settles on the next local read. Applying is idempotent: the same event twice produces the same row.
 
@@ -61,11 +55,11 @@ entries, one per event and one `app_object` probe per hierarchy event, and retur
 
 ## Cursors and trimming
 
-`prophet_state` holds, per app, `last_applied_seq`, the sequence the app's consumer last proved it applied by asking for what comes after it, and `last_contact_at`. `trim_sync_event(stale_after)` deletes every event at or below the lowest cursor among apps in contact within `stale_after`, 7 days by default, and returns the count. An app out of contact longer is treated as gone, so one dead disciple cannot hold the outbox. The outbox holds, per app, the events since the lowest live cursor: proportional to the source rows written.
+`sync_consumer` holds one cursor per consumer, a disciple database named by the id of its `disciple_state` row: `last_applied_seq`, the sequence it last proved it applied by asking for what comes after it, and `last_contact_at`. `update_sync_cursor` moves it, and the app's `prophet_state` row carries the lowest cursor among its consumers in contact. `trim_sync_event(stale_after)` deletes every event at or below the lowest cursor among consumers in contact within `stale_after`, 7 days by default, then each app's events beyond as many as its source rows, records the highest removed per app in `prophet_state.trimmed_seq`, and returns the count. A consumer out of contact longer is treated as gone, so one dead disciple cannot hold the outbox. The outbox holds, per app, at most as many events as the app has source rows.
 
 ## Catch up
 
-A disciple away for a while returns `n_b` events behind, all of which the outbox still holds when it was in contact within `stale_after`. It replays them in pages, `⌈n_b / 1000⌉` pulls and `n_b` applies. A disciple further behind than the trimmed watermark cannot be replayed and starts again from a snapshot of its app's rows, which the middleware serves.
+A disciple away for a while returns `n_b` events behind, all of which the outbox still holds when it was in contact within `stale_after`. It replays them in pages, `⌈n_b / 1000⌉` pulls and `n_b` applies. `check_sync_cursor(app_id, seq)` sends a consumer to the snapshot of its app's rows, which the middleware serves, when its cursor is above every sequence the prophet issued, below `trimmed_seq`, or behind by more events than the app has source rows, where the snapshot is the cheaper catch up.
 
 ## The sequence is the consistency token
 
