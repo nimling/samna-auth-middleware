@@ -11,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
+	"github.com/nimling/samna-auth-middleware/client"
 	sdb "github.com/nimling/samna-auth-middleware/disciple/sdb"
 	"github.com/nimling/samna-auth-middleware/internal/store"
 	"github.com/nimling/samna-auth-middleware/sauth"
@@ -32,23 +33,16 @@ const (
 // its cursor. Two patterns produce this and neither recovers on its own: a
 // cursor the prophet's feed cannot serve, which the prophet answers with 409,
 // and an event the replica cannot apply, which fails forever. The loop answers
-// both with a snapshot and leaves an audit trail of the reconcile.
-func reportStalledCursor(ctx context.Context, log echo.Logger, reason string) {
+// both with a snapshot, and the snapshot's transaction audits the reconcile
+// with the message this returns.
+func reportStalledCursor(ctx context.Context, log echo.Logger, reason string) string {
 	seq, err := GetSeq(ctx)
 	if err != nil {
 		log.Errorf("disciple sync: read cursor before reconcile: %v", err)
-		return
+		return fmt.Sprintf("cursor %s, reconciled from a fresh snapshot", reason)
 	}
-	log.Warnf("disciple sync: cursor %d %s, reconciling from snapshot", seq, reason)
-	sdb.Write(
-		"disciple sync reconcile",
-		"update",
-		"claimius.disciple_state",
-		uuid.Nil,
-		uuid.Nil,
-		nil,
-		fmt.Sprintf("cursor %d %s, pulling a fresh snapshot", seq, reason),
-	)
+	log.Warnf("disciple sync: cursor %s %s, reconciling from snapshot", seq, reason)
+	return fmt.Sprintf("cursor %s %s, reconciled from a fresh snapshot", seq, reason)
 }
 
 // SyncStart launches the background pull loop that keeps the disciple database
@@ -154,8 +148,8 @@ func pullLoop(ctx context.Context) {
 	}
 	if seq, err := GetSeq(ctx); err != nil {
 		report(fmt.Errorf("get current seq: %w", err))
-	} else if seq == 0 {
-		report(PullSnapshot(ctx))
+	} else if seq.IsZero() {
+		report(PullSnapshot(ctx, ""))
 	}
 	backoff := time.Second
 	failed := 0
@@ -166,8 +160,7 @@ func pullLoop(ctx context.Context) {
 		case errors.Is(err, ErrSnapshotRequired):
 			backoff = time.Second
 			failed = 0
-			reportStalledCursor(ctx, log, "was refused by the prophet feed")
-			report(PullSnapshot(ctx))
+			report(PullSnapshot(ctx, reportStalledCursor(ctx, log, "was refused by the prophet feed")))
 		case err != nil:
 			report(err)
 			wait = backoff
@@ -179,8 +172,8 @@ func pullLoop(ctx context.Context) {
 			if failed >= failedPullsBeforeReconcile {
 				failed = 0
 				backoff = time.Second
-				reportStalledCursor(ctx, log, fmt.Sprintf("failed to apply %d consecutive pulls, last error %v", failedPullsBeforeReconcile, err))
-				report(PullSnapshot(ctx))
+				reason := fmt.Sprintf("failed to apply %d consecutive pulls, last error %v", failedPullsBeforeReconcile, err)
+				report(PullSnapshot(ctx, reportStalledCursor(ctx, log, reason)))
 			}
 		default:
 			backoff = time.Second
@@ -195,7 +188,7 @@ func pullLoop(ctx context.Context) {
 }
 
 type SyncPayload struct {
-	Seq       int64           `json:"seq"`
+	client.SyncCursor
 	Operation string          `json:"operation"`
 	EventType string          `json:"event_type"`
 	Payload   json.RawMessage `json:"payload"`
@@ -228,8 +221,9 @@ func stripAppID(raw json.RawMessage) json.RawMessage {
 // crash is a cursor that did not move, and the page is pulled again. The
 // cursor moves first and only from the position the page was pulled at, which
 // holds its row for the page and refuses a page another consumer already
-// applied.
-func ApplyPage(ctx context.Context, from, to int64, payloads []SyncPayload) error {
+// applied. A snapshot that replaces a stalled replica passes the reconcile
+// message, audited in the same transaction.
+func ApplyPage(ctx context.Context, from, to client.SyncCursor, payloads []SyncPayload, reconcile string) error {
 	return sdb.Instance().DB.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
 		if _, err := tx.ExecContext(ctx, "SET LOCAL claimius.replay_mode = 'true'"); err != nil {
 			return fmt.Errorf("set replay_mode: %w", err)
@@ -242,8 +236,11 @@ func ApplyPage(ctx context.Context, from, to int64, payloads []SyncPayload) erro
 		}
 		for _, payload := range payloads {
 			if err := ApplyPayload(ctx, tx, payload); err != nil {
-				return fmt.Errorf("apply %s seq %d: %w", payload.EventType, payload.Seq, err)
+				return fmt.Errorf("apply %s seq %s: %w", payload.EventType, payload.SyncCursor, err)
 			}
+		}
+		if reconcile != "" {
+			return sdb.Write(ctx, tx, "disciple sync reconcile", "update", "claimius.disciple_state", uuid.Nil, uuid.Nil, nil, reconcile)
 		}
 		return nil
 	})
@@ -444,14 +441,16 @@ func deleteEntity[T any](ctx context.Context, tx bun.Tx, id json.RawMessage) err
 }
 
 // UpdateSeq moves the cursor from from to to. A page moves it forward; a
-// snapshot sets it to the snapshot's sequence, below a cursor the prophet no
+// snapshot sets it to the snapshot's position, below a cursor the prophet no
 // longer serves when that is what sent the disciple to the snapshot.
-func UpdateSeq(ctx context.Context, tx bun.Tx, from, to int64) error {
+func UpdateSeq(ctx context.Context, tx bun.Tx, from, to client.SyncCursor) error {
 	result, err := tx.NewUpdate().
 		Model((*shared.DiscipleState)(nil)).
-		Set("last_applied_seq = ?", to).
+		Set("last_applied_txid = ?", to.Txid).
+		Set("last_applied_seq = ?", to.Seq).
 		Set("sa_updated_at = ?", time.Now()).
-		Where("last_applied_seq = ?", from).
+		Where("last_applied_txid = ?", from.Txid).
+		Where("last_applied_seq = ?", from.Seq).
 		Exec(ctx)
 	if err != nil {
 		return fmt.Errorf("update seq: %w", err)
@@ -461,7 +460,7 @@ func UpdateSeq(ctx context.Context, tx bun.Tx, from, to int64) error {
 		return fmt.Errorf("update seq rows: %w", err)
 	}
 	if rows == 0 {
-		return fmt.Errorf("update seq: cursor moved from %d before the page applied", from)
+		return fmt.Errorf("update seq: cursor moved from %s before the page applied", from)
 	}
 	return nil
 }
@@ -481,18 +480,18 @@ func GetState(ctx context.Context) (shared.DiscipleState, error) {
 	return state, err
 }
 
-func GetSeq(ctx context.Context) (int64, error) {
+func GetSeq(ctx context.Context) (client.SyncCursor, error) {
 	state, err := GetState(ctx)
 	if err != nil {
-		return 0, err
+		return client.SyncCursor{}, err
 	}
-	return state.LastAppliedSeq, nil
+	return state.Cursor(), nil
 }
 
-// WaitForSeq waits until the disciple's cursor reaches targetSeq, the sequence
-// a routed write answered with, so a read that follows sees that write. It
-// gives up after timeout or when ctx ends.
-func WaitForSeq(ctx context.Context, targetSeq int64, timeout time.Duration) error {
+// WaitForSeq waits until the disciple's cursor reaches target, the position a
+// routed write answered with, so a read that follows sees that write. It gives
+// up after timeout or when ctx ends.
+func WaitForSeq(ctx context.Context, target client.SyncCursor, timeout time.Duration) error {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	for {
@@ -500,12 +499,12 @@ func WaitForSeq(ctx context.Context, targetSeq int64, timeout time.Duration) err
 		if err != nil && ctx.Err() == nil {
 			return err
 		}
-		if err == nil && seq >= targetSeq {
+		if err == nil && !seq.Less(target) {
 			return nil
 		}
 		select {
 		case <-ctx.Done():
-			return fmt.Errorf("timeout waiting for seq %d: %w", targetSeq, ctx.Err())
+			return fmt.Errorf("timeout waiting for seq %s: %w", target, ctx.Err())
 		case <-time.After(50 * time.Millisecond):
 		}
 	}

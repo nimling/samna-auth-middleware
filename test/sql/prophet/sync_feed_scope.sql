@@ -34,26 +34,26 @@ BEGIN
 END $$;
 
 SELECT ok(
-    EXISTS (SELECT 1 FROM claimius.get_sync_events('50000000-0000-4000-8000-0000000000a1', 0) e
+    EXISTS (SELECT 1 FROM claimius.get_sync_events('50000000-0000-4000-8000-0000000000a1', 0, 0) e
              WHERE e.event_type = 'claimius.organization' AND (e.payload ->> 'id')::UUID = '10000000-0000-4000-8000-0000000000e1'),
     'an organization linked to the app reaches its delta feed'
 );
 
 SELECT is_empty(
-    $$SELECT 1 FROM claimius.get_sync_events('50000000-0000-4000-8000-0000000000a1', 0) e
+    $$SELECT 1 FROM claimius.get_sync_events('50000000-0000-4000-8000-0000000000a1', 0, 0) e
        WHERE e.event_type = 'claimius.organization' AND (e.payload ->> 'id')::UUID = '10000000-0000-4000-8000-0000000000e2'$$,
     'an organization linked only to another app never reaches this app''s delta feed'
 );
 
 SELECT ok(
-    EXISTS (SELECT 1 FROM claimius.get_sync_events('50000000-0000-4000-8000-0000000000a1', 0) e
+    EXISTS (SELECT 1 FROM claimius.get_sync_events('50000000-0000-4000-8000-0000000000a1', 0, 0) e
              JOIN claimius.sync_event s ON s.seq = e.seq
              WHERE s.app_id = '50000000-0000-4000-8000-0000000000a1'),
     'the delta feed carries the app''s own app scoped events'
 );
 
 SELECT is_empty(
-    $$SELECT 1 FROM claimius.get_sync_events('50000000-0000-4000-8000-0000000000a1', 0) e
+    $$SELECT 1 FROM claimius.get_sync_events('50000000-0000-4000-8000-0000000000a1', 0, 0) e
        JOIN claimius.sync_event s ON s.seq = e.seq
        WHERE s.app_id = '50000000-0000-4000-8000-0000000000b1'$$,
     'the delta feed carries no event stamped for another app'

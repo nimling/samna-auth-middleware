@@ -29,7 +29,7 @@ test target='':
             out=$(smig test --schema=$role/database/migrate.yml --db-dir=$role/database --keep -s 2>&1 | sed 's/\x1b\[[0-9;]*m//g')
             name=$(echo "$out" | grep -o 'smig-test-[0-9]*' | head -1)
             eval "$(echo "$out" | grep '^ *PG[A-Z]*=' | sed 's/^ *//; s/^/export /')"
-            pkgs="./shared/... ./disciple/..."; [ $role = prophet ] && pkgs=./prophet/...
+            pkgs="./shared/... ./disciple/... ./smw/..."; [ $role = prophet ] && pkgs=./prophet/...
             go test -tags dbtest -count=1 -p 1 $pkgs || { docker rm -f "$name" >/dev/null; exit 1; }
             docker rm -f "$name" >/dev/null
         done

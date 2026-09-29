@@ -10,16 +10,18 @@ import (
 )
 
 // ErrSnapshotRequired is the prophet's answer to a pull at a cursor its feed
-// cannot serve: above every sequence it issued, below events it trimmed, or
+// cannot serve: above every position it issued, below events it trimmed, or
 // behind by more events than the app has source rows.
 var ErrSnapshotRequired = errors.New("sync cursor refused by the prophet feed, snapshot required")
 
 type SnapshotResponse struct {
 	Records []SyncPayload `json:"records"`
-	Seq     int64         `json:"seq"`
+	client.SyncCursor
 }
 
-func PullSnapshot(ctx context.Context) error {
+// PullSnapshot replaces the replica with the prophet's snapshot. reconcile,
+// when set, is audited in the snapshot's transaction.
+func PullSnapshot(ctx context.Context, reconcile string) error {
 	state, err := GetState(ctx)
 	if err != nil {
 		return fmt.Errorf("get current seq: %w", err)
@@ -33,7 +35,7 @@ func PullSnapshot(ctx context.Context) error {
 		return fmt.Errorf("fetch snapshot: %w", err)
 	}
 
-	return ApplyPage(ctx, state.LastAppliedSeq, snapshot.Seq, snapshot.Records)
+	return ApplyPage(ctx, state.Cursor(), snapshot.SyncCursor, snapshot.Records, reconcile)
 }
 
 func PullSync(ctx context.Context) (int, error) {
@@ -41,9 +43,9 @@ func PullSync(ctx context.Context) (int, error) {
 	if err != nil {
 		return 0, fmt.Errorf("get current seq: %w", err)
 	}
-	seq := state.LastAppliedSeq
+	from := state.Cursor()
 
-	payloads, err := GetSyncPage(ctx, state.ID.String(), seq)
+	payloads, err := GetSyncPage(ctx, state.ID.String(), from)
 	if err != nil {
 		return 0, err
 	}
@@ -51,26 +53,26 @@ func PullSync(ctx context.Context) (int, error) {
 		return 0, nil
 	}
 
-	maxSeq := seq
+	to := from
 	for _, payload := range payloads {
-		if payload.Seq > maxSeq {
-			maxSeq = payload.Seq
+		if to.Less(payload.SyncCursor) {
+			to = payload.SyncCursor
 		}
 	}
 
-	if err := ApplyPage(ctx, seq, maxSeq, payloads); err != nil {
+	if err := ApplyPage(ctx, from, to, payloads, ""); err != nil {
 		return 0, err
 	}
 
 	return len(payloads), nil
 }
 
-// GetSyncPage fetches the page after seq for consumer. The prophet holds an
-// empty answer open up to syncHold and answers as soon as an event commits,
-// so the request timeout covers the hold.
-func GetSyncPage(ctx context.Context, consumer string, seq int64) ([]SyncPayload, error) {
+// GetSyncPage fetches the page after the cursor for consumer. The prophet
+// holds an empty answer open up to syncHold and answers as soon as an event
+// commits, so the request timeout covers the hold.
+func GetSyncPage(ctx context.Context, consumer string, cursor client.SyncCursor) ([]SyncPayload, error) {
 	ctx = client.WithTimeout(ctx, syncHold+syncHoldMargin)
-	path := fmt.Sprintf("sync/%d?wait=%d&consumer=%s", seq, int(syncHold.Seconds()), consumer)
+	path := fmt.Sprintf("sync/%s?wait=%d&consumer=%s", cursor, int(syncHold.Seconds()), consumer)
 	var payloads []SyncPayload
 	if err := client.Get(ctx, path, &payloads); err != nil {
 		switch {

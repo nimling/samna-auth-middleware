@@ -35,7 +35,7 @@ A closure row is two object pairs, a root, a depth and two timestamps: about 140
 | `sync_event` | primary key; `(app_id, seq)`; `(event_type, seq)`; `written_at` | 4 |
 | `user_claim` | primary key; live unique `(claim_id, user_id, app_id)`; `(user_id, app_id)`; `claim_id`; `sa_owner_id`; `sa_deleted_at` | 6 |
 | `claim_object` | primary key; `app_id`; `claim_id`; `(object_type, object_id)` partial; `(claim_id)` partial for scope grants; `sa_owner_id`; `sa_deleted_at`; `(claim_id, object_type, object_id)` partial | 6 or 7 |
-| `audit` | primary key; `app_id`; `sa_owner_id`; `sa_created_at`; `(object_type, object_id)` | 5 |
+| `audit` | primary key `(id, sa_created_at)`; `app_id`; `sa_owner_id`; `(object_type, object_id)`; BRIN on `sa_created_at`, per month partition | 4 and a BRIN summary |
 
 The GIN indexes take their entries through the pending list and merge them in bulk ([PostgreSQL, GIN fast update](https://www.postgresql.org/docs/17/gin.html#GIN-FAST-UPDATE)). A soft delete sets an indexed column, so it is never a heap only update and writes an entry in every index of its table ([PostgreSQL, Heap Only Tuples](https://www.postgresql.org/docs/17/storage-hot.html)).
 

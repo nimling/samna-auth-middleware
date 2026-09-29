@@ -28,17 +28,17 @@ lastUpdated: true
 
 3. The calc triggers write an `error` row when they fail and then raise the error again. The row is in the failing transaction, so it persists only when the caller catches the error in a savepoint and commits.
 
-4. The service writes its own rows, a denied attempt among them, through `write_audit` in its own transaction.
+4. The service writes its own rows, a denied attempt among them, through `write_audit` in the transaction of the change: `shared.WriteAudit` takes the `bun.IDB` of that transaction, and the prophet's and the disciple's `sdb.Write` pass it on.
 
 A row carries the actor as a grant, the same value every row carries in `sa_created_by`, so the trail joins to the grants, claims and organizations with keys that already exist, and later changes to a row, which carry no `sa_updated_by`, are attributed here.
 
 ## What a row costs
 
-One insert with five btree entries, the primary key, `app_id`, `sa_owner_id`, `sa_created_at` and `(object_type, object_id)`, in a transaction that is already writing: no second round trip, no queue, no consumer. The table grows by one row per audited event and is not carried on the feed, so the trail of an app lives in the database of the service that did the work: a disciple's own tables are audited on the disciple, shared writes on the prophet that decided them.
+One insert with four btree entries, the primary key `(id, sa_created_at)`, `app_id`, `sa_owner_id` and `(object_type, object_id)`, and a BRIN summary on `sa_created_at`, in a transaction that is already writing: no second round trip, no queue, no consumer. The table is partitioned by month on `sa_created_at`; `write_audit` opens the month's partition on its first row through `ensure_audit_partition`, a row no month takes lands in `audit_default` and moves when its month opens, and a month is retired by detaching its partition rather than deleting rows. The table grows by one row per audited event and is not carried on the feed, so the trail of an app lives in the database of the service that did the work: a disciple's own tables are audited on the disciple, shared writes on the prophet that decided them.
 
 ## Reading it
 
-`get_audit(user, app, required, limit, offset)` returns the app's rows newest first whose `sa_owner_id` is an organization the user reaches with `required`: the user's `V_{u,organization}` pairs, then a backward range of `idx_audit_sa_created_at` kept by owner until `limit + offset` rows are kept. With a share `f` of the app's rows owned by organizations the user reaches, a page reads about `(limit + offset) / f` rows. `resolve_access` answers one `claimius.audit` row the same way, one probe of the row and the reader's organizations.
+`get_audit(user, app, required, limit, offset)` returns the app's rows newest first whose `sa_owner_id` is an organization the user reaches with `required`: the user's `V_{u,organization}` pairs, then the app's rows newest first, month partition by month partition, kept by owner until `limit + offset` rows are kept. With a share `f` of the app's rows owned by organizations the user reaches, a page reads about `(limit + offset) / f` rows. `resolve_access` answers one `claimius.audit` row the same way, one probe of the row and the reader's organizations.
 
 ## Why in the database
 

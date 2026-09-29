@@ -23,7 +23,7 @@ SELECT is(
 COMMIT;
 
 SELECT is_empty(
-    $$SELECT 1 FROM claimius.get_sync_events('50000000-0000-4000-8000-0000000000d0', 0)$$,
+    $$SELECT 1 FROM claimius.get_sync_events('50000000-0000-4000-8000-0000000000d0', 0, 0)$$,
     'the feed serves neither the open event nor the committed one above it'
 );
 COMMIT;
@@ -32,7 +32,7 @@ SELECT dblink_exec('sync_open', 'COMMIT');
 COMMIT;
 
 SELECT is(
-    ARRAY(SELECT e.payload ->> 'id' FROM claimius.get_sync_events('50000000-0000-4000-8000-0000000000d0', 0) e),
+    ARRAY(SELECT e.payload ->> 'id' FROM claimius.get_sync_events('50000000-0000-4000-8000-0000000000d0', 0, 0) e),
     ARRAY['60000000-0000-4000-8000-0000000000d1', '60000000-0000-4000-8000-0000000000d2'],
     'once the open transaction commits the feed serves both events in sequence order'
 );

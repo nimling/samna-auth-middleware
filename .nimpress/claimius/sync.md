@@ -12,7 +12,7 @@ A prophet appends every change of a mirrored table to `sync_event`. A disciple o
 
 ## The row
 
-`sync_event (seq bigserial, operation, event_type, payload jsonb, app_id, written_at)`, with four btree indexes: the primary key `seq`, `(app_id, seq)`, `(event_type, seq)` and `written_at`.
+`sync_event (seq bigserial, operation, event_type, payload jsonb, app_id, written_at, txid xid8)`, with four btree indexes: the primary key `seq`, `(app_id, txid, seq)`, `(event_type, seq)` and `written_at`. `txid` is the transaction that wrote the event.
 
 `emit_sync_event`, an after trigger on the source tables, writes one row per row written, in the transaction of the change, so an event exists exactly when its change committed. An `upsert` carries the full row; a `delete` carries its `id` and `app_id`. The trigger does nothing on a database with no `prophet_state` row, so a pure disciple writes no events.
 
@@ -43,27 +43,27 @@ For the request of [Writes](./writes.md#one-request-one-transaction), a claim bo
 
 1. A prophet writes events in its transactions, each stamped with its `txid`. Every event of an app carries the app's id; an organization or location, whose row has no `app_id`, is written once for every app linked to it through `app_object`, stamped with that app. A statement trigger notifies `claimius_sync` with the app id, delivered at commit.
 
-2. `get_sync_events(app_id, seq, limit)` returns the app's events after a sequence in `seq` order, 1,000 by default, one range of `idx_sync_event_app_seq`. With `n_a` events of the app after the cursor a pull reads `n_a` entries. Another app's rows never leave the prophet.
+2. `get_sync_events(app_id, txid, seq, limit)` returns the app's events after the cursor `(txid, seq)` in `(txid, seq)` order, 1,000 by default, one range of `idx_sync_event_app_txid_seq`. With `n_a` events of the app after the cursor a pull reads `n_a` entries. Another app's rows never leave the prophet.
 
-3. Sequences are handed out at insert and become visible at commit, so a higher sequence can commit before a lower one. The feed serves only events whose `txid` is below the `xmin` of the reading snapshot, the transactions every one of which has ended, so a cursor never passes over a sequence that commits late.
+3. Sequences are handed out at insert and become visible at commit, so a higher sequence can commit before a lower one. The feed serves only events whose `txid` is below the `xmin` of the reading snapshot, the transactions every one of which has ended, and orders them by `txid` before `seq`. Every event written later carries a `txid` at or above that `xmin`, so it sorts after every served event and a cursor never passes over a sequence that commits late: a transaction that took its `txid` first and its sequence last is served in its `txid` place, not its sequence place.
 
 4. A disciple applies a page in one transaction under `replay_mode`, each event by its primary key: the calc triggers settle no actor but keep the closure and raise the object areas a structural row moves. For a `claim`, `claim_object` or `user_claim` event the disciple raises the claim areas it moves in its own `access_diff`, one or two rows, so every pair it holds, on the shared types and on its own registered tables, settles on the next local read. Applying is idempotent: the same event twice produces the same row.
 
-5. `disciple_state.last_applied_seq` moves to the page's last sequence first in the same transaction, and only from the cursor the page was pulled at. A page of `p` events costs one commit; a page that fails anywhere rolls back whole, cursor included, and is fetched again from the same cursor.
+5. `disciple_state (last_applied_txid, last_applied_seq)` moves to the page's last position first in the same transaction, and only from the cursor the page was pulled at. A page of `p` events costs one commit; a page that fails anywhere rolls back whole, cursor included, and is fetched again from the same cursor.
 
 6. One process per disciple database applies. The pull loop runs on every pod, and each holds a session level `pg_try_advisory_lock` on a key of the app slug on a dedicated connection for as long as it pulls; a pod without the lock does no sync work and tries again every 5 s. The lock dies with its session, so when the holder goes another pod takes over, and a holder whose connection stops answering stops pulling. `N` pods apply `E` events once, `E` applies instead of `N · E`.
 
 ## Cursors and trimming
 
-`sync_consumer` holds one cursor per consumer, a disciple database named by the id of its `disciple_state` row: `last_applied_seq`, the sequence it last proved it applied by asking for what comes after it, and `last_contact_at`. `update_sync_cursor` moves it, and the app's `prophet_state` row carries the lowest cursor among its consumers in contact. `trim_sync_event(stale_after)` deletes every event at or below the lowest cursor among consumers in contact within `stale_after`, 7 days by default, then each app's events beyond as many as its source rows, records the highest removed per app in `prophet_state.trimmed_seq`, and returns the count. A consumer out of contact longer is treated as gone, so one dead disciple cannot hold the outbox. The outbox holds, per app, at most as many events as the app has source rows.
+`sync_consumer` holds one cursor per consumer, a disciple database named by the id of its `disciple_state` row: `(last_applied_txid, last_applied_seq)`, the position it last proved it applied by asking for what comes after it, and `last_contact_at`. `update_sync_cursor` moves it, and the app's `prophet_state` row carries the lowest cursor among its consumers in contact. `trim_sync_event(stale_after)` deletes every event at or below the lowest cursor among consumers in contact within `stale_after`, 7 days by default, then each app's events beyond as many as its source rows, records the highest position removed per app in `prophet_state (trimmed_txid, trimmed_seq)`, and returns the count. A consumer out of contact longer is treated as gone, so one dead disciple cannot hold the outbox. The outbox holds, per app, at most as many events as the app has source rows.
 
 ## Catch up
 
-A disciple away for a while returns `n_b` events behind, all of which the outbox still holds when it was in contact within `stale_after`. It replays them in pages, `⌈n_b / 1000⌉` pulls and `n_b` applies. `check_sync_cursor(app_id, seq)` sends a consumer to the snapshot of its app's rows, which the middleware serves, when its cursor is above every sequence the prophet issued, below `trimmed_seq`, or behind by more events than the app has source rows, where the snapshot is the cheaper catch up.
+A disciple away for a while returns `n_b` events behind, all of which the outbox still holds when it was in contact within `stale_after`. It replays them in pages, `⌈n_b / 1000⌉` pulls and `n_b` applies. `check_sync_cursor(app_id, txid, seq)` sends a consumer to the snapshot of its app's rows, which the middleware serves, when its cursor is above every sequence or transaction the prophet issued, below `(trimmed_txid, trimmed_seq)`, or behind by more events than the app has source rows, where the snapshot is the cheaper catch up.
 
 ## The sequence is the consistency token
 
-A routed write returns the prophet sequence of its change. A read on a disciple that must see that write waits until `disciple_state.last_applied_seq` reaches the sequence. This is the zookie of Zanzibar, "at least as fresh as" a known write ([Pang et al. 2019, section 2.2](https://www.usenix.org/system/files/atc19-pang.pdf)), and the `at_least_as_fresh` mode of SpiceDB ([SpiceDB, Consistency](https://authzed.com/docs/spicedb/concepts/consistency)). Without a token a disciple read is consistent as of its cursor. A prophet read settles what it meets before it answers, in the same database.
+A routed write returns the prophet position `(txid, seq)` of its change. A read on a disciple that must see that write waits until the disciple's cursor reaches that position. This is the zookie of Zanzibar, "at least as fresh as" a known write ([Pang et al. 2019, section 2.2](https://www.usenix.org/system/files/atc19-pang.pdf)), and the `at_least_as_fresh` mode of SpiceDB ([SpiceDB, Consistency](https://authzed.com/docs/spicedb/concepts/consistency)). Without a token a disciple read is consistent as of its cursor. A prophet read settles what it meets before it answers, in the same database.
 
 ## A disciple's own writes
 

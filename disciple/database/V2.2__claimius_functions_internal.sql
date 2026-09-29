@@ -1536,7 +1536,7 @@ BEGIN
           AND e.descendant_id   = p_object_id
         ORDER BY e.depth;
 END;
-$$ LANGUAGE plpgsql STABLE;
+$$ LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = claimius, pg_temp;
 
 COMMENT ON FUNCTION claimius.get_owner_ancestors(p_object_type text, p_object_id uuid) IS 'Ownership tree ancestors of an object, hop 0 = self.';
 
@@ -1586,7 +1586,7 @@ BEGIN
                      AND eo.descendant_id   = l.sa_owner_id
         WHERE l.sa_owner_id IS NOT NULL;
 END;
-$$ LANGUAGE plpgsql STABLE;
+$$ LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = claimius, pg_temp;
 
 COMMENT ON FUNCTION claimius.get_location_ancestors(p_object_type text, p_object_id uuid) IS 'Location chain ancestors of an object plus each location''s owning org chain.';
 
@@ -1618,7 +1618,7 @@ BEGIN
         RETURN QUERY SELECT p_object_type, p_object_id, 0;
     END IF;
 END;
-$$ LANGUAGE plpgsql STABLE;
+$$ LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = claimius, pg_temp;
 
 COMMENT ON FUNCTION claimius.get_parenthood_ancestors(p_object_type text, p_object_id uuid) IS 'Parenthood tree ancestors via sa_parent_id, hop 0 = self.';
 
@@ -1643,7 +1643,7 @@ BEGIN
         SELECT a.object_type, a.object_id, a.hop, 'parenthood'::TEXT
         FROM claimius.get_parenthood_ancestors(p_object_type, p_object_id) a;
 END;
-$$ LANGUAGE plpgsql STABLE;
+$$ LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = claimius, pg_temp;
 
 COMMENT ON FUNCTION claimius.get_ancestors(p_object_type text, p_object_id uuid) IS 'Combined ancestor walk across owner, location, and parenthood trees.';
 CREATE OR REPLACE FUNCTION claimius.apply_row_delta(p_object_type text, p_object_id uuid, p_old jsonb, p_new jsonb)

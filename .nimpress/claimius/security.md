@@ -16,10 +16,10 @@ Four Postgres roles split what a connection may do. `claimius_admin` owns the sc
 |---|---|---|
 | `claimius_admin` | Owns every table | Everything |
 | `claimius_writer` | `SELECT` on every table; `INSERT`, `UPDATE` on `samna_app`, `samna_user`, `samna_client`, `samna_secret`, `organization`, `location`, `object_field`, `user_field`, `user_relation`, `notification`, `prophet_state`; `INSERT`, `UPDATE`, `DELETE` on `claim_graph_cache` | Every function |
-| `claimius_reader` | `INSERT`, `UPDATE`, `DELETE` on `claim_graph_cache`, nothing else | Every function except the claim, grant and binding writers, `merge_user`, `migrate_root`, the `init` functions and `recompute_state` |
+| `claimius_reader` | Nothing | Every function except the claim, grant and binding writers, `merge_user`, `migrate_root`, the `init` functions and `recompute_state` |
 | `claimius_disciple_client` | `SELECT` on every table; `INSERT`, `UPDATE`, `DELETE` on the mirrored tables, the derived tables and `audit` | Every function |
 
-1. The claimius functions run with the privileges of their caller, the PostgreSQL default ([CREATE FUNCTION, SECURITY INVOKER](https://www.postgresql.org/docs/17/sql-createfunction.html)), so a connection holds the table privileges of every function it calls, and the grants above are the whole of what a role can do.
+1. The read surface, every `get_*` of the access, listing, audit, secret, scope and graph families, `search`, `resolve_access`, `mutation_access`, the ancestor and subtree walks, the `app_object` probes and the app identity helpers, runs with the privileges of its owner under a pinned `search_path = claimius, pg_temp` ([CREATE FUNCTION, SECURITY DEFINER](https://www.postgresql.org/docs/17/sql-createfunction.html#SQL-CREATEFUNCTION-SECURITY)), so the reader, which holds no table privilege, gets answers through it and nothing else. The settle and the graph cache a read writes are written by the owner. Every other function runs with the privileges of its caller, so a writer holds the table privileges of every write function it calls.
 
 2. No grant gives the writer or the reader `UPDATE` or `DELETE` on `audit` or `sync_event`, so a service connecting as either cannot rewrite the trail or the feed.
 
@@ -31,7 +31,7 @@ Four Postgres roles split what a connection may do. `claimius_admin` owns the sc
 
 2. A `samna_app` row has no `app_id`, so its events never match a pull: `private_key` and `private_seed` never leave the prophet. A disciple holds ciphertext and resolves a secret through its prophet.
 
-3. `samna_client.secret_hash` and `samna_app.app_secret` are bcrypt hashes. A copy can verify a credential and cannot recover it.
+3. `samna_client.secret_hash` and `samna_app.app_secret` are bcrypt hashes. A copy can verify a credential and cannot recover it. The middleware pays bcrypt once per client and `secret_hash`: it keeps the SHA-256 digest of the verified secret per `client_id` and rereads the client row, its status, expiry and hash, on every request, so a revoked client or a rotated secret stops on the next request. `smw.AppMiddleware` keeps the imported app key pair per app and imports it again when the row's key or seed changes.
 
 4. `organization.private_seed` is generated at a root and inherited by its children, and keys `app_secret` hashing for the apps owned in the tree, so a secret verified under one tenant's seed is meaningless under another's.
 

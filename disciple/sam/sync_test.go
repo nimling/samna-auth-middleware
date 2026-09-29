@@ -8,16 +8,17 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/nimling/samna-auth-middleware/client"
 	sam "github.com/nimling/samna-auth-middleware/disciple/sam"
 	"github.com/uptrace/bun"
 )
 
 func TestApplyPayload_SkipsSamnaApp(t *testing.T) {
 	payload := sam.SyncPayload{
-		Seq:       42,
-		Operation: "upsert",
-		EventType: "claimius.samna_app",
-		Payload:   json.RawMessage(`{"id":"10000000-0000-4000-8000-000000000001","slug":"nimployer"}`),
+		SyncCursor: client.SyncCursor{Txid: 3, Seq: 42},
+		Operation:  "upsert",
+		EventType:  "claimius.samna_app",
+		Payload:    json.RawMessage(`{"id":"10000000-0000-4000-8000-000000000001","slug":"nimployer"}`),
 	}
 	if err := sam.ApplyPayload(context.Background(), bun.Tx{}, payload); err != nil {
 		t.Fatalf("samna_app must be skipped without touching the database, got %v", err)
@@ -26,10 +27,10 @@ func TestApplyPayload_SkipsSamnaApp(t *testing.T) {
 
 func TestApplyPayload_SkipsSamnaAppDelete(t *testing.T) {
 	payload := sam.SyncPayload{
-		Seq:       43,
-		Operation: "delete",
-		EventType: "claimius.samna_app",
-		Payload:   json.RawMessage(`{"id":"10000000-0000-4000-8000-000000000001"}`),
+		SyncCursor: client.SyncCursor{Txid: 3, Seq: 43},
+		Operation:  "delete",
+		EventType:  "claimius.samna_app",
+		Payload:    json.RawMessage(`{"id":"10000000-0000-4000-8000-000000000001"}`),
 	}
 	if err := sam.ApplyPayload(context.Background(), bun.Tx{}, payload); err != nil {
 		t.Fatalf("samna_app delete must be skipped without touching the database, got %v", err)
@@ -97,19 +98,19 @@ func TestGetSyncPageAsksTheProphetToHoldAndNamesTheConsumer(t *testing.T) {
 	prophet := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		path, wait, consumer = r.URL.Path, r.URL.Query().Get("wait"), r.URL.Query().Get("consumer")
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"data":[{"seq":8,"operation":"upsert","event_type":"claimius.claim","payload":{}}],"count":1}`))
+		w.Write([]byte(`{"data":[{"txid":4,"seq":8,"operation":"upsert","event_type":"claimius.claim","payload":{}}],"count":1}`))
 	}))
 	defer prophet.Close()
 	t.Setenv("SAUTH_ENDPOINT", prophet.URL)
 
-	payloads, err := sam.GetSyncPage(context.Background(), "70000000-0000-4000-8000-000000000001", 7)
+	payloads, err := sam.GetSyncPage(context.Background(), "70000000-0000-4000-8000-000000000001", client.SyncCursor{Txid: 3, Seq: 7})
 	if err != nil {
 		t.Fatalf("pull: %v", err)
 	}
-	if len(payloads) != 1 || payloads[0].Seq != 8 {
+	if len(payloads) != 1 || payloads[0].SyncCursor != (client.SyncCursor{Txid: 4, Seq: 8}) {
 		t.Fatalf("the page must decode, got %v", payloads)
 	}
-	if path != "/sam/sync/7" || wait != "25" || consumer != "70000000-0000-4000-8000-000000000001" {
+	if path != "/sam/sync/3.7" || wait != "25" || consumer != "70000000-0000-4000-8000-000000000001" {
 		t.Fatalf("the pull must name the cursor, the hold and the consumer, got %s wait=%s consumer=%s", path, wait, consumer)
 	}
 }
@@ -121,7 +122,7 @@ func TestGetSyncPageTurnsAConflictIntoASnapshot(t *testing.T) {
 	defer prophet.Close()
 	t.Setenv("SAUTH_ENDPOINT", prophet.URL)
 
-	if _, err := sam.GetSyncPage(context.Background(), "", 7); !errors.Is(err, sam.ErrSnapshotRequired) {
+	if _, err := sam.GetSyncPage(context.Background(), "", client.SyncCursor{Seq: 7}); !errors.Is(err, sam.ErrSnapshotRequired) {
 		t.Fatalf("a 409 from the prophet must require the snapshot, got %v", err)
 	}
 }

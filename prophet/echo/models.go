@@ -384,6 +384,7 @@ type Audit struct {
 }
 
 type SyncEvent struct {
+	Txid          int64           `bun:"txid,scanonly" json:"txid"`
 	Seq           int64           `bun:"seq,pk" json:"seq"`
 	Operation     string          `bun:"operation" json:"operation"`
 	EventType     string          `bun:"event_type" json:"event_type"`

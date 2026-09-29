@@ -5,8 +5,8 @@ CREATE FUNCTION pg_temp.app() RETURNS UUID AS $$
     SELECT '50000000-0000-4000-8000-0000000000c5'::UUID
 $$ LANGUAGE sql;
 
-CREATE FUNCTION pg_temp.head() RETURNS BIGINT AS $$
-    SELECT coalesce(max(seq), 0) FROM claimius.sync_event WHERE app_id = pg_temp.app()
+CREATE FUNCTION pg_temp.head() RETURNS TABLE (txid BIGINT, seq BIGINT) AS $$
+    SELECT h.txid, h.seq FROM claimius.get_sync_seq(pg_temp.app()) h
 $$ LANGUAGE sql;
 
 DO $$
@@ -32,8 +32,8 @@ BEGIN
     END LOOP;
 END $$;
 
-SELECT claimius.update_sync_cursor(pg_temp.app(), '70000000-0000-4000-8000-0000000000c1', 5);
-SELECT claimius.update_sync_cursor(pg_temp.app(), '70000000-0000-4000-8000-0000000000c2', 3);
+SELECT claimius.update_sync_cursor(pg_temp.app(), '70000000-0000-4000-8000-0000000000c1', 9, 5);
+SELECT claimius.update_sync_cursor(pg_temp.app(), '70000000-0000-4000-8000-0000000000c2', 8, 30);
 
 SELECT is(
     (SELECT count(*) FROM claimius.sync_consumer WHERE app_id = pg_temp.app()),
@@ -42,45 +42,45 @@ SELECT is(
 );
 
 SELECT is(
-    (SELECT last_applied_seq FROM claimius.prophet_state WHERE app_id = pg_temp.app()),
-    3::BIGINT,
-    'the app''s cursor is the lowest of its consumers'
+    (SELECT ARRAY[last_applied_txid::TEXT::BIGINT, last_applied_seq] FROM claimius.prophet_state WHERE app_id = pg_temp.app()),
+    ARRAY[8, 30]::BIGINT[],
+    'the app''s cursor is the lowest of its consumers in (txid, seq) order'
 );
 
-SELECT claimius.update_sync_cursor(pg_temp.app(), '70000000-0000-4000-8000-0000000000c2', 7);
+SELECT claimius.update_sync_cursor(pg_temp.app(), '70000000-0000-4000-8000-0000000000c2', 10, 7);
 
 SELECT is(
-    ARRAY(SELECT last_applied_seq FROM claimius.sync_consumer WHERE app_id = pg_temp.app() ORDER BY consumer_id),
-    ARRAY[5, 7]::BIGINT[],
+    ARRAY(SELECT last_applied_txid::TEXT || '.' || last_applied_seq FROM claimius.sync_consumer WHERE app_id = pg_temp.app() ORDER BY consumer_id),
+    ARRAY['9.5', '10.7'],
     'moving one consumer leaves the other consumer''s cursor where it was'
 );
 
 SELECT is(
-    claimius.check_sync_cursor(pg_temp.app(), pg_sequence_last_value('claimius.sync_event_seq_seq') + 1),
+    claimius.check_sync_cursor(pg_temp.app(), 0, pg_sequence_last_value('claimius.sync_event_seq_seq') + 1),
     'ahead',
     'a cursor above every sequence the prophet issued is sent to the snapshot'
 );
 
 SELECT is(
-    claimius.check_sync_cursor(pg_temp.app(), pg_temp.head()),
+    claimius.check_sync_cursor(pg_temp.app(), (SELECT txid FROM pg_temp.head()), (SELECT seq FROM pg_temp.head())),
     NULL,
     'a cursor at the head of the app''s events is served by the feed'
 );
 
-CREATE TEMP TABLE before_burst AS SELECT pg_temp.head() AS seq, claimius.count_sync_source_rows(pg_temp.app()) AS rows;
+CREATE TEMP TABLE before_burst AS SELECT h.txid, h.seq, claimius.count_sync_source_rows(pg_temp.app()) AS rows FROM pg_temp.head() h;
 
 INSERT INTO claimius.sync_event (operation, event_type, payload, app_id)
 SELECT 'upsert', 'claimius.user_field', jsonb_build_object('id', gen_random_uuid()), pg_temp.app()
 FROM generate_series(1, (SELECT rows FROM before_burst) + 1);
 
 SELECT is(
-    claimius.check_sync_cursor(pg_temp.app(), (SELECT seq FROM before_burst)),
+    claimius.check_sync_cursor(pg_temp.app(), (SELECT txid FROM before_burst), (SELECT seq FROM before_burst)),
     'backlog',
     'a cursor behind by more events than the app has source rows is sent to the snapshot'
 );
 
 SELECT is(
-    claimius.check_sync_cursor(pg_temp.app(), (SELECT seq FROM before_burst) + 2),
+    claimius.check_sync_cursor(pg_temp.app(), pg_current_xact_id()::TEXT::BIGINT, (SELECT seq FROM before_burst) + 2),
     NULL,
     'a cursor behind by fewer events than the app has source rows is served by the feed'
 );
@@ -94,8 +94,8 @@ SELECT is(
 );
 
 SELECT ok(
-    (SELECT trimmed_seq FROM claimius.prophet_state WHERE app_id = pg_temp.app()) > (SELECT seq FROM before_burst)
-    AND claimius.check_sync_cursor(pg_temp.app(), (SELECT seq FROM before_burst)) = 'trimmed',
+    (SELECT (trimmed_txid::TEXT::BIGINT, trimmed_seq) FROM claimius.prophet_state WHERE app_id = pg_temp.app()) > (SELECT (txid, seq) FROM before_burst)
+    AND claimius.check_sync_cursor(pg_temp.app(), (SELECT txid FROM before_burst), (SELECT seq FROM before_burst)) = 'trimmed',
     'a cursor below the trimmed events is sent to the snapshot'
 );
 

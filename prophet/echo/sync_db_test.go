@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -20,13 +19,13 @@ import (
 	"github.com/nimling/samna-auth-middleware/smw"
 )
 
-func getAppHead(t *testing.T, appID uuid.UUID) int64 {
+func getAppHead(t *testing.T, appID uuid.UUID) client.SyncCursor {
 	t.Helper()
-	var seq int64
-	if err := psdb.Instance().NewRaw(`SELECT claimius.get_sync_seq(?)`, appID).Scan(context.Background(), &seq); err != nil {
+	var head client.SyncCursor
+	if err := psdb.Instance().NewRaw(`SELECT txid, seq FROM claimius.get_sync_seq(?)`, appID).Scan(context.Background(), &head); err != nil {
 		t.Fatalf("read app head: %v", err)
 	}
-	return seq
+	return head
 }
 
 func postSyncEvent(t *testing.T, appID uuid.UUID) {
@@ -39,20 +38,20 @@ func postSyncEvent(t *testing.T, appID uuid.UUID) {
 	}
 }
 
-func getSyncPage(appID uuid.UUID, seq int64, query string) *httptest.ResponseRecorder {
+func getSyncPage(appID uuid.UUID, seq client.SyncCursor, query string) *httptest.ResponseRecorder {
 	e := echo.New()
 	req := httptest.NewRequest(http.MethodGet, "/?"+query, nil)
 	rec := httptest.NewRecorder()
 	ctx := e.NewContext(req, rec)
-	ctx.SetParamNames("seq")
-	ctx.SetParamValues(strconv.FormatInt(seq, 10))
+	ctx.SetParamNames("cursor")
+	ctx.SetParamValues(seq.String())
 	ctx.Set("app_id", appID)
 	ctx.Set("request_id", uuid.New())
 	_ = pecho.GetSyncEvents(ctx)
 	return rec
 }
 
-func getPageSeqs(t *testing.T, rec *httptest.ResponseRecorder) []int64 {
+func getPageSeqs(t *testing.T, rec *httptest.ResponseRecorder) []client.SyncCursor {
 	t.Helper()
 	var envelope struct {
 		Data []pecho.SyncPayload `json:"data"`
@@ -60,9 +59,9 @@ func getPageSeqs(t *testing.T, rec *httptest.ResponseRecorder) []int64 {
 	if err := json.Unmarshal(rec.Body.Bytes(), &envelope); err != nil {
 		t.Fatalf("decode page %s: %v", rec.Body.String(), err)
 	}
-	seqs := make([]int64, 0, len(envelope.Data))
+	seqs := make([]client.SyncCursor, 0, len(envelope.Data))
 	for _, p := range envelope.Data {
-		seqs = append(seqs, p.Seq)
+		seqs = append(seqs, p.SyncCursor)
 	}
 	return seqs
 }
@@ -83,19 +82,20 @@ func TestSyncSeqAnswersAWriteWithTheAppsSequence(t *testing.T) {
 		t.Fatalf("patch grant: %v %d %s", err, rec.Code, rec.Body.String())
 	}
 
-	got, err := strconv.ParseInt(rec.Header().Get(client.HeaderSyncSeq), 10, 64)
+	got, err := client.ParseSyncCursor(rec.Header().Get(client.HeaderSyncSeq))
 	if err != nil {
 		t.Fatalf("a write must answer with %s, got %q", client.HeaderSyncSeq, rec.Header().Get(client.HeaderSyncSeq))
 	}
-	var own int64
+	var own client.SyncCursor
 	if err := psdb.Instance().NewRaw(`
-		SELECT max(seq) FROM claimius.sync_event
+		SELECT txid::TEXT::BIGINT AS txid, seq FROM claimius.sync_event
 		WHERE app_id = ? AND event_type = 'claimius.user_claim' AND payload ->> 'reason' = 'sequenced'
+		ORDER BY txid DESC, seq DESC LIMIT 1
 	`, appID).Scan(context.Background(), &own); err != nil {
 		t.Fatalf("read the write's event: %v", err)
 	}
-	if got < own || got != getAppHead(t, appID) {
-		t.Fatalf("the answer must carry the app's sequence covering the write's event %d, got %d", own, got)
+	if got.Less(own) || got != getAppHead(t, appID) {
+		t.Fatalf("the answer must carry the app's position covering the write's event %s, got %s", own, got)
 	}
 
 	read := httptest.NewRecorder()
@@ -123,7 +123,7 @@ func TestSyncEventsHoldsAnEmptyPullUntilAnEventCommits(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("held pull: %d %s", rec.Code, rec.Body.String())
 	}
-	if seqs := getPageSeqs(t, rec); len(seqs) != 1 || seqs[0] <= head {
+	if seqs := getPageSeqs(t, rec); len(seqs) != 1 || !head.Less(seqs[0]) {
 		t.Fatalf("the held pull must answer with the event that committed, got %v", seqs)
 	}
 	if took < 400*time.Millisecond || took > 5*time.Second {
@@ -149,17 +149,17 @@ func TestSyncEventsKeepsACursorPerConsumer(t *testing.T) {
 	first, second := uuid.New(), uuid.New()
 
 	getSyncPage(appID, head, "consumer="+first.String())
-	getSyncPage(appID, 0, "consumer="+second.String())
+	getSyncPage(appID, client.SyncCursor{}, "consumer="+second.String())
 
-	var cursors []int64
+	var cursors []client.SyncCursor
 	if err := psdb.Instance().NewRaw(`
-		SELECT last_applied_seq FROM claimius.sync_consumer
+		SELECT last_applied_txid::TEXT::BIGINT AS txid, last_applied_seq AS seq FROM claimius.sync_consumer
 		WHERE app_id = ? AND consumer_id IN (?, ?)
-		ORDER BY last_applied_seq DESC
+		ORDER BY last_applied_txid DESC, last_applied_seq DESC
 	`, appID, first, second).Scan(context.Background(), &cursors); err != nil {
 		t.Fatalf("read cursors: %v", err)
 	}
-	if len(cursors) != 2 || cursors[0] != head || cursors[1] != 0 {
+	if len(cursors) != 2 || cursors[0] != head || !cursors[1].IsZero() {
 		t.Fatalf("two consumers of one app must keep their own cursors, got %v", cursors)
 	}
 }
@@ -171,7 +171,7 @@ func TestSyncEventsSendsAStaleCursorToTheSnapshot(t *testing.T) {
 		t.Fatalf("read sequence: %v", err)
 	}
 
-	if rec := getSyncPage(appID, issued+1000, "wait=10"); rec.Code != http.StatusConflict {
+	if rec := getSyncPage(appID, client.SyncCursor{Txid: getAppHead(t, appID).Txid, Seq: issued + 1000}, "wait=10"); rec.Code != http.StatusConflict {
 		t.Fatalf("a cursor above every issued sequence must answer 409, got %d %s", rec.Code, rec.Body.String())
 	}
 

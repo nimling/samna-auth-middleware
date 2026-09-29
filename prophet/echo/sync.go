@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 	"github.com/lib/pq"
+	"github.com/nimling/samna-auth-middleware/client"
 	"github.com/nimling/samna-auth-middleware/pkg/respond"
 	sdb "github.com/nimling/samna-auth-middleware/prophet/sdb"
 	"github.com/nimling/samna-auth-middleware/sauth"
@@ -111,7 +112,7 @@ func (f *syncFeed) wake(appID *uuid.UUID) {
 }
 
 type SyncPayload struct {
-	Seq       int64           `json:"seq"`
+	client.SyncCursor
 	Operation string          `json:"operation"`
 	EventType string          `json:"event_type"`
 	Payload   json.RawMessage `json:"payload"`
@@ -119,7 +120,7 @@ type SyncPayload struct {
 
 type SyncSnapshotResponse struct {
 	Records []SyncPayload `json:"records"`
-	Seq     int64         `json:"seq"`
+	client.SyncCursor
 }
 
 func getSyncConsumer(ctx echo.Context) (uuid.UUID, error) {
@@ -156,7 +157,7 @@ func GetSyncSnapshot(ctx echo.Context) error {
 	}
 
 	var records []SyncPayload
-	var lastSeq int64
+	var cursor client.SyncCursor
 
 	reqCtx := ctx.Request().Context()
 	err = sdb.Instance().RunInTx(reqCtx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true}, func(txCtx context.Context, tx bun.Tx) error {
@@ -189,14 +190,8 @@ func GetSyncSnapshot(ctx echo.Context) error {
 			}
 		}
 
-		seq := tx.NewSelect().
-			TableExpr("claimius.sync_event AS e").
-			ColumnExpr("COALESCE(MAX(e.seq), 0)").
-			Where("e.txid < pg_snapshot_xmin(pg_current_snapshot())")
-		if appID != uuid.Nil {
-			seq = seq.Where("e.app_id = ?", appID)
-		}
-		return seq.Scan(txCtx, &lastSeq)
+		return tx.NewRaw("SELECT pg_snapshot_xmin(pg_current_snapshot())::TEXT::BIGINT AS txid, 0::BIGINT AS seq").
+			Scan(txCtx, &cursor)
 	})
 	if err != nil {
 		ctx.Logger().Errorf("snapshot %s: %v", appID, err)
@@ -208,25 +203,25 @@ func GetSyncSnapshot(ctx echo.Context) error {
 	}
 
 	if appID != uuid.Nil {
-		if _, err := sdb.Instance().NewRaw("SELECT claimius.update_sync_cursor(?, ?, ?)", appID, consumerID, lastSeq).
+		if _, err := sdb.Instance().NewRaw("SELECT claimius.update_sync_cursor(?, ?, ?, ?)", appID, consumerID, cursor.Txid, cursor.Seq).
 			Exec(reqCtx); err != nil {
 			ctx.Logger().Errorf("snapshot cursor %s: %v", appID, err)
 		}
 	}
 
 	return respond.JSON(ctx, http.StatusOK, SyncSnapshotResponse{
-		Records: records,
-		Seq:     lastSeq,
+		Records:    records,
+		SyncCursor: cursor,
 	}, 1)
 }
 
-// GetSyncEvents serves the page of the app's events after seq. With wait set
-// it holds an empty answer open up to wait seconds, at most SyncHoldMax, and
-// answers the moment an event of the app commits. A cursor the feed cannot
+// GetSyncEvents serves the page of the app's events after the cursor. With
+// wait set it holds an empty answer open up to wait seconds, at most
+// SyncHoldMax, and answers the moment an event of the app commits. A cursor the feed cannot
 // serve answers 409 and the consumer takes the snapshot.
 func GetSyncEvents(ctx echo.Context) error {
-	seq := int64(0)
-	if err := echo.PathParamsBinder(ctx).Int64("seq", &seq).BindError(); err != nil {
+	seq, err := client.ParseSyncCursor(ctx.Param("cursor"))
+	if err != nil {
 		return respond.Error(ctx, http.StatusBadRequest, "Bad request")
 	}
 	wait := 0
@@ -245,7 +240,7 @@ func GetSyncEvents(ctx echo.Context) error {
 
 	reqCtx := ctx.Request().Context()
 	var stale sql.NullString
-	if err := sdb.Instance().NewRaw("SELECT claimius.check_sync_cursor(?, ?)", appID, seq).Scan(reqCtx, &stale); err != nil {
+	if err := sdb.Instance().NewRaw("SELECT claimius.check_sync_cursor(?, ?, ?)", appID, seq.Txid, seq.Seq).Scan(reqCtx, &stale); err != nil {
 		ctx.Logger().Errorf("sync cursor: %v", err)
 		return respond.Error(ctx, http.StatusInternalServerError, "Internal server error")
 	}
@@ -253,12 +248,12 @@ func GetSyncEvents(ctx echo.Context) error {
 		return respond.Error(ctx, http.StatusConflict, "Snapshot required: cursor "+stale.String)
 	}
 
-	// The incoming seq is the disciple's proof of application: it only advances
+	// The incoming cursor is the disciple's proof of application: it only advances
 	// its cursor after every payload applied. What was served is not proof, and
 	// a disciple that fails to apply re-requests from the same point, so arming
 	// on the served position would report consumption that never happened and
 	// let the trim delete events still owed.
-	if _, err := sdb.Instance().NewRaw("SELECT claimius.update_sync_cursor(?, ?, ?)", appID, consumerID, seq).
+	if _, err := sdb.Instance().NewRaw("SELECT claimius.update_sync_cursor(?, ?, ?, ?)", appID, consumerID, seq.Txid, seq.Seq).
 		Exec(reqCtx); err != nil {
 		ctx.Logger().Errorf("delta cursor %s: %v", appID, err)
 	}
@@ -276,17 +271,17 @@ func GetSyncEvents(ctx echo.Context) error {
 	payloads := make([]SyncPayload, 0, len(events))
 	for _, event := range events {
 		payloads = append(payloads, SyncPayload{
-			Seq:       event.Seq,
-			Operation: event.Operation,
-			EventType: event.EventType,
-			Payload:   event.Payload,
+			SyncCursor: client.SyncCursor{Txid: event.Txid, Seq: event.Seq},
+			Operation:  event.Operation,
+			EventType:  event.EventType,
+			Payload:    event.Payload,
 		})
 	}
 
 	return respond.JSON(ctx, http.StatusOK, payloads, len(payloads))
 }
 
-func getSyncPage(ctx context.Context, d *shared.DB, appID uuid.UUID, seq int64, hold time.Duration) ([]SyncEvent, error) {
+func getSyncPage(ctx context.Context, d *shared.DB, appID uuid.UUID, seq client.SyncCursor, hold time.Duration) ([]SyncEvent, error) {
 	var wake <-chan struct{}
 	if hold > 0 {
 		if feed := getSyncFeed(d); feed != nil {
@@ -300,7 +295,7 @@ func getSyncPage(ctx context.Context, d *shared.DB, appID uuid.UUID, seq int64, 
 	pending := false
 	for {
 		var events []SyncEvent
-		if err := d.NewRaw("SELECT * FROM claimius.get_sync_events(?, ?, 1000)", appID, seq).Scan(ctx, &events); err != nil {
+		if err := d.NewRaw("SELECT * FROM claimius.get_sync_events(?, ?, ?, 1000)", appID, seq.Txid, seq.Seq).Scan(ctx, &events); err != nil {
 			return nil, err
 		}
 		if len(events) > 0 || wake == nil {

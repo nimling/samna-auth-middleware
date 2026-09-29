@@ -1,11 +1,14 @@
 package smw
 
 import (
+	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/base64"
 	"errors"
 	"fmt"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -90,7 +93,7 @@ func authenticateClient(ctx echo.Context, debugClients map[string]DebugClient) e
 		return fmt.Errorf("lookup client: %w: %w", err, ErrorUnauthorized)
 	}
 
-	if err := bcrypt.CompareHashAndPassword([]byte(samnaClient.SecretHash), []byte(clientSecret)); err != nil {
+	if err := verifyClientSecret(samnaClient, clientSecret); err != nil {
 		return fmt.Errorf("verify client_secret: %w: %w", err, ErrorUnauthorized)
 	}
 
@@ -149,5 +152,27 @@ func forwardUserExternal(ctx echo.Context) error {
 		return ErrorUserExternalNotRecognized
 	}
 	ctx.Set(UserIDKey, user.UserID)
+	return nil
+}
+
+var verifiedSecrets sync.Map
+
+type verifiedSecret struct {
+	digest     [sha256.Size]byte
+	secretHash string
+}
+
+func verifyClientSecret(client *shared.SamnaClient, secret string) error {
+	digest := sha256.Sum256([]byte(secret))
+	if v, ok := verifiedSecrets.Load(client.ClientID); ok {
+		known := v.(verifiedSecret)
+		if known.secretHash == client.SecretHash && subtle.ConstantTimeCompare(known.digest[:], digest[:]) == 1 {
+			return nil
+		}
+	}
+	if err := bcrypt.CompareHashAndPassword([]byte(client.SecretHash), []byte(secret)); err != nil {
+		return err
+	}
+	verifiedSecrets.Store(client.ClientID, verifiedSecret{digest: digest, secretHash: client.SecretHash})
 	return nil
 }

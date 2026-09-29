@@ -75,7 +75,7 @@ BEGIN
         FROM uo
                  CROSS JOIN LATERAL claimius._best_grant(uo.grants, p_user_id, p_required_access) best;
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = claimius, pg_temp;
 
 COMMENT ON FUNCTION claimius.get_access(UUID, UUID, TEXT, INTEGER) IS 'Strongest active claim based grant for one (user, app, object) whose mask covers p_required_access. user_claim_id is the actor token for follow-on writes. sa_root_id is the owning organization root, suitable for FK to claimius.organization on follow-on claim and claim_object writes.';
 
@@ -296,7 +296,7 @@ BEGIN
         RAISE EXCEPTION 'not found' USING ERRCODE = 'P0404';
     END IF;
 END;
-$$ LANGUAGE plpgsql VOLATILE;
+$$ LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path = claimius, pg_temp;
 
 COMMENT ON FUNCTION claimius.get_direct_access(UUID, UUID, TEXT, INTEGER, BOOLEAN) IS 'Locates the closest, strongest user_claim the user holds related to the given object via ancestor walk, directly or through composition, with the binding narrowing its claim and the user''s denies subtracted by class. VOLATILE: it settles through reconcile_if_pending.';
 
@@ -370,7 +370,7 @@ BEGIN
         ORDER BY claimius.user_object.object_id
         LIMIT p_limit;
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = claimius, pg_temp;
 
 COMMENT ON FUNCTION claimius.get_objects(p_user_id uuid, p_object_type text, p_required_access integer, p_after uuid, p_limit integer) IS 'Object ids and metadata for objects whose mask covers p_required_access, in object_id order after p_after, at most p_limit rows. user_claim_id is the actor token from the strongest surviving claim grant; null when only direct_grant applies. claim_id and claim_name describe the claim that contributed the strongest grant. sa_root_id is derived from the owning organization root.';
 
@@ -402,7 +402,7 @@ BEGIN
         WHERE o.sa_deleted_at IS NULL
         ORDER BY o.id;
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = claimius, pg_temp;
 
 COMMENT ON FUNCTION claimius.get_organizations(p_user_id uuid, p_required_access integer, p_after uuid, p_limit integer) IS 'Organizations whose effective mask covers p_required_access, one get_objects page in id order.';
 
@@ -433,7 +433,7 @@ BEGIN
         WHERE l.sa_deleted_at IS NULL
         ORDER BY l.id;
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = claimius, pg_temp;
 
 COMMENT ON FUNCTION claimius.get_locations(p_user_id uuid, p_required_access integer, p_after uuid, p_limit integer) IS 'Locations whose effective mask covers p_required_access, one get_objects page in id order.';
 
@@ -573,7 +573,7 @@ BEGIN
         WHERE access > 0
           AND (access & p_required_access) = p_required_access;
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = claimius, pg_temp;
 
 COMMENT ON FUNCTION claimius.get_user_access(UUID, TEXT, INTEGER) IS
     'Resolved actor access on one target samna_user. OR of self, member co-visibility, and direct claim branches. Empty result means the required mask is not covered.';
@@ -619,7 +619,7 @@ BEGIN
         WHERE u.sa_deleted_at IS NULL
           AND u.status        = 'active';
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = claimius, pg_temp;
 
 COMMENT ON FUNCTION claimius.get_users(UUID, INTEGER) IS
     'Users the calling user can see in this app whose resolved access covers p_required_access. Resolution merges self (0x2F), member co-visibility via user_users (0x24), and direct claim_object on claimius.samna_user.';
@@ -716,7 +716,7 @@ BEGIN
                g.scope, g.sa_owner_id, g.sa_root_id, g.sa_location_id, g.direct_grant
         FROM claimius.get_direct_access(p_user_id, p_object_id::UUID, p_object_type, p_required) g;
 END;
-$$ LANGUAGE plpgsql VOLATILE;
+$$ LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path = claimius, pg_temp;
 
 GRANT EXECUTE ON FUNCTION claimius.resolve_access(UUID, TEXT, TEXT, INTEGER)
     TO claimius_disciple_client, claimius_writer, claimius_admin, claimius_reader;
@@ -784,7 +784,7 @@ BEGIN
     RETURN QUERY
         SELECT * FROM claimius.get_direct_access(p_user_id, v_uuid, p_object_type, p_required, TRUE);
 END;
-$$ LANGUAGE plpgsql VOLATILE;
+$$ LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path = claimius, pg_temp;
 
 COMMENT ON FUNCTION claimius.mutation_access(UUID, TEXT, TEXT, INTEGER) IS 'Single object access gate. Resolves access through get_access then get_direct_access, returns the strongest AccessClaim row, and RAISEs SQLSTATE P0403 when the object exists but the caller lacks the required access, P0404 when the object is absent or soft deleted, the id is malformed or the type is not registered. SQL embodiment of the Go MutationAccess resolution in one round trip. VOLATILE: it settles through reconcile_if_pending.';
 
@@ -838,7 +838,7 @@ BEGIN
           )
         ORDER BY claimius._popcount(c.sa_access) DESC;
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = claimius, pg_temp;
 
 COMMENT ON FUNCTION claimius.get_claims(UUID, INTEGER) IS 'All claims the user can read at the required level: either via a direct user_claim grant or via the materialized user_object index (cascade or direct creator grant).';
 
@@ -880,7 +880,7 @@ BEGIN
           )
         ORDER BY claimius._popcount(c.sa_access) DESC;
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = claimius, pg_temp;
 
 COMMENT ON FUNCTION claimius.get_claims(UUID, UUID, TEXT) IS 'All claims the user holds against one object.';
 
@@ -909,7 +909,7 @@ CREATE OR REPLACE FUNCTION claimius.get_scope_access(
                     object_scope    JSONB,
                     object_access   INTEGER,
                     object_inherits BOOLEAN
-                ) LANGUAGE sql STABLE AS $$
+                ) LANGUAGE sql STABLE SECURITY DEFINER SET search_path = claimius, pg_temp AS $$
     WITH bound AS (
         SELECT uc.id AS held_id,
                c.id AS held_claim_id,
@@ -986,7 +986,7 @@ BEGIN
         ORDER BY claimius._popcount(s.sa_access) DESC, s.claim_id
         LIMIT 1;
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = claimius, pg_temp;
 
 COMMENT ON FUNCTION claimius.get_access(UUID, TEXT, INTEGER) IS 'Strongest active object-less binding whose scope contains p_scope_key and whose mask covers p_required_access. A NULL binding mask inherits the claim mask, and a deny binding carrying the key subtracts its bits.';
 
@@ -1020,7 +1020,7 @@ BEGIN
         ORDER BY a.sa_created_at DESC
         LIMIT p_limit OFFSET p_offset;
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = claimius, pg_temp;
 
 COMMENT ON FUNCTION claimius.get_audit(p_user_id uuid, p_required_access integer, p_limit integer, p_offset integer) IS 'Audit rows for organizations the user can see.';
 
@@ -1051,7 +1051,7 @@ BEGIN
         WHERE s.sa_deleted_at IS NULL
         ORDER BY s.id;
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = claimius, pg_temp;
 
 COMMENT ON FUNCTION claimius.get_secrets(p_user_id uuid, p_required_access integer, p_after uuid, p_limit integer) IS 'Secrets whose effective mask covers p_required_access, one get_objects page in id order.';
 
@@ -1293,7 +1293,7 @@ BEGIN
             RETURN QUERY EXECUTE v_sql USING p_user_id, p_required_access;
         END LOOP;
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = claimius, pg_temp;
 
 COMMENT ON FUNCTION claimius.get_owner_graph(UUID, UUID, INTEGER, INTEGER) IS 'Ownership graph (orgs, locations, registered tables with sa_owner_id or sa_location_id) for the user. Optional start org and depth limit.';
 
@@ -1632,7 +1632,7 @@ BEGIN
                e->'data'
         FROM jsonb_array_elements(v_graph) AS e;
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = claimius, pg_temp;
 
 COMMENT ON FUNCTION claimius.get_claim_graph(UUID, UUID, INTEGER, INTEGER) IS 'Access graph: user, other users seen, claims, user_claims, claim_object bindings, reachable objects. Optional start claim and depth limit. Default shape served from claimius.claim_graph_cache.';
 
@@ -1732,7 +1732,7 @@ BEGIN
         ORDER BY ts_rank(claimius.user_object.search_vector, v_tsquery) DESC
         LIMIT p_limit OFFSET p_offset;
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = claimius, pg_temp;
 
 COMMENT ON FUNCTION claimius.search(UUID, TEXT, TEXT[], INTEGER, INTEGER, INTEGER) IS 'Full text search over accessible objects whose mask covers p_required_access. user_claim_id is the actor token from the strongest surviving claim grant per object.';
 
@@ -1879,7 +1879,7 @@ BEGIN
     ORDER BY combined.rank DESC, combined.object_id ASC
     LIMIT p_limit OFFSET p_offset;
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = claimius, pg_temp;
 
 COMMENT ON FUNCTION claimius.search(UUID, TEXT, TEXT[], INTEGER, UUID[], UUID[], UUID[], UUID, TEXT, INTEGER, INTEGER) IS 'Full text search over accessible objects. Includes claimius.claim rows the user holds, skipped when any subtree or parent filter is set. p_owner_subtree_ids scopes via ownership tree. p_parent_id and p_parent_type scope via location or parenthood tree. total_count carries the un-capped match count for pagination. Rows tie-break on object_id so offset pagination tiles without overlap or skip.';
 
@@ -2623,11 +2623,13 @@ BEGIN
              claimius.audit, claimius.inheritance_info, claimius.table_info,
              claimius.notification, claimius.claim_graph_cache
              TO claimius_disciple_client';
-    EXECUTE 'GRANT INSERT, UPDATE, DELETE ON claimius.claim_graph_cache TO claimius_reader';
+    EXECUTE 'REVOKE INSERT, UPDATE, DELETE ON claimius.claim_graph_cache FROM claimius_reader';
     EXECUTE 'GRANT SELECT ON ALL TABLES IN SCHEMA claimius TO claimius_disciple_client';
     EXECUTE 'GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA claimius TO claimius_disciple_client';
 END;
 $$ LANGUAGE plpgsql;
+
+REVOKE INSERT, UPDATE, DELETE ON claimius.claim_graph_cache FROM claimius_reader;
 
 -- ----------------------------------------------------------------------------
 -- ensure_app_user
@@ -2689,7 +2691,7 @@ BEGIN
           AND e.ancestor_id   = p_object_id
         ORDER BY e.depth;
 END;
-$$ LANGUAGE plpgsql STABLE;
+$$ LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = claimius, pg_temp;
 
 COMMENT ON FUNCTION claimius.get_owner_descendants(p_object_type text, p_object_id uuid) IS 'Ownership tree descendants of an object, hop 0 = self.';
 
@@ -2718,7 +2720,7 @@ BEGIN
         END IF;
     END IF;
 END;
-$$ LANGUAGE plpgsql STABLE;
+$$ LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = claimius, pg_temp;
 
 COMMENT ON FUNCTION claimius.get_location_descendants(p_object_type text, p_object_id uuid) IS 'Location tree descendants of an object across every registered table located in the subtree.';
 
@@ -2746,7 +2748,7 @@ BEGIN
         RETURN QUERY SELECT p_object_type, p_object_id, 0;
     END IF;
 END;
-$$ LANGUAGE plpgsql STABLE;
+$$ LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = claimius, pg_temp;
 
 COMMENT ON FUNCTION claimius.get_parenthood_descendants(p_object_type text, p_object_id uuid) IS 'Parenthood tree descendants via sa_parent_id, hop 0 = self.';
 
@@ -2768,7 +2770,7 @@ BEGIN
         SELECT d.object_type, d.object_id, d.hop, 'parenthood'::TEXT
         FROM claimius.get_parenthood_descendants(p_object_type, p_object_id) d;
 END;
-$$ LANGUAGE plpgsql STABLE;
+$$ LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = claimius, pg_temp;
 
 COMMENT ON FUNCTION claimius.get_descendants(p_object_type text, p_object_id uuid) IS 'Combined descendant walk across owner, location, and parenthood trees.';
 
@@ -2791,7 +2793,7 @@ BEGIN
           AND uc.sa_deleted_at IS NULL
           AND c.sa_deleted_at IS NULL;
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = claimius, pg_temp;
 
 
 CREATE OR REPLACE FUNCTION claimius.normalize_object_type(p_object_type TEXT)
@@ -2976,7 +2978,7 @@ BEGIN
 
     RETURN jsonb_build_object('links', v_links);
 END;
-$$ LANGUAGE plpgsql STABLE;
+$$ LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = claimius, pg_temp;
 
 GRANT EXECUTE ON FUNCTION claimius.get_graph_links_owner(UUID, INTEGER, TEXT[], TEXT[], UUID, INTEGER) TO claimius_reader, claimius_writer, claimius_admin;
 
@@ -3149,7 +3151,7 @@ BEGIN
 
     RETURN jsonb_build_object('links', v_links);
 END;
-$$ LANGUAGE plpgsql STABLE;
+$$ LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = claimius, pg_temp;
 
 GRANT EXECUTE ON FUNCTION claimius.get_graph_links_claim(UUID, INTEGER, TEXT[], TEXT[], UUID, INTEGER) TO claimius_reader, claimius_writer, claimius_admin;
 

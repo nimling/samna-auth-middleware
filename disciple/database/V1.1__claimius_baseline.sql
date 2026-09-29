@@ -543,16 +543,19 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_prophet_state_system_singleton
 COMMENT ON TABLE claimius.prophet_state IS 'Per app publishing cursor. system_app_slug marks the deployment system app row.';
 
 -- disciple_state
--- Singleton cursor on the disciple side. Tracks the highest sync_event.seq
--- already applied locally. The disciple identifies its app from env only,
+-- Singleton cursor on the disciple side. Tracks the (txid, seq) position
+-- on the prophet feed already applied locally. The disciple identifies its app from env only,
 -- so no app slug is stored here.
 CREATE TABLE IF NOT EXISTS claimius.disciple_state (
                                                        id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                                                       last_applied_txid   BIGINT NOT NULL DEFAULT 0,
                                                        last_applied_seq    BIGINT NOT NULL DEFAULT 0,
                                                        sa_updated_at       TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-COMMENT ON TABLE claimius.disciple_state IS 'Singleton consumption cursor for the disciple.';
+ALTER TABLE claimius.disciple_state ADD COLUMN IF NOT EXISTS last_applied_txid BIGINT NOT NULL DEFAULT 0;
+
+COMMENT ON TABLE claimius.disciple_state IS 'Singleton consumption cursor for the disciple: the prophet feed position (last_applied_txid, last_applied_seq) applied locally.';
 
 -- reconcile_queue
 -- Disciple side retry queue. When applying a sync_event fails, the
@@ -645,13 +648,33 @@ COMMENT ON COLUMN claimius.claim_graph_cache.graph IS 'JSON array of {object_id,
 -- ----------------------------------------------------------------------------
 
 -- audit
--- Append only audit log. Populated by audit_trigger_function.
+-- Append only audit log, partitioned by month on sa_created_at. Written by
+-- write_audit, which creates the month's partition on the first row of the
+-- month. A row no month partition takes lands in audit_default and moves to
+-- its month when that partition is created. An unpartitioned audit table
+-- from before becomes audit_default and its rows move to their months.
 -- sa_created_by is nullable on this table only. Audit captures every event,
 -- including ones with no clear actor: denied access attempts, system trigger
 -- side effects, disciple replay, scheduled cleanups. Successful operations
 -- still write the acting user_claim.id; everything else writes NULL.
+DO $$
+DECLARE
+    v_fn REGPROCEDURE;
+BEGIN
+    IF (SELECT c.relkind FROM pg_class c WHERE c.oid = to_regclass('claimius.audit')) = 'r' THEN
+        FOR v_fn IN SELECT p.oid::REGPROCEDURE FROM pg_proc p WHERE p.prorettype = 'claimius.audit'::REGTYPE LOOP
+            EXECUTE format('DROP FUNCTION %s', v_fn);
+        END LOOP;
+        DROP TRIGGER IF EXISTS tg_update_timestamp ON claimius.audit;
+        ALTER TABLE claimius.audit DROP CONSTRAINT IF EXISTS audit_pkey;
+        DROP INDEX IF EXISTS claimius.idx_audit_sa_owner_id,
+            claimius.idx_audit_sa_created_at, claimius.idx_audit_object;
+        ALTER TABLE claimius.audit RENAME TO audit_default;
+    END IF;
+END $$;
+
 CREATE TABLE IF NOT EXISTS claimius.audit (
-                                              id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                                              id              UUID NOT NULL DEFAULT gen_random_uuid(),
                                               operation       VARCHAR NOT NULL,
                                               message         TEXT DEFAULT '',
                                               type            VARCHAR NOT NULL,
@@ -660,15 +683,73 @@ CREATE TABLE IF NOT EXISTS claimius.audit (
                                               sa_owner_id     UUID NOT NULL,
                                               sa_created_by   UUID,
                                               sa_created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
-                                              sa_updated_at   TIMESTAMPTZ NOT NULL DEFAULT now()
-);
+                                              sa_updated_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+                                              PRIMARY KEY (id, sa_created_at)
+) PARTITION BY RANGE (sa_created_at);
 
-COMMENT ON TABLE claimius.audit IS 'Append only audit log. sa_created_by may be NULL when no actor applies (system triggers, replay, denied attempts).';
+DO $$
+DECLARE
+    v_acl RECORD;
+BEGIN
+    IF coalesce((SELECT c.relispartition FROM pg_class c WHERE c.oid = to_regclass('claimius.audit_default')), TRUE) THEN
+        RETURN;
+    END IF;
+    ALTER TABLE claimius.audit ATTACH PARTITION claimius.audit_default DEFAULT;
+    FOR v_acl IN
+        SELECT a.privilege_type, pg_get_userbyid(a.grantee) AS grantee
+        FROM pg_class c, aclexplode(c.relacl) a
+        WHERE c.oid = 'claimius.audit_default'::REGCLASS AND a.grantee <> 0 AND a.grantee <> c.relowner
+    LOOP
+        EXECUTE format('GRANT %s ON claimius.audit TO %I', v_acl.privilege_type, v_acl.grantee);
+    END LOOP;
+    IF to_regproc('claimius.update_timestamp') IS NOT NULL THEN
+        CREATE TRIGGER tg_update_timestamp BEFORE UPDATE ON claimius.audit
+            FOR EACH ROW EXECUTE FUNCTION claimius.update_timestamp();
+    END IF;
+END $$;
+
+CREATE TABLE IF NOT EXISTS claimius.audit_default PARTITION OF claimius.audit DEFAULT;
+
+COMMENT ON TABLE claimius.audit IS 'Append only audit log, partitioned by month on sa_created_at. sa_created_by may be NULL when no actor applies (system triggers, replay, denied attempts).';
 COMMENT ON COLUMN claimius.audit.sa_created_by IS 'Acting user_claim.id, or NULL for system events with no clear actor.';
 
 CREATE INDEX IF NOT EXISTS idx_audit_sa_owner_id ON claimius.audit (sa_owner_id);
-CREATE INDEX IF NOT EXISTS idx_audit_sa_created_at ON claimius.audit (sa_created_at);
+CREATE INDEX IF NOT EXISTS idx_audit_sa_created_at ON claimius.audit USING brin (sa_created_at);
 CREATE INDEX IF NOT EXISTS idx_audit_object ON claimius.audit (object_type, object_id);
+
+CREATE OR REPLACE FUNCTION claimius.ensure_audit_partition(p_at TIMESTAMPTZ)
+    RETURNS VOID AS $$
+DECLARE
+    v_from  TIMESTAMPTZ := date_trunc('month', p_at, 'UTC');
+    v_to    TIMESTAMPTZ := date_trunc('month', p_at, 'UTC') + INTERVAL '1 month';
+    v_name  TEXT := 'audit_' || to_char(p_at AT TIME ZONE 'UTC', 'YYYYMM');
+BEGIN
+    IF to_regclass('claimius.' || v_name) IS NOT NULL THEN
+        RETURN;
+    END IF;
+    PERFORM pg_advisory_xact_lock(hashtextextended('claimius.audit_partition', 0));
+    IF to_regclass('claimius.' || v_name) IS NOT NULL THEN
+        RETURN;
+    END IF;
+    EXECUTE format('CREATE TABLE claimius.%I (LIKE claimius.audit INCLUDING DEFAULTS)', v_name);
+    EXECUTE format('WITH moved AS (DELETE FROM claimius.audit_default WHERE sa_created_at >= $1 AND sa_created_at < $2 RETURNING *)
+                    INSERT INTO claimius.%I SELECT * FROM moved', v_name) USING v_from, v_to;
+    EXECUTE format('ALTER TABLE claimius.audit ATTACH PARTITION claimius.%I FOR VALUES FROM (%L) TO (%L)', v_name, v_from, v_to);
+EXCEPTION WHEN duplicate_table THEN
+    RETURN;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = claimius, pg_temp;
+
+COMMENT ON FUNCTION claimius.ensure_audit_partition(TIMESTAMPTZ) IS 'Creates the audit partition of the UTC month holding p_at when it is missing, moving that month''s rows out of audit_default. Owner rights, so a writer that only inserts audit rows can open a month.';
+
+DO $$
+DECLARE
+    v_month TIMESTAMPTZ;
+BEGIN
+    FOR v_month IN SELECT DISTINCT date_trunc('month', a.sa_created_at, 'UTC') FROM claimius.audit_default a LOOP
+        PERFORM claimius.ensure_audit_partition(v_month);
+    END LOOP;
+END $$;
 
 -- ----------------------------------------------------------------------------
 -- 9. Extensibility

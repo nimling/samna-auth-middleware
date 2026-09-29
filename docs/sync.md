@@ -12,7 +12,7 @@ sam.SyncStart(ctx)
 
 ## Where it pulls from
 
-Sync is pull only. The prophet serves two routes under the `/sam` group, `GET /sam/sync/snapshot` and `GET /sam/sync/:seq`, and nothing pushes to a disciple or to the prophet: there is no inbound sync route on either side. The delta route reads `claimius.get_sync_events`, which returns the committed events of the app in sequence order, an organization or location written once per app linked to it. An empty pull is held open up to 25 s until an event of the app commits, and a cursor the feed cannot serve answers 409 and the disciple takes the snapshot.
+Sync is pull only. The prophet serves two routes under the `/sam` group, `GET /sam/sync/snapshot` and `GET /sam/sync/:cursor`, and nothing pushes to a disciple or to the prophet: there is no inbound sync route on either side. The delta route reads `claimius.get_sync_events`, which returns the committed events of the app in `(txid, seq)` order after a `<txid>.<seq>` cursor, an organization or location written once per app linked to it. An empty pull is held open up to 25 s until an event of the app commits, and a cursor the feed cannot serve answers 409 and the disciple takes the snapshot.
 
 ## What travels
 

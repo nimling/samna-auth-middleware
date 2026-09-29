@@ -95,7 +95,7 @@ func RegisterEndpoints(g *echo.Group) {
 
 	sync := g.Group("/sync")
 	sync.GET("/snapshot", h.GetSyncSnapshot)
-	sync.GET("/:seq", h.GetSyncEvents)
+	sync.GET("/:cursor", h.GetSyncEvents)
 
 	client := g.Group("/samna_client")
 	client.GET("", h.GetClients)

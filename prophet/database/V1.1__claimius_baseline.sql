@@ -623,30 +623,34 @@ CREATE INDEX IF NOT EXISTS idx_sync_event_written_at ON claimius.sync_event (wri
 CREATE INDEX IF NOT EXISTS idx_sync_event_type_seq ON claimius.sync_event (event_type, seq);
 
 -- prophet_state
--- Per app cursor on the prophet side. Tracks the highest sync_event.seq
--- already published to disciples for this app. Additionally carries the
+-- Per app cursor on the prophet side. Tracks the lowest (txid, seq) position
+-- on the sync feed that the app's consumers applied. Additionally carries the
 -- system_app_slug marker on the system app's row (NULL on every other row),
 -- which is how get_app finds the deployment's system app.
 CREATE TABLE IF NOT EXISTS claimius.prophet_state (
                                                       id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
                                                       app_id              UUID NOT NULL UNIQUE REFERENCES claimius.samna_app(id),
+                                                      last_applied_txid   XID8 NOT NULL DEFAULT '0',
                                                       last_applied_seq    BIGINT NOT NULL DEFAULT 0,
                                                       system_app_slug     TEXT,
                                                       sync_mode           TEXT NOT NULL DEFAULT 'idle',
                                                       sync_failures       INTEGER NOT NULL DEFAULT 0,
                                                       next_attempt_at     TIMESTAMPTZ,
                                                       last_contact_at     TIMESTAMPTZ,
+                                                      trimmed_txid        XID8 NOT NULL DEFAULT '0',
                                                       trimmed_seq         BIGINT NOT NULL DEFAULT 0,
                                                       sa_updated_at       TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 ALTER TABLE claimius.prophet_state ADD COLUMN IF NOT EXISTS trimmed_seq BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE claimius.prophet_state ADD COLUMN IF NOT EXISTS last_applied_txid XID8 NOT NULL DEFAULT '0';
+ALTER TABLE claimius.prophet_state ADD COLUMN IF NOT EXISTS trimmed_txid XID8 NOT NULL DEFAULT '0';
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_prophet_state_system_singleton
     ON claimius.prophet_state (system_app_slug)
     WHERE system_app_slug IS NOT NULL;
 
-COMMENT ON TABLE claimius.prophet_state IS 'Per app publishing state. last_applied_seq is the lowest cursor among the app''s consumers in contact, trimmed_seq the highest of the app''s events trim_sync_event removed. system_app_slug marks the deployment system app row.';
+COMMENT ON TABLE claimius.prophet_state IS 'Per app publishing state. (last_applied_txid, last_applied_seq) is the lowest cursor among the app''s consumers in contact, (trimmed_txid, trimmed_seq) the highest position of the app''s events trim_sync_event removed. system_app_slug marks the deployment system app row.';
 
 -- sync_consumer
 -- One cursor per consumer of an app. A consumer is one disciple database,
@@ -655,12 +659,15 @@ COMMENT ON TABLE claimius.prophet_state IS 'Per app publishing state. last_appli
 CREATE TABLE IF NOT EXISTS claimius.sync_consumer (
                                                       app_id              UUID NOT NULL REFERENCES claimius.samna_app(id),
                                                       consumer_id         UUID NOT NULL,
+                                                      last_applied_txid   XID8 NOT NULL DEFAULT '0',
                                                       last_applied_seq    BIGINT NOT NULL DEFAULT 0,
                                                       last_contact_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
                                                       PRIMARY KEY (app_id, consumer_id)
 );
 
-COMMENT ON TABLE claimius.sync_consumer IS 'Per consumer sync cursor: the sequence a disciple database last proved it applied by asking for what comes after it.';
+ALTER TABLE claimius.sync_consumer ADD COLUMN IF NOT EXISTS last_applied_txid XID8 NOT NULL DEFAULT '0';
+
+COMMENT ON TABLE claimius.sync_consumer IS 'Per consumer sync cursor: the (txid, seq) position a disciple database last proved it applied by asking for what comes after it.';
 
 INSERT INTO claimius.sync_consumer (app_id, consumer_id, last_applied_seq, last_contact_at)
 SELECT ps.app_id, '00000000-0000-0000-0000-000000000000', ps.last_applied_seq, ps.last_contact_at
@@ -669,17 +676,20 @@ WHERE ps.last_contact_at IS NOT NULL
 ON CONFLICT (app_id, consumer_id) DO NOTHING;
 
 -- disciple_state
--- Singleton cursor on the disciple side. Tracks the highest sync_event.seq
--- already applied locally. disciple_app_slug records which app this disciple
+-- Singleton cursor on the disciple side. Tracks the (txid, seq) position
+-- on the prophet feed already applied locally. disciple_app_slug records which app this disciple
 -- mirrors from upstream prophet; set by init_disciple.
 CREATE TABLE IF NOT EXISTS claimius.disciple_state (
                                                        id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                                                       last_applied_txid   BIGINT NOT NULL DEFAULT 0,
                                                        last_applied_seq    BIGINT NOT NULL DEFAULT 0,
                                                        disciple_app_slug   TEXT NOT NULL,
                                                        sa_updated_at       TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-COMMENT ON TABLE claimius.disciple_state IS 'Singleton consumption cursor for the disciple.';
+ALTER TABLE claimius.disciple_state ADD COLUMN IF NOT EXISTS last_applied_txid BIGINT NOT NULL DEFAULT 0;
+
+COMMENT ON TABLE claimius.disciple_state IS 'Singleton consumption cursor for the disciple: the prophet feed position (last_applied_txid, last_applied_seq) applied locally.';
 
 -- reconcile_queue
 -- Disciple side retry queue. When applying a sync_event fails, the
@@ -796,7 +806,7 @@ BEGIN
         SELECT * FROM claimius.samna_app
         WHERE slug = v_slug AND sa_deleted_at IS NULL;
 END;
-$$ LANGUAGE plpgsql STABLE;
+$$ LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = claimius, pg_temp;
 
 COMMENT ON FUNCTION claimius.get_app() IS 'Returns the system app row for this deployment (prophet or hybrid). Raises on pure disciple.';
 
@@ -817,21 +827,21 @@ BEGIN
         SELECT * FROM claimius.samna_app
         WHERE slug = v_slug AND sa_deleted_at IS NULL;
 END;
-$$ LANGUAGE plpgsql STABLE;
+$$ LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = claimius, pg_temp;
 
 COMMENT ON FUNCTION claimius.get_disciple_app() IS 'Returns the upstream prophet app this disciple mirrors. Raises on pure prophet.';
 
 CREATE OR REPLACE FUNCTION claimius.get_prophet_app_id()
     RETURNS UUID AS $$
 SELECT id FROM claimius.get_app();
-$$ LANGUAGE sql STABLE;
+$$ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = claimius, pg_temp;
 
 COMMENT ON FUNCTION claimius.get_prophet_app_id() IS 'Scalar wrapper over get_app. Returns the system app id; raises on pure disciple.';
 
 CREATE OR REPLACE FUNCTION claimius.get_disciple_app_id()
     RETURNS UUID AS $$
 SELECT id FROM claimius.get_disciple_app();
-$$ LANGUAGE sql STABLE;
+$$ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = claimius, pg_temp;
 
 COMMENT ON FUNCTION claimius.get_disciple_app_id() IS 'Scalar wrapper over get_disciple_app. Returns the upstream prophet app id; raises on pure prophet.';
 
@@ -863,7 +873,7 @@ BEGIN
 
     RETURN v_id;
 END;
-$$ LANGUAGE plpgsql STABLE;
+$$ LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = claimius, pg_temp;
 
 COMMENT ON FUNCTION claimius.get_app_id() IS 'Returns the deployment own app id. Prophet/hybrid: system app. Pure disciple: upstream app.';
 
@@ -872,13 +882,33 @@ COMMENT ON FUNCTION claimius.get_app_id() IS 'Returns the deployment own app id.
 -- ----------------------------------------------------------------------------
 
 -- audit
--- Append only audit log. Populated by audit_trigger_function.
+-- Append only audit log, partitioned by month on sa_created_at. Written by
+-- write_audit, which creates the month's partition on the first row of the
+-- month. A row no month partition takes lands in audit_default and moves to
+-- its month when that partition is created. An unpartitioned audit table
+-- from before becomes audit_default and its rows move to their months.
 -- sa_created_by is nullable on this table only. Audit captures every event,
 -- including ones with no clear actor: denied access attempts, system trigger
 -- side effects, disciple replay, scheduled cleanups. Successful operations
 -- still write the acting user_claim.id; everything else writes NULL.
+DO $$
+DECLARE
+    v_fn REGPROCEDURE;
+BEGIN
+    IF (SELECT c.relkind FROM pg_class c WHERE c.oid = to_regclass('claimius.audit')) = 'r' THEN
+        FOR v_fn IN SELECT p.oid::REGPROCEDURE FROM pg_proc p WHERE p.prorettype = 'claimius.audit'::REGTYPE LOOP
+            EXECUTE format('DROP FUNCTION %s', v_fn);
+        END LOOP;
+        DROP TRIGGER IF EXISTS tg_update_timestamp ON claimius.audit;
+        ALTER TABLE claimius.audit DROP CONSTRAINT IF EXISTS audit_pkey;
+        DROP INDEX IF EXISTS claimius.idx_audit_app_id, claimius.idx_audit_sa_owner_id,
+            claimius.idx_audit_sa_created_at, claimius.idx_audit_object;
+        ALTER TABLE claimius.audit RENAME TO audit_default;
+    END IF;
+END $$;
+
 CREATE TABLE IF NOT EXISTS claimius.audit (
-                                              id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                                              id              UUID NOT NULL DEFAULT gen_random_uuid(),
                                               app_id          UUID NOT NULL DEFAULT claimius.get_app_id(),
                                               operation       VARCHAR NOT NULL,
                                               message         TEXT DEFAULT '',
@@ -888,16 +918,74 @@ CREATE TABLE IF NOT EXISTS claimius.audit (
                                               sa_owner_id     UUID NOT NULL,
                                               sa_created_by   UUID,
                                               sa_created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
-                                              sa_updated_at   TIMESTAMPTZ NOT NULL DEFAULT now()
-);
+                                              sa_updated_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+                                              PRIMARY KEY (id, sa_created_at)
+) PARTITION BY RANGE (sa_created_at);
 
-COMMENT ON TABLE claimius.audit IS 'Append only audit log. sa_created_by may be NULL when no actor applies (system triggers, replay, denied attempts).';
+DO $$
+DECLARE
+    v_acl RECORD;
+BEGIN
+    IF coalesce((SELECT c.relispartition FROM pg_class c WHERE c.oid = to_regclass('claimius.audit_default')), TRUE) THEN
+        RETURN;
+    END IF;
+    ALTER TABLE claimius.audit ATTACH PARTITION claimius.audit_default DEFAULT;
+    FOR v_acl IN
+        SELECT a.privilege_type, pg_get_userbyid(a.grantee) AS grantee
+        FROM pg_class c, aclexplode(c.relacl) a
+        WHERE c.oid = 'claimius.audit_default'::REGCLASS AND a.grantee <> 0 AND a.grantee <> c.relowner
+    LOOP
+        EXECUTE format('GRANT %s ON claimius.audit TO %I', v_acl.privilege_type, v_acl.grantee);
+    END LOOP;
+    IF to_regproc('claimius.update_timestamp') IS NOT NULL THEN
+        CREATE TRIGGER tg_update_timestamp BEFORE UPDATE ON claimius.audit
+            FOR EACH ROW EXECUTE FUNCTION claimius.update_timestamp();
+    END IF;
+END $$;
+
+CREATE TABLE IF NOT EXISTS claimius.audit_default PARTITION OF claimius.audit DEFAULT;
+
+COMMENT ON TABLE claimius.audit IS 'Append only audit log, partitioned by month on sa_created_at. sa_created_by may be NULL when no actor applies (system triggers, replay, denied attempts).';
 COMMENT ON COLUMN claimius.audit.sa_created_by IS 'Acting user_claim.id, or NULL for system events with no clear actor.';
 
 CREATE INDEX IF NOT EXISTS idx_audit_app_id ON claimius.audit (app_id);
 CREATE INDEX IF NOT EXISTS idx_audit_sa_owner_id ON claimius.audit (sa_owner_id);
-CREATE INDEX IF NOT EXISTS idx_audit_sa_created_at ON claimius.audit (sa_created_at);
+CREATE INDEX IF NOT EXISTS idx_audit_sa_created_at ON claimius.audit USING brin (sa_created_at);
 CREATE INDEX IF NOT EXISTS idx_audit_object ON claimius.audit (object_type, object_id);
+
+CREATE OR REPLACE FUNCTION claimius.ensure_audit_partition(p_at TIMESTAMPTZ)
+    RETURNS VOID AS $$
+DECLARE
+    v_from  TIMESTAMPTZ := date_trunc('month', p_at, 'UTC');
+    v_to    TIMESTAMPTZ := date_trunc('month', p_at, 'UTC') + INTERVAL '1 month';
+    v_name  TEXT := 'audit_' || to_char(p_at AT TIME ZONE 'UTC', 'YYYYMM');
+BEGIN
+    IF to_regclass('claimius.' || v_name) IS NOT NULL THEN
+        RETURN;
+    END IF;
+    PERFORM pg_advisory_xact_lock(hashtextextended('claimius.audit_partition', 0));
+    IF to_regclass('claimius.' || v_name) IS NOT NULL THEN
+        RETURN;
+    END IF;
+    EXECUTE format('CREATE TABLE claimius.%I (LIKE claimius.audit INCLUDING DEFAULTS)', v_name);
+    EXECUTE format('WITH moved AS (DELETE FROM claimius.audit_default WHERE sa_created_at >= $1 AND sa_created_at < $2 RETURNING *)
+                    INSERT INTO claimius.%I SELECT * FROM moved', v_name) USING v_from, v_to;
+    EXECUTE format('ALTER TABLE claimius.audit ATTACH PARTITION claimius.%I FOR VALUES FROM (%L) TO (%L)', v_name, v_from, v_to);
+EXCEPTION WHEN duplicate_table THEN
+    RETURN;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = claimius, pg_temp;
+
+COMMENT ON FUNCTION claimius.ensure_audit_partition(TIMESTAMPTZ) IS 'Creates the audit partition of the UTC month holding p_at when it is missing, moving that month''s rows out of audit_default. Owner rights, so a writer that only inserts audit rows can open a month.';
+
+DO $$
+DECLARE
+    v_month TIMESTAMPTZ;
+BEGIN
+    FOR v_month IN SELECT DISTINCT date_trunc('month', a.sa_created_at, 'UTC') FROM claimius.audit_default a LOOP
+        PERFORM claimius.ensure_audit_partition(v_month);
+    END LOOP;
+END $$;
 
 -- ----------------------------------------------------------------------------
 -- 9. Extensibility

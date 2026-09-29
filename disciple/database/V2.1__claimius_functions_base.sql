@@ -98,8 +98,9 @@ $$;
 COMMENT ON FUNCTION claimius.ensure_uuid_null(p uuid) IS 'Returns NULL when input is NULL or the zero UUID; otherwise the UUID unchanged.';
 
 -- write_audit
--- Inserts a row into claimius.audit. Used by audit triggers and by error
--- paths inside other triggers.
+-- Inserts a row into claimius.audit, in the transaction of the change it
+-- records, opening the month's partition on its first row. Used by audit
+-- triggers, by error paths inside other triggers and by the service.
 -- p_sa_created_by may be NULL for events with no clear actor (system
 -- triggers, replay, denied access attempts).
 DROP FUNCTION IF EXISTS claimius.write_audit(UUID, TEXT, TEXT, TEXT, UUID, UUID, UUID, TEXT);
@@ -116,6 +117,7 @@ CREATE OR REPLACE FUNCTION claimius.write_audit(
 DECLARE
     v_row claimius.audit;
 BEGIN
+    PERFORM claimius.ensure_audit_partition(now());
     INSERT INTO claimius.audit (
         operation, type, object_type, object_id,
         sa_owner_id, sa_created_by, message
@@ -163,7 +165,7 @@ BEGIN
           AND i.ancestor_type = p_start_type
           AND i.ancestor_id = p_start_id;
 END;
-$$ LANGUAGE plpgsql STABLE;
+$$ LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = claimius, pg_temp;
 
 COMMENT ON FUNCTION claimius.get_subtree(p_tree_type claimius.tree_type, p_root_id uuid, p_start_type text, p_start_id uuid) IS 'Returns (object_type, object_id) descendants under a start node in a tree, self-edge included.';
 

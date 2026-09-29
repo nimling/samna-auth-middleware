@@ -104,7 +104,7 @@ SELECT 'upsert', t, jsonb_build_object('id', gen_random_uuid(), 'app_id', pg_tem
 FROM unnest(ARRAY['claimius.user_object', 'claimius.user_users', 'claimius.audit']) AS t;
 
 SELECT is_empty(
-    $$SELECT 1 FROM claimius.get_sync_events(pg_temp.app(), 0)
+    $$SELECT 1 FROM claimius.get_sync_events(pg_temp.app(), 0, 0)
        WHERE event_type IN ('claimius.user_object', 'claimius.user_users', 'claimius.audit')$$,
     'the delta feed serves no derived rows and no audit, even ones left in the outbox'
 );
@@ -130,7 +130,7 @@ SELECT is(
 );
 
 SELECT ok(
-    EXISTS (SELECT 1 FROM claimius.get_sync_events(pg_temp.app(), (SELECT seq FROM before_link)) e
+    EXISTS (SELECT 1 FROM claimius.get_sync_events(pg_temp.app(), pg_current_xact_id()::TEXT::BIGINT, (SELECT seq FROM before_link)) e
              WHERE e.event_type = 'claimius.organization' AND e.operation = 'upsert'
                AND (e.payload ->> 'id')::UUID = '10000000-0000-4000-8000-0000000000f9'),
     'the linked organization reaches the app''s delta feed'
@@ -145,7 +145,7 @@ SELECT is(
 );
 
 SELECT is(
-    (SELECT count(*) FROM claimius.get_sync_events(pg_temp.app(), (SELECT seq FROM before_unlink)) e
+    (SELECT count(*) FROM claimius.get_sync_events(pg_temp.app(), pg_current_xact_id()::TEXT::BIGINT, (SELECT seq FROM before_unlink)) e
       WHERE e.operation = 'delete' AND (e.payload ->> 'id')::UUID = '10000000-0000-4000-8000-0000000000f9'),
     1::BIGINT,
     'the unlink reaches the app''s delta feed'

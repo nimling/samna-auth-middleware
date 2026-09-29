@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 
 	"github.com/labstack/echo/v4"
 	"github.com/nimling/samna-auth-middleware/pkg/encryption"
@@ -76,7 +77,7 @@ func AppMiddleware(next echo.HandlerFunc) echo.HandlerFunc {
 			return ctx.NoContent(http.StatusNotFound)
 		}
 
-		masterKey, err := encryption.ImportMasterKeyPair(app.PrivateKey, app.PrivateSeed)
+		masterKey, err := getAppKey(app)
 		if err != nil {
 			ctx.Logger().Infof("Failed to import master key for slug=%s: %v", appSlug, err)
 			return ctx.NoContent(http.StatusUnauthorized)
@@ -143,4 +144,27 @@ func parseBasicAuth(r *http.Request) (string, string, error) {
 	}
 
 	return parts[0], parts[1], nil
+}
+
+var appKeys sync.Map
+
+type appKey struct {
+	privateKey  string
+	privateSeed string
+	key         *encryption.MasterKeyPair
+}
+
+func getAppKey(app pecho.SamnaApp) (*encryption.MasterKeyPair, error) {
+	if v, ok := appKeys.Load(app.ID); ok {
+		cached := v.(appKey)
+		if cached.privateKey == app.PrivateKey && cached.privateSeed == app.PrivateSeed {
+			return cached.key, nil
+		}
+	}
+	key, err := encryption.ImportMasterKeyPair(app.PrivateKey, app.PrivateSeed)
+	if err != nil {
+		return nil, err
+	}
+	appKeys.Store(app.ID, appKey{privateKey: app.PrivateKey, privateSeed: app.PrivateSeed, key: key})
+	return key, nil
 }

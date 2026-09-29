@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -83,14 +84,52 @@ func forwardFrom(ctx context.Context) (Forward, bool) {
 }
 
 // HeaderSyncSeq carries, on the prophet's answer to a write, the highest sync
-// sequence of the calling app once the write has run.
+// position of the calling app once the write has run, as SyncCursor.String.
 const HeaderSyncSeq = "SAuth-Seq"
+
+// SyncCursor is a position on the prophet's sync feed. The feed is ordered by
+// the writing transaction and then the sequence, so a sequence taken late by
+// a transaction that started early is never passed over.
+type SyncCursor struct {
+	Txid int64 `bun:"txid" json:"txid"`
+	Seq  int64 `bun:"seq" json:"seq"`
+}
+
+// Less reports whether c comes before o on the feed.
+func (c SyncCursor) Less(o SyncCursor) bool {
+	return c.Txid < o.Txid || (c.Txid == o.Txid && c.Seq < o.Seq)
+}
+
+// IsZero reports whether c is the start of the feed.
+func (c SyncCursor) IsZero() bool { return c.Txid == 0 && c.Seq == 0 }
+
+// String encodes c as "<txid>.<seq>", the form of the sync path and HeaderSyncSeq.
+func (c SyncCursor) String() string {
+	return strconv.FormatInt(c.Txid, 10) + "." + strconv.FormatInt(c.Seq, 10)
+}
+
+// ParseSyncCursor reads the form SyncCursor.String writes.
+func ParseSyncCursor(s string) (SyncCursor, error) {
+	txid, seq, ok := strings.Cut(s, ".")
+	if !ok {
+		return SyncCursor{}, fmt.Errorf("sync cursor %q: want <txid>.<seq>", s)
+	}
+	t, err := strconv.ParseInt(txid, 10, 64)
+	if err != nil || t < 0 {
+		return SyncCursor{}, fmt.Errorf("sync cursor %q: bad txid", s)
+	}
+	q, err := strconv.ParseInt(seq, 10, 64)
+	if err != nil || q < 0 {
+		return SyncCursor{}, fmt.Errorf("sync cursor %q: bad seq", s)
+	}
+	return SyncCursor{Txid: t, Seq: q}, nil
+}
 
 type syncSeqKey struct{}
 
-// WithSyncSeq returns a context whose writes record the prophet sequence of
+// WithSyncSeq returns a context whose writes record the prophet position of
 // their change in seq, the token a disciple waits on to read its own write.
-func WithSyncSeq(ctx context.Context, seq *int64) context.Context {
+func WithSyncSeq(ctx context.Context, seq *SyncCursor) context.Context {
 	return context.WithValue(ctx, syncSeqKey{}, seq)
 }
 
@@ -208,8 +247,8 @@ func (e *httpClient) execute(ctx context.Context, method string, reqBody any, ta
 		return nil, fmt.Errorf("send request: %w", err)
 	}
 
-	if seq, ok := ctx.Value(syncSeqKey{}).(*int64); ok && resp.StatusCode >= 200 && resp.StatusCode < 300 {
-		if v, err := strconv.ParseInt(resp.Header.Get(HeaderSyncSeq), 10, 64); err == nil && v > *seq {
+	if seq, ok := ctx.Value(syncSeqKey{}).(*SyncCursor); ok && resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		if v, err := ParseSyncCursor(resp.Header.Get(HeaderSyncSeq)); err == nil && seq.Less(v) {
 			*seq = v
 		}
 	}

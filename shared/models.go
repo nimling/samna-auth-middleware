@@ -13,6 +13,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/nimling/nimbody"
+	"github.com/nimling/samna-auth-middleware/client"
 	"github.com/nimling/samna-auth-middleware/pkg/jsonx"
 	"github.com/uptrace/bun"
 )
@@ -856,13 +857,13 @@ type ConsentCategories struct {
 }
 
 type ConsentState struct {
-	AnonymousID   string             `json:"anonymous_id"`
-	PolicyVersion string             `json:"policy_version"`
-	PolicyURL     string             `json:"policy_url"`
-	Decided       bool               `json:"decided"`
-	Categories    ConsentCategories  `json:"categories"`
-	GrantedAt     *time.Time         `json:"granted_at,omitzero"`
-	Captured      []string           `json:"captured"`
+	AnonymousID   string            `json:"anonymous_id"`
+	PolicyVersion string            `json:"policy_version"`
+	PolicyURL     string            `json:"policy_url"`
+	Decided       bool              `json:"decided"`
+	Categories    ConsentCategories `json:"categories"`
+	GrantedAt     *time.Time        `json:"granted_at,omitzero"`
+	Captured      []string          `json:"captured"`
 }
 
 type ConsentRequest struct {
@@ -954,9 +955,15 @@ type SyncEvent struct {
 type DiscipleState struct {
 	bun.BaseModel `bun:"table:claimius.disciple_state"`
 
-	ID             uuid.UUID `bun:"id,pk,type:uuid,default:gen_random_uuid()" json:"id"`
-	LastAppliedSeq int64     `bun:"last_applied_seq,default:0" json:"last_applied_seq"`
-	UpdatedAt      time.Time `bun:"sa_updated_at,default:now()" json:"updated_at"`
+	ID              uuid.UUID `bun:"id,pk,type:uuid,default:gen_random_uuid()" json:"id"`
+	LastAppliedTxid int64     `bun:"last_applied_txid,default:0" json:"last_applied_txid"`
+	LastAppliedSeq  int64     `bun:"last_applied_seq,default:0" json:"last_applied_seq"`
+	UpdatedAt       time.Time `bun:"sa_updated_at,default:now()" json:"updated_at"`
+}
+
+// Cursor is the prophet feed position the disciple applied.
+func (s DiscipleState) Cursor() client.SyncCursor {
+	return client.SyncCursor{Txid: s.LastAppliedTxid, Seq: s.LastAppliedSeq}
 }
 
 type SearchResult struct {

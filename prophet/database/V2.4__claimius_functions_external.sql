@@ -76,7 +76,7 @@ BEGIN
         FROM uo
                  CROSS JOIN LATERAL claimius._best_grant(uo.grants, p_user_id, p_app_id, p_required_access) best;
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = claimius, pg_temp;
 
 COMMENT ON FUNCTION claimius.get_access(UUID, UUID, UUID, TEXT, INTEGER) IS 'Strongest active claim based grant for one (user, app, object) whose mask covers p_required_access. user_claim_id is the actor token for follow-on writes. sa_root_id is the owning organization root, suitable for FK to claimius.organization on follow-on claim and claim_object writes.';
 
@@ -299,7 +299,7 @@ BEGIN
         RAISE EXCEPTION 'not found' USING ERRCODE = 'P0404';
     END IF;
 END;
-$$ LANGUAGE plpgsql VOLATILE;
+$$ LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path = claimius, pg_temp;
 
 COMMENT ON FUNCTION claimius.get_direct_access(UUID, UUID, UUID, TEXT, INTEGER, BOOLEAN) IS 'Locates the closest, strongest user_claim the user holds related to the given object via ancestor walk, directly or through composition, with the binding narrowing its claim and the user''s denies subtracted by class. VOLATILE: it settles through reconcile_if_pending.';
 
@@ -378,7 +378,7 @@ BEGIN
         ORDER BY claimius.user_object.object_id
         LIMIT p_limit;
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = claimius, pg_temp;
 
 COMMENT ON FUNCTION claimius.get_objects(p_user_id uuid, p_app_id uuid, p_object_type text, p_required_access integer, p_after uuid, p_limit integer) IS 'Object ids and metadata for objects whose mask covers p_required_access, in object_id order after p_after, at most p_limit rows. user_claim_id is the actor token from the strongest surviving claim grant; null when only direct_grant applies. claim_id and claim_name describe the claim that contributed the strongest grant. sa_root_id is derived from the owning organization root.';
 
@@ -411,7 +411,7 @@ BEGIN
           AND o.sa_deleted_at IS NULL
         ORDER BY o.id;
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = claimius, pg_temp;
 
 COMMENT ON FUNCTION claimius.get_organizations(p_user_id uuid, p_app_id uuid, p_required_access integer, p_after uuid, p_limit integer) IS 'Organizations whose effective mask covers p_required_access, one get_objects page in id order.';
 
@@ -443,7 +443,7 @@ BEGIN
           AND l.sa_deleted_at IS NULL
         ORDER BY l.id;
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = claimius, pg_temp;
 
 COMMENT ON FUNCTION claimius.get_locations(p_user_id uuid, p_app_id uuid, p_required_access integer, p_after uuid, p_limit integer) IS 'Locations whose effective mask covers p_required_access, one get_objects page in id order.';
 
@@ -583,7 +583,7 @@ BEGIN
         WHERE access > 0
           AND (access & p_required_access) = p_required_access;
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = claimius, pg_temp;
 
 COMMENT ON FUNCTION claimius.get_user_access(UUID, UUID, TEXT, INTEGER) IS
     'Resolved actor access on one target samna_user. OR of self, member co-visibility, and direct claim branches. Empty result means the required mask is not covered.';
@@ -632,7 +632,7 @@ BEGIN
           AND u.sa_deleted_at IS NULL
           AND u.status        = 'active';
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = claimius, pg_temp;
 
 COMMENT ON FUNCTION claimius.get_users(UUID, UUID, INTEGER) IS
     'Users the calling user can see in this app whose resolved access covers p_required_access. Resolution merges self (0x2F), member co-visibility via user_users (0x24), and direct claim_object on claimius.samna_user.';
@@ -736,7 +736,7 @@ BEGIN
                g.scope, g.sa_owner_id, g.sa_root_id, g.sa_location_id, g.direct_grant
         FROM claimius.get_direct_access(p_user_id, p_app_id, p_object_id::UUID, p_object_type, p_required) g;
 END;
-$$ LANGUAGE plpgsql VOLATILE;
+$$ LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path = claimius, pg_temp;
 CREATE OR REPLACE FUNCTION claimius.resolve_access(
     p_user_id     UUID,
     p_object_id   TEXT,
@@ -755,7 +755,7 @@ CREATE OR REPLACE FUNCTION claimius.resolve_access(
                     direct_grant   BOOLEAN
                 ) AS $$
     SELECT * FROM claimius.resolve_access(p_user_id, claimius.get_app_id(), p_object_id, p_object_type, p_required);
-$$ LANGUAGE sql VOLATILE;
+$$ LANGUAGE sql VOLATILE SECURITY DEFINER SET search_path = claimius, pg_temp;
 
 
 GRANT EXECUTE ON FUNCTION claimius.resolve_access(UUID, TEXT, TEXT, INTEGER)
@@ -819,7 +819,7 @@ BEGIN
     RETURN QUERY
         SELECT * FROM claimius.get_direct_access(p_user_id, v_app_id, v_uuid, p_object_type, p_required, TRUE);
 END;
-$$ LANGUAGE plpgsql VOLATILE;
+$$ LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path = claimius, pg_temp;
 
 COMMENT ON FUNCTION claimius.mutation_access(UUID, TEXT, TEXT, INTEGER) IS 'Single object access gate. Resolves access through get_access then get_direct_access, returns the strongest AccessClaim row, and RAISEs SQLSTATE P0403 when the object exists but the caller lacks the required access, P0404 when the object is absent or soft deleted, the id is malformed or the type is not registered. SQL embodiment of the Go MutationAccess resolution in one round trip. VOLATILE: it settles through reconcile_if_pending.';
 
@@ -872,7 +872,7 @@ BEGIN
           )
         ORDER BY claimius._popcount(c.sa_access) DESC;
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = claimius, pg_temp;
 
 COMMENT ON FUNCTION claimius.get_claims(UUID, UUID, INTEGER) IS 'All claims the user can read at the required level: either via a direct user_claim grant or via the materialized user_object index (cascade or direct creator grant).';
 
@@ -915,7 +915,7 @@ BEGIN
           )
         ORDER BY claimius._popcount(c.sa_access) DESC;
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = claimius, pg_temp;
 
 COMMENT ON FUNCTION claimius.get_claims(UUID, UUID, UUID, TEXT) IS 'All claims the user holds against one object.';
 
@@ -945,7 +945,7 @@ CREATE OR REPLACE FUNCTION claimius.get_scope_access(
                     object_scope    JSONB,
                     object_access   INTEGER,
                     object_inherits BOOLEAN
-                ) LANGUAGE sql STABLE AS $$
+                ) LANGUAGE sql STABLE SECURITY DEFINER SET search_path = claimius, pg_temp AS $$
     WITH bound AS (
         SELECT uc.id AS held_id,
                c.id AS held_claim_id,
@@ -1008,7 +1008,7 @@ CREATE OR REPLACE FUNCTION claimius.get_scope_access(
                     object_scope    JSONB,
                     object_access   INTEGER,
                     object_inherits BOOLEAN
-                ) LANGUAGE sql STABLE AS $$
+                ) LANGUAGE sql STABLE SECURITY DEFINER SET search_path = claimius, pg_temp AS $$
     SELECT * FROM claimius.get_scope_access(p_user_id, claimius.get_app_id(), p_path, p_required_access);
 $$;
 
@@ -1045,7 +1045,7 @@ BEGIN
         ORDER BY claimius._popcount(s.sa_access) DESC, s.claim_id
         LIMIT 1;
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = claimius, pg_temp;
 
 COMMENT ON FUNCTION claimius.get_access(UUID, UUID, TEXT, INTEGER) IS 'Strongest active object-less binding whose scope contains p_scope_key and whose mask covers p_required_access. A NULL binding mask inherits the claim mask, and a deny binding carrying the key subtracts its bits.';
 
@@ -1080,7 +1080,7 @@ BEGIN
         ORDER BY a.sa_created_at DESC
         LIMIT p_limit OFFSET p_offset;
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = claimius, pg_temp;
 
 COMMENT ON FUNCTION claimius.get_audit(p_user_id uuid, p_app_id uuid, p_required_access integer, p_limit integer, p_offset integer) IS 'Audit rows for organizations the user can see.';
 
@@ -1112,7 +1112,7 @@ BEGIN
           AND s.sa_deleted_at IS NULL
         ORDER BY s.id;
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = claimius, pg_temp;
 
 COMMENT ON FUNCTION claimius.get_secrets(p_user_id uuid, p_app_id uuid, p_required_access integer, p_after uuid, p_limit integer) IS 'Secrets whose effective mask covers p_required_access, one get_objects page in id order.';
 
@@ -1351,7 +1351,7 @@ BEGIN
             RETURN QUERY EXECUTE v_sql USING p_user_id, p_app_id, p_required_access;
         END LOOP;
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = claimius, pg_temp;
 
 COMMENT ON FUNCTION claimius.get_owner_graph(UUID, UUID, UUID, INTEGER, INTEGER) IS 'Ownership graph (orgs, locations, registered tables with sa_owner_id or sa_location_id) for the user. Optional start org and depth limit.';
 
@@ -1692,7 +1692,7 @@ BEGIN
                e->'data'
         FROM jsonb_array_elements(v_graph) AS e;
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = claimius, pg_temp;
 
 COMMENT ON FUNCTION claimius.get_claim_graph(UUID, UUID, UUID, INTEGER, INTEGER) IS 'Access graph: user, other users seen, claims, user_claims, claim_object bindings, reachable objects. Optional start claim and depth limit. Default shape served from claimius.claim_graph_cache.';
 
@@ -1799,7 +1799,7 @@ BEGIN
         ORDER BY ts_rank(claimius.user_object.search_vector, v_tsquery) DESC
         LIMIT p_limit OFFSET p_offset;
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = claimius, pg_temp;
 
 COMMENT ON FUNCTION claimius.search(UUID, UUID, TEXT, TEXT[], INTEGER, INTEGER, INTEGER) IS 'Full text search over accessible objects whose mask covers p_required_access. user_claim_id is the actor token from the strongest surviving claim grant per object.';
 
@@ -1948,7 +1948,7 @@ BEGIN
     ORDER BY combined.rank DESC, combined.object_id ASC
     LIMIT p_limit OFFSET p_offset;
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = claimius, pg_temp;
 
 COMMENT ON FUNCTION claimius.search(UUID, UUID, TEXT, TEXT[], INTEGER, UUID[], UUID[], UUID[], UUID, TEXT, INTEGER, INTEGER) IS 'Full text search over accessible objects. Includes claimius.claim rows the user holds, skipped when any subtree or parent filter is set. p_owner_subtree_ids scopes via ownership tree. p_parent_id and p_parent_type scope via location or parenthood tree. total_count carries the un-capped match count for pagination. Rows tie-break on object_id so offset pagination tiles without overlap or skip.';
 
@@ -3125,7 +3125,7 @@ BEGIN
              claimius.notification, claimius.prophet_state, claimius.sync_consumer
              TO claimius_writer';
     EXECUTE 'GRANT INSERT, UPDATE, DELETE ON claimius.claim_graph_cache TO claimius_writer';
-    EXECUTE 'GRANT INSERT, UPDATE, DELETE ON claimius.claim_graph_cache TO claimius_reader';
+    EXECUTE 'REVOKE INSERT, UPDATE, DELETE ON claimius.claim_graph_cache FROM claimius_reader';
     EXECUTE 'GRANT SELECT ON ALL TABLES IN SCHEMA claimius TO claimius_writer';
 END;
 $$ LANGUAGE plpgsql;
@@ -3150,7 +3150,7 @@ BEGIN
              claimius.audit, claimius.inheritance_info, claimius.table_info,
              claimius.notification, claimius.claim_graph_cache
              TO claimius_disciple_client';
-    EXECUTE 'GRANT INSERT, UPDATE, DELETE ON claimius.claim_graph_cache TO claimius_reader';
+    EXECUTE 'REVOKE INSERT, UPDATE, DELETE ON claimius.claim_graph_cache FROM claimius_reader';
     EXECUTE 'GRANT SELECT ON ALL TABLES IN SCHEMA claimius TO claimius_disciple_client';
     EXECUTE 'GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA claimius TO claimius_disciple_client';
 END;
@@ -3163,6 +3163,8 @@ BEGIN
     PERFORM claimius._grant_disciple_roles();
 END;
 $$ LANGUAGE plpgsql;
+
+REVOKE INSERT, UPDATE, DELETE ON claimius.claim_graph_cache FROM claimius_reader;
 
 -- ----------------------------------------------------------------------------
 -- ensure_app_user
@@ -3266,7 +3268,7 @@ BEGIN
           AND e.ancestor_id   = p_object_id
         ORDER BY e.depth;
 END;
-$$ LANGUAGE plpgsql STABLE;
+$$ LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = claimius, pg_temp;
 
 COMMENT ON FUNCTION claimius.get_owner_descendants(p_object_type text, p_object_id uuid) IS 'Ownership tree descendants of an object, hop 0 = self.';
 
@@ -3295,7 +3297,7 @@ BEGIN
         END IF;
     END IF;
 END;
-$$ LANGUAGE plpgsql STABLE;
+$$ LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = claimius, pg_temp;
 
 COMMENT ON FUNCTION claimius.get_location_descendants(p_object_type text, p_object_id uuid) IS 'Location tree descendants of an object across every registered table located in the subtree.';
 
@@ -3323,7 +3325,7 @@ BEGIN
         RETURN QUERY SELECT p_object_type, p_object_id, 0;
     END IF;
 END;
-$$ LANGUAGE plpgsql STABLE;
+$$ LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = claimius, pg_temp;
 
 COMMENT ON FUNCTION claimius.get_parenthood_descendants(p_object_type text, p_object_id uuid) IS 'Parenthood tree descendants via sa_parent_id, hop 0 = self.';
 
@@ -3345,7 +3347,7 @@ BEGIN
         SELECT d.object_type, d.object_id, d.hop, 'parenthood'::TEXT
         FROM claimius.get_parenthood_descendants(p_object_type, p_object_id) d;
 END;
-$$ LANGUAGE plpgsql STABLE;
+$$ LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = claimius, pg_temp;
 
 COMMENT ON FUNCTION claimius.get_descendants(p_object_type text, p_object_id uuid) IS 'Combined descendant walk across owner, location, and parenthood trees.';
 
@@ -3368,7 +3370,7 @@ BEGIN
           AND uc.sa_deleted_at IS NULL
           AND c.sa_deleted_at IS NULL;
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = claimius, pg_temp;
 
 
 CREATE OR REPLACE FUNCTION claimius.normalize_object_type(p_object_type TEXT)
@@ -3554,7 +3556,7 @@ BEGIN
 
     RETURN jsonb_build_object('links', v_links);
 END;
-$$ LANGUAGE plpgsql STABLE;
+$$ LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = claimius, pg_temp;
 
 GRANT EXECUTE ON FUNCTION claimius.get_graph_links_owner(UUID, UUID, INTEGER, TEXT[], TEXT[], UUID, INTEGER) TO claimius_reader, claimius_writer, claimius_admin;
 
@@ -3728,7 +3730,7 @@ BEGIN
 
     RETURN jsonb_build_object('links', v_links);
 END;
-$$ LANGUAGE plpgsql STABLE;
+$$ LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = claimius, pg_temp;
 
 GRANT EXECUTE ON FUNCTION claimius.get_graph_links_claim(UUID, UUID, INTEGER, TEXT[], TEXT[], UUID, INTEGER) TO claimius_reader, claimius_writer, claimius_admin;
 
@@ -4077,27 +4079,34 @@ COMMENT ON FUNCTION claimius.count_sync_source_rows(UUID, BIGINT) IS 'Source row
 
 -- ----------------------------------------------------------------------------
 -- update_sync_cursor
--- Records that one consumer of an app applied everything up to p_seq, which
--- it proves by asking for what comes after it. The app's prophet_state row
--- carries the lowest cursor among its consumers in contact and the contact
--- itself.
+-- Records that one consumer of an app applied everything up to the position
+-- (p_txid, p_seq), which it proves by asking for what comes after it. The
+-- app's prophet_state row carries the lowest cursor among its consumers in
+-- contact and the contact itself.
 -- ----------------------------------------------------------------------------
+DROP FUNCTION IF EXISTS claimius.update_sync_cursor(UUID, UUID, BIGINT);
+
 CREATE OR REPLACE FUNCTION claimius.update_sync_cursor(
     p_app_id        UUID,
     p_consumer_id   UUID,
+    p_txid          BIGINT,
     p_seq           BIGINT
 ) RETURNS VOID AS $$
-    INSERT INTO claimius.sync_consumer (app_id, consumer_id, last_applied_seq, last_contact_at)
-    VALUES (p_app_id, p_consumer_id, p_seq, now())
+    INSERT INTO claimius.sync_consumer (app_id, consumer_id, last_applied_txid, last_applied_seq, last_contact_at)
+    VALUES (p_app_id, p_consumer_id, p_txid::TEXT::XID8, p_seq, now())
     ON CONFLICT (app_id, consumer_id) DO UPDATE SET
-        last_applied_seq = EXCLUDED.last_applied_seq,
-        last_contact_at  = EXCLUDED.last_contact_at;
+        last_applied_txid = EXCLUDED.last_applied_txid,
+        last_applied_seq  = EXCLUDED.last_applied_seq,
+        last_contact_at   = EXCLUDED.last_contact_at;
 
-    INSERT INTO claimius.prophet_state (app_id, last_applied_seq, sync_mode, last_contact_at, next_attempt_at)
-    VALUES (p_app_id, p_seq, 'active', now(), now())
+    INSERT INTO claimius.prophet_state (app_id, last_applied_txid, last_applied_seq, sync_mode, last_contact_at, next_attempt_at)
+    VALUES (p_app_id, p_txid::TEXT::XID8, p_seq, 'active', now(), now())
     ON CONFLICT (app_id) DO UPDATE SET
-        last_applied_seq = (SELECT min(c.last_applied_seq) FROM claimius.sync_consumer c
-                            WHERE c.app_id = p_app_id AND c.last_contact_at > now() - INTERVAL '7 days'),
+        (last_applied_txid, last_applied_seq) = (
+            SELECT c.last_applied_txid, c.last_applied_seq FROM claimius.sync_consumer c
+            WHERE c.app_id = p_app_id AND c.last_contact_at > now() - INTERVAL '7 days'
+            ORDER BY c.last_applied_txid, c.last_applied_seq
+            LIMIT 1),
         sync_mode        = 'active',
         sync_failures    = 0,
         last_contact_at  = now(),
@@ -4105,44 +4114,50 @@ CREATE OR REPLACE FUNCTION claimius.update_sync_cursor(
         sa_updated_at    = now();
 $$ LANGUAGE sql;
 
-COMMENT ON FUNCTION claimius.update_sync_cursor(UUID, UUID, BIGINT) IS 'Moves one consumer''s cursor for an app and records the contact on the app''s prophet_state row.';
+COMMENT ON FUNCTION claimius.update_sync_cursor(UUID, UUID, BIGINT, BIGINT) IS 'Moves one consumer''s (txid, seq) cursor for an app and records the contact on the app''s prophet_state row.';
 
 -- ----------------------------------------------------------------------------
 -- trim_sync_event
 -- Removes outbox rows every consumer has already applied, and caps each app's
--- outbox at its source rows. sync_consumer holds one cursor per consumer,
--- advanced when it asks for what comes after it, so a row at or below the
--- minimum across the consumers still in contact is owed to nobody. A consumer
--- whose last contact is older than p_stale_after is treated as gone rather
--- than allowed to pin the watermark forever. Past that, an app's events
--- beyond as many as it has source rows are removed: a consumer further behind
--- is cheaper served by the snapshot. The highest sequence removed per app is
--- kept in prophet_state.trimmed_seq, and check_sync_cursor sends a consumer
--- below it to the snapshot. Returns the number of rows deleted.
+-- outbox at its source rows. sync_consumer holds one (txid, seq) cursor per
+-- consumer, advanced when it asks for what comes after it, so a row at or
+-- below the lowest cursor across the consumers still in contact is owed to
+-- nobody. A consumer whose last contact is older than p_stale_after is
+-- treated as gone rather than allowed to pin the watermark forever. Past
+-- that, an app's events beyond as many as it has source rows are removed: a
+-- consumer further behind is cheaper served by the snapshot. The highest
+-- position removed per app is kept in prophet_state (trimmed_txid,
+-- trimmed_seq), and check_sync_cursor sends a consumer below it to the
+-- snapshot. Returns the number of rows deleted.
 -- ----------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION claimius.trim_sync_event(
     p_stale_after   INTERVAL DEFAULT INTERVAL '7 days'
 ) RETURNS BIGINT AS $$
 DECLARE
-    v_watermark BIGINT;
+    v_watermark RECORD;
     v_deleted   BIGINT := 0;
     v_n         BIGINT;
     v_app       UUID;
-    v_cut       BIGINT;
+    v_cut       RECORD;
 BEGIN
-    SELECT min(last_applied_seq) INTO v_watermark
-    FROM claimius.sync_consumer
-    WHERE last_contact_at > now() - p_stale_after;
+    SELECT c.last_applied_txid AS txid, c.last_applied_seq AS seq INTO v_watermark
+    FROM claimius.sync_consumer c
+    WHERE c.last_contact_at > now() - p_stale_after
+    ORDER BY c.last_applied_txid, c.last_applied_seq
+    LIMIT 1;
 
-    IF v_watermark > 0 THEN
+    IF FOUND AND v_watermark.txid > '0'::XID8 THEN
         WITH gone AS (
-            DELETE FROM claimius.sync_event WHERE seq <= v_watermark
-            RETURNING app_id, seq
+            DELETE FROM claimius.sync_event e WHERE (e.txid, e.seq) <= (v_watermark.txid, v_watermark.seq)
+            RETURNING e.app_id, e.txid, e.seq
         ),
         marked AS (
             UPDATE claimius.prophet_state ps
-            SET trimmed_seq = greatest(ps.trimmed_seq, g.seq)
-            FROM (SELECT app_id, max(seq) AS seq FROM gone WHERE app_id IS NOT NULL GROUP BY app_id) g
+            SET (trimmed_txid, trimmed_seq) = (
+                SELECT t.txid, t.seq FROM (VALUES (ps.trimmed_txid, ps.trimmed_seq), (g.txid, g.seq)) t (txid, seq)
+                ORDER BY t.txid DESC, t.seq DESC LIMIT 1)
+            FROM (SELECT DISTINCT ON (app_id) app_id, txid, seq FROM gone
+                  WHERE app_id IS NOT NULL ORDER BY app_id, txid DESC, seq DESC) g
             WHERE ps.app_id = g.app_id
         )
         SELECT count(*) INTO v_n FROM gone;
@@ -4150,17 +4165,18 @@ BEGIN
     END IF;
 
     FOR v_app IN SELECT ps.app_id FROM claimius.prophet_state ps LOOP
-        v_cut := NULL;
-        SELECT e.seq INTO v_cut
+        SELECT e.txid, e.seq INTO v_cut
         FROM claimius.sync_event e
         WHERE e.app_id = v_app
-        ORDER BY e.seq DESC
+        ORDER BY e.txid DESC, e.seq DESC
         OFFSET claimius.count_sync_source_rows(v_app) LIMIT 1;
-        CONTINUE WHEN v_cut IS NULL;
+        CONTINUE WHEN NOT FOUND;
 
-        DELETE FROM claimius.sync_event WHERE app_id = v_app AND seq <= v_cut;
+        DELETE FROM claimius.sync_event e WHERE e.app_id = v_app AND (e.txid, e.seq) <= (v_cut.txid, v_cut.seq);
         GET DIAGNOSTICS v_n = ROW_COUNT;
-        UPDATE claimius.prophet_state SET trimmed_seq = greatest(trimmed_seq, v_cut) WHERE app_id = v_app;
+        UPDATE claimius.prophet_state ps
+        SET (trimmed_txid, trimmed_seq) = (v_cut.txid, v_cut.seq)
+        WHERE ps.app_id = v_app AND (ps.trimmed_txid, ps.trimmed_seq) < (v_cut.txid, v_cut.seq);
         v_deleted := v_deleted + v_n;
     END LOOP;
 
@@ -4168,4 +4184,4 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius.trim_sync_event(INTERVAL) IS 'Deletes sync_event rows at or below the lowest cursor among consumers still in contact, then each app''s events beyond as many as its source rows, recording the highest removed per app in prophet_state.trimmed_seq. Run on a schedule.';
+COMMENT ON FUNCTION claimius.trim_sync_event(INTERVAL) IS 'Deletes sync_event rows at or below the lowest (txid, seq) cursor among consumers still in contact, then each app''s events beyond as many as its source rows, recording the highest position removed per app in prophet_state (trimmed_txid, trimmed_seq). Run on a schedule.';

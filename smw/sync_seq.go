@@ -2,7 +2,6 @@ package smw
 
 import (
 	"net/http"
-	"strconv"
 
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
@@ -11,7 +10,7 @@ import (
 )
 
 // SyncSeq stamps, on a successful prophet answer to a write, the highest sync
-// sequence of the calling app once the write has run. A disciple that routed
+// position of the calling app once the write has run. A disciple that routed
 // the write waits until its cursor reaches it before it reads its own write.
 func SyncSeq(next echo.HandlerFunc) echo.HandlerFunc {
 	return func(ctx echo.Context) error {
@@ -25,13 +24,13 @@ func SyncSeq(next echo.HandlerFunc) echo.HandlerFunc {
 			if appID == uuid.Nil || res.Status < 200 || res.Status >= 300 {
 				return
 			}
-			var seq int64
-			if err := sdb.Instance().NewRaw("SELECT claimius.get_sync_seq(?)", appID).
+			var seq client.SyncCursor
+			if err := sdb.Instance().NewRaw("SELECT txid, seq FROM claimius.get_sync_seq(?)", appID).
 				Scan(ctx.Request().Context(), &seq); err != nil {
 				ctx.Logger().Errorf("sync seq %s: %v", appID, err)
 				return
 			}
-			res.Header().Set(client.HeaderSyncSeq, strconv.FormatInt(seq, 10))
+			res.Header().Set(client.HeaderSyncSeq, seq.String())
 		})
 		return next(ctx)
 	}
