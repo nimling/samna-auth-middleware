@@ -12,6 +12,8 @@
 --   tg_calc_access          AFTER INSERT/UPDATE/DELETE: on internal tables
 --                           that are themselves access targets (organization,
 --                           location, samna_user, etc).
+--   tg_calc_trees           AFTER INSERT/UPDATE/DELETE: on owned tables that
+--                           are not access targets. Keeps their closure rows.
 --   tg_emit_sync_event      AFTER INSERT/UPDATE/DELETE: on user_object,
 --                           object_users, user_users. Publishes to sync_event.
 -- ============================================================================
@@ -146,6 +148,18 @@ CREATE TRIGGER tg_calc_access AFTER INSERT OR UPDATE OR DELETE ON claimius.claim
 DROP TRIGGER IF EXISTS tg_calc_access ON claimius.user_token;
 CREATE TRIGGER tg_calc_access AFTER INSERT OR UPDATE OR DELETE ON claimius.user_token
     FOR EACH ROW EXECUTE FUNCTION claimius.calc_object_access();
+
+-- ----------------------------------------------------------------------------
+-- Owned tables that are not access targets keep their ownership closure rows.
+-- ----------------------------------------------------------------------------
+
+DROP TRIGGER IF EXISTS tg_calc_trees ON claimius.user_claim;
+CREATE TRIGGER tg_calc_trees AFTER INSERT OR UPDATE OR DELETE ON claimius.user_claim
+    FOR EACH ROW EXECUTE FUNCTION claimius.calc_object_trees();
+
+DROP TRIGGER IF EXISTS tg_calc_trees ON claimius.claim_object;
+CREATE TRIGGER tg_calc_trees AFTER INSERT OR UPDATE OR DELETE ON claimius.claim_object
+    FOR EACH ROW EXECUTE FUNCTION claimius.calc_object_trees();
 
 -- ----------------------------------------------------------------------------
 -- Sync event publishers

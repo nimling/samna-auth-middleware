@@ -7,25 +7,46 @@
 -- ============================================================================
 
 -- ----------------------------------------------------------------------------
--- Tree builders. Used by init, hierarchy reparenting, and bulk operations.
--- Each rewrites every edge in inheritance_info for the given tree from live
--- data. Self-edges (depth = 0) included so a node is its own ancestor.
+-- Tree builders. Used by init, recompute_state, migrate_root, and the restore
+-- of a soft deleted node. Each rewrites the edges in inheritance_info for the
+-- given tree from live data, the whole root when p_node_id is NULL or the
+-- root itself, otherwise the subtree of p_node_id hung under the stored
+-- ancestors of its parent. Self-edges (depth = 0) included so a node is its
+-- own ancestor.
 -- ----------------------------------------------------------------------------
 
 -- build_ownership_tree
 -- Rewrites the ownership tree closure rooted at p_root_id from live data.
 -- Includes org-org edges plus edges from every registered table whose rows
 -- point at any org in the tree via sa_owner_id.
-CREATE OR REPLACE FUNCTION claimius.build_ownership_tree(p_root_id UUID)
+DROP FUNCTION IF EXISTS claimius.build_ownership_tree(UUID);
+CREATE OR REPLACE FUNCTION claimius.build_ownership_tree(p_root_id UUID, p_node_id UUID DEFAULT NULL)
     RETURNS VOID AS $$
+DECLARE
+    v_start  UUID := coalesce(p_node_id, p_root_id);
+    v_prefix UUID[] := '{}';
 BEGIN
     -- Serialize concurrent rebuilds of the same root. Without this, two
     -- transactions both delete against their own snapshot and collide on
     -- the closure insert with a duplicate inheritance_info_pkey.
     PERFORM pg_advisory_xact_lock(hashtext(p_root_id::TEXT));
 
-    DELETE FROM claimius.inheritance_info
-    WHERE tree_type = 'ownership' AND root_id = p_root_id;
+    IF v_start = p_root_id THEN
+        DELETE FROM claimius.inheritance_info
+        WHERE tree_type = 'ownership' AND root_id = p_root_id;
+    ELSE
+        PERFORM claimius._splice_subtree('ownership', 'claimius.organization', v_start, p_root_id, NULL);
+        SELECT array_agg(e.ancestor_id ORDER BY e.depth DESC) INTO v_prefix
+        FROM claimius.organization o
+                 JOIN claimius.inheritance_info e
+                      ON e.tree_type = 'ownership'
+                          AND e.descendant_type = 'claimius.organization'
+                          AND e.descendant_id = o.sa_owner_id
+        WHERE o.id = v_start;
+        IF v_prefix IS NULL THEN
+            RETURN;
+        END IF;
+    END IF;
 
     -- Org-org edges. Walk down recursively, recording the path of ancestors
     -- to each node, then explode the path into one edge per ancestor.
@@ -33,9 +54,9 @@ BEGIN
         tree_type, root_id, ancestor_type, ancestor_id, descendant_type, descendant_id, depth
     )
     WITH RECURSIVE org_paths AS (
-        SELECT id AS node_id, ARRAY[id]::UUID[] AS path
+        SELECT id AS node_id, v_prefix || id AS path
         FROM claimius.organization
-        WHERE id = p_root_id AND sa_deleted_at IS NULL
+        WHERE id = v_start AND sa_deleted_at IS NULL
         UNION ALL
         SELECT o.id, p.path || o.id
         FROM claimius.organization o
@@ -58,14 +79,14 @@ BEGIN
     )
     SELECT 'ownership'::claimius.tree_type, p_root_id, t.object_type, r.id, t.object_type, r.id, 0
     FROM claimius.table_info t
-             CROSS JOIN LATERAL claimius._select_owned_rows(t.object_type, p_root_id) r
+             CROSS JOIN LATERAL claimius._select_owned_rows(t.object_type, v_start) r
     WHERE t.has_sa_owner_id
       AND t.has_sa_deleted_at
       AND t.object_type <> 'claimius.organization'
     UNION ALL
     SELECT 'ownership'::claimius.tree_type, p_root_id, e.ancestor_type, e.ancestor_id, t.object_type, r.id, e.depth + 1
     FROM claimius.table_info t
-             CROSS JOIN LATERAL claimius._select_owned_rows(t.object_type, p_root_id) r
+             CROSS JOIN LATERAL claimius._select_owned_rows(t.object_type, v_start) r
              JOIN claimius.inheritance_info e
                   ON e.tree_type = 'ownership'
                       AND e.root_id = p_root_id
@@ -77,27 +98,45 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius.build_ownership_tree(UUID) IS 'Rewrites ownership tree closure rooted at p_root_id from live data.';
+COMMENT ON FUNCTION claimius.build_ownership_tree(UUID, UUID) IS 'Rewrites ownership tree closure rooted at p_root_id, or the subtree of p_node_id, from live data.';
 
 -- build_location_tree
 -- Rewrites the location tree closure rooted at p_root_id from live data.
 -- Includes location-location edges plus edges from every registered table
 -- whose rows point at any location in the tree via sa_location_id.
-CREATE OR REPLACE FUNCTION claimius.build_location_tree(p_root_id UUID)
+DROP FUNCTION IF EXISTS claimius.build_location_tree(UUID);
+CREATE OR REPLACE FUNCTION claimius.build_location_tree(p_root_id UUID, p_node_id UUID DEFAULT NULL)
     RETURNS VOID AS $$
+DECLARE
+    v_start  UUID := coalesce(p_node_id, p_root_id);
+    v_prefix UUID[] := '{}';
 BEGIN
     PERFORM pg_advisory_xact_lock(hashtext(p_root_id::TEXT));
 
-    DELETE FROM claimius.inheritance_info
-    WHERE tree_type = 'location' AND root_id = p_root_id;
+    IF v_start = p_root_id THEN
+        DELETE FROM claimius.inheritance_info
+        WHERE tree_type = 'location' AND root_id = p_root_id;
+    ELSE
+        PERFORM claimius._splice_subtree('location', 'claimius.location', v_start, p_root_id, NULL);
+        SELECT array_agg(e.ancestor_id ORDER BY e.depth DESC) INTO v_prefix
+        FROM claimius.location l
+                 JOIN claimius.inheritance_info e
+                      ON e.tree_type = 'location'
+                          AND e.descendant_type = 'claimius.location'
+                          AND e.descendant_id = l.sa_parent_id
+        WHERE l.id = v_start;
+        IF v_prefix IS NULL THEN
+            RETURN;
+        END IF;
+    END IF;
 
     INSERT INTO claimius.inheritance_info (
         tree_type, root_id, ancestor_type, ancestor_id, descendant_type, descendant_id, depth
     )
     WITH RECURSIVE loc_paths AS (
-        SELECT id AS node_id, ARRAY[id]::UUID[] AS path
+        SELECT id AS node_id, v_prefix || id AS path
         FROM claimius.location
-        WHERE id = p_root_id AND sa_deleted_at IS NULL
+        WHERE id = v_start AND sa_deleted_at IS NULL
         UNION ALL
         SELECT l.id, p.path || l.id
         FROM claimius.location l
@@ -116,13 +155,13 @@ BEGIN
     )
     SELECT 'location'::claimius.tree_type, p_root_id, t.object_type, r.id, t.object_type, r.id, 0
     FROM claimius.table_info t
-             CROSS JOIN LATERAL claimius._select_located_rows(t.object_type, p_root_id) r
+             CROSS JOIN LATERAL claimius._select_located_rows(t.object_type, v_start) r
     WHERE t.has_sa_location_id
       AND t.has_sa_deleted_at
     UNION ALL
     SELECT 'location'::claimius.tree_type, p_root_id, e.ancestor_type, e.ancestor_id, t.object_type, r.id, e.depth + 1
     FROM claimius.table_info t
-             CROSS JOIN LATERAL claimius._select_located_rows(t.object_type, p_root_id) r
+             CROSS JOIN LATERAL claimius._select_located_rows(t.object_type, v_start) r
              JOIN claimius.inheritance_info e
                   ON e.tree_type = 'location'
                       AND e.root_id = p_root_id
@@ -133,18 +172,22 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius.build_location_tree(UUID) IS 'Rewrites location tree closure rooted at p_root_id from live data.';
+COMMENT ON FUNCTION claimius.build_location_tree(UUID, UUID) IS 'Rewrites location tree closure rooted at p_root_id, or the subtree of p_node_id, from live data.';
 
 -- build_parenthood_tree
 -- Rewrites the parenthood tree closure for one root of a self referencing
 -- registered table. Walks the table's sa_parent_id chain only.
-CREATE OR REPLACE FUNCTION claimius.build_parenthood_tree(p_object_type TEXT, p_root_id UUID)
+DROP FUNCTION IF EXISTS claimius.build_parenthood_tree(TEXT, UUID);
+CREATE OR REPLACE FUNCTION claimius.build_parenthood_tree(p_object_type TEXT, p_root_id UUID, p_node_id UUID DEFAULT NULL)
     RETURNS VOID AS $$
 DECLARE
     v_schema TEXT;
     v_table TEXT;
     v_parts TEXT[];
     v_sql TEXT;
+    v_start  UUID := coalesce(p_node_id, p_root_id);
+    v_parent UUID;
+    v_prefix UUID[] := '{}';
 BEGIN
     PERFORM pg_advisory_xact_lock(hashtext(p_root_id::TEXT));
 
@@ -152,17 +195,31 @@ BEGIN
     v_schema := v_parts[1];
     v_table := v_parts[2];
 
-    DELETE FROM claimius.inheritance_info
-    WHERE tree_type = 'parenthood' AND root_id = p_root_id AND ancestor_type = p_object_type;
+    IF v_start = p_root_id THEN
+        DELETE FROM claimius.inheritance_info
+        WHERE tree_type = 'parenthood' AND root_id = p_root_id AND ancestor_type = p_object_type;
+    ELSE
+        PERFORM claimius._splice_subtree('parenthood', p_object_type, v_start, p_root_id, NULL);
+        EXECUTE format('SELECT sa_parent_id FROM %I.%I WHERE id = $1', v_schema, v_table)
+            INTO v_parent USING v_start;
+        SELECT array_agg(e.ancestor_id ORDER BY e.depth DESC) INTO v_prefix
+        FROM claimius.inheritance_info e
+        WHERE e.tree_type = 'parenthood'
+          AND e.descendant_type = p_object_type
+          AND e.descendant_id = v_parent;
+        IF v_prefix IS NULL THEN
+            RETURN;
+        END IF;
+    END IF;
 
     v_sql := format($f$
         INSERT INTO claimius.inheritance_info (
             tree_type, root_id, ancestor_type, ancestor_id, descendant_type, descendant_id, depth
         )
         WITH RECURSIVE node_paths AS (
-            SELECT id AS node_id, ARRAY[id]::UUID[] AS path
+            SELECT id AS node_id, $2 || id AS path
             FROM %I.%I
-            WHERE id = $1 AND sa_deleted_at IS NULL
+            WHERE id = $3 AND sa_deleted_at IS NULL
             UNION ALL
             SELECT t.id, p.path || t.id
             FROM %I.%I t
@@ -177,11 +234,85 @@ BEGIN
                  CROSS JOIN LATERAL generate_subscripts(p.path, 1) AS i
     $f$, v_schema, v_table, v_schema, v_table, p_object_type, p_object_type);
 
-    EXECUTE v_sql USING p_root_id;
+    EXECUTE v_sql USING p_root_id, v_prefix, v_start;
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius.build_parenthood_tree(TEXT, UUID) IS 'Rewrites parenthood tree closure for one root of a self referencing registered table.';
+COMMENT ON FUNCTION claimius.build_parenthood_tree(TEXT, UUID, UUID) IS 'Rewrites parenthood tree closure for one root, or the subtree of p_node_id, of a self referencing registered table.';
+
+-- _splice_subtree
+-- Hangs the stored subtree of one node under a new parent. The rows linking
+-- the subtree to the node's former ancestors go, and the rows linking it to
+-- the parent's ancestors come: n (D + 1) rows for a subtree of n nodes under
+-- a parent at depth D. With no parent, or a parent outside the closure or
+-- inside the subtree, every row of the subtree goes, as a rebuild would drop
+-- a subtree its root no longer reaches.
+CREATE OR REPLACE FUNCTION claimius._splice_subtree(
+    p_tree_type claimius.tree_type,
+    p_node_type TEXT,
+    p_node_id   UUID,
+    p_root_id   UUID,
+    p_parent_id UUID
+) RETURNS VOID AS $$
+BEGIN
+    IF p_parent_id IS NOT NULL
+        AND EXISTS (
+            SELECT 1 FROM claimius.inheritance_info p
+            WHERE p.tree_type = p_tree_type
+              AND p.descendant_type = p_node_type
+              AND p.descendant_id = p_parent_id
+              AND p.depth = 0
+        )
+        AND NOT EXISTS (
+            SELECT 1 FROM claimius.inheritance_info s
+            WHERE s.tree_type = p_tree_type
+              AND s.ancestor_type = p_node_type
+              AND s.ancestor_id = p_node_id
+              AND s.descendant_type = p_node_type
+              AND s.descendant_id = p_parent_id
+        ) THEN
+        DELETE FROM claimius.inheritance_info d
+            USING claimius.inheritance_info s, claimius.inheritance_info a
+        WHERE s.tree_type = p_tree_type
+          AND s.ancestor_type = p_node_type
+          AND s.ancestor_id = p_node_id
+          AND a.tree_type = p_tree_type
+          AND a.descendant_type = p_node_type
+          AND a.descendant_id = p_node_id
+          AND a.depth > 0
+          AND d.tree_type = p_tree_type
+          AND d.ancestor_type = a.ancestor_type
+          AND d.ancestor_id = a.ancestor_id
+          AND d.descendant_type = s.descendant_type
+          AND d.descendant_id = s.descendant_id;
+
+        INSERT INTO claimius.inheritance_info (
+            tree_type, root_id, ancestor_type, ancestor_id, descendant_type, descendant_id, depth
+        )
+        SELECT p_tree_type, p_root_id, a.ancestor_type, a.ancestor_id, s.descendant_type, s.descendant_id, a.depth + s.depth + 1
+        FROM claimius.inheritance_info a
+                 JOIN claimius.inheritance_info s
+                      ON s.tree_type = p_tree_type
+                          AND s.ancestor_type = p_node_type
+                          AND s.ancestor_id = p_node_id
+        WHERE a.tree_type = p_tree_type
+          AND a.descendant_type = p_node_type
+          AND a.descendant_id = p_parent_id;
+        RETURN;
+    END IF;
+
+    DELETE FROM claimius.inheritance_info d
+        USING claimius.inheritance_info s
+    WHERE s.tree_type = p_tree_type
+      AND s.ancestor_type = p_node_type
+      AND s.ancestor_id = p_node_id
+      AND d.tree_type = p_tree_type
+      AND d.descendant_type = s.descendant_type
+      AND d.descendant_id = s.descendant_id;
+END;
+$$ LANGUAGE plpgsql;
+
+COMMENT ON FUNCTION claimius._splice_subtree(claimius.tree_type, TEXT, UUID, UUID, UUID) IS 'Moves the stored subtree of a node under a new parent, or drops it when the parent is absent.';
 
 -- _select_owned_rows
 -- Returns (id, sa_owner_id) for live rows of an object_type whose owner is

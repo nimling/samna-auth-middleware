@@ -2679,12 +2679,16 @@ BEGIN
     -- 4. reconcile: app's sa_owner_id should match the actual system org id
     UPDATE claimius.samna_app SET sa_owner_id = v_org_id WHERE id = v_app_id AND sa_owner_id <> v_org_id;
 
-    -- 5. ensure ownership tree closure self-edge for the system org
+    -- 5. ensure ownership tree closure self-edge for the system org, and
+    --    attach the app written before the org that owns it
     INSERT INTO claimius.inheritance_info (
         tree_type, root_id, ancestor_type, ancestor_id, descendant_type, descendant_id, depth
     ) VALUES (
         'ownership', v_org_id, 'claimius.organization', v_org_id, 'claimius.organization', v_org_id, 0
     ) ON CONFLICT DO NOTHING;
+    PERFORM claimius._attach_object_to_trees('claimius.samna_app', a.id, to_jsonb(a))
+    FROM claimius.samna_app a
+    WHERE a.id = v_app_id;
 
     -- 6. system claim (sidelined: granted only to the system user)
     SELECT id INTO v_claim_id FROM claimius.claim
