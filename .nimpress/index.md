@@ -14,28 +14,29 @@ Samna Auth Middleware is the Go module every service in the Samna stack links to
 
 ## One schema, two roles
 
-Every consuming service runs the [claimius](/libraries/claimius/) schema in its own database. A binary links exactly one role.
+Every consuming service runs the [claimius](./claimius/index.md) schema in its own database. A binary links exactly one role.
 
 | Role | Is | Holds | Writes |
 |---|---|---|---|
 | Prophet | Samna Auth itself | Every app, with key and seed material | Owns every grant and serves the sync feed |
 | Disciple | A product service such as Bookable or Nimployer | One app, `app_id` stripped | Sends grant writes to the prophet, owns its own tables |
+| Hybrid | A prophet set up with `init_hybrid` | Its own apps, and one app mirrored from a peer prophet | Owns its own apps; the mirrored app's writes belong to the peer |
 
-The prophet is the authority. A disciple is a mirror that answers the same reads at its own latency, and settles access for the tables only it carries. See [Disciple](./disciple.md) for how writes and sync move between the two.
+The prophet is the authority, and each app has one home prophet that decides its writes. A disciple is a mirror that answers the same reads from its own database, relies on exactly one prophet, and settles access for the tables only it carries. See [Disciple](./disciple.md) for how writes and sync move between the two, and [Prophets and disciples](./claimius/prophets.md) for federation.
 
 ## Packages
 
 | Package | Prophet import | Disciple import | Holds |
 |---|---|---|---|
-| `sdb` | `prophet/sdb` | `disciple/sdb` | The database layer and the access lookups |
+| `sdb` | `prophet/sdb` | `disciple/sdb` | The database layer, the access lookups, the usage counter and the audit writer |
 | `echo` | `prophet/echo` | `disciple/echo` | The HTTP handlers |
-| `sam` | `prophet/sam` | `disciple/sam` | Route registration, and on the disciple the pull loop `SyncStart` |
+| `sam` | `prophet/sam` | `disciple/sam` | Route registration; the pull loop `SyncStart`, and on a prophet the peer pull `PeerSyncStart` |
 | `smw` | `smw` | `smw` | Authentication middleware for both roles |
 | `client` | `client` | `client` | The HTTP client a disciple reaches the prophet with |
 | `database` | `prophet/database` | `disciple/database` | The canonical claimius SQL set for the role |
 | `uptime` | | `uptime` | The heartbeat a disciple reports to the prophet |
 
-`shared` carries the implementation both roles use. A consumer never imports it; each role package re-exports what it needs.
+`shared` carries the implementation both roles use. A consumer never imports it; each role package reexports what it needs.
 
 ## Authentication
 
@@ -46,7 +47,7 @@ The prophet is the authority. A disciple is a mirror that answers the same reads
 | `smw.AppMiddleware` | `SAuth-App-Slug` and `SAuth-App-Secret` | The prophet's `/sam` group, where disciples reach the prophet |
 | `smw.TelemetryMiddleware()` | Nothing, it opens the server span | The echo instance, before auth |
 
-Tokens are verified locally against the prophet's JWKS, checked for issuer and audience, and bound to a DPoP proof or an mTLS thumbprint when the token carries `cnf`. A machine client is verified against the local replica with bcrypt, so serving a call never asks the prophet. The actor lands in `ctx.Get(smw.UserIDKey)`.
+Tokens are verified locally against the prophet's JWKS, checked for issuer and audience, and bound to a DPoP proof or an mTLS thumbprint when the token carries `cnf`. A machine client is verified against the local `samna_client` row with bcrypt once per credential, and by the digest of the verified secret after, so serving a call never asks the prophet. The actor lands in `ctx.Get(smw.UserIDKey)`.
 
 ## Access
 
@@ -74,7 +75,7 @@ A prophet uses `prophet/database` in the same step. Moving the ref replays the c
 
 | Variable | Role | Holds |
 |---|---|---|
-| `SAUTH_ENDPOINT` | both | Base url of Samna Auth |
+| `SAUTH_ENDPOINT` | both | Base url of Samna Auth; a disciple bound to another prophet under a handover routes there and asks this one to take it over |
 | `SAUTH_APP_SLUG` | both | The app slug |
 | `SAUTH_APP_SECRET` | disciple | The app secret |
 | `SAUTH_REDIRECT_URI` | disciple | The OAuth redirect for the login flow |
@@ -82,7 +83,8 @@ A prophet uses `prophet/database` in the same step. Moving the ref replays the c
 | `SAUTH_CLIENT_TIMEOUT` | disciple | Seconds before a call to the prophet gives up, default 5 |
 | `SAUTH_DEBUG_USER_ID` | both | Pins one user and skips authentication |
 | `SAUTH_DEBUG_CLIENTS` | both | A static map of client credentials |
-| `SAUTH_DEBUG_PRIVATE_SEED` | disciple | The app seed a debug disciple signs local secrets with |
+| `SAUTH_DEBUG_PRIVATE_SEED` | disciple | The app seed a debug disciple encrypts local secrets with |
+| `SAUTH_REPLICA_DSN` | both | A standby the pure reads run on; see [Access in Go](./claimius/middleware/access.md) |
 
 ## Debug mode
 

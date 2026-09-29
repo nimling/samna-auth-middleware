@@ -1,8 +1,8 @@
 ---
 layout: doc
 title: Prophets and disciples
-description: The authority and its mirrors, what each holds and trusts, why ids are random and what that costs in collision probability, how prophets federate, what each role reads and writes per request, and what happens when any of them fails.
-tags: prophet, disciple, hybrid, federation, init, init_disciple, init_hybrid, prophet_peer, home_prophet, app_handover, peer_collision, trust, uuid, availability, failure
+description: The authority and its mirrors, the three bootstraps, why ids are random and what that costs in collision probability, how prophets federate through peers with one home per app, refused collisions and agreed handovers, what each role reads and writes per request, and what happens when any of them fails.
+tags: prophet, disciple, hybrid, federation, init, init_disciple, init_hybrid, prophet_peer, home_prophet, get_app_home, enforce_app_home, check_sync_home, apply_peer_event, peer_collision, app_handover, offer_handover, accept_handover, availability, failure
 lastUpdated: true
 ---
 
@@ -12,21 +12,29 @@ The same schema runs in two roles and their combination.
 
 | Role | Bootstrap | Holds | Writes |
 |---|---|---|---|
-| Prophet | `init` | Every app it is home for, with keys and seeds | Every grant and shared row of its apps; writes their feeds |
-| Disciple | `init_disciple` | One app, mirrored, without `app_id` or `app_object` | Its own registered tables; routes shared writes to its prophet |
-| Hybrid | `init_hybrid` | Its own system app, and one app mirrored from an upstream prophet | Both of the above |
+| Prophet | `init` | Every app it is home for, with keys and seeds, and every app it mirrors from a peer | Every shared row of the apps it is home for; their feeds |
+| Disciple | `init_disciple(p_disciple_app_slug)` | One app, mirrored, without `app_id` and without `app_object` | Its own registered tables; routes shared writes to its prophet |
+| Hybrid | `init_hybrid` | Its own system app, and one app of an upstream prophet mirrored as a peer | As a prophet |
 
 Samna Auth is the prophet of the ecosystem. Bookable and Nimployer are disciples.
 
+## The bootstraps
+
+1. `init` creates the system app, its root organization, its system user, its administrator claim with its binding and grant, and the system app's `prophet_state` row marked with `system_app_slug`, and returns the six rows as one jsonb object.
+
+2. `init_disciple(p_disciple_app_slug)` writes the one `disciple_state` row naming the mirrored app and grants the disciple roles. The rows arrive from the prophet's snapshot.
+
+3. `init_hybrid(p_system_app_slug, p_system_app_name, p_system_app_private_key, p_system_app_private_seed, p_upstream_prophet, p_upstream_endpoint, p_upstream_app_slug, p_upstream_app_secret, ...)` refuses an empty upstream and an upstream named like itself, runs `init` with the system app fields, and upserts one `prophet_peer` row on `app_slug`: the upstream's slug and endpoint and the mirrored app's slug and secret, created by the system grant `init` returned. A hybrid is a prophet that mirrors one app the way prophets federate; it writes no `disciple_state` row, so `get_disciple_app` and `get_disciple_app_id` raise on a hybrid and `get_app_id` returns its system app.
+
 ## The principle
 
-1. A prophet is the home of an app. It is the only place a shared row of the app, a grant, a binding, an organization it reaches, a user row, is decided. Every other copy is a mirror of it.
+1. A prophet is the home of an app. It is the only place a shared row of the app, a grant, a binding, an organization linked to it, a user row, is decided. Every other copy mirrors it.
 
-2. A disciple relies on exactly one prophet. Its cursor is a sequence of that prophet's outbox and means nothing anywhere else. It applies what its prophet sends under `replay_mode`, without deciding it again.
+2. A replica relies on exactly one prophet. Its cursor is a position on that prophet's feed and means nothing anywhere else. It applies what that prophet sends under `replay_mode`, without deciding it again.
 
 3. A disciple answers every read from its own database. The prophet is on the path of a shared write and of the feed, never of a read.
 
-4. A prophet trusts a disciple as an app, no more. The app key authenticates the disciple for its feed and its routed writes; every routed write is authorized again on the prophet against the end user it is made for.
+4. A prophet trusts a disciple as an app, no more. The app key authenticates the disciple for its feed and its routed writes; every routed write runs for that app alone and carries its actor as a grant of that app in `sa_created_by`, and the prophet's triggers judge the write against that grant: a binding may not hand out more than the grant's user holds on the object.
 
 ## What each role reads and writes
 
@@ -34,63 +42,72 @@ Samna Auth is the prophet of the ecosystem. Bookable and Nimployer are disciples
 |---|---|---|---|
 | A check or a listing | The read of [Reads](./reads.md) | nothing | 0 |
 | A write to the disciple's own table | The write of [Writes](./writes.md) | nothing | 0 |
-| A shared write | One upsert of the returned row | The write, its settles and its events | 1 request and its answer |
-| A pull | `n` applies | `n_a + 2h` entries read | 1 request and its answer per page |
+| A shared write | One upsert of the returned row | The write, its actor's settle, its events | 1 request and its answer |
+| A pull | `n` applies in one transaction | `n_a` entries of `idx_sync_event_app_txid_seq`, one cursor upsert | 1 request and its answer per page |
 
-So `N` disciples of one prophet answer their reads with no shared term: the prophet reads nothing for them. The writes of an app are decided on its home, and each event the home writes is read once per consumer of the app.
+`N` disciples of one prophet answer their reads with no shared term. The writes of an app are decided on its home, and each event the home writes is read once per consumer of the app.
 
 ## Ids
 
-Every row id is a version 4 UUID from `gen_random_uuid()`: 122 random bits ([RFC 9562, section 5.4](https://www.rfc-editor.org/rfc/rfc9562#section-5.4)). The id is given once, by the home prophet, or by the disciple for its own tables, and kept by every copy. The ids of the derived tables are `composite_id` hashes of source ids, so every copy derives the same ones.
+Every row id is a version 4 UUID from `gen_random_uuid()`, 122 random bits ([RFC 9562, section 5.4](https://www.rfc-editor.org/rfc/rfc9562#section-5.4)). The id is given once, by the home prophet, or by the disciple for its own tables, and kept by every copy. The keys of the derived tables are source ids or `composite_id` hashes of them, so every copy derives the same keys.
 
-The probability that `n` independent random ids contain a collision is at most `n² / 2^123`: `9.4 × 10^-20` for a billion ids and `9.4 × 10^-14` for a trillion. So no prophet reserves ranges or asks another before creating a row, and creating a row never waits on a peer.
+The probability that `n` independent random ids contain a collision is at most
 
-Why random and not brokered: a prophet that drew its ids from ranges of `B_r` handed out by a broker would send one message per `B_r` rows and never collide, but would stop creating rows once cut off from the broker for longer than its range lasts, so every create would carry the broker's availability, `A_create = A_db × A_broker`. Random ids send no message and add no factor, and trade them for the collision probability above.
+```
+p(n) ≤ n (n − 1) / 2 · 2^−122 < n² / 2^123
+```
+
+`9.4 × 10^−20` for a billion ids and `9.4 × 10^−14` for a trillion. So no prophet reserves ranges or asks another before creating a row, and creating a row never waits on a peer: a create sends 0 messages.
 
 ## Federation
 
-Prophets federate by mirroring each other's apps. A prophet that serves users of an app homed on a peer is a disciple of the peer for that app, the shape `init_hybrid` sets up: its own apps at home, the peer's app mirrored.
+Prophets federate by mirroring each other's apps. A prophet that serves users of an app homed on a peer mirrors the app from the peer; a hybrid is one prophet set up that way from the start.
 
-1. Agreement is per app. Two prophets agree which of them is home for an app before either serves it. The home decides every shared row of the app; the other mirrors it and routes its writes home.
+### Peers and homes
 
-2. A person is one `user_id` everywhere. The prophet that is home for the person's identity authenticates them and signs their tokens; a peer verifies those tokens against the home's published keys and holds its own per app `samna_user` rows under the same `user_id`.
+1. One `prophet_peer` row per mirrored app: the peer's slug `prophet`, its `endpoint`, the `app_slug` and `app_secret` the peer's `/sam` app authentication checks, a `status` of `active` or `suspended`, and this prophet's cursor on the peer's feed. `idx_prophet_peer_app_slug` is unique, so an app is mirrored from one peer at a time.
 
-3. A peer's rows keep their ids. Because ids are random and never reassigned, a row mirrored across three prophets is the same row in all three, and a grant made at home binds the same object id everywhere.
+2. The pull is a disciple's pull, a consumer of the peer's feed of that app named by the row id, with `peer = true`. Its first page is `get_peer_snapshot`, every source row of the app in the shape its events carry, the app row and its handovers first and parents before children, so each row applies against rows already applied. Each row is applied through `apply_peer_event` under `replay_mode`. The mirrored `samna_app` row carries the peer in `home_prophet`; an app homed here carries NULL.
 
-4. Moving a disciple to another prophet is a change of home. It works only when the new prophet holds the disciple's app with the same ids, and the disciple starts again from the new prophet's snapshot with its cursor at zero.
+3. `get_app_home(app)` is the prophet deciding the app's writes when it is not this one: `home_prophet`, or the peer this prophet has offered the app to while the offer stands. It is one primary key probe and one probe of the partial unique index `idx_app_handover_offered`.
 
-A disciple of a mirror is `h` feeds from the home: a change reaches it after `h` pulls, one per hop, and a write routed from it travels `h` hops to the home and back.
+4. Each app has one writer. `smw.AppHome` refuses a write request for an app another prophet decides with `409` and the home in `SAuth-Home`. The `tg_enforce_app_home` trigger on every source table and on `app_object` refuses any write outside replay to a row of such an app with SQLSTATE `P0409` and the home in the hint; an organization or location is refused when any app linked to it is decided elsewhere.
 
-### How it is kept
+5. `check_sync_home(app, prophet)` decides whether this prophet serves the app's feed to a consumer bound to `prophet`: only when this prophet is the app's home and the consumer is unbound, bound here, or bound to a prophet that handed the app over here and saw the handover accepted. Otherwise the pull is refused with `409` and the prophet the consumer stays with in `SAuth-Home`. A mirror serves no consumer of an app it mirrors, so a disciple is `h = 1` feed from its app's home and a change reaches it after one pull.
 
-1. A prophet's admin writes one `prophet_peer` row per app it mirrors: the peer's slug, its endpoint, and the slug and secret of the app, which the peer's `/sam` app auth checks as it does a disciple's. The pull is the disciple's, a consumer of the peer's feed of that app, applied by `apply_peer_event` under `replay_mode`. The mirrored `samna_app` row carries the peer in `home_prophet`; an app homed here carries NULL. A mirror serves the app's feed to no consumer: `check_sync_home` sends them to the home, so today `h` is 1.
+### Collisions are refused
 
-2. `get_app_home` names the prophet deciding an app's writes when it is not this one. `/sam` refuses a write for such an app with `409` and the home in `SAuth-Home`, and the `tg_enforce_app_home` trigger refuses any write to its rows outside replay with SQLSTATE `P0409`, so each app has one writer. Refusing keeps the writer single without a second hop; forwarding would put the home's availability on the local request anyway.
+`_check_peer_row` refuses a row a peer's feed carries when the app is not decided by that peer, when the feed of one app carries another app's row, or when the row's id is held here by another app, or, for an organization or location, by an app of another home. `apply_peer_event` writes the refused row with its reason and payload to `peer_collision`, returns false, and the page goes on. With the bound above, a refused row is a seeding mistake, not chance. An applied row that changed raises the claim areas it moves, as a disciple's apply does, and an organization or location upsert links it to the mirrored app, its delete unlinks it.
 
-3. A mirrored row whose id this prophet holds for another app, or for an app another prophet decides, is refused on apply and written to `peer_collision` with its payload, and the page goes on. With the bound above, such a row is a seeding mistake, not chance.
+### Handovers
 
-4. A handover moves a home. The home calls `offer_handover(app, peer)` and decides none of the app's writes from then; the offer reaches the peer on the app's feed, and the peer's `accept_handover` makes it the home. The acceptance travels back on the new home's feed, where the old home, pulling the app from the new one, records it and moves `home_prophet`. A disciple bound to the old home is served by the new one only after that acceptance; before it the new prophet refuses and the disciple keeps its prophet. An offer is not withdrawn: a withdrawal racing the acceptance would leave two homes.
+A handover moves an app's home in two steps, each one row of `app_handover`:
 
-5. An organization or location belongs to the home of the apps it is linked to; one shared by apps of two homes is refused as a collision.
+1. The home calls `offer_handover(app, peer, created_by)`. It refuses unless this prophet is the home and the peer is an active peer, inserts the offer and an audit row. From that commit `get_app_home` names the peer, so this prophet decides none of the app's writes. The offer travels on the app's feed to peers only.
+
+2. The peer, which mirrors the app and so holds every row the app has, calls `accept_handover(offer, created_by)`. It refuses unless the offer names it and the app is mirrored from the offering prophet, marks the offer `accepted`, sets `home_prophet` to NULL, and writes an audit row. This prophet is now the home.
+
+3. The acceptance travels back on the new home's feed. The old home, which now pulls the app from the new home, applies it in `apply_peer_event`: its own offer turns `accepted` and `home_prophet` names the new home.
+
+A disciple bound to the old home is served by the new one only after the acceptance; until then the new prophet refuses the pull and the disciple keeps its prophet. An offer is not withdrawn, because a withdrawal racing the acceptance would leave the app two homes.
 
 ## Failure
 
 | Down | Reads | Writes | Recovery |
 |---|---|---|---|
 | The prophet | Every disciple answers from its copy | Shared writes fail; a disciple's own tables keep working | The pull resumes from the cursor |
-| A disciple | The prophet and other disciples are unaffected | None of its writes happen | It resumes from its cursor, or from a snapshot below the trimmed watermark |
+| A disciple | The prophet and other disciples are unaffected | None of its writes happen | It resumes from its cursor, or from the snapshot once `check_sync_cursor` says `trimmed` or `backlog` |
 | The link between them | As when the prophet is down | As when the prophet is down | The same |
+| A peer that is home for a mirrored app | The mirror answers from its copy | Writes of that app fail everywhere but on the home | The peer pull resumes from its cursor |
 
 ### Availability by shape
 
-With independent failures, a request succeeds when every component on its path is up. `A_api` is the service tier, `A_db` a database, `A_net` a link.
+With independent failures a request succeeds when every component on its path is up. `A_db` is a database with the service in front of it, `A_net` a link.
 
-| Shape | Read | Shared write |
+| Shape | Access decision | Shared write |
 |---|---|---|
-| One node, the service and its database | `A_api A_db` | `A_api A_db` |
-| Prophet with disciples | `A_api,d A_db,d` | `A_api,d A_db,d A_net A_api,p A_db,p` |
-| Disciple of a mirroring prophet | `A_api,d A_db,d` | `A_d A_net A_m A_net A_h`, each `A` a service and its database |
+| Claimius, any role | `A_db` | `A_db` on the home |
+| Disciple routing a write | `A_db` | `A_db,d · A_net · A_db,p` |
+| A decision service in front of the data | `A_db · A_net · A_authz` | `A_db · A_net · A_authz` |
 
-A read's availability never has a factor for a prophet or a peer, so a disciple's read is as available as the service and the database it already needs for its data. A write's availability is the product along the chain to its home, which is why a shared write is routed to the home in as few hops as the shape allows.
-
-A disciple keeps answering while its prophet is away, and the cost is staleness. When the prophet itself is down no grant or revoke can be made at all, so the disciple serves nothing staler than the events it had not yet pulled when the prophet went away. When only the link is down, the prophet goes on deciding and the disciple falls behind by the events written meanwhile, which it replays on return.
+A decision never has a factor for a prophet or a peer, because it runs in the database the request already needs for its data. A write's availability is the product along the path to its home, which is why a shared write goes straight to the home in one hop. A disciple keeps answering while its prophet is away, and the cost is staleness: it is behind by the events written since its last applied page, and it replays them on return.

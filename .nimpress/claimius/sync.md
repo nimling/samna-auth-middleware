@@ -1,70 +1,106 @@
 ---
 layout: doc
 title: Sync
-description: The outbox a prophet writes, the rows it carries per write, how a pull reads it, how a disciple applies it, the cursors and trimming, and the sequence as a consistency token, in rows as functions of the data.
-tags: sync_event, emit_sync_event, get_sync_events, trim_sync_event, prophet_state, disciple_state, replay_mode, cursor, consistency
+description: The outbox of source rows a prophet writes, the (txid, seq) cursor served below the snapshot xmin, pages applied whole by one consumer per database, per consumer cursors and trimming capped at the source rows, and the cursor as the consistency token, in events and rows as functions of the data.
+tags: sync_event, emit_sync_event, emit_app_object_sync_event, get_sync_events, get_sync_seq, check_sync_cursor, update_sync_cursor, trim_sync_event, sync_consumer, disciple_state, replay_mode, cursor, txid, xmin, consistency
 lastUpdated: true
 ---
 
 # Sync
 
-A prophet appends every change of a mirrored table to `sync_event`. A disciple of an app reads the events of its app after its cursor and applies them to its own copy. The protocol that moves the events is pull, and it belongs to the middleware; see [Sync in Go](./middleware/sync.md).
+A prophet appends every change of a mirrored source table to `sync_event`. A consumer of an app, a disciple database or a peer prophet, reads the app's events after its cursor and applies them to its own copy, where it derives its own pairs. The protocol that moves the events is pull, and it belongs to the middleware; see [Sync in Go](./middleware/sync.md).
 
 ## The row
 
-`sync_event (seq bigserial, operation, event_type, payload jsonb, app_id, written_at, txid xid8)`, with four btree indexes: the primary key `seq`, `(app_id, txid, seq)`, `(event_type, seq)` and `written_at`. `txid` is the transaction that wrote the event.
+`sync_event (seq bigserial, operation, event_type, payload jsonb, app_id, written_at, txid xid8)` carries three indexes: the primary key `seq`, `idx_sync_event_app_txid_seq (app_id, txid, seq)` and `idx_sync_event_written_brin`, a BRIN summary on `written_at`. `txid` defaults to `pg_current_xact_id()`, the transaction that wrote the event. An event costs one heap row and two btree entries; the BRIN summary changes only when a new range of pages starts ([PostgreSQL, BRIN Indexes](https://www.postgresql.org/docs/17/brin.html)).
 
-`emit_sync_event`, an after trigger on the source tables, writes one row per row written, in the transaction of the change, so an event exists exactly when its change committed. An `upsert` carries the full row; a `delete` carries its `id` and `app_id`. The trigger does nothing on a database with no `prophet_state` row, so a pure disciple writes no events.
+`emit_sync_event`, an after row trigger on `samna_app`, `samna_user`, `samna_client`, `samna_secret`, `organization`, `location`, `claim`, `user_claim`, `claim_object`, `object_field`, `user_field`, `user_relation` and `app_handover`, writes in the transaction of the change, so an event exists exactly when its change committed. An `upsert` carries the full row less `txid`; a `delete` carries its `id` and `app_id`. The trigger writes nothing under `replay_mode` and nothing on a database with no `prophet_state` row, so a pure disciple writes no events.
 
-## What is carried
+An `organization` or `location` has no `app_id`. Its change is written once per app holding a live `app_object` link to it, stamped with that app, through `apps_for_object`. `emit_app_object_sync_event` on `app_object` publishes the linked row to the app when a link goes live and its delete to that app alone when the link ends, so a row linked after it was written reaches the app's consumers and an unlinked one leaves them.
 
-| Carried | Never carried |
-|---|---|
-| `samna_user`, `samna_client`, `samna_secret` | `samna_app`: its events carry no `app_id` and no pull serves them |
-| | `inheritance_info`, `table_info`, `access_diff`, `reconcile_queue` |
-| `organization`, `location` | `claim_graph_cache` |
-| `claim`, `claim_object`, `user_claim` | the implementing side's own tables |
-| `object_field`, `user_field`, `user_relation` | `user_object`, `user_users`: derived, see below |
-| | `audit` |
+## Events per write
 
-The feed carries the source rows of access and nothing derived from them. A disciple derives its own pairs: applying a source row keeps its closure and raises the areas the row moves, and the disciple's reads settle them as the prophet's do; see [Materialization](./materialization.md). An `app_object` link publishes the linked organization or location to the linked app, stamped with its id, and an unlink publishes the row's delete to that app alone, so a row linked after it was written reaches the disciple and an unlinked one leaves it. `get_sync_events` and the snapshot serve no `user_object`, `user_users` or `audit` row, and the base files delete any left in the outbox.
-
-### Events per write
-
-A write emits one event per source row it writes, and a settle emits none:
+The feed carries source rows and nothing derived from them. `user_object`, `user_users`, `object_info`, `inheritance_info`, `access_diff` and `audit` never publish, `get_sync_events` excludes `claimius.user_object`, `claimius.user_users` and `claimius.audit` by event type, and the base files delete any such row left in the outbox.
 
 ```
-events = source rows
+events(write) = Σ_{source rows r written} n_apps(r)
 ```
 
-For the request of [Writes](./writes.md#one-request-one-transaction), a claim bound to a node and granted to `k` users, `events = 2 + k`, whatever the claim reaches. Measured on a prophet with one root, 200 organizations under it and 50 users, granting a claim bound to the root to the 50 users and letting each list its organizations: the feed took 50 `user_claim` events for the grants and nothing for the 12,651 pairs and 2,450 `user_users` rows the reads settled, where publishing the derived rows took 12,651 `user_object` and 227,850 `user_users` events more. On the data set of [the index](./index.md#symbols), building the data held 5,186,276 events when the derived rows were published, of which 9,355 were source rows: the fan out of a grant to the pairs it reaches, and of a pair to the users who share it, is what the feed no longer carries.
+with `n_apps(r) = 1` for a row carrying `app_id` and the number of live links for an organization or location. A settle writes pairs and counts, never source rows, so it emits nothing. For the request of [Writes](./writes.md), a claim bound to a node and granted to `k` users, `events = 2 + k`, independent of `|T_c|` and `|H_c|`.
 
-## The feed as a pipeline
+Measured on a prophet with one root, 200 organizations under it and 50 users, granting a claim bound to the root to the 50 users and letting each list its organizations: the feed took 50 `user_claim` events. Publishing the derived rows as well took 12,651 `user_object` and 227,850 `user_users` events more, 240,551 events against 50. The fan out of a grant to the pairs it reaches, `|T_c|` per holder, and of each pair to the users who share its object, `U_x − 1` per pair and direction, is exactly what a consumer derives locally instead of reading.
 
-1. A prophet writes events in its transactions, each stamped with its `txid`. Every event of an app carries the app's id; an organization or location, whose row has no `app_id`, is written once for every app linked to it through `app_object`, stamped with that app. A statement trigger notifies `claimius_sync` with the app id, delivered at commit.
+## The cursor
 
-2. `get_sync_events(app_id, txid, seq, limit)` returns the app's events after the cursor `(txid, seq)` in `(txid, seq)` order, 1,000 by default, one range of `idx_sync_event_app_txid_seq`. With `n_a` events of the app after the cursor a pull reads `n_a` entries. Another app's rows never leave the prophet.
+A position on the feed is `(txid, seq)`, written `<txid>.<seq>` on the wire. `get_sync_events(app_id, txid, seq, limit, peer)` returns the app's events with
 
-3. Sequences are handed out at insert and become visible at commit, so a higher sequence can commit before a lower one. The feed serves only events whose `txid` is below the `xmin` of the reading snapshot, the transactions every one of which has ended, and orders them by `txid` before `seq`. Every event written later carries a `txid` at or above that `xmin`, so it sorts after every served event and a cursor never passes over a sequence that commits late: a transaction that took its `txid` first and its sequence last is served in its `txid` place, not its sequence place.
+```
+(e.txid, e.seq) > (txid, seq)   and   (e.txid < pg_snapshot_xmin(pg_current_snapshot())  or  e.txid = the reader's own)
+```
 
-4. A disciple applies a page in one transaction under `replay_mode`, each event by its primary key: the calc triggers settle no actor but keep the closure and raise the object areas a structural row moves. For a `claim`, `claim_object` or `user_claim` event the disciple raises the claim areas it moves in its own `access_diff`, one or two rows, so every pair it holds, on the shared types and on its own registered tables, settles on the next local read. Applying is idempotent: the same event twice produces the same row.
+in `(txid, seq)` order, 1,000 by default, through one range of `idx_sync_event_app_txid_seq`. A pull with `n_a` of the app's events after its cursor reads `n_a` entries and no other app's.
 
-5. `disciple_state (last_applied_txid, last_applied_seq)` moves to the page's last position first in the same transaction, and only from the cursor the page was pulled at. A page of `p` events costs one commit; a page that fails anywhere rolls back whole, cursor included, and is fetched again from the same cursor.
+Sequences are taken at insert and become visible at commit, so a higher `seq` can commit before a lower one. The feed serves only events whose transaction is below the `xmin` of its snapshot, transactions that have all ended, and every event written later carries a `txid` at or above that `xmin`, so it sorts after every event already served. A cursor therefore never passes an event still to be served, whatever order transactions commit in; the proof is [Theory, Result 9](./theory.md#result-9-the-cursor-below-the-snapshot-xmin).
 
-6. One process per disciple database applies. The pull loop runs on every pod, and each holds a session level `pg_try_advisory_lock` on a key of the app slug on a dedicated connection for as long as it pulls; a pod without the lock does no sync work and tries again every 5 s. The lock dies with its session, so when the holder goes another pod takes over, and a holder whose connection stops answering stops pulling. `N` pods apply `E` events once, `E` applies instead of `N · E`.
+`app_handover` events travel only with `peer = true`, to a peer prophet mirroring the app, never to a disciple.
+
+## Applying a page
+
+A consumer applies one page in one transaction under `replay_mode`:
+
+1. It moves its cursor first, from the position the page was pulled at to the page's highest position, with an update whose `WHERE` names the old position. The row stays locked for the page, and a page pulled at a cursor that has since moved changes no row and is refused.
+
+2. It upserts or deletes every payload by primary key. On a disciple `app_id` is stripped, `samna_app` events are skipped, and an upsert writes only when a column differs, so an unchanged row costs one probe and moves nothing.
+
+3. For each `claim`, `claim_object` or `user_claim` payload that changed a row, it raises the claim areas the payload moves in its own `access_diff`: the claim itself, the linked claim for a composition link, and for an assignment the area of its one user. One or two rows, whatever the claim reaches. Hierarchy rows keep the closure through their calc triggers, which raise the object area under replay without settling any actor.
+
+4. One commit. A page that fails anywhere rolls back whole, cursor included, and is pulled again from the same position.
+
+```
+per page of p events:  p upserts or deletes,  ≤ 2 area rows per claim event,  1 cursor row,  1 commit
+```
+
+Every pair a disciple holds, on the shared types and on its own registered tables, then settles on the next local read that meets the area; see [Materialization](./materialization.md).
+
+A snapshot is applied the same way, as one page with the snapshot's cursor `(pg_snapshot_xmin, 0)` of the repeatable read transaction that read it: every event below that `xmin` is in the snapshot and every later event sorts after its cursor. It upserts and never deletes a row the prophet did not send.
+
+## One consumer per database
+
+The pull loop runs on every process of a service. Each takes a session level `pg_try_advisory_lock` on `hashtextextended(key, 0)`, the key `claimius.disciple_sync:<app slug>` for a disciple and `claimius.prophet_peer:<id>` for a peer row, on a dedicated connection, and only the holder pulls and applies. The lock dies with its session, so when the holder goes another process takes it. With `N` processes, `E` events are applied `E` times, not `N · E`, and no two consumers of one database race on its cursor.
 
 ## Cursors and trimming
 
-`sync_consumer` holds one cursor per consumer, a disciple database named by the id of its `disciple_state` row: `(last_applied_txid, last_applied_seq)`, the position it last proved it applied by asking for what comes after it, and `last_contact_at`. `update_sync_cursor` moves it, and the app's `prophet_state` row carries the lowest cursor among its consumers in contact. `trim_sync_event(stale_after)` deletes every event at or below the lowest cursor among consumers in contact within `stale_after`, 7 days by default, then each app's events beyond as many as its source rows, records the highest position removed per app in `prophet_state (trimmed_txid, trimmed_seq)`, and returns the count. A consumer out of contact longer is treated as gone, so one dead disciple cannot hold the outbox. The outbox holds, per app, at most as many events as the app has source rows.
+`sync_consumer (app_id, consumer_id)` holds one cursor per consumer, named by its `disciple_state` or `prophet_peer` id. A pull for the page after a cursor is the consumer's proof that it applied everything up to it, and `update_sync_cursor` records it with the contact time. The app's `prophet_state` row carries the lowest cursor among its consumers in contact within 7 days.
+
+`trim_sync_event(stale_after)` deletes, in two passes:
+
+1. Every event at or below the lowest cursor among consumers in contact within `stale_after`, 7 days by default. A consumer out of contact longer is treated as gone, so one dead disciple cannot hold the outbox.
+
+2. Per app, every event beyond as many as the app has source rows, `count_sync_source_rows`: the rows of the nine app scoped tables and the live organization and location links.
+
+It records the highest position removed per app in `prophet_state (trimmed_txid, trimmed_seq)`. So the outbox of an app holds at most
+
+```
+events(app) ≤ R_a = Σ_{app scoped source tables} rows(app) + live links(app)
+```
 
 ## Catch up
 
-A disciple away for a while returns `n_b` events behind, all of which the outbox still holds when it was in contact within `stale_after`. It replays them in pages, `⌈n_b / 1000⌉` pulls and `n_b` applies. `check_sync_cursor(app_id, txid, seq)` sends a consumer to the snapshot of its app's rows, which the middleware serves, when its cursor is above every sequence or transaction the prophet issued, below `(trimmed_txid, trimmed_seq)`, or behind by more events than the app has source rows, where the snapshot is the cheaper catch up.
+`check_sync_cursor(app_id, txid, seq)` decides, on every pull, whether the feed or the snapshot serves a consumer:
 
-## The sequence is the consistency token
+| Answer | When | The consumer |
+|---|---|---|
+| NULL | the feed can serve the cursor | pulls pages |
+| `ahead` | `seq` above every sequence issued or `txid` above the snapshot's `xmax` | takes the snapshot |
+| `trimmed` | the cursor is below `(trimmed_txid, trimmed_seq)` | takes the snapshot |
+| `backlog` | the app's events after the cursor outnumber its source rows `R_a` | takes the snapshot |
 
-A routed write returns the prophet position `(txid, seq)` of its change. A read on a disciple that must see that write waits until the disciple's cursor reaches that position. This is the zookie of Zanzibar, "at least as fresh as" a known write ([Pang et al. 2019, section 2.2](https://www.usenix.org/system/files/atc19-pang.pdf)), and the `at_least_as_fresh` mode of SpiceDB ([SpiceDB, Consistency](https://authzed.com/docs/spicedb/concepts/consistency)). Without a token a disciple read is consistent as of its cursor. A prophet read settles what it meets before it answers, in the same database.
+The test reads at most 1,001 events and stops counting source rows at the number it compares against, so it costs `min(n_b, 1001)` entries for a consumer `n_b` events behind, and only past 1,000 events the count of `R_a`. A consumer `n_b ≤ R_a` events behind replays them in `⌈n_b / 1000⌉` pages and `n_b` applies; one further behind reads `R_a` rows once, which is fewer than the events it missed.
 
-## A disciple's own writes
+## The cursor is the consistency token
 
-The implementing side's own tables never enter the feed. Bindings on them are stored on the prophet, addressed by `object_type` and `object_id`, travel as any binding does, and settle on the disciple that holds the table.
+A write routed to the prophet answers with `SAuth-Seq`, the app's highest position after the write, from `get_sync_seq`, one descent of `idx_sync_event_app_txid_seq`. A read on the disciple that must see the write waits until the disciple's cursor reaches that position. This is the zookie of Zanzibar, a read "at least as fresh as" a known write ([Pang et al. 2019, section 2.2](https://www.usenix.org/system/files/atc19-pang.pdf)), and the `at_least_as_fresh` mode of SpiceDB ([SpiceDB, Consistency](https://authzed.com/docs/spicedb/concepts/consistency)). Without a token a disciple read is consistent as of its cursor, behind the prophet by the events it has not yet applied and by nothing else. A read on the prophet settles what it meets and answers in the database that holds the write.
+
+## A disciple's own tables
+
+The implementing side's own tables never enter the feed. Bindings on their rows are `claim_object` rows on the prophet, addressed by `object_type` and `object_id`, travel as any binding does, and settle on the disciple that holds the table.

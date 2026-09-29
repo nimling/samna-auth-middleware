@@ -1,99 +1,120 @@
 ---
 layout: doc
 title: Reads
-description: The claimius read surface, what each read function reads and writes in index entries and rows as a function of the data, and why a check and a listing are independent of tree depth and of the number of users.
-tags: get_access, get_direct_access, mutation_access, resolve_access, get_objects, get_users, get_claims, get_audit, _best_grant, reconcile_if_pending, read cost
+description: The claimius read surface and what each read function reads and writes in index entries and rows as a function of the data, why a check and a page of a listing are independent of tree depth and of the number of users, and which reads may run on a replica.
+tags: get_access, get_direct_access, mutation_access, resolve_access, get_user_access, get_objects, get_organizations, get_locations, get_secrets, get_users, get_claims, get_audit, _best_grant, reconcile_if_pending, key paging, security definer
 lastUpdated: true
 ---
 
 # Reads
 
-Every read function takes the user and the app first. It runs `reconcile_if_pending(app, user)`, which settles the outstanding areas the read meets, then `check_user_active`, one probe, and then answers from `user_object` or the base relations. Soft deleted rows, grants outside their window and denied bits never reach the caller.
+Every read function takes the user and the app first. It runs `reconcile_if_pending`, which settles what the read meets, see [Materialization](./materialization.md), then `check_user_active`, one probe of `samna_user` by `(user_id, app_id)`, and then answers from `user_object` or from the base relations. Soft deleted rows, grants outside their window and denied bits never reach the caller. On a disciple the same functions exist with the same arguments, and the app argument is accepted and ignored, because every row it holds is in scope.
 
 ## The surface
 
 | Function | Answers |
 |---|---|
-| `get_access(user, app, object_id, object_type, required)` | The chosen grant on one object, at most one row, with `user_claim_id` |
-| `get_direct_access(user, app, object_id, object_type, required, raise)` | The closest, strongest grant bound on the object or an ancestor |
+| `get_access(user, app, object_id, object_type, required)` | The chosen grant on one object, at most one row, with its `user_claim_id` |
+| `get_direct_access(user, app, object_id, object_type, required, raise)` | The closest, strongest grant bound on the object or an ancestor, walking the trees |
 | `resolve_access(user, app, object_id text, object_type, required)` | The verdict for any type: audit, relation and user lookups, otherwise the two above |
-| `mutation_access(user, object_id text, object_type, required)` | The gate: a row, `P0403` or `P0404` |
-| `get_user_access(actor, app, target, required)` | The actor's access on a user named three ways; see [Users](./users.md) |
-| `get_objects(user, app, object_type, required)` | Every object of a type the user reaches, with rendering fields and `user_claim_id` |
-| `get_organizations`, `get_locations` | `get_objects` intersected with the app's `app_object` links |
-| `get_users`, `get_claims`, `get_audit`, `get_secrets` | Listings by type |
+| `mutation_access(user, object_id text, object_type, required)` | The gate: a row, SQLSTATE `P0403` or `P0404` |
+| `get_user_access(actor, app, target text, required)` | The actor's access on a user named by `external_id`, `user_id` or row id; see [Users](./users.md) |
+| `get_objects(user, app, object_type, required, after, limit)` | One page of the objects of a type the user reaches, with rendering fields and `user_claim_id` |
+| `get_organizations`, `get_locations`, `get_secrets` | One `get_objects` page joined to the table, with the same `after` and `limit` |
+| `get_users(user, app, required)` | The users the reader sees |
+| `get_claims(user, app, required)`, `get_claims(user, app, object_id, object_type)` | The claims the reader holds or reads; the claims behind one pair |
+| `get_audit(user, app, required, limit, offset)` | Audit rows of the organizations the reader reaches; see [Audit](./audit.md) |
+| `get_scope_access(user, app, path, required)` | Scope grants matching a jsonpath; see [Capabilities](./capabilities.md) |
 | `search`, `get_owner_graph`, `get_claim_graph` | See [Search](./search.md) and [Graphs](./graphs.md) |
 
-## What every read pays first
+## get_access
 
-`reconcile_if_pending` reads the app's `Δ_a` outstanding areas and, for each claim area, tests the reader's grants and links against it. With nothing outstanding it reads `Δ_a = 0` rows and writes nothing. When it finds areas it settles them for every user they reach, at the cost of [Materialization](./materialization.md#what-a-settle-costs), inside the read.
+`get_access` reads the stored pair and chooses a grant:
 
-## What a check costs
-
-`get_access` reads the pair and chooses a grant:
-
-1. The pair, one probe of the `user_object` primary key `(user_id, app_id, object_type, object_id)`, with the mask tested on the `sa_access` it carries, and its object's `object_info` row by key for the owner and location.
-
-2. `_best_grant` over the pair's `G_x` derivations: per derivation one probe of `idx_user_claim_unique` for the live grant inside its window and one `claim` primary key probe.
-
-3. The owner's root, one `organization` probe.
-
-```
-entries(get_access) = Δ_a + 1 + min(U_x, V_{u,τ}) + 2 G_x + 1          rows written = 0 when Δ_a = 0
-```
-
-Nothing in it depends on the depth of the trees, the number of claims bound above the object, or the number of users beyond `U_x`: the derivation was paid when the pair was settled. That is the point of storing the pair.
-
-## What a walk to the closest grant costs
-
-`get_direct_access` answers without `user_object`, for a caller that expects to act on an object whose pair is not there:
-
-1. `get_ancestors`: the object's ownership chain, its location chain and, for each location on it, the owner's chain, and its parenthood chain, one range of `idx_inheritance_info_descendant` each. With `a'_x = d_o + d_l + d_q + Σ_{l on the location chain} (d(owner(l)) + 1)` ancestors this reads `a'_x + O(1)` entries.
-
-2. The bindings on each ancestor, `idx_claim_object_object`, joined to the reader's live grant on each and its claim. A binding on an ancestor above hop 0 counts only when claim and binding both inherit.
-
-3. The same walk again for denies, in a `NOT EXISTS`: a deny on any ancestor that covers a required bit empties the answer.
-
-4. The first row by hops, then bits, then grant id.
+| Step | Entries |
+|---|---|
+| `reconcile_if_pending(app, u, τ, x)` with no open area in the app: the `reconcile_queue` probe and two probes of the partial `access_diff` indexes | 3 |
+| `check_user_active` | 1 |
+| The pair, one probe of the `user_object` primary key, the mask tested on the `sa_access` it includes | 1 |
+| The object's `object_info` row, for owner and location | 1 |
+| `_best_grant` over the pair's `G_x` derivations: the live grant inside its window, one probe of `idx_user_claim_unique`, and its claim | `2 G_x` |
+| The root of the owning organization | 1 |
 
 ```
-entries(get_direct_access) ≈ 2 (a'_x + 3 B'_x) + O(1)
+entries(get_access) = 7 + 2 G_x                           rows written = 0
 ```
 
-for `B'_x` bindings on those ancestors. Its location term follows each location's owner, a wider set of ancestors than the closure the settle reads; see [Locations](./locations.md).
+When the app holds open areas the covering test is added, `a_x + t_x` closure entries, the reader's grants and links, and one `access_diff` probe per node and per held claim, and at most one recompute `R(u, {x})` when an area covers the pair. Nothing in the answer depends on the depth of the trees, the bindings above the object, or the number of users: the derivation was paid when the pair settled.
 
-## What the gate costs
+`_best_grant(grants, user, app, required)` keeps the derivations whose mask covers `required` and whose grant is live and inside its window, and returns the one with the most bits set, then the highest mask, then the oldest claim. `scope` is the pair's field masks. `user_claim_id` is the actor token a follow on write stamps into `sa_created_by`; see [Claims](./claims.md).
 
-`mutation_access` calls `resolve_access`, which tries `get_access` and on a miss `get_direct_access`; on a second miss `mutation_access` calls `get_direct_access` again with `raise`, which probes the object's live row once and raises `P0403` or `P0404`. A hit costs one check; a miss costs one check, two walks and one probe, and runs `reconcile_if_pending` three times. For `claimius.samna_user` the target is resolved in the app's `samna_user` rows by `external_id`, `user_id` or `id`; `external_id` carries no index there, so the resolution reads the app's `U` user rows.
+## get_direct_access
 
-## What a listing costs
+`get_direct_access` answers without `user_object`, for a caller that expects to act on an object whose pair is absent:
 
-`get_objects(user, app, type, required, after, limit)` reads the reader's range of the `user_object` primary key, `(user_id, app_id, object_type, object_id)` carrying `sa_access`, from the first key past `after`, the heap row of each pair for its `grants`, the `object_info` row of each object by key for its name and owner, and chooses a grant per row, until `limit` rows are kept:
+1. `reconcile_if_pending` for the pair and `check_user_active`, as above.
+
+2. `get_ancestors`: the object's ownership chain, its location chain and, for each location on it, the owning organization's chain, and its parenthood chain, one range of `idx_inheritance_info_descendant` each. With `a'_x = d_o + d_l + d_q + Σ_{l on the location chain} (d(owner(l)) + 1)` this reads `a'_x + O(1)` entries.
+
+3. The reader's live grants inside their window, `1 + 2C`.
+
+4. The bindings on each node, joined to the reader's grants, a binding above hop 0 counting only when claim and binding both inherit; and the composed bindings, each with its claim and its link: `a'_x + 1` probes returning `B'_x` bindings, and `2 B'_x` more for the composed branch.
+
+5. The denies among the same derivations: an unscoped deny on the object itself subtracts from every candidate, one above it from the candidates found above; what remains is closed under implication. A binding scoped only to fields the type lacks grants nothing.
+
+6. The first row by hops, then bits, then grant id.
 
 ```
-entries(get_objects page) = Δ_a + h + p (1 + 2 G + 2)           comparisons = 0
+entries(get_direct_access) ≈ 4 + 2C + a'_x + 3 B'_x + O(1)
 ```
 
-for a page of `p` rows and a descent of `h` levels. Rows come in `object_id` order straight from the index, so nothing is sorted, and the next page starts after the last `object_id` of this one. Without `limit` the page is the whole range, `p = V_{u,τ}`. The settle of the reader's share, `Δ_a`, runs before the range is read and is the same for every page. Measured at `V_{u,τ} = 5,000` among 200,160 pairs, a page of 50 reads 50 entries of `user_object` indexes and 110 across the schema with no sort, where the unpaged listing read 5,000 and 10,010 and sorted 5,000 rows. The mask test is written `(sa_access & required) >= required`, the equality for a submask of `required`, which the planner estimates as a range and not a point, so it keeps the ordered scan. A page is linear in its own size and independent of the depth of the trees, the number of bindings, the number of other users and the size of the reader's range.
+With `raise`, a miss probes the object's live row once and raises `P0403` when it exists and `P0404` when it does not. It is `VOLATILE`, because its settle writes.
+
+## resolve_access and mutation_access
+
+`resolve_access` sends `claimius.audit` to a probe of the row and of the reader's organizations, `claimius.user_relation` to one probe matching `id` and `user_id`, `claimius.samna_user` to `get_user_access`, and every other type to `get_access` and on a miss to `get_direct_access`. A malformed id returns no row, so a batch of `resolve_access` over `unnest` never aborts on one.
+
+`mutation_access` refuses a malformed id or an unregistered type with `P0404` before any read, then calls `resolve_access`; on a miss it calls `get_direct_access` with `raise`. A hit costs one check; a miss costs one check, two walks and one existence probe, and runs `reconcile_if_pending` three times, each finding the pair settled after the first. One round trip answers 200, 403 or 404.
+
+## get_objects
+
+`get_objects(user, app, type, required, after, limit)` reads the reader's range of the `user_object` primary key, `(user_id, app_id, object_type, object_id)` with `sa_access` included, from the first key past `after`, until `limit` rows are kept. Per row it reads the heap tuple for `grants`, chooses the grant with `_best_grant`, and probes `object_info` by key for name, description, link, owner and location, and the owner's root:
+
+```
+entries(page) = s + h + p (3 + 2 G)           rows sorted = 0
+```
+
+for a page of `p` rows, a descent of `h` levels and the settle `s` of the reader's share, which runs before the range is read and does not depend on the page. Rows come in `object_id` order straight from the index, and the next page starts after the last `object_id` of this one. Without `limit` the page is the whole range, `p = V_{u,τ}`. The mask test is written `(sa_access & required) >= required`, the equality for a submask of `required`, which the planner estimates as a range rather than a point, so it keeps the ordered scan instead of sorting a bitmap scan.
+
+Measured at `V_{u,τ} = 5,000` among 200,160 pairs, a page of 50 read 50 entries of the `user_object` indexes and 110 across the schema with no sort, where the unpaged listing read 5,000 and 10,010 and sorted 5,000 rows. A page is linear in its own size and independent of the depth of the trees, the number of bindings, the number of other users and the size of the reader's range. The argument that storing the pairs is right is [Result 4](./theory.md#result-4-a-listing-reads-stored-pairs).
+
+## The other listings
 
 | Listing | Reads |
 |---|---|
-| `get_organizations`, `get_locations`, `get_secrets` | One `get_objects` page, each row joined to its table row and kept when live and linked to the app |
-| `get_users` | `S_u` rows of `idx_user_users_viewer`, the reader's grants and their bindings on `claimius.samna_user`, then one `samna_user` probe per target |
-| `get_claims(user, app, required)` | Every live claim row, each tested against the reader's grants and pairs with two probes |
-| `get_claims(user, app, object_id, object_type)` | The reader's pair on the object and the claims of its `G_x` derivations |
-| `get_audit` | The app's audit rows newest first through `idx_audit_sa_created_at`, kept when their owner is among the reader's organizations, until `limit + offset` are kept |
+| `get_organizations`, `get_locations` | One `get_objects` page, each row joined to its table row by primary key and kept when live and linked to the app, one probe of `idx_app_object_unique`: `p` more rows and `p` probes. A disciple has no `app_object`, and keeps every live row |
+| `get_secrets` | One `get_objects` page joined to `samna_secret`, kept when live and of the app |
+| `get_users` | The reader itself, one range of `idx_user_users_viewer`, `S_u` rows, and the reader's grants with their bindings on `claimius.samna_user`, then one `samna_user` probe per target: `1 + S_u + 2C + b + |targets|` |
+| `get_claims(user, app, required)` | Every live claim row, each tested with a probe of the reader's grant and a probe of the reader's pair on it: `3` entries per live claim |
+| `get_claims(user, app, object_id, object_type)` | The reader's pair on the object and, per derivation of its `grants`, the live grant and the claim: `1 + 2 G_x` |
+| `get_audit` | The reader's `V_{u,organization}` pairs, then the app's rows newest first until `limit + offset` are kept |
 
-## A check writes nothing, a read writes only its settle
+A listing carries no authority to act on a row in it: `get_objects` returns a `user_claim_id` per row, but a write goes through `mutation_access` for its one row.
 
-Every read function is `VOLATILE` in effect, because `reconcile_if_pending` locks with `FOR UPDATE SKIP LOCKED` and writes when it finds an area. Nothing else in a read path writes.
+## Which reads write
+
+A read writes only its settle: the pairs it recomputes, the `access_diff_user` records of the shares it settles, the areas it clears and the `claim_graph_cache` row a graph read stores. Nothing else in a read path writes.
 
 1. No cascade runs in a read. The soft delete of a user cascades to its grants, relations and field values through `tg_cascade_user_soft_delete`, once, in the write that deleted the user. `check_user_active` is a predicate.
 
-2. A settle locks the areas it takes and the pairs it writes, for one statement each. A concurrent read that meets an area being settled skips it and reads the pairs as they stand.
+2. A settle locks the areas it takes `FOR KEY SHARE SKIP LOCKED` and the objects it writes with sorted advisory locks. A read that meets an area another read is settling skips it and reads the pairs as they stand.
 
-3. Every statement runs under `statement_timeout` and every session under `idle_in_transaction_session_timeout`, so no statement outlives its client.
+3. `get_scope_access` reads no pair and no area and is `STABLE`, so it answers on a hot standby. Every function that runs `reconcile_if_pending` may write, so it runs on the primary; the middleware routes a pure read to a replica and repeats a read the standby refuses with SQLSTATE `25006` on the primary; see [Access in Go](./middleware/access.md).
+
+## Definer rights
+
+Every `get_*`, `search`, `resolve_access` and `mutation_access` is `SECURITY DEFINER` with `search_path = claimius, pg_temp`. The `claimius_reader` role holds no privilege on any table, so a connection that only reads gets answers through these functions and cannot select the pairs, the closure or the grants directly. The settle a read performs is written with the owner's privileges, and the pinned `search_path` keeps a caller from shadowing a claimius object with its own ([PostgreSQL, CREATE FUNCTION, Writing SECURITY DEFINER Functions Safely](https://www.postgresql.org/docs/17/sql-createfunction.html#SQL-CREATEFUNCTION-SECURITY)). See [Security](./security.md).
 
 ## Plans
 
-PL/pgSQL caches a plan per statement and, under `plan_cache_mode = auto`, switches to a generic plan after five executions when its estimated cost is close to the custom plans ([PostgreSQL, PREPARE](https://www.postgresql.org/docs/17/sql-prepare.html)). Every hot statement of a read filters on equalities over indexed columns, so its generic plan is the same index path as its custom plans. The listings, whose row counts vary from one user to the next by orders of magnitude, read the reader's own index range, so the plan does not depend on the count either. A client that sends each access statement as a named prepared statement pays bind and execute per call, and parse and plan once per connection.
+PL/pgSQL caches a plan per statement and, under `plan_cache_mode = auto`, switches to a generic plan after five executions when its estimated cost is close to that of the custom plans ([PostgreSQL, PREPARE](https://www.postgresql.org/docs/17/sql-prepare.html)). Every hot statement of a read filters on equalities over indexed columns, so its generic plan is the same index path as its custom plans, and a listing reads the reader's own range, so its plan does not depend on how many pairs the reader holds. The middleware sends each access call as a named prepared statement, so a connection parses and plans it once.

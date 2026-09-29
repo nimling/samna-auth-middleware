@@ -21,7 +21,7 @@ The test must assert the observable contract, not the internal call graph. Hit t
 just test
 ```
 
-Runs `go test ./...`, then for each role `smig test` on `<role>/database/migrate.yml` fresh and `--from` the last tag, then the `dbtest` tagged Go suites against the container that run keeps. `just test-hurl` runs the hurl files under `test/hurl/` against the example disciple; run it when the change touches a route. Failure: report the failing test names and stop. Do not commit, do not bump.
+Runs `go test ./...`, then for each role `smig test` on `<role>/database/migrate.yml` `--from` the last tag, then a fresh `smig test --keep` whose container the `dbtest` tagged suites run against: `./shared/... ./disciple/... ./smw/...` on the disciple set, and `./prophet/...` on the prophet set with a second kept container exported as `PEER_PG*` for the federation tests. The containers are removed after each role. `just test <package>` runs `go test ./<package>/...` alone. `just test-hurl` runs the hurl files under `test/hurl/` against the example disciple; run it when the change touches a route. Failure: report the failing test names and stop. Do not commit, do not bump.
 
 ## 3. Mirror the Go change to typescript under `ts/`
 
@@ -32,7 +32,7 @@ The typescript package under `ts/src/` mirrors the Go surface that is callable f
 3. New http endpoints, query parameters, header names, or status codes that the typescript client speaks get mirrored into `ts/src/client.ts`, `ts/src/fetch.ts`, or `ts/src/session.ts` as appropriate.
 4. Update the typescript tests beside the module, `ts/src/<name>.test.ts`, if the contract change has a browser side assertion.
 
-If the Go diff has zero browser facing surface, this step is a no-op and the deploy can move on. Document that no-op in the commit message so a reviewer does not wonder.
+If the Go diff has zero browser facing surface, this step is a no op and the deploy can move on. Document that no op in the commit message so a reviewer does not wonder.
 
 ## 4. Build the Go module
 
@@ -68,9 +68,9 @@ If the working tree has nothing to commit after the build outputs are excluded b
 just deploy
 ```
 
-Calls `sbump patch --env APP_VERSION --json ts/package.json@.version --push-version --auto --workflow`. Patch bump, tag write, tag push. The GitHub Actions workflow attached to tag pushes builds and publishes the `@nimling` typescript package; consumers of the Go module pick the new tag up via `go get github.com/nimling/samna-auth-middleware@vX.Y.Z` and move the `ref` of their claimius git include to the same tag. The module path stays `github.com/nimling/samna-auth-middleware` at every major.
+Calls `sbump patch --env APP_VERSION --json ts/package.json@.version --push-version --auto --workflow`. Patch bump, tag write, tag push. The GitHub Actions workflows attached to tag pushes create the release, build and publish the `@nimling` typescript package, and publish `.nimpress` to the docs site; consumers of the Go module pick the new tag up via `go get github.com/nimling/samna-auth-middleware@vX.Y.Z` and move the `ref` of their claimius git include to the same tag. The module path stays `github.com/nimling/samna-auth-middleware` at every major.
 
-For minor or major releases, use the explicit `major|minor|patch` argument on `sbump` instead of `patch`.
+For minor or major releases, run `sbump major|minor --env APP_VERSION --json ts/package.json@.version --push-version --auto --workflow` instead of `just deploy`, which always bumps a patch. A release carries its `.nimpress/changelog/v<version>.md` entry in the commit before the bump.
 
 ## Never
 

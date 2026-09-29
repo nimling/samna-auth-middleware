@@ -35,16 +35,16 @@ The routes live under the group `sam.RegisterEndpoints` mounts, guarded by `smw.
 
 A client with no claim authenticates and sees nothing. Bind a claim the same way you would for a user:
 
-- Object access. `assign_claim_object` binds the claim to organizations, locations or registered rows; the calc triggers materialize `user_object` for the client id, and `ObjectWhere(clientID, objectType, level)` filters by it.
-- Capability access. A `claim_object` with a NULL `object_id` and a `scope` payload, read back with `ScopeAccess(clientID, jsonpath, level)`. This is how a client is told it may read only the public subset of a resource. See `.claude/rules/access.md`.
+- Object access. `assign_claim_object` binds the claim to organizations, locations or registered rows; the client's `user_object` pairs settle on its first check or listing, and `ObjectWhere(q, clientID, objectType, level, nil, after, limit)` filters a listing by them.
+- Capability access. A `claim_object` with a NULL `object_id` and a `scope` payload, read back with `ScopeAccess(clientID, jsonpath, level)`. This is how a client is told it may read only the public subset of a resource. See [Capabilities](../.nimpress/claimius/capabilities.md).
 
 `POST /samna_client/:id/claim` takes a `user_claim` body and stamps `app_id` from the app context. Time bounds through `starts_at` and `ends_at` apply to clients exactly as to users.
 
 ## Reaching the disciple
 
-`GetSyncSnapshot` carries `claimius.samna_client`, `claimius.samna_secret`, `claim`, `user_claim`, `claim_object`, `user_object`, `object_users` and `user_users`, filtered by `app_id`. The disciple's `sam.SyncStart(ctx)` loop applies them, so a client created on the prophet becomes usable on the disciple within one pull.
+The feed carries `claimius.samna_client`, `claimius.samna_secret`, `claim`, `user_claim` and `claim_object` as source rows, filtered by `app_id`, in the snapshot `GetSyncSnapshot` and in every page after it. The disciple's `sam.SyncStart(ctx)` loop applies them and derives the client's `user_object` pairs itself on the client's next read, so a client created on the prophet becomes usable on the disciple within one pull.
 
-Nothing on the serving side calls the prophet per request. `authenticateClient` reads the local replica only.
+Nothing on the serving side calls the prophet per request. `authenticateClient` reads the local copy only: it runs bcrypt once per credential and after that compares the digest of the presented secret with the one it verified, rereading the client row by `client_id` on every request, so a revoked client or a rotated secret stops on the next call.
 
 ## Calling with the credentials
 
@@ -63,7 +63,9 @@ req.SetBasicAuth(clientID, clientSecret)
 Two optional headers ride along when the call is made on behalf of a human:
 
 - `SAuth-User-Token` is validated with `ValidateToken`, and the resolved owner is checked with `HasAccess(clientID, ownerID, OBJECT_TYPE_ORGANIZATION, ACCESS_READ)` before the user replaces the client as the actor.
-- `SAuth-User-ID` carries an external user reference through the same path.
+- `SAuth-User-ID` carries an external user reference, resolved and checked against the client's read on the owner the same way.
+
+A call carries at most one of the two: both together are refused with 403.
 
 Omit both for anonymous traffic such as a public website; the client itself is then the actor and its own claims decide the answer.
 

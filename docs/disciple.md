@@ -49,7 +49,7 @@ func main() {
 
 3. `smw.UserAuthMiddleware(opts)` protects the routes. Pass `nil` to take the slug, secret, redirect and page redirect from the config.
 
-4. `sam.SyncStart(ctx)` launches the background pull loop that keeps the local database current. It takes a snapshot on first run, then polls the prophet for deltas, backing off on failure and logging through the database logger. Call it once; it returns immediately and runs until the context ends.
+4. `sam.SyncStart(ctx)` launches the background pull loop that keeps the local database current. Call it on every pod; one pod per database takes the sync lock and pulls, the others stand by. The puller takes a snapshot on first run, then pulls one page after its cursor at a time, each held open by the prophet while there is nothing new, backing off on failure and logging through the database logger. It returns immediately and runs until the context ends.
 
 ## App scoping
 
@@ -96,7 +96,7 @@ uptime.Init(e.Logger, uptime.Options{
 
 ## Notes
 
-Sync is pull only. There is no inbound sync endpoint on a disciple and none on the prophet; the disciple reaches out to `GET /sam/sync/snapshot` and `GET /sam/sync/:seq` through `sam.SyncStart`.
+Sync is pull only. There is no inbound sync endpoint on a disciple and none on the prophet; the disciple reaches out to `GET /sam/sync/snapshot` and `GET /sam/sync/:cursor` through `sam.SyncStart`, with a `(txid, seq)` cursor written `<txid>.<seq>`. The feed carries source rows only, and the disciple settles its own access from them. It binds to the prophet that answers it and routes its writes there. See [Sync](sync.md).
 
 Object types pass through the middleware untouched over JSON and into the database. A disciple's own tables are qualified by the consumer in their `table:` tags, which `ObjectTypeOf` returns as written, and `init_claimius_tables` raises on an unqualified name. `ObjectType.Validate` is the opt in check for the consumer's own types.
 </content>

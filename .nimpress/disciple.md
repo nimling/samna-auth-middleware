@@ -1,7 +1,7 @@
 ---
 layout: doc
 title: Disciple
-description: How a disciple writes through to the prophet, what it owns itself, and how the pull loop keeps its replica level.
+description: How a disciple writes through to the prophet, what it owns itself, and how the pull loop keeps its copy current.
 tags: disciple, prophet, sync, write through, sync_event, access_diff, replay mode
 lastUpdated: true
 ---
@@ -21,7 +21,7 @@ sam.RegisterEndpoints(api)
 sam.SyncStart(context.Background())
 ```
 
-`SyncStart` returns immediately and owns its goroutine, backoff and logging. In debug mode it does nothing.
+`SyncStart` returns immediately and owns its goroutines, backoff and logging, on every pod. In debug mode it does nothing.
 
 ## Writes
 
@@ -49,22 +49,25 @@ The service's own tables never leave the disciple. The prophet stores the `claim
 
 ## The pull loop
 
-The disciple pulls. There is no inbound sync endpoint on a disciple and none on the prophet; the prophet serves `GET /sam/sync/snapshot` and `GET /sam/sync/:seq` and nothing pushes.
+The disciple pulls. There is no inbound sync endpoint on a disciple and none on the prophet; the prophet serves `GET /sam/sync/snapshot` and `GET /sam/sync/:cursor` and nothing pushes. The cursor is a `client.SyncCursor`, a `(txid, seq)` position on the prophet's feed written `<txid>.<seq>`, kept in `disciple_state.last_applied_txid` and `last_applied_seq`.
 
-1. On first start the cursor is zero, so it fetches `sync/snapshot`, upserts every row and records the snapshot sequence.
-2. It then fetches `sync/<cursor>` for deltas, applies them under `replay_mode` and moves `disciple_state.last_applied_seq`.
-3. It polls every 100 ms while events arrive, backs off to 15 s when idle, and doubles a failure delay up to 30 s.
-4. Forty empty pulls, or ten failed ones, trigger a fresh snapshot and an audit row naming the stalled cursor.
+1. One pod pulls. Every pod runs the loop, and only the one holding the session level advisory lock `SyncLockKey(app slug)` does sync work; the others try again every 5 s and take over when it goes.
+2. On first start the cursor is zero, so it fetches `sync/snapshot`, upserts every source row that differs and records the snapshot's cursor, in one transaction.
+3. It then fetches `sync/<cursor>` for the next page, which the prophet holds open up to 25 s while there is nothing, and applies the page under `replay_mode` in one transaction that moves the cursor first. A failure doubles the delay up to 30 s.
+4. A `409` from the prophet, or ten failed pulls in a row, trigger a fresh snapshot and an audit row naming the stalled cursor.
+5. Between pulls it drains open access areas whose holders read often enough to be settled ahead.
 
-The feed is scoped by the prophet: organizations and locations through `app_object_ids`, every other table through `app_id`. The disciple strips `app_id` from each payload and skips `samna_app`.
+The feed is scoped by the prophet: organizations and locations through `app_object_ids`, every other table through `app_id`. It carries source rows only, never `user_object`, `user_users` or `audit`. The disciple strips `app_id` from each payload and skips `samna_app`.
 
 A snapshot upserts; it never deletes a row the prophet did not send.
 
+The disciple binds to the prophet that first answers it, keeps its slug and endpoint in `disciple_state.prophet` and `disciple_state.endpoint`, and routes its writes there. It moves to another prophet only when that prophet accepted a handover of the app from the bound one. See [Sync in Go](./claimius/middleware/sync.md).
+
 ## Settling access
 
-Replay mode silences the calc triggers, because the feed already carries the computed state for the tables the prophet knows. For the disciple's own tables the prophet has nothing to send, so every applied `claim`, `claim_object` or `user_claim` marks its claim area in `access_diff`. The next `get_*` that reads that area runs `reconcile_if_pending` and settles it for every user in it. An area nobody reads costs nothing.
+The feed carries the claims, bindings and grants, and the disciple derives its own access from them. Applying a `claim`, `claim_object` or `user_claim` raises its claim area in `access_diff`, and applying an organization, a location or any registered row keeps the closure and raises its object area. A check settles the one pair it asks about; a listing settles the reader's own share of each open area it meets. An area clears once every holder has settled it, and a share nobody reads costs nothing. This is the same settle for the shared types and for the tables only the disciple carries.
 
-A local write settles the acting user inside the same statement, so a handler reads its own write back. Another user's `user_object` row appears on that user's next read.
+A local write settles the acting user inside the same statement, so a handler reads its own write back. Another user's `user_object` row changes on that user's next read. A read that must see a routed write waits on `sam.WaitForSeq` with the position the write answered with.
 
 ## What the disciple never does
 

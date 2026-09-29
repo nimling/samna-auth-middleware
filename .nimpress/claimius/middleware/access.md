@@ -1,8 +1,8 @@
 ---
 layout: doc
 title: Access in Go
-description: The access lookups on sdb.Instance(), the claimius function each one calls, how errors map to status codes, the listing filters, the self case, and the usage counter.
-tags: MutationAccess, MutationAccessMany, UserAccess, RootAccess, GetAccess, GetDirectAccess, ScopeAccess, ObjectWhere, AccessClaim, usage
+description: The access lookups on sdb.Instance(), the claimius function each one calls, how errors map to status codes, the paged listings, the graph window, the usage counter and where each call runs.
+tags: MutationAccess, MutationAccessMany, UserAccess, RootAccess, GetAccess, GetDirectAccess, ScopeAccess, ObjectWhere, QueryPage, GraphWindow, AccessClaim, usage, replica
 lastUpdated: true
 ---
 
@@ -17,28 +17,48 @@ A handler never decides access in its own code. It asks the database through a l
 | `UserAccess(ctx, actor, target, required)` | `claimius.get_user_access` | `*AccessUser` with the resolved `TargetUserID` | Acting on a user named by external id, user id or row id |
 | `RootAccess(ctx, actor, required)` | `claimius.get_access` on the actor's root organization | `*AccessClaim` | Actions on the root itself |
 | `GetAccess`, `GetDirectAccess` | `claimius.get_access`, `claimius.get_direct_access` | `*AccessClaim` | The grant on the object, the closest grant above it |
-| `ScopeAccess(ctx, actor, jsonpath, required)` | The scope match of [Capabilities](../capabilities.md), parameterized by the actor's app | `[]AccessClaim`, empty for no | Capabilities, page grants |
+| `ScopeAccess(ctx, actor, jsonpath, required)` | `claimius.get_scope_access` | `[]AccessClaim`, empty for no | Capabilities, page grants; see [Capabilities](../capabilities.md) |
 
 ## Status codes come from the database
 
-`mutation_access` raises `P0403` when the object exists and the actor lacks the mask and `P0404` when it does not exist, so one round trip answers 200, 403 or 404. `ErrInternalServer` is a database fault and maps to 500. `ErrNoAccess` is never a 500: on a write it is a 403, on a read it filters.
+`mutation_access` raises `P0403` when the object exists and the actor lacks the mask and `P0404` when it does not exist, when its id is malformed or its type is not registered, so one round trip answers 200, 403 or 404. `ErrInternalServer` is a database fault and maps to 500. `ErrNoAccess` is never a 500: on a write it is a 403, on a read it filters. `UserAccess` answers `ErrNotFound` for a target that resolves to no user in the app.
+
+## What a lookup reads
+
+A lookup on one object reads the settled pair of `user_object`. `get_access` first runs `reconcile_if_pending` for that one pair, which recomputes it only when an area still open for the actor covers it, then reads the pair and chooses a grant with `_best_grant`. No lookup evaluates access from the base relations; see [Reads](../reads.md) and [Materialization](../materialization.md).
 
 ## The self case
 
-`MutationAccess(actor, actor, OBJECT_TYPE_USER, required)` and `GetAccess` on the actor's own user row return a synthesized grant without a database call: `UserObjectID`, `OwnerID` and `RootID` are the actor, `DirectGrant` is true. No `user_claim` binds a user to their own row, and none is needed to edit it.
+`MutationAccess(actor, actor, OBJECT_TYPE_USER, required)` and `GetAccess` on the actor's own user row return a synthesized grant without a database call: `UserObjectID`, `OwnerID` and `RootID` are the actor, `DirectGrant` is true. `GetDirectAccess` does the same with `ACCESS_ALL`. No `user_claim` binds a user to their own row, and none is needed to edit it.
 
 ## One round trip for many
 
-`MutationAccessMany` sends four arrays and runs `resolve_access` in a lateral join over `unnest`. A page that shows fifty rows with an edit button checks fifty grants in one statement: `50 × (O(C + D) probes)` on the server, one round trip on the wire.
+`MutationAccessMany` sends four arrays and runs `resolve_access` in a lateral join over `unnest`. A page that shows fifty rows with an edit button checks fifty grants in one statement and one round trip. A denied or unknown row is a nil entry in the set, never an error.
 
 ## Listings
 
-`ObjectWhere(query, actor, objectType, required, after, limit)` puts `table.id IN (SELECT object_id FROM claimius.get_objects(actor, objectType, required, after, limit))` on the implementing side's query, every value a bound parameter, and orders it by `table.id`, so a page of `limit` rows past `after` reads `limit` entries of the actor's range; `after` nil and `limit` 0 pass NULL and read the whole range. `GetOrganizations`, `GetLocations` and `GetSecrets` take the same `after` and `limit`, and `QueryPage` reads them from the `cursor` and `limit` query parameters, so `/me/organization?cursor=<last id>&limit=50` is the next page. `UserWhere`, `ClaimWhere` and `AuditWhere` return a predicate the implementing side puts on its own query. The implementing side's table is joined to the actor's own index range, so a listing is one query and the planner sees both sides. A listing carries no `UserClaimID`; acting on a row in it goes through `MutationAccess`. See [Reads](../reads.md).
+`ObjectWhere(q, actor, objectType, required, objectID, after, limit)` takes the implementing side's `*bun.SelectQuery` and returns it filtered:
+
+1. With `objectID` set it adds `?TableAlias.id = objectID` and `EXISTS (SELECT 1 FROM claimius.get_access(...))`, the check of that one object.
+
+2. Otherwise it adds `?TableAlias.id IN (SELECT object_id FROM claimius.get_objects(actor, objectType, required, after, limit))` and orders by `?TableAlias.id`, every value a bound parameter. `get_objects` reads the actor's range of the `user_object` primary key in `object_id` order from the first key past `after`, so a page of `limit` rows reads `limit` entries of that range; `after` nil and `limit` 0 pass NULL and read the whole range.
+
+`GetOrganizations`, `GetLocations` and `GetSecrets`, with their `Query` forms, take the same `after` and `limit`. `QueryPage(ctx)` reads them from the `cursor` and `limit` query parameters, a uuid and a positive integer, so `/me/organization?cursor=<last id>&limit=50` is the next page. `UserWhere`, `ClaimWhere` and `AuditWhere` return a predicate the implementing side puts on its own query. The implementing side's table is joined to the actor's own index range, so a listing is one query and the planner sees both sides. A listing carries no `UserClaimID`; acting on a row in it goes through `MutationAccess`. See [Reads](../reads.md).
+
+## Graphs
+
+`GetOwnerGraph(ctx, actor, startID, depth, required, window)` and `GetClaimGraph(ctx, actor, startID, depth, required, window)`, with their `Query` forms, call `claimius.get_owner_graph` and `claimius.get_claim_graph` and return flat `GraphNode` rows. `window` is a `GraphWindow{Width, Sort, NextID}`: at most `Width` children of each type per parent, 0 meaning all, in `GRAPH_SORT_NAME` order or by decayed usage with `GRAPH_SORT_USAGE`, continuing after `NextID`. An empty `Sort` is name order. See [Graphs](../graphs.md).
+
+## Object types
+
+`ObjectType` carries a type to SQL and back. `ResolveObjectType` validates claimius's own types only: a bare claimius name resolves to `claimius.X`, and a `claimius.X` the schema does not register is refused. Every other type passes through untouched, because a consumer's type is its own metadata. `ObjectType.Validate(known...)` is the opt in check a consumer runs on its own types: schema qualified, and one of `known` when given; the middleware never calls it. The middleware reads a model's type from its `bun` table tag as given, through `ObjectTypeOf`, so a consumer's model carries a qualified tag such as `table:public.bookable`.
 
 ## Usage
 
-Every lookup that returns a granted single object, `MutationAccess`, `GetAccess`, `UserAccess` and each granted entry of `MutationAccessMany`, adds one use of `(app, actor, object_type, object_id)` to an in process counter on the `sdb` handle, with the time. The counter flushes through `claimius.touch_object_usage` every 10 seconds, at 1,000 distinct keys, and when the process stops. A crash loses at most the uses since the last flush, a loss usage tolerates and access never sees. With several replicas each flushes its own counts, and the database adds them. See [Usage](../usage.md).
+Every granted single object lookup adds one use of `(actor, object_type, object_id)` to an in process counter on the handle, `DB.Usage`: `MutationAccess`, `GetAccess`, `UserAccess` on the resolved target, and each granted entry of `MutationAccessMany`. The counter flushes through `claimius.touch_object_usage` every 10 s, when it holds 1,000 distinct keys, and on `Stop`. A crash loses at most the uses since the last flush, a loss usage tolerates and access never sees. With several replicas each flushes its own counts, and the database adds them. A use counts only on a settled pair; see [Usage](../usage.md).
 
 ## Where a call runs
 
-Every access call is one statement, sent as a named prepared statement. A service configured with a standby pool sends reads to it. A check never writes and always answers there; a listing that meets an area to settle is refused by the standby with SQLSTATE `25006` and repeated once on the primary. Writes, `WaitForSeq` reads and the usage flush go to the primary. See [Reads](../reads.md) and [Scaling](../scaling.md).
+Every access call is one statement, sent as a named prepared statement through `DB.prepared`, parsed and planned once per connection.
+
+`SAUTH_REPLICA_DSN` opens a second pool, `DB.Replica`. `DB.Read` runs a pure read there and runs it once more on the primary when the replica refuses it with SQLSTATE `25006`. The calls that use it are `ScopeAccess`, the client credential lookup `GetClient`, `GetApp`, and the child and parent walks `GetChildOrganizations`, `GetParentOrganizations`, `GetChildLocations` and `GetParentLocations`. The lookups that can settle, `MutationAccess`, `MutationAccessMany`, `UserAccess`, `RootAccess`, `GetAccess` and `GetDirectAccess`, always run on the primary, because `reconcile_if_pending` writes when an area covers the pair. Writes, `WaitForSeq` reads and the usage flush go to the primary.

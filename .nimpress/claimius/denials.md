@@ -1,56 +1,69 @@
 ---
 layout: doc
 title: Denials
-description: Deny claims, the subtraction formula _apply_denies computes over the derivations of one pair, what a creator keeps, why a deny is a claim, and a worked scenario of an organization admin with a denied branch.
-tags: deny, ACCESS_DENY, direct deny, inherited deny, _apply_denies, _build_grants_for_objects, creator, direct_grant, scenario
+description: Deny claims, the two deny classes, the subtraction _apply_denies computes over the derivations of one pair, closure under implication, denies scoped to fields, what a creator keeps, and a worked scenario of an organization admin with a denied branch.
+tags: deny, ACCESS_DENY, direct deny, inherited deny, _apply_denies, _close_access, _build_grants_for_objects, scoped deny, creator, direct_grant, scenario
 lastUpdated: true
 ---
 
 # Denials
 
-A deny is a derivation whose effective mask carries the deny bit, 16: a claim stored with bit 16, or a binding whose mask carries it. Its other bits, `e & 15`, name what it takes away. A deny mask is stored as given, never expanded, and a deny claim is bound and granted like any claim: `assign_claim_object` puts it on an object, `assign_claim_user` gives it to the users it applies to.
+A deny is a derivation whose effective mask carries the deny bit, 16: a claim stored with bit 16 and bound with a NULL mask or a mask that keeps bit 16, or a composition whose link or binding carries it. Its other bits, `e & 15`, name what it takes away. A deny mask is stored as given, never expanded, and a deny claim is bound and granted like any claim: `assign_claim_object` puts it on an object, `assign_claim_user` gives it to the users it applies to.
+
+## The classes
+
+`_build_grants_for_objects` collects every derivation reaching a user on an object and tags it with the class of the binding's position, `tree_type` in `grants`:
+
+| Class | Reaches the object through |
+|---|---|
+| `direct` | A binding on the object itself, held or composed |
+| `ownership`, `location`, `parenthood` | A binding on an ancestor, held or composed, through that tree |
 
 ## How a deny subtracts
 
-`_build_grants_for_objects` collects every derivation reaching a user on an object and tags it with its class.
+`_apply_denies` settles the derivations of one pair, with the symbols of [the model](./index.md#the-access-of-a-pair):
 
-| Class | `tree_type` in `grants` | Reaches the object through |
-|---|---|---|
-| Direct | `direct` | A binding on the object itself |
-| Inherited | `ownership`, `location`, `parenthood` | A binding on an ancestor, through one tree |
-| Composed | `composition` | A binding of a linked claim on the object itself |
+1. A deny of class `direct` subtracts its bits from every grant, of every class, and from the creator.
 
-`_apply_denies` then subtracts, for every grant and every deny reaching the same pair:
+2. A deny of any other class subtracts its bits from the grants of classes other than `direct` only. A grant bound on the object itself survives it. That is how one object is shared out of a denied subtree.
 
-1. A deny of class direct subtracts its bits from every grant, of every class.
-
-2. A deny of any other class, inherited or composed, subtracts its bits from inherited grants only. A grant bound on the object itself, or composed onto it, survives it. That is how one object is shared out of a denied subtree.
-
-3. A grant left with no bit is dropped.
-
-With `X_d` the OR of the direct denies and `X_o` the OR of every other deny:
+3. What remains of each grant is closed under implication, and a grant left with no bit is dropped.
 
 ```
-A(u, x) = 15·[direct_grant(u, x)]
-        | ⋁_{g direct or composed} (e_g & 15 & ~X_d)
-        | ⋁_{g inherited}          (e_g & 15 & ~(X_d | X_o))
+D_g   = X_d | [k_g ≠ direct] X_o
+a_g   = close(e_g & 15 & ~D_g)
+A(u, x) = ⋁_g a_g | [made(u, x)] close(15 & ~X_d)
 ```
 
-The bits are subtracted independently and the result is not expanded again: denying write to a holder of 15 leaves 13, owner, read and execute, and denying read leaves 11, owner, write and execute. A check tests the bits it needs, so a pair of 11 passes a write check and fails a read check. The member bit is masked off every derivation, `& 15`, so it never reaches `user_object`.
+`close` keeps a bit only when every bit it implies survives: read needs nothing, execute needs read, write needs read and execute, owner needs all three. So denying write to a holder of 15 leaves `close(13) = 12`, read and execute, because owner implies write and cannot stand without it; denying read leaves `close(11) = 0`, and the grant is dropped, because every other bit implies read; denying execute leaves `close(7) = 4`. A grant claim's mask is closed under `X` when stored, `eff` of two such masks is closed too, and `close` keeps it so after a subtraction, so a check tests the bits it needs against a mask where no write stands without read.
 
-The cost is `G × X` mask operations for `G` grants and `X` denies on one pair, in memory, paid once per recompute of the pair; the read of a pair is the same with or without denies. This is the deny overrides combining rule of [XACML 3.0, appendix C](https://docs.oasis-open.org/xacml/3.0/xacml-3.0-core-spec-os-en.html), scoped by class. A deny is negation over the derivations of the same pair only, which keeps the access relation a nonrecursive stratified view and its maintenance exact; see [Materialization](./materialization.md#why-the-maintenance-is-exact).
+The member bit is masked off every derivation, `& 15`, so it never reaches `user_object`.
+
+The cost is `G_x × X` mask operations for `G_x` grants and `X` denies on one pair, in memory, paid once per recompute of the pair; with no deny and no scope the function returns the grants unchanged with one aggregate. The read of a pair is the same with or without denies. This is the deny overrides combining rule of [XACML 3.0, appendix C](https://docs.oasis-open.org/xacml/3.0/xacml-3.0-core-spec-os-en.html), scoped by class. A deny is negation over the derivations of the same pair only, which keeps the access relation a nonrecursive stratified view and its maintenance exact; see [Theory](./theory.md#result-1-access-is-a-nonrecursive-view).
+
+## Denies scoped to fields
+
+A deny binding with a `scope` subtracts from the fields the scope names only, and only from fields the object's table carries. `F_d(f)` and `F_o(f)` collect them by class, and each grant is settled per field:
+
+```
+a_g(f) = close(e_g & 15 & ~(D_g | F_d(f) | [k_g ≠ direct] F_o(f)))
+```
+
+An unscoped grant keeps its mask for every other field, recorded under `*`. The field masks are the pair's `scope`; see [Redaction](./redaction.md). A scoped deny never lowers `A(u, x)` below what the unnamed fields keep.
 
 ## What a creator keeps
 
-The creator of a row, the user behind its `sa_created_by`, holds 15 on it through `direct_grant`, ORed with whatever grants survive. `recompute_user_object` removes it only when the user holds a deny bound on the object itself whose mask, claim and binding together with the binding mask set, carries the owner bit. An inherited deny never touches the creator, so an author always reaches what they made inside a denied subtree.
+The creator of a row, the user behind its `sa_created_by`, holds `close(15 & ~X_d)` on it through `direct_grant`, ORed with whatever grants survive. Only a deny bound on the object itself reaches the creator; an inherited deny never does, so an author always reaches what they made inside a denied subtree.
 
 ## Why a deny is a claim
 
-1. One rule path. A deny is bound, granted and synced exactly as a grant is. Its grant's window is not read: the recompute ignores windows and only `_best_grant` applies them, to grants, so a deny subtracts while its grant is live. It needs no table, index or read path of its own; the one index it adds, `idx_claim_deny_bit`, is partial and holds the deny claims only.
+1. One rule path. A deny is bound, granted and synced exactly as a grant is. It needs no table, index or read path of its own; the one index it adds, `idx_claim_deny_bit`, is partial and holds the deny claims only.
 
 2. A deny is scoped to people. The same subtree can be denied to contractors and open to staff, because the deny reaches only the users who hold it.
 
 3. The cost is paid once. The subtraction happens when a pair is recomputed; the read is the same pair lookup with or without denies.
+
+4. The window of a deny's grant is not read when the pair is recomputed, so a deny subtracts from the pairs of its holders while its grant is live.
 
 ## Worked scenario: admin over an organization, a denied branch
 
@@ -70,16 +83,18 @@ Ada administers the organization Acme. One branch, Research, is closed to her fo
 | `claim_object` | Share on Lab doc 1 |
 | `user_claim` | Ada holds Admin, No write on Research, and Share |
 
+Every binding mask is NULL, so `eff` is the claim mask: 15, 18 and 4.
+
 ### Masks in `user_object`
 
-| Object | Grants reaching Ada | Deny reaching Ada | `sa_access` |
+| Object | Grants reaching Ada | Denies reaching Ada | `sa_access` |
 |---|---|---|---|
-| Acme | Admin 15, direct | none | 15 |
-| Acme's documents, Sales and its documents | Admin 15, inherited | none | 15 |
-| Research | Admin 15, inherited | 2, direct on Research | 13 |
-| Research's documents, Lab, Archive and their documents | Admin 15, inherited | 2, inherited | 13 |
-| Lab doc 1 | Admin 15 inherited, Share 4 direct | 2, inherited | `13 | 4 = 13` |
+| Acme | Admin 15, `direct` | none | 15 |
+| Acme's documents, Sales and its documents | Admin 15, `ownership` | none | 15 |
+| Research | Admin 15, `ownership` | 2, `direct` | `close(15 & ~2) = 12` |
+| Research's documents, Lab, Archive and their documents | Admin 15, `ownership` | 2, `ownership` | `close(15 & ~2) = 12` |
+| Lab doc 1 | Admin 15 `ownership`, Share 4 `direct` | 2, `ownership` | `12 | 4 = 12` |
 
-With the deny widened to read, 20, every object of the Research branch holds 11, and Lab doc 1 holds `11 | 4 = 15`, because the directly bound Share is not subtracted by an inherited deny. A document Ada creates under Lab holds 15 in both cases, through `direct_grant`.
+With the deny widened to read, 20, Admin's grant on every object of the Research branch closes to `close(15 & ~4) = 0` and is dropped: Ada holds no pair on Research, Lab, Archive or their documents, except Lab doc 1, which holds 4, because the directly bound Share is a `direct` grant and an `ownership` deny does not subtract from it. A document Ada creates under Lab holds 15 in both cases, through `direct_grant`, because no deny is bound on the document itself.
 
-Composition behaves by its class. A Vendor claim linked to Admin with link mask 4 gives its holders 4 on Acme, the one object Admin is bound to, and nothing below it: a composed grant does not cascade.
+Composition behaves by the position of the binding. A Vendor claim, 4, linked to Admin with link mask 4 gives its holders `comp = eff(Vendor, 4) & eff(Admin, NULL) = 4 & 15 = 4` on Acme, class `direct`, and 4 on everything below Acme, class `ownership`, because Admin's binding inherits. A deny held by a vendor on Research subtracts from those as it would from Admin's own grant.

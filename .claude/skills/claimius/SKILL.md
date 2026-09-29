@@ -15,7 +15,7 @@ The mistakes that historically caused damage:
 2. Treating `samna_user.id` as the user identifier when `samna_user.user_id` is.
 3. Adding `sa_parent_id` without `sa_root_id`, or vice versa.
 4. Allowing nullable `sa_owner_id` or `sa_parent_id` for the root case instead of using self references. All parent columns are NOT NULL; roots self reference.
-5. Inserting into `claim`, `user_claim`, or `claim_object` directly instead of using the write functions; OR writing to computed tables like `user_object`, `object_users`, `user_users`, `inheritance_info`, `table_info`, `sync_event` at all.
+5. Inserting into `claim`, `user_claim`, or `claim_object` directly instead of using the write functions; OR writing to computed tables like `user_object`, `object_info`, `user_users`, `inheritance_info`, `table_info`, `sync_event`, `access_diff`, `access_diff_user`, `user_activity`, `claim_graph_cache` at all.
 6. Modifying access calculations by editing `user_object` rows.
 7. Forgetting `app_id` in filters, leaking access across apps.
 8. Confusing `sa_created_by`, a `user_claim.id`, with a user identifier.
@@ -27,7 +27,7 @@ If you are about to do any of those, STOP and explain to the user what you're co
 
 ## How Claimius works in one paragraph
 
-Apps register their tables via `init_claimius_tables`. Triggers attached at registration maintain `claimius.user_object`, the materialized "what can this user see" index. Reads go through `get_*` functions. Writes to claim metadata go through write functions. The same schema runs on prophets, the sources of truth, and disciples, the read replicas. Disciples receive state via `sync_event` rows from a prophet and apply them under `replay_mode = true` so calc triggers don't fire. Roles enforce the boundary: `claimius_writer` can write, `claimius_reader` cannot.
+Apps register their tables via `init_claimius_tables`. Triggers attached at registration keep the closure and `claimius.object_info`, settle the acting user's pairs in `claimius.user_object`, the materialized "what can this user see" index, and record the area of the change in `claimius.access_diff` for every other user, whose next check settles the one pair and whose next listing settles their share. Reads go through `get_*` functions. Writes to claim metadata go through write functions. The same schema runs on prophets, the sources of truth, and disciples, the read replicas. Disciples pull the source rows of their app from a prophet's `sync_event` feed and apply each page in one transaction under `replay_mode = true`: no actor is settled and no event is emitted, but the closure is kept and the areas the rows move are raised, so every pair settles on the disciple's own reads. Derived rows never travel. Roles enforce the boundary: `claimius_writer` can write, `claimius_reader` cannot.
 
 ## Decision rules
 
@@ -46,10 +46,11 @@ A cascade fires only when BOTH `claim.inherits = TRUE` AND the `claim_object.inh
 NO. Always use `get_*` functions:
 
 - `get_access(user_id, app_id, object_id, object_type, min_level)` for access checks
-- `get_direct_access(user_id, app_id, object_id, object_type)` to find the closest user_claim via ancestor walk when `get_access` returns nothing
-- `get_objects(user_id, app_id, object_type, min_level)` to list visible objects
-- `get_organizations`, `get_locations`, `get_users`, `get_claims`, `get_audit`, `get_secrets` for typed lists
-- `get_owner_graph`, `get_claim_graph` for hierarchy and access visualizations. Both take optional `start_id` and `depth` for subgraph queries. Both cover all registered tables in the deployment. Output rows have fields `object_id`, `object_type`, `label`, `parent_id`, and `data jsonb` where `object_type` is schema qualified. `data` always carries `access` and `level` plus per type fallback fields with `sa_` prefixes stripped.
+- `get_direct_access(user_id, app_id, object_id, object_type, required?, raise?)` to find the closest user_claim via ancestor walk when `get_access` returns nothing
+- `get_objects(user_id, app_id, object_type, min_level, after?, limit?)` to list visible objects, a page in `object_id` order after `after`
+- `get_organizations`, `get_locations`, `get_secrets` for typed pages, each taking `after` and `limit`; `get_users`, `get_claims`, `get_audit` for typed lists
+- `get_scope_access(user_id, app_id, jsonpath, min_level)` for grants with no object, such as page access
+- `get_owner_graph`, `get_claim_graph` for hierarchy and access visualizations. Both take optional `start_id` and `depth` for subgraph queries, and a window `width`, `sort` (`name` or `usage`) and `next_id` that bounds the children of each type per parent. Both cover all registered tables in the deployment. Output rows have fields `object_id`, `object_type`, `label`, `parent_id`, and `data jsonb` where `object_type` is schema qualified. `data` always carries `access` and `level` plus per type fallback fields with `sa_` prefixes stripped.
 - `search(user_id, app_id, query, types, min_level, limit, offset)` for full text search
 
 ### "Should I INSERT/UPDATE a claimius table directly?"
@@ -64,9 +65,9 @@ It depends on the table.
 - `samna_user` per app row creation → `ensure_app_user`
 - Cross app moves → `merge_user`
 - Cross root moves → `migrate_root`
-- Bootstrap → `init`, which on the prophet set takes the system app fields and on the disciple set takes `p_disciple_app_slug`; the prophet set also carries `init_disciple` and `init_hybrid`, the latter requiring both `p_system_app_slug` and `p_disciple_app_slug`
+- Bootstrap → `init`, which on the prophet set takes the system app fields and on the disciple set takes `p_disciple_app_slug`; the prophet set also carries `init_disciple` and `init_hybrid`. `init_hybrid` takes the system app fields plus `p_upstream_prophet`, `p_upstream_endpoint`, `p_upstream_app_slug` and `p_upstream_app_secret`, runs `init`, and registers the upstream in `prophet_peer`: a hybrid is a prophet mirroring one app of a peer prophet
 - External table registration → `init_claimius_tables`
-- Self identity → `get_prophet_app()` returns the system app on prophet and hybrid, raises on disciple. `get_disciple_app()` returns the upstream app on disciple and hybrid, raises on prophet. Both return `SETOF claimius.samna_app`. Scalar UUID variants `get_prophet_app_id()`, `get_disciple_app_id()`, and `get_app_id()` are available for column DEFAULTs and other places that reject subqueries. `get_app_id()` resolves to the prophet/system app id on prophet and hybrid, disciple app id on pure disciple. Use these instead of maintaining a local helper.
+- Self identity → `get_prophet_app()` returns the system app on prophet and hybrid, raises on disciple. `get_disciple_app()` returns the upstream app on a pure disciple and raises on a prophet and on a hybrid, which has no `disciple_state` row; `get_disciple_app_id()` raises with it. Both return `SETOF claimius.samna_app`. Scalar UUID variants `get_prophet_app_id()`, `get_disciple_app_id()`, and `get_app_id()` are available for column DEFAULTs and other places that reject subqueries. `get_app_id()` resolves to the system app id on prophet and hybrid and to the disciple app id on a pure disciple; it is the one to use on a hybrid. These helpers ship in the prophet set; the disciple set mirrors one app, carries none of them, and its read functions take no app argument. Use these instead of maintaining a local helper.
 
 **Direct INSERT/UPDATE is fine** on the prophet for:
 
@@ -75,12 +76,15 @@ It depends on the table.
 - `samna_client`, `samna_secret`
 - `object_field`, `user_field`, `user_relation`
 - `prophet_state`, `disciple_state`
+- `prophet_peer`, by the prophet's admin only. `app_handover` only through `offer_handover` and `accept_handover`
 
 The triggers attached to each table fire either way, so calc, audit, and sync emission run identically. The function vs INSERT distinction is about validation, ergonomics, and getting non obvious sequences right.
 
 **NEVER write directly** to these tables; they are managed by triggers and the sync layer:
 
-- `user_object`, `object_users`, `user_users` for computed access state
+- `user_object`, `object_info`, `user_users` for computed access state; the reverse lookup is the index `idx_user_object_object_user`, and `used_count` moves only through `touch_object_usage`
+- `access_diff`, `access_diff_user`, `user_activity`, `claim_graph_cache` managed by the settle, the drain and the graph
+- `peer_collision` written by `apply_peer_event`
 - `inheritance_info`, `table_info` computed by registration and calc functions
 - `sync_event` append only, written by triggers
 - `audit`. Use `claimius.write_audit` if you must.
@@ -94,7 +98,7 @@ NO. Soft delete by setting `sa_deleted_at = now()`. Hard delete only happens ins
 
 YES, but you MUST also add `sa_root_id`. Both come together. The root row has `sa_parent_id = id` and `sa_root_id = id`.
 
-After adding columns, re-run `init_claimius_tables` with the same table list. It will pick up the new columns.
+After adding columns, rerun `init_claimius_tables` with the same table list. It will pick up the new columns.
 
 ### "What user identifier do I use?"
 
@@ -124,7 +128,7 @@ Other `get_*` functions, including `get_organizations`, `get_locations`, `get_us
 
 ### "How do I scope a query to one app?"
 
-Always filter on `app_id`. Every materialized state table — `samna_user`, `user_claim`, `user_object`, `object_users`, `user_users`, `user_relation`, `user_field` — carries `app_id`. The same human can have entirely separate access in different apps.
+Always filter on `app_id`. Every materialized state table — `samna_user`, `user_claim`, `user_object`, `user_users`, `user_relation`, `user_field` — carries `app_id` on a prophet. The same human can have entirely separate access in different apps.
 
 ### "How do I check if a user can see something?"
 
@@ -142,19 +146,19 @@ SELECT EXISTS (
 SELECT * FROM claimius.get_objects($user_id, $app_id, $object_type, $min_level);
 ```
 
-Returns object id, denormalized name, description, link, and tree position columns. Already filtered for active claims.
+Returns object id, the name, description, link, owner and location from `object_info`, the mask, the scope and the actor token, in `object_id` order. Pass `after` (the last id of the previous page) and `limit` for a page. Already filtered for active claims, windows and soft delete.
 
 ### "How do I implement a deny?"
 
-Create a claim with `is_deny = true` and a specific `sa_access`. Bind it via `assign_claim_object`. The deny erases grants on the same path at level `<= deny.sa_access`. Calc functions process this; you don't filter denies in your reads.
+Create a claim whose `sa_access` carries the deny bit `0x10` plus the bits to subtract; it is stored as given. Bind it via `assign_claim_object` and grant it via `assign_claim_user`. A deny bound on the object itself subtracts from every grant on it; a deny reaching the object through a tree subtracts only from grants that also reach it through a tree, so a grant bound or composed on the object itself survives an inherited deny. A deny with a field scope subtracts from those fields only. What remains is closed under implication: denying read drops execute, write and owner too. The settle stores the result; you don't filter denies in your reads. There is no access level.
 
 ### "What's a path?"
 
-A path is the pair `tree_type, cascaded_from`. A claim binding cascades through one of the three trees: ownership, location, parenthood. Each grant in `user_object.grants` records which path it came through. Denies are evaluated path by path.
+A path is the pair `tree_type, cascaded_from`. `tree_type` is `direct` for a binding on the object itself and `ownership`, `location` or `parenthood` for a binding on an ancestor reached through that tree. A composed grant also carries `composed_from`, the linked claim, and takes the class of the binding it came through. Denies subtract by class: a direct deny from everything, a tree deny from tree grants.
 
 ### "Can I have multiple grants on the same object?"
 
-Yes. The `user_object.grants` jsonb array carries one entry per contributing claim. The effective level, `sa_access` on the row, is the strongest of contributing levels. Removing one claim's contribution shrinks the array; the row stays as long as some grant or `direct_grant` survives.
+Yes. The `user_object.grants` jsonb array carries one entry per contributing claim. `sa_access` on the row is the OR of the surviving grants after denies. A binding mask narrows its claim: each grant carries `claim & expand(coalesce(binding, claim))`, a composed one the bits both the link and the target binding carry. Removing one claim's contribution shrinks the array; the row stays as long as some grant or `direct_grant` survives.
 
 ## Required columns on a registered application table
 
@@ -195,7 +199,7 @@ Tables in claimius reference each other circularly: app↔org, claim→org, user
 
 1. Owning org must exist.
 2. INSERT `samna_app`.
-3. INSERT `prophet_state` row with `last_applied_seq = 0`.
+3. INSERT `prophet_state` row; its cursor `(last_applied_txid, last_applied_seq)` starts at `(0, 0)`.
 4. Optional: create default claim, UPDATE `samna_app.claim_id`.
 5. Optional: `init_claimius_tables(...)` for any external tables.
 
@@ -274,7 +278,7 @@ WHERE r.id IN (
   AND r.kitchen_id = $kitchen_id;
 ```
 
-For the basics use `user_object`'s denormalized columns:
+For the basics use the rendering columns `get_objects` joins from `object_info`:
 
 ```sql
 SELECT object_id, sa_name, sa_description, sa_access
@@ -289,7 +293,7 @@ Ask the user. Do not guess. Specifically ask:
 - "Should this query filter by `app_id`? I assume yes since this is reading materialized state."
 - "I'm about to call `merge_user`. This will hard delete rows for the source user. Confirm?"
 - "Is this code on the prophet side or the disciple side? On a disciple, only the sync layer should write to claimius tables."
-- "I'm about to add a column to a registered table. Should I re-run `init_claimius_tables` after the migration?"
+- "I'm about to add a column to a registered table. Should I rerun `init_claimius_tables` after the migration?"
 
 ## What this skill prevents
 
@@ -297,12 +301,14 @@ When the AI assistant has Claimius rules loaded, it should:
 
 - Refuse to write a SELECT from any `claimius.*` table directly. Always use `get_*` functions.
 - Refuse to INSERT/UPDATE on `claim`, `user_claim`, `claim_object` without using the write functions.
-- Refuse to INSERT/UPDATE/DELETE on `user_object`, `object_users`, `user_users`, `inheritance_info`, `table_info`, `sync_event`, `audit`, or `reconcile_queue` ever.
+- Refuse to INSERT/UPDATE/DELETE on `user_object`, `object_info`, `user_users`, `inheritance_info`, `table_info`, `sync_event`, `audit`, `reconcile_queue`, `access_diff`, `access_diff_user`, `user_activity`, `claim_graph_cache` or `peer_collision` ever.
 - Allow direct INSERT/UPDATE on `samna_app`, `organization`, `location`, `samna_user`, `samna_client`, `samna_secret`, `object_field`, `user_field`, `user_relation`, `prophet_state`, `disciple_state` on the prophet side, with the required `sa_*` columns populated.
 - Reject any registered table missing required columns and tell the user.
 - Always include `app_id` in filters against materialized state.
 - Default to soft delete; raise hard delete as a flag for the user.
-- Never bypass `replay_mode` outside the disciple sync layer.
+- Never set `replay_mode` outside the sync layer, the disciple pull and a prophet's pull of a peer.
+- Never write a row of an app another prophet decides: it is refused with `P0409`, or `409` with `SAuth-Home` over HTTP. Send it to the home.
+- Never call `get_disciple_app` on a hybrid; use `get_app_id`.
 - Never confuse `samna_user.id` with `samna_user.user_id`.
 - Never set `sa_created_by` to a `samna_user.user_id`.
 - Treat self referencing tree roots as `parent == root == id`, never null.

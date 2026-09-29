@@ -15,9 +15,10 @@ go get github.com/nimling/samna-auth-middleware
 | Role | Holds | Sync | API |
 |------|-------|------|-----|
 | Prophet | Full app row with key and seed material | Serves the snapshot and delta feed | `sam.RegisterEndpoints` mounts the full admin API |
-| Disciple | App identity from the environment | Pulls in the background via `sam.SyncStart` | `sam.RegisterEndpoints` mounts the me and login routes |
+| Disciple | App identity from the environment | Pulls in the background via `sam.SyncStart`, one pod per database | `sam.RegisterEndpoints` mounts the me and login routes |
+| Hybrid | A prophet set up with `claimius.init_hybrid` | Serves its own apps, and pulls one app of a peer prophet via `sam.PeerSyncStart` | As the prophet; writes of the mirrored app are refused and belong to the peer |
 
-A binary is one role. Both roles wire the same four identifiers.
+A binary is one role. Both roles wire the same four identifiers. Each app has one home prophet that decides its writes, and a disciple relies on exactly one prophet, the one it is bound to.
 
 ## Packages
 
@@ -25,7 +26,7 @@ A binary is one role. Both roles wire the same four identifiers.
 |---------|----------------|-----------------|------|
 | `sdb` | `prophet/sdb` | `disciple/sdb` | Database layer. `sdb.Init(logger)` connects the pool and loads config once. |
 | `echo` | `prophet/echo` | `disciple/echo` | The individual HTTP handlers. |
-| `sam` | `prophet/sam` | `disciple/sam` | `sam.RegisterEndpoints(group)`, and on the disciple `sam.SyncStart(ctx)`. |
+| `sam` | `prophet/sam` | `disciple/sam` | `sam.RegisterEndpoints(group)`; `sam.SyncStart(ctx)` on the disciple, `sam.PeerSyncStart(ctx, db)` on a prophet mirroring a peer, and `sam.WaitForSeq`. |
 | `smw` | `smw` | `smw` | Middleware, shared by both roles. |
 | `client` | `client` | `client` | HTTP client for the Samna Auth API. |
 | `utils` | `utils` | `utils` | Config loader, cookies, and debug helpers. |
@@ -52,7 +53,7 @@ Runnable examples live under [example/prophet](example/prophet) and [example/dis
 
 The `smw` package validates requests against the Samna Auth service following OAuth 2.0 and OIDC. Its entrypoints:
 
-- `smw.AppMiddleware` is internal. It guards the endpoints apps use to reach the prophet, authenticating the app slug and secret and setting the app context.
+- `smw.AppMiddleware` is internal. It guards the endpoints apps use to reach the prophet, authenticating the app slug and secret and setting the app context. On that group `smw.SyncSeq` answers every successful write with the app's feed position in `SAuth-Seq`, and `smw.AppHome` refuses a write for an app another prophet decides with `409` and that prophet in `SAuth-Home`.
 - `smw.UserAuthMiddleware(opts)` authenticates browser and bearer users. It checks a bearer token, then a session cookie, then client credentials, and reads the resolved OIDC endpoints from the config that `sdb.Init` loaded. Pass `nil` to take the slug, secret, redirect, and page redirect from the config. Once the actor is known it stamps the request context with the actor's claimius `sa_root_id` and `sa_owner_id` through `nimtel.Organization`, so every span and every log line written with that context carries `samna.sa_root_id` and `samna.sa_owner_id`. A service never calls the stamp itself.
 - `smw.TelemetryMiddleware()` is the OpenTelemetry server span middleware named after the app slug. Mount it once on the echo instance before the auth middleware; the service starts the SDK with `nimtel.Init` at boot and the platform provides the collector through the standard `OTEL_EXPORTER_OTLP_*` variables.
 - `smw.ClientAuthMiddleware()` authenticates service to service callers by their client credentials.
@@ -149,10 +150,10 @@ Setting `SAUTH_DEBUG_USER_ID` to a valid UUID makes the middleware skip authenti
 
 The repo ships the Claimius schema as two complete, role tailored base SQL sets, and nothing else for the schema:
 
-- `prophet/database` is the full schema. It hosts many apps and scopes them two ways: an `app_id` column on most tables, and `claimius.app_object` links for `organization` and `location`, which carry no `app_id`. It is the source of truth: writes fire calc triggers that materialize `user_object` and emit `sync_event` rows for downstream disciples.
-- `disciple/database` is the same schema with `app_id` removed from every table, index, and function and without `app_object`. A disciple mirrors exactly one app, so it needs neither mechanism, and it bootstraps with `claimius.init()`. Its calc engine still runs in debug mode for standalone local writes, and stays dormant under `replay_mode` while sync applies the relation tables shipped from the prophet.
+- `prophet/database` is the full schema. It hosts many apps and scopes them two ways: an `app_id` column on most tables, and `claimius.app_object` links for `organization` and `location`, which carry no `app_id`. It is the source of truth: a write keeps the closure, settles the writer's own pairs in `user_object`, records what else it changed in `access_diff`, and emits one `sync_event` row per source row it wrote for downstream disciples.
+- `disciple/database` is the same schema with `app_id` removed from every table, index, and function and without `app_object`. A disciple mirrors exactly one app, so it needs neither mechanism, and it bootstraps with `claimius.init()`. The feed carries source rows only. Under `replay_mode` the calc triggers keep the closure and raise the areas each applied row moves, and the disciple settles its own `user_object` from them on its reads, for the shared types and its own tables alike. In debug mode the same engine serves standalone local writes.
 
-Both scoping mechanisms exist only on the prophet. `app_id` is read from the deployment env into `prophet_state` at init. The disciple schema knows nothing about either. [App scoping](docs/app_scoping.md) has the full rules.
+Both scoping mechanisms exist only on the prophet. The disciple schema knows nothing about either. [App scoping](docs/app_scoping.md) has the full rules.
 
 ### Reaching a set from a consumer
 
