@@ -38,7 +38,7 @@ func (d *DB) GetOrganizationsQuery(orgs *[]Organization, userID uuid.UUID, requi
 	return ObjectWhere(d.NewSelect().
 		Model(orgs).
 		Where("organization.sa_deleted_at IS NULL").
-		ExcludeColumn("sa_deleted_at"), userID, string(OBJECT_TYPE_ORGANIZATION), requiredAccess, after, limit)
+		ExcludeColumn("sa_deleted_at"), userID, string(OBJECT_TYPE_ORGANIZATION), requiredAccess, nil, after, limit)
 }
 
 func (d *DB) GetChildOrganizations(ctx context.Context, startID uuid.UUID) ([]uuid.UUID, error) {

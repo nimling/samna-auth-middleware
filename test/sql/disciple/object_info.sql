@@ -75,7 +75,7 @@ SELECT results_eq(
     'the harbour''s fields are stored once, in one object_info row'
 );
 SELECT columns_are('claimius', 'user_object',
-    ARRAY['user_id', 'object_id', 'object_type', 'sa_access', 'grants', 'scope', 'direct_grant', 'sa_created_at', 'sa_updated_at'],
+    ARRAY['user_id', 'object_id', 'object_type', 'sa_access', 'grants', 'scope', 'direct_grant', 'used_count', 'last_used_at', 'sa_created_at', 'sa_updated_at'],
     'a pair carries only the per user columns');
 SELECT col_is_pk('claimius', 'user_object', ARRAY['user_id', 'object_type', 'object_id'],
     'the pair is keyed on its natural key');

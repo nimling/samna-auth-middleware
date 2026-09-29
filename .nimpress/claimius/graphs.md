@@ -41,12 +41,17 @@ For the default shape, no start, unlimited depth, no mask, the graph is built fr
 
 ## The claim graph cache
 
-The default shape is stored per user in `claim_graph_cache` as one jsonb array, and served from it: one primary key probe and the array's elements. The entry is dropped by triggers:
+The default shape is stored per user in `claim_graph_cache` as one jsonb array, and served from it: one primary key probe and the array's elements. The entry is dropped by triggers on the user's own rows:
 
 | Write | Drops |
 |---|---|
 | Any row of `user_object` or `user_users` of the user, or the user's `samna_user` row | That user's entry, one probe |
 | An `object_info` row updated, a rename or a move | The entry of every user holding a pair on the object, one range of `idx_user_object_object_user` per app |
-| Any `claim` or `claim_object` row of the app | Every entry of the app, one range of the primary key |
 
-With `w` invalidating writes between two opens of the graph by one user, arriving independently of the opens, the fraction of opens served from the cache is `1 / (1 + w)`. Dropping every entry of the app on a claim or binding change keeps every served graph current without enumerating the holders of the claim, at the cost of a lower hit ratio in an app whose claims change often: every claim write in the app counts in `w` for every user.
+A change of the access of a pair drops the entry; a usage flush, which moves only `used_count` and `last_used_at`, does not. A claim or binding change drops nothing: the read serves the entry only while no `user_claim` row of the user, no claim it names and no binding of those claims carries an `sa_updated_at` at or after the entry's, `1 + 2C` probes over the user's grants.
+
+With `w` invalidating writes between two opens of the graph by one user, arriving independently of the opens, the fraction of opens served from the cache is `1 / (1 + w)`. Only writes to the user's own grants, claims and pairs count in `w`: a claim write elsewhere in the app leaves the entry valid.
+
+## The window
+
+Both graphs take `p_width`, `p_sort` and `p_next_id`. Every parent shows at most `p_width` children of each type, 0 meaning all, in name order or with `p_sort` `usage` by the reader's `used_count × 2^(−age / 14 days)`, computed at read time. A node is kept when it is inside its parent's window and its parent is kept. `p_next_id` continues after that node with its later siblings of its type. Name order is the order `idx_object_info_owner_name` and `idx_object_info_location_name` serve.

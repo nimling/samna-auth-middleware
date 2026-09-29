@@ -110,7 +110,12 @@ func ClaimWhere(userID uuid.UUID, requiredAccess ClaimAccess) string {
 	)
 }
 
-func ObjectWhere(q *bun.SelectQuery, userID uuid.UUID, objectType string, requiredAccess ClaimAccess, after *uuid.UUID, limit int) *bun.SelectQuery {
+func ObjectWhere(q *bun.SelectQuery, userID uuid.UUID, objectType string, requiredAccess ClaimAccess, objectID *uuid.UUID, after *uuid.UUID, limit int) *bun.SelectQuery {
+	if objectID != nil {
+		return q.
+			Where("?TableAlias.id = ?", *objectID).
+			Where("EXISTS (SELECT 1 FROM claimius.get_access(?, ?, ?, ?))", userID, *objectID, objectType, int(requiredAccess))
+	}
 	var pageLimit any
 	if limit > 0 {
 		pageLimit = limit

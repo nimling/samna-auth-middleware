@@ -354,3 +354,75 @@ func TestScopeAccessInheritsTheClaimMaskAndSubtractsADeny(t *testing.T) {
 		t.Fatalf("expected the deny on the same path to take the read away, got %+v", denied)
 	}
 }
+
+func TestObjectWhereWithAnIDChecksInTheSameStatement(t *testing.T) {
+	db := database(t)
+	ctx := context.Background()
+	read := func(user uuid.UUID) int {
+		orgs := make([]sdb.Organization, 0)
+		if err := sdb.ObjectWhere(db.NewSelect().Model(&orgs).ExcludeColumn("sa_deleted_at"), user, string(sdb.OBJECT_TYPE_ORGANIZATION), sdb.ACCESS_READ, &orgGrand, nil, 0).Scan(ctx); err != nil {
+			t.Fatalf("read: %v", err)
+		}
+		return len(orgs)
+	}
+	if n := read(userA); n != 1 {
+		t.Fatalf("a reader with a grant reads the one organization, got %d rows", n)
+	}
+	if n := read(userB); n != 0 {
+		t.Fatalf("a reader without a grant reads nothing, got %d rows", n)
+	}
+}
+
+func TestUsageFlushTouchesTheCheckedPair(t *testing.T) {
+	db := database(t)
+	ctx := context.Background()
+	if _, err := db.GetOrganizations(ctx, userA, sdb.ACCESS_READ, nil, 0); err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	var before int64
+	if err := db.NewRaw(`SELECT used_count FROM claimius.user_object WHERE user_id = ? AND object_type = ? AND object_id = ?`,
+		userA, sdb.OBJECT_TYPE_ORGANIZATION, orgGrand).Scan(ctx, &before); err != nil {
+		t.Fatalf("pair: %v", err)
+	}
+	for i := 0; i < 2; i++ {
+		if _, err := db.MutationAccess(ctx, userA, orgGrand, sdb.OBJECT_TYPE_ORGANIZATION, sdb.ACCESS_READ); err != nil {
+			t.Fatalf("check: %v", err)
+		}
+	}
+	db.Usage.Stop()
+	var after int64
+	if err := db.NewRaw(`SELECT used_count FROM claimius.user_object WHERE user_id = ? AND object_type = ? AND object_id = ?`,
+		userA, sdb.OBJECT_TYPE_ORGANIZATION, orgGrand).Scan(ctx, &after); err != nil {
+		t.Fatalf("pair: %v", err)
+	}
+	if after-before != 2 {
+		t.Fatalf("expected two counted checks on the pair, got %d", after-before)
+	}
+}
+
+func TestOwnerGraphTakesTheWindow(t *testing.T) {
+	db := database(t)
+	ctx := context.Background()
+	if _, err := db.GetOwnerGraph(ctx, userA, &orgRoot, 0, sdb.ACCESS_READ, sdb.GraphWindow{Width: 1, Sort: sdb.GRAPH_SORT_USAGE}); err != nil {
+		t.Fatalf("usage window: %v", err)
+	}
+	nodes, err := db.GetOwnerGraph(ctx, userA, &orgRoot, 0, sdb.ACCESS_READ, sdb.GraphWindow{Width: 1, NextID: &orgAlpha})
+	if err != nil {
+		t.Fatalf("continuation: %v", err)
+	}
+	for _, n := range nodes {
+		if n.ObjectID == orgAlpha || n.ObjectID == orgRoot {
+			t.Fatalf("a continuation after alpha returns neither alpha nor its parent, got %+v", n)
+		}
+	}
+	if _, err := db.GetOwnerGraph(ctx, userA, &orgRoot, 0, sdb.ACCESS_READ, sdb.GraphWindow{Sort: "size"}); err == nil {
+		t.Fatal("an unknown sort must be refused")
+	}
+}
+
+func TestAccessDiffDrainRunsOffTheRequestPath(t *testing.T) {
+	db := database(t)
+	if _, err := db.PostAccessDiffDrain(context.Background(), 10); err != nil {
+		t.Fatalf("drain: %v", err)
+	}
+}

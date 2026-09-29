@@ -527,6 +527,9 @@ CREATE INDEX IF NOT EXISTS idx_inheritance_info_ancestor
 -- vector, lives once in object_info. The same pairs keyed from the object
 -- side are the index idx_user_object_object_user, so the users of one object
 -- are read here and the pairs are stored once.
+-- used_count and last_used_at record how often and how lately the user checked
+-- the object. touch_object_usage adds to them, a settle never writes them and
+-- they leave with the pair. They are local to this database and never sync.
 CREATE TABLE IF NOT EXISTS claimius.user_object (
                                                     app_id              UUID NOT NULL,
                                                     user_id             UUID NOT NULL,
@@ -536,6 +539,8 @@ CREATE TABLE IF NOT EXISTS claimius.user_object (
                                                     grants              JSONB NOT NULL DEFAULT '[]'::jsonb,
                                                     scope               JSONB,
                                                     direct_grant        BOOLEAN NOT NULL DEFAULT FALSE,
+                                                    used_count          BIGINT NOT NULL DEFAULT 0,
+                                                    last_used_at        TIMESTAMPTZ,
                                                     sa_created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
                                                     sa_updated_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
                                                     CONSTRAINT user_object_pkey PRIMARY KEY (user_id, app_id, object_type, object_id) INCLUDE (sa_access)
@@ -546,6 +551,12 @@ COMMENT ON COLUMN claimius.user_object.grants IS 'JSON array of {claim_id, acces
 COMMENT ON COLUMN claimius.user_object.direct_grant IS 'True when user is creator (via sa_created_by lookup).';
 COMMENT ON COLUMN claimius.user_object.sa_access IS 'Effective bitwise access mask: OR of grants[].access with deny bits subtracted. Bits: 0x01 owner, 0x02 write, 0x04 read, 0x08 execute. Direct creator gets 0x01|0x02|0x04|0x08.';
 COMMENT ON COLUMN claimius.user_object.scope IS 'Effective merged scope: union of grants[].scope keys when any grant has a scope, else NULL meaning whole object access.';
+
+ALTER TABLE claimius.user_object ADD COLUMN IF NOT EXISTS used_count BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE claimius.user_object ADD COLUMN IF NOT EXISTS last_used_at TIMESTAMPTZ;
+
+COMMENT ON COLUMN claimius.user_object.used_count IS 'Successful single object checks of the pair, added by touch_object_usage. Kept by every settle, gone with the pair.';
+COMMENT ON COLUMN claimius.user_object.last_used_at IS 'Time of the latest flush that counted a check of the pair. Usage ranks by used_count * 2^(-age / 14 days).';
 
 -- object_info
 -- The per object fields every pair used to copy: owner, location, root, name,
@@ -785,7 +796,10 @@ CREATE INDEX IF NOT EXISTS idx_reconcile_queue_user ON claimius.reconcile_queue 
 -- the claim to that one user changed.
 -- The id is deterministic on the area, so repeated changes to the same area
 -- collapse into one outstanding row instead of a queue of duplicates. Each
--- repeat raises generation, which supersedes every share settled before it.
+-- repeat adds one to raise_count, which supersedes every share settled before
+-- it, and which with sa_created_at estimates how often the area is raised:
+-- drain_access_diff settles a holder's share ahead of its read only when the
+-- holder reads more often than that.
 CREATE TABLE IF NOT EXISTS claimius.access_diff (
                                                     id              UUID PRIMARY KEY,
                                                     app_id          UUID NOT NULL,
@@ -799,16 +813,29 @@ CREATE TABLE IF NOT EXISTS claimius.access_diff (
 );
 
 ALTER TABLE claimius.access_diff ADD COLUMN IF NOT EXISTS user_id UUID;
-ALTER TABLE claimius.access_diff ADD COLUMN IF NOT EXISTS generation BIGINT NOT NULL DEFAULT 1;
+
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM information_schema.columns
+               WHERE table_schema = 'claimius' AND table_name = 'access_diff' AND column_name = 'generation') THEN
+        ALTER TABLE claimius.access_diff RENAME COLUMN generation TO raise_count;
+    END IF;
+    IF EXISTS (SELECT 1 FROM information_schema.columns
+               WHERE table_schema = 'claimius' AND table_name = 'access_diff_user' AND column_name = 'generation') THEN
+        ALTER TABLE claimius.access_diff_user RENAME COLUMN generation TO raise_count;
+    END IF;
+END $$;
+
+ALTER TABLE claimius.access_diff ADD COLUMN IF NOT EXISTS raise_count BIGINT NOT NULL DEFAULT 1;
 
 ALTER TABLE claimius.access_diff SET (
     autovacuum_vacuum_scale_factor = 0.02,
     autovacuum_analyze_scale_factor = 0.02
 );
 
-COMMENT ON TABLE claimius.access_diff IS 'Outstanding access areas awaiting recalculation. Written by calc triggers, settled per user by the reads that meet the area, cleared once every holder has settled the current generation.';
+COMMENT ON TABLE claimius.access_diff IS 'Outstanding access areas awaiting recalculation. Written by calc triggers, settled per user by the reads that meet the area and by drain_access_diff, cleared once every holder has settled the current raise.';
 COMMENT ON COLUMN claimius.access_diff.user_id IS 'Set on a claim area raised by an assignment: the one user whose access the assignment changed. NULL means every holder of the claim.';
-COMMENT ON COLUMN claimius.access_diff.generation IS 'Raised by every repeat of the area. A share settled at an older generation is superseded.';
+COMMENT ON COLUMN claimius.access_diff.raise_count IS 'Raises of the area since it opened, one per write that raised it. A share settled at a lower count is superseded; raise_count / (now - sa_created_at) is the raise rate the drain compares a holder''s read rate against.';
 
 CREATE INDEX IF NOT EXISTS idx_access_diff_object ON claimius.access_diff (app_id, object_type, object_id) WHERE kind = 'object';
 CREATE INDEX IF NOT EXISTS idx_access_diff_claim ON claimius.access_diff (app_id, claim_id) WHERE kind = 'claim';
@@ -816,26 +843,42 @@ CREATE INDEX IF NOT EXISTS idx_access_diff_user ON claimius.access_diff (app_id,
 
 -- access_diff_user
 -- One row per area and user that settled its share of the area, at the
--- generation it settled. A user never settles the same generation twice, and
--- the row goes with its area.
+-- raise_count it settled. A user never settles the same raise twice, and the
+-- row goes with its area.
 CREATE TABLE IF NOT EXISTS claimius.access_diff_user (
                                                          diff_id         UUID NOT NULL REFERENCES claimius.access_diff (id) ON DELETE CASCADE,
                                                          app_id          UUID NOT NULL,
                                                          user_id         UUID NOT NULL,
-                                                         generation      BIGINT NOT NULL,
+                                                         raise_count     BIGINT NOT NULL,
                                                          sa_created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
                                                          PRIMARY KEY (diff_id, user_id)
 );
 
-COMMENT ON TABLE claimius.access_diff_user IS 'Per user done record of an access_diff area. Written by the read that settles the user share, removed with the area.';
+COMMENT ON TABLE claimius.access_diff_user IS 'Per user done record of an access_diff area. Written by the read or the drain that settles the user share, removed with the area.';
+
+-- user_activity
+-- When a user last used an app: one row per user and app, moved forward by
+-- touch_object_usage whenever it counts a check of theirs. 1 / (now -
+-- last_used_at) estimates how often the user reads, and drain_access_diff
+-- settles a user's share of an area ahead of the read only when that rate is
+-- at least the area's raise rate. Local, never synced.
+CREATE TABLE IF NOT EXISTS claimius.user_activity (
+                                                      user_id         UUID NOT NULL,
+                                                      app_id          UUID NOT NULL,
+                                                      last_used_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+                                                      PRIMARY KEY (user_id, app_id)
+);
+
+COMMENT ON TABLE claimius.user_activity IS 'Latest use of an app per user, written by touch_object_usage, read by drain_access_diff to order and gate the settle ahead of a read.';
 
 -- claim_graph_cache
 -- Per user materialized result of claimius.get_claim_graph for the default
 -- argument shape: p_start_id IS NULL, p_depth = 0, p_required_access = 0. The
 -- graph column holds the full row set as a jsonb array, one element per
 -- (object_id, object_type, label, parent_id, data) tuple. Read path expands
--- back to rows. Invalidated by triggers on user_object, object_info,
--- user_users, samna_user, claim, and claim_object.
+-- back to rows. Dropped by triggers on user_object, object_info, user_users
+-- and samna_user of the user, and validated on read against the sa_updated_at
+-- of the user's user_claim rows, their claims and those claims' bindings.
 CREATE TABLE IF NOT EXISTS claimius.claim_graph_cache (
                                                           app_id          UUID NOT NULL,
                                                           user_id         UUID NOT NULL,
@@ -844,7 +887,7 @@ CREATE TABLE IF NOT EXISTS claimius.claim_graph_cache (
                                                           PRIMARY KEY (app_id, user_id)
 );
 
-COMMENT ON TABLE claimius.claim_graph_cache IS 'Per user cache of get_claim_graph default shape. Trigger invalidated.';
+COMMENT ON TABLE claimius.claim_graph_cache IS 'Per user cache of get_claim_graph default shape. Dropped by triggers on the user''s own rows, validated on read against the user''s grants, claims and bindings.';
 COMMENT ON COLUMN claimius.claim_graph_cache.graph IS 'JSON array of {object_id, object_type, label, parent_id, data} tuples.';
 
 -- ----------------------------------------------------------------------------

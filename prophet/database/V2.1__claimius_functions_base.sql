@@ -226,3 +226,18 @@ CREATE OR REPLACE FUNCTION claimius._close_access(p INTEGER)
 $$;
 
 COMMENT ON FUNCTION claimius._close_access(INTEGER) IS 'The mask closed under implication: a bit whose implied bits are not all present is dropped.';
+
+-- _decayed_usage
+-- The weight of a pair's usage at read time: its count of checks halved for
+-- every 14 days since the latest one, so recent use outranks old use of the
+-- same count. A pair never used weighs 0.
+CREATE OR REPLACE FUNCTION claimius._decayed_usage(p_used_count BIGINT, p_last_used_at TIMESTAMPTZ)
+    RETURNS DOUBLE PRECISION LANGUAGE sql STABLE PARALLEL SAFE AS $$
+    SELECT CASE
+               WHEN coalesce(p_used_count, 0) = 0 OR p_last_used_at IS NULL THEN 0::DOUBLE PRECISION
+               ELSE p_used_count * power(2::DOUBLE PRECISION,
+                        -greatest(extract(epoch FROM now() - p_last_used_at), 0) / 1209600)
+           END
+$$;
+
+COMMENT ON FUNCTION claimius._decayed_usage(BIGINT, TIMESTAMPTZ) IS 'used_count * 2^(-age / 14 days), age since last_used_at. 0 for a pair never used.';

@@ -697,8 +697,8 @@ COMMENT ON FUNCTION claimius.emit_sync_event() IS 'Trigger on the source tables.
 -- Called without one, the read is a listing and settles the reader's share of
 -- every area it meets: every object area of the app and the claim areas of
 -- the reader's claims. Each share is set based, one recompute per object
--- type, and is recorded in access_diff_user at the area's generation, so the
--- reader never settles the same generation twice. The area row is cleared
+-- type, and is recorded in access_diff_user at the area's raise_count, so the
+-- reader never settles the same raise twice. The area row is cleared
 -- once every holder has settled it. A reader locks the areas it takes
 -- FOR KEY SHARE SKIP LOCKED, which writers raising the area again do not
 -- wait on, and its own share of an area with a transaction advisory lock, so
@@ -782,13 +782,13 @@ BEGIN
                         WHERE (n.self OR d.cascade)
                           AND NOT EXISTS (
                               SELECT 1 FROM claimius.access_diff_user du
-                              WHERE du.diff_id = d.id AND du.user_id = p_user_id AND du.generation = d.generation))
+                              WHERE du.diff_id = d.id AND du.user_id = p_user_id AND du.raise_count = d.raise_count))
                     OR EXISTS (
                         SELECT 1
                         FROM claim_areas d
                         WHERE NOT EXISTS (
                                 SELECT 1 FROM claimius.access_diff_user du
-                                WHERE du.diff_id = d.id AND du.user_id = p_user_id AND du.generation = d.generation)
+                                WHERE du.diff_id = d.id AND du.user_id = p_user_id AND du.raise_count = d.raise_count)
                           AND (
                               EXISTS (
                                   SELECT 1
@@ -842,30 +842,11 @@ BEGIN
                   )
               AND NOT EXISTS (
                   SELECT 1 FROM claimius.access_diff_user du
-                  WHERE du.diff_id = d.id AND du.user_id = p_user_id AND du.generation = d.generation)
+                  WHERE du.diff_id = d.id AND du.user_id = p_user_id AND du.raise_count = d.raise_count)
             ORDER BY d.sa_created_at, d.id
             FOR KEY SHARE OF d SKIP LOCKED
         LOOP
-            CONTINUE WHEN NOT pg_try_advisory_xact_lock(hashtextextended(v_diff.id::TEXT || ':' || p_user_id::TEXT, 0));
-            BEGIN
-                IF v_diff.kind = 'object' THEN
-                    PERFORM claimius._settle_object_diff(
-                            p_user_id, v_diff.object_type, v_diff.object_id, v_diff.cascade);
-                ELSE
-                    PERFORM claimius._settle_claim_diff(p_user_id, v_diff.claim_id, v_diff.sa_created_at);
-                END IF;
-
-                INSERT INTO claimius.access_diff_user (diff_id, user_id, generation)
-                VALUES (v_diff.id, p_user_id, v_diff.generation)
-                ON CONFLICT (diff_id, user_id) DO UPDATE
-                    SET generation = EXCLUDED.generation,
-                        sa_created_at = now();
-
-                PERFORM claimius._clear_diff(v_diff.id);
-            EXCEPTION WHEN OTHERS THEN
-                -- leave the share outstanding for the next read
-                NULL;
-            END;
+            PERFORM claimius._settle_diff_share(p_user_id, v_diff.id);
         END LOOP;
 
         FOR v_row IN
@@ -886,6 +867,50 @@ END;
 $$ LANGUAGE plpgsql;
 
 COMMENT ON FUNCTION claimius.reconcile_if_pending(UUID, TEXT, UUID) IS 'Settles what a read meets and drains reconcile_queue. With a target it recomputes the one pair when an open area covers it; without one it settles the reader''s share of every open area, set based, and records it in access_diff_user. Called at read entry points.';
+
+-- drain_access_diff
+-- Settles, outside any request, the shares of open areas whose holders are
+-- likelier to read before the area is raised again than after. A holder j
+-- reads at the rate 1 / (now - last_used_at) of its user_activity row, an
+-- area a is raised at raise_count / (now - sa_created_at), and the share is
+-- worth settling ahead when the first is at least the second. A share that
+-- fails the test, or whose holder has never used the app, waits for the
+-- holder's own read. Shares are taken most recent user first, at most
+-- p_limit_pairs of them, each through _settle_diff_share, so a share a read is
+-- settling at the same moment is skipped. The sync loop calls it between
+-- pulls, on the one process holding the sync lock. Returns the shares settled.
+CREATE OR REPLACE FUNCTION claimius.drain_access_diff(
+    p_limit_pairs   INTEGER DEFAULT 1000
+) RETURNS INTEGER AS $$
+DECLARE
+    v_share     RECORD;
+    v_settled   INTEGER := 0;
+BEGIN
+    FOR v_share IN
+        SELECT s.user_id, s.diff_id
+        FROM (
+            SELECT DISTINCT h.user_id, d.id AS diff_id, a.last_used_at
+            FROM claimius.access_diff d
+                CROSS JOIN LATERAL claimius._diff_holders(d.id) h
+                JOIN claimius.user_activity a ON a.user_id = h.user_id
+            WHERE extract(epoch FROM now() - d.sa_created_at) >= d.raise_count * extract(epoch FROM now() - a.last_used_at)
+              AND NOT EXISTS (
+                  SELECT 1 FROM claimius.access_diff_user du
+                  WHERE du.diff_id = d.id AND du.user_id = h.user_id AND du.raise_count = d.raise_count)
+        ) s
+        ORDER BY s.last_used_at DESC, s.diff_id, s.user_id
+        LIMIT greatest(p_limit_pairs, 0)
+    LOOP
+        IF claimius._settle_diff_share(v_share.user_id, v_share.diff_id) THEN
+            v_settled := v_settled + 1;
+        END IF;
+    END LOOP;
+
+    RETURN v_settled;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = claimius, pg_temp;
+
+COMMENT ON FUNCTION claimius.drain_access_diff(INTEGER) IS 'Settles up to p_limit_pairs holder shares of open access_diff areas off the request path, only where 1 / (now - user_activity.last_used_at) >= raise_count / (now - sa_created_at), most recent user first. Returns the shares settled.';
 
 -- cascade_user_soft_delete
 -- When read functions detect a soft deleted user, propagate the soft delete

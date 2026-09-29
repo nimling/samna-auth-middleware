@@ -2171,7 +2171,7 @@ COMMENT ON FUNCTION claimius._actor_user_for_row(UUID, TEXT, ANYELEMENT) IS 'Use
 -- _raise_object_diff
 -- Marks the area around one object as needing recalculation. One row, no user
 -- enumeration. Repeated changes to the same object collapse onto the same id
--- and raise its generation, superseding every share settled before.
+-- and add one to its raise_count, superseding every share settled before.
 -- ----------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION claimius._raise_object_diff(
     p_app_id        UUID,
@@ -2189,7 +2189,7 @@ BEGIN
             p_app_id, 'object', p_object_type, p_object_id, p_cascade)
     ON CONFLICT (id) DO UPDATE
         SET sa_updated_at = now(),
-            generation = claimius.access_diff.generation + 1,
+            raise_count = claimius.access_diff.raise_count + 1,
             cascade = claimius.access_diff.cascade OR EXCLUDED.cascade;
 END;
 $$ LANGUAGE plpgsql;
@@ -2220,7 +2220,7 @@ BEGIN
             p_app_id, 'claim', p_claim_id, p_user_id)
     ON CONFLICT (id) DO UPDATE
         SET sa_updated_at = now(),
-            generation = claimius.access_diff.generation + 1;
+            raise_count = claimius.access_diff.raise_count + 1;
 END;
 $$ LANGUAGE plpgsql;
 
@@ -2428,14 +2428,111 @@ $$ LANGUAGE plpgsql;
 COMMENT ON FUNCTION claimius._settle_claim_diff(UUID, UUID, UUID, TIMESTAMPTZ) IS 'Recomputes one user''s share of a claim area, set based. Returns whether the user''s pair set changed.';
 
 -- ----------------------------------------------------------------------------
+-- _diff_holders
+-- The users an area can reach, the ones whose share of it is theirs to settle.
+-- The holders of a claim area are the users holding the claim or a claim
+-- linking to it, or the one user an assignment names. The holders of an
+-- object area are the users holding a pair on the object or, with cascade, on
+-- its subtree, the users holding a claim bound on the object or an ancestor,
+-- and the creator of the object. A user can come more than once.
+-- ----------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION claimius._diff_holders(
+    p_app_id        UUID,
+    p_diff_id       UUID
+) RETURNS TABLE (user_id UUID) AS $$
+    SELECT d.user_id
+    FROM claimius.access_diff d
+    WHERE d.id = p_diff_id AND d.kind = 'claim' AND d.user_id IS NOT NULL
+
+    UNION ALL
+
+    SELECT uc.user_id
+    FROM claimius.access_diff d
+        JOIN claimius.user_claim uc
+            ON uc.claim_id = d.claim_id
+           AND uc.app_id = p_app_id
+           AND uc.sa_deleted_at IS NULL
+    WHERE d.id = p_diff_id AND d.kind = 'claim' AND d.user_id IS NULL
+
+    UNION ALL
+
+    SELECT uc.user_id
+    FROM claimius.access_diff d
+        JOIN claimius.claim_object link
+            ON link.object_type = 'claimius.claim'
+           AND link.object_id = d.claim_id
+           AND link.app_id = p_app_id
+           AND link.sa_deleted_at IS NULL
+        JOIN claimius.user_claim uc
+            ON uc.claim_id = link.claim_id
+           AND uc.app_id = p_app_id
+           AND uc.sa_deleted_at IS NULL
+    WHERE d.id = p_diff_id AND d.kind = 'claim' AND d.user_id IS NULL
+
+    UNION ALL
+
+    SELECT uc.user_id
+    FROM claimius.access_diff d
+        CROSS JOIN LATERAL claimius._denormalize_objects(d.object_type, ARRAY[d.object_id]) r
+        JOIN claimius.user_claim uc ON uc.id = r.sa_created_by AND uc.app_id = p_app_id AND uc.sa_deleted_at IS NULL
+    WHERE d.id = p_diff_id AND d.kind = 'object'
+
+    UNION ALL
+
+    SELECT uo.user_id
+    FROM claimius.access_diff d
+        JOIN claimius.user_object uo
+            ON uo.app_id = p_app_id
+           AND uo.object_type = d.object_type
+           AND uo.object_id = d.object_id
+    WHERE d.id = p_diff_id AND d.kind = 'object'
+
+    UNION ALL
+
+    SELECT uo.user_id
+    FROM claimius.access_diff d
+        JOIN claimius.inheritance_info e
+            ON e.ancestor_type = d.object_type
+           AND e.ancestor_id = d.object_id
+           AND e.depth > 0
+        JOIN claimius.user_object uo
+            ON uo.app_id = p_app_id
+           AND uo.object_type = e.descendant_type
+           AND uo.object_id = e.descendant_id
+    WHERE d.id = p_diff_id AND d.kind = 'object' AND d.cascade
+
+    UNION ALL
+
+    SELECT uc.user_id
+    FROM claimius.access_diff d
+        CROSS JOIN LATERAL (
+            SELECT d.object_type AS object_type, d.object_id AS object_id
+            UNION ALL
+            SELECT e.ancestor_type, e.ancestor_id
+            FROM claimius.inheritance_info e
+            WHERE e.descendant_type = d.object_type
+              AND e.descendant_id = d.object_id
+              AND e.depth > 0
+        ) n
+        JOIN claimius.claim_object co
+            ON co.object_type = n.object_type
+           AND co.object_id = n.object_id
+           AND co.app_id = p_app_id
+           AND co.sa_deleted_at IS NULL
+        JOIN claimius.user_claim uc
+            ON uc.claim_id = co.claim_id
+           AND uc.app_id = p_app_id
+           AND uc.sa_deleted_at IS NULL
+    WHERE d.id = p_diff_id AND d.kind = 'object'
+$$ LANGUAGE sql STABLE;
+
+COMMENT ON FUNCTION claimius._diff_holders(UUID, UUID) IS 'The users an access_diff area can reach, with repeats: the holders of a claim area, or the pair holders, binding holders and creator of an object area.';
+
+-- ----------------------------------------------------------------------------
 -- _clear_diff
 -- Deletes an area once every user it can reach has settled its current
--- generation. The holders of a claim area are the users holding the claim or
--- a claim linking to it, or the one user an assignment names. The holders of
--- an object area are the users holding a pair on the object or its subtree,
--- the users holding a claim bound on the object or an ancestor, and the
--- creator of the object. The first holder found unsettled ends the test, and
--- an area another transaction holds is left for the next settle to clear.
+-- raise_count. The first holder found unsettled ends the test, and an area
+-- another transaction holds is left for the next settle to clear.
 -- ----------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION claimius._clear_diff(
     p_app_id        UUID,
@@ -2443,107 +2540,87 @@ CREATE OR REPLACE FUNCTION claimius._clear_diff(
 ) RETURNS BOOLEAN AS $$
 DECLARE
     v_diff      claimius.access_diff%ROWTYPE;
-    v_creator   UUID;
-    v_open      BOOLEAN;
 BEGIN
     SELECT d.* INTO v_diff FROM claimius.access_diff d WHERE d.id = p_diff_id;
     IF NOT FOUND THEN
         RETURN FALSE;
     END IF;
 
-    IF v_diff.kind = 'claim' AND v_diff.user_id IS NOT NULL THEN
-        v_open := NOT EXISTS (
+    IF EXISTS (
+        SELECT 1 FROM claimius._diff_holders(p_app_id, v_diff.id) h
+        WHERE NOT EXISTS (
             SELECT 1 FROM claimius.access_diff_user du
-            WHERE du.diff_id = v_diff.id AND du.user_id = v_diff.user_id AND du.generation = v_diff.generation);
-    ELSIF v_diff.kind = 'claim' THEN
-        v_open := EXISTS (
-                SELECT 1 FROM claimius.user_claim uc
-                WHERE uc.claim_id = v_diff.claim_id
-                  AND uc.app_id = p_app_id
-                  AND uc.sa_deleted_at IS NULL
-                  AND NOT EXISTS (
-                      SELECT 1 FROM claimius.access_diff_user du
-                      WHERE du.diff_id = v_diff.id AND du.user_id = uc.user_id AND du.generation = v_diff.generation))
-            OR EXISTS (
-                SELECT 1
-                FROM claimius.claim_object link
-                    JOIN claimius.user_claim uc
-                        ON uc.claim_id = link.claim_id
-                       AND uc.app_id = p_app_id
-                       AND uc.sa_deleted_at IS NULL
-                WHERE link.object_type = 'claimius.claim'
-                  AND link.object_id = v_diff.claim_id
-                  AND link.app_id = p_app_id
-                  AND link.sa_deleted_at IS NULL
-                  AND NOT EXISTS (
-                      SELECT 1 FROM claimius.access_diff_user du
-                      WHERE du.diff_id = v_diff.id AND du.user_id = uc.user_id AND du.generation = v_diff.generation));
-    ELSE
-        SELECT uc.user_id INTO v_creator
-        FROM claimius._denormalize_objects(v_diff.object_type, ARRAY[v_diff.object_id]) r
-            JOIN claimius.user_claim uc ON uc.id = r.sa_created_by AND uc.app_id = p_app_id AND uc.sa_deleted_at IS NULL;
-
-        v_open := (v_creator IS NOT NULL AND NOT EXISTS (
-                SELECT 1 FROM claimius.access_diff_user du
-                WHERE du.diff_id = v_diff.id AND du.user_id = v_creator AND du.generation = v_diff.generation))
-            OR EXISTS (
-                SELECT 1 FROM claimius.user_object uo
-                WHERE uo.app_id = p_app_id
-                  AND uo.object_type = v_diff.object_type
-                  AND uo.object_id = v_diff.object_id
-                  AND NOT EXISTS (
-                      SELECT 1 FROM claimius.access_diff_user du
-                      WHERE du.diff_id = v_diff.id AND du.user_id = uo.user_id AND du.generation = v_diff.generation))
-            OR (v_diff.cascade AND EXISTS (
-                SELECT 1
-                FROM claimius.inheritance_info e
-                    JOIN claimius.user_object uo
-                        ON uo.app_id = p_app_id
-                       AND uo.object_type = e.descendant_type
-                       AND uo.object_id = e.descendant_id
-                WHERE e.ancestor_type = v_diff.object_type
-                  AND e.ancestor_id = v_diff.object_id
-                  AND e.depth > 0
-                  AND NOT EXISTS (
-                      SELECT 1 FROM claimius.access_diff_user du
-                      WHERE du.diff_id = v_diff.id AND du.user_id = uo.user_id AND du.generation = v_diff.generation)))
-            OR EXISTS (
-                SELECT 1
-                FROM (
-                    SELECT v_diff.object_type AS object_type, v_diff.object_id AS object_id
-                    UNION ALL
-                    SELECT e.ancestor_type, e.ancestor_id
-                    FROM claimius.inheritance_info e
-                    WHERE e.descendant_type = v_diff.object_type
-                      AND e.descendant_id = v_diff.object_id
-                      AND e.depth > 0
-                ) n
-                    JOIN claimius.claim_object co
-                        ON co.object_type = n.object_type
-                       AND co.object_id = n.object_id
-                       AND co.app_id = p_app_id
-                       AND co.sa_deleted_at IS NULL
-                    JOIN claimius.user_claim uc
-                        ON uc.claim_id = co.claim_id
-                       AND uc.app_id = p_app_id
-                       AND uc.sa_deleted_at IS NULL
-                WHERE NOT EXISTS (
-                    SELECT 1 FROM claimius.access_diff_user du
-                    WHERE du.diff_id = v_diff.id AND du.user_id = uc.user_id AND du.generation = v_diff.generation));
-    END IF;
-
-    IF v_open THEN
+            WHERE du.diff_id = v_diff.id AND du.user_id = h.user_id AND du.raise_count = v_diff.raise_count)
+    ) THEN
         RETURN FALSE;
     END IF;
 
     DELETE FROM claimius.access_diff
     WHERE id IN (
         SELECT d.id FROM claimius.access_diff d
-        WHERE d.id = v_diff.id AND d.generation = v_diff.generation
+        WHERE d.id = v_diff.id AND d.raise_count = v_diff.raise_count
         FOR UPDATE SKIP LOCKED
     );
     RETURN FOUND;
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius._clear_diff(UUID, UUID) IS 'Deletes an access_diff area once every holder has settled its current generation. Stops at the first unsettled holder and skips an area another transaction holds.';
+COMMENT ON FUNCTION claimius._clear_diff(UUID, UUID) IS 'Deletes an access_diff area once every holder has settled its current raise_count. Stops at the first unsettled holder and skips an area another transaction holds.';
+
+-- ----------------------------------------------------------------------------
+-- _settle_diff_share
+-- Settles one user's share of one area and records it: the object or claim
+-- settle, set based, then the done record at the area's raise_count, then the
+-- clear. The area is taken FOR KEY SHARE SKIP LOCKED, which a writer raising
+-- it again does not wait on, and the share under a transaction advisory lock,
+-- so two settles of one share never run at once. A share already settled at
+-- the current raise, an area gone or held, and a settle that fails are left
+-- as they are and answer FALSE.
+-- ----------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION claimius._settle_diff_share(
+    p_app_id        UUID,
+    p_user_id       UUID,
+    p_diff_id       UUID
+) RETURNS BOOLEAN AS $$
+DECLARE
+    v_diff      claimius.access_diff%ROWTYPE;
+BEGIN
+    SELECT d.* INTO v_diff
+    FROM claimius.access_diff d
+    WHERE d.id = p_diff_id
+      AND d.app_id = p_app_id
+      AND NOT EXISTS (
+          SELECT 1 FROM claimius.access_diff_user du
+          WHERE du.diff_id = d.id AND du.user_id = p_user_id AND du.raise_count = d.raise_count)
+    FOR KEY SHARE SKIP LOCKED;
+    IF NOT FOUND THEN
+        RETURN FALSE;
+    END IF;
+
+    IF NOT pg_try_advisory_xact_lock(hashtextextended(v_diff.id::TEXT || ':' || p_user_id::TEXT, 0)) THEN
+        RETURN FALSE;
+    END IF;
+
+    BEGIN
+        IF v_diff.kind = 'object' THEN
+            PERFORM claimius._settle_object_diff(
+                    p_app_id, p_user_id, v_diff.object_type, v_diff.object_id, v_diff.cascade);
+        ELSE
+            PERFORM claimius._settle_claim_diff(p_app_id, p_user_id, v_diff.claim_id, v_diff.sa_created_at);
+        END IF;
+
+        INSERT INTO claimius.access_diff_user (diff_id, app_id, user_id, raise_count)
+        VALUES (v_diff.id, p_app_id, p_user_id, v_diff.raise_count)
+        ON CONFLICT (diff_id, user_id) DO UPDATE
+            SET raise_count = EXCLUDED.raise_count,
+                sa_created_at = now();
+
+        PERFORM claimius._clear_diff(p_app_id, v_diff.id);
+    EXCEPTION WHEN OTHERS THEN
+        RETURN FALSE;
+    END;
+    RETURN TRUE;
+END;
+$$ LANGUAGE plpgsql;
+
+COMMENT ON FUNCTION claimius._settle_diff_share(UUID, UUID, UUID) IS 'Settles and records one user''s share of one access_diff area, then clears the area when no holder is left. FALSE when the share was settled already, the area is gone or held, or the settle failed.';

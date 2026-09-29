@@ -22,6 +22,7 @@ type DB struct {
 	*bun.DB
 	Logger  echo.Logger
 	ConnStr string
+	Usage   *ObjectUsage
 }
 
 // GetConnectionString returns the DSN the pool was opened with. The
@@ -119,6 +120,8 @@ func Connect(logger echo.Logger) (*DB, error) {
 	if err := db.Ping(); err != nil {
 		return nil, fmt.Errorf("ping: %w", err)
 	}
+
+	db.Usage = startObjectUsage(db.postObjectUsage, func(err error) { logger.Warnf("usage flush: %v", err) }, usageFlushInterval, usageFlushKeys)
 
 	db.RegisterModel(
 		(*SamnaUser)(nil),

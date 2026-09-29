@@ -27,6 +27,8 @@ const (
 	leadInterval               = 5 * time.Second
 	syncHold                   = 25 * time.Second
 	syncHoldMargin             = 10 * time.Second
+	drainInterval              = time.Second
+	drainPairs                 = 1000
 )
 
 // reportStalledCursor records that the disciple has stopped making progress at
@@ -153,6 +155,7 @@ func pullLoop(ctx context.Context) {
 	}
 	backoff := time.Second
 	failed := 0
+	var drained time.Time
 	for {
 		wait := activeInterval
 		_, err := PullSync(ctx)
@@ -178,6 +181,12 @@ func pullLoop(ctx context.Context) {
 		default:
 			backoff = time.Second
 			failed = 0
+		}
+		if time.Since(drained) >= drainInterval {
+			drained = time.Now()
+			if _, err := sdb.Instance().PostAccessDiffDrain(ctx, drainPairs); err != nil {
+				report(fmt.Errorf("drain access_diff: %w", err))
+			}
 		}
 		select {
 		case <-ctx.Done():

@@ -38,7 +38,7 @@ func (d *DB) GetLocationsQuery(locs *[]Location, userID uuid.UUID, requiredAcces
 	return ObjectWhere(d.NewSelect().
 		Model(locs).
 		Where("location.sa_deleted_at IS NULL").
-		ExcludeColumn("sa_deleted_at"), userID, string(OBJECT_TYPE_LOCATION), requiredAccess, after, limit)
+		ExcludeColumn("sa_deleted_at"), userID, string(OBJECT_TYPE_LOCATION), requiredAccess, nil, after, limit)
 }
 
 func (d *DB) GetChildLocations(ctx context.Context, startID uuid.UUID) ([]uuid.UUID, error) {

@@ -28,6 +28,7 @@ func (d *DB) GetAccess(ctx context.Context, userID, objectID uuid.UUID, objectTy
 	if len(claims) == 0 {
 		return nil, ErrNoAccess
 	}
+	d.Usage.Add(userID, objectType, objectID)
 	return &claims[0], nil
 }
 
@@ -143,22 +144,48 @@ func (d *DB) GetObjectClaims(ctx context.Context, userID, objectID uuid.UUID, ob
 	return claims, err
 }
 
-func (d *DB) GetOwnerGraph(ctx context.Context, userID uuid.UUID, startID *uuid.UUID, depth int, requiredAccess ClaimAccess) ([]GraphNode, error) {
+type GraphWindow struct {
+	Width  int
+	Sort   string
+	NextID *uuid.UUID
+}
+
+const (
+	GRAPH_SORT_NAME  = "name"
+	GRAPH_SORT_USAGE = "usage"
+)
+
+func (w GraphWindow) sort() string {
+	if w.Sort == "" {
+		return GRAPH_SORT_NAME
+	}
+	return w.Sort
+}
+
+func (d *DB) GetOwnerGraph(ctx context.Context, userID uuid.UUID, startID *uuid.UUID, depth int, requiredAccess ClaimAccess, window GraphWindow) ([]GraphNode, error) {
 	nodes := make([]GraphNode, 0)
-	err := d.NewSelect().
-		TableExpr("claimius.get_owner_graph(p_user_id := ?, p_start_id := ?, p_depth := ?, p_required_access := ?) AS graph", userID, startID, depth, requiredAccess).
-		Column("graph.*").
-		Scan(ctx, &nodes)
+	err := d.GetOwnerGraphQuery(userID, startID, depth, requiredAccess, window).Scan(ctx, &nodes)
 	return nodes, err
 }
 
-func (d *DB) GetClaimGraph(ctx context.Context, userID uuid.UUID, startID *uuid.UUID, depth int, requiredAccess ClaimAccess) ([]GraphNode, error) {
+func (d *DB) GetOwnerGraphQuery(userID uuid.UUID, startID *uuid.UUID, depth int, requiredAccess ClaimAccess, window GraphWindow) *bun.SelectQuery {
+	return d.NewSelect().
+		TableExpr("claimius.get_owner_graph(p_user_id := ?, p_start_id := ?, p_depth := ?, p_required_access := ?, p_width := ?, p_sort := ?, p_next_id := ?) AS graph",
+			userID, startID, depth, requiredAccess, window.Width, window.sort(), window.NextID).
+		Column("graph.*")
+}
+
+func (d *DB) GetClaimGraph(ctx context.Context, userID uuid.UUID, startID *uuid.UUID, depth int, requiredAccess ClaimAccess, window GraphWindow) ([]GraphNode, error) {
 	nodes := make([]GraphNode, 0)
-	err := d.NewSelect().
-		TableExpr("claimius.get_claim_graph(p_user_id := ?, p_start_id := ?, p_depth := ?, p_required_access := ?) AS graph", userID, startID, depth, requiredAccess).
-		Column("graph.*").
-		Scan(ctx, &nodes)
+	err := d.GetClaimGraphQuery(userID, startID, depth, requiredAccess, window).Scan(ctx, &nodes)
 	return nodes, err
+}
+
+func (d *DB) GetClaimGraphQuery(userID uuid.UUID, startID *uuid.UUID, depth int, requiredAccess ClaimAccess, window GraphWindow) *bun.SelectQuery {
+	return d.NewSelect().
+		TableExpr("claimius.get_claim_graph(p_user_id := ?, p_start_id := ?, p_depth := ?, p_required_access := ?, p_width := ?, p_sort := ?, p_next_id := ?) AS graph",
+			userID, startID, depth, requiredAccess, window.Width, window.sort(), window.NextID).
+		Column("graph.*")
 }
 
 func (d *DB) insertClaim(ctx context.Context, ac *AccessClaim, claim *Claim) (*Claim, error) {

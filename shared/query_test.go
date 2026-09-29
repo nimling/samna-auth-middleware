@@ -89,7 +89,7 @@ func TestGetLocationsQuery_UnpagedPassesNull(t *testing.T) {
 func TestObjectWhere_QuotesItsArguments(t *testing.T) {
 	db := offlineDB()
 	orgs := make([]sdb.Organization, 0)
-	got := sdb.ObjectWhere(db.NewSelect().Model(&orgs), uuid.Nil, "claimius.organization'); SELECT 1; --", sdb.ACCESS_READ, nil, 1).String()
+	got := sdb.ObjectWhere(db.NewSelect().Model(&orgs), uuid.Nil, "claimius.organization'); SELECT 1; --", sdb.ACCESS_READ, nil, nil, 1).String()
 	if !strings.Contains(got, `'claimius.organization''); SELECT 1; --'`) {
 		t.Fatalf("object type not bound as a literal: %s", got)
 	}
@@ -116,5 +116,40 @@ func TestQueryPage(t *testing.T) {
 		if _, _, err := parse(bad); err == nil {
 			t.Fatalf("%s: expected an error", bad)
 		}
+	}
+}
+
+func TestObjectWhere_CarriesTheProbeForOneObject(t *testing.T) {
+	db := offlineDB()
+	userID := uuid.MustParse("a0000000-0000-4000-8000-00000000000a")
+	orgID := uuid.MustParse("10000000-0000-4000-8000-000000000011")
+	orgs := make([]sdb.Organization, 0)
+	got := sdb.ObjectWhere(db.NewSelect().Model(&orgs), userID, "claimius.organization", sdb.ACCESS_WRITE, &orgID, nil, 0).String()
+	for _, want := range []string{
+		`"organization".id = '10000000-0000-4000-8000-000000000011'`,
+		`EXISTS (SELECT 1 FROM claimius.get_access('a0000000-0000-4000-8000-00000000000a', '10000000-0000-4000-8000-000000000011', 'claimius.organization', 2))`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("one object read must carry its check in the statement:\nwant %s\ngot  %s", want, got)
+		}
+	}
+	if strings.Contains(got, "get_objects") {
+		t.Fatalf("one object read must not list the reader's range: %s", got)
+	}
+}
+
+func TestGraphQueries_BindTheWindow(t *testing.T) {
+	db := offlineDB()
+	userID := uuid.MustParse("a0000000-0000-4000-8000-00000000000a")
+	next := uuid.MustParse("10000000-0000-4000-8000-000000000012")
+	owner := db.GetOwnerGraphQuery(userID, nil, 2, sdb.ACCESS_READ, sdb.GraphWindow{Width: 25, Sort: sdb.GRAPH_SORT_USAGE, NextID: &next}).String()
+	want := `claimius.get_owner_graph(p_user_id := 'a0000000-0000-4000-8000-00000000000a', p_start_id := NULL, p_depth := 2, p_required_access := 4, p_width := 25, p_sort := 'usage', p_next_id := '10000000-0000-4000-8000-000000000012')`
+	if !strings.Contains(owner, want) {
+		t.Fatalf("owner graph window:\nwant %s\ngot  %s", want, owner)
+	}
+	claim := db.GetClaimGraphQuery(userID, nil, 0, sdb.ACCESS_NONE, sdb.GraphWindow{}).String()
+	want = `claimius.get_claim_graph(p_user_id := 'a0000000-0000-4000-8000-00000000000a', p_start_id := NULL, p_depth := 0, p_required_access := 0, p_width := 0, p_sort := 'name', p_next_id := NULL)`
+	if !strings.Contains(claim, want) {
+		t.Fatalf("an empty window is every child in name order:\nwant %s\ngot  %s", want, claim)
 	}
 }

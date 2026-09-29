@@ -270,13 +270,16 @@ CREATE TRIGGER tg_self_root BEFORE INSERT ON claimius.location
     FOR EACH ROW EXECUTE FUNCTION claimius._set_self_root_on_insert();
 
 -- ----------------------------------------------------------------------------
--- Claim graph cache invalidation. Drops claim_graph_cache rows whenever a
--- write touches data that feeds the cached graph.
+-- Claim graph cache invalidation. Drops a user's claim_graph_cache row when
+-- a write touches that user's own rows that feed the cached graph: a pair
+-- whose access changes, not its usage, a user_users row, the samna_user row,
+-- or the object_info row of an object the user holds. A claim or binding
+-- change is caught when the graph is read, against sa_updated_at.
 -- ----------------------------------------------------------------------------
 
 DROP TRIGGER IF EXISTS tg_invalidate_claim_graph_cache ON claimius.user_object;
 CREATE TRIGGER tg_invalidate_claim_graph_cache
-    AFTER INSERT OR UPDATE OR DELETE ON claimius.user_object
+    AFTER INSERT OR DELETE OR UPDATE OF sa_access, grants, scope, direct_grant ON claimius.user_object
     FOR EACH ROW EXECUTE FUNCTION claimius._invalidate_claim_graph_cache();
 
 DROP TRIGGER IF EXISTS tg_invalidate_claim_graph_cache ON claimius.object_info;
@@ -295,14 +298,7 @@ CREATE TRIGGER tg_invalidate_claim_graph_cache
     FOR EACH ROW EXECUTE FUNCTION claimius._invalidate_claim_graph_cache();
 
 DROP TRIGGER IF EXISTS tg_invalidate_claim_graph_cache ON claimius.claim;
-CREATE TRIGGER tg_invalidate_claim_graph_cache
-    AFTER INSERT OR UPDATE OR DELETE ON claimius.claim
-    FOR EACH ROW EXECUTE FUNCTION claimius._invalidate_claim_graph_cache();
-
 DROP TRIGGER IF EXISTS tg_invalidate_claim_graph_cache ON claimius.claim_object;
-CREATE TRIGGER tg_invalidate_claim_graph_cache
-    AFTER INSERT OR UPDATE OR DELETE ON claimius.claim_object
-    FOR EACH ROW EXECUTE FUNCTION claimius._invalidate_claim_graph_cache();
 
 -- ----------------------------------------------------------------------------
 -- Notification

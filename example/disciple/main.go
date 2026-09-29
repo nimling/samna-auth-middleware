@@ -83,6 +83,10 @@ func uuidQuery(ctx echo.Context, key string) *uuid.UUID {
 	return nil
 }
 
+func graphWindow(ctx echo.Context) shared.GraphWindow {
+	return shared.GraphWindow{Width: intQuery(ctx, "width", 0), Sort: ctx.QueryParam("sort"), NextID: uuidQuery(ctx, "next_id")}
+}
+
 func GetAccess(ctx echo.Context) error {
 	objectID, err := uuid.Parse(ctx.Param("id"))
 	if err != nil {
@@ -139,7 +143,7 @@ func GetRootAccess(ctx echo.Context) error {
 
 func GetOwnerGraph(ctx echo.Context) error {
 	nodes, err := sdb.Instance().GetOwnerGraph(ctx.Request().Context(), actor(ctx), uuidQuery(ctx, "start_id"),
-		intQuery(ctx, "depth", 0), shared.ClaimAccess(intQuery(ctx, "access", int(shared.ACCESS_READ))))
+		intQuery(ctx, "depth", 0), shared.ClaimAccess(intQuery(ctx, "access", int(shared.ACCESS_READ))), graphWindow(ctx))
 	if err != nil {
 		return accessError(ctx, err)
 	}
@@ -148,7 +152,7 @@ func GetOwnerGraph(ctx echo.Context) error {
 
 func GetClaimGraph(ctx echo.Context) error {
 	nodes, err := sdb.Instance().GetClaimGraph(ctx.Request().Context(), actor(ctx), uuidQuery(ctx, "start_id"),
-		intQuery(ctx, "depth", 0), shared.ClaimAccess(intQuery(ctx, "access", int(shared.ACCESS_READ))))
+		intQuery(ctx, "depth", 0), shared.ClaimAccess(intQuery(ctx, "access", int(shared.ACCESS_READ))), graphWindow(ctx))
 	if err != nil {
 		return accessError(ctx, err)
 	}

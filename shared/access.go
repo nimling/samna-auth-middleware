@@ -56,6 +56,7 @@ func (d *DB) MutationAccess(ctx context.Context, userID, objectID uuid.UUID, obj
 	if len(claims) == 0 {
 		return nil, ErrNoAccess
 	}
+	d.Usage.Add(userID, objectType, objectID)
 	return &claims[0], nil
 }
 
@@ -155,6 +156,7 @@ func (d *DB) MutationAccessMany(ctx context.Context, requests []AccessRequest) (
 		}
 		ac := rows[i].AccessClaim
 		set[idx].Claim = &ac
+		d.Usage.Add(requests[idx].UserID, requests[idx].ObjectType, requests[idx].ObjectID)
 	}
 	return set, nil
 }
@@ -244,6 +246,7 @@ func (d *DB) UserAccess(ctx context.Context, actorID uuid.UUID, target string, r
 		}
 		return nil, ErrNoAccess
 	}
+	d.Usage.Add(actorID, OBJECT_TYPE_USER, users[0].TargetUserID)
 	return &users[0], nil
 }
 
@@ -278,4 +281,10 @@ func (d *DB) RootAccess(ctx context.Context, userID uuid.UUID, requiredAccess Cl
 		return nil, ErrNoAccess
 	}
 	return &claims[0], nil
+}
+
+func (d *DB) PostAccessDiffDrain(ctx context.Context, limitPairs int) (int, error) {
+	var settled int
+	err := d.NewRaw("SELECT claimius.drain_access_diff(?)", limitPairs).Scan(ctx, &settled)
+	return settled, err
 }

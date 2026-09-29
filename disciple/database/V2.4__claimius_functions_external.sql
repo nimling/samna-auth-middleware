@@ -1073,6 +1073,89 @@ DROP FUNCTION IF EXISTS claimius.get_owner_graph(UUID, UUID, INTEGER);
 DROP FUNCTION IF EXISTS claimius.get_claim_graph(UUID, UUID, INTEGER);
 
 -- ----------------------------------------------------------------------------
+-- _window_graph
+-- The window of a graph: the nodes of p_rows kept when every parent shows at
+-- most p_width of its children of each type, 0 meaning all of them. A node
+-- whose parent is not in the graph is a top node, and the top nodes are the
+-- children of no parent. Children come in name order, label then id, or
+-- with p_sort 'usage' by the reader's decayed usage of the pair, heaviest
+-- first, then name. A
+-- node is kept when it is inside its parent's window and its parent is kept.
+-- With p_next_id the window continues after that node: its later siblings of
+-- its type, p_width of them, with their windowed subtrees. The node itself
+-- is not returned, and an id not in the graph returns nothing.
+-- ----------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION claimius._window_graph(
+    p_rows      JSONB,
+    p_user_id   UUID,
+    p_width     INTEGER,
+    p_sort      TEXT,
+    p_next_id   UUID
+) RETURNS TABLE(object_id UUID, object_type TEXT, label TEXT, parent_id UUID, data JSONB) AS $$
+    WITH RECURSIVE node AS (
+        SELECT e.ord,
+               (e.value ->> 'object_id')::UUID AS object_id,
+               e.value ->> 'object_type' AS object_type,
+               e.value ->> 'label' AS label,
+               NULLIF(e.value ->> 'parent_id', '')::UUID AS parent_id,
+               e.value -> 'data' AS data
+        FROM jsonb_array_elements(coalesce(p_rows, '[]'::JSONB)) WITH ORDINALITY AS e(value, ord)
+    ),
+    ordered AS (
+        SELECT n.*,
+               p.parent_key,
+               row_number() OVER (
+                   PARTITION BY p.parent_key, n.object_type
+                   ORDER BY CASE WHEN p_sort = 'usage' THEN claimius._decayed_usage(uo.used_count, uo.last_used_at) ELSE 0 END DESC,
+                            n.label, n.object_id, n.ord
+               ) AS pos
+        FROM node n
+            CROSS JOIN LATERAL (
+                SELECT CASE WHEN EXISTS (SELECT 1 FROM node x WHERE x.object_id = n.parent_id) THEN n.parent_id END AS parent_key
+            ) p
+            LEFT JOIN claimius.user_object uo
+                ON p_sort = 'usage'
+               AND uo.user_id = p_user_id
+               AND uo.object_type = n.object_type
+               AND uo.object_id = n.object_id
+    ),
+    anchor AS (
+        SELECT o.parent_key, o.object_type, o.pos
+        FROM ordered o
+        WHERE o.object_id = p_next_id
+        ORDER BY o.ord
+        LIMIT 1
+    ),
+    kept AS (
+        SELECT o.ord, o.object_id
+        FROM ordered o
+        WHERE CASE
+                  WHEN p_next_id IS NULL THEN o.parent_key IS NULL AND (p_width = 0 OR o.pos <= p_width)
+                  ELSE EXISTS (
+                      SELECT 1 FROM anchor a
+                      WHERE a.parent_key IS NOT DISTINCT FROM o.parent_key
+                        AND a.object_type = o.object_type
+                        AND o.pos > a.pos
+                        AND (p_width = 0 OR o.pos <= a.pos + p_width))
+              END
+
+        UNION
+
+        SELECT c.ord, c.object_id
+        FROM kept k
+            JOIN ordered c ON c.parent_key = k.object_id
+        WHERE p_width = 0 OR c.pos <= p_width
+    )
+    SELECT o.object_id, o.object_type, o.label, o.parent_id, o.data
+    FROM ordered o
+    WHERE o.ord IN (SELECT k.ord FROM kept k)
+    ORDER BY o.ord
+$$ LANGUAGE sql STABLE;
+
+COMMENT ON FUNCTION claimius._window_graph(JSONB, UUID, INTEGER, TEXT, UUID) IS 'The nodes of a graph kept when each parent shows at most p_width children of each type, 0 meaning all, in name order or by the reader''s decayed usage with p_sort ''usage'', continuing after p_next_id when given.';
+
+
+-- ----------------------------------------------------------------------------
 -- get_owner_graph
 -- Returns the ownership graph the user can see as a flat node list. Covers
 -- organizations, locations, AND every registered application table that has
@@ -1091,25 +1174,41 @@ DROP FUNCTION IF EXISTS claimius.get_claim_graph(UUID, UUID, INTEGER);
 --                 when start is NULL) is depth 0; its direct children are
 --                 depth 1; and so on.
 --   p_required_access - access bit filter passed through to get_objects.
+--   p_width, p_sort, p_next_id - the window of _window_graph: at most p_width
+--                 children of each type per parent, 0 meaning all, in name or
+--                 usage order, continuing after p_next_id.
 -- ----------------------------------------------------------------------------
 
-DROP FUNCTION IF EXISTS claimius.get_owner_graph(UUID, UUID, INTEGER, INTEGER, INTEGER, TEXT, UUID);
+DROP FUNCTION IF EXISTS claimius.get_owner_graph(UUID, UUID, INTEGER, INTEGER);
 CREATE OR REPLACE FUNCTION claimius.get_owner_graph(
     p_user_id          UUID,
     p_start_id         UUID DEFAULT NULL,
     p_depth            INTEGER DEFAULT 0,
-    p_required_access  INTEGER DEFAULT 0
+    p_required_access  INTEGER DEFAULT 0,
+    p_width            INTEGER DEFAULT 0,
+    p_sort             TEXT DEFAULT 'name',
+    p_next_id          UUID DEFAULT NULL
 ) RETURNS TABLE(object_id UUID, object_type TEXT, label TEXT, parent_id UUID, data JSONB) AS $$
 DECLARE
     v_root_ids      UUID[];
     v_table         RECORD;
     v_sql           TEXT;
+    v_rows          JSONB;
 BEGIN
+    IF p_sort IS NULL OR p_sort NOT IN ('name', 'usage') OR p_width IS NULL OR p_width < 0 THEN
+        RAISE EXCEPTION 'graph window: p_sort is name or usage and p_width at least 0' USING ERRCODE = '22023';
+    END IF;
+
     PERFORM claimius.reconcile_if_pending(p_user_id);
 
     IF NOT claimius.check_user_active(p_user_id) THEN
         RETURN;
     END IF;
+
+    CREATE TEMP TABLE IF NOT EXISTS _owner_graph_rows (
+        object_id UUID, object_type TEXT, label TEXT, parent_id UUID, data JSONB
+    ) ON COMMIT DROP;
+    DELETE FROM _owner_graph_rows;
 
     -- Resolve the set of root organizations to walk from.
     -- When p_start_id is null we use every root org the user can see.
@@ -1141,7 +1240,7 @@ BEGIN
 
     -- Organizations: walk each root's ownership tree, depth limited.
     -- Recursive CTE bound to the access filter and the depth limit.
-    RETURN QUERY
+    INSERT INTO _owner_graph_rows (object_id, object_type, label, parent_id, data)
         WITH RECURSIVE org_walk AS (
             SELECT o.id, o.name::TEXT AS name, o.description, o.type::TEXT AS type, o.sa_level,
                    o.sa_owner_id, 0 AS lvl
@@ -1209,7 +1308,7 @@ BEGIN
 
     -- Locations: handled explicitly so we keep longitude/latitude in data.
     -- Filtered to locations whose owning org sits in the walked org set.
-    RETURN QUERY
+    INSERT INTO _owner_graph_rows (object_id, object_type, label, parent_id, data)
         SELECT l.id ,
                'claimius.location'::TEXT ,
                l.name::TEXT ,
@@ -1303,12 +1402,20 @@ BEGIN
                             CASE WHEN v_table.has_sa_location_id THEN ' OR EXISTS (SELECT 1 FROM claimius.location loc WHERE loc.id = t.sa_location_id AND loc.sa_owner_id IN (SELECT org_id FROM _owner_graph_orgs))' ELSE '' END
                      );
 
-            RETURN QUERY EXECUTE v_sql USING p_user_id, p_required_access;
+            EXECUTE 'INSERT INTO _owner_graph_rows (object_id, object_type, label, parent_id, data) ' || v_sql USING p_user_id, p_required_access;
         END LOOP;
+
+    IF p_width = 0 AND p_next_id IS NULL THEN
+        RETURN QUERY SELECT r.object_id, r.object_type, r.label, r.parent_id, r.data FROM _owner_graph_rows r;
+        RETURN;
+    END IF;
+
+    SELECT jsonb_agg(to_jsonb(r)) INTO v_rows FROM _owner_graph_rows r;
+    RETURN QUERY SELECT * FROM claimius._window_graph(v_rows, p_user_id, p_width, p_sort, p_next_id);
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = claimius, pg_temp;
 
-COMMENT ON FUNCTION claimius.get_owner_graph(UUID, UUID, INTEGER, INTEGER) IS 'Ownership graph (orgs, locations, registered tables with sa_owner_id or sa_location_id) for the user. Optional start org and depth limit.';
+COMMENT ON FUNCTION claimius.get_owner_graph(UUID, UUID, INTEGER, INTEGER, INTEGER, TEXT, UUID) IS 'Ownership graph (orgs, locations, registered tables with sa_owner_id or sa_location_id) for the user. Optional start org and depth limit, and a window of p_width children of each type per parent in name or usage order continuing after p_next_id.';
 
 -- ----------------------------------------------------------------------------
 -- get_claim_graph
@@ -1338,14 +1445,20 @@ COMMENT ON FUNCTION claimius.get_owner_graph(UUID, UUID, INTEGER, INTEGER) IS 'O
 --                 N = directly bound plus N-1 cascade hops.
 --   p_required_access - bit filter; claims and reachable objects whose
 --                       effective mask does not cover these bits are excluded.
+--   p_width, p_sort, p_next_id - the window of _window_graph: at most p_width
+--                 children of each type per parent, 0 meaning all, in name or
+--                 usage order, continuing after p_next_id.
 -- ----------------------------------------------------------------------------
 
-DROP FUNCTION IF EXISTS claimius.get_claim_graph(UUID, UUID, INTEGER, INTEGER, INTEGER, TEXT, UUID);
+DROP FUNCTION IF EXISTS claimius.get_claim_graph(UUID, UUID, INTEGER, INTEGER);
 CREATE OR REPLACE FUNCTION claimius.get_claim_graph(
     p_user_id          UUID,
     p_start_id         UUID DEFAULT NULL,
     p_depth            INTEGER DEFAULT 0,
-    p_required_access  INTEGER DEFAULT 0
+    p_required_access  INTEGER DEFAULT 0,
+    p_width            INTEGER DEFAULT 0,
+    p_sort             TEXT DEFAULT 'name',
+    p_next_id          UUID DEFAULT NULL
 ) RETURNS TABLE(object_id UUID, object_type TEXT, label TEXT, parent_id UUID, data JSONB) AS $$
 DECLARE
     v_claim_ids     UUID[];
@@ -1353,6 +1466,10 @@ DECLARE
     v_cacheable     BOOLEAN;
     v_graph         JSONB;
 BEGIN
+    IF p_sort IS NULL OR p_sort NOT IN ('name', 'usage') OR p_width IS NULL OR p_width < 0 THEN
+        RAISE EXCEPTION 'graph window: p_sort is name or usage and p_width at least 0' USING ERRCODE = '22023';
+    END IF;
+
     PERFORM claimius.reconcile_if_pending(p_user_id);
 
     IF NOT claimius.check_user_active(p_user_id) THEN
@@ -1364,299 +1481,306 @@ BEGIN
     IF v_cacheable THEN
         SELECT c.graph INTO v_graph
         FROM claimius.claim_graph_cache c
-        WHERE TRUE AND c.user_id = p_user_id;
+        WHERE c.user_id = p_user_id
+          AND NOT EXISTS (
+              SELECT 1
+              FROM claimius.user_claim uc
+              WHERE uc.user_id = p_user_id
+                AND (uc.sa_updated_at >= c.sa_updated_at
+                     OR EXISTS (
+                         SELECT 1 FROM claimius.claim cl
+                         WHERE cl.id = uc.claim_id AND cl.sa_updated_at >= c.sa_updated_at)
+                     OR EXISTS (
+                         SELECT 1 FROM claimius.claim_object co
+                         WHERE co.claim_id = uc.claim_id AND co.sa_updated_at >= c.sa_updated_at)));
+    END IF;
 
-        IF v_graph IS NOT NULL THEN
-            RETURN QUERY
-                SELECT (e->>'object_id')::UUID,
-                       e->>'object_type',
-                       e->>'label',
-                       NULLIF(e->>'parent_id', '')::UUID,
-                       e->'data'
-                FROM jsonb_array_elements(v_graph) AS e;
+    IF v_graph IS NULL THEN
+        IF p_start_id IS NULL THEN
+            SELECT array_agg(uc.claim_id) INTO v_claim_ids
+            FROM claimius.user_claim uc
+                     JOIN claimius.claim c ON c.id = uc.claim_id
+            WHERE uc.user_id = p_user_id
+              AND TRUE
+              AND uc.sa_deleted_at IS NULL
+              AND c.sa_deleted_at IS NULL
+              AND (p_required_access = 0 OR (c.sa_access & p_required_access) = p_required_access);
+        ELSE
+            SELECT array_agg(c.id) INTO v_claim_ids
+            FROM claimius.claim c
+            WHERE c.id = p_start_id
+              AND TRUE
+              AND c.sa_deleted_at IS NULL
+              AND (p_required_access = 0 OR (c.sa_access & p_required_access) = p_required_access);
+        END IF;
+
+        IF v_claim_ids IS NULL OR array_length(v_claim_ids, 1) IS NULL THEN
             RETURN;
+        END IF;
+
+        SELECT u.id INTO v_user_row_id
+        FROM claimius.samna_user u
+        WHERE u.user_id = p_user_id AND TRUE
+          AND u.sa_deleted_at IS NULL
+        LIMIT 1;
+
+        WITH grant_anchors AS (
+            SELECT uo.object_id          AS uo_object_id,
+                   uo.object_type        AS uo_object_type,
+                   uo.sa_access          AS uo_access,
+                   uo.scope              AS uo_scope,
+                   oi.sa_name            AS uo_name,
+                   oi.sa_description     AS uo_description,
+                   oi.sa_owner_id        AS uo_owner_id,
+                   oi.sa_location_id     AS uo_location_id,
+                   (e->>'claim_id')::UUID  AS claim_id,
+                   e->>'tree_type'         AS tree_type,
+                   CASE WHEN e->>'tree_type' = 'direct'
+                        THEN uo.object_type
+                        ELSE e -> 'cascaded_from' ->> 'type' END  AS anchor_type,
+                   CASE WHEN e->>'tree_type' = 'direct'
+                        THEN uo.object_id
+                        ELSE (e -> 'cascaded_from' ->> 'id')::UUID END  AS anchor_id
+            FROM claimius.user_object uo
+                     LEFT JOIN claimius.object_info oi
+                          ON oi.object_type = uo.object_type
+                              AND oi.object_id = uo.object_id
+                     CROSS JOIN LATERAL jsonb_array_elements(uo.grants) e
+            WHERE p_start_id IS NULL
+              AND uo.user_id = p_user_id
+              AND TRUE
+              AND (p_required_access = 0 OR (uo.sa_access & p_required_access) = p_required_access)
+              AND (e->>'claim_id')::UUID = ANY(v_claim_ids)
+              AND (p_depth = 0 OR e->>'tree_type' = 'direct')
+        ),
+        reach AS (
+            SELECT DISTINCT ON (co.id, ii.descendant_type, ii.descendant_id)
+                   co.id                AS co_id,
+                   ii.descendant_type   AS object_type,
+                   ii.descendant_id     AS object_id,
+                   ii.tree_type::TEXT   AS tree_type,
+                   ii.depth             AS depth,
+                   claimius._effective_access(c.sa_access, co.sa_access) AS access,
+                   co.scope             AS scope
+            FROM claimius.claim_object co
+                     JOIN claimius.claim c ON c.id = co.claim_id AND c.sa_deleted_at IS NULL
+                     JOIN claimius.inheritance_info ii
+                          ON ii.ancestor_type = co.object_type
+                              AND ii.ancestor_id = co.object_id
+                              AND (ii.depth = 0 OR (c.inherits AND co.inherits AND (p_depth = 0 OR ii.depth <= p_depth)))
+            WHERE p_start_id IS NOT NULL
+              AND TRUE
+              AND co.sa_deleted_at IS NULL
+              AND co.object_id IS NOT NULL
+              AND co.object_type <> 'claimius.claim'
+              AND co.claim_id = ANY(v_claim_ids)
+            ORDER BY co.id, ii.descendant_type, ii.descendant_id, ii.depth
+        ),
+        self_node AS (
+            SELECT u.id                                                                     AS object_id,
+                   'claimius.samna_user'::TEXT                                              AS object_type,
+                   coalesce(u.first_name || ' ' || u.last_name, u.email, u.user_id::TEXT)::TEXT  AS label,
+                   NULL::UUID                                                               AS parent_id,
+                   jsonb_build_object(
+                       'access', NULL::INTEGER,
+                       'scope', NULL::JSONB,
+                       'level', NULL::INTEGER,
+                       'user_id', u.user_id,
+                       'email', u.email,
+                       'external_id', u.external_id,
+                       'status', u.status
+                   )                                                                        AS data
+            FROM claimius.samna_user u
+            WHERE u.id = v_user_row_id
+              AND p_start_id IS NULL
+        ),
+        other_users_node AS (
+            SELECT u.id                                                                     AS object_id,
+                   'claimius.samna_user'::TEXT                                              AS object_type,
+                   coalesce(u.first_name || ' ' || u.last_name, u.email, u.user_id::TEXT)::TEXT  AS label,
+                   v_user_row_id                                                            AS parent_id,
+                   jsonb_build_object(
+                       'access', uo.sa_access, 'scope', uo.scope,
+                       'level', NULL::INTEGER,
+                       'user_id', u.user_id,
+                       'email', u.email,
+                       'external_id', u.external_id,
+                       'status', u.status
+                   )                                                                        AS data
+            FROM claimius.samna_user u
+                     JOIN claimius.user_users uu
+                          ON uu.viewer_id = p_user_id
+                              AND TRUE
+                              AND uu.target_user_id = u.user_id
+                     LEFT JOIN claimius.user_object uo
+                          ON uo.object_id = u.id
+                              AND uo.object_type = 'claimius.samna_user'
+                              AND uo.user_id = p_user_id
+                              AND TRUE
+            WHERE TRUE
+              AND u.sa_deleted_at IS NULL
+              AND u.id <> v_user_row_id
+              AND p_start_id IS NULL
+        ),
+        user_claim_node AS (
+            SELECT uc.id                AS object_id,
+                   'claimius.user_claim'::TEXT  AS object_type,
+                   c.name::TEXT         AS label,
+                   v_user_row_id        AS parent_id,
+                   jsonb_build_object(
+                       'access', NULL::INTEGER,
+                       'scope', NULL::JSONB,
+                       'level', NULL::INTEGER,
+                       'claim_id', uc.claim_id,
+                       'starts_at', uc.starts_at,
+                       'ends_at', uc.ends_at,
+                       'reason', uc.reason
+                   )                    AS data
+            FROM claimius.user_claim uc
+                     JOIN claimius.claim c ON c.id = uc.claim_id
+            WHERE uc.user_id = p_user_id
+              AND TRUE
+              AND uc.sa_deleted_at IS NULL
+              AND uc.claim_id = ANY(v_claim_ids)
+        ),
+        claim_node AS (
+            SELECT c.id                 AS object_id,
+                   'claimius.claim'::TEXT  AS object_type,
+                   c.name::TEXT         AS label,
+                   NULL::UUID           AS parent_id,
+                   jsonb_build_object(
+                       'access', c.sa_access,
+                       'scope', NULL::JSONB,
+                       'level', NULL::INTEGER,
+                       'description', c.description,
+                       'inherits', c.inherits,
+                       'type', c.type
+                   )                    AS data
+            FROM claimius.claim c
+            WHERE TRUE
+              AND c.sa_deleted_at IS NULL
+              AND c.id = ANY(v_claim_ids)
+        ),
+        claim_object_node AS (
+            SELECT co.id                AS object_id,
+                   'claimius.claim_object'::TEXT  AS object_type,
+                   coalesce(oi.sa_name, co.object_id::TEXT, '')::TEXT  AS label,
+                   co.claim_id          AS parent_id,
+                   jsonb_build_object(
+                       'access', co.sa_access,
+                       'scope', co.scope,
+                       'level', NULL::INTEGER,
+                       'target_object_id', co.object_id,
+                       'target_object_type', co.object_type,
+                       'inherits', co.inherits
+                   )                    AS data
+            FROM claimius.claim_object co
+                     LEFT JOIN claimius.user_object uo
+                          ON uo.object_id = co.object_id
+                              AND uo.object_type = co.object_type
+                              AND uo.user_id = p_user_id
+                     LEFT JOIN claimius.object_info oi
+                          ON oi.object_type = uo.object_type
+                              AND oi.object_id = uo.object_id
+                              AND TRUE
+            WHERE TRUE
+              AND co.sa_deleted_at IS NULL
+              AND co.claim_id = ANY(v_claim_ids)
+        ),
+        object_node AS (
+            SELECT ga.uo_object_id      AS object_id,
+                   ga.uo_object_type    AS object_type,
+                   coalesce(ga.uo_name, ga.uo_object_id::TEXT)::TEXT  AS label,
+                   co.id                AS parent_id,
+                   jsonb_build_object(
+                       'access', ga.uo_access,
+                       'scope', ga.uo_scope,
+                       'level', NULL::INTEGER,
+                       'description', ga.uo_description,
+                       'owner_id', ga.uo_owner_id,
+                       'location_id', ga.uo_location_id,
+                       'tree_type', ga.tree_type
+                   )                    AS data
+            FROM grant_anchors ga
+                     JOIN claimius.claim_object co
+                          ON TRUE
+                              AND co.claim_id = ga.claim_id
+                              AND co.object_type = ga.anchor_type
+                              AND co.object_id = ga.anchor_id
+                              AND co.sa_deleted_at IS NULL
+            UNION ALL
+            SELECT r.object_id            AS object_id,
+                   r.object_type          AS object_type,
+                   coalesce(oi.sa_name, r.object_id::TEXT)::TEXT  AS label,
+                   r.co_id                AS parent_id,
+                   jsonb_build_object(
+                       'access', r.access & 15,
+                       'deny', (r.access & 16) <> 0,
+                       'scope', r.scope,
+                       'level', r.depth,
+                       'tree_type', r.tree_type
+                   )                      AS data
+            FROM reach r
+                     LEFT JOIN claimius.user_object uo
+                          ON uo.object_id = r.object_id
+                              AND uo.object_type = r.object_type
+                              AND uo.user_id = p_user_id
+                     LEFT JOIN claimius.object_info oi
+                          ON oi.object_type = uo.object_type
+                              AND oi.object_id = uo.object_id
+                              AND TRUE
+        ),
+        all_nodes AS (
+            SELECT * FROM self_node
+            UNION ALL
+            SELECT * FROM other_users_node
+            UNION ALL
+            SELECT * FROM user_claim_node
+            UNION ALL
+            SELECT * FROM claim_node
+            UNION ALL
+            SELECT * FROM claim_object_node
+            UNION ALL
+            SELECT * FROM object_node
+        )
+        SELECT jsonb_agg(jsonb_build_object(
+                    'object_id', n.object_id,
+                    'object_type', n.object_type,
+                    'label', n.label,
+                    'parent_id', n.parent_id,
+                    'data', n.data
+               )) INTO v_graph
+        FROM all_nodes n;
+
+        IF v_graph IS NULL THEN
+            v_graph := '[]'::JSONB;
+        END IF;
+
+        IF v_cacheable THEN
+            INSERT INTO claimius.claim_graph_cache (user_id, graph, sa_updated_at)
+            VALUES (p_user_id, v_graph, now())
+            ON CONFLICT (user_id) DO UPDATE
+                SET graph = EXCLUDED.graph,
+                    sa_updated_at = EXCLUDED.sa_updated_at;
         END IF;
     END IF;
 
-    IF p_start_id IS NULL THEN
-        SELECT array_agg(uc.claim_id) INTO v_claim_ids
-        FROM claimius.user_claim uc
-                 JOIN claimius.claim c ON c.id = uc.claim_id
-        WHERE uc.user_id = p_user_id
-          AND TRUE
-          AND uc.sa_deleted_at IS NULL
-          AND c.sa_deleted_at IS NULL
-          AND (p_required_access = 0 OR (c.sa_access & p_required_access) = p_required_access);
-    ELSE
-        SELECT array_agg(c.id) INTO v_claim_ids
-        FROM claimius.claim c
-        WHERE c.id = p_start_id
-          AND TRUE
-          AND c.sa_deleted_at IS NULL
-          AND (p_required_access = 0 OR (c.sa_access & p_required_access) = p_required_access);
-    END IF;
-
-    IF v_claim_ids IS NULL OR array_length(v_claim_ids, 1) IS NULL THEN
+    IF p_width = 0 AND p_next_id IS NULL THEN
+        RETURN QUERY
+            SELECT (e->>'object_id')::UUID,
+                   e->>'object_type',
+                   e->>'label',
+                   NULLIF(e->>'parent_id', '')::UUID,
+                   e->'data'
+            FROM jsonb_array_elements(v_graph) AS e;
         RETURN;
     END IF;
 
-    SELECT u.id INTO v_user_row_id
-    FROM claimius.samna_user u
-    WHERE u.user_id = p_user_id AND TRUE
-      AND u.sa_deleted_at IS NULL
-    LIMIT 1;
-
-    WITH grant_anchors AS (
-        SELECT uo.object_id          AS uo_object_id,
-               uo.object_type        AS uo_object_type,
-               uo.sa_access          AS uo_access,
-               uo.scope              AS uo_scope,
-               oi.sa_name            AS uo_name,
-               oi.sa_description     AS uo_description,
-               oi.sa_owner_id        AS uo_owner_id,
-               oi.sa_location_id     AS uo_location_id,
-               (e->>'claim_id')::UUID  AS claim_id,
-               e->>'tree_type'         AS tree_type,
-               CASE WHEN e->>'tree_type' = 'direct'
-                    THEN uo.object_type
-                    ELSE e -> 'cascaded_from' ->> 'type' END  AS anchor_type,
-               CASE WHEN e->>'tree_type' = 'direct'
-                    THEN uo.object_id
-                    ELSE (e -> 'cascaded_from' ->> 'id')::UUID END  AS anchor_id
-        FROM claimius.user_object uo
-                 LEFT JOIN claimius.object_info oi
-                      ON oi.object_type = uo.object_type
-                          AND oi.object_id = uo.object_id
-                 CROSS JOIN LATERAL jsonb_array_elements(uo.grants) e
-        WHERE p_start_id IS NULL
-          AND uo.user_id = p_user_id
-          AND TRUE
-          AND (p_required_access = 0 OR (uo.sa_access & p_required_access) = p_required_access)
-          AND (e->>'claim_id')::UUID = ANY(v_claim_ids)
-          AND (p_depth = 0 OR e->>'tree_type' = 'direct')
-    ),
-    reach AS (
-        SELECT DISTINCT ON (co.id, ii.descendant_type, ii.descendant_id)
-               co.id                AS co_id,
-               ii.descendant_type   AS object_type,
-               ii.descendant_id     AS object_id,
-               ii.tree_type::TEXT   AS tree_type,
-               ii.depth             AS depth,
-               claimius._effective_access(c.sa_access, co.sa_access) AS access,
-               co.scope             AS scope
-        FROM claimius.claim_object co
-                 JOIN claimius.claim c ON c.id = co.claim_id AND c.sa_deleted_at IS NULL
-                 JOIN claimius.inheritance_info ii
-                      ON ii.ancestor_type = co.object_type
-                          AND ii.ancestor_id = co.object_id
-                          AND (ii.depth = 0 OR (c.inherits AND co.inherits AND (p_depth = 0 OR ii.depth <= p_depth)))
-        WHERE p_start_id IS NOT NULL
-          AND TRUE
-          AND co.sa_deleted_at IS NULL
-          AND co.object_id IS NOT NULL
-          AND co.object_type <> 'claimius.claim'
-          AND co.claim_id = ANY(v_claim_ids)
-        ORDER BY co.id, ii.descendant_type, ii.descendant_id, ii.depth
-    ),
-    self_node AS (
-        SELECT u.id                                                                     AS object_id,
-               'claimius.samna_user'::TEXT                                              AS object_type,
-               coalesce(u.first_name || ' ' || u.last_name, u.email, u.user_id::TEXT)::TEXT  AS label,
-               NULL::UUID                                                               AS parent_id,
-               jsonb_build_object(
-                   'access', NULL::INTEGER,
-                   'scope', NULL::JSONB,
-                   'level', NULL::INTEGER,
-                   'user_id', u.user_id,
-                   'email', u.email,
-                   'external_id', u.external_id,
-                   'status', u.status
-               )                                                                        AS data
-        FROM claimius.samna_user u
-        WHERE u.id = v_user_row_id
-          AND p_start_id IS NULL
-    ),
-    other_users_node AS (
-        SELECT u.id                                                                     AS object_id,
-               'claimius.samna_user'::TEXT                                              AS object_type,
-               coalesce(u.first_name || ' ' || u.last_name, u.email, u.user_id::TEXT)::TEXT  AS label,
-               v_user_row_id                                                            AS parent_id,
-               jsonb_build_object(
-                   'access', uo.sa_access, 'scope', uo.scope,
-                   'level', NULL::INTEGER,
-                   'user_id', u.user_id,
-                   'email', u.email,
-                   'external_id', u.external_id,
-                   'status', u.status
-               )                                                                        AS data
-        FROM claimius.samna_user u
-                 JOIN claimius.user_users uu
-                      ON uu.viewer_id = p_user_id
-                          AND TRUE
-                          AND uu.target_user_id = u.user_id
-                 LEFT JOIN claimius.user_object uo
-                      ON uo.object_id = u.id
-                          AND uo.object_type = 'claimius.samna_user'
-                          AND uo.user_id = p_user_id
-                          AND TRUE
-        WHERE TRUE
-          AND u.sa_deleted_at IS NULL
-          AND u.id <> v_user_row_id
-          AND p_start_id IS NULL
-    ),
-    user_claim_node AS (
-        SELECT uc.id                AS object_id,
-               'claimius.user_claim'::TEXT  AS object_type,
-               c.name::TEXT         AS label,
-               v_user_row_id        AS parent_id,
-               jsonb_build_object(
-                   'access', NULL::INTEGER,
-                   'scope', NULL::JSONB,
-                   'level', NULL::INTEGER,
-                   'claim_id', uc.claim_id,
-                   'starts_at', uc.starts_at,
-                   'ends_at', uc.ends_at,
-                   'reason', uc.reason
-               )                    AS data
-        FROM claimius.user_claim uc
-                 JOIN claimius.claim c ON c.id = uc.claim_id
-        WHERE uc.user_id = p_user_id
-          AND TRUE
-          AND uc.sa_deleted_at IS NULL
-          AND uc.claim_id = ANY(v_claim_ids)
-    ),
-    claim_node AS (
-        SELECT c.id                 AS object_id,
-               'claimius.claim'::TEXT  AS object_type,
-               c.name::TEXT         AS label,
-               NULL::UUID           AS parent_id,
-               jsonb_build_object(
-                   'access', c.sa_access,
-                   'scope', NULL::JSONB,
-                   'level', NULL::INTEGER,
-                   'description', c.description,
-                   'inherits', c.inherits,
-                   'type', c.type
-               )                    AS data
-        FROM claimius.claim c
-        WHERE TRUE
-          AND c.sa_deleted_at IS NULL
-          AND c.id = ANY(v_claim_ids)
-    ),
-    claim_object_node AS (
-        SELECT co.id                AS object_id,
-               'claimius.claim_object'::TEXT  AS object_type,
-               coalesce(oi.sa_name, co.object_id::TEXT, '')::TEXT  AS label,
-               co.claim_id          AS parent_id,
-               jsonb_build_object(
-                   'access', co.sa_access,
-                   'scope', co.scope,
-                   'level', NULL::INTEGER,
-                   'target_object_id', co.object_id,
-                   'target_object_type', co.object_type,
-                   'inherits', co.inherits
-               )                    AS data
-        FROM claimius.claim_object co
-                 LEFT JOIN claimius.user_object uo
-                      ON uo.object_id = co.object_id
-                          AND uo.object_type = co.object_type
-                          AND uo.user_id = p_user_id
-                 LEFT JOIN claimius.object_info oi
-                      ON oi.object_type = uo.object_type
-                          AND oi.object_id = uo.object_id
-                          AND TRUE
-        WHERE TRUE
-          AND co.sa_deleted_at IS NULL
-          AND co.claim_id = ANY(v_claim_ids)
-    ),
-    object_node AS (
-        SELECT ga.uo_object_id      AS object_id,
-               ga.uo_object_type    AS object_type,
-               coalesce(ga.uo_name, ga.uo_object_id::TEXT)::TEXT  AS label,
-               co.id                AS parent_id,
-               jsonb_build_object(
-                   'access', ga.uo_access,
-                   'scope', ga.uo_scope,
-                   'level', NULL::INTEGER,
-                   'description', ga.uo_description,
-                   'owner_id', ga.uo_owner_id,
-                   'location_id', ga.uo_location_id,
-                   'tree_type', ga.tree_type
-               )                    AS data
-        FROM grant_anchors ga
-                 JOIN claimius.claim_object co
-                      ON TRUE
-                          AND co.claim_id = ga.claim_id
-                          AND co.object_type = ga.anchor_type
-                          AND co.object_id = ga.anchor_id
-                          AND co.sa_deleted_at IS NULL
-        UNION ALL
-        SELECT r.object_id            AS object_id,
-               r.object_type          AS object_type,
-               coalesce(oi.sa_name, r.object_id::TEXT)::TEXT  AS label,
-               r.co_id                AS parent_id,
-               jsonb_build_object(
-                   'access', r.access & 15,
-                   'deny', (r.access & 16) <> 0,
-                   'scope', r.scope,
-                   'level', r.depth,
-                   'tree_type', r.tree_type
-               )                      AS data
-        FROM reach r
-                 LEFT JOIN claimius.user_object uo
-                      ON uo.object_id = r.object_id
-                          AND uo.object_type = r.object_type
-                          AND uo.user_id = p_user_id
-                 LEFT JOIN claimius.object_info oi
-                      ON oi.object_type = uo.object_type
-                          AND oi.object_id = uo.object_id
-                          AND TRUE
-    ),
-    all_nodes AS (
-        SELECT * FROM self_node
-        UNION ALL
-        SELECT * FROM other_users_node
-        UNION ALL
-        SELECT * FROM user_claim_node
-        UNION ALL
-        SELECT * FROM claim_node
-        UNION ALL
-        SELECT * FROM claim_object_node
-        UNION ALL
-        SELECT * FROM object_node
-    )
-    SELECT jsonb_agg(jsonb_build_object(
-                'object_id', n.object_id,
-                'object_type', n.object_type,
-                'label', n.label,
-                'parent_id', n.parent_id,
-                'data', n.data
-           )) INTO v_graph
-    FROM all_nodes n;
-
-    IF v_graph IS NULL THEN
-        v_graph := '[]'::JSONB;
-    END IF;
-
-    IF v_cacheable THEN
-        INSERT INTO claimius.claim_graph_cache (user_id, graph, sa_updated_at)
-        VALUES (p_user_id, v_graph, now())
-        ON CONFLICT (user_id) DO UPDATE
-            SET graph = EXCLUDED.graph,
-                sa_updated_at = EXCLUDED.sa_updated_at;
-    END IF;
-
-    RETURN QUERY
-        SELECT (e->>'object_id')::UUID,
-               e->>'object_type',
-               e->>'label',
-               NULLIF(e->>'parent_id', '')::UUID,
-               e->'data'
-        FROM jsonb_array_elements(v_graph) AS e;
+    RETURN QUERY SELECT * FROM claimius._window_graph(v_graph, p_user_id, p_width, p_sort, p_next_id);
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = claimius, pg_temp;
 
-COMMENT ON FUNCTION claimius.get_claim_graph(UUID, UUID, INTEGER, INTEGER) IS 'Access graph: user, other users seen, claims, user_claims, claim_object bindings, reachable objects. Optional start claim and depth limit. Default shape served from claimius.claim_graph_cache.';
+COMMENT ON FUNCTION claimius.get_claim_graph(UUID, UUID, INTEGER, INTEGER, INTEGER, TEXT, UUID) IS 'Access graph: user, other users seen, claims, user_claims, claim_object bindings, reachable objects. Optional start claim and depth limit, and a window of p_width children of each type per parent in name or usage order continuing after p_next_id. Default shape served from claimius.claim_graph_cache while no grant, claim or binding of the user changed since it was built.';
 
 CREATE OR REPLACE FUNCTION claimius._invalidate_claim_graph_cache()
     RETURNS TRIGGER AS $$
@@ -1681,16 +1805,13 @@ BEGIN
         WHERE uo.object_type = NEW.object_type
           AND uo.object_id = NEW.object_id
           AND c.user_id = uo.user_id;
-    ELSIF TG_TABLE_NAME = 'claim' OR TG_TABLE_NAME = 'claim_object' THEN
-        DELETE FROM claimius.claim_graph_cache
-        WHERE TRUE;
     END IF;
 
     RETURN COALESCE(NEW, OLD);
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius._invalidate_claim_graph_cache() IS 'Trigger function. Drops claim_graph_cache rows affected by writes to user_object, object_info, user_users, samna_user, claim, claim_object.';
+COMMENT ON FUNCTION claimius._invalidate_claim_graph_cache() IS 'Trigger function. Drops claim_graph_cache rows affected by writes to user_object, object_info, user_users, samna_user. A claim or binding change is caught on read by get_claim_graph.';
 
 -- ----------------------------------------------------------------------------
 -- search
@@ -1698,6 +1819,9 @@ COMMENT ON FUNCTION claimius._invalidate_claim_graph_cache() IS 'Trigger functio
 -- gated by access. Matches against the search_vector of the object's one
 -- object_info row, generated from its name and description, so a rename is
 -- searchable by every reader at once.
+-- A row ranks by its text match plus the reader's decayed usage of the
+-- pair, so among equal matches what the reader uses most and lately comes
+-- first.
 -- ----------------------------------------------------------------------------
 
 DROP FUNCTION IF EXISTS claimius.search_objects(UUID, UUID, TEXT, TEXT[], INTEGER, INTEGER, INTEGER);
@@ -1749,7 +1873,7 @@ BEGIN
             oi.sa_owner_id,
             oi.sa_location_id,
             (claimius.user_object.direct_grant AND best.user_claim_id IS NULL),
-            ts_rank(oi.search_vector, v_tsquery)
+            (ts_rank(oi.search_vector, v_tsquery) + claimius._decayed_usage(claimius.user_object.used_count, claimius.user_object.last_used_at))::REAL
         FROM claimius.user_object
                  LEFT JOIN LATERAL claimius._best_grant(claimius.user_object.grants, p_user_id, p_required_access) best ON TRUE
                  JOIN claimius.object_info oi
@@ -1760,7 +1884,7 @@ BEGIN
           AND oi.search_vector @@ v_tsquery
           AND (p_object_types IS NULL OR claimius.user_object.object_type = ANY(p_object_types))
           AND (best.user_claim_id IS NOT NULL OR claimius.user_object.direct_grant)
-        ORDER BY ts_rank(oi.search_vector, v_tsquery) DESC
+        ORDER BY 12 DESC, 1
         LIMIT p_limit OFFSET p_offset;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = claimius, pg_temp;
@@ -1834,7 +1958,7 @@ BEGIN
             oi.sa_owner_id         AS owner_id,
             oi.sa_location_id      AS location_id,
             (claimius.user_object.direct_grant AND best.user_claim_id IS NULL) AS is_direct_grant,
-            ts_rank(oi.search_vector, v_tsquery)     AS rank
+            (ts_rank(oi.search_vector, v_tsquery) + claimius._decayed_usage(claimius.user_object.used_count, claimius.user_object.last_used_at))::REAL AS rank
         FROM claimius.user_object
                  LEFT JOIN LATERAL claimius._best_grant(claimius.user_object.grants, p_user_id, p_required_access) best ON TRUE
                  JOIN claimius.object_info oi
@@ -1919,6 +2043,75 @@ COMMENT ON FUNCTION claimius.search(UUID, TEXT, TEXT[], INTEGER, UUID[], UUID[],
 
 GRANT EXECUTE ON FUNCTION claimius.search(UUID, TEXT, TEXT[], INTEGER, INTEGER, INTEGER) TO claimius_disciple_client, claimius_writer, claimius_admin, claimius_reader;
 GRANT EXECUTE ON FUNCTION claimius.search(UUID, TEXT, TEXT[], INTEGER, UUID[], UUID[], UUID[], UUID, TEXT, INTEGER, INTEGER) TO claimius_disciple_client, claimius_writer, claimius_admin, claimius_reader;
+
+-- ----------------------------------------------------------------------------
+-- touch_object_usage
+-- Adds counted checks to the pairs they were made on, one call per flush of
+-- the middleware's in process counter. Row i of the arrays is one pair and the
+-- checks counted on it; repeats of a pair add up. A pair that is not settled,
+-- that has no user_object row, is skipped, so usage never makes a pair and
+-- never outlives one. The touched pairs are locked in key order first, so two
+-- replicas flushing the same pairs wait on each other instead of deadlocking.
+-- Every user counted moves its user_activity row to now. Nothing here
+-- publishes anywhere: usage is local to this database. Returns the pairs
+-- touched.
+-- ----------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION claimius.touch_object_usage(
+    p_user_ids      UUID[],
+    p_object_types  TEXT[],
+    p_object_ids    UUID[],
+    p_counts        BIGINT[]
+) RETURNS INTEGER AS $$
+DECLARE
+    v_touched   INTEGER;
+BEGIN
+    WITH used AS MATERIALIZED (
+        SELECT u.user_id, u.object_type, u.object_id, sum(u.n) AS n
+        FROM unnest(p_user_ids, p_object_types, p_object_ids, p_counts) AS u(user_id, object_type, object_id, n)
+        WHERE u.user_id IS NOT NULL
+          AND u.object_type IS NOT NULL
+          AND u.object_id IS NOT NULL
+          AND u.n > 0
+        GROUP BY u.user_id, u.object_type, u.object_id
+    ),
+    locked AS (
+        SELECT uo.user_id, uo.object_type, uo.object_id, used.n
+        FROM claimius.user_object uo
+            JOIN used
+                ON used.user_id = uo.user_id
+               AND used.object_type = uo.object_type
+               AND used.object_id = uo.object_id
+        ORDER BY uo.user_id, uo.object_type, uo.object_id
+        FOR NO KEY UPDATE OF uo
+    ),
+    touched AS (
+        UPDATE claimius.user_object uo
+        SET used_count = uo.used_count + l.n,
+            last_used_at = now()
+        FROM locked l
+        WHERE uo.user_id = l.user_id
+          AND uo.object_type = l.object_type
+          AND uo.object_id = l.object_id
+        RETURNING uo.user_id
+    ),
+    active AS (
+        INSERT INTO claimius.user_activity (user_id, last_used_at)
+        SELECT DISTINCT used.user_id, now()
+        FROM used
+        ORDER BY used.user_id
+        ON CONFLICT (user_id) DO UPDATE
+            SET last_used_at = EXCLUDED.last_used_at
+        RETURNING user_id
+    )
+    SELECT count(*) INTO v_touched FROM touched;
+
+    RETURN v_touched;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = claimius, pg_temp;
+
+COMMENT ON FUNCTION claimius.touch_object_usage(UUID[], TEXT[], UUID[], BIGINT[]) IS 'Adds counted checks to user_object.used_count and moves last_used_at, per (user, type, object) row of the arrays, skipping pairs not settled, and moves each counted user''s user_activity. Local, never synced. Returns the pairs touched.';
+
+GRANT EXECUTE ON FUNCTION claimius.touch_object_usage(UUID[], TEXT[], UUID[], BIGINT[]) TO claimius_disciple_client, claimius_writer, claimius_admin, claimius_reader;
 
 -- ============================================================================
 -- Write functions: claim management
