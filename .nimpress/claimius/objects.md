@@ -14,7 +14,7 @@ To claimius an object is an `object_type` and `object_id` pair that a `claim_obj
 
 1. An `object_type` is schema qualified at every boundary: `claimius.organization`, `public.bookable`, never `bookable`. `init_claimius_tables` refuses a type without a schema.
 
-2. A composite id is built with `claimius.composite_id`, a deterministic UUID over its text arguments. The primary keys of `user_object`, `object_users`, `user_users`, `access_diff` and `reconcile_queue` are composite ids of their key columns, so every copy of the schema derives the same id for the same pair, and a repeated write of one pair or one area collapses onto one row.
+2. A composite id is built with `claimius.composite_id`, a deterministic UUID over its text arguments. The primary keys of `user_object`, `user_users`, `access_diff` and `reconcile_queue` are composite ids of their key columns, so every copy of the schema derives the same id for the same pair, and a repeated write of one pair or one area collapses onto one row.
 
 ## Registration
 
@@ -34,9 +34,9 @@ The implementing side makes a table participate by carrying the `sa_*` columns a
 
 1. For each it records the column shape in `table_info`, one row per type with a `has_*` flag per column, and attaches the calc trigger: `calc_hierarchical_access` when the table has both `sa_parent_id` and `sa_root_id`, `calc_object_access` otherwise, plus the self root trigger.
 
-2. A table registered before and absent from the list is deregistered: its triggers detached, its `table_info` row, its `inheritance_info` rows and its `user_object`, `object_users` and `reconcile_queue` rows deleted.
+2. A table registered before and absent from the list is deregistered: its triggers detached, its `table_info` row, its `inheritance_info` rows and its `user_object` and `reconcile_queue` rows deleted, and `user_users` counted down with the pairs.
 
-3. Under `replay_mode` it seeds `user_object` for the rows already present: for every live row `x` and every app of it, `recompute_user_object` for each user of `_affected_users_for_object(x)`, then `_refresh_user_users` for every user holding a pair of the type. The seed recomputes `Σ_x |affected(x)|` pairs.
+3. Under `replay_mode` it seeds `user_object` for the rows already present: for every live row `x` and every app of it, `recompute_user_object` for each user of `_affected_users_for_object(x)`, then `_refresh_user_users` for every user holding a pair of the type, since no count moves under `replay_mode`. The seed recomputes `Σ_x |affected(x)|` pairs.
 
 `table_info` is why no claimius function reflects on `information_schema` at run time: the calc trigger, the settle and the graphs read one row per type, one index probe on `idx_table_info_object_type`.
 
@@ -86,4 +86,4 @@ A registered row owned at depth `d_o` of the ownership tree and pinned at depth 
 
 ## Soft delete
 
-A registered row is deleted by stamping `sa_deleted_at`. The calc trigger detaches its closure rows and raises its object area, and the settle of that area deletes the `user_object` and `object_users` row of every user reaching it, because `recompute_user_object` finds the row gone. A hard delete would leave `audit` rows and `sa_created_by` references pointing at nothing, so claimius never issues one on a registered table.
+A registered row is deleted by stamping `sa_deleted_at`. The calc trigger detaches its closure rows and raises its object area, and the settle of that area deletes the `user_object` row of every user reaching it, because `recompute_user_object` finds the row gone. A hard delete would leave `audit` rows and `sa_created_by` references pointing at nothing, so claimius never issues one on a registered table.

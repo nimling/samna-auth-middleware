@@ -772,17 +772,6 @@ type UserUsers struct {
 	SharingObjectCount int       `bun:"sharing_object_count,default:1" json:"sharing_object_count"`
 }
 
-type ObjectUsers struct {
-	bun.BaseModel `bun:"table:claimius.object_users"`
-
-	ID         uuid.UUID  `bun:"id,pk" json:"id"`
-	ObjectID   uuid.UUID  `bun:"object_id" json:"object_id"`
-	ObjectType ObjectType `bun:"object_type" json:"object_type"`
-	UserID     uuid.UUID  `bun:"user_id" json:"user_id"`
-	CreatedAt  time.Time  `bun:"sa_created_at,default:now()" json:"created_at"`
-	UpdatedAt  time.Time  `bun:"sa_updated_at,default:now()" json:"updated_at"`
-}
-
 type Notification struct {
 	bun.BaseModel `bun:"table:claimius.notification"`
 

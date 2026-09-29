@@ -1,8 +1,8 @@
 ---
 layout: doc
 title: Users
-description: One person or machine, one stable user_id, one samna_user row per app, delegation through get_user_access, and user_users with the count it holds and what refreshing it costs.
-tags: samna_user, user_id, ensure_app_user, merge_user, samna_client, get_user_access, user_users, object_users, user_relation, delegation
+description: One person or machine, one stable user_id, one samna_user row per app, delegation through get_user_access, and user_users with the count it holds and what counting it costs.
+tags: samna_user, user_id, ensure_app_user, merge_user, samna_client, get_user_access, user_users, user_relation, delegation
 lastUpdated: true
 ---
 
@@ -61,26 +61,28 @@ The row the actor writes carries the actor's `user_claim.id` in `sa_created_by` 
 sharing_object_count(u, v) = |V_u ∩ V_v|
 ```
 
-It is derived from `object_users`, the `(object, user)` projection of `user_object`, by `_refresh_user_users(app, u)`:
+It is kept by counting. `tg_count_user_users_insert` and `tg_count_user_users_delete` are statement triggers on `user_object` that call `_count_user_users` with the pairs the statement inserted or deleted:
 
-1. Delete every `user_users` row of viewer `u`: `S_u` rows.
+1. For each pair `(u, x)` that entered or left, one range of `idx_user_object_object_user` on `(app, x)` returns the `U_x` users of `x`.
 
-2. Join `u`'s `object_users` rows, one range of `idx_object_users_user` returning `V_u` entries, to every other user's row on the same object, one range of `idx_object_users_object` per object returning `U_x` entries, group by target and insert one row per target: `S_u` rows, each with its three index entries.
+2. Every other user `v` of `x` moves `sharing_object_count(u, v)` and `sharing_object_count(v, u)` by one, the moves summed per `(viewer, target)` over the statement, so each row is written once: an upsert on entry, an update on exit, and a delete when the count reaches zero.
 
 ```
-entries read  = V_u + Σ_{x ∈ V_u} U_x
-rows written  = 2 S_u                     S_u ≤ min(U − 1, Σ_{x ∈ V_u} (U_x − 1))
+entries read  = Σ_{pairs entering or leaving} U_x
+rows written  ≤ Σ_{pairs entering or leaving} 2 (U_x − 1)
 ```
 
-Every settle refreshes the viewers it touched, once each, after all their pairs are written. On the data set of [the index](./index.md#symbols), `Σ_u S_u = 111,472`, so the average user shares objects with 111 others and a refresh rewrites about 223 rows.
+A settle that changes one pair of `u` touches the users of that one object, not the `V_u` objects of `u` and every other user on each of them. On the data set of [the index](./index.md#symbols), `Σ_u S_u = 111,472`, so the average user shares objects with 111 others; a full rebuild of one user would read `V_u + Σ_{x ∈ V_u} U_x` entries and rewrite up to `2 S_u` rows, where one pair entering reads `U_x`.
+
+The counts stay quiet under `replay_mode`: a disciple takes `user_users` from the feed, and the bulk seed of `init_claimius_tables` rebuilds it with `_refresh_user_users(app, u)`, which reads `u`'s pairs and every other user on each of their objects from `user_object` and rewrites only the counts that changed. `rebuild_user_object` runs the same rebuild after it recomputes every pair.
 
 ### Why the count is exact
 
-`sharing_object_count` is a count over the join `P ⋈_x P` of the pair relation with itself, a nonrecursive view. Recomputing a viewer's rows from `object_users` is the recomputation of every tuple of that view whose first column is `u`, and a pair `(u, x)` entering or leaving `P` changes only rows whose viewer is `u` or whose target is `u`. Gupta, Mumick and Subrahmanian show that for nonrecursive views the counting approach computes exactly the tuples inserted or deleted ([Maintaining Views Incrementally](https://dl.acm.org/doi/10.1145/170035.170066), SIGMOD 1993). `_refresh_user_users` recomputes the viewer side of every change it is called for; the target side of the same change is refreshed when the target is itself a settled user of the area.
+`sharing_object_count` is a count over the join `P ⋈_x P` of the pair relation with itself, a nonrecursive view. A pair `(u, x)` entering or leaving `P` changes exactly the tuples `(u, v)` and `(v, u)` for the other users `v` of `x`, each by one. Gupta, Mumick and Subrahmanian show that for nonrecursive views the counting approach computes exactly the tuples inserted or deleted ([Maintaining Views Incrementally](https://dl.acm.org/doi/10.1145/170035.170066), SIGMOD 1993). Two pairs on one object entering or leaving in the same statement are counted once per ordered pair of users, so the delta is exact within a statement as well.
 
 ### Why the table exists
 
-`get_users` must answer from one index range: without `user_users` the list of users visible to `u` is the self join above, `Σ_{x ∈ V_u} U_x` entries per call. With it, the list is one range of `S_u` rows, and the join is paid once per settle of `u`, not once per read.
+`get_users` must answer from one index range: without `user_users` the list of users visible to `u` is the self join `Σ_{x ∈ V_u} U_x`, per call. With it, the list is one range of `S_u` rows, and the join is paid once per pair that enters or leaves, not once per read.
 
 ## Per user state on objects
 

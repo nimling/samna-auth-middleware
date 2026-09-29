@@ -9,7 +9,7 @@
 --   3. Hierarchy roots          organization, location
 --   4. Claims and bindings      claim, user_claim, claim_object, user_token
 --   5. Registry                 table_info, inheritance_info
---   6. Materialized access      user_object, object_users, user_users
+--   6. Materialized access      user_object, user_users
 --   7. Sync                     sync_event, prophet_state, disciple_state,
 --                               reconcile_queue
 --   8. Audit                    audit
@@ -425,7 +425,9 @@ CREATE INDEX IF NOT EXISTS idx_inheritance_info_ancestor
 -- user_object
 -- The reverse access index. One row per (user_id, object_type,
 -- object_id) when the user has any access (claim based or direct). Carries
--- denormalized rendering fields and a tsvector for search.
+-- denormalized rendering fields and a tsvector for search. The same pairs
+-- keyed from the object side are the index idx_user_object_object_user, so
+-- the users of one object are read here and the pairs are stored once.
 -- The id is a deterministic UUID hash of (user_id, object_type,
 -- object_id) produced by claimius.composite_id, so prophet and disciple
 -- converge on the same row identity.
@@ -456,7 +458,8 @@ COMMENT ON COLUMN claimius.user_object.sa_access IS 'Effective bitwise access ma
 COMMENT ON COLUMN claimius.user_object.scope IS 'Effective merged scope: union of grants[].scope keys when any grant has a scope, else NULL meaning whole object access.';
 
 CREATE INDEX IF NOT EXISTS idx_user_object_user_type ON claimius.user_object (user_id, object_type, sa_access);
-CREATE INDEX IF NOT EXISTS idx_user_object_object ON claimius.user_object (object_id, object_type);
+DROP INDEX IF EXISTS claimius.idx_user_object_object;
+CREATE INDEX IF NOT EXISTS idx_user_object_object_user ON claimius.user_object (object_type, object_id, user_id);
 CREATE INDEX IF NOT EXISTS idx_user_object_owner ON claimius.user_object (sa_owner_id);
 CREATE INDEX IF NOT EXISTS idx_user_object_location ON claimius.user_object (sa_location_id) WHERE sa_location_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_user_object_root ON claimius.user_object (sa_root_id);
@@ -464,27 +467,17 @@ CREATE INDEX IF NOT EXISTS idx_user_object_grants ON claimius.user_object USING 
 CREATE INDEX IF NOT EXISTS idx_user_object_search ON claimius.user_object USING GIN (search_vector);
 
 -- object_users
--- Inverse of user_object. For each object, lists users with access. Used to
--- compute user_users.
--- The id is a deterministic UUID hash of (object_type, object_id,
--- user_id) produced by claimius.composite_id.
-CREATE TABLE IF NOT EXISTS claimius.object_users (
-                                                     id              UUID PRIMARY KEY,
-                                                     object_id       UUID NOT NULL,
-                                                     object_type     TEXT NOT NULL,
-                                                     user_id         UUID NOT NULL,
-                                                     sa_created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
-                                                     sa_updated_at   TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-
-COMMENT ON TABLE claimius.object_users IS 'Inverse of user_object. (object, user) pairs with access.';
-
-CREATE INDEX IF NOT EXISTS idx_object_users_object ON claimius.object_users (object_id, object_type);
-CREATE INDEX IF NOT EXISTS idx_object_users_user ON claimius.object_users (user_id);
+-- Held the pairs of user_object a second time, keyed from the object side.
+-- The reverse lookup is idx_user_object_object_user and the rows are derived
+-- from user_object, so the table goes.
+DROP TABLE IF EXISTS claimius.object_users;
 
 -- user_users
 -- Records that two users in the same app share at least one accessible
--- object. Used by get_users to list visible users.
+-- object. Used by get_users to list visible users. Kept by counting: a pair
+-- of user_object entering or leaving moves sharing_object_count by one
+-- against every other user of the object, in both directions, and a row
+-- whose count reaches zero is removed.
 -- The id is a deterministic UUID hash of (viewer_id, target_user_id)
 -- produced by claimius.composite_id.
 CREATE TABLE IF NOT EXISTS claimius.user_users (
@@ -496,7 +489,8 @@ CREATE TABLE IF NOT EXISTS claimius.user_users (
                                                    sharing_object_count    INTEGER NOT NULL DEFAULT 1
 );
 
-COMMENT ON TABLE claimius.user_users IS 'Pairs of users sharing at least one accessible object.';
+COMMENT ON TABLE claimius.user_users IS 'Pairs of users sharing at least one accessible object. Counted from user_object inserts and deletes.';
+COMMENT ON COLUMN claimius.user_users.sharing_object_count IS 'Objects both users hold a user_object pair on. Moved by one per pair entering or leaving; the row is removed at zero.';
 
 CREATE INDEX IF NOT EXISTS idx_user_users_viewer ON claimius.user_users (viewer_id);
 CREATE INDEX IF NOT EXISTS idx_user_users_target ON claimius.user_users (target_user_id);
@@ -518,7 +512,9 @@ CREATE TABLE IF NOT EXISTS claimius.sync_event (
 );
 
 COMMENT ON TABLE claimius.sync_event IS 'Append only event stream for prophet to disciple sync.';
-COMMENT ON COLUMN claimius.sync_event.event_type IS 'Source table: claimius.user_object, claimius.object_users, etc.';
+COMMENT ON COLUMN claimius.sync_event.event_type IS 'Source table: claimius.user_object, claimius.user_users, etc.';
+
+DELETE FROM claimius.sync_event WHERE event_type = 'claimius.object_users';
 
 CREATE INDEX IF NOT EXISTS idx_sync_event_written_at ON claimius.sync_event (written_at);
 CREATE INDEX IF NOT EXISTS idx_sync_event_type_seq ON claimius.sync_event (event_type, seq);

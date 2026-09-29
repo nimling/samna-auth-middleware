@@ -15,7 +15,10 @@
 --   tg_calc_trees           AFTER INSERT/UPDATE/DELETE: on owned tables that
 --                           are not access targets. Keeps their closure rows.
 --   tg_emit_sync_event      AFTER INSERT/UPDATE/DELETE: on user_object,
---                           object_users, user_users. Publishes to sync_event.
+--                           user_users. Publishes to sync_event.
+--   tg_count_user_users_*   AFTER INSERT/DELETE per statement: on user_object.
+--                           Counts the pairs entering and leaving into
+--                           user_users.
 -- ============================================================================
 
 -- ----------------------------------------------------------------------------
@@ -169,13 +172,23 @@ DROP TRIGGER IF EXISTS tg_emit_sync_event ON claimius.user_object;
 CREATE TRIGGER tg_emit_sync_event AFTER INSERT OR UPDATE OR DELETE ON claimius.user_object
     FOR EACH ROW EXECUTE FUNCTION claimius.emit_sync_event();
 
-DROP TRIGGER IF EXISTS tg_emit_sync_event ON claimius.object_users;
-CREATE TRIGGER tg_emit_sync_event AFTER INSERT OR UPDATE OR DELETE ON claimius.object_users
-    FOR EACH ROW EXECUTE FUNCTION claimius.emit_sync_event();
-
 DROP TRIGGER IF EXISTS tg_emit_sync_event ON claimius.user_users;
 CREATE TRIGGER tg_emit_sync_event AFTER INSERT OR UPDATE OR DELETE ON claimius.user_users
     FOR EACH ROW EXECUTE FUNCTION claimius.emit_sync_event();
+
+-- ----------------------------------------------------------------------------
+-- user_users counting
+-- ----------------------------------------------------------------------------
+
+DROP TRIGGER IF EXISTS tg_count_user_users_insert ON claimius.user_object;
+CREATE TRIGGER tg_count_user_users_insert AFTER INSERT ON claimius.user_object
+    REFERENCING NEW TABLE AS changed
+    FOR EACH STATEMENT EXECUTE FUNCTION claimius._count_user_users();
+
+DROP TRIGGER IF EXISTS tg_count_user_users_delete ON claimius.user_object;
+CREATE TRIGGER tg_count_user_users_delete AFTER DELETE ON claimius.user_object
+    REFERENCING OLD TABLE AS changed
+    FOR EACH STATEMENT EXECUTE FUNCTION claimius._count_user_users();
 
 DROP TRIGGER IF EXISTS tg_emit_sync_event ON claimius.samna_user;
 CREATE TRIGGER tg_emit_sync_event AFTER INSERT OR UPDATE OR DELETE ON claimius.samna_user

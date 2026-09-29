@@ -289,8 +289,6 @@ func applyUpsert(ctx context.Context, tx bun.Tx, eventType string, raw json.RawM
 		return upsertEntity[shared.Audit](ctx, tx, raw)
 	case "claimius.user_object":
 		return upsertEntity[shared.UserObject](ctx, tx, raw)
-	case "claimius.object_users":
-		return upsertEntity[shared.ObjectUsers](ctx, tx, raw)
 	case "claimius.user_users":
 		return upsertEntity[shared.UserUsers](ctx, tx, raw)
 	default:
@@ -338,8 +336,6 @@ func applyDelete(ctx context.Context, tx bun.Tx, eventType string, raw json.RawM
 		return deleteEntity[shared.Audit](ctx, tx, env.ID)
 	case "claimius.user_object":
 		return deleteEntity[shared.UserObject](ctx, tx, env.ID)
-	case "claimius.object_users":
-		return deleteEntity[shared.ObjectUsers](ctx, tx, env.ID)
 	case "claimius.user_users":
 		return deleteEntity[shared.UserUsers](ctx, tx, env.ID)
 	default:

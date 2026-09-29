@@ -65,9 +65,9 @@ A move of a subtree `S` changes the ancestors of every node of `S` and of every 
 
 An organization has no `app_id`. It is shared structure, and an app reaches it through a live `claimius.app_object` row.
 
-1. `link_app_object(app_id, object_type, object_id, created_by)` probes for a live link and returns it, or inserts one and recomputes the pair of every user in `_affected_users_for_object`, then refreshes those users' `user_users` rows.
+1. `link_app_object(app_id, object_type, object_id, created_by)` probes for a live link and returns it, or inserts one and recomputes the pair of every user in `_affected_users_for_object`; `user_users` counts the pairs that entered.
 
-2. `unlink_app_object` soft deletes the link and deletes every `user_object` and `object_users` row of the app on the object, then refreshes the `user_users` rows of those users.
+2. `unlink_app_object` soft deletes the link and deletes every `user_object` row of the app on the object, and `user_users` counts those pairs down.
 
 3. `app_object_ids(app_id, object_type)` is the filter a prophet query uses in place of `app_id = ?`, one range of `idx_app_object_unique`. `app_has_object` is the boolean guard, `apps_for_object` the reverse through `idx_app_object_object`.
 

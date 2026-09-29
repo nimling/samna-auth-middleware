@@ -9,7 +9,7 @@
 -- Hashes the joined input parts into a deterministic UUID. Same inputs
 -- produce the same id on every node, so prophet and disciple converge on
 -- the same row identity without coordinating writes. Used for the row id
--- of materialization tables (user_object, object_users, user_users,
+-- of materialization tables (user_object, user_users,
 -- reconcile_queue) and for the cascaded_from anchor key inside grants
 -- jsonb where two parts (object_type, object_id) collapse into a single
 -- comparable identifier.

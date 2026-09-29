@@ -32,7 +32,7 @@ Claimius owns and validates its own types. It never constructs or reads the impl
 | [Capabilities](./capabilities.md) | Scope grants with no object, and their cost |
 | [Objects](./objects.md) | Registration, `table_info`, the `inheritance_info` closure, the `sa_*` columns |
 | [Apps](./apps.md) | `samna_app`, `app_object`, app scoped tables |
-| [Materialization](./materialization.md) | `user_object`, `object_users`, `user_users`, `access_diff`, the cost of a settle, and why the maintenance is exact |
+| [Materialization](./materialization.md) | `user_object`, `user_users`, `access_diff`, the cost of a settle, and why the maintenance is exact |
 | [Reads](./reads.md) | The read surface and what each read reads and writes |
 | [Writes](./writes.md) | What each write does inside its own transaction |
 | [Search](./search.md) | Full text search over what a user can reach |
@@ -110,7 +110,6 @@ with `X_d` the OR of the denies bound on `x` itself and `X_o` the OR of every ot
 |---|---|---|
 | `inheritance_info` | `anc_t(x, y, h)` for every tree, self edges included | `Σ_x Σ_{t ∋ x} (d_t(x) + 1)` |
 | `user_object` | `A(u, x) ≠ 0` with its derivations in `grants` and the object's name, owner, location and search vector | `P = Σ_u V_u` |
-| `object_users` | `π_{x, u}` of `user_object` | `P` |
 | `user_users` | `|V_u ∩ V_v|` for every pair of users sharing an object | `Σ_u S_u` |
 | `access_diff` | the outstanding areas of changes not yet settled | at most one per claim and one per object |
 
@@ -121,7 +120,7 @@ with `X_d` the OR of the denies bound on `x` itself and `X_o` the OR of every ot
 | Check `(u, x, r)` | `σ_{u, x, A & r = r} A` | one pair of `user_object` |
 | Listing `(u, τ, r)` | `π_x σ_{u, type = τ, A & r = r} A` | the reader's range of `idx_user_object_user_type` |
 | Search | the listing restricted by `search_vector @@ q` | `user_object` |
-| Members of `x` | `π_u σ_x A` | `idx_user_object_object`, `object_users` |
+| Members of `x` | `π_u σ_x A` | `idx_user_object_object_user` |
 | Visible users of `u` | `π_v σ_u user_users` | `idx_user_users_viewer` |
 | Capability `(u, path, r)` | `σ_{object = ⊥, jsonpath} (grant ⋈ claim ⋈ bind)` | the base relations, see [Capabilities](./capabilities.md) |
 
@@ -139,7 +138,7 @@ Every formula in these files uses these symbols.
 | `B_x` | Bindings on `x` and its ancestors |
 | `G_x` | Derivations in the `grants` array of one pair |
 | `V_u`, `V_{u,τ}` | Objects user `u` reaches, of any type and of type `τ` |
-| `U_x` | Users reaching `x`, the `object_users` rows of `x` |
+| `U_x` | Users reaching `x`, the `user_object` rows of `x` in `idx_user_object_object_user` |
 | `Ū_o` | `P / O`, the users an object is reached by on average |
 | `S_u` | Users `u` shares at least one object with, the `user_users` rows of `u` |
 | `T_c` | Objects claim `c` reaches: its bound objects and, when it inherits, their descendants |

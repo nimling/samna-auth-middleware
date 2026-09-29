@@ -40,7 +40,7 @@ index entries read = 1 + 2C + b          jsonpath evaluations = b
 
 It reads no materialized table, so a scope grant takes effect on the next call with no settle, and costs the same whether the app has ten users or a million.
 
-In SQL the same match by top level key is `get_access(user, app, scope_key, required)`: after the read preamble of [Reads](./reads.md#what-every-read-pays-first), the user's live grants in the app joined to their scope bindings whose `scope` has the key, `scope ? key`, with the same mask and deny rule, and the binding with the most bits set as the one row.
+In SQL the same match by top level key is `get_access(user, app, scope_key, required)`: it reads no pair and no area, so it settles nothing and after `check_user_active` joins the user's live grants in the app to their scope bindings whose `scope` has the key, `scope ? key`, with the same mask and deny rule, and the binding with the most bits set as the one row.
 
 ## The boundary
 

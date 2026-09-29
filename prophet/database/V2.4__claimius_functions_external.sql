@@ -839,6 +839,8 @@ COMMENT ON FUNCTION claimius.get_claims(UUID, UUID, UUID, TEXT) IS 'All claims t
 -- Strongest active object-less binding whose scope contains p_scope_key and
 -- whose mask covers p_required_access. Returns user_claim_id, claim_id,
 -- sa_access, scope.
+-- It reads claim, user_claim and the object-less bindings, never user_object
+-- or an area a diff can hold open, so it settles nothing.
 -- ----------------------------------------------------------------------------
 
 CREATE OR REPLACE FUNCTION claimius.get_access(
@@ -853,8 +855,6 @@ CREATE OR REPLACE FUNCTION claimius.get_access(
                     scope           JSONB
                 ) AS $$
 BEGIN
-    PERFORM claimius.reconcile_if_pending(p_app_id, p_user_id);
-
     IF NOT claimius.check_user_active(p_app_id, p_user_id) THEN
         RETURN;
     END IF;
@@ -2051,11 +2051,11 @@ COMMENT ON FUNCTION claimius.remove_claim_object(p_claim_object_id uuid, p_delet
 -- merge_user
 -- Reassigns all data from a source user to a target user. Operates by
 -- user_id (not row PK) and unifies across apps. Hard deletes the source
--- samna_user row(s) and migrates user_claim, user_relation, user_field,
--- user_object, object_users, user_users to the target. External tables
--- registered through init_claimius_tables can opt in by passing themselves
--- in p_external_tables; the function will UPDATE their sa_created_by
--- references where applicable.
+-- samna_user row(s) and migrates user_claim, user_relation, user_field and
+-- user_object to the target, and user_users follows the deleted pairs.
+-- External tables registered through init_claimius_tables can opt in by
+-- passing themselves in p_external_tables; the function will UPDATE their
+-- sa_created_by references where applicable.
 -- ============================================================================
 
 CREATE OR REPLACE FUNCTION claimius.merge_user(
@@ -2119,22 +2119,14 @@ BEGIN
                 WHERE id = v_target_app_user.id;
 
                 -- Hard delete materialized rows for the source; calc functions will
-                -- repopulate as transactions touch the target.
+                -- repopulate as transactions touch the target. _count_user_users
+                -- takes the source out of user_users with its pairs.
                 DELETE FROM claimius.user_object
                 WHERE user_id = p_source_user_id AND app_id = v_app_row.app_id;
-                DELETE FROM claimius.object_users
-                WHERE user_id = p_source_user_id AND app_id = v_app_row.app_id;
-                DELETE FROM claimius.user_users
-                WHERE app_id = v_app_row.app_id
-                  AND (viewer_id = p_source_user_id OR target_user_id = p_source_user_id);
 
                 -- Hard delete the source samna_user row
                 DELETE FROM claimius.samna_user WHERE id = v_source_app_user.id;
             END IF;
-
-            -- Force recompute of materialized state for the target by touching
-            -- every (app, target, object) currently in object_users
-            PERFORM claimius._refresh_user_users(v_app_row.app_id, p_target_user_id);
 
             PERFORM claimius.write_audit(
                     v_app_row.app_id,
@@ -2247,7 +2239,6 @@ BEGIN
                  WHERE ancestor_type = v_old_object_type
                     OR descendant_type = v_old_object_type;
                 DELETE FROM claimius.user_object WHERE object_type = v_old_object_type;
-                DELETE FROM claimius.object_users WHERE object_type = v_old_object_type;
                 DELETE FROM claimius.reconcile_queue WHERE object_type = v_old_object_type;
                 RAISE NOTICE 'Deregistered table %', v_old_object_type;
             END LOOP;
@@ -2282,9 +2273,10 @@ $$ LANGUAGE plpgsql;
 COMMENT ON FUNCTION claimius.init_claimius_tables(VARIADIC p_object_types text[]) IS 'Registers external tables. Idempotent. Called by implementer migrations.';
 
 -- _bulk_seed_user_object
--- For a registered table with existing rows, populates user_object,
--- object_users, and user_users for every (user, object) pair where access
--- exists. Inherits the caller's replay_mode setting; callers run this with
+-- For a registered table with existing rows, populates user_object for
+-- every (user, object) pair where access exists, then rebuilds user_users for
+-- the users it holds pairs for, since no count moves under replay_mode.
+-- Inherits the caller's replay_mode setting; callers run this with
 -- replay_mode = true so emit_sync_event short circuits and the bulk seed
 -- produces no sync events. Per-row cost is bounded because the helpers
 -- _affected_users_for_object and _build_grants_for_objects both use indexed
@@ -2322,7 +2314,7 @@ BEGIN
     PERFORM claimius._refresh_user_users(s.app_id, s.user_id)
     FROM (
         SELECT DISTINCT app_id, user_id
-        FROM claimius.object_users
+        FROM claimius.user_object
         WHERE object_type = p_object_type
     ) s;
 END;
@@ -2979,7 +2971,7 @@ BEGIN
              claimius.init_claimius_tables, claimius.init_claimius_internal,
              claimius.recompute_state
              FROM claimius_reader';
-    EXECUTE 'GRANT INSERT, UPDATE, DELETE ON claimius.user_object, claimius.object_users, claimius.user_users,
+    EXECUTE 'GRANT INSERT, UPDATE, DELETE ON claimius.user_object, claimius.user_users,
              claimius.disciple_state, claimius.samna_user, claimius.samna_client,
              claimius.samna_secret, claimius.samna_app, claimius.organization, claimius.location,
              claimius.claim, claimius.user_claim, claimius.claim_object,

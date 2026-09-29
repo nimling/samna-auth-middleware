@@ -13,7 +13,6 @@ lastUpdated: true
 | Table | Rows | Grows with |
 |---|---|---|
 | `user_object` | `P = Σ_u V_u = O Ū_o` | users times reach |
-| `object_users` | `P` | users times reach |
 | `user_users` | `Σ_u S_u ≤ U (U − 1)` | pairs of users sharing an object |
 | `inheritance_info` | `Σ_x Σ_{t ∋ x} (d_t(x) + 1)` | objects times depth |
 | `claim`, `claim_object`, `user_claim` | claims, bindings, grants | the model, never its product |
@@ -29,8 +28,7 @@ A closure row is two object pairs, a root, a depth and two timestamps: about 140
 
 | Table | Indexes | Entries per row written |
 |---|---|---|
-| `user_object` | primary key; `(user_id, app_id, object_type, sa_access)`; `(object_id, object_type)`; `(app_id, sa_owner_id)`; `(app_id, sa_location_id)` partial; `(app_id, sa_root_id)`; GIN `jsonb_path_ops` on `grants`; GIN on `search_vector` | 5 or 6 btree, about 6 per derivation in `grants`, one per distinct lexeme |
-| `object_users` | primary key; `(object_id, object_type)`; `(app_id, user_id)` | 3 |
+| `user_object` | primary key; `(user_id, app_id, object_type, sa_access)`; `(app_id, object_type, object_id, user_id)`; `(app_id, sa_owner_id)`; `(app_id, sa_location_id)` partial; `(app_id, sa_root_id)`; GIN `jsonb_path_ops` on `grants`; GIN on `search_vector` | 5 or 6 btree, about 6 per derivation in `grants`, one per distinct lexeme |
 | `user_users` | primary key; `(app_id, viewer_id)`; `(app_id, target_user_id)` | 3 |
 | `inheritance_info` | primary key; descendant covering; ancestor covering | 3 |
 | `access_diff` | primary key; one of two partial indexes by kind | 2 |
@@ -41,7 +39,7 @@ A closure row is two object pairs, a root, a depth and two timestamps: about 140
 
 The GIN indexes take their entries through the pending list and merge them in bulk ([PostgreSQL, GIN fast update](https://www.postgresql.org/docs/17/gin.html#GIN-FAST-UPDATE)). A soft delete sets an indexed column, so it is never a heap only update and writes an entry in every index of its table ([PostgreSQL, Heap Only Tuples](https://www.postgresql.org/docs/17/storage-hot.html)).
 
-Per pair written, the materialization therefore writes one `user_object` row with `≈ 6 + 6 G_x + n_w` entries for `n_w` distinct lexemes, on first insert one `object_users` row with 3, and one or two `sync_event` rows with 4 each.
+Per pair written, the materialization therefore writes one `user_object` row with `≈ 6 + 6 G_x + n_w` entries for `n_w` distinct lexemes, one or two `sync_event` rows with 4 each, and on insert or delete one update of each `user_users` row it shares with another user of the object.
 
 ## The shape of a B-tree
 
@@ -74,7 +72,7 @@ When it exceeds the cache, a listing reads up to `V_{u,τ}` heap pages from stor
 
 1. A pair recompute that changes nothing writes nothing, because its upsert updates only when a column is distinct.
 
-2. A `user_users` refresh deletes and inserts every row of its viewer: `S_u` dead rows per refresh, whether the counts changed or not.
+2. A pair entering or leaving updates `2 (U_x − 1)` `user_users` rows, one dead row each; the bulk rebuild `_refresh_user_users` rewrites only the counts that changed.
 
 3. An area is inserted by the write and deleted by the settle: one dead row per settled area.
 

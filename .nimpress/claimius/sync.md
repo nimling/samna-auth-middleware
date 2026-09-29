@@ -25,25 +25,25 @@ A prophet appends every change of a mirrored table to `sync_event`. A disciple o
 | `organization`, `location` | `claim_graph_cache` |
 | `claim`, `claim_object`, `user_claim` | the implementing side's own tables |
 | `object_field`, `user_field`, `user_relation` | |
-| `user_object`, `object_users`, `user_users` | |
+| `user_object`, `user_users` | |
 
 The feed carries the source rows of access and the pairs derived from them, so a disciple holds the prophet's pairs for the shared types without deriving them.
 
 ### Events per write
 
-A write emits one event per source row it writes, one per pair it writes, one more when a pair enters or leaves `object_users`, and two per row of every `user_users` refresh it runs, because the refresh deletes and inserts every row of its viewer:
+A write emits one event per source row it writes, one per pair it writes, and one per `user_users` row a pair entering or leaving moves, `2 (U_x − 1)` for a pair on `x`:
 
 ```
-events = source rows + pairs written + object_users rows written + 2 Σ_{refreshes} S_u
+events = source rows + pairs written + Σ_{pairs entering or leaving} 2 (U_x − 1)
 ```
 
-For the request of [Writes](./writes.md#one-request-one-transaction), a claim bound to a node and granted to `k` users, with the actor refreshed once per trigger that settles it:
+For the request of [Writes](./writes.md#one-request-one-transaction), a claim bound to a node and granted to `k` users:
 
 ```
-events ≤ (2 + k) + 2 (1 + (1 + k) |T_c|) + 2 ((3 + k) S_actor + Σ_{assignees} S_u)
+events ≤ (2 + k) + 2 (1 + (1 + k) |T_c|) + Σ_{pairs entering or leaving} 2 (U_x − 1)
 ```
 
-A settle on the prophet emits the same terms for every pair and every user it touches. On the data set of [the index](./index.md#symbols), building the data held 5,186,276 events, of which 9,355 were source rows and 5,176,921 rows of `user_object`, `object_users` and `user_users`: the fan out of a grant to the pairs it reaches, and of a pair to the users who share it, is what the feed carries.
+A settle on the prophet emits the same terms for every pair and every user it touches. On the data set of [the index](./index.md#symbols), building the data held 5,186,276 events, of which 9,355 were source rows and 5,176,921 rows of `user_object`, `user_users` and the `object_users` table the schema then carried: the fan out of a grant to the pairs it reaches, and of a pair to the users who share it, is what the feed carries.
 
 ## The feed as a pipeline
 

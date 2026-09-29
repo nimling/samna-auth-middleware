@@ -23,11 +23,11 @@ A write changes a source row: a registered row, an organization, a location, a c
 | `organization`, `location`, `samna_app`, `samna_client`, `samna_secret`, `object_field`, `user_field`, `user_relation`, `prophet_state` | Direct insert and update |
 | The implementing side's registered tables | Direct insert and update, by the implementing side |
 
-`claim`, `user_claim` and `claim_object` also accept a direct insert, because their triggers do the same work whatever the path in; the functions are the form for SQL callers and return one jsonb object keyed by the table they wrote. Never written by hand: `user_object`, `object_users`, `user_users`, `inheritance_info`, `table_info`, `sync_event`, `access_diff`, `reconcile_queue`, `claim_graph_cache`.
+`claim`, `user_claim` and `claim_object` also accept a direct insert, because their triggers do the same work whatever the path in; the functions are the form for SQL callers and return one jsonb object keyed by the table they wrote. Never written by hand: `user_object`, `user_users`, `inheritance_info`, `table_info`, `sync_event`, `access_diff`, `reconcile_queue`, `claim_graph_cache`.
 
 ## What each write costs
 
-`F_u = V_u + Σ_{y ∈ V_u} U_y` entries read and `2 S_u` rows written is the `user_users` refresh of one user, and `R_read` the reads of one pair recompute; see [Users](./users.md) and [Materialization](./materialization.md#recomputing-one-pair).
+`F_u` is the `user_users` counting for the pairs of `u` that entered or left, `U_x` entries read and at most `2 (U_x − 1)` rows written per pair on `x`, and `R_read` the reads of one pair recompute; see [Users](./users.md) and [Materialization](./materialization.md#recomputing-one-pair).
 
 | Write | Closure rows | Pairs recomputed in the write | Area rows |
 |---|---|---|---|

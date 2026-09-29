@@ -26,7 +26,7 @@ Five systems stand where claimius stands. Zanzibar is Google's; SpiceDB, OpenFGA
 
 A tuple store stores the relation tuples and nothing derived from them, except the group index Zanzibar calls Leopard. The Zanzibar paper states the principle: "To facilitate consistency, Zanzibar avoids storage denormalization and relies only on normalized data" ([Pang et al. 2019](https://www.usenix.org/system/files/atc19-pang.pdf)).
 
-Claimius stores the same source rows, one per claim, binding and grant, and three derived relations: the closure, `Σ_x rows(x)` rows, the pairs, `P = Σ_u V_u` rows in `user_object` and `object_users`, and the user pairs, `Σ_u S_u`. The pairs are the one term that grows with users times reach. Claimius pays that storage so that a check and a listing read the answer instead of deriving it; see [Materialization](./materialization.md#why-a-listing-reads-stored-pairs).
+Claimius stores the same source rows, one per claim, binding and grant, and three derived relations: the closure, `Σ_x rows(x)` rows, the pairs, `P = Σ_u V_u` rows in `user_object`, and the user pairs, `Σ_u S_u`. The pairs are the one term that grows with users times reach. Claimius pays that storage so that a check and a listing read the answer instead of deriving it; see [Materialization](./materialization.md#why-a-listing-reads-stored-pairs).
 
 ## Check
 

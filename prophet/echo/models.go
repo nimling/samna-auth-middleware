@@ -417,17 +417,6 @@ type UserUsers struct {
 	bun.BaseModel   `bun:"table:claimius.user_users" json:"-"`
 }
 
-type ObjectUsers struct {
-	ID            uuid.UUID `bun:"id,pk" json:"id"`
-	AppID         uuid.UUID `bun:"app_id" json:"app_id"`
-	ObjectID      uuid.UUID `bun:"object_id" json:"object_id"`
-	ObjectType    string    `bun:"object_type" json:"object_type"`
-	UserID        uuid.UUID `bun:"user_id" json:"user_id"`
-	CreatedAt     time.Time `bun:"sa_created_at" json:"created_at"`
-	UpdatedAt     time.Time `bun:"sa_updated_at" json:"updated_at"`
-	bun.BaseModel `bun:"table:claimius.object_users" json:"-"`
-}
-
 type SyncEvent struct {
 	Seq           int64           `bun:"seq,pk" json:"seq"`
 	Operation     string          `bun:"operation" json:"operation"`

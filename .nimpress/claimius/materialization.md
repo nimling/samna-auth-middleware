@@ -2,7 +2,7 @@
 layout: doc
 title: Materialization
 description: The per user access index user_object and its projections, how a write records an area in access_diff, how reconcile_if_pending settles it on the first read, the rows each step reads and writes, and why the maintenance is exact and the shape is right.
-tags: user_object, object_users, user_users, access_diff, reconcile_if_pending, recompute_user_object, _settle_object_diff, _settle_claim_diff, reconcile_queue, incremental view maintenance
+tags: user_object, user_users, access_diff, reconcile_if_pending, recompute_user_object, _settle_object_diff, _settle_claim_diff, reconcile_queue, incremental view maintenance
 lastUpdated: true
 ---
 
@@ -14,9 +14,8 @@ Claimius stores the access relation `A` of [the model](./index.md#the-model) per
 
 | Table | One row per | Holds | Indexes |
 |---|---|---|---|
-| `user_object` | app, user, object with `A ≠ 0` | `sa_access`, `grants`, `scope`, `direct_grant`, and the object's `sa_owner_id`, `sa_location_id`, `sa_root_id`, `sa_name`, `sa_description`, `sa_link`, `search_vector` | primary key `id = composite_id(app, user, type, object)`; `idx_user_object_user_type (user_id, app_id, object_type, sa_access)`; `idx_user_object_object (object_id, object_type)`; `idx_user_object_owner`, `idx_user_object_location`, `idx_user_object_root`; GIN on `grants`; GIN on `search_vector` |
-| `object_users` | app, object, user | the `(object, user)` projection of `user_object` | primary key; `(object_id, object_type)`; `(app_id, user_id)` |
-| `user_users` | app, viewer, target | `sharing_object_count = |V_u ∩ V_v|`, first and last time; see [Users](./users.md) | primary key; `(app_id, viewer_id)`; `(app_id, target_user_id)` |
+| `user_object` | app, user, object with `A ≠ 0` | `sa_access`, `grants`, `scope`, `direct_grant`, and the object's `sa_owner_id`, `sa_location_id`, `sa_root_id`, `sa_name`, `sa_description`, `sa_link`, `search_vector` | primary key `id = composite_id(app, user, type, object)`; `idx_user_object_user_type (user_id, app_id, object_type, sa_access)`; `idx_user_object_object_user (app_id, object_type, object_id, user_id)`; `idx_user_object_owner`, `idx_user_object_location`, `idx_user_object_root`; GIN on `grants`; GIN on `search_vector` |
+| `user_users` | app, viewer, target | `sharing_object_count = |V_u ∩ V_v|`, kept by counting, first and last time; see [Users](./users.md) | primary key; `(app_id, viewer_id)`; `(app_id, target_user_id)` |
 | `access_diff` | outstanding area | `kind` (`object` or `claim`), the object pair or the claim, `cascade` | primary key; `(app_id, object_type, object_id) WHERE kind = 'object'`; `(app_id, claim_id) WHERE kind = 'claim'` |
 | `reconcile_queue` | app, user, object | a pair whose recompute failed and waits for its user's next read | primary key; `(app_id, user_id)` |
 
@@ -40,7 +39,7 @@ Claimius stores the access relation `A` of [the model](./index.md#the-model) per
 R_read(u, x) = 2C + L + 2 a_x + B_x + t_x + O(1)
 ```
 
-It writes, when the pair changed: one `user_object` row with its five btree entries, a sixth when pinned, `≈ 5 G_x` entries in the `grants` GIN index and one per lexeme in the search GIN index; on first insert one `object_users` row with three entries; one `sync_event` row per written row; and one delete probe on `claim_graph_cache`. The upsert is `ON CONFLICT (id) DO UPDATE ... WHERE ... IS DISTINCT FROM`, so a pair whose every column is unchanged writes nothing and fires no trigger. When the object is gone or no derivation survives, it deletes the pair and its `object_users` row instead.
+It writes, when the pair changed: one `user_object` row with its five btree entries, a sixth when pinned, `≈ 5 G_x` entries in the `grants` GIN index and one per lexeme in the search GIN index; on insert or delete the `user_users` counts against the other users of the object, see [Users](./users.md); one `sync_event` row per written row; and one delete probe on `claim_graph_cache`. The upsert is `ON CONFLICT (id) DO UPDATE ... WHERE ... IS DISTINCT FROM`, so a pair whose every column is unchanged writes nothing and fires no trigger. When the object is gone or no derivation survives, it deletes the pair instead.
 
 ## Writes record areas
 
@@ -64,18 +63,18 @@ Every read function begins with `reconcile_if_pending(app, user)`:
 
 2. It locks them `FOR UPDATE SKIP LOCKED`. An area another read is settling is skipped, and this read goes on with the pairs as they stand.
 
-3. It settles each area for every user it reaches, deletes the row, drains the reader's own `reconcile_queue` rows, and refreshes `user_users` for every user it touched.
+3. It settles each area for every user it reaches, deletes the row, drains the reader's own `reconcile_queue` rows; `user_users` moves with each pair that entered or left.
 
 With nothing outstanding the settle costs `Δ_a = 0` rows read and nothing written, and that is the common case.
 
 ### What a settle costs
 
-An `object` area on `x` recomputes, for `x` and, with `cascade`, every descendant `y` of `x`, the pair of every user in `_affected_users_for_object(y)`: the creator of `y`, the users in `object_users` for `y`, the holders of bindings on `y`, and the holders of inheriting bindings on the ancestors of `y`.
+An `object` area on `x` recomputes, for `x` and, with `cascade`, every descendant `y` of `x`, the pair of every user in `_affected_users_for_object(y)`: the creator of `y`, the users holding a pair on `y`, read through `idx_user_object_object_user`, the holders of bindings on `y`, and the holders of inheriting bindings on the ancestors of `y`.
 
 ```
 pairs(object area x) = Σ_{y ∈ {x} ∪ desc(x)} |affected(y)|
 pairs(claim area c)  = |H_c| × |T_c|
-cost(area)           = pairs × R_read + (rows written for the pairs that changed) + Σ_{touched u} (V_u + Σ_{y ∈ V_u} U_y + 2 S_u)
+cost(area)           = pairs × R_read + (rows written for the pairs that changed) + Σ_{pairs entering or leaving} (U_x + 2 (U_x − 1))
 ```
 
 On the data set of [the index](./index.md#symbols), a binding change on a leaf claim with 6 holders over 33 objects settles 198 pairs; a binding change on a root claim with 2 holders over 20,782 objects settles 41,564.
@@ -136,9 +135,7 @@ With `R_read ≈ 2C + 2a_x + B_x` the right side is a few units for any tree of 
 
 2. `user_object` is what makes a check one pair and a listing one range.
 
-3. `object_users` is the narrow projection the `user_users` join reads, five columns where `user_object` carries the object's text.
-
-4. `user_users` turns the self join `Σ_{x ∈ V_u} U_x` of `get_users` into one range of `S_u` rows.
+3. `user_users` turns the self join `Σ_{x ∈ V_u} U_x` of `get_users` into one range of `S_u` rows.
 
 5. `access_diff` and `reconcile_queue` are the state of lazy maintenance. `claim_graph_cache` stores a rendering; see [Graphs](./graphs.md).
 

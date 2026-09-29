@@ -7,7 +7,7 @@
 --   calc_hierarchical_access  Fires on hierarchical tables (org, location,
 --                             parenthood enabled tables)
 --   calc_claim_access         Fires on claim, claim_object, user_claim
---   emit_sync_event           Fires on user_object, object_users, user_users
+--   emit_sync_event           Fires on user_object, user_users
 --                             to publish into sync_event
 --   audit_trigger             Fires on core auditable tables to write audit
 --   tg_update_timestamp       Generic sa_updated_at maintenance
@@ -66,9 +66,7 @@ BEGIN
     IF NOT v_replay THEN
         v_actor := claimius._actor_user_for_row(v_object_type, coalesce(NEW, OLD));
         IF v_actor IS NOT NULL THEN
-            IF claimius.recompute_user_object(v_actor, v_object_type, v_obj_id) THEN
-                PERFORM claimius._refresh_user_users(v_actor);
-            END IF;
+            PERFORM claimius.recompute_user_object(v_actor, v_object_type, v_obj_id);
         END IF;
     END IF;
 
@@ -338,9 +336,7 @@ BEGIN
     IF NOT v_replay THEN
         v_actor := claimius._actor_user_for_row(v_object_type, coalesce(NEW, OLD));
         IF v_actor IS NOT NULL THEN
-            IF claimius.recompute_user_object(v_actor, v_object_type, v_obj_id) THEN
-                PERFORM claimius._refresh_user_users(v_actor);
-            END IF;
+            PERFORM claimius.recompute_user_object(v_actor, v_object_type, v_obj_id);
         END IF;
     END IF;
 
@@ -432,7 +428,6 @@ DECLARE
     v_table       TEXT;
     v_claim_id    UUID;
     v_actor       UUID;
-    v_changed     BOOLEAN;
 BEGIN
     IF claimius.in_replay_mode() THEN
         RETURN coalesce(NEW, OLD);
@@ -463,14 +458,10 @@ BEGIN
     -- other pair, the assignee's included, settles when its user reads.
     v_actor := claimius._actor_user_for_row('claimius.' || v_table, coalesce(NEW, OLD));
     IF v_actor IS NOT NULL THEN
-        v_changed := claimius.recompute_user_object(v_actor, 'claimius.claim', v_claim_id);
+        PERFORM claimius.recompute_user_object(v_actor, 'claimius.claim', v_claim_id);
         IF v_table = 'claim_object' THEN
-            v_changed := claimius.recompute_user_object(
-                    v_actor, coalesce(NEW.object_type, OLD.object_type), coalesce(NEW.object_id, OLD.object_id))
-                OR v_changed;
-        END IF;
-        IF v_changed THEN
-            PERFORM claimius._refresh_user_users(v_actor);
+            PERFORM claimius.recompute_user_object(
+                    v_actor, coalesce(NEW.object_type, OLD.object_type), coalesce(NEW.object_id, OLD.object_id));
         END IF;
     END IF;
 
@@ -608,8 +599,8 @@ $$ LANGUAGE plpgsql;
 
 -- ----------------------------------------------------------------------------
 -- emit_sync_event
--- Trigger function that publishes changes from user_object, object_users,
--- and user_users into sync_event. Disciples consume from sync_event by seq.
+-- Trigger function that publishes changes from user_object and user_users
+-- into sync_event. Disciples consume from sync_event by seq.
 -- ----------------------------------------------------------------------------
 
 CREATE OR REPLACE FUNCTION claimius.emit_sync_event()
@@ -690,7 +681,6 @@ DECLARE
     v_row       RECORD;
     v_diff      RECORD;
     v_open      BOOLEAN;
-    v_changed   BOOLEAN := FALSE;
 BEGIN
     IF p_user_id IS NULL THEN
         RETURN;
@@ -787,11 +777,11 @@ BEGIN
             END IF;
 
             IF v_open THEN
-                v_changed := claimius.recompute_user_object(p_user_id, p_object_type, p_object_id);
+                PERFORM claimius.recompute_user_object(p_user_id, p_object_type, p_object_id);
             END IF;
         EXCEPTION WHEN OTHERS THEN
             -- leave the pair outstanding for the next reader
-            v_changed := FALSE;
+            NULL;
         END;
     ELSE
         FOR v_diff IN
@@ -824,10 +814,10 @@ BEGIN
             CONTINUE WHEN NOT pg_try_advisory_xact_lock(hashtextextended(v_diff.id::TEXT || ':' || p_user_id::TEXT, 0));
             BEGIN
                 IF v_diff.kind = 'object' THEN
-                    v_open := claimius._settle_object_diff(
+                    PERFORM claimius._settle_object_diff(
                             p_user_id, v_diff.object_type, v_diff.object_id, v_diff.cascade);
                 ELSE
-                    v_open := claimius._settle_claim_diff(p_user_id, v_diff.claim_id, v_diff.sa_created_at);
+                    PERFORM claimius._settle_claim_diff(p_user_id, v_diff.claim_id, v_diff.sa_created_at);
                 END IF;
 
                 INSERT INTO claimius.access_diff_user (diff_id, user_id, generation)
@@ -837,7 +827,6 @@ BEGIN
                         sa_created_at = now();
 
                 PERFORM claimius._clear_diff(v_diff.id);
-                v_changed := v_changed OR v_open;
             EXCEPTION WHEN OTHERS THEN
                 -- leave the share outstanding for the next read
                 NULL;
@@ -850,18 +839,13 @@ BEGIN
                 FOR UPDATE SKIP LOCKED
             LOOP
                 BEGIN
-                    v_changed := claimius.recompute_user_object(p_user_id, v_row.object_type, v_row.object_id)
-                        OR v_changed;
+                    PERFORM claimius.recompute_user_object(p_user_id, v_row.object_type, v_row.object_id);
                     DELETE FROM claimius.reconcile_queue WHERE id = v_row.id;
                 EXCEPTION WHEN OTHERS THEN
                     -- leave it queued for the next attempt
                     NULL;
                 END;
             END LOOP;
-    END IF;
-
-    IF v_changed THEN
-        PERFORM claimius._refresh_user_users(p_user_id);
     END IF;
 END;
 $$ LANGUAGE plpgsql;
@@ -1064,16 +1048,18 @@ $$ LANGUAGE plpgsql;
 
 COMMENT ON FUNCTION claimius._set_self_parent_on_insert() IS 'BEFORE INSERT for parenthood tables. Self references on root creation; copies parent sa_root_id from the same table otherwise.';
 -- recompute_external_access
--- Materializes user_object and object_users for one user across every
--- registered external table. The prophet cannot compute these rows because
--- the tables exist only on the disciple, so sync calls this after applying a
--- claim, claim_object or user_claim payload.
+-- Materializes user_object for one user across every registered external
+-- table. The prophet cannot compute these rows because the tables exist only
+-- on the disciple, so sync calls this after applying a claim, claim_object or
+-- user_claim payload. One set based recompute per table over its live rows
+-- and the pairs the user already holds on it, so a pair whose row went is
+-- purged in the same call; user_users follows through _count_user_users.
 CREATE OR REPLACE FUNCTION claimius.recompute_external_access(
     p_user_id UUID
 ) RETURNS INTEGER AS $$
 DECLARE
     v_table RECORD;
-    v_row   RECORD;
+    v_ids   UUID[];
     v_count INTEGER := 0;
 BEGIN
     FOR v_table IN
@@ -1081,21 +1067,21 @@ BEGIN
         FROM claimius.table_info
         WHERE is_internal = FALSE
         LOOP
-            FOR v_row IN EXECUTE format(
-                'SELECT id FROM %I.%I%s',
+            EXECUTE format(
+                'SELECT ARRAY(SELECT id FROM %I.%I%s UNION SELECT object_id FROM claimius.user_object WHERE user_id = $1 AND object_type = $2)',
                 v_table.schema_name,
                 v_table.table_name,
                 CASE WHEN v_table.has_sa_deleted_at THEN ' WHERE sa_deleted_at IS NULL' ELSE '' END
-            )
-                LOOP
-                    PERFORM claimius.recompute_user_object(p_user_id, v_table.object_type, v_row.id);
-                    v_count := v_count + 1;
-                END LOOP;
+            ) INTO v_ids USING p_user_id, v_table.object_type;
+
+            IF cardinality(v_ids) > 0 THEN
+                PERFORM claimius.recompute_user_object(p_user_id, v_table.object_type, VARIADIC v_ids);
+                v_count := v_count + cardinality(v_ids);
+            END IF;
         END LOOP;
 
-    PERFORM claimius._refresh_user_users(p_user_id);
     RETURN v_count;
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius.recompute_external_access(p_user_id uuid) IS 'Rebuilds user_object and object_users for one user over every external registered table. Called by disciple sync after a claim binding arrives, since the prophet holds no external tables.';
+COMMENT ON FUNCTION claimius.recompute_external_access(p_user_id uuid) IS 'Rebuilds user_object for one user over every external registered table, one set based recompute per table. Called by disciple sync after a claim binding arrives, since the prophet holds no external tables.';

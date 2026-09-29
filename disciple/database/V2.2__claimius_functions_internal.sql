@@ -948,11 +948,11 @@ COMMENT ON FUNCTION claimius._denormalize_objects(TEXT, UUID[]) IS 'Reads name, 
 -- The single function that recomputes user_object for one user on a set of
 -- objects of one type: the one pair a check asks about, or the reader's share
 -- of an area in one statement per step. It handles insert, update, and delete
--- based on whether grants survive, and maintains the companion object_users
--- rows. A creator holds its row through sa_created_by, which is a
--- user_claim.id, unless a deny bound on the row itself carries the owner bit.
--- Returns whether the user's object_users set changed, which is the only case
--- in which the calling orchestrator has to rebuild user_users.
+-- based on whether grants survive. A creator holds its row through
+-- sa_created_by, which is a user_claim.id, unless a deny bound on the row
+-- itself carries the owner bit. The pairs it inserts and deletes move
+-- user_users through _count_user_users. Returns whether the user's pair set
+-- changed.
 DROP FUNCTION IF EXISTS claimius.recompute_user_object(UUID, TEXT, UUID);
 CREATE OR REPLACE FUNCTION claimius.recompute_user_object(
     p_user_id       UUID,
@@ -1055,116 +1055,178 @@ BEGIN
             FROM unnest(v_ids) AS i
         )
       AND object_id NOT IN (SELECT (p ->> 'object_id')::UUID FROM jsonb_array_elements(v_pairs) AS p);
-
-    DELETE FROM claimius.object_users
-    WHERE id IN (
-            SELECT claimius.composite_id(p_object_type, i::TEXT, p_user_id::TEXT)
-            FROM unnest(v_ids) AS i
-        )
-      AND object_id NOT IN (SELECT (p ->> 'object_id')::UUID FROM jsonb_array_elements(v_pairs) AS p);
     GET DIAGNOSTICS v_removed = ROW_COUNT;
 
-    INSERT INTO claimius.user_object (
-        id, user_id, object_id, object_type,
-        sa_access, scope, grants, direct_grant,
-        sa_owner_id, sa_location_id, sa_root_id,
-        sa_name, sa_description, sa_link, search_vector
+    WITH written AS (
+        INSERT INTO claimius.user_object (
+            id, user_id, object_id, object_type,
+            sa_access, scope, grants, direct_grant,
+            sa_owner_id, sa_location_id, sa_root_id,
+            sa_name, sa_description, sa_link, search_vector
+        )
+        SELECT claimius.composite_id(p_user_id::TEXT, p_object_type, p.object_id::TEXT),
+               p_user_id, p.object_id, p_object_type,
+               p.sa_access, p.scope, p.grants, p.direct_grant,
+               p.sa_owner_id, p.sa_location_id, p.sa_root_id,
+               p.sa_name, p.sa_description, p.sa_link,
+               setweight(to_tsvector('simple', coalesce(p.sa_name, '')), 'A') ||
+               setweight(to_tsvector('simple', coalesce(p.sa_description, '')), 'B')
+        FROM jsonb_to_recordset(v_pairs) AS p(
+            object_id UUID, sa_access INTEGER, scope JSONB, grants JSONB, direct_grant BOOLEAN,
+            sa_owner_id UUID, sa_location_id UUID, sa_root_id UUID,
+            sa_name TEXT, sa_description TEXT, sa_link TEXT
+        )
+        ON CONFLICT (id) DO UPDATE SET
+                                       sa_access = EXCLUDED.sa_access,
+                                       scope = EXCLUDED.scope,
+                                       grants = EXCLUDED.grants,
+                                       direct_grant = EXCLUDED.direct_grant,
+                                       sa_owner_id = EXCLUDED.sa_owner_id,
+                                       sa_location_id = EXCLUDED.sa_location_id,
+                                       sa_root_id = EXCLUDED.sa_root_id,
+                                       sa_name = EXCLUDED.sa_name,
+                                       sa_description = EXCLUDED.sa_description,
+                                       sa_link = EXCLUDED.sa_link,
+                                       search_vector = EXCLUDED.search_vector,
+                                       sa_updated_at = now()
+        WHERE claimius.user_object.sa_access        IS DISTINCT FROM EXCLUDED.sa_access
+           OR claimius.user_object.scope            IS DISTINCT FROM EXCLUDED.scope
+           OR claimius.user_object.grants           IS DISTINCT FROM EXCLUDED.grants
+           OR claimius.user_object.direct_grant     IS DISTINCT FROM EXCLUDED.direct_grant
+           OR claimius.user_object.sa_owner_id      IS DISTINCT FROM EXCLUDED.sa_owner_id
+           OR claimius.user_object.sa_location_id   IS DISTINCT FROM EXCLUDED.sa_location_id
+           OR claimius.user_object.sa_root_id       IS DISTINCT FROM EXCLUDED.sa_root_id
+           OR claimius.user_object.sa_name          IS DISTINCT FROM EXCLUDED.sa_name
+           OR claimius.user_object.sa_description   IS DISTINCT FROM EXCLUDED.sa_description
+           OR claimius.user_object.sa_link          IS DISTINCT FROM EXCLUDED.sa_link
+           OR claimius.user_object.search_vector    IS DISTINCT FROM EXCLUDED.search_vector
+        RETURNING xmax = 0 AS inserted
     )
-    SELECT claimius.composite_id(p_user_id::TEXT, p_object_type, p.object_id::TEXT),
-           p_user_id, p.object_id, p_object_type,
-           p.sa_access, p.scope, p.grants, p.direct_grant,
-           p.sa_owner_id, p.sa_location_id, p.sa_root_id,
-           p.sa_name, p.sa_description, p.sa_link,
-           setweight(to_tsvector('simple', coalesce(p.sa_name, '')), 'A') ||
-           setweight(to_tsvector('simple', coalesce(p.sa_description, '')), 'B')
-    FROM jsonb_to_recordset(v_pairs) AS p(
-        object_id UUID, sa_access INTEGER, scope JSONB, grants JSONB, direct_grant BOOLEAN,
-        sa_owner_id UUID, sa_location_id UUID, sa_root_id UUID,
-        sa_name TEXT, sa_description TEXT, sa_link TEXT
-    )
-    ON CONFLICT (id) DO UPDATE SET
-                                   sa_access = EXCLUDED.sa_access,
-                                   scope = EXCLUDED.scope,
-                                   grants = EXCLUDED.grants,
-                                   direct_grant = EXCLUDED.direct_grant,
-                                   sa_owner_id = EXCLUDED.sa_owner_id,
-                                   sa_location_id = EXCLUDED.sa_location_id,
-                                   sa_root_id = EXCLUDED.sa_root_id,
-                                   sa_name = EXCLUDED.sa_name,
-                                   sa_description = EXCLUDED.sa_description,
-                                   sa_link = EXCLUDED.sa_link,
-                                   search_vector = EXCLUDED.search_vector,
-                                   sa_updated_at = now()
-    WHERE claimius.user_object.sa_access        IS DISTINCT FROM EXCLUDED.sa_access
-       OR claimius.user_object.scope            IS DISTINCT FROM EXCLUDED.scope
-       OR claimius.user_object.grants           IS DISTINCT FROM EXCLUDED.grants
-       OR claimius.user_object.direct_grant     IS DISTINCT FROM EXCLUDED.direct_grant
-       OR claimius.user_object.sa_owner_id      IS DISTINCT FROM EXCLUDED.sa_owner_id
-       OR claimius.user_object.sa_location_id   IS DISTINCT FROM EXCLUDED.sa_location_id
-       OR claimius.user_object.sa_root_id       IS DISTINCT FROM EXCLUDED.sa_root_id
-       OR claimius.user_object.sa_name          IS DISTINCT FROM EXCLUDED.sa_name
-       OR claimius.user_object.sa_description   IS DISTINCT FROM EXCLUDED.sa_description
-       OR claimius.user_object.sa_link          IS DISTINCT FROM EXCLUDED.sa_link
-       OR claimius.user_object.search_vector    IS DISTINCT FROM EXCLUDED.search_vector;
-
-    INSERT INTO claimius.object_users (id, object_id, object_type, user_id)
-    SELECT claimius.composite_id(p_object_type, (p ->> 'object_id'), p_user_id::TEXT),
-           (p ->> 'object_id')::UUID, p_object_type, p_user_id
-    FROM jsonb_array_elements(v_pairs) AS p
-    ON CONFLICT (id) DO NOTHING;
-    GET DIAGNOSTICS v_added = ROW_COUNT;
+    SELECT count(*) FILTER (WHERE inserted) INTO v_added FROM written;
 
     RETURN v_removed > 0 OR v_added > 0;
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius.recompute_user_object(UUID, TEXT, UUID[]) IS 'Recomputes user_object and object_users for one user on a set of objects of one type, one pair or a whole share. Purges the pairs whose object is soft deleted or absent or that no grant reaches. Returns whether the user''s object_users set changed.';
+COMMENT ON FUNCTION claimius.recompute_user_object(UUID, TEXT, UUID[]) IS 'Recomputes user_object for one user on a set of objects of one type, one pair or a whole share. Purges the pairs whose object is soft deleted or absent or that no grant reaches. Returns whether the user''s pair set changed.';
+
+-- _count_user_users
+-- Statement trigger on user_object that keeps user_users by counting. Every
+-- pair (u, x) that enters moves sharing_object_count up by one between u and
+-- each other user of object x, in both directions; every pair that leaves
+-- moves it down, and a row reaching zero is removed. A statement touches the
+-- U_x users of each object it names and nothing of either user's other
+-- objects. Two pairs entering or leaving on the same object in one statement
+-- count once per ordered pair of users. Quiet under replay_mode, where the
+-- disciple takes user_users from the feed and the bulk seed rebuilds it with
+-- _refresh_user_users.
+CREATE OR REPLACE FUNCTION claimius._count_user_users()
+    RETURNS TRIGGER AS $$
+BEGIN
+    IF claimius.in_replay_mode() THEN
+        RETURN NULL;
+    END IF;
+
+    IF TG_OP = 'INSERT' THEN
+        WITH moved AS (
+            SELECT d.viewer_id, d.target_user_id
+            FROM changed c
+                JOIN claimius.user_object o
+                    ON o.object_type = c.object_type
+                   AND o.object_id = c.object_id
+                   AND o.user_id <> c.user_id
+                CROSS JOIN LATERAL (VALUES (c.user_id, o.user_id), (o.user_id, c.user_id)) AS d(viewer_id, target_user_id)
+            WHERE d.viewer_id = c.user_id
+               OR NOT EXISTS (SELECT 1 FROM changed n WHERE n.id = o.id)
+        )
+        INSERT INTO claimius.user_users (id, viewer_id, target_user_id, sharing_object_count)
+        SELECT claimius.composite_id(m.viewer_id::TEXT, m.target_user_id::TEXT),
+               m.viewer_id, m.target_user_id, count(*)::INTEGER
+        FROM moved m
+        GROUP BY m.viewer_id, m.target_user_id
+        ON CONFLICT (id) DO UPDATE SET
+            sharing_object_count = claimius.user_users.sharing_object_count + EXCLUDED.sharing_object_count,
+            last_shared_at       = now();
+    ELSE
+        WITH moved AS (
+            SELECT c.user_id AS viewer_id, o.user_id AS target_user_id
+            FROM changed c
+                JOIN changed o
+                    ON o.object_type = c.object_type
+                   AND o.object_id = c.object_id
+                   AND o.user_id <> c.user_id
+
+            UNION ALL
+
+            SELECT d.viewer_id, d.target_user_id
+            FROM changed c
+                JOIN claimius.user_object o
+                    ON o.object_type = c.object_type
+                   AND o.object_id = c.object_id
+                CROSS JOIN LATERAL (VALUES (c.user_id, o.user_id), (o.user_id, c.user_id)) AS d(viewer_id, target_user_id)
+        ),
+        delta AS (
+            SELECT claimius.composite_id(m.viewer_id::TEXT, m.target_user_id::TEXT) AS id,
+                   count(*)::INTEGER AS n
+            FROM moved m
+            GROUP BY m.viewer_id, m.target_user_id
+        ),
+        gone AS (
+            DELETE FROM claimius.user_users uu
+            USING delta d
+            WHERE uu.id = d.id AND uu.sharing_object_count <= d.n
+            RETURNING uu.id
+        )
+        UPDATE claimius.user_users uu
+        SET sharing_object_count = uu.sharing_object_count - d.n
+        FROM delta d
+        WHERE uu.id = d.id AND uu.sharing_object_count > d.n;
+    END IF;
+
+    RETURN NULL;
+END;
+$$ LANGUAGE plpgsql;
+
+COMMENT ON FUNCTION claimius._count_user_users() IS 'Statement trigger on user_object. Moves user_users.sharing_object_count by one per pair entering or leaving against every other user of the object, both directions, and removes a row at zero. Quiet under replay_mode.';
 
 -- _refresh_user_users
--- Recomputes the user_users rows on both sides of one user from object_users:
--- the rows where it is the viewer and the rows where it is the target, since
--- the sharing of two users moves only with the objects of either. A settle
--- that changes one user's objects refreshes that user alone. Rows that did
--- not change are not rewritten.
+-- The bulk rebuild of user_users on both sides of one user from user_object:
+-- the rows where it is the viewer and the rows where it is the target. Reads
+-- the user's whole share and every other user of each object in it, so it
+-- runs only on the bulk paths: the bulk seed, whose pairs are written under
+-- replay_mode where no count moves, and rebuild_user_object, which repairs
+-- any drift. Rows whose count did not change are not rewritten.
 CREATE OR REPLACE FUNCTION claimius._refresh_user_users(p_viewer_id UUID)
     RETURNS VOID AS $$
 BEGIN
     WITH shared AS (
         SELECT other.user_id                AS other_id,
-               count(*)::INTEGER            AS sharing,
-               min(other.sa_created_at)     AS other_first,
-               max(other.sa_updated_at)     AS other_last,
-               min(mine.sa_created_at)      AS mine_first,
-               max(mine.sa_updated_at)      AS mine_last
-        FROM claimius.object_users mine
-            JOIN claimius.object_users other
-                ON other.object_id = mine.object_id
-               AND other.object_type = mine.object_type
+               count(*)::INTEGER            AS sharing
+        FROM claimius.user_object mine
+            JOIN claimius.user_object other
+                ON other.object_type = mine.object_type
+               AND other.object_id = mine.object_id
                AND other.user_id <> mine.user_id
         WHERE mine.user_id = p_viewer_id
         GROUP BY other.user_id
     ),
     wanted AS (
         SELECT claimius.composite_id(p_viewer_id::TEXT, s.other_id::TEXT) AS id,
-               p_viewer_id AS viewer_id, s.other_id AS target_user_id,
-               s.sharing, s.other_first AS first_shared_at, s.other_last AS last_shared_at
+               p_viewer_id AS viewer_id, s.other_id AS target_user_id, s.sharing
         FROM shared s
         UNION ALL
         SELECT claimius.composite_id(s.other_id::TEXT, p_viewer_id::TEXT),
-               s.other_id, p_viewer_id,
-               s.sharing, s.mine_first, s.mine_last
+               s.other_id, p_viewer_id, s.sharing
         FROM shared s
     ),
     written AS (
-        INSERT INTO claimius.user_users (id, viewer_id, target_user_id, sharing_object_count, first_shared_at, last_shared_at)
-        SELECT w.id, w.viewer_id, w.target_user_id, w.sharing, w.first_shared_at, w.last_shared_at
+        INSERT INTO claimius.user_users (id, viewer_id, target_user_id, sharing_object_count)
+        SELECT w.id, w.viewer_id, w.target_user_id, w.sharing
         FROM wanted w
         ON CONFLICT (id) DO UPDATE SET
             sharing_object_count = EXCLUDED.sharing_object_count,
-            first_shared_at      = EXCLUDED.first_shared_at,
-            last_shared_at       = EXCLUDED.last_shared_at
-        WHERE (claimius.user_users.sharing_object_count, claimius.user_users.first_shared_at, claimius.user_users.last_shared_at)
-              IS DISTINCT FROM (EXCLUDED.sharing_object_count, EXCLUDED.first_shared_at, EXCLUDED.last_shared_at)
+            last_shared_at       = now()
+        WHERE claimius.user_users.sharing_object_count IS DISTINCT FROM EXCLUDED.sharing_object_count
         RETURNING 1
     )
     DELETE FROM claimius.user_users uu
@@ -1173,13 +1235,13 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius._refresh_user_users(p_viewer_id uuid) IS 'Rebuilds the user_users rows on both sides of one user, rewriting only the rows that changed.';
+COMMENT ON FUNCTION claimius._refresh_user_users(p_viewer_id uuid) IS 'Bulk rebuild of the user_users rows on both sides of one user from user_object, rewriting only the counts that changed. For the bulk paths; every other write is counted by _count_user_users.';
 
 
 -- _affected_users_for_object
 -- Returns the list of users whose access to the given object could change.
--- Includes any user holding a relevant claim plus any user already in
--- object_users for that object.
+-- Includes any user holding a relevant claim plus any user already holding a
+-- user_object pair on the object, read through idx_user_object_object_user.
 CREATE OR REPLACE FUNCTION claimius._affected_users_for_object(
     p_object_type   TEXT,
     p_object_id     UUID
@@ -1227,9 +1289,9 @@ BEGIN
 
             UNION
 
-            -- existing object_users
-            SELECT ou.user_id FROM claimius.object_users ou
-            WHERE TRUE AND ou.object_id = p_object_id AND ou.object_type = p_object_type
+            -- existing pairs on the object
+            SELECT uo.user_id FROM claimius.user_object uo
+            WHERE uo.object_type = p_object_type AND uo.object_id = p_object_id
 
             UNION
 
@@ -1670,7 +1732,7 @@ BEGIN
     END LOOP;
 
     PERFORM claimius._refresh_user_users(s.user_id)
-    FROM (SELECT DISTINCT user_id FROM claimius.object_users) s;
+    FROM (SELECT DISTINCT user_id FROM claimius.user_object) s;
 END;
 $function$
 ;
@@ -1772,7 +1834,7 @@ COMMENT ON FUNCTION claimius._raise_claim_diff(UUID, UUID) IS 'Marks a claim are
 -- area, the object and with cascade its subtree, on which the user holds a
 -- pair or which a binding of the user's own claims reaches, plus the object
 -- itself so its creator is settled. One recompute per object type. Returns
--- whether the user's object_users set changed.
+-- whether the user's pair set changed.
 -- ----------------------------------------------------------------------------
 DROP FUNCTION IF EXISTS claimius._settle_object_diff(TEXT, UUID, BOOLEAN);
 CREATE OR REPLACE FUNCTION claimius._settle_object_diff(
@@ -1850,7 +1912,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius._settle_object_diff(UUID, TEXT, UUID, BOOLEAN) IS 'Recomputes one user''s share of an object area, set based. Returns whether the user''s object_users set changed.';
+COMMENT ON FUNCTION claimius._settle_object_diff(UUID, TEXT, UUID, BOOLEAN) IS 'Recomputes one user''s share of an object area, set based. Returns whether the user''s pair set changed.';
 
 -- ----------------------------------------------------------------------------
 -- _settle_claim_diff
@@ -1859,7 +1921,7 @@ COMMENT ON FUNCTION claimius._settle_object_diff(UUID, TEXT, UUID, BOOLEAN) IS '
 -- bound by the claims it links to; and the user's pairs whose grants name the
 -- claim. Bindings and links removed or changed since the area opened, at
 -- p_since, count too, so the pairs they used to reach are settled away. One
--- recompute per object type. Returns whether the user's object_users set
+-- recompute per object type. Returns whether the user's pair set
 -- changed.
 -- ----------------------------------------------------------------------------
 DROP FUNCTION IF EXISTS claimius._settle_claim_diff(UUID);
@@ -1928,7 +1990,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius._settle_claim_diff(UUID, UUID, TIMESTAMPTZ) IS 'Recomputes one user''s share of a claim area, set based. Returns whether the user''s object_users set changed.';
+COMMENT ON FUNCTION claimius._settle_claim_diff(UUID, UUID, TIMESTAMPTZ) IS 'Recomputes one user''s share of a claim area, set based. Returns whether the user''s pair set changed.';
 
 -- ----------------------------------------------------------------------------
 -- _clear_diff
@@ -1986,24 +2048,24 @@ BEGIN
                 SELECT 1 FROM claimius.access_diff_user du
                 WHERE du.diff_id = v_diff.id AND du.user_id = v_creator AND du.generation = v_diff.generation))
             OR EXISTS (
-                SELECT 1 FROM claimius.object_users ou
-                WHERE ou.object_type = v_diff.object_type
-                  AND ou.object_id = v_diff.object_id
+                SELECT 1 FROM claimius.user_object uo
+                WHERE uo.object_type = v_diff.object_type
+                  AND uo.object_id = v_diff.object_id
                   AND NOT EXISTS (
                       SELECT 1 FROM claimius.access_diff_user du
-                      WHERE du.diff_id = v_diff.id AND du.user_id = ou.user_id AND du.generation = v_diff.generation))
+                      WHERE du.diff_id = v_diff.id AND du.user_id = uo.user_id AND du.generation = v_diff.generation))
             OR (v_diff.cascade AND EXISTS (
                 SELECT 1
                 FROM claimius.inheritance_info e
-                    JOIN claimius.object_users ou
-                        ON ou.object_type = e.descendant_type
-                       AND ou.object_id = e.descendant_id
+                    JOIN claimius.user_object uo
+                        ON uo.object_type = e.descendant_type
+                       AND uo.object_id = e.descendant_id
                 WHERE e.ancestor_type = v_diff.object_type
                   AND e.ancestor_id = v_diff.object_id
                   AND e.depth > 0
                   AND NOT EXISTS (
                       SELECT 1 FROM claimius.access_diff_user du
-                      WHERE du.diff_id = v_diff.id AND du.user_id = ou.user_id AND du.generation = v_diff.generation)))
+                      WHERE du.diff_id = v_diff.id AND du.user_id = uo.user_id AND du.generation = v_diff.generation)))
             OR EXISTS (
                 SELECT 1
                 FROM (

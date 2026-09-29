@@ -22,7 +22,7 @@ An app is one product that claimius governs: Samna Auth itself, Bookable, Nimplo
 
 ## Two scoping mechanisms
 
-1. Own column. `samna_user`, `claim`, `user_claim`, `claim_object`, `user_object`, `object_users`, `user_users`, `user_relation`, `user_field`, `object_field`, `samna_client`, `samna_secret`, `audit` and `access_diff` carry `app_id` on a prophet. A row belongs to one app, and every read function filters on it: `app_id` is the second column of `idx_user_claim_user_app` and `idx_user_object_user_type` and the first of `idx_user_users_viewer`, so the filter narrows the same descent that finds the user.
+1. Own column. `samna_user`, `claim`, `user_claim`, `claim_object`, `user_object`, `user_users`, `user_relation`, `user_field`, `object_field`, `samna_client`, `samna_secret`, `audit` and `access_diff` carry `app_id` on a prophet. A row belongs to one app, and every read function filters on it: `app_id` is the second column of `idx_user_claim_user_app` and `idx_user_object_user_type` and the first of `idx_user_users_viewer`, so the filter narrows the same descent that finds the user.
 
 2. Links. `organization` and `location` carry no `app_id`. An object belongs to every app holding a live `app_object` row for it, found with `app_object_ids(app_id, object_type)`, guarded with `app_has_object`, created with `link_app_object`, removed with `unlink_app_object`.
 

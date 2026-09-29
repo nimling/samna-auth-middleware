@@ -7,7 +7,7 @@
 --   calc_hierarchical_access  Fires on hierarchical tables (org, location,
 --                             parenthood enabled tables)
 --   calc_claim_access         Fires on claim, claim_object, user_claim
---   emit_sync_event           Fires on user_object, object_users, user_users
+--   emit_sync_event           Fires on user_object, user_users
 --                             to publish into sync_event
 --   audit_trigger             Fires on core auditable tables to write audit
 --   tg_update_timestamp       Generic sa_updated_at maintenance
@@ -77,9 +77,7 @@ BEGIN
     FOREACH v_app_id IN ARRAY v_app_ids LOOP
         v_actor := claimius._actor_user_for_row(v_app_id, v_object_type, coalesce(NEW, OLD));
         IF v_actor IS NOT NULL THEN
-            IF claimius.recompute_user_object(v_app_id, v_actor, v_object_type, v_obj_id) THEN
-                PERFORM claimius._refresh_user_users(v_app_id, v_actor);
-            END IF;
+            PERFORM claimius.recompute_user_object(v_app_id, v_actor, v_object_type, v_obj_id);
         END IF;
 
         IF v_structural THEN
@@ -370,9 +368,7 @@ BEGIN
     FOREACH v_app_id IN ARRAY v_app_ids LOOP
         v_actor := claimius._actor_user_for_row(v_app_id, v_object_type, coalesce(NEW, OLD));
         IF v_actor IS NOT NULL THEN
-            IF claimius.recompute_user_object(v_app_id, v_actor, v_object_type, v_obj_id) THEN
-                PERFORM claimius._refresh_user_users(v_app_id, v_actor);
-            END IF;
+            PERFORM claimius.recompute_user_object(v_app_id, v_actor, v_object_type, v_obj_id);
         END IF;
 
         PERFORM claimius._raise_object_diff(v_app_id, v_object_type, v_obj_id, TRUE);
@@ -465,7 +461,6 @@ DECLARE
     v_app_id      UUID;
     v_claim_id    UUID;
     v_actor       UUID;
-    v_changed     BOOLEAN;
 BEGIN
     IF claimius.in_replay_mode() THEN
         RETURN coalesce(NEW, OLD);
@@ -497,14 +492,10 @@ BEGIN
     -- other pair, the assignee's included, settles when its user reads.
     v_actor := claimius._actor_user_for_row(v_app_id, 'claimius.' || v_table, coalesce(NEW, OLD));
     IF v_actor IS NOT NULL THEN
-        v_changed := claimius.recompute_user_object(v_app_id, v_actor, 'claimius.claim', v_claim_id);
+        PERFORM claimius.recompute_user_object(v_app_id, v_actor, 'claimius.claim', v_claim_id);
         IF v_table = 'claim_object' THEN
-            v_changed := claimius.recompute_user_object(
-                    v_app_id, v_actor, coalesce(NEW.object_type, OLD.object_type), coalesce(NEW.object_id, OLD.object_id))
-                OR v_changed;
-        END IF;
-        IF v_changed THEN
-            PERFORM claimius._refresh_user_users(v_app_id, v_actor);
+            PERFORM claimius.recompute_user_object(
+                    v_app_id, v_actor, coalesce(NEW.object_type, OLD.object_type), coalesce(NEW.object_id, OLD.object_id));
         END IF;
     END IF;
 
@@ -643,8 +634,8 @@ $$ LANGUAGE plpgsql;
 
 -- ----------------------------------------------------------------------------
 -- emit_sync_event
--- Trigger function that publishes changes from user_object, object_users,
--- and user_users into sync_event. Disciples consume from sync_event by seq.
+-- Trigger function that publishes changes from user_object and user_users
+-- into sync_event. Disciples consume from sync_event by seq.
 -- ----------------------------------------------------------------------------
 
 CREATE OR REPLACE FUNCTION claimius.emit_sync_event()
@@ -726,7 +717,6 @@ DECLARE
     v_row       RECORD;
     v_diff      RECORD;
     v_open      BOOLEAN;
-    v_changed   BOOLEAN := FALSE;
 BEGIN
     IF p_app_id IS NULL OR p_user_id IS NULL THEN
         RETURN;
@@ -832,11 +822,11 @@ BEGIN
             END IF;
 
             IF v_open THEN
-                v_changed := claimius.recompute_user_object(p_app_id, p_user_id, p_object_type, p_object_id);
+                PERFORM claimius.recompute_user_object(p_app_id, p_user_id, p_object_type, p_object_id);
             END IF;
         EXCEPTION WHEN OTHERS THEN
             -- leave the pair outstanding for the next reader
-            v_changed := FALSE;
+            NULL;
         END;
     ELSE
         FOR v_diff IN
@@ -872,10 +862,10 @@ BEGIN
             CONTINUE WHEN NOT pg_try_advisory_xact_lock(hashtextextended(v_diff.id::TEXT || ':' || p_user_id::TEXT, 0));
             BEGIN
                 IF v_diff.kind = 'object' THEN
-                    v_open := claimius._settle_object_diff(
+                    PERFORM claimius._settle_object_diff(
                             p_app_id, p_user_id, v_diff.object_type, v_diff.object_id, v_diff.cascade);
                 ELSE
-                    v_open := claimius._settle_claim_diff(p_app_id, p_user_id, v_diff.claim_id, v_diff.sa_created_at);
+                    PERFORM claimius._settle_claim_diff(p_app_id, p_user_id, v_diff.claim_id, v_diff.sa_created_at);
                 END IF;
 
                 INSERT INTO claimius.access_diff_user (diff_id, app_id, user_id, generation)
@@ -885,7 +875,6 @@ BEGIN
                         sa_created_at = now();
 
                 PERFORM claimius._clear_diff(p_app_id, v_diff.id);
-                v_changed := v_changed OR v_open;
             EXCEPTION WHEN OTHERS THEN
                 -- leave the share outstanding for the next read
                 NULL;
@@ -898,18 +887,13 @@ BEGIN
                 FOR UPDATE SKIP LOCKED
             LOOP
                 BEGIN
-                    v_changed := claimius.recompute_user_object(p_app_id, p_user_id, v_row.object_type, v_row.object_id)
-                        OR v_changed;
+                    PERFORM claimius.recompute_user_object(p_app_id, p_user_id, v_row.object_type, v_row.object_id);
                     DELETE FROM claimius.reconcile_queue WHERE id = v_row.id;
                 EXCEPTION WHEN OTHERS THEN
                     -- leave it queued for the next attempt
                     NULL;
                 END;
             END LOOP;
-    END IF;
-
-    IF v_changed THEN
-        PERFORM claimius._refresh_user_users(p_app_id, p_user_id);
     END IF;
 END;
 $$ LANGUAGE plpgsql;

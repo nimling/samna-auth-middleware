@@ -135,7 +135,6 @@ func Connect(logger echo.Logger) (*DB, error) {
 		(*UserRelation)(nil),
 		(*UserObject)(nil),
 		(*UserUsers)(nil),
-		(*ObjectUsers)(nil),
 		(*Notification)(nil),
 		(*SyncEvent)(nil),
 		(*DiscipleState)(nil),

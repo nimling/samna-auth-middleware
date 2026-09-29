@@ -62,7 +62,6 @@ func GetSyncSnapshot(ctx echo.Context) error {
 		{"claimius.user_relation", &[]UserRelation{}, true},
 		{"claimius.audit", &[]Audit{}, true},
 		{"claimius.user_object", &[]UserObject{}, true},
-		{"claimius.object_users", &[]ObjectUsers{}, true},
 		{"claimius.user_users", &[]UserUsers{}, true},
 	}
 
