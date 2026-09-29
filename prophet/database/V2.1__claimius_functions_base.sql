@@ -50,6 +50,19 @@ $$ LANGUAGE plpgsql;
 
 COMMENT ON FUNCTION claimius.update_timestamp() IS 'Trigger function. Sets sa_updated_at = now() on UPDATE. Under replay_mode a row applied from the prophet keeps the sa_updated_at it carries, so the replica matches its source and an unchanged row compares equal.';
 
+-- update_txid
+-- Trigger function that stamps txid with the writing transaction on every
+-- INSERT and UPDATE of claim, user_claim and claim_object.
+CREATE OR REPLACE FUNCTION claimius.update_txid()
+    RETURNS TRIGGER AS $$
+BEGIN
+    NEW.txid = pg_current_xact_id();
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+COMMENT ON FUNCTION claimius.update_txid() IS 'Trigger function. Sets txid = pg_current_xact_id() on INSERT and UPDATE, under replay_mode too, so txid always names the local transaction that last wrote the row.';
+
 -- get_table_columns
 -- Returns the column names for a (schema qualified) table.
 CREATE OR REPLACE FUNCTION claimius.get_table_columns(p_object_type TEXT)

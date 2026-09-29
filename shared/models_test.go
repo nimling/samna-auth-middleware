@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 	sdb "github.com/nimling/samna-auth-middleware/shared"
+	"github.com/uptrace/bun"
 )
 
 func TestClaim_CreatorEmbedJSONRoundTrip(t *testing.T) {
@@ -473,5 +474,71 @@ func TestAccessClaim_ObjectsJSONRoundTrip(t *testing.T) {
 	}
 	if back.Objects[0].Scope == nil {
 		t.Fatalf("expected claim_object scope to round-trip")
+	}
+}
+
+func TestObjectType_ClaimiusTypesAreValidated(t *testing.T) {
+	if got, err := sdb.ResolveObjectType("organization"); err != nil || got != sdb.OBJECT_TYPE_ORGANIZATION {
+		t.Fatalf("expected the bare claimius name to resolve, got %q, %v", got, err)
+	}
+	if got, err := sdb.ResolveObjectType(sdb.OBJECT_TYPE_AUDIT); err != nil || got != sdb.OBJECT_TYPE_AUDIT {
+		t.Fatalf("expected a registered claimius type to pass, got %q, %v", got, err)
+	}
+	if _, err := sdb.ResolveObjectType("claimius.bogus"); err == nil {
+		t.Fatal("expected a claimius type the schema does not register to be refused")
+	}
+	var o sdb.ObjectType
+	if err := json.Unmarshal([]byte(`"claimius.bogus"`), &o); err == nil {
+		t.Fatal("expected the wire to refuse an unknown claimius type")
+	}
+}
+
+func TestObjectType_ConsumerTypePassesThroughJSON(t *testing.T) {
+	for _, consumer := range []string{"inventory.device", "device"} {
+		var co sdb.ClaimObject
+		if err := json.Unmarshal([]byte(`{"object_type":"`+consumer+`"}`), &co); err != nil {
+			t.Fatalf("unmarshal %q: %v", consumer, err)
+		}
+		if co.ObjectType == nil || string(*co.ObjectType) != consumer {
+			t.Fatalf("expected %q in untouched, got %v", consumer, co.ObjectType)
+		}
+		value, err := co.ObjectType.Value()
+		if err != nil || value != consumer {
+			t.Fatalf("expected %q to bind untouched, got %v, %v", consumer, value, err)
+		}
+		raw, err := json.Marshal(co.ObjectType)
+		if err != nil || string(raw) != `"`+consumer+`"` {
+			t.Fatalf("expected %q out untouched, got %s, %v", consumer, raw, err)
+		}
+	}
+}
+
+func TestObjectType_ValidateIsTheConsumersOptIn(t *testing.T) {
+	if err := sdb.ObjectType("device").Validate(); err == nil {
+		t.Fatal("expected an unqualified type to fail the consumer's check")
+	}
+	if err := sdb.ObjectType("inventory.device").Validate(); err != nil {
+		t.Fatalf("expected a qualified type to pass: %v", err)
+	}
+	if err := sdb.ObjectType("inventory.device").Validate("inventory.tag"); err == nil {
+		t.Fatal("expected a type outside the consumer's list to fail")
+	}
+	if err := sdb.ObjectType("inventory.device").Validate("inventory.tag", "inventory.device"); err != nil {
+		t.Fatalf("expected a listed type to pass: %v", err)
+	}
+}
+
+func TestObjectTypeOf_ReadsTheTableTagAsWritten(t *testing.T) {
+	type bare struct {
+		bun.BaseModel `bun:"table:device"`
+	}
+	type qualified struct {
+		bun.BaseModel `bun:"table:inventory.device,alias:d"`
+	}
+	if got, err := sdb.ObjectTypeOf(&bare{}); err != nil || got != "device" {
+		t.Fatalf("expected the bare tag untouched, got %q, %v", got, err)
+	}
+	if got, err := sdb.ObjectTypeOf(qualified{}); err != nil || got != "inventory.device" {
+		t.Fatalf("expected the qualified tag untouched, got %q, %v", got, err)
 	}
 }

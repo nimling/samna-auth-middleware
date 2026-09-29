@@ -6,18 +6,21 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/uptrace/bun"
 )
 
 func (d *DB) GetClient(ctx context.Context, clientID uuid.UUID) (*SamnaClient, error) {
 	var client SamnaClient
-	err := d.NewSelect().
-		Model(&client).
-		ExcludeColumn("sa_deleted_at").
-		Where("client_id = ?", clientID).
-		Where("sa_deleted_at IS NULL").
-		Where("status = ?", "active").
-		Where("expires_at IS NULL OR expires_at > ?", time.Now()).
-		Scan(ctx)
+	err := d.Read(ctx, func(ctx context.Context, db *bun.DB) error {
+		return db.NewSelect().
+			Model(&client).
+			ExcludeColumn("sa_deleted_at").
+			Where("client_id = ?", clientID).
+			Where("sa_deleted_at IS NULL").
+			Where("status = ?", "active").
+			Where("expires_at IS NULL OR expires_at > ?", time.Now()).
+			Scan(ctx)
+	})
 	if err != nil {
 		return nil, fmt.Errorf("get client: %w", err)
 	}

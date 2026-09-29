@@ -131,12 +131,13 @@ A beat is a check, so the incident state machine is unchanged: three failed beat
 | `SAUTH_DEBUG_USER_ID` | both | UUID that bypasses authentication |
 | `SAUTH_DEBUG_CLIENTS` | both | JSON map of debug client credentials |
 | `PGHOST` `PGPORT` `PGUSER` `PGPASSWORD` `PGDATABASE` `PGSSLMODE` | both | Database connection |
+| `SAUTH_REPLICA_DSN` | both | Optional DSN of a hot standby. Reads that never settle, the scope check, the app, client and tree reads, go to it; one the standby refuses with SQLSTATE `25006` runs again on the primary |
 
 At `sdb.Init` the prophet and disciple resolve the OIDC issuer, token, and jwks endpoints once and log them through the echo logger. A miss disables auth and serves an unavailable response rather than failing startup.
 
 ## Object types
 
-Object types are schema qualified at every boundary, in the database and on the wire. `ObjectType.MarshalJSON` sends the qualified string, so a caller sees `public.device` exactly as the row stores it. `ResolveObjectType` in `shared` is the one resolver: it accepts a qualified string or a bare claimius name such as `organization` and refuses any other bare name, so a consumer qualifies its own types. A model whose `table:` tag carries no schema reads as the `public` schema through `ObjectTypeOf`. `init_claimius_tables` raises on an unqualified name.
+An object type passes through the middleware untouched in both directions: `ObjectType.MarshalJSON` sends the string the row stores and `UnmarshalJSON` keeps the string it is given. The middleware validates only claimius's own types: `ResolveObjectType` in `shared` resolves a bare claimius name such as `organization` to `claimius.organization` and refuses a `claimius.` type the schema does not register, and passes every other type through as given. A consumer type is metadata with an id; the middleware neither qualifies nor refuses it, and `ObjectTypeOf` returns a model's `table:` tag as written. A consumer that wants its own types checked calls `ObjectType.Validate`, which requires the schema and, given a list, membership in it. `init_claimius_tables` raises on an unqualified name, so a consumer qualifies its table tags.
 
 The middleware knows the shared claimius types only: `organization`, `location`, `claim`, `claim_object`, `user_claim`, `samna_user`, `samna_client`, `samna_secret` and `user_relation`. A consumer's own tables register with `init_claimius_tables`, and the consumer wraps `claimius.search` and the graph functions in its own SQL for its own shapes.
 

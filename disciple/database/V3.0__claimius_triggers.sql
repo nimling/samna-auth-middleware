@@ -6,6 +6,8 @@
 --
 -- Trigger families on internal tables:
 --   tg_update_timestamp     BEFORE UPDATE: maintains sa_updated_at
+--   tg_update_txid          BEFORE INSERT/UPDATE: on claim, user_claim,
+--                           claim_object. Maintains txid.
 --   tg_audit                AFTER INSERT/UPDATE: writes to claimius.audit
 --   tg_calc_claim_access    AFTER INSERT/UPDATE: on claim, claim_object,
 --                           user_claim. Reconciles affected users.
@@ -77,6 +79,22 @@ CREATE TRIGGER tg_update_timestamp BEFORE UPDATE ON claimius.user_field
 DROP TRIGGER IF EXISTS tg_update_timestamp ON claimius.table_info;
 CREATE TRIGGER tg_update_timestamp BEFORE UPDATE ON claimius.table_info
     FOR EACH ROW EXECUTE FUNCTION claimius.update_timestamp();
+
+-- ----------------------------------------------------------------------------
+-- txid maintenance on the sources of the claim graph
+-- ----------------------------------------------------------------------------
+
+DROP TRIGGER IF EXISTS tg_update_txid ON claimius.claim;
+CREATE TRIGGER tg_update_txid BEFORE INSERT OR UPDATE ON claimius.claim
+    FOR EACH ROW EXECUTE FUNCTION claimius.update_txid();
+
+DROP TRIGGER IF EXISTS tg_update_txid ON claimius.user_claim;
+CREATE TRIGGER tg_update_txid BEFORE INSERT OR UPDATE ON claimius.user_claim
+    FOR EACH ROW EXECUTE FUNCTION claimius.update_txid();
+
+DROP TRIGGER IF EXISTS tg_update_txid ON claimius.claim_object;
+CREATE TRIGGER tg_update_txid BEFORE INSERT OR UPDATE ON claimius.claim_object
+    FOR EACH ROW EXECUTE FUNCTION claimius.update_txid();
 
 -- ----------------------------------------------------------------------------
 -- Claim mutation triggers: maintain user_object when claim/binding/grant changes
@@ -249,7 +267,8 @@ CREATE TRIGGER tg_self_root BEFORE INSERT ON claimius.location
 -- a write touches that user's own rows that feed the cached graph: a pair
 -- whose access changes, not its usage, a user_users row, the samna_user row,
 -- or the object_info row of an object the user holds. A claim or binding
--- change is caught when the graph is read, against sa_updated_at.
+-- change is caught when the graph is read, against the snapshot the graph
+-- was built under.
 -- ----------------------------------------------------------------------------
 
 DROP TRIGGER IF EXISTS tg_invalidate_claim_graph_cache ON claimius.user_object;

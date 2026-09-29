@@ -4,12 +4,16 @@ package shared_test
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"testing"
 
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 	sdb "github.com/nimling/samna-auth-middleware/shared"
+	"github.com/uptrace/bun"
+	"github.com/uptrace/bun/dialect/pgdialect"
+	"github.com/uptrace/bun/driver/pgdriver"
 )
 
 var (
@@ -424,5 +428,34 @@ func TestAccessDiffDrainRunsOffTheRequestPath(t *testing.T) {
 	db := database(t)
 	if _, err := db.PostAccessDiffDrain(context.Background(), 10); err != nil {
 		t.Fatalf("drain: %v", err)
+	}
+}
+
+func TestReadRunsOnAReadOnlyReplicaAndRetriesARefusedWrite(t *testing.T) {
+	db := database(t)
+	ctx := context.Background()
+	db.Replica = bun.NewDB(sql.OpenDB(pgdriver.NewConnector(
+		pgdriver.WithDSN(db.ConnStr),
+		pgdriver.WithConnParams(map[string]any{"default_transaction_read_only": "on"}),
+	)), pgdialect.New())
+	defer func() {
+		db.Replica.Close()
+		db.Replica = nil
+	}()
+	granted, err := db.ScopeAccess(ctx, userB, `$.page."time-report"`, sdb.ACCESS_READ)
+	if err != nil || len(granted) != 1 {
+		t.Fatalf("expected the scope read to answer on the read only replica, got %+v, %v", granted, err)
+	}
+	var ran []bool
+	err = db.Read(ctx, func(ctx context.Context, b *bun.DB) error {
+		ran = append(ran, b == db.Replica)
+		_, err := b.NewRaw(`CREATE TEMP TABLE IF NOT EXISTS read_route_probe (id INTEGER)`).Exec(ctx)
+		return err
+	})
+	if err != nil {
+		t.Fatalf("expected the refused write to succeed on the primary: %v", err)
+	}
+	if len(ran) != 2 || !ran[0] || ran[1] {
+		t.Fatalf("expected the replica to refuse and the primary to answer, got %v", ran)
 	}
 }

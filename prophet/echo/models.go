@@ -76,7 +76,7 @@ type Asset struct {
 	CreatedAt     time.Time  `bun:"sa_created_at,notnull,default:current_timestamp" json:"created_at"`
 	UpdatedAt     time.Time  `bun:"sa_updated_at,notnull,default:current_timestamp" json:"updated_at"`
 	nimbody.Body  `bun:"-" json:"-"`
-	bun.BaseModel `bun:"table:asset" json:"-"`
+	bun.BaseModel `bun:"table:public.asset" json:"-"`
 }
 
 type ObjectAsset struct {
@@ -92,7 +92,7 @@ type ObjectAsset struct {
 	CreatedAt     time.Time  `bun:"sa_created_at,notnull,default:current_timestamp" json:"created_at"`
 	UpdatedAt     time.Time  `bun:"sa_updated_at,notnull,default:current_timestamp" json:"updated_at"`
 	Asset         *Asset     `bun:"rel:belongs-to,join:asset_id=id" json:"asset,omitempty"`
-	bun.BaseModel `bun:"table:object_asset" json:"-"`
+	bun.BaseModel `bun:"table:public.object_asset" json:"-"`
 }
 
 type Code struct {
@@ -115,7 +115,7 @@ type Code struct {
 	CreatedAt     time.Time   `bun:"sa_created_at,default:current_timestamp,notnull" json:"created_at"`
 	UpdatedAt     time.Time   `bun:"sa_updated_at,default:current_timestamp,notnull" json:"updated_at"`
 	Access        ClaimAccess `bun:"access,scanonly" json:"access,omitempty"`
-	bun.BaseModel `bun:"table:code" json:"-"`
+	bun.BaseModel `bun:"table:public.code" json:"-"`
 }
 
 type UserField struct {
@@ -223,6 +223,7 @@ type Claim struct {
 	DeletedAt   *time.Time  `bun:"sa_deleted_at" json:"deleted_at,omitzero"`
 	CreatedAt   time.Time   `bun:"sa_created_at,notnull,default:current_timestamp" json:"created_at"`
 	UpdatedAt   time.Time   `bun:"sa_updated_at,notnull,default:current_timestamp" json:"updated_at"`
+	Txid        uint64      `bun:"txid,scanonly" json:"-"`
 
 	ClaimObjects    []ClaimObject `bun:"rel:has-many,join:id=claim_id" json:"claim_objects,omitempty"`
 	ClaimUsers      []UserClaim   `bun:"rel:has-many,join:id=claim_id" json:"claim_users,omitempty"`
@@ -247,6 +248,7 @@ type UserClaim struct {
 	DeletedAt     *time.Time `bun:"sa_deleted_at" json:"deleted_at,omitzero"`
 	CreatedAt     time.Time  `bun:"sa_created_at,notnull,default:current_timestamp" json:"created_at"`
 	UpdatedAt     time.Time  `bun:"sa_updated_at,notnull,default:current_timestamp" json:"updated_at"`
+	Txid          uint64     `bun:"txid,scanonly" json:"-"`
 	FirstName     string     `bun:"first_name,scanonly" json:"first_name,omitempty"`
 	LastName      string     `bun:"last_name,scanonly" json:"last_name,omitempty"`
 	nimbody.Body  `bun:"-" json:"-"`
@@ -270,6 +272,7 @@ type ClaimObject struct {
 	DeletedAt         *time.Time       `bun:"sa_deleted_at" json:"deleted_at,omitzero"`
 	CreatedAt         time.Time        `bun:"sa_created_at,notnull,default:current_timestamp" json:"created_at"`
 	UpdatedAt         time.Time        `bun:"sa_updated_at,notnull,default:current_timestamp" json:"updated_at"`
+	Txid              uint64           `bun:"txid,scanonly" json:"-"`
 	ObjectName        string           `bun:"object_name,scanonly" json:"object_name,omitempty"`
 	ObjectDescription *string          `bun:"object_description,scanonly" json:"object_description,omitempty"`
 	nimbody.Body      `bun:"-" json:"-"`

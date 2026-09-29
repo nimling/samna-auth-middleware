@@ -1528,6 +1528,7 @@ DECLARE
     v_user_row_id   UUID;
     v_cacheable     BOOLEAN;
     v_graph         JSONB;
+    v_snapshot      PG_SNAPSHOT;
 BEGIN
     IF p_sort IS NULL OR p_sort NOT IN ('name', 'usage') OR p_width IS NULL OR p_width < 0 THEN
         RAISE EXCEPTION 'graph window: p_sort is name or usage and p_width at least 0' USING ERRCODE = '22023';
@@ -1551,16 +1552,17 @@ BEGIN
               FROM claimius.user_claim uc
               WHERE uc.user_id = p_user_id
                 AND uc.app_id = p_app_id
-                AND (uc.sa_updated_at >= c.sa_updated_at
+                AND (NOT pg_visible_in_snapshot(uc.txid, c.snapshot)
                      OR EXISTS (
                          SELECT 1 FROM claimius.claim cl
-                         WHERE cl.id = uc.claim_id AND cl.sa_updated_at >= c.sa_updated_at)
+                         WHERE cl.id = uc.claim_id AND NOT pg_visible_in_snapshot(cl.txid, c.snapshot))
                      OR EXISTS (
                          SELECT 1 FROM claimius.claim_object co
-                         WHERE co.claim_id = uc.claim_id AND co.app_id = p_app_id AND co.sa_updated_at >= c.sa_updated_at)));
+                         WHERE co.claim_id = uc.claim_id AND co.app_id = p_app_id AND NOT pg_visible_in_snapshot(co.txid, c.snapshot))));
     END IF;
 
     IF v_graph IS NULL THEN
+        v_snapshot := pg_current_snapshot();
         IF p_start_id IS NULL THEN
             SELECT array_agg(uc.claim_id) INTO v_claim_ids
             FROM claimius.user_claim uc
@@ -1822,11 +1824,11 @@ BEGIN
         END IF;
 
         IF v_cacheable THEN
-            INSERT INTO claimius.claim_graph_cache (app_id, user_id, graph, sa_updated_at)
-            VALUES (p_app_id, p_user_id, v_graph, now())
+            INSERT INTO claimius.claim_graph_cache (app_id, user_id, graph, snapshot)
+            VALUES (p_app_id, p_user_id, v_graph, v_snapshot)
             ON CONFLICT (app_id, user_id) DO UPDATE
                 SET graph = EXCLUDED.graph,
-                    sa_updated_at = EXCLUDED.sa_updated_at;
+                    snapshot = EXCLUDED.snapshot;
         END IF;
     END IF;
 
@@ -1845,7 +1847,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = claimius, pg_temp;
 
-COMMENT ON FUNCTION claimius.get_claim_graph(UUID, UUID, UUID, INTEGER, INTEGER, INTEGER, TEXT, UUID) IS 'Access graph: user, other users seen, claims, user_claims, claim_object bindings, reachable objects. Optional start claim and depth limit, and a window of p_width children of each type per parent in name or usage order continuing after p_next_id. Default shape served from claimius.claim_graph_cache while no grant, claim or binding of the user changed since it was built.';
+COMMENT ON FUNCTION claimius.get_claim_graph(UUID, UUID, UUID, INTEGER, INTEGER, INTEGER, TEXT, UUID) IS 'Access graph: user, other users seen, claims, user_claims, claim_object bindings, reachable objects. Optional start claim and depth limit, and a window of p_width children of each type per parent in name or usage order continuing after p_next_id. Default shape served from claimius.claim_graph_cache while every grant, claim and binding of the user was written by a transaction visible in the snapshot taken before the cached graph was built.';
 
 CREATE OR REPLACE FUNCTION claimius._invalidate_claim_graph_cache()
     RETURNS TRIGGER AS $$

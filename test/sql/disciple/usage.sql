@@ -114,9 +114,9 @@ SELECT results_eq(
 ALTER TABLE claimius.user_claim DISABLE TRIGGER USER;
 ALTER TABLE claimius.claim DISABLE TRIGGER USER;
 ALTER TABLE claimius.claim_object DISABLE TRIGGER USER;
-UPDATE claimius.user_claim SET sa_updated_at = now() - INTERVAL '1 hour';
-UPDATE claimius.claim SET sa_updated_at = now() - INTERVAL '1 hour';
-UPDATE claimius.claim_object SET sa_updated_at = now() - INTERVAL '1 hour';
+UPDATE claimius.user_claim SET txid = '3';
+UPDATE claimius.claim SET txid = '3';
+UPDATE claimius.claim_object SET txid = '3';
 ALTER TABLE claimius.user_claim ENABLE TRIGGER USER;
 ALTER TABLE claimius.claim ENABLE TRIGGER USER;
 ALTER TABLE claimius.claim_object ENABLE TRIGGER USER;

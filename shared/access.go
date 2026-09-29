@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/lib/pq"
+	"github.com/uptrace/bun"
 	"github.com/uptrace/bun/driver/pgdriver"
 )
 
@@ -29,15 +30,14 @@ func selfAccessClaim(userID uuid.UUID, requiredAccess ClaimAccess) *AccessClaim 
 	}
 }
 
+const mutationAccessQuery = "SELECT * FROM claimius.mutation_access($1::uuid, $2::text, $3::text, $4::int)"
+
 func (d *DB) MutationAccess(ctx context.Context, userID, objectID uuid.UUID, objectType string, requiredAccess ClaimAccess) (*AccessClaim, error) {
 	if objectType == OBJECT_TYPE_USER && userID == objectID {
 		return selfAccessClaim(userID, requiredAccess), nil
 	}
 	claims := make([]AccessClaim, 0)
-	err := d.NewRaw(
-		"SELECT * FROM claimius.mutation_access(?, ?::text, ?, ?)",
-		userID, objectID, objectType, requiredAccess,
-	).Scan(ctx, &claims)
+	err := d.prepared(ctx, d.DB, &claims, mutationAccessQuery, userID, objectID, objectType, requiredAccess)
 	if err != nil {
 		var pgErr pgdriver.Error
 		if errors.As(err, &pgErr) {
@@ -114,11 +114,11 @@ func (d *DB) MutationAccessMany(ctx context.Context, requests []AccessRequest) (
 		AccessClaim
 	}
 	rows := make([]batchRow, 0, len(requests))
-	err := d.NewRaw(`
+	err := d.prepared(ctx, d.DB, &rows, `
 		WITH inputs AS (
 			SELECT user_id, object_id, object_type, required_access,
 			       row_number() OVER () AS idx
-			FROM unnest(?::uuid[], ?::uuid[], ?::text[], ?::int[]) AS u(user_id, object_id, object_type, required_access)
+			FROM unnest($1::uuid[], $2::uuid[], $3::text[], $4::int[]) AS u(user_id, object_id, object_type, required_access)
 		)
 		SELECT
 			inputs.idx,
@@ -135,7 +135,7 @@ func (d *DB) MutationAccessMany(ctx context.Context, requests []AccessRequest) (
 		FROM inputs
 		LEFT JOIN LATERAL claimius.resolve_access(inputs.user_id, inputs.object_id::text, inputs.object_type, inputs.required_access) g ON TRUE
 		ORDER BY inputs.idx
-	`, pq.Array(userIDs), pq.Array(objectIDs), pq.Array(objectTypes), pq.Array(requiredAccesses)).Scan(ctx, &rows)
+	`, pq.Array(userIDs), pq.Array(objectIDs), pq.Array(objectTypes), pq.Array(requiredAccesses))
 	set := make(AccessClaimSet, len(requests))
 	for i, r := range requests {
 		set[i] = AccessClaimSetEntry{Request: r}
@@ -175,10 +175,9 @@ func (d *DB) ScopeAccess(ctx context.Context, userID uuid.UUID, scopePath string
 		ObjectInherit bool             `bun:"object_inherits"`
 	}
 	rows := make([]scopeAccessRow, 0)
-	err := d.NewRaw(
-		"SELECT * FROM claimius.get_scope_access(?, ?::jsonpath, ?)",
-		userID, scopePath, requiredAccess,
-	).Scan(ctx, &rows)
+	err := d.Read(ctx, func(ctx context.Context, db *bun.DB) error {
+		return d.prepared(ctx, db, &rows, "SELECT * FROM claimius.get_scope_access($1::uuid, $2::jsonpath, $3::int)", userID, scopePath, requiredAccess)
+	})
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return []AccessClaim{}, nil
@@ -227,11 +226,7 @@ func (d *DB) ScopeAccess(ctx context.Context, userID uuid.UUID, scopePath string
 
 func (d *DB) UserAccess(ctx context.Context, actorID uuid.UUID, target string, requiredAccess ClaimAccess) (*AccessUser, error) {
 	users := make([]AccessUser, 0)
-	err := d.NewSelect().
-		TableExpr(`claimius.get_user_access(?, ?, ?) AS u`,
-			actorID, target, requiredAccess).
-		Column("u.*").
-		Scan(ctx, &users)
+	err := d.prepared(ctx, d.DB, &users, "SELECT * FROM claimius.get_user_access($1::uuid, $2::text, $3::int)", actorID, target, requiredAccess)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNoAccess
@@ -239,7 +234,7 @@ func (d *DB) UserAccess(ctx context.Context, actorID uuid.UUID, target string, r
 		return nil, ErrInternalServer
 	}
 	if len(users) == 0 {
-		_, gateErr := d.NewRaw("SELECT * FROM claimius.mutation_access(?, ?, ?, ?)", actorID, target, OBJECT_TYPE_USER, requiredAccess).Exec(ctx)
+		gateErr := d.prepared(ctx, d.DB, &[]AccessClaim{}, mutationAccessQuery, actorID, target, OBJECT_TYPE_USER, requiredAccess)
 		var pgErr pgdriver.Error
 		if errors.As(gateErr, &pgErr) && pgErr.Field('C') == "P0404" {
 			return nil, ErrNotFound
@@ -252,25 +247,22 @@ func (d *DB) UserAccess(ctx context.Context, actorID uuid.UUID, target string, r
 
 func (d *DB) RootAccess(ctx context.Context, userID uuid.UUID, requiredAccess ClaimAccess) (*AccessClaim, error) {
 	claims := make([]AccessClaim, 0)
-	err := d.NewSelect().
-		TableExpr(`claimius.get_access(
-			?,
+	err := d.prepared(ctx, d.DB, &claims, `SELECT claim.* FROM claimius.get_access(
+			$1::uuid,
 			(
 				SELECT DISTINCT c.sa_root_id
 				FROM claimius.user_claim uc
 				JOIN claimius.claim c ON c.id = uc.claim_id
 				JOIN claimius.organization o ON o.id = c.sa_root_id AND o.sa_deleted_at IS NULL
-				WHERE uc.user_id = ?
+				WHERE uc.user_id = $1::uuid
 				  AND uc.sa_deleted_at IS NULL
 				  AND c.sa_deleted_at IS NULL
 				ORDER BY c.sa_root_id
 				LIMIT 1
 			),
-			?,
-			?
-		) AS claim`, userID, userID, OBJECT_TYPE_ORGANIZATION, requiredAccess).
-		Column("claim.*").
-		Scan(ctx, &claims)
+			$2::text,
+			$3::int
+		) AS claim`, userID, OBJECT_TYPE_ORGANIZATION, requiredAccess)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNoAccess

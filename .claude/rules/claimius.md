@@ -201,7 +201,7 @@ The list and graph functions `get_organizations`, `get_locations`, `get_users`, 
 
 ### Composite ids are `<schema>.<table>:<uuid>`
 
-Object types are always schema qualified, in the database and on the wire. `public.device`, never bare `device`. `init_claimius_tables` raises on an unqualified name. The one resolver is `shared.ResolveObjectType`: it accepts a qualified string or a bare claimius name and refuses any other bare name, and a model whose `table:` tag carries no schema reads as `public` through `ObjectTypeOf`. The prophet has no resolver of its own.
+Object types are always schema qualified, in the database and on the wire. `public.device`, never bare `device`. `init_claimius_tables` raises on an unqualified name. The middleware carries a consumer type untouched in both directions and validates only claimius's own: `shared.ResolveObjectType` resolves a bare claimius name, refuses a `claimius.` type the schema does not register, and passes every other type through. `ObjectTypeOf` returns a model's `table:` tag as written, so a consumer qualifies its tags. `ObjectType.Validate` is the opt in check a consumer calls on its own types. The prophet has no resolver of its own.
 
 The composite id format is colon separated: `claimius.composite_id('public.device', 'aaaa...')` returns `'public.device:aaaa...'`.
 

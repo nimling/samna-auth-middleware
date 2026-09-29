@@ -15,10 +15,7 @@ func (d *DB) GetAccess(ctx context.Context, userID, objectID uuid.UUID, objectTy
 		return selfAccessClaim(userID, requiredAccess), nil
 	}
 	claims := make([]AccessClaim, 0)
-	err := d.NewSelect().
-		TableExpr("claimius.get_access(?,?, ?, ?) AS claim", userID, objectID, objectType, requiredAccess).
-		Column("claim.*").
-		Scan(ctx, &claims)
+	err := d.prepared(ctx, d.DB, &claims, "SELECT * FROM claimius.get_access($1::uuid, $2::uuid, $3::text, $4::int)", userID, objectID, objectType, requiredAccess)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNoAccess
@@ -37,10 +34,7 @@ func (d *DB) GetDirectAccess(ctx context.Context, userID, objectID uuid.UUID, ob
 		return selfAccessClaim(userID, ACCESS_ALL), nil
 	}
 	claims := make([]AccessClaim, 0)
-	err := d.NewSelect().
-		TableExpr("claimius.get_direct_access(?,?, ?) AS claim", userID, objectID, objectType).
-		Column("claim.*").
-		Scan(ctx, &claims)
+	err := d.prepared(ctx, d.DB, &claims, "SELECT * FROM claimius.get_direct_access($1::uuid, $2::uuid, $3::text)", userID, objectID, objectType)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNoAccess

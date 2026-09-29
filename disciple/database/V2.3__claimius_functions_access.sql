@@ -663,7 +663,7 @@ BEGIN
         v_payload := jsonb_build_object('id', (to_jsonb(OLD) ->> 'id'));
     ELSE
         v_op := 'upsert';
-        v_payload := to_jsonb(NEW);
+        v_payload := to_jsonb(NEW) - 'txid';
     END IF;
 
     INSERT INTO claimius.sync_event (operation, event_type, payload)

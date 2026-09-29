@@ -51,7 +51,7 @@ func (o *ObjectType) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-var bareObjectTypes = map[string]ObjectType{
+var claimiusObjectTypes = map[string]ObjectType{
 	StripObjectSchema(OBJECT_TYPE_USER):          OBJECT_TYPE_USER,
 	StripObjectSchema(OBJECT_TYPE_ORGANIZATION):  OBJECT_TYPE_ORGANIZATION,
 	StripObjectSchema(OBJECT_TYPE_LOCATION):      OBJECT_TYPE_LOCATION,
@@ -62,20 +62,44 @@ var bareObjectTypes = map[string]ObjectType{
 	StripObjectSchema(OBJECT_TYPE_SAMNA_APP):     OBJECT_TYPE_SAMNA_APP,
 	StripObjectSchema(OBJECT_TYPE_SAMNA_CLIENT):  OBJECT_TYPE_SAMNA_CLIENT,
 	StripObjectSchema(OBJECT_TYPE_SAMNA_SECRET):  OBJECT_TYPE_SAMNA_SECRET,
+	StripObjectSchema(OBJECT_TYPE_AUDIT):         OBJECT_TYPE_AUDIT,
+	StripObjectSchema(OBJECT_TYPE_OBJECT_FIELD):  OBJECT_TYPE_OBJECT_FIELD,
+	StripObjectSchema(OBJECT_TYPE_USER_FIELD):    OBJECT_TYPE_USER_FIELD,
+	StripObjectSchema(OBJECT_TYPE_USER_TOKEN):    OBJECT_TYPE_USER_TOKEN,
 }
 
-// ResolveObjectType returns a qualified ObjectType. Bare claimius types resolve to claimius.X. Already qualified strings pass through. Any other bare name is refused: a consumer qualifies its own types.
+// ResolveObjectType validates claimius's own types and passes every other type through untouched. A bare claimius name resolves to claimius.X and a claimius.X the schema does not register is refused. A consumer's type is metadata the middleware carries to SQL and back as given; the consumer checks it with ObjectType.Validate when it wants to.
 func ResolveObjectType(s string) (ObjectType, error) {
 	if s == "" {
 		return "", fmt.Errorf("object_type is required")
 	}
-	if q, ok := bareObjectTypes[s]; ok {
+	if q, ok := claimiusObjectTypes[s]; ok {
 		return q, nil
 	}
-	if strings.IndexByte(s, '.') >= 0 {
-		return ObjectType(s), nil
+	if strings.HasPrefix(s, "claimius.") {
+		if q, ok := claimiusObjectTypes[StripObjectSchema(s)]; ok && string(q) == s {
+			return q, nil
+		}
+		return "", fmt.Errorf("object_type %q is not a claimius type", s)
 	}
-	return "", fmt.Errorf("object_type must be schema qualified: %q", s)
+	return ObjectType(s), nil
+}
+
+// Validate is the opt in check a consumer runs on its own types: the type is schema qualified and, when known is given, one of known. The middleware never calls it.
+func (o ObjectType) Validate(known ...ObjectType) error {
+	schema, table, ok := strings.Cut(string(o), ".")
+	if !ok || schema == "" || table == "" {
+		return fmt.Errorf("object_type must be schema qualified: %q", string(o))
+	}
+	if len(known) == 0 {
+		return nil
+	}
+	for _, k := range known {
+		if o == k {
+			return nil
+		}
+	}
+	return fmt.Errorf("object_type %q is not one of %v", string(o), known)
 }
 
 type ClaimAccess int
@@ -264,6 +288,10 @@ const (
 	OBJECT_TYPE_SAMNA_APP     = "claimius.samna_app"
 	OBJECT_TYPE_SAMNA_CLIENT  = "claimius.samna_client"
 	OBJECT_TYPE_SAMNA_SECRET  = "claimius.samna_secret"
+	OBJECT_TYPE_AUDIT         = "claimius.audit"
+	OBJECT_TYPE_OBJECT_FIELD  = "claimius.object_field"
+	OBJECT_TYPE_USER_FIELD    = "claimius.user_field"
+	OBJECT_TYPE_USER_TOKEN    = "claimius.user_token"
 )
 
 type OrganizationType string
@@ -419,6 +447,7 @@ type Claim struct {
 	DeletedAt    *time.Time    `bun:"sa_deleted_at" json:"deleted_at,omitzero"`
 	CreatedAt    time.Time     `bun:"sa_created_at,default:now()" json:"created_at"`
 	UpdatedAt    time.Time     `bun:"sa_updated_at,default:now()" json:"updated_at"`
+	Txid         uint64        `bun:"txid,scanonly" json:"-"`
 	ClaimObjects []ClaimObject `bun:"rel:has-many,join:id=claim_id" json:"claim_objects,omitempty"`
 	ClaimUsers   []UserClaim   `bun:"rel:has-many,join:id=claim_id" json:"claim_users,omitempty"`
 	Owner        *Organization `bun:"rel:belongs-to,join:sa_owner_id=id" json:"owner,omitempty"`
@@ -460,11 +489,7 @@ func ObjectTypeOf(model any) (ObjectType, error) {
 	for _, part := range strings.Split(bm.Tag.Get("bun"), ",") {
 		part = strings.TrimSpace(part)
 		if strings.HasPrefix(part, "table:") {
-			table := strings.TrimPrefix(part, "table:")
-			if strings.IndexByte(table, '.') < 0 {
-				table = "public." + table
-			}
-			return ObjectType(table), nil
+			return ObjectType(strings.TrimPrefix(part, "table:")), nil
 		}
 	}
 	return "", fmt.Errorf("bun.BaseModel has no table tag")
@@ -513,6 +538,7 @@ type UserClaim struct {
 	DeletedAt    *time.Time    `bun:"sa_deleted_at" json:"deleted_at,omitzero"`
 	CreatedAt    time.Time     `bun:"sa_created_at,default:now()" json:"created_at"`
 	UpdatedAt    time.Time     `bun:"sa_updated_at,default:now()" json:"updated_at"`
+	Txid         uint64        `bun:"txid,scanonly" json:"-"`
 	Owner        *Organization `bun:"rel:belongs-to,join:sa_owner_id=id" json:"owner,omitempty"`
 	User         *SamnaUser    `bun:"rel:belongs-to,join:user_id=user_id" json:"user,omitempty"`
 	Access       *AccessClaim  `bun:"embed:access_" json:"access,omitempty"`
@@ -542,6 +568,7 @@ type ClaimObject struct {
 	DeletedAt    *time.Time       `bun:"sa_deleted_at" json:"deleted_at,omitzero"`
 	CreatedAt    time.Time        `bun:"sa_created_at,default:now()" json:"created_at"`
 	UpdatedAt    time.Time        `bun:"sa_updated_at,default:now()" json:"updated_at"`
+	Txid         uint64           `bun:"txid,scanonly" json:"-"`
 	Owner        *Organization    `bun:"rel:belongs-to,join:sa_owner_id=id" json:"owner,omitempty"`
 	Creator      *Creator         `bun:"embed:creator_" json:"creator,omitempty"`
 }
@@ -588,7 +615,7 @@ type Creator struct {
 }
 
 type Asset struct {
-	bun.BaseModel `bun:"table:asset" json:"-"`
+	bun.BaseModel `bun:"table:public.asset" json:"-"`
 	nimbody.Body  `bun:"-" json:"-"`
 
 	ID          uuid.UUID  `bun:"id,pk" json:"id"`

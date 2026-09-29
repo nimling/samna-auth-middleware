@@ -48,7 +48,7 @@ The default shape is stored per user in `claim_graph_cache` as one jsonb array, 
 | Any row of `user_object` or `user_users` of the user, or the user's `samna_user` row | That user's entry, one probe |
 | An `object_info` row updated, a rename or a move | The entry of every user holding a pair on the object, one range of `idx_user_object_object_user` per app |
 
-A change of the access of a pair drops the entry; a usage flush, which moves only `used_count` and `last_used_at`, does not. A claim or binding change drops nothing: the read serves the entry only while no `user_claim` row of the user, no claim it names and no binding of those claims carries an `sa_updated_at` at or after the entry's, `1 + 2C` probes over the user's grants.
+A change of the access of a pair drops the entry; a usage flush, which moves only `used_count` and `last_used_at`, does not. A claim or binding change drops nothing: the entry stores the `pg_current_snapshot()` taken before its graph was read, and the read serves it only while every `user_claim` row of the user, every claim it names and every binding of those claims carries a `txid` visible in that snapshot, `1 + 2C` probes over the user's grants. `txid` is the local transaction that last wrote the row, stamped by `tg_update_txid`, so a write that began before the build and committed after it is invisible to the snapshot and makes the entry stale, which a timestamp taken at the start of that write could not show.
 
 With `w` invalidating writes between two opens of the graph by one user, arriving independently of the opens, the fraction of opens served from the cache is `1 / (1 + w)`. Only writes to the user's own grants, claims and pairs count in `w`: a claim write elsewhere in the app leaves the entry valid.
 

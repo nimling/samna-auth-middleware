@@ -43,7 +43,8 @@ func (d *DB) GetLocationsQuery(locs *[]Location, userID uuid.UUID, requiredAcces
 
 func (d *DB) GetChildLocations(ctx context.Context, startID uuid.UUID) ([]uuid.UUID, error) {
 	ids := make([]uuid.UUID, 0)
-	err := d.NewRaw(`
+	err := d.Read(ctx, func(ctx context.Context, db *bun.DB) error {
+		return db.NewRaw(`
 		SELECT object_id
 		FROM claimius.get_subtree(
 			'location',
@@ -54,18 +55,21 @@ func (d *DB) GetChildLocations(ctx context.Context, startID uuid.UUID) ([]uuid.U
 		WHERE object_type = ?
 		  AND object_id <> ?
 	`, startID, OBJECT_TYPE_LOCATION, startID, OBJECT_TYPE_LOCATION, startID).
-		Scan(ctx, &ids)
+			Scan(ctx, &ids)
+	})
 	return ids, err
 }
 
 func (d *DB) GetParentLocations(ctx context.Context, startID uuid.UUID) ([]uuid.UUID, error) {
 	ids := make([]uuid.UUID, 0)
-	err := d.NewRaw(`
+	err := d.Read(ctx, func(ctx context.Context, db *bun.DB) error {
+		return db.NewRaw(`
 		SELECT object_id
 		FROM claimius.get_parenthood_ancestors(?, ?)
 		WHERE hop > 0
 	`, OBJECT_TYPE_LOCATION, startID).
-		Scan(ctx, &ids)
+			Scan(ctx, &ids)
+	})
 	return ids, err
 }
 

@@ -243,7 +243,8 @@ CREATE TABLE IF NOT EXISTS claimius.claim (
                                               sa_created_by   UUID,
                                               sa_deleted_at   TIMESTAMPTZ,
                                               sa_created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
-                                              sa_updated_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+                                              sa_updated_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+                                              txid            XID8 NOT NULL DEFAULT pg_current_xact_id()
 );
 
 COMMENT ON TABLE claimius.claim IS 'Permission template. Access is a bitwise mask.';
@@ -254,6 +255,8 @@ CREATE INDEX IF NOT EXISTS idx_claim_sa_owner_id ON claimius.claim (sa_owner_id)
 CREATE INDEX IF NOT EXISTS idx_claim_sa_root_id ON claimius.claim (sa_root_id);
 CREATE INDEX IF NOT EXISTS idx_claim_deny_bit ON claimius.claim ((sa_access & 16)) WHERE (sa_access & 16) <> 0;
 DROP INDEX IF EXISTS claimius.idx_claim_sa_deleted_at;
+ALTER TABLE claimius.claim ADD COLUMN IF NOT EXISTS txid XID8 NOT NULL DEFAULT pg_current_xact_id();
+COMMENT ON COLUMN claimius.claim.txid IS 'Local transaction that last wrote the row, stamped by tg_update_txid on every insert and update, a replayed one included. get_claim_graph compares it to the snapshot a cached graph was built under.';
 
 -- user_claim
 -- Grants a claim to a user (or client). Optional time bounds. Reads filter
@@ -269,7 +272,8 @@ CREATE TABLE IF NOT EXISTS claimius.user_claim (
                                                    sa_created_by   UUID NOT NULL,
                                                    sa_deleted_at   TIMESTAMPTZ,
                                                    sa_created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
-                                                   sa_updated_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+                                                   sa_updated_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+                                                   txid            XID8 NOT NULL DEFAULT pg_current_xact_id()
 );
 
 COMMENT ON TABLE claimius.user_claim IS 'Grants a claim to a user in an app. id is referenced as sa_created_by everywhere.';
@@ -281,6 +285,8 @@ CREATE INDEX IF NOT EXISTS idx_user_claim_user_app ON claimius.user_claim (user_
 CREATE INDEX IF NOT EXISTS idx_user_claim_claim_id ON claimius.user_claim (claim_id);
 CREATE INDEX IF NOT EXISTS idx_user_claim_sa_owner_id ON claimius.user_claim (sa_owner_id);
 DROP INDEX IF EXISTS claimius.idx_user_claim_sa_deleted_at;
+ALTER TABLE claimius.user_claim ADD COLUMN IF NOT EXISTS txid XID8 NOT NULL DEFAULT pg_current_xact_id();
+COMMENT ON COLUMN claimius.user_claim.txid IS 'Local transaction that last wrote the row, stamped by tg_update_txid on every insert and update, a replayed one included. get_claim_graph compares it to the snapshot a cached graph was built under.';
 
 -- claim_object
 -- Binds a claim. With (object_type, object_id) the binding targets that
@@ -302,6 +308,7 @@ CREATE TABLE IF NOT EXISTS claimius.claim_object (
                                                      sa_deleted_at   TIMESTAMPTZ,
                                                      sa_created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
                                                      sa_updated_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+                                                     txid            XID8 NOT NULL DEFAULT pg_current_xact_id(),
                                                      CONSTRAINT claim_object_object_pair CHECK (
                                                          (object_id IS NULL AND object_type IS NULL)
                                                       OR (object_id IS NOT NULL AND object_type IS NOT NULL)
@@ -317,6 +324,8 @@ CREATE INDEX IF NOT EXISTS idx_claim_object_object ON claimius.claim_object (obj
 CREATE INDEX IF NOT EXISTS idx_claim_object_no_object ON claimius.claim_object (claim_id) WHERE object_id IS NULL AND sa_deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_claim_object_sa_owner_id ON claimius.claim_object (sa_owner_id);
 DROP INDEX IF EXISTS claimius.idx_claim_object_sa_deleted_at;
+ALTER TABLE claimius.claim_object ADD COLUMN IF NOT EXISTS txid XID8 NOT NULL DEFAULT pg_current_xact_id();
+COMMENT ON COLUMN claimius.claim_object.txid IS 'Local transaction that last wrote the row, stamped by tg_update_txid on every insert and update, a replayed one included. get_claim_graph compares it to the snapshot a cached graph was built under.';
 CREATE INDEX IF NOT EXISTS idx_claim_object_lookup
     ON claimius.claim_object (claim_id, object_type, object_id)
     WHERE sa_deleted_at IS NULL AND object_id IS NOT NULL;
@@ -738,17 +747,31 @@ COMMENT ON TABLE claimius.user_activity IS 'Latest use of the app per user, writ
 -- graph column holds the full row set as a jsonb array, one element per
 -- (object_id, object_type, label, parent_id, data) tuple. Read path expands
 -- back to rows. Dropped by triggers on user_object, object_info, user_users
--- and samna_user of the user, and validated on read against the sa_updated_at
--- of the user's user_claim rows, their claims and those claims' bindings.
+-- and samna_user of the user, and validated on read against the snapshot the
+-- graph was built under: a user_claim row of the user, its claim or one of
+-- that claim's bindings written by a transaction the snapshot does not see
+-- makes the row stale, a write that began before the build and committed
+-- after it included.
 CREATE TABLE IF NOT EXISTS claimius.claim_graph_cache (
                                                           user_id         UUID NOT NULL,
                                                           graph           JSONB NOT NULL,
-                                                          sa_updated_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+                                                          snapshot        PG_SNAPSHOT NOT NULL,
                                                           PRIMARY KEY (user_id)
 );
 
-COMMENT ON TABLE claimius.claim_graph_cache IS 'Per user cache of get_claim_graph default shape. Dropped by triggers on the user''s own rows, validated on read against the user''s grants, claims and bindings.';
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM information_schema.columns
+               WHERE table_schema = 'claimius' AND table_name = 'claim_graph_cache' AND column_name = 'sa_updated_at') THEN
+        DELETE FROM claimius.claim_graph_cache;
+        ALTER TABLE claimius.claim_graph_cache DROP COLUMN sa_updated_at;
+        ALTER TABLE claimius.claim_graph_cache ADD COLUMN snapshot PG_SNAPSHOT NOT NULL;
+    END IF;
+END $$;
+
+COMMENT ON TABLE claimius.claim_graph_cache IS 'Per user cache of get_claim_graph default shape. Dropped by triggers on the user''s own rows, validated on read against the snapshot it was built under and the txid of the user''s grants, claims and bindings.';
 COMMENT ON COLUMN claimius.claim_graph_cache.graph IS 'JSON array of {object_id, object_type, label, parent_id, data} tuples.';
+COMMENT ON COLUMN claimius.claim_graph_cache.snapshot IS 'pg_current_snapshot() taken before the graph was read. A source row whose txid is not visible in it was written after the build saw the sources.';
 
 -- ----------------------------------------------------------------------------
 -- 8. Audit

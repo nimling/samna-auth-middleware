@@ -1,6 +1,7 @@
 package smw
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
@@ -15,6 +16,7 @@ import (
 	sdb "github.com/nimling/samna-auth-middleware/prophet/sdb"
 	"github.com/nimling/samna-auth-middleware/shared"
 	"github.com/nimling/samna-auth-middleware/utils"
+	"github.com/uptrace/bun"
 )
 
 // AppMiddleware is internal. It guards the endpoints apps use to reach the
@@ -60,13 +62,15 @@ func AppMiddleware(next echo.HandlerFunc) echo.HandlerFunc {
 		ctx.Set("app_secret", appSecret)
 
 		var app pecho.SamnaApp
-		err := sdb.Instance().NewSelect().
-			Model(&app).
-			ExcludeColumn("sa_deleted_at").
-			Where("slug = ?", appSlug).
-			Where("sa_deleted_at IS NULL").
-			Limit(1).
-			Scan(ctx.Request().Context())
+		err := sdb.Instance().Read(ctx.Request().Context(), func(rctx context.Context, db *bun.DB) error {
+			return db.NewSelect().
+				Model(&app).
+				ExcludeColumn("sa_deleted_at").
+				Where("slug = ?", appSlug).
+				Where("sa_deleted_at IS NULL").
+				Limit(1).
+				Scan(rctx)
+		})
 		if err != nil {
 			ctx.Logger().Infof("App not found for slug=%s: %v", appSlug, err)
 			return ctx.NoContent(http.StatusUnauthorized)
@@ -84,13 +88,15 @@ func AppMiddleware(next echo.HandlerFunc) echo.HandlerFunc {
 		}
 
 		var ownerOrg shared.Organization
-		if err := sdb.Instance().NewSelect().
-			Model(&ownerOrg).
-			Column("private_seed").
-			Where("id = ?", app.OwnerID).
-			Where("sa_deleted_at IS NULL").
-			Limit(1).
-			Scan(ctx.Request().Context()); err != nil {
+		if err := sdb.Instance().Read(ctx.Request().Context(), func(rctx context.Context, db *bun.DB) error {
+			return db.NewSelect().
+				Model(&ownerOrg).
+				Column("private_seed").
+				Where("id = ?", app.OwnerID).
+				Where("sa_deleted_at IS NULL").
+				Limit(1).
+				Scan(rctx)
+		}); err != nil {
 			ctx.Logger().Infof("Owner org not found for slug=%s: %v", appSlug, err)
 			return ctx.NoContent(http.StatusUnauthorized)
 		}

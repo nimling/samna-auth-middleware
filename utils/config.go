@@ -17,6 +17,7 @@ type Config struct {
 	DebugUserID   string
 	DebugClients  string
 	DebugSeed     string
+	ReplicaDSN    string
 
 	Issuer      string
 	TokenURL     url.URL
@@ -38,6 +39,7 @@ func loadConfig() {
 	cfg.DebugUserID = os.Getenv("SAUTH_DEBUG_USER_ID")
 	cfg.DebugClients = os.Getenv("SAUTH_DEBUG_CLIENTS")
 	cfg.DebugSeed = os.Getenv("SAUTH_DEBUG_PRIVATE_SEED")
+	cfg.ReplicaDSN = os.Getenv("SAUTH_REPLICA_DSN")
 }
 
 func Cfg() *Config {

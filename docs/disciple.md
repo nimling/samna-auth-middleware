@@ -98,5 +98,5 @@ uptime.Init(e.Logger, uptime.Options{
 
 Sync is pull only. There is no inbound sync endpoint on a disciple and none on the prophet; the disciple reaches out to `GET /sam/sync/snapshot` and `GET /sam/sync/:seq` through `sam.SyncStart`.
 
-Object types are schema qualified over JSON and in the database alike. A disciple's own tables are qualified by the consumer: a bare `table:` tag on a model reads as the `public` schema, and `init_claimius_tables` raises on an unqualified name.
+Object types pass through the middleware untouched over JSON and into the database. A disciple's own tables are qualified by the consumer in their `table:` tags, which `ObjectTypeOf` returns as written, and `init_claimius_tables` raises on an unqualified name. `ObjectType.Validate` is the opt in check for the consumer's own types.
 </content>

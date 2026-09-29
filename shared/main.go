@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"reflect"
+	"sync"
 	"time"
 
 	"github.com/labstack/echo/v4"
@@ -20,9 +21,54 @@ import (
 
 type DB struct {
 	*bun.DB
+	Replica *bun.DB
 	Logger  echo.Logger
 	ConnStr string
 	Usage   *ObjectUsage
+	stmts   sync.Map
+}
+
+type stmtKey struct {
+	db    *bun.DB
+	query string
+}
+
+// Read runs fn on the replica when one is configured and on the primary
+// otherwise. A replica that refuses the read with SQLSTATE 25006 because the
+// read had to write runs it once more on the primary.
+func (d *DB) Read(ctx context.Context, fn func(ctx context.Context, db *bun.DB) error) error {
+	if d.Replica == nil {
+		return fn(ctx, d.DB)
+	}
+	err := fn(ctx, d.Replica)
+	var pgErr interface{ Field(byte) string }
+	if errors.As(err, &pgErr) && pgErr.Field('C') == "25006" {
+		return fn(ctx, d.DB)
+	}
+	return err
+}
+
+// prepared runs query on db as a named prepared statement, parsed and planned
+// once per connection, and scans its rows into dest.
+func (d *DB) prepared(ctx context.Context, db *bun.DB, dest any, query string, args ...any) error {
+	key := stmtKey{db: db, query: query}
+	cached, ok := d.stmts.Load(key)
+	if !ok {
+		stmt, err := db.DB.PrepareContext(ctx, query)
+		if err != nil {
+			return err
+		}
+		var loaded bool
+		if cached, loaded = d.stmts.LoadOrStore(key, stmt); loaded {
+			stmt.Close()
+		}
+	}
+	rows, err := cached.(*sql.Stmt).QueryContext(ctx, args...)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	return db.ScanRows(ctx, rows, dest)
 }
 
 // GetConnectionString returns the DSN the pool was opened with. The
@@ -46,7 +92,9 @@ func (d *DB) GetApp(ctx context.Context) (*SamnaApp, error) {
 		return app, nil
 	}
 	var app SamnaApp
-	if err := d.NewRaw(`SELECT * FROM claimius.get_app() LIMIT 1`).Scan(ctx, &app); err != nil {
+	if err := d.Read(ctx, func(ctx context.Context, db *bun.DB) error {
+		return db.NewRaw(`SELECT * FROM claimius.get_app() LIMIT 1`).Scan(ctx, &app)
+	}); err != nil {
 		return nil, fmt.Errorf("no claimius app registered: %w", err)
 	}
 	return &app, nil
@@ -98,32 +146,22 @@ func Connect(logger echo.Logger) (*DB, error) {
 	redactedDSN := fmt.Sprintf("postgres://%s:*********@%s:%s/%s?sslmode=%s", pgUser, pgHost, pgPort, pgDatabase, sslMode)
 
 	logger.Info("DSN:", redactedDSN)
-	sqlDB := sql.OpenDB(pgdriver.NewConnector(
-		pgdriver.WithDSN(dsn),
-		pgdriver.WithReadTimeout(120*time.Second),
-		pgdriver.WithWriteTimeout(120*time.Second),
-		pgdriver.WithDialTimeout(30*time.Second),
-	))
-	bunDB := bun.NewDB(sqlDB, pgdialect.New())
-
-	if bunDB == nil {
-		return nil, errors.New("failed to initialize db")
-	}
-
-	db := &DB{DB: bunDB, Logger: logger, ConnStr: dsn}
-
-	db.SetMaxOpenConns(25)
-	db.SetMaxIdleConns(2)
-	db.SetConnMaxLifetime(2 * time.Minute)
-	db.SetConnMaxIdleTime(15 * time.Second)
-
+	db := &DB{DB: openPool(dsn), Logger: logger, ConnStr: dsn}
 	if err := db.Ping(); err != nil {
 		return nil, fmt.Errorf("ping: %w", err)
 	}
 
+	if replicaDSN := utils.Cfg().ReplicaDSN; replicaDSN != "" {
+		db.Replica = openPool(replicaDSN)
+		if err := db.Replica.Ping(); err != nil {
+			return nil, fmt.Errorf("ping replica: %w", err)
+		}
+		logger.Info("reads route to the replica")
+	}
+
 	db.Usage = startObjectUsage(db.postObjectUsage, func(err error) { logger.Warnf("usage flush: %v", err) }, usageFlushInterval, usageFlushKeys)
 
-	db.RegisterModel(
+	models := []any{
 		(*SamnaUser)(nil),
 		(*Organization)(nil),
 		(*Location)(nil),
@@ -142,11 +180,30 @@ func Connect(logger echo.Logger) (*DB, error) {
 		(*SyncEvent)(nil),
 		(*DiscipleState)(nil),
 		(*UserToken)(nil),
-	)
+	}
+	db.RegisterModel(models...)
+	if db.Replica != nil {
+		db.Replica.RegisterModel(models...)
+	}
 
 	resolveOIDC(logger)
 
 	return db, nil
+}
+
+// openPool opens a pool on dsn with the pool shape every Samna service uses.
+func openPool(dsn string) *bun.DB {
+	sqlDB := sql.OpenDB(pgdriver.NewConnector(
+		pgdriver.WithDSN(dsn),
+		pgdriver.WithReadTimeout(120*time.Second),
+		pgdriver.WithWriteTimeout(120*time.Second),
+		pgdriver.WithDialTimeout(30*time.Second),
+	))
+	sqlDB.SetMaxOpenConns(25)
+	sqlDB.SetMaxIdleConns(2)
+	sqlDB.SetConnMaxLifetime(2 * time.Minute)
+	sqlDB.SetConnMaxIdleTime(15 * time.Second)
+	return bun.NewDB(sqlDB, pgdialect.New())
 }
 
 func resolveOIDC(logger echo.Logger) {

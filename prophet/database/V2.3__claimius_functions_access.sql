@@ -702,7 +702,7 @@ BEGIN
         v_payload := jsonb_build_object('id', (to_jsonb(OLD) ->> 'id'), 'app_id', (to_jsonb(OLD) ->> 'app_id'));
     ELSE
         v_op := 'upsert';
-        v_payload := to_jsonb(NEW);
+        v_payload := to_jsonb(NEW) - 'txid';
     END IF;
 
     IF v_type IN ('claimius.organization', 'claimius.location') THEN

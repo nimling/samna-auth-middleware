@@ -43,7 +43,8 @@ func (d *DB) GetOrganizationsQuery(orgs *[]Organization, userID uuid.UUID, requi
 
 func (d *DB) GetChildOrganizations(ctx context.Context, startID uuid.UUID) ([]uuid.UUID, error) {
 	ids := make([]uuid.UUID, 0)
-	err := d.NewRaw(`
+	err := d.Read(ctx, func(ctx context.Context, db *bun.DB) error {
+		return db.NewRaw(`
 		SELECT object_id
 		FROM claimius.get_subtree(
 			'ownership',
@@ -54,18 +55,21 @@ func (d *DB) GetChildOrganizations(ctx context.Context, startID uuid.UUID) ([]uu
 		WHERE object_type = ?
 		  AND object_id <> ?
 	`, startID, OBJECT_TYPE_ORGANIZATION, startID, OBJECT_TYPE_ORGANIZATION, startID).
-		Scan(ctx, &ids)
+			Scan(ctx, &ids)
+	})
 	return ids, err
 }
 
 func (d *DB) GetParentOrganizations(ctx context.Context, startID uuid.UUID) ([]uuid.UUID, error) {
 	ids := make([]uuid.UUID, 0)
-	err := d.NewRaw(`
+	err := d.Read(ctx, func(ctx context.Context, db *bun.DB) error {
+		return db.NewRaw(`
 		SELECT object_id
 		FROM claimius.get_owner_ancestors(?, ?)
 		WHERE hop > 0
 	`, OBJECT_TYPE_ORGANIZATION, startID).
-		Scan(ctx, &ids)
+			Scan(ctx, &ids)
+	})
 	return ids, err
 }
 
