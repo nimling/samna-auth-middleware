@@ -17,9 +17,13 @@ type BodySecret struct {
 	ExpiresAt *time.Time `json:"expires_at"`
 }
 
-func (d *DB) GetSecrets(ctx context.Context, userID uuid.UUID, requiredAccess ClaimAccess) ([]SamnaSecret, error) {
+func (d *DB) GetSecrets(ctx context.Context, userID uuid.UUID, requiredAccess ClaimAccess, after *uuid.UUID, limit int) ([]SamnaSecret, error) {
+	var pageLimit any
+	if limit > 0 {
+		pageLimit = limit
+	}
 	secrets := make([]SamnaSecret, 0)
-	err := d.NewRaw("SELECT * FROM claimius.get_secrets(?, ?)", userID, requiredAccess).
+	err := d.NewRaw("SELECT * FROM claimius.get_secrets(?, ?, ?, ?)", userID, int(requiredAccess), after, pageLimit).
 		Scan(ctx, &secrets)
 	if err != nil {
 		return nil, err

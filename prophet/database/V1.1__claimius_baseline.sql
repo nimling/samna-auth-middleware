@@ -553,7 +553,8 @@ COMMENT ON COLUMN claimius.user_object.direct_grant IS 'True when user is creato
 COMMENT ON COLUMN claimius.user_object.sa_access IS 'Effective bitwise access mask: OR of grants[].access with deny bits subtracted. Bits: 0x01 owner, 0x02 write, 0x04 read, 0x08 execute. Direct creator gets 0x01|0x02|0x04|0x08.';
 COMMENT ON COLUMN claimius.user_object.scope IS 'Effective merged scope: union of grants[].scope keys when any grant has a scope, else NULL meaning whole object access.';
 
-CREATE INDEX IF NOT EXISTS idx_user_object_user_type ON claimius.user_object (user_id, app_id, object_type, sa_access);
+DROP INDEX IF EXISTS claimius.idx_user_object_user_type;
+CREATE INDEX IF NOT EXISTS idx_user_object_user_object ON claimius.user_object (user_id, app_id, object_type, object_id) INCLUDE (sa_access);
 DROP INDEX IF EXISTS claimius.idx_user_object_object;
 CREATE INDEX IF NOT EXISTS idx_user_object_object_user ON claimius.user_object (app_id, object_type, object_id, user_id);
 CREATE INDEX IF NOT EXISTS idx_user_object_owner ON claimius.user_object (app_id, sa_owner_id);

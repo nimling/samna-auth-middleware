@@ -68,17 +68,17 @@ for `B'_x` bindings on those ancestors. Its location term follows each location'
 
 ## What a listing costs
 
-`get_objects` reads the reader's range of `idx_user_object_user_type` for one type, the heap row of each pair for its `grants`, name and owner, and chooses a grant per row:
+`get_objects(user, app, type, required, after, limit)` reads the reader's range of `idx_user_object_user_object`, keyed `(user_id, app_id, object_type, object_id)` and carrying `sa_access`, from the first key past `after`, the heap row of each pair for its `grants`, name and owner, and chooses a grant per row, until `limit` rows are kept:
 
 ```
-entries(get_objects) = Δ_a + 1 + V_{u,τ} (1 + 2 G + 1)          comparisons = V_{u,τ} log₂ V_{u,τ}
+entries(get_objects page) = Δ_a + h + p (1 + 2 G + 1)           comparisons = 0
 ```
 
-Rows are ordered by the number of bits set, then `object_id`, and returned whole; the implementing side joins the range to its own table or pages over it. A listing is linear in what the reader reaches and independent of the depth of the trees, the number of bindings and the number of other users.
+for a page of `p` rows and a descent of `h` levels. Rows come in `object_id` order straight from the index, so nothing is sorted, and the next page starts after the last `object_id` of this one. Without `limit` the page is the whole range, `p = V_{u,τ}`. The settle of the reader's share, `Δ_a`, runs before the range is read and is the same for every page. Measured at `V_{u,τ} = 5,000` among 200,160 pairs, a page of 50 reads 50 entries of `user_object` indexes and 110 across the schema with no sort, where the unpaged listing read 5,000 and 10,010 and sorted 5,000 rows. The mask test is written `(sa_access & required) >= required`, the equality for a submask of `required`, which the planner estimates as a range and not a point, so it keeps the ordered scan. A page is linear in its own size and independent of the depth of the trees, the number of bindings, the number of other users and the size of the reader's range.
 
 | Listing | Reads |
 |---|---|
-| `get_organizations`, `get_locations` | One range of `app_object_ids` for the type intersected with `get_objects` |
+| `get_organizations`, `get_locations`, `get_secrets` | One `get_objects` page, each row joined to its table row and kept when live and linked to the app |
 | `get_users` | `S_u` rows of `idx_user_users_viewer`, the reader's grants and their bindings on `claimius.samna_user`, then one `samna_user` probe per target |
 | `get_claims(user, app, required)` | Every live claim row, each tested against the reader's grants and pairs with two probes |
 | `get_claims(user, app, object_id, object_type)` | The reader's pair on the object and the claims of its `G_x` derivations |

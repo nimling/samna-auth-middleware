@@ -28,7 +28,7 @@ For a user reaching `V_u` objects, a query matching `M_q` objects of the app eac
 
 | Path | Entries read |
 |---|---|
-| The reader's range of `idx_user_object_user_type`, each pair's vector tested | `V_u` heap rows |
+| The reader's range of `idx_user_object_user_object`, each pair's vector tested | `V_u` heap rows |
 | The query's postings in `idx_user_object_search`, each kept when it is the reader's | `Σ_{x matching} U_x ≈ M_q Ū_o` postings |
 
 Then every candidate `n` kept is ranked and chooses its grant, and the whole set is sorted:

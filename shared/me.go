@@ -85,8 +85,12 @@ func (d *DB) GetMeOrganizations(ctx echo.Context) ([]Organization, error) {
 	if err != nil {
 		return nil, err
 	}
+	after, limit, err := QueryPage(ctx)
+	if err != nil {
+		return nil, err
+	}
 	orgs := make([]Organization, 0)
-	q := d.GetOrganizationsQuery(&orgs, userID, ACCESS_NONE)
+	q := d.GetOrganizationsQuery(&orgs, userID, ACCESS_NONE, after, limit)
 	for _, w := range with {
 		switch w {
 		case OBJECT_TYPE_ORGANIZATION:
@@ -110,8 +114,12 @@ func (d *DB) GetMeLocations(ctx echo.Context) ([]Location, error) {
 	if err != nil {
 		return nil, err
 	}
+	after, limit, err := QueryPage(ctx)
+	if err != nil {
+		return nil, err
+	}
 	locs := make([]Location, 0)
-	q := d.GetLocationsQuery(&locs, userID, ACCESS_READ)
+	q := d.GetLocationsQuery(&locs, userID, ACCESS_READ, after, limit)
 	for _, w := range with {
 		switch w {
 		case OBJECT_TYPE_ORGANIZATION:

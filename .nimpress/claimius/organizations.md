@@ -77,4 +77,4 @@ One organization serves several apps without being copied, which is why the colu
 
 ## Reading organizations
 
-`get_organizations(user, app, required)` returns the organizations linked to the app that `get_objects` returns for the user: one `app_object_ids` range intersected with the user's `V_{u,organization}` pairs. `get_owner_graph` renders the tree; see [Graphs](./graphs.md).
+`get_organizations(user, app, required, after, limit)` returns the organizations linked to the app that one `get_objects` page returns for the user, in `id` order: at most `limit` of the user's `V_{u,organization}` pairs past `after`, each joined to its row and kept when live and linked. `get_owner_graph` renders the tree; see [Graphs](./graphs.md).

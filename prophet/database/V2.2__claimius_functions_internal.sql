@@ -1113,6 +1113,30 @@ $$ LANGUAGE plpgsql STABLE;
 
 COMMENT ON FUNCTION claimius._denormalize_objects(TEXT, UUID[]) IS 'Reads name, description, owner, location, root and creator of a set of live rows of one registered table. Falls back to organization or location sa_root_id when the row carries no sa_root_id column.';
 
+-- _lock_objects
+-- Takes the transaction advisory lock of every object named, one key per
+-- object_type:object_id, in sorted key order. A settle takes the locks of
+-- every object it will write before its first write, so two settles that
+-- overlap acquire their common objects in one order and cannot deadlock. A
+-- lock already held is taken again without waiting and without reordering.
+CREATE OR REPLACE FUNCTION claimius._lock_objects(p_keys TEXT[])
+    RETURNS VOID AS $$
+DECLARE
+    v_key BIGINT;
+BEGIN
+    FOR v_key IN
+        SELECT DISTINCT hashtextextended(k, 0)
+        FROM unnest(p_keys) AS k
+        WHERE k IS NOT NULL
+        ORDER BY 1
+    LOOP
+        PERFORM pg_advisory_xact_lock(v_key);
+    END LOOP;
+END;
+$$ LANGUAGE plpgsql;
+
+COMMENT ON FUNCTION claimius._lock_objects(TEXT[]) IS 'Takes the per object transaction advisory locks of a set of object_type:object_id keys in sorted key order.';
+
 -- recompute_user_object
 -- The single function that recomputes user_object for one user on a set of
 -- objects of one type: the one pair a check asks about, or the reader's share
@@ -1120,7 +1144,9 @@ COMMENT ON FUNCTION claimius._denormalize_objects(TEXT, UUID[]) IS 'Reads name, 
 -- based on whether grants survive. A creator holds its row through
 -- sa_created_by, which is a user_claim.id, unless a deny bound on the row
 -- itself carries the owner bit. The pairs it inserts and deletes move
--- user_users through _count_user_users. Returns whether the user's pair set
+-- user_users through _count_user_users. It takes the per object locks of its
+-- objects, sorted, before its first write, which inside a settle are already
+-- held. Returns whether the user's pair set
 -- changed.
 DROP FUNCTION IF EXISTS claimius.recompute_user_object(UUID, UUID, TEXT, UUID);
 CREATE OR REPLACE FUNCTION claimius.recompute_user_object(
@@ -1148,6 +1174,10 @@ BEGIN
     SELECT ti.* INTO v_info FROM claimius.table_info ti WHERE ti.object_type = p_object_type;
     IF NOT FOUND THEN
         RETURN FALSE;
+    END IF;
+
+    IF NOT claimius.in_replay_mode() THEN
+        PERFORM claimius._lock_objects(ARRAY(SELECT p_object_type || ':' || i::TEXT FROM unnest(v_ids) AS i));
     END IF;
 
     WITH target AS (
@@ -1292,26 +1322,21 @@ COMMENT ON FUNCTION claimius.recompute_user_object(UUID, UUID, TEXT, UUID[]) IS 
 -- U_x users of each object it names and nothing of either user's other
 -- objects. Two pairs entering or leaving on the same object in one statement
 -- count once per ordered pair of users. Two transactions adding or removing
--- pairs on one object serialize on an advisory lock per object, taken in
--- sorted order before the other holders are read, so each reads the pairs
--- the other committed and no ordered pair is missed or counted twice. Quiet
--- under replay_mode, where the bulk seed rebuilds it with _refresh_user_users.
+-- pairs on one object serialize on an advisory lock per object, held before
+-- the other holders are read, so each reads the pairs the other committed
+-- and no ordered pair is missed or counted twice. A settle and
+-- recompute_user_object hold those locks, taken sorted before their first
+-- write, so here they are taken again, which waits on nothing and reorders
+-- nothing; any other writer of user_object takes them here. Quiet under
+-- replay_mode, where the bulk seed rebuilds it with _refresh_user_users.
 CREATE OR REPLACE FUNCTION claimius._count_user_users()
     RETURNS TRIGGER AS $$
-DECLARE
-    v_key BIGINT;
 BEGIN
     IF claimius.in_replay_mode() THEN
         RETURN NULL;
     END IF;
 
-    FOR v_key IN
-        SELECT DISTINCT hashtextextended(c.object_type || ':' || c.object_id::TEXT, 0)
-        FROM changed c
-        ORDER BY 1
-    LOOP
-        PERFORM pg_advisory_xact_lock(v_key);
-    END LOOP;
+    PERFORM claimius._lock_objects(ARRAY(SELECT c.object_type || ':' || c.object_id::TEXT FROM changed c));
 
     IF TG_OP = 'INSERT' THEN
         WITH moved AS (
@@ -2035,8 +2060,9 @@ COMMENT ON FUNCTION claimius._raise_claim_diff(UUID, UUID, UUID) IS 'Marks a cla
 -- Settles one user's share of an object area, set based: the objects of the
 -- area, the object and with cascade its subtree, on which the user holds a
 -- pair or which a binding of the user's own claims reaches, plus the object
--- itself so its creator is settled. One recompute per object type. Returns
--- whether the user's pair set changed.
+-- itself so its creator is settled. The per object locks of the whole share
+-- are taken once, sorted, before the first write, then one recompute per
+-- object type. Returns whether the user's pair set changed.
 -- ----------------------------------------------------------------------------
 DROP FUNCTION IF EXISTS claimius._settle_object_diff(UUID, TEXT, UUID, BOOLEAN);
 CREATE OR REPLACE FUNCTION claimius._settle_object_diff(
@@ -2048,70 +2074,78 @@ CREATE OR REPLACE FUNCTION claimius._settle_object_diff(
 ) RETURNS BOOLEAN AS $$
 DECLARE
     v_share     RECORD;
+    v_types     TEXT[];
+    v_ids       UUID[];
     v_changed   BOOLEAN := FALSE;
 BEGIN
-    FOR v_share IN
-        WITH area AS (
-            SELECT p_object_type AS object_type, p_object_id AS object_id
-            UNION
-            SELECT e.descendant_type, e.descendant_id
+    WITH area AS (
+        SELECT p_object_type AS object_type, p_object_id AS object_id
+        UNION
+        SELECT e.descendant_type, e.descendant_id
+        FROM claimius.inheritance_info e
+        WHERE p_cascade
+          AND e.ancestor_type = p_object_type
+          AND e.ancestor_id = p_object_id
+          AND e.depth > 0
+    ),
+    bound AS MATERIALIZED (
+        SELECT co.object_type, co.object_id, (co.inherits AND c.inherits) AS inherits
+        FROM claimius.user_claim uc
+            JOIN claimius.claim c ON c.id = uc.claim_id AND c.sa_deleted_at IS NULL
+            JOIN claimius.claim_object co
+                ON co.claim_id = c.id
+               AND co.app_id = p_app_id
+               AND co.sa_deleted_at IS NULL
+               AND co.object_id IS NOT NULL
+        WHERE uc.user_id = p_user_id
+          AND uc.app_id = p_app_id
+          AND uc.sa_deleted_at IS NULL
+
+        UNION ALL
+
+        SELECT co.object_type, co.object_id, FALSE
+        FROM claimius.user_claim uc
+            JOIN claimius.claim_object link
+                ON link.claim_id = uc.claim_id
+               AND link.app_id = p_app_id
+               AND link.object_type = 'claimius.claim'
+               AND link.sa_deleted_at IS NULL
+            JOIN claimius.claim_object co
+                ON co.claim_id = link.object_id
+               AND co.app_id = p_app_id
+               AND co.sa_deleted_at IS NULL
+               AND co.object_id IS NOT NULL
+        WHERE uc.user_id = p_user_id
+          AND uc.app_id = p_app_id
+          AND uc.sa_deleted_at IS NULL
+    )
+    SELECT array_agg(a.object_type), array_agg(a.object_id)
+    INTO v_types, v_ids
+    FROM area a
+    WHERE (a.object_type = p_object_type AND a.object_id = p_object_id)
+       OR EXISTS (
+            SELECT 1 FROM claimius.user_object uo
+            WHERE uo.id = claimius.composite_id(p_app_id::TEXT, p_user_id::TEXT, a.object_type, a.object_id::TEXT))
+       OR EXISTS (
+            SELECT 1 FROM bound b
+            WHERE b.object_type = a.object_type AND b.object_id = a.object_id)
+       OR EXISTS (
+            SELECT 1
             FROM claimius.inheritance_info e
-            WHERE p_cascade
-              AND e.ancestor_type = p_object_type
-              AND e.ancestor_id = p_object_id
-              AND e.depth > 0
-        ),
-        bound AS MATERIALIZED (
-            SELECT co.object_type, co.object_id, (co.inherits AND c.inherits) AS inherits
-            FROM claimius.user_claim uc
-                JOIN claimius.claim c ON c.id = uc.claim_id AND c.sa_deleted_at IS NULL
-                JOIN claimius.claim_object co
-                    ON co.claim_id = c.id
-                   AND co.app_id = p_app_id
-                   AND co.sa_deleted_at IS NULL
-                   AND co.object_id IS NOT NULL
-            WHERE uc.user_id = p_user_id
-              AND uc.app_id = p_app_id
-              AND uc.sa_deleted_at IS NULL
+                JOIN bound b
+                    ON b.inherits
+                   AND b.object_type = e.ancestor_type
+                   AND b.object_id = e.ancestor_id
+            WHERE e.descendant_type = a.object_type
+              AND e.descendant_id = a.object_id
+              AND e.depth > 0);
 
-            UNION ALL
+    PERFORM claimius._lock_objects(ARRAY(SELECT s.object_type || ':' || s.object_id::TEXT FROM unnest(v_types, v_ids) AS s(object_type, object_id)));
 
-            SELECT co.object_type, co.object_id, FALSE
-            FROM claimius.user_claim uc
-                JOIN claimius.claim_object link
-                    ON link.claim_id = uc.claim_id
-                   AND link.app_id = p_app_id
-                   AND link.object_type = 'claimius.claim'
-                   AND link.sa_deleted_at IS NULL
-                JOIN claimius.claim_object co
-                    ON co.claim_id = link.object_id
-                   AND co.app_id = p_app_id
-                   AND co.sa_deleted_at IS NULL
-                   AND co.object_id IS NOT NULL
-            WHERE uc.user_id = p_user_id
-              AND uc.app_id = p_app_id
-              AND uc.sa_deleted_at IS NULL
-        )
-        SELECT a.object_type, array_agg(a.object_id) AS object_ids
-        FROM area a
-        WHERE (a.object_type = p_object_type AND a.object_id = p_object_id)
-           OR EXISTS (
-                SELECT 1 FROM claimius.user_object uo
-                WHERE uo.id = claimius.composite_id(p_app_id::TEXT, p_user_id::TEXT, a.object_type, a.object_id::TEXT))
-           OR EXISTS (
-                SELECT 1 FROM bound b
-                WHERE b.object_type = a.object_type AND b.object_id = a.object_id)
-           OR EXISTS (
-                SELECT 1
-                FROM claimius.inheritance_info e
-                    JOIN bound b
-                        ON b.inherits
-                       AND b.object_type = e.ancestor_type
-                       AND b.object_id = e.ancestor_id
-                WHERE e.descendant_type = a.object_type
-                  AND e.descendant_id = a.object_id
-                  AND e.depth > 0)
-        GROUP BY a.object_type
+    FOR v_share IN
+        SELECT s.object_type, array_agg(s.object_id) AS object_ids
+        FROM unnest(v_types, v_ids) AS s(object_type, object_id)
+        GROUP BY s.object_type
     LOOP
         v_changed := claimius.recompute_user_object(p_app_id, p_user_id, v_share.object_type, VARIADIC v_share.object_ids) OR v_changed;
     END LOOP;
@@ -2128,9 +2162,10 @@ COMMENT ON FUNCTION claimius._settle_object_diff(UUID, UUID, TEXT, UUID, BOOLEAN
 -- is bound on and, where the binding inherits, their subtrees; the objects
 -- bound by the claims it links to; and the user's pairs whose grants name the
 -- claim. Bindings and links removed or changed since the area opened, at
--- p_since, count too, so the pairs they used to reach are settled away. One
--- recompute per object type. Returns whether the user's pair set
--- changed.
+-- p_since, count too, so the pairs they used to reach are settled away. The
+-- per object locks of the whole share are taken once, sorted, before the
+-- first write, then one recompute per object type. Returns whether the
+-- user's pair set changed.
 -- ----------------------------------------------------------------------------
 DROP FUNCTION IF EXISTS claimius._settle_claim_diff(UUID, UUID);
 DROP FUNCTION IF EXISTS claimius._settle_claim_diff_for_user(UUID, UUID, UUID);
@@ -2142,58 +2177,66 @@ CREATE OR REPLACE FUNCTION claimius._settle_claim_diff(
 ) RETURNS BOOLEAN AS $$
 DECLARE
     v_share     RECORD;
+    v_types     TEXT[];
+    v_ids       UUID[];
     v_changed   BOOLEAN := FALSE;
 BEGIN
+    WITH bound AS MATERIALIZED (
+        SELECT co.object_type, co.object_id,
+               (co.inherits OR co.sa_updated_at >= p_since) AND (c.inherits OR c.sa_updated_at >= p_since) AS cascades
+        FROM claimius.claim_object co
+            JOIN claimius.claim c ON c.id = co.claim_id
+        WHERE co.claim_id = p_claim_id
+          AND co.app_id = p_app_id
+          AND co.object_id IS NOT NULL
+          AND (co.sa_deleted_at IS NULL OR co.sa_updated_at >= p_since)
+
+        UNION ALL
+
+        SELECT co.object_type, co.object_id, FALSE
+        FROM claimius.claim_object link
+            JOIN claimius.claim_object co
+                ON co.claim_id = link.object_id
+               AND co.app_id = p_app_id
+               AND co.object_id IS NOT NULL
+               AND (co.sa_deleted_at IS NULL OR co.sa_updated_at >= p_since)
+        WHERE link.claim_id = p_claim_id
+          AND link.app_id = p_app_id
+          AND link.object_type = 'claimius.claim'
+          AND (link.sa_deleted_at IS NULL OR link.sa_updated_at >= p_since)
+    ),
+    share AS (
+        SELECT b.object_type, b.object_id FROM bound b
+
+        UNION
+
+        SELECT e.descendant_type, e.descendant_id
+        FROM bound b
+            JOIN claimius.inheritance_info e
+                ON e.ancestor_type = b.object_type
+               AND e.ancestor_id = b.object_id
+               AND e.depth > 0
+        WHERE b.cascades
+
+        UNION
+
+        SELECT uo.object_type, uo.object_id
+        FROM claimius.user_object uo
+        WHERE uo.app_id = p_app_id
+          AND uo.user_id = p_user_id
+          AND (uo.grants @> jsonb_build_array(jsonb_build_object('claim_id', p_claim_id))
+               OR uo.grants @> jsonb_build_array(jsonb_build_object(
+                      'cascaded_from', jsonb_build_object('type', 'claimius.claim', 'id', p_claim_id))))
+    )
+    SELECT array_agg(s.object_type), array_agg(s.object_id)
+    INTO v_types, v_ids
+    FROM share s;
+
+    PERFORM claimius._lock_objects(ARRAY(SELECT s.object_type || ':' || s.object_id::TEXT FROM unnest(v_types, v_ids) AS s(object_type, object_id)));
+
     FOR v_share IN
-        WITH bound AS MATERIALIZED (
-            SELECT co.object_type, co.object_id,
-                   (co.inherits OR co.sa_updated_at >= p_since) AND (c.inherits OR c.sa_updated_at >= p_since) AS cascades
-            FROM claimius.claim_object co
-                JOIN claimius.claim c ON c.id = co.claim_id
-            WHERE co.claim_id = p_claim_id
-              AND co.app_id = p_app_id
-              AND co.object_id IS NOT NULL
-              AND (co.sa_deleted_at IS NULL OR co.sa_updated_at >= p_since)
-
-            UNION ALL
-
-            SELECT co.object_type, co.object_id, FALSE
-            FROM claimius.claim_object link
-                JOIN claimius.claim_object co
-                    ON co.claim_id = link.object_id
-                   AND co.app_id = p_app_id
-                   AND co.object_id IS NOT NULL
-                   AND (co.sa_deleted_at IS NULL OR co.sa_updated_at >= p_since)
-            WHERE link.claim_id = p_claim_id
-              AND link.app_id = p_app_id
-              AND link.object_type = 'claimius.claim'
-              AND (link.sa_deleted_at IS NULL OR link.sa_updated_at >= p_since)
-        ),
-        share AS (
-            SELECT b.object_type, b.object_id FROM bound b
-
-            UNION
-
-            SELECT e.descendant_type, e.descendant_id
-            FROM bound b
-                JOIN claimius.inheritance_info e
-                    ON e.ancestor_type = b.object_type
-                   AND e.ancestor_id = b.object_id
-                   AND e.depth > 0
-            WHERE b.cascades
-
-            UNION
-
-            SELECT uo.object_type, uo.object_id
-            FROM claimius.user_object uo
-            WHERE uo.app_id = p_app_id
-              AND uo.user_id = p_user_id
-              AND (uo.grants @> jsonb_build_array(jsonb_build_object('claim_id', p_claim_id))
-                   OR uo.grants @> jsonb_build_array(jsonb_build_object(
-                          'cascaded_from', jsonb_build_object('type', 'claimius.claim', 'id', p_claim_id))))
-        )
         SELECT s.object_type, array_agg(s.object_id) AS object_ids
-        FROM share s
+        FROM unnest(v_types, v_ids) AS s(object_type, object_id)
         GROUP BY s.object_type
     LOOP
         v_changed := claimius.recompute_user_object(p_app_id, p_user_id, v_share.object_type, VARIADIC v_share.object_ids) OR v_changed;

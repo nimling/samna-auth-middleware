@@ -44,7 +44,7 @@ Every write of a location runs `calc_hierarchical_access`:
 
 ## Reading locations
 
-1. `get_locations(user, app, required)` returns the locations linked to the app that `get_objects` returns for the user.
+1. `get_locations(user, app, required, after, limit)` returns the locations linked to the app that one `get_objects` page returns for the user, in `id` order.
 
 2. `get_location_ancestors` returns the location chain of an object from the closure and, for each location on it, the owning organization's chain; `get_ancestors` returns every tree tagged by name. Both read `idx_inheritance_info_descendant`, one range per tree, plus one owner chain range per location on the chain.
 

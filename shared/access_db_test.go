@@ -281,3 +281,45 @@ func TestInsertRootOrganizationBindsNoForeignClaim(t *testing.T) {
 		t.Fatalf("a new root must carry no binding to the actor's claim until its owner claim is created, found %d", bindings)
 	}
 }
+
+func TestGetOrganizationsPagesInKeyOrder(t *testing.T) {
+	db := database(t)
+	ctx := context.Background()
+	all, err := db.GetOrganizations(ctx, userA, sdb.ACCESS_READ, nil, 0)
+	if err != nil {
+		t.Fatalf("unpaged: %v", err)
+	}
+	if len(all) < 3 {
+		t.Fatalf("expected root, alpha and grand, got %d", len(all))
+	}
+	var walked []uuid.UUID
+	var after *uuid.UUID
+	for page := 0; page <= len(all); page++ {
+		orgs, err := db.GetOrganizations(ctx, userA, sdb.ACCESS_READ, after, 2)
+		if err != nil {
+			t.Fatalf("page %d: %v", page, err)
+		}
+		if len(orgs) > 2 {
+			t.Fatalf("page %d: %d rows over a limit of 2", page, len(orgs))
+		}
+		if len(orgs) == 0 {
+			break
+		}
+		for _, o := range orgs {
+			walked = append(walked, o.ID)
+		}
+		last := orgs[len(orgs)-1].ID
+		after = &last
+	}
+	if len(walked) != len(all) {
+		t.Fatalf("pages returned %d organizations, unpaged %d", len(walked), len(all))
+	}
+	for i := range all {
+		if walked[i] != all[i].ID {
+			t.Fatalf("position %d: paged %s, unpaged %s", i, walked[i], all[i].ID)
+		}
+		if i > 0 && walked[i].String() <= walked[i-1].String() {
+			t.Fatalf("position %d: %s does not follow %s in key order", i, walked[i], walked[i-1])
+		}
+	}
+}

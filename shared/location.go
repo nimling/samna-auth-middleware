@@ -25,21 +25,20 @@ func (d *DB) GetLocationQuery(loc *Location, locationID uuid.UUID) *bun.SelectQu
 		Limit(1)
 }
 
-func (d *DB) GetLocations(ctx context.Context, userID uuid.UUID, requiredAccess ClaimAccess) ([]Location, error) {
+func (d *DB) GetLocations(ctx context.Context, userID uuid.UUID, requiredAccess ClaimAccess, after *uuid.UUID, limit int) ([]Location, error) {
 	locs := make([]Location, 0)
-	err := d.GetLocationsQuery(&locs, userID, requiredAccess).Scan(ctx)
+	err := d.GetLocationsQuery(&locs, userID, requiredAccess, after, limit).Scan(ctx)
 	if err != nil {
 		return nil, err
 	}
 	return locs, nil
 }
 
-func (d *DB) GetLocationsQuery(locs *[]Location, userID uuid.UUID, requiredAccess ClaimAccess) *bun.SelectQuery {
-	return d.NewSelect().
+func (d *DB) GetLocationsQuery(locs *[]Location, userID uuid.UUID, requiredAccess ClaimAccess, after *uuid.UUID, limit int) *bun.SelectQuery {
+	return ObjectWhere(d.NewSelect().
 		Model(locs).
 		Where("location.sa_deleted_at IS NULL").
-		ExcludeColumn("sa_deleted_at").
-		Where(ObjectWhere(userID, OBJECT_TYPE_LOCATION, requiredAccess))
+		ExcludeColumn("sa_deleted_at"), userID, string(OBJECT_TYPE_LOCATION), requiredAccess, after, limit)
 }
 
 func (d *DB) GetChildLocations(ctx context.Context, startID uuid.UUID) ([]uuid.UUID, error) {

@@ -93,7 +93,7 @@ pairs in its transaction: the actor and the assignee per grant, the actor per bi
 
 2. An area raise takes the area row's lock until commit, so two writers of one claim, or of one object, serialize on that row and on nothing else.
 
-3. A pair recompute locks the pair it writes. The write's own pairs are those of its actor and assignee, so two writers acting for different users meet only on an area row.
+3. A pair recompute locks the pair it writes, and first the per object advisory keys of its objects in sorted order; a settle takes the keys of its whole share in sorted order before its first recompute, so overlapping settles acquire their common objects in one order. The write's own pairs are those of its actor and assignee, so two writers acting for different users meet only on an area row.
 
 ## Routed writes
 

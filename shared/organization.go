@@ -25,21 +25,20 @@ func (d *DB) GetOrganizationQuery(org *Organization, orgID uuid.UUID) *bun.Selec
 		Limit(1)
 }
 
-func (d *DB) GetOrganizations(ctx context.Context, userID uuid.UUID, requiredAccess ClaimAccess) ([]Organization, error) {
+func (d *DB) GetOrganizations(ctx context.Context, userID uuid.UUID, requiredAccess ClaimAccess, after *uuid.UUID, limit int) ([]Organization, error) {
 	orgs := make([]Organization, 0)
-	err := d.GetOrganizationsQuery(&orgs, userID, requiredAccess).Scan(ctx)
+	err := d.GetOrganizationsQuery(&orgs, userID, requiredAccess, after, limit).Scan(ctx)
 	if err != nil {
 		return nil, err
 	}
 	return orgs, nil
 }
 
-func (d *DB) GetOrganizationsQuery(orgs *[]Organization, userID uuid.UUID, requiredAccess ClaimAccess) *bun.SelectQuery {
-	return d.NewSelect().
+func (d *DB) GetOrganizationsQuery(orgs *[]Organization, userID uuid.UUID, requiredAccess ClaimAccess, after *uuid.UUID, limit int) *bun.SelectQuery {
+	return ObjectWhere(d.NewSelect().
 		Model(orgs).
 		Where("organization.sa_deleted_at IS NULL").
-		ExcludeColumn("sa_deleted_at").
-		Where(ObjectWhere(userID, OBJECT_TYPE_ORGANIZATION, requiredAccess))
+		ExcludeColumn("sa_deleted_at"), userID, string(OBJECT_TYPE_ORGANIZATION), requiredAccess, after, limit)
 }
 
 func (d *DB) GetChildOrganizations(ctx context.Context, startID uuid.UUID) ([]uuid.UUID, error) {

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"strconv"
 	"strings"
 
 	"github.com/google/uuid"
@@ -75,6 +76,26 @@ func QueryWithObject(ctx echo.Context) ([]ObjectType, error) {
 	return out, nil
 }
 
+func QueryPage(ctx echo.Context) (*uuid.UUID, int, error) {
+	var after *uuid.UUID
+	if raw := ctx.QueryParam("cursor"); raw != "" {
+		id, err := uuid.Parse(raw)
+		if err != nil {
+			return nil, 0, fmt.Errorf("cursor must be a uuid: %w", err)
+		}
+		after = &id
+	}
+	limit := 0
+	if raw := ctx.QueryParam("limit"); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n < 1 {
+			return nil, 0, fmt.Errorf("limit must be a positive integer")
+		}
+		limit = n
+	}
+	return after, limit, nil
+}
+
 func UserWhere(userID uuid.UUID, requiredAccess ClaimAccess) string {
 	return fmt.Sprintf(
 		`(samna_user.user_id = '%[1]s' OR samna_user.user_id IN (SELECT user_id FROM claimius.get_users('%[1]s', %[2]d))) AND samna_user.user_id NOT IN (SELECT user_id FROM claimius.samna_user WHERE type = 'system' AND sa_deleted_at IS NULL)`,
@@ -89,13 +110,14 @@ func ClaimWhere(userID uuid.UUID, requiredAccess ClaimAccess) string {
 	)
 }
 
-func ObjectWhere(userID uuid.UUID, objectType string, requiredAccess ClaimAccess) string {
-	parts := strings.SplitN(objectType, ".", 2)
-	table := parts[len(parts)-1]
-	return fmt.Sprintf(
-		`%[4]s.id IN (SELECT object_id FROM claimius.get_objects('%[1]s', '%[3]s', %[2]d))`,
-		userID, requiredAccess, objectType, table,
-	)
+func ObjectWhere(q *bun.SelectQuery, userID uuid.UUID, objectType string, requiredAccess ClaimAccess, after *uuid.UUID, limit int) *bun.SelectQuery {
+	var pageLimit any
+	if limit > 0 {
+		pageLimit = limit
+	}
+	return q.
+		Where("?TableAlias.id IN (SELECT object_id FROM claimius.get_objects(?, ?, ?, ?, ?))", userID, objectType, int(requiredAccess), after, pageLimit).
+		OrderExpr("?TableAlias.id")
 }
 
 func AuditWhere(userID uuid.UUID, requiredAccess ClaimAccess) string {

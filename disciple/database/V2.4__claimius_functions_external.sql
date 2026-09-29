@@ -250,15 +250,25 @@ COMMENT ON FUNCTION claimius.get_direct_access(UUID, UUID, TEXT, INTEGER, BOOLEA
 -- get_objects
 -- Returns object ids of the given object_type whose effective access mask
 -- covers all bits in p_required_access. The default 0 returns every object
--- the user has any access to.
+-- the user has any access to. Rows come in object_id order straight from the
+-- reader's range of idx_user_object_user_object: p_after starts the page past
+-- the last object_id of the previous one and p_limit bounds it, so a page of
+-- p rows reads p index entries and sorts nothing. The mask test reads
+-- (sa_access & required) >= required, which for a submask of required is
+-- the equality, and which the planner estimates as a range rather than a
+-- point, so it keeps the ordered range instead of sorting a bitmap scan. The
+-- reader's share settles before the page is read and does not depend on it.
 -- ----------------------------------------------------------------------------
 
 DROP FUNCTION IF EXISTS claimius.get_objects(UUID, UUID, TEXT, INTEGER);
+DROP FUNCTION IF EXISTS claimius.get_objects(UUID, TEXT, INTEGER);
 
 CREATE OR REPLACE FUNCTION claimius.get_objects(
     p_user_id          UUID,
     p_object_type      TEXT,
-    p_required_access  INTEGER DEFAULT 0
+    p_required_access  INTEGER DEFAULT 0,
+    p_after            UUID DEFAULT NULL,
+    p_limit            INTEGER DEFAULT NULL
 ) RETURNS TABLE(
                    object_id           UUID,
                    user_claim_id       UUID,
@@ -300,13 +310,15 @@ BEGIN
                  LEFT JOIN LATERAL claimius._best_grant(claimius.user_object.grants, p_user_id, p_required_access) best ON TRUE
         WHERE claimius.user_object.user_id = p_user_id
           AND claimius.user_object.object_type = p_object_type
-          AND (claimius.user_object.sa_access & p_required_access) = p_required_access
+          AND claimius.user_object.object_id > coalesce(p_after, '00000000-0000-0000-0000-000000000000'::UUID)
+          AND (claimius.user_object.sa_access & p_required_access) >= p_required_access
           AND (best.user_claim_id IS NOT NULL OR claimius.user_object.direct_grant)
-        ORDER BY claimius._popcount(claimius.user_object.sa_access) DESC, claimius.user_object.object_id;
+        ORDER BY claimius.user_object.object_id
+        LIMIT p_limit;
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius.get_objects(p_user_id uuid, p_object_type text, p_required_access integer) IS 'Object ids and metadata for objects whose mask covers p_required_access. user_claim_id is the actor token from the strongest surviving claim grant; null when only direct_grant applies. claim_id and claim_name describe the claim that contributed the strongest grant. sa_root_id is derived from the owning organization root.';
+COMMENT ON FUNCTION claimius.get_objects(p_user_id uuid, p_object_type text, p_required_access integer, p_after uuid, p_limit integer) IS 'Object ids and metadata for objects whose mask covers p_required_access, in object_id order after p_after, at most p_limit rows. user_claim_id is the actor token from the strongest surviving claim grant; null when only direct_grant applies. claim_id and claim_name describe the claim that contributed the strongest grant. sa_root_id is derived from the owning organization root.';
 
 -- ----------------------------------------------------------------------------
 -- get_organizations
@@ -314,10 +326,13 @@ COMMENT ON FUNCTION claimius.get_objects(p_user_id uuid, p_object_type text, p_r
 -- ----------------------------------------------------------------------------
 
 DROP FUNCTION IF EXISTS claimius.get_organizations(UUID, UUID, INTEGER);
+DROP FUNCTION IF EXISTS claimius.get_organizations(UUID, INTEGER);
 
 CREATE OR REPLACE FUNCTION claimius.get_organizations(
     p_user_id          UUID,
-    p_required_access  INTEGER DEFAULT 0
+    p_required_access  INTEGER DEFAULT 0,
+    p_after            UUID DEFAULT NULL,
+    p_limit            INTEGER DEFAULT NULL
 ) RETURNS SETOF claimius.organization AS $$
 BEGIN
     PERFORM claimius.reconcile_if_pending(p_user_id);
@@ -328,26 +343,27 @@ BEGIN
 
     RETURN QUERY
         SELECT o.*
-        FROM claimius.organization o
-        WHERE TRUE
-          AND o.sa_deleted_at IS NULL
-          AND o.id IN (
-            SELECT g.object_id FROM claimius.get_objects(p_user_id, 'claimius.organization', p_required_access) g
-        );
+        FROM claimius.get_objects(p_user_id, 'claimius.organization', p_required_access, p_after, p_limit) g
+            JOIN claimius.organization o ON o.id = g.object_id
+        WHERE o.sa_deleted_at IS NULL
+        ORDER BY o.id;
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius.get_organizations(p_user_id uuid, p_required_access integer) IS 'Organizations whose effective mask covers p_required_access.';
+COMMENT ON FUNCTION claimius.get_organizations(p_user_id uuid, p_required_access integer, p_after uuid, p_limit integer) IS 'Organizations whose effective mask covers p_required_access, one get_objects page in id order.';
 
 -- ----------------------------------------------------------------------------
 -- get_locations
 -- ----------------------------------------------------------------------------
 
 DROP FUNCTION IF EXISTS claimius.get_locations(UUID, UUID, INTEGER);
+DROP FUNCTION IF EXISTS claimius.get_locations(UUID, INTEGER);
 
 CREATE OR REPLACE FUNCTION claimius.get_locations(
     p_user_id          UUID,
-    p_required_access  INTEGER DEFAULT 0
+    p_required_access  INTEGER DEFAULT 0,
+    p_after            UUID DEFAULT NULL,
+    p_limit            INTEGER DEFAULT NULL
 ) RETURNS SETOF claimius.location AS $$
 BEGIN
     PERFORM claimius.reconcile_if_pending(p_user_id);
@@ -358,16 +374,14 @@ BEGIN
 
     RETURN QUERY
         SELECT l.*
-        FROM claimius.location l
-        WHERE TRUE
-          AND l.sa_deleted_at IS NULL
-          AND l.id IN (
-            SELECT g.object_id FROM claimius.get_objects(p_user_id, 'claimius.location', p_required_access) g
-        );
+        FROM claimius.get_objects(p_user_id, 'claimius.location', p_required_access, p_after, p_limit) g
+            JOIN claimius.location l ON l.id = g.object_id
+        WHERE l.sa_deleted_at IS NULL
+        ORDER BY l.id;
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius.get_locations(p_user_id uuid, p_required_access integer) IS 'Locations whose effective mask covers p_required_access.';
+COMMENT ON FUNCTION claimius.get_locations(p_user_id uuid, p_required_access integer, p_after uuid, p_limit integer) IS 'Locations whose effective mask covers p_required_access, one get_objects page in id order.';
 
 -- ----------------------------------------------------------------------------
 -- get_users
@@ -562,7 +576,7 @@ GRANT EXECUTE ON FUNCTION claimius.get_access(UUID, UUID, TEXT, INTEGER)
 GRANT EXECUTE ON FUNCTION claimius.get_direct_access(UUID, UUID, TEXT, INTEGER, BOOLEAN)
     TO claimius_disciple_client, claimius_writer, claimius_admin, claimius_reader;
 
-GRANT EXECUTE ON FUNCTION claimius.get_objects(UUID, TEXT, INTEGER)
+GRANT EXECUTE ON FUNCTION claimius.get_objects(UUID, TEXT, INTEGER, UUID, INTEGER)
     TO claimius_disciple_client, claimius_writer, claimius_admin, claimius_reader;
 
 GRANT EXECUTE ON FUNCTION claimius.get_user_access(UUID, TEXT, INTEGER)
@@ -892,10 +906,13 @@ COMMENT ON FUNCTION claimius.get_audit(p_user_id uuid, p_required_access integer
 -- ----------------------------------------------------------------------------
 
 DROP FUNCTION IF EXISTS claimius.get_secrets(UUID, UUID, INTEGER);
+DROP FUNCTION IF EXISTS claimius.get_secrets(UUID, INTEGER);
 
 CREATE OR REPLACE FUNCTION claimius.get_secrets(
     p_user_id          UUID,
-    p_required_access  INTEGER DEFAULT 0
+    p_required_access  INTEGER DEFAULT 0,
+    p_after            UUID DEFAULT NULL,
+    p_limit            INTEGER DEFAULT NULL
 ) RETURNS SETOF claimius.samna_secret AS $$
 BEGIN
     PERFORM claimius.reconcile_if_pending(p_user_id);
@@ -906,16 +923,14 @@ BEGIN
 
     RETURN QUERY
         SELECT s.*
-        FROM claimius.samna_secret s
-        WHERE TRUE
-          AND s.sa_deleted_at IS NULL
-          AND s.id IN (
-            SELECT g.object_id FROM claimius.get_objects(p_user_id, 'claimius.samna_secret', p_required_access) g
-        );
+        FROM claimius.get_objects(p_user_id, 'claimius.samna_secret', p_required_access, p_after, p_limit) g
+            JOIN claimius.samna_secret s ON s.id = g.object_id
+        WHERE s.sa_deleted_at IS NULL
+        ORDER BY s.id;
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius.get_secrets(p_user_id uuid, p_required_access integer) IS 'Secrets whose effective mask covers p_required_access.';
+COMMENT ON FUNCTION claimius.get_secrets(p_user_id uuid, p_required_access integer, p_after uuid, p_limit integer) IS 'Secrets whose effective mask covers p_required_access, one get_objects page in id order.';
 
 -- Drop any stale earlier signatures of the graph functions before redefining.
 -- The previous version of these functions had different argument lists; if a

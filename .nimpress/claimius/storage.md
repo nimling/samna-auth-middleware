@@ -54,7 +54,7 @@ The levels above the leaves are `1 / B` of the index, so a descent reads `h` pag
 
 1. The pair primary key is one UUID, `e = 28`, `B ≈ 262`: three levels hold 18 million pairs.
 
-2. `idx_user_object_user_type` has no include columns, so it deduplicates: every pair of one user, app, type and mask shares one key and adds a 6 byte heap pointer to its posting list ([Deduplication](https://www.postgresql.org/docs/17/btree.html#BTREE-DEDUPLICATION)). The reader's range of `V_{u,τ}` pairs with `m` distinct masks is then about `⌈(V_{u,τ} × 6 + m × 68) / 7,337⌉` leaf pages, and a listing's further cost is the `V_{u,τ}` heap rows it reads for `grants` and the rendering fields.
+2. `idx_user_object_user_object` is keyed `(user_id, app_id, object_type, object_id)` and includes `sa_access`, so every pair is its own entry of about 64 bytes and the reader's range of `V_{u,τ}` pairs is about `⌈V_{u,τ} × 64 / 7,337⌉` leaf pages in `object_id` order. A page of `p` rows reads `⌈p × 64 / 7,337⌉ + 1` of them after one descent, and a listing's further cost is the `p` heap rows it reads for `grants` and the rendering fields. Include columns disable deduplication ([Deduplication](https://www.postgresql.org/docs/17/btree.html#BTREE-DEDUPLICATION)); the key order is what lets a page stop after `p` entries.
 
 3. `idx_inheritance_info_descendant` and `idx_inheritance_info_ancestor` carry include columns, so they never deduplicate and every closure row pays its full entry, about 100 bytes.
 
