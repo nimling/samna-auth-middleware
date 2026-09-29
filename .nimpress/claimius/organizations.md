@@ -26,7 +26,7 @@ An organization is who owns something. Every registered row carries `sa_owner_id
 
 2. The before insert trigger `tg_self_root` runs `_set_self_owner_on_insert`. A row with no owner, or with itself as owner, becomes a root and generates a `private_seed` of 32 random bytes. A child with no `sa_root_id` copies its parent's `sa_root_id` and `private_seed`, one primary key probe.
 
-3. A root is a tenant. Every row under it resolves to it, and an update that changes `sa_root_id` outside replay is refused by `calc_hierarchical_access`. `migrate_root(object_type, object_id, new_root_id)` is the only path across roots, and every call is reviewed by a person.
+3. A root is a tenant. Every row under it resolves to it, and an update that changes `sa_root_id` outside replay and outside `migrate_root` is refused by `calc_hierarchical_access`. `migrate_root(object_type, object_id, new_root_id)` is the only path across roots, and every call is reviewed by a person.
 
 4. `create_root_organization(app_id, name, actor, ...)` probes for a live root of that name linked to the app and returns it, and otherwise inserts the root and links it with `link_app_object`. It is idempotent on app and name, so a bootstrap may run it on every start.
 
@@ -78,7 +78,17 @@ The work of a write is linear in the subtree it moves and constant in the size o
 
 ## Crossing roots
 
-`migrate_root(object_type, object_id, new_root_id)` is the one path that changes `sa_root_id`. Under `replay_mode` it rewrites `sa_root_id` on the object and the rows below it, then rebuilds the whole closure of the old root and of the new one with `build_*_tree(root)`: `N_old + N_new` rows deleted and inserted. It is the one write whose cost is the size of two tenants, which is why it is kept off the normal write path and every call is reviewed.
+`migrate_root(object_type, object_id, new_root_id)` is the one path that changes `sa_root_id`. It hangs the object, with its subtree, directly under `new_root_id`:
+
+1. It refuses, SQLSTATE `22023`, an object that is not live, a `new_root_id` that is not a live root of the same type, and a `new_root_id` inside the object's own subtree.
+
+2. It walks the subtree through the object's own parent column, `sa_owner_id` for an organization and `sa_parent_id` for a location or a parenthood row, so the walk of an organization follows the ownership tree it is moving.
+
+3. One update gives every node of the subtree the new root and the object the new root as its parent, under the transaction setting `claimius.migrating_root`, which is the one case `calc_hierarchical_access` lets a root change through outside replay. The trigger runs as for any reparent: it splices the moved subtree into the new tree incrementally and raises the object area, with `cascade`, of every node it moves, so every holder on either side settles on its next read.
+
+4. For an organization, the rows of registered tables owned in the subtree that carry `sa_root_id` and no parenthood of their own, and whose `sa_root_id` names the old root, take the new one, one update per such table. On a prophet the moved organization then joins every app of the new root, `link_app_organization` with `cascade`.
+
+With `n_S` the moved subtree, the move writes `n_S` rows, the closure rows the splice moves and `n_S` areas, and nothing in the rest of either tenant. It still crosses the tenant boundary every other write keeps, which is why it is kept off the normal write path and every call is reviewed.
 
 ## Linking to an app
 

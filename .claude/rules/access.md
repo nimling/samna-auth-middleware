@@ -50,7 +50,7 @@ The synthesized `*AccessClaim` carries `UserObjectID = userID`, `Access = int(re
 
 ## Usage and where a call runs
 
-`MutationAccess`, `GetAccess`, `UserAccess` and every granted entry of `MutationAccessMany` add one use of `(actor, object_type, object_id)` to the in process counter `DB.Usage`. It flushes through `claimius.touch_object_usage` every 10 seconds, at 1,000 distinct keys, and on stop. Never write `used_count`, `last_used_at` or `user_activity` yourself.
+`MutationAccess`, `GetAccess`, `UserAccess` and every granted entry of `MutationAccessMany` add one use of `(actor, object_type, object_id)` to the in process counter `DB.Usage`. `Usage.Add(appID *uuid.UUID, userID, objectType, objectID)` keys the use per app; a nil `appID` is the deployment's own app, which is what the lookups pass. It flushes through `claimius.touch_object_usage` every 10 seconds, at 1,000 distinct keys, and on stop, with the keys sorted in lock order, a deadlock or serialization failure retried, and a failed batch kept for the next flush. Never write `used_count`, `last_used_at` or `user_activity` yourself.
 
 The object gates run on the primary: `get_access`, `get_direct_access`, `mutation_access` and `resolve_access` may settle a pair, which writes. Pure reads, `ScopeAccess` among them, go through `DB.Read`, which uses the replica from `SAUTH_REPLICA_DSN` and repeats a read on the primary when the replica refuses it with SQLSTATE `25006`.
 

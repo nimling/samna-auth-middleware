@@ -39,15 +39,17 @@ A lookup on one object reads the settled pair of `user_object`. `get_access` fir
 
 `ObjectWhere(q, actor, objectType, required, objectID, after, limit)` takes the implementing side's `*bun.SelectQuery` and returns it filtered:
 
-1. With `objectID` set it adds `?TableAlias.id = objectID` and `EXISTS (SELECT 1 FROM claimius.get_access(...))`, the check of that one object.
+The table is `?TableAlias` when the query has a model; a query built with `Table` or `TableExpr` and no model has its table resolved from the query, the alias after `AS` when there is one, so `db.NewSelect().TableExpr("public.asset AS a")` filters on `a.id`.
 
-2. Otherwise it adds `?TableAlias.id IN (SELECT object_id FROM claimius.get_objects(actor, objectType, required, after, limit))` and orders by `?TableAlias.id`, every value a bound parameter. `get_objects` reads the actor's range of the `user_object` primary key in `object_id` order from the first key past `after`, so a page of `limit` rows reads `limit` entries of that range; `after` nil and `limit` 0 pass NULL and read the whole range.
+1. With `objectID` set it adds `<table>.id = objectID` and `EXISTS (SELECT 1 FROM claimius.get_access(...))`, the check of that one object.
+
+2. Otherwise it adds `<table>.id IN (SELECT object_id FROM claimius.get_objects(actor, objectType, required, after, limit))`, every value a bound parameter, and orders by `<table>.id` when `after` or `limit` is set: a page is ordered on the id its cursor continues from, and an unpaged listing keeps the order the caller gave. `GetOrganizationsQuery` and `GetLocationsQuery` order an unpaged listing by id themselves. `get_objects` reads the actor's range of the `user_object` primary key in `object_id` order from the first key past `after`, so a page of `limit` rows reads `limit` entries of that range; `after` nil and `limit` 0 pass NULL and read the whole range.
 
 `GetOrganizations`, `GetLocations` and `GetSecrets`, with their `Query` forms, take the same `after` and `limit`. `QueryPage(ctx)` reads them from the `cursor` and `limit` query parameters, a uuid and a positive integer, so `/me/organization?cursor=<last id>&limit=50` is the next page. `UserWhere`, `ClaimWhere` and `AuditWhere` return a predicate the implementing side puts on its own query. The implementing side's table is joined to the actor's own index range, so a listing is one query and the planner sees both sides. A listing carries no `UserClaimID`; acting on a row in it goes through `MutationAccess`. See [Reads](../reads.md).
 
 ## Graphs
 
-`GetOwnerGraph(ctx, actor, startID, depth, required, window)` and `GetClaimGraph(ctx, actor, startID, depth, required, window)`, with their `Query` forms, call `claimius.get_owner_graph` and `claimius.get_claim_graph` and return flat `GraphNode` rows. `window` is a `GraphWindow{Width, Sort, NextID}`: at most `Width` children of each type per parent, 0 meaning all, in `GRAPH_SORT_NAME` order or by decayed usage with `GRAPH_SORT_USAGE`, continuing after `NextID`. An empty `Sort` is name order. See [Graphs](../graphs.md).
+`GetOwnerGraph(ctx, actor, startID, depth, required, window)` and `GetClaimGraph(ctx, actor, startID, depth, required, window)`, with their `Query` forms, call `claimius.get_owner_graph` and `claimius.get_claim_graph` and return flat `GraphNode` rows. `window` is a `GraphWindow{Width, Sort, NextID}`: at most `Width` children of each type per parent, 0 meaning all, in `GRAPH_SORT_NAME` order or by decayed usage with `GRAPH_SORT_USAGE`, continuing after `NextID`. An empty `Sort` is name order. `GraphWindow` is exported from `disciple/sdb` beside `GraphNode`, so a disciple builds the window without importing `shared`. See [Graphs](../graphs.md).
 
 ## Object types
 
@@ -55,7 +57,15 @@ A lookup on one object reads the settled pair of `user_object`. `get_access` fir
 
 ## Usage
 
-Every granted single object lookup adds one use of `(actor, object_type, object_id)` to an in process counter on the handle, `DB.Usage`: `MutationAccess`, `GetAccess`, `UserAccess` on the resolved target, and each granted entry of `MutationAccessMany`. The counter flushes through `claimius.touch_object_usage` every 10 s, when it holds 1,000 distinct keys, and on `Stop`. A crash loses at most the uses since the last flush, a loss usage tolerates and access never sees. With several replicas each flushes its own counts, and the database adds them. A use counts only on a settled pair; see [Usage](../usage.md).
+Every granted single object lookup adds one use of `(actor, object_type, object_id)` to an in process counter on the handle, `DB.Usage`: `MutationAccess`, `GetAccess`, `UserAccess` on the resolved target, and each granted entry of `MutationAccessMany`. `Usage.Add(appID *uuid.UUID, userID uuid.UUID, objectType string, objectID uuid.UUID)` keys the use per app; the lookups pass a nil `appID`, the deployment's own app, and a prophet service that checks for another app passes that app, so the use lands on that app's pair. The counter flushes through `claimius.touch_object_usage` every 10 s, when it holds 1,000 distinct keys, and on `Stop`:
+
+1. The keys go sorted by user, app, type and object, the order the pairs are locked in, the own app keys through the form without apps and the others through the form with `app_ids[]`, in one statement.
+
+2. A flush refused with SQLSTATE `40P01` or `40001` is sent again, up to three attempts.
+
+3. A batch that still fails is added back to the counter and reported, so its counts go with the next flush.
+
+A crash loses at most the uses since the last flush, a loss usage tolerates and access never sees. With several replicas each flushes its own counts, and the database adds them. A use counts only on a settled pair; see [Usage](../usage.md).
 
 ## Where a call runs
 

@@ -31,7 +31,7 @@ Both routes take `consumer`, the replica's state id, and `prophet`, the slug the
 
 2. It then fetches pages after the cursor. `ApplyPage` applies a page in one transaction under `replay_mode`: the cursor moved first, from the position the page was pulled at and nowhere else, then every payload upserted or deleted by primary key with `app_id` stripped and `samna_app` skipped, and the claim areas each claim, binding and grant moves raised in `access_diff`, all together. One commit per page, whatever its size; a page that fails rolls back whole and is pulled again, and a page pulled at a cursor that has since moved is refused.
 
-3. On the disciple, between pulls and at most once a second, the loop calls `PostAccessDiffDrain(ctx, 1000)`, `claimius.drain_access_diff`, which settles up to 1,000 holder shares of open areas that pass the drain rule, most recently active holder first; see [Materialization](../materialization.md).
+3. On the disciple, between pulls and at most once a second, the loop calls `PostAccessDiffDrain(ctx, 1000)`, `claimius.drain_access_diff`, which settles up to 1,000 holder shares of open areas that pass the drain rule, most recently active holder first, of at most 64 users and within the lock budget; see [Materialization](../materialization.md#the-drain).
 
 4. It pulls again as soon as a page is applied, with `wait` 25, so an idle app costs one held request per hold.
 

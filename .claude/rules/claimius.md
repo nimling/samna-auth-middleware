@@ -15,7 +15,7 @@ description: |
    app_object app_object_ids apps_for_object link_app_object app_has_object
    unlink_app_object create_root_organization, scope claim ScopeAccess get_scope_access
    jsonb_path_exists machine client service to service client credentials,
-   init init_disciple init_hybrid init_claimius_tables
+   init init_disciple init_hybrid create_app init_claimius_tables
    init_claimius_internal ensure_app_user merge_user migrate_root,
    calc_object_access calc_hierarchical_access calc_claim_access
    emit_sync_event replay_mode reconcile_queue access_diff access_diff_user
@@ -47,7 +47,7 @@ do_not_invent: true
 
 This project uses **Claimius** for access control. Claimius is a Postgres schema named `claimius` that materializes user access into a denormalized index. Application code reads through `get_*` functions, never direct SELECTs against claimius tables.
 
-Materialization is paid on read, not on write. A write settles only the acting user on the rows it names, so a writer reads its own change back inside the same request, and records the changed area in `claimius.access_diff`: one row per claim, per assignment of a claim to one user, or per object, whose `raise_count` grows by one on every repeat. Each user settles its own share of an area when it reads: a check through `get_access` settles the one pair it asks about, a listing settles the reader's whole share of every area it meets and records it in `access_diff_user` at the area's `raise_count`. The area clears once every holder has settled it. `drain_access_diff` settles, off the request path, the shares of holders who read more often than the area is raised. An area nobody reads is never computed. This keeps write cost constant in the number of users and is why a write must never assume another user's `user_object` row exists yet.
+Materialization is paid on read, not on write. A write settles only the acting user on the rows it names, so a writer reads its own change back inside the same request, and records the changed area in `claimius.access_diff`: one row per claim, per assignment of a claim to one user, or per object, whose `raise_count` grows by one on every repeat. Each user settles its own share of an area when it reads: a check through `get_access` settles the one pair it asks about, a listing settles the reader's share of the areas it needs, those that can hold a pair of the type it lists, at most 512 per call under one share lock per user, and records it in `access_diff_user` at the area's `raise_count`. The area clears once every holder has settled it. `drain_access_diff` settles, off the request path, the shares of holders who read more often than the area is raised. An area nobody reads is never computed. This keeps write cost constant in the number of users and is why a write must never assume another user's `user_object` row exists yet.
 
 This document is a usage guide. It tells you which functions to call, which tables you may write to, and which patterns to follow. It does not describe how the engine computes access. Trust the engine and call the documented entry points.
 
@@ -168,12 +168,13 @@ Tables that have a write function:
 - Cross app moves → `merge_user`
 - Cross root moves → `migrate_root`. Admin only, rare.
 - Bootstrap → `init`, which on the prophet set takes the system app fields and on the disciple set takes `p_disciple_app_slug`; the prophet set also carries `init_disciple` and `init_hybrid`. `init_hybrid` takes the system app fields plus `p_upstream_prophet`, `p_upstream_endpoint`, `p_upstream_app_slug` and `p_upstream_app_secret`, runs `init`, and registers the upstream in `prophet_peer`: a hybrid is a prophet that mirrors one app of a peer prophet, and it has no `disciple_state` row
+- App creation → `init` for the system app, whose rows are all stamped with the system user's `user_claim.id`; `create_app(p_actor_user_claim_id, p_slug, p_name, p_org_id, p_private_key, p_private_seed, p_redirect_uris, p_sync_uri, p_description, p_connection, p_owner_access, p_default_claim, p_app_id)` for every other app. The actor must hold owner on `p_org_id` in its own app; `create_app` links the organization tree, creates and binds the owner claim, grants it to the actor's user in the new app, creates and binds the default claim, and returns jsonb keyed `samna_app`, `organization`, `samna_user`, `claim`, `default_claim`, `user_claim`, `claim_object`
 - Table registration → `init_claimius_tables`
 - Self identity → `get_prophet_app()` returns the system app on prophet and hybrid and raises on a pure disciple. `get_disciple_app()` returns the upstream app on a pure disciple and raises on a prophet and on a hybrid, which carry no `disciple_state` row. Both return `SETOF claimius.samna_app`. Scalar UUID variants `get_prophet_app_id()`, `get_disciple_app_id()`, and `get_app_id()` exist for `DEFAULT` expressions and other places that reject subqueries. `get_app_id()` returns the system app id on prophet and hybrid, the disciple app id on a pure disciple, and is the one to use on a hybrid. `get_disciple_app_id()` raises wherever `get_disciple_app()` does. These helpers ship in the prophet set; the disciple set mirrors one app, carries none of them, and its read functions take no app argument. Use these instead of maintaining a local helper.
 
 Tables where direct INSERT/UPDATE is the documented path:
 
-- `samna_app`. Use `init` for the FIRST app only.
+- `samna_app` updates. Create an app with `init`, the system app, or `create_app`, every other app; never INSERT it by hand.
 - `organization`. Prefer `create_root_organization` for roots; it links `app_object` for you.
 - `location`
 - `samna_client`, `samna_secret`
@@ -204,6 +205,13 @@ The actor recorded in every row is the assignment under whose authority the acti
 `get_access`, `get_objects`, and `search` return a `user_claim_id` column. **Contract: when a row is returned, `user_claim_id` is populated.** Callers use it as `sa_created_by` on follow on writes within the same request.
 
 When `get_access` returns no rows but the user is expected to have access via structural relationship, call `get_direct_access`. It walks the owner, location, and parenthood ancestor chains and returns the closest, highest privilege user_claim the user holds on any ancestor, in the same row shape as `get_access`. If both functions return nothing, the user has no path to act on the object.
+
+### First bindings
+
+`_check_claim_composition` refuses a binding that hands out more than the actor holds on the object. Two first bindings are judged on the actor's owner bit on an organization instead, because nobody can hold a pair on what has no binding yet:
+
+- The first binding of an app that carries none, from an actor of another app who holds owner on the organization owning the `samna_app` row, judged in the actor's own app. `create_app` relies on it.
+- The first binding on a `samna_user` who holds a claim assigned under the binding's owning organization, from an actor holding owner on that organization. `create_organization_user` relies on it.
 
 The list and graph functions `get_organizations`, `get_locations`, `get_users`, `get_claims`, `get_audit`, `get_secrets`, `get_owner_graph`, `get_claim_graph` do NOT return `user_claim_id`. To get the actor token after listing, call `get_access` for the specific object the caller is about to act on.
 
@@ -279,7 +287,7 @@ Default for everything is soft delete: set `sa_deleted_at = now()`. Never `DELET
 
 ### Cross root reparenting is forbidden
 
-To move an organization to a different root tree, the calc trigger will raise. Use `claimius.migrate_root(object_type, object_id, new_root_id)`. This is rare and should be flagged for human review.
+To move an organization to a different root tree, the calc trigger will raise. Use `claimius.migrate_root(object_type, object_id, new_root_id)`. It hangs the object with its subtree directly under `new_root_id`, a live root of the same type, walking an organization's subtree through `sa_owner_id` and any other through `sa_parent_id`, in one update the trigger lets through under the transaction setting `claimius.migrating_root`. The trigger moves the closure incrementally and raises the area of every node moved; for an organization the owned rows without parenthood take the new root and the moved tree joins the new root's apps. This is rare and should be flagged for human review.
 
 ## Creation order on a prophet
 
@@ -291,11 +299,10 @@ Encapsulated in `init`. Call `init` and don't replicate its body.
 
 ### A new non system app on an existing prophet
 
-1. Owning org must exist, either an existing org or a fresh root org.
-2. INSERT `samna_app` with all per app fields. `sa_owner_id` points at the owning org.
-3. INSERT `prophet_state` row for the app; its cursor `(last_applied_txid, last_applied_seq)` starts at `(0, 0)`.
-4. Optionally create a default claim for the app and set `samna_app.claim_id`.
-5. Call `init_claimius_tables(...)` to register any external tables.
+1. Owning org must exist, either an existing org or a fresh root org, and the actor must hold owner on it in its own app.
+2. Call `create_app` with the actor's `user_claim.id`. It writes the `samna_app` row, its `prophet_state` row, the actor's `samna_user` in the app, the organization links, the owner claim with its bindings and grant, and the default claim, every row stamped with that id.
+3. Write `app_secret` when the app needs one.
+4. Call `init_claimius_tables(...)` to register any external tables.
 
 ### Resources inside an existing app
 
@@ -358,7 +365,7 @@ Pass `p_starts_at` or `p_ends_at` to `assign_claim_user`. `get_*` functions filt
 
 ### A user cannot see something another user just created
 
-Expected until that user reads. The write marked the area in `access_diff` and settled only the writer. The other user's next check settles the one pair it asks about, and their next listing settles their whole share of the area and records it in `access_diff_user`; the area row clears once every holder has settled it. If it persists past a read, check that the read entered through a `get_*` function rather than a direct SELECT, since `reconcile_if_pending` runs at the top of the `get_*` family and nowhere else.
+Expected until that user reads. The write marked the area in `access_diff` and settled only the writer. The other user's next check settles the one pair it asks about, and their next listing settles their share of the area and records it in `access_diff_user`; the area row clears once every holder has settled it. If it persists past a read, check that the read entered through a `get_*` function rather than a direct SELECT, since `reconcile_if_pending` runs at the top of the `get_*` family and nowhere else.
 
 ### The disciple keeps falling behind on sync
 
@@ -393,6 +400,8 @@ To force a refresh, call `claimius.recompute_user_object($app_id, $user_id, $obj
 - Editing `user_object` rows directly to change access.
 - Overriding `claimius.replay_mode` outside the disciple sync layer.
 - Calling `migrate_root` without flagging for human review.
+- INSERT into `samna_app` by hand. Use `init` or `create_app`.
+- Calling `_grant_prophet_roles` or `_grant_disciple_roles`. The role grants live in the last base file, `V6.0__claimius_grants.sql`, and run on every build and replay of the set.
 - Hard coding the system app slug. Different deployments use different slugs.
 - Writing a row of an app another prophet decides. The trigger refuses it with SQLSTATE `P0409` and the home in the hint, and `/sam` answers `409` with the home in `SAuth-Home`; send the write to that prophet.
 - Calling `get_disciple_app` or `get_disciple_app_id` on a hybrid. It raises; use `get_app_id`.

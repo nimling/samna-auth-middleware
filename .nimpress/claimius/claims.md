@@ -55,6 +55,14 @@ eff(c, b) & ~A(writer, y) & 15 ≠ 0
 
 with `A(writer, y) = 0` when the writer holds no pair. It reads the writer's grant, the settle test of one pair and one range of the writer's pairs on the object. An actor who cannot reach an object cannot grant it away, and one who reads it cannot grant write on it.
 
+Two first bindings are judged on the writer's owner bit on an organization instead, `A = 15` when it holds owner there, because no one can hold a pair on what has no binding yet:
+
+1. On a prophet, the first live binding of an app that carries none, from a writer whose grant belongs to another app, when the writer holds owner, in its own app, on the organization that owns the `samna_app` row. This is how `create_app` opens a new app; see [Apps](./apps.md#creating-an-app).
+
+2. The first live binding on a `samna_user` who holds a claim assigned under the binding's owning organization, when the writer holds owner on that organization in the binding's app. This is how `create_organization_user` binds a new member's claim.
+
+Each costs one pair settle and one probe of the writer's pair on the organization, and is tested only when the plain rule would refuse.
+
 ## Cascade
 
 A binding reaches the rows below its object when both `claim.inherits` and `claim_object.inherits` are true. The claim flag is the switch for every binding the claim carries; the binding flag narrows it to one object. Either false stops the cascade, which is how a broad claim is bound to one room without reaching anything under it. The objects a claim reaches are

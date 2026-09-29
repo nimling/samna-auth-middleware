@@ -2,7 +2,7 @@
 layout: doc
 title: Security
 description: The four roles and their grants per role, read functions that run as their owner, secrets under the app seed and the credential cache, the unlogged token tables, soft delete, and what a compromised disciple can and cannot do.
-tags: claimius_admin, claimius_writer, claimius_reader, claimius_disciple_client, security definer, search_path, samna_secret, private_seed, bcrypt, credential cache, unlogged, rate_limit_gcra, soft delete
+tags: claimius_admin, claimius_writer, claimius_reader, claimius_disciple_client, _grant_prophet_roles, _grant_disciple_roles, _match_audit_partition_grants, security definer, search_path, samna_secret, private_seed, bcrypt, credential cache, unlogged, rate_limit_gcra, soft delete
 lastUpdated: true
 ---
 
@@ -10,18 +10,18 @@ lastUpdated: true
 
 ## Roles
 
-`V1.0__claimius_roles.sql` creates four roles and the schema, owned by `claimius_admin`, and grants the other three `USAGE` on it. The grants on tables and functions are written by `_grant_prophet_roles` on a prophet and a hybrid and by `_grant_disciple_roles` on a disciple.
+`V1.0__claimius_roles.sql` creates four roles and the schema, owned by `claimius_admin`, and grants the other three `USAGE` on it. The grants on tables and functions are written by `_grant_prophet_roles` on a prophet and a hybrid and by `_grant_disciple_roles` on a disciple. Both live in `V6.0__claimius_grants.sql`, the last file of each base set, which runs the one that fits at the top level: the disciple set runs the disciple helper, and the prophet set runs the disciple helper on a database initialized through `init_disciple` and the prophet helper otherwise. So every build and every replay of the set leaves the roles holding their grants on every table and function the set carries, a function added in any earlier file included, and no consumer calls a `_grant_*` function. A change to what a role holds is made in that file, which replays it.
 
 | Role | Prophet | Disciple |
 |---|---|---|
 | `claimius_admin` | Owns every table and function | The same |
 | `claimius_writer` | `SELECT` on every table; `INSERT`, `UPDATE` on `samna_app`, `samna_user`, `samna_client`, `samna_secret`, `organization`, `location`, `object_field`, `user_field`, `user_relation`, `notification`, `prophet_state`, `sync_consumer`; `UPDATE` on `prophet_peer`; `INSERT`, `UPDATE`, `DELETE` on `claim_graph_cache`; `EXECUTE` on every function | not granted |
-| `claimius_reader` | No table; `EXECUTE` on every function except the claim, grant and binding writers, `merge_user`, `migrate_root`, `init`, `init_disciple`, `init_hybrid`, `offer_handover`, `accept_handover`, `apply_peer_event`, `init_claimius_tables`, `init_claimius_internal` and `recompute_state` | The same |
+| `claimius_reader` | No table; `EXECUTE` on every function except the claim, grant and binding writers, `merge_user`, `migrate_root`, `init`, `init_disciple`, `init_hybrid`, `create_app`, `offer_handover`, `accept_handover`, `apply_peer_event`, `init_claimius_tables`, `init_claimius_internal` and `recompute_state` | The same |
 | `claimius_disciple_client` | not granted | `SELECT` on every table; `INSERT`, `UPDATE`, `DELETE` on the mirrored tables, the derived tables `user_object`, `object_info`, `user_users`, `inheritance_info`, `table_info`, `claim_graph_cache`, and on `disciple_state`, `audit`, `notification`; `EXECUTE` on every function |
 
 1. The reader holds no table privilege. It reaches data only through functions, and it cannot call a function that creates or changes a claim, a grant, a binding or a home, so a connection that only reads cannot change access.
 
-2. The writer holds no `UPDATE` or `DELETE` on `audit` or `sync_event`, so a prophet service connecting as the writer cannot rewrite the trail or the feed.
+2. The writer holds no `UPDATE` or `DELETE` on `audit` or `sync_event`, so a prophet service connecting as the writer cannot rewrite the trail or the feed. Every partition of `audit` holds exactly the grants of the partitioned table, the owner and `PUBLIC` aside: `_match_audit_partition_grants` revokes every other grant on a partition and gives it each grant of `audit`, when `ensure_audit_partition` attaches a month and on every replay of `V6.0__claimius_grants.sql`. So a partition read or written by name grants nothing the table does not, and the `audit_default` left by an unpartitioned `audit` keeps none of its old grants.
 
 3. The disciple client applies the feed, so it writes the mirrored tables and the rows derived from them. Its authority is the one app the disciple mirrors; see below.
 
@@ -67,7 +67,7 @@ A disciple's database and process hold its app's mirrored rows, its own tables, 
 | Send routed writes for its own app, stamped with any grant of that app in `sa_created_by` | Write for another app: the app key names the app, and every routed write runs for it alone |
 | Pull its own app's feed | Sign a token: it holds no `private_key` |
 | Store ciphertext of its app's secrets | Decrypt a secret: it holds no `private_seed` |
-| | Hand out more than the stamped grant holds: `_check_claim_composition` refuses a binding whose mask exceeds what that grant's user holds on the object, and a link to a claim that user cannot read |
+| | Hand out more than the stamped grant holds: `_check_claim_composition` refuses a binding whose mask exceeds what that grant's user holds on the object, or for a first binding owner on the organization it opens, and a link to a claim that user cannot read |
 | | Replay a DPoP bound token without the client's private key |
 | | Write an app another prophet decides: the home refuses it |
 

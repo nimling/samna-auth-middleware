@@ -2,7 +2,7 @@
 layout: doc
 title: Graphs
 description: The owner graph and the claim graph, their node shape, the window that bounds the rows they return, the rows each reads as a function of the tree and the reader, the per user cache of the default claim graph validated on read against the snapshot it was built under, and its hit ratio.
-tags: get_owner_graph, get_claim_graph, _window_graph, p_width, p_sort, p_next_id, claim_graph_cache, pg_snapshot, pg_visible_in_snapshot, txid, get_graph_links_owner, get_graph_links_claim
+tags: get_owner_graph, get_claim_graph, _window_graph, _window_links, p_width, p_sort, p_next_id, claim_graph_cache, pg_snapshot, pg_visible_in_snapshot, txid, get_graph_links_owner, get_graph_links_claim
 lastUpdated: true
 ---
 
@@ -14,7 +14,7 @@ Two functions render what a user can reach as a graph of flat nodes. Every node 
 |---|---|
 | `get_owner_graph(user, app, start_id, depth, required, width, sort, next_id)` | Organizations under their owners, locations under their parents or owners, and every registered row under its parent, location or owner |
 | `get_claim_graph(user, app, start_id, depth, required, width, sort, next_id)` | The user, the users the user sees, the user's grants, the claims, their bindings, and the objects each binding reaches |
-| `get_graph_links_owner`, `get_graph_links_claim` | The edges between the reader's nodes as one jsonb array, filtered by included and excluded types, read from the pairs as they stand |
+| `get_graph_links_owner`, `get_graph_links_claim` | The edges between the reader's nodes as one jsonb array, filtered by included and excluded types, read from the pairs as they stand, and windowed by the same `width`, `sort` and `next_id` |
 
 The registered types a graph covers are read from `table_info`, so an implementing side's tables appear the moment they are registered and nothing about them is written into a graph function. Both graphs begin with `reconcile_if_pending(app, u)` and `check_user_active`, as a listing does.
 
@@ -31,6 +31,8 @@ Both graphs take `p_width`, `p_sort` and `p_next_id`, applied by `_window_graph`
 4. With `p_next_id` the window continues after that node: its later siblings of its type, `p_width` of them, each with its windowed subtree. The node itself is not returned, and an id not in the graph returns nothing.
 
 Any other `p_sort`, or a negative `p_width`, is refused with SQLSTATE `22023`. With `w` the width, `τ` the types under a parent and `k` the levels, a window returns at most `Σ_{i=1}^{k} (w τ)^i` nodes below the top, whatever the tree holds. The window bounds the rows returned and sent, not the rows read: the graph is built whole and windowed after, and with `p_sort = 'usage'` each node costs one probe of the reader's pair. With `p_width = 0` and no `p_next_id` the graph is returned as built.
+
+The link graphs take the same three arguments after `p_depth`, `p_width INTEGER DEFAULT 0`, `p_sort TEXT DEFAULT 'name'` and `p_next_id UUID DEFAULT NULL`, refused the same way, and `_window_links` windows the links as `_window_graph` windows the nodes: every link target is a node whose parent is the link source, a source no link targets is a top node, and a link is kept when its target is kept under its source. Each type is matched back to the registered type it normalizes from, and labels come from `object_info`, the claim or the `samna_user` row, so a node graph and a link graph drawn with one window show the same nodes in the same order.
 
 ## The owner graph
 

@@ -36,7 +36,9 @@ For a flush of `K` distinct pairs of `J` distinct users:
 entries read = K          rows written ≤ K + J          outbox rows = 0          statements = 1
 ```
 
-An update of `used_count` and `last_used_at` touches no indexed column, so on a page with room, which `fillfactor = 90` leaves, it is a heap only update and writes no index entry. The overload `touch_object_usage(user_ids[], object_types[], object_ids[], counts[])` fills the app with `get_app_id()`.
+An update of `used_count` and `last_used_at` touches no indexed column, so on a page with room, which `fillfactor = 90` leaves, it is a heap only update and writes no index entry. On a prophet the overload `touch_object_usage(user_ids[], object_types[], object_ids[], counts[])` fills the app with `get_app_id()`; a disciple mirrors one app and carries only that form.
+
+The middleware keys its count per app, `(app, user, type, object)`. A key with no app is the deployment's own and flushes through the form without apps; a key with an app flushes through the form with `app_ids[]`, so a prophet that checks an object for another app counts the use on that app's pair. When a flush holds both, the two calls go as one statement. The keys are sent sorted by user, app, type and object, the order of the `user_object` primary key in which the pairs are locked. A flush that fails on a deadlock, SQLSTATE `40P01`, or a serialization failure, `40001`, is sent again, up to three attempts in all; a batch that still fails is added back to the counter and reported, so its counts go out with the next flush instead of being lost.
 
 ### Decay
 

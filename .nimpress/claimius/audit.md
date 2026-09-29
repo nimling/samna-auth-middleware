@@ -28,13 +28,13 @@ lastUpdated: true
 
 3. `offer_handover`, `accept_handover` and `merge_user` write their own rows. A replica that falls back to its snapshot writes one row naming the stalled cursor, in the snapshot's transaction.
 
-4. The calc triggers write an `error` row when they fail and raise the error again. The row is in the failing transaction, so it persists only when the caller catches the error in a savepoint and commits.
+4. The calc triggers write an `error` row when they fail and raise the error again, under the row's app; `calc_hierarchical_access` takes, for an organization or location, the first app the row is linked to, and writes none for a row that resolves to no app, an organization not yet linked. The row is in the failing transaction, so it persists only when the caller catches the error in a savepoint and commits.
 
 A row carries the actor as a grant, the value every row carries in `sa_created_by`, so the trail joins to the grants, claims and organizations with keys that already exist, and a change to a row, which carries no `sa_updated_by`, is attributed here.
 
 ## Monthly partitions
 
-`audit` is partitioned by range on `sa_created_at`, one partition per UTC month named `audit_YYYYMM`, with `audit_default` taking any row no month takes. `write_audit` calls `ensure_audit_partition(now())` first. When the month's partition exists that is one catalog probe. On the first row of a month it takes a transaction advisory lock, creates the partition, moves that month's rows out of `audit_default` and attaches it; it runs as its owner, so a writer that only inserts audit rows can open a month. An unpartitioned `audit` from before becomes `audit_default` and its rows move to their months.
+`audit` is partitioned by range on `sa_created_at`, one partition per UTC month named `audit_YYYYMM`, with `audit_default` taking any row no month takes. `write_audit` calls `ensure_audit_partition(now())` first. When the month's partition exists that is one catalog probe. On the first row of a month it takes a transaction advisory lock, creates the partition, moves that month's rows out of `audit_default` and attaches it; it runs as its owner, so a writer that only inserts audit rows can open a month. An unpartitioned `audit` from before becomes `audit_default` and its rows move to their months. Each partition holds exactly the grants of `audit`, set by `_match_audit_partition_grants` when it is attached and on every replay of the grants file, so no partition grants more than the table; see [Security](./security.md#roles).
 
 A month is retired by detaching its partition, one catalog change, where deleting its rows would write one dead row and one entry removal per row in every index.
 

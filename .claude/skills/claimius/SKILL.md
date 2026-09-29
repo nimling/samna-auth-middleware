@@ -64,14 +64,15 @@ It depends on the table.
 - `claim_object` → `assign_claim_object`, `update_claim_object`, `remove_claim_object`
 - `samna_user` per app row creation → `ensure_app_user`
 - Cross app moves → `merge_user`
-- Cross root moves → `migrate_root`
+- Cross root moves → `migrate_root`, which hangs the object and its subtree under a live root of the same type, walking organizations through `sa_owner_id`, under `claimius.migrating_root`; flag every call for human review
+- App creation → `init` for the system app, every row stamped with the system user's `user_claim.id`; `create_app(p_actor_user_claim_id, p_slug, p_name, p_org_id, p_private_key, p_private_seed, p_redirect_uris, p_sync_uri, p_description, p_connection, p_owner_access, p_default_claim, p_app_id)` for every other app, by an actor holding owner on `p_org_id` in its own app
 - Bootstrap → `init`, which on the prophet set takes the system app fields and on the disciple set takes `p_disciple_app_slug`; the prophet set also carries `init_disciple` and `init_hybrid`. `init_hybrid` takes the system app fields plus `p_upstream_prophet`, `p_upstream_endpoint`, `p_upstream_app_slug` and `p_upstream_app_secret`, runs `init`, and registers the upstream in `prophet_peer`: a hybrid is a prophet mirroring one app of a peer prophet
 - External table registration → `init_claimius_tables`
 - Self identity → `get_prophet_app()` returns the system app on prophet and hybrid, raises on disciple. `get_disciple_app()` returns the upstream app on a pure disciple and raises on a prophet and on a hybrid, which has no `disciple_state` row; `get_disciple_app_id()` raises with it. Both return `SETOF claimius.samna_app`. Scalar UUID variants `get_prophet_app_id()`, `get_disciple_app_id()`, and `get_app_id()` are available for column DEFAULTs and other places that reject subqueries. `get_app_id()` resolves to the system app id on prophet and hybrid and to the disciple app id on a pure disciple; it is the one to use on a hybrid. These helpers ship in the prophet set; the disciple set mirrors one app, carries none of them, and its read functions take no app argument. Use these instead of maintaining a local helper.
 
 **Direct INSERT/UPDATE is fine** on the prophet for:
 
-- `samna_app`. Use `init` only for the FIRST app.
+- `samna_app` updates only. An app is created by `init` or `create_app`.
 - `organization`, `location`
 - `samna_client`, `samna_secret`
 - `object_field`, `user_field`, `user_relation`
@@ -197,11 +198,9 @@ Tables in claimius reference each other circularly: app↔org, claim→org, user
 
 **A new app on an existing prophet:**
 
-1. Owning org must exist.
-2. INSERT `samna_app`.
-3. INSERT `prophet_state` row; its cursor `(last_applied_txid, last_applied_seq)` starts at `(0, 0)`.
-4. Optional: create default claim, UPDATE `samna_app.claim_id`.
-5. Optional: `init_claimius_tables(...)` for any external tables.
+1. Owning org must exist, and the actor must hold owner on it in its own app.
+2. `create_app` with the actor's `user_claim.id`: the app, its `prophet_state`, the actor's `samna_user` in the app, the organization links, the owner claim bound and granted, the default claim bound and set as `claim_id`. Its first binding passes on the actor's owner bit on the owning organization, because the new app has no pairs yet.
+3. Optional: `init_claimius_tables(...)` for any external tables.
 
 **A new resource — org, location, app table row — inside an existing app:**
 
@@ -309,6 +308,8 @@ When the AI assistant has Claimius rules loaded, it should:
 - Never set `replay_mode` outside the sync layer, the disciple pull and a prophet's pull of a peer.
 - Never write a row of an app another prophet decides: it is refused with `P0409`, or `409` with `SAuth-Home` over HTTP. Send it to the home.
 - Never call `get_disciple_app` on a hybrid; use `get_app_id`.
+- Never INSERT a `samna_app` row by hand; use `init` or `create_app`.
+- Never call `_grant_prophet_roles` or `_grant_disciple_roles`. The role grants live in `V6.0__claimius_grants.sql`, the last base file, and run on every build and replay of the set.
 - Never confuse `samna_user.id` with `samna_user.user_id`.
 - Never set `sa_created_by` to a `samna_user.user_id`.
 - Treat self referencing tree roots as `parent == root == id`, never null.

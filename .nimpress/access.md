@@ -38,7 +38,7 @@ A route that names a user acts for that user without becoming them. `UserAccess`
 
 ## Listings
 
-A listing filters through the materialized index. `ObjectWhere(q, actor, objectType, required, objectID, after, limit)` takes the handler's own `*bun.SelectQuery` and returns it restricted to the rows the actor reaches with `required`, ordered by id: a page of `limit` rows past the id `after` reads `limit` entries of the actor's range, and `after` nil with `limit` 0 reads the whole range. With `objectID` set it is the check of that one row. `GetOrganizations`, `GetLocations` and `GetSecrets` take the same `after` and `limit`, and `QueryPage(ctx)` reads them from the `cursor` and `limit` query parameters. `UserWhere` and `ClaimWhere` return a predicate for users and claims. A listing never returns a `UserClaimID`, because a listing is no authority to act on any row in it. To act on one row, call `MutationAccess` for that row.
+A listing filters through the materialized index. `ObjectWhere(q, actor, objectType, required, objectID, after, limit)` takes the handler's own `*bun.SelectQuery` and returns it restricted to the rows the actor reaches with `required`: a page of `limit` rows past the id `after` reads `limit` entries of the actor's range and is ordered by id, the order its cursor continues in, and `after` nil with `limit` 0 reads the whole range and keeps the order the handler gave. A query built with `Table` or `TableExpr` and no model names its table, or the alias after `AS`, in the filter. With `objectID` set it is the check of that one row. `GetOrganizations`, `GetLocations` and `GetSecrets` take the same `after` and `limit`, and `QueryPage(ctx)` reads them from the `cursor` and `limit` query parameters. `UserWhere` and `ClaimWhere` return a predicate for users and claims. A listing never returns a `UserClaimID`, because a listing is no authority to act on any row in it. To act on one row, call `MutationAccess` for that row.
 
 ## Graphs
 
@@ -46,7 +46,7 @@ A listing filters through the materialized index. `ObjectWhere(q, actor, objectT
 
 ## Usage
 
-Every granted single object lookup, `MutationAccess`, `GetAccess`, `UserAccess` and each granted entry of `MutationAccessMany`, counts one use of the object by the actor in process. The counts flush to `claimius.touch_object_usage` every 10 s, at 1,000 distinct keys and on shutdown, and order the `usage` graph window and search. See [Access in Go](./claimius/middleware/access.md#usage).
+Every granted single object lookup, `MutationAccess`, `GetAccess`, `UserAccess` and each granted entry of `MutationAccessMany`, counts one use of the object by the actor in process, keyed per app: `DB.Usage.Add(appID, actor, objectType, objectID)` with a nil `appID` for the deployment's own app, which is what the lookups pass. The counts flush to `claimius.touch_object_usage` every 10 s, at 1,000 distinct keys and on shutdown, in the order the pairs are locked, retrying a deadlock and keeping a failed batch for the next flush, and order the `usage` graph window and search. See [Access in Go](./claimius/middleware/access.md#usage).
 
 ## Where a lookup runs
 

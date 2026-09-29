@@ -61,4 +61,4 @@ So app scoping is written on the prophet side only. A disciple query that filter
 
 A disciple whose prophet fails to select organizations receives none, and `RootAccess` then finds no root organization for the actor's first `user_claim`. Every handler that gates on `RootAccess` answers 403 while every other part of the service looks healthy. When a disciple reports blanket 403s on listing endpoints, check the organization count in its replica before looking at claims.
 
-A new app on an existing prophet does not get organizations by copying them. It gets them by linking: `create_root_organization` for a fresh tree, or `link_app_object` against an existing one.
+A new app on an existing prophet does not get organizations by copying them. It gets them by linking: `create_app` links the owning organization and its tree when it creates the app, `create_root_organization` links a fresh tree, and `link_app_object` links an existing one.
