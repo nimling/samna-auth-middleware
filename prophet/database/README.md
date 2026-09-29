@@ -583,7 +583,7 @@ A deny bound directly on the object subtracts its bits from every grant on that 
 
 A deny that arrives by cascade subtracts its bits from inherited grants in any tree and spares grants bound directly on the object.
 
-A grant whose mask reaches `0` after subtraction is dropped. Denies are computed inside calc functions (`_build_grants_for_object`, `_apply_denies`); the resulting `user_object` row reflects only surviving grants, so reads never filter for denies.
+A grant whose mask reaches `0` after subtraction is dropped. Denies are computed inside calc functions (`_build_grants_for_objects`, `_apply_denies`); the resulting `user_object` row reflects only surviving grants, so reads never filter for denies.
 
 ## Sync model
 

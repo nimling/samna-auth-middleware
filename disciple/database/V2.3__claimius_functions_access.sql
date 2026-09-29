@@ -66,8 +66,9 @@ BEGIN
     IF NOT v_replay THEN
         v_actor := claimius._actor_user_for_row(v_object_type, coalesce(NEW, OLD));
         IF v_actor IS NOT NULL THEN
-            PERFORM claimius.recompute_user_object(v_actor, v_object_type, v_obj_id);
-            PERFORM claimius._refresh_user_users(v_actor);
+            IF claimius.recompute_user_object(v_actor, v_object_type, v_obj_id) THEN
+                PERFORM claimius._refresh_user_users(v_actor);
+            END IF;
         END IF;
     END IF;
 
@@ -337,8 +338,9 @@ BEGIN
     IF NOT v_replay THEN
         v_actor := claimius._actor_user_for_row(v_object_type, coalesce(NEW, OLD));
         IF v_actor IS NOT NULL THEN
-            PERFORM claimius.recompute_user_object(v_actor, v_object_type, v_obj_id);
-            PERFORM claimius._refresh_user_users(v_actor);
+            IF claimius.recompute_user_object(v_actor, v_object_type, v_obj_id) THEN
+                PERFORM claimius._refresh_user_users(v_actor);
+            END IF;
         END IF;
     END IF;
 
@@ -430,6 +432,7 @@ DECLARE
     v_table       TEXT;
     v_claim_id    UUID;
     v_actor       UUID;
+    v_changed     BOOLEAN;
 BEGIN
     IF claimius.in_replay_mode() THEN
         RETURN coalesce(NEW, OLD);
@@ -438,34 +441,37 @@ BEGIN
     v_table := TG_TABLE_NAME;
 
     -- Every shape resolves to the claim whose area moved. claim_object carries
-    -- it directly, user_claim carries the assignment, and a composition link
-    -- moves the linked claim as well as its own.
+    -- it directly, user_claim carries the assignment and moves the area of
+    -- its one user only, and a composition link moves the linked claim as
+    -- well as its own.
     IF v_table = 'claim' THEN
         v_claim_id := coalesce(NEW.id, OLD.id);
+        PERFORM claimius._raise_claim_diff(v_claim_id);
+    ELSIF v_table = 'user_claim' THEN
+        v_claim_id := coalesce(NEW.claim_id, OLD.claim_id);
+        PERFORM claimius._raise_claim_diff(v_claim_id, coalesce(NEW.user_id, OLD.user_id));
     ELSE
         v_claim_id := coalesce(NEW.claim_id, OLD.claim_id);
-    END IF;
-
-    PERFORM claimius._raise_claim_diff(v_claim_id);
-
-    IF v_table = 'claim_object' THEN
+        PERFORM claimius._raise_claim_diff(v_claim_id);
         IF coalesce(NEW.object_type, OLD.object_type) = 'claimius.claim' THEN
             PERFORM claimius._raise_claim_diff(coalesce(NEW.object_id, OLD.object_id));
         END IF;
     END IF;
 
-    -- The acting user settles its own view now, so an assignment or a binding
-    -- made in a request is visible to the rest of that request.
+    -- The acting user settles its pairs on the objects the row names, the
+    -- claim and a binding's object, so the request reads them back. Every
+    -- other pair, the assignee's included, settles when its user reads.
     v_actor := claimius._actor_user_for_row('claimius.' || v_table, coalesce(NEW, OLD));
     IF v_actor IS NOT NULL THEN
-        PERFORM claimius._settle_claim_diff_for_user(v_actor, v_claim_id);
-        PERFORM claimius._refresh_user_users(v_actor);
-    END IF;
-
-    IF v_table = 'user_claim' THEN
-        PERFORM claimius._settle_claim_diff_for_user(
-                coalesce(NEW.user_id, OLD.user_id), v_claim_id);
-        PERFORM claimius._refresh_user_users(coalesce(NEW.user_id, OLD.user_id));
+        v_changed := claimius.recompute_user_object(v_actor, 'claimius.claim', v_claim_id);
+        IF v_table = 'claim_object' THEN
+            v_changed := claimius.recompute_user_object(
+                    v_actor, coalesce(NEW.object_type, OLD.object_type), coalesce(NEW.object_id, OLD.object_id))
+                OR v_changed;
+        END IF;
+        IF v_changed THEN
+            PERFORM claimius._refresh_user_users(v_actor);
+        END IF;
     END IF;
 
     RETURN coalesce(NEW, OLD);
@@ -508,6 +514,8 @@ BEGIN
           AND uc.sa_deleted_at IS NULL;
 
         IF v_user_id IS NOT NULL THEN
+            PERFORM claimius.reconcile_if_pending(v_user_id, NEW.object_type, NEW.object_id);
+
             SELECT max(sa_access) INTO v_actor_access
             FROM claimius.user_object
             WHERE user_id     = v_user_id
@@ -548,6 +556,8 @@ BEGIN
     IF v_user_id IS NULL THEN
         RAISE EXCEPTION 'sa_created_by % is not a valid user_claim', NEW.sa_created_by;
     END IF;
+
+    PERFORM claimius.reconcile_if_pending(v_user_id, 'claimius.claim', NEW.object_id);
 
     SELECT EXISTS (
         SELECT 1 FROM claimius.user_object
@@ -647,19 +657,29 @@ COMMENT ON FUNCTION claimius.emit_sync_event() IS 'Trigger on materialized state
 -- Settles outstanding access areas inline, at the top of every get_* function.
 -- Two independent sources feed it.
 --
--- The diff. access_diff holds the areas a write marked instead of recomputing.
--- A read claims the rows whose area it targets, recalculates each area for
--- every user in it, and deletes the row. First come first serve through
--- FOR UPDATE SKIP LOCKED: concurrent readers never settle the same area twice,
--- the first one through pays for everyone, and an area nobody reads is never
--- computed at all.
+-- The diff. access_diff holds the areas a write marked instead of recomputing,
+-- and each user settles its own part of them when it reads.
 --
--- p_object_type and p_object_id narrow the claim to what the caller is about
--- to read. Called with neither, a read settles every area it can reach as the
--- holder of its claims, which is what the list and graph functions need.
+-- Called with a target, p_object_type and p_object_id, the read is a check
+-- and settles the one pair it asks about: once, when an area still open for
+-- the reader covers it. The areas that cover a pair are the object areas of
+-- the object and, with cascade, of its ancestors, and the claim areas of the
+-- claims the reader holds, links to or was assigned, that are bound on the
+-- object or an ancestor or that the pair's grants name. No area is marked
+-- settled, since the rest of the reader's share is still open.
+--
+-- Called without one, the read is a listing and settles the reader's share of
+-- every area it meets: every object area of the app and the claim areas of
+-- the reader's claims. Each share is set based, one recompute per object
+-- type, and is recorded in access_diff_user at the area's generation, so the
+-- reader never settles the same generation twice. The area row is cleared
+-- once every holder has settled it. A reader locks the areas it takes
+-- FOR KEY SHARE SKIP LOCKED, which writers raising the area again do not
+-- wait on, and its own share of an area with a transaction advisory lock, so
+-- two reads of one user never settle the same share at once.
 --
 -- The retry queue. reconcile_queue holds sync event applications that failed.
--- It drains the same way it always has, so transient sync failures self heal.
+-- A check drains the pair it asks about, a listing every pair of the reader.
 CREATE OR REPLACE FUNCTION claimius.reconcile_if_pending(
     p_user_id       UUID,
     p_object_type   TEXT DEFAULT NULL,
@@ -669,80 +689,184 @@ CREATE OR REPLACE FUNCTION claimius.reconcile_if_pending(
 DECLARE
     v_row       RECORD;
     v_diff      RECORD;
-    v_touched   UUID[] := '{}';
-    v_users     UUID[];
+    v_open      BOOLEAN;
+    v_changed   BOOLEAN := FALSE;
 BEGIN
     IF p_user_id IS NULL THEN
         RETURN;
     END IF;
 
-    FOR v_diff IN
-        SELECT d.* FROM claimius.access_diff d
-        WHERE (
-                  p_object_type IS NULL
-                  OR (d.kind = 'object'
-                      AND d.object_type = p_object_type
-                      AND (p_object_id IS NULL OR d.object_id = p_object_id))
-                  OR d.kind = 'claim'
-              )
-          AND (
-                  d.kind = 'object'
-                  OR EXISTS (
-                      SELECT 1 FROM claimius.user_claim uc
-                      WHERE uc.user_id = p_user_id
-                        AND uc.sa_deleted_at IS NULL
-                        AND (
-                            uc.claim_id = d.claim_id
-                            OR EXISTS (
-                                SELECT 1 FROM claimius.claim_object link
-                                WHERE link.claim_id = uc.claim_id
-                                  AND link.object_type = 'claimius.claim'
-                                  AND link.object_id = d.claim_id
-                                  AND link.sa_deleted_at IS NULL
+    IF p_object_type IS NOT NULL AND p_object_id IS NOT NULL THEN
+        BEGIN
+            DELETE FROM claimius.reconcile_queue
+            WHERE id IN (
+                SELECT q.id FROM claimius.reconcile_queue q
+                WHERE q.user_id = p_user_id
+                  AND q.object_type = p_object_type
+                  AND q.object_id = p_object_id
+                FOR UPDATE SKIP LOCKED
+            );
+            v_open := FOUND;
+
+            IF NOT v_open AND (
+                EXISTS (SELECT 1 FROM claimius.access_diff d WHERE d.kind = 'object')
+                OR EXISTS (SELECT 1 FROM claimius.access_diff d WHERE d.kind = 'claim')
+            ) THEN
+                WITH nodes AS MATERIALIZED (
+                    SELECT p_object_type AS object_type, p_object_id AS object_id, TRUE AS self
+                    UNION
+                    SELECT e.ancestor_type, e.ancestor_id, FALSE
+                    FROM claimius.inheritance_info e
+                    WHERE e.descendant_type = p_object_type
+                      AND e.descendant_id = p_object_id
+                      AND e.depth > 0
+                ),
+                held AS MATERIALIZED (
+                    SELECT uc.claim_id
+                    FROM claimius.user_claim uc
+                    WHERE uc.user_id = p_user_id
+                      AND uc.sa_deleted_at IS NULL
+                    UNION
+                    SELECT link.object_id
+                    FROM claimius.user_claim uc
+                        JOIN claimius.claim_object link
+                            ON link.claim_id = uc.claim_id
+                           AND link.object_type = 'claimius.claim'
+                           AND link.sa_deleted_at IS NULL
+                    WHERE uc.user_id = p_user_id
+                      AND uc.sa_deleted_at IS NULL
+                ),
+                claim_areas AS (
+                    SELECT d.* FROM held h
+                        JOIN claimius.access_diff d
+                            ON d.kind = 'claim'
+                           AND d.claim_id = h.claim_id
+                           AND d.user_id IS NULL
+                    UNION ALL
+                    SELECT d.* FROM claimius.access_diff d
+                    WHERE d.kind = 'claim'
+                      AND d.user_id = p_user_id
+                )
+                SELECT EXISTS (
+                        SELECT 1
+                        FROM nodes n
+                            JOIN claimius.access_diff d
+                                ON d.kind = 'object'
+                               AND d.object_type = n.object_type
+                               AND d.object_id = n.object_id
+                        WHERE (n.self OR d.cascade)
+                          AND NOT EXISTS (
+                              SELECT 1 FROM claimius.access_diff_user du
+                              WHERE du.diff_id = d.id AND du.user_id = p_user_id AND du.generation = d.generation))
+                    OR EXISTS (
+                        SELECT 1
+                        FROM claim_areas d
+                        WHERE NOT EXISTS (
+                                SELECT 1 FROM claimius.access_diff_user du
+                                WHERE du.diff_id = d.id AND du.user_id = p_user_id AND du.generation = d.generation)
+                          AND (
+                              EXISTS (
+                                  SELECT 1
+                                  FROM nodes n
+                                      JOIN claimius.claim_object co
+                                          ON co.object_type = n.object_type
+                                         AND co.object_id = n.object_id
+                                  WHERE co.claim_id = d.claim_id
+                                     OR co.claim_id IN (
+                                         SELECT link.object_id FROM claimius.claim_object link
+                                         WHERE link.claim_id = d.claim_id
+                                           AND link.object_type = 'claimius.claim'))
+                              OR EXISTS (
+                                  SELECT 1 FROM claimius.user_object uo
+                                  WHERE uo.id = claimius.composite_id(p_user_id::TEXT, p_object_type, p_object_id::TEXT)
+                                    AND (uo.grants @> jsonb_build_array(jsonb_build_object('claim_id', d.claim_id))
+                                         OR uo.grants @> jsonb_build_array(jsonb_build_object(
+                                                'cascaded_from', jsonb_build_object('type', 'claimius.claim', 'id', d.claim_id))))))
+                    )
+                INTO v_open;
+            END IF;
+
+            IF v_open THEN
+                v_changed := claimius.recompute_user_object(p_user_id, p_object_type, p_object_id);
+            END IF;
+        EXCEPTION WHEN OTHERS THEN
+            -- leave the pair outstanding for the next reader
+            v_changed := FALSE;
+        END;
+    ELSE
+        FOR v_diff IN
+            SELECT d.* FROM claimius.access_diff d
+            WHERE (
+                      d.kind = 'object'
+                      OR d.user_id = p_user_id
+                      OR (d.user_id IS NULL AND EXISTS (
+                          SELECT 1 FROM claimius.user_claim uc
+                          WHERE uc.user_id = p_user_id
+                            AND uc.sa_deleted_at IS NULL
+                            AND (
+                                uc.claim_id = d.claim_id
+                                OR EXISTS (
+                                    SELECT 1 FROM claimius.claim_object link
+                                    WHERE link.claim_id = uc.claim_id
+                                      AND link.object_type = 'claimius.claim'
+                                      AND link.object_id = d.claim_id
+                                      AND link.sa_deleted_at IS NULL
+                                )
                             )
-                        )
+                      ))
                   )
-              )
-        FOR UPDATE SKIP LOCKED
+              AND NOT EXISTS (
+                  SELECT 1 FROM claimius.access_diff_user du
+                  WHERE du.diff_id = d.id AND du.user_id = p_user_id AND du.generation = d.generation)
+            ORDER BY d.sa_created_at, d.id
+            FOR KEY SHARE OF d SKIP LOCKED
         LOOP
+            CONTINUE WHEN NOT pg_try_advisory_xact_lock(hashtextextended(v_diff.id::TEXT || ':' || p_user_id::TEXT, 0));
             BEGIN
                 IF v_diff.kind = 'object' THEN
-                    SELECT array_agg(u) INTO v_users
-                    FROM claimius._settle_object_diff(v_diff.object_type, v_diff.object_id) u;
+                    v_open := claimius._settle_object_diff(
+                            p_user_id, v_diff.object_type, v_diff.object_id, v_diff.cascade);
                 ELSE
-                    SELECT array_agg(u) INTO v_users
-                    FROM claimius._settle_claim_diff(v_diff.claim_id) u;
+                    v_open := claimius._settle_claim_diff(p_user_id, v_diff.claim_id, v_diff.sa_created_at);
                 END IF;
 
-                DELETE FROM claimius.access_diff WHERE id = v_diff.id;
-                v_touched := v_touched || coalesce(v_users, '{}');
+                INSERT INTO claimius.access_diff_user (diff_id, user_id, generation)
+                VALUES (v_diff.id, p_user_id, v_diff.generation)
+                ON CONFLICT (diff_id, user_id) DO UPDATE
+                    SET generation = EXCLUDED.generation,
+                        sa_created_at = now();
+
+                PERFORM claimius._clear_diff(v_diff.id);
+                v_changed := v_changed OR v_open;
             EXCEPTION WHEN OTHERS THEN
-                -- leave the area outstanding for the next reader
+                -- leave the share outstanding for the next read
                 NULL;
             END;
         END LOOP;
 
-    FOR v_row IN
-        SELECT id, object_id, object_type FROM claimius.reconcile_queue
-        WHERE TRUE AND user_id = p_user_id
-            FOR UPDATE SKIP LOCKED
-        LOOP
-            BEGIN
-                PERFORM claimius.recompute_user_object(p_user_id, v_row.object_type, v_row.object_id);
-                DELETE FROM claimius.reconcile_queue WHERE id = v_row.id;
-                v_touched := v_touched || p_user_id;
-            EXCEPTION WHEN OTHERS THEN
-                -- leave it queued for the next attempt
-                NULL;
-            END;
-        END LOOP;
+        FOR v_row IN
+            SELECT id, object_id, object_type FROM claimius.reconcile_queue
+            WHERE user_id = p_user_id
+                FOR UPDATE SKIP LOCKED
+            LOOP
+                BEGIN
+                    v_changed := claimius.recompute_user_object(p_user_id, v_row.object_type, v_row.object_id)
+                        OR v_changed;
+                    DELETE FROM claimius.reconcile_queue WHERE id = v_row.id;
+                EXCEPTION WHEN OTHERS THEN
+                    -- leave it queued for the next attempt
+                    NULL;
+                END;
+            END LOOP;
+    END IF;
 
-    PERFORM claimius._refresh_user_users(s.uid)
-    FROM (SELECT DISTINCT unnest(v_touched) AS uid) s;
+    IF v_changed THEN
+        PERFORM claimius._refresh_user_users(p_user_id);
+    END IF;
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius.reconcile_if_pending(UUID, TEXT, UUID) IS 'Settles outstanding access_diff areas the read targets and drains reconcile_queue. Called at read entry points.';
+COMMENT ON FUNCTION claimius.reconcile_if_pending(UUID, TEXT, UUID) IS 'Settles what a read meets and drains reconcile_queue. With a target it recomputes the one pair when an open area covers it; without one it settles the reader''s share of every open area, set based, and records it in access_diff_user. Called at read entry points.';
 
 -- cascade_user_soft_delete
 -- When read functions detect a soft deleted user, propagate the soft delete

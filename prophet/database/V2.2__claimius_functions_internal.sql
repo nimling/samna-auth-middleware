@@ -898,138 +898,6 @@ CREATE OR REPLACE FUNCTION claimius._user_claim_grants(
       AND ((c.sa_access | COALESCE(co.sa_access, c.sa_access)) & 16) = 0
 $$;
 
--- _build_grants_for_object
--- Computes the grants jsonb array for one (user, object) pair by walking
--- claim_objects bound directly, via inheritance trees, or via composition
--- links (a claim_object row whose object_type is 'claimius.claim'). Applies
--- deny semantics. Returns an empty array if no grants survive.
-CREATE OR REPLACE FUNCTION claimius._build_grants_for_object(
-    p_user_id     UUID,
-    p_app_id      UUID,
-    p_object_type TEXT,
-    p_object_id   UUID
-) RETURNS JSONB AS $$
-DECLARE
-    v_grants     JSONB := '[]'::JSONB;
-    v_denies     JSONB := '[]'::JSONB;
-    v_row        RECORD;
-    v_grant_bits INTEGER;
-    v_deny_bits  INTEGER;
-    v_is_deny    BOOLEAN;
-BEGIN
-    FOR v_row IN
-        WITH user_claims AS (
-            SELECT uc.claim_id, c.sa_access AS claim_access, c.inherits, c.sa_deleted_at
-            FROM claimius.user_claim uc
-                JOIN claimius.claim c ON c.id = uc.claim_id
-            WHERE uc.user_id = p_user_id
-              AND uc.app_id = p_app_id
-              AND uc.sa_deleted_at IS NULL
-              AND c.sa_deleted_at IS NULL
-        ),
-        direct_bindings AS (
-            SELECT co.claim_id,
-                   p_object_type AS cascaded_from_type,
-                   p_object_id   AS cascaded_from_id,
-                   'direct'::TEXT AS tree_type,
-                   (uc.claim_access | COALESCE(co.sa_access, uc.claim_access)) AS sa_access,
-                   co.scope
-            FROM claimius.claim_object co
-                JOIN user_claims uc ON uc.claim_id = co.claim_id
-            WHERE co.object_type = p_object_type
-              AND co.object_id = p_object_id
-              AND co.app_id = p_app_id
-              AND co.sa_deleted_at IS NULL
-        ),
-        cascaded_bindings AS (
-            SELECT co.claim_id,
-                   co.object_type AS cascaded_from_type,
-                   co.object_id   AS cascaded_from_id,
-                   e.tree_type::TEXT AS tree_type,
-                   (uc.claim_access | COALESCE(co.sa_access, uc.claim_access)) AS sa_access,
-                   co.scope
-            FROM claimius.claim_object co
-                JOIN user_claims uc ON uc.claim_id = co.claim_id AND uc.inherits = TRUE
-                JOIN claimius.inheritance_info e
-                    ON e.ancestor_type = co.object_type
-                   AND e.ancestor_id   = co.object_id
-                   AND e.descendant_type = p_object_type
-                   AND e.descendant_id   = p_object_id
-                   AND e.depth > 0
-            WHERE co.app_id = p_app_id
-              AND co.sa_deleted_at IS NULL
-              AND co.inherits = TRUE
-        ),
-        composed_bindings AS (
-            SELECT uc.claim_id,
-                   'claimius.claim'::TEXT AS cascaded_from_type,
-                   link.object_id         AS cascaded_from_id,
-                   'composition'::TEXT    AS tree_type,
-                   (
-                       (
-                           COALESCE(link.sa_access, uc.claim_access)
-                           & COALESCE(co.sa_access, cb.sa_access)
-                       )
-                       | (
-                           (COALESCE(link.sa_access, uc.claim_access) | COALESCE(co.sa_access, cb.sa_access))
-                           & 16
-                       )
-                   ) AS sa_access,
-                   co.scope
-            FROM claimius.claim_object link
-                JOIN user_claims uc ON uc.claim_id = link.claim_id AND link.inherits = TRUE
-                JOIN claimius.claim cb
-                    ON cb.id = link.object_id
-                   AND cb.sa_deleted_at IS NULL
-                   AND cb.inherits = TRUE
-                JOIN claimius.claim_object co
-                    ON co.claim_id      = link.object_id
-                   AND co.object_type   = p_object_type
-                   AND co.object_id     = p_object_id
-                   AND co.app_id        = p_app_id
-                   AND co.sa_deleted_at IS NULL
-            WHERE link.object_type = 'claimius.claim'
-              AND link.app_id      = p_app_id
-              AND link.sa_deleted_at IS NULL
-        )
-        SELECT * FROM direct_bindings
-        UNION ALL
-        SELECT * FROM cascaded_bindings
-        UNION ALL
-        SELECT * FROM composed_bindings
-    LOOP
-        v_is_deny := (v_row.sa_access & 16) <> 0;
-        IF v_is_deny THEN
-            v_deny_bits := v_row.sa_access & 15;
-            v_denies := v_denies || jsonb_build_array(jsonb_build_object(
-                'claim_id', v_row.claim_id,
-                'access', v_deny_bits,
-                'scope', v_row.scope,
-                'cascaded_from', jsonb_build_object('type', v_row.cascaded_from_type, 'id', v_row.cascaded_from_id),
-                'tree_type', v_row.tree_type
-            ));
-        ELSE
-            v_grant_bits := v_row.sa_access & 15;
-            v_grants := v_grants || jsonb_build_array(jsonb_build_object(
-                'claim_id', v_row.claim_id,
-                'access', v_grant_bits,
-                'scope', v_row.scope,
-                'cascaded_from', jsonb_build_object('type', v_row.cascaded_from_type, 'id', v_row.cascaded_from_id),
-                'tree_type', v_row.tree_type
-            ));
-        END IF;
-    END LOOP;
-
-    IF jsonb_array_length(v_denies) > 0 THEN
-        v_grants := claimius._apply_denies(v_grants, v_denies, p_object_type, p_object_id);
-    END IF;
-
-    RETURN v_grants;
-END;
-$$ LANGUAGE plpgsql;
-
-COMMENT ON FUNCTION claimius._build_grants_for_object(p_user_id uuid, p_app_id uuid, p_object_type text, p_object_id uuid) IS 'Computes grants jsonb for a (user, object) pair. Walks direct, hierarchy cascaded, and claim composition paths. Applies deny subtraction: direct denies clear every grant, inherited denies clear inherited grants.';
-
 -- _apply_denies
 -- Subtracts deny bits from the grants a deny covers. A direct deny clears
 -- every grant on the object. An inherited deny clears inherited grants in any
@@ -1079,263 +947,332 @@ $$ LANGUAGE plpgsql IMMUTABLE;
 
 COMMENT ON FUNCTION claimius._apply_denies(p_grants jsonb, p_denies jsonb, p_object_type text, p_object_id uuid) IS 'Subtracts deny bits from grants the deny covers. A direct deny clears every grant on the object; an inherited deny covers every descendant in any tree and leaves grants bound directly on the object intact. Drops grants whose mask becomes 0.';
 
--- _direct_grant_for_object
--- Determines whether the given user holds direct grant on the given object
--- via sa_created_by chain. A direct grant exists when there is a row in
--- the registered table with this id whose sa_created_by maps (via user_claim
--- lookup) to this user_id and app_id, AND no deny at level 0 on this object
--- blocks them.
-CREATE OR REPLACE FUNCTION claimius._direct_grant_for_object(
-    p_user_id       UUID,
-    p_app_id        UUID,
-    p_object_type   TEXT,
-    p_object_id     UUID
-) RETURNS BOOLEAN AS $$
-DECLARE
-    v_schema        TEXT;
-    v_table         TEXT;
-    v_parts         TEXT[];
-    v_sql           TEXT;
-    v_creator_uc_id UUID;
-    v_creator_user  UUID;
-    v_creator_app   UUID;
-    v_has_deny      BOOLEAN;
-BEGIN
-    v_parts := claimius.split_object_type(p_object_type);
-    v_schema := v_parts[1];
-    v_table := v_parts[2];
-
-    IF p_object_type = 'claimius.samna_user' THEN
-        IF NOT EXISTS (
-            SELECT 1 FROM claimius.samna_user
-            WHERE id = p_object_id
-              AND user_id = p_user_id
-              AND app_id = p_app_id
-              AND sa_deleted_at IS NULL
-        ) THEN
-            RETURN FALSE;
-        END IF;
-    ELSE
-        v_sql := format('SELECT sa_created_by FROM %I.%I WHERE id = $1 AND sa_deleted_at IS NULL', v_schema, v_table);
-        EXECUTE v_sql INTO v_creator_uc_id USING p_object_id;
-
-        IF v_creator_uc_id IS NULL THEN
-            RETURN FALSE;
-        END IF;
-
-        IF v_creator_uc_id <> p_user_id THEN
-            SELECT uc.user_id, uc.app_id INTO v_creator_user, v_creator_app
-            FROM claimius.user_claim uc
-            WHERE uc.id = v_creator_uc_id AND uc.sa_deleted_at IS NULL;
-
-            IF v_creator_user IS NULL OR v_creator_user <> p_user_id OR v_creator_app <> p_app_id THEN
-                RETURN FALSE;
-            END IF;
-        END IF;
-    END IF;
-
-    -- A creator's grant is wiped only by a deny bound directly on this
-    -- object whose effective mask carries the deny bit (0x10) and the owner
-    -- bit (0x01). A deny inherited from an ancestor never removes it, so an
-    -- author always reaches what they made.
-    SELECT EXISTS (
-        SELECT 1
+-- _build_grants_for_objects
+-- Computes the grants jsonb array of one user on a set of objects of one type
+-- in one statement, walking the claim_objects bound directly, bound on an
+-- ancestor through the inheritance trees, or reached through composition
+-- links (a claim_object row whose object_type is 'claimius.claim'). Applies
+-- deny semantics per object. An object no derivation reaches has no row.
+DROP FUNCTION IF EXISTS claimius._build_grants_for_object(UUID, UUID, TEXT, UUID);
+CREATE OR REPLACE FUNCTION claimius._build_grants_for_objects(
+    p_user_id     UUID,
+    p_app_id      UUID,
+    p_object_type TEXT,
+    p_object_ids  UUID[]
+) RETURNS TABLE (object_id UUID, grants JSONB) LANGUAGE sql STABLE AS $$
+    WITH user_claims AS (
+        SELECT uc.claim_id, c.sa_access AS claim_access, c.inherits
         FROM claimius.user_claim uc
-                 JOIN claimius.claim c ON c.id = uc.claim_id
-                 JOIN claimius.claim_object co ON co.claim_id = c.id
+            JOIN claimius.claim c ON c.id = uc.claim_id
         WHERE uc.user_id = p_user_id
           AND uc.app_id = p_app_id
           AND uc.sa_deleted_at IS NULL
           AND c.sa_deleted_at IS NULL
-          AND co.app_id = p_app_id
-          AND co.sa_deleted_at IS NULL
-          AND ((c.sa_access | co.sa_access) & 16) <> 0
-          AND ((c.sa_access | co.sa_access) & 1)  <> 0
-          AND co.object_type = p_object_type
-          AND co.object_id = p_object_id
-    ) INTO v_has_deny;
+    ),
+    target AS (
+        SELECT DISTINCT t.id FROM unnest(p_object_ids) AS t(id)
+    ),
+    derivations AS (
+        SELECT t.id                 AS object_id,
+               co.claim_id,
+               p_object_type        AS from_type,
+               t.id                 AS from_id,
+               'direct'::TEXT       AS tree_type,
+               1                    AS path,
+               (uc.claim_access | COALESCE(co.sa_access, uc.claim_access)) AS sa_access,
+               co.scope
+        FROM target t
+            JOIN claimius.claim_object co
+                ON co.object_type = p_object_type
+               AND co.object_id = t.id
+               AND co.app_id = p_app_id
+               AND co.sa_deleted_at IS NULL
+            JOIN user_claims uc ON uc.claim_id = co.claim_id
 
-    RETURN NOT v_has_deny;
-END;
-$$ LANGUAGE plpgsql;
+        UNION ALL
 
-COMMENT ON FUNCTION claimius._direct_grant_for_object(p_user_id uuid, p_app_id uuid, p_object_type text, p_object_id uuid) IS 'Determines if user has direct (creator) grant. Only a deny bound directly on the object with the owner bit removes it.';
+        SELECT t.id,
+               co.claim_id,
+               co.object_type,
+               co.object_id,
+               e.tree_type::TEXT,
+               2,
+               (uc.claim_access | COALESCE(co.sa_access, uc.claim_access)),
+               co.scope
+        FROM target t
+            JOIN claimius.inheritance_info e
+                ON e.descendant_type = p_object_type
+               AND e.descendant_id = t.id
+               AND e.depth > 0
+            JOIN claimius.claim_object co
+                ON co.object_type = e.ancestor_type
+               AND co.object_id = e.ancestor_id
+               AND co.app_id = p_app_id
+               AND co.sa_deleted_at IS NULL
+               AND co.inherits = TRUE
+            JOIN user_claims uc ON uc.claim_id = co.claim_id AND uc.inherits = TRUE
 
--- _denormalize_object
--- Reads the registered row's name, description, sa_owner_id, sa_location_id,
--- sa_root_id, and produces the denormalized values for user_object.
-CREATE OR REPLACE FUNCTION claimius._denormalize_object(
+        UNION ALL
+
+        SELECT t.id,
+               uc.claim_id,
+               'claimius.claim'::TEXT,
+               link.object_id,
+               'composition'::TEXT,
+               3,
+               (
+                   (COALESCE(link.sa_access, uc.claim_access) & COALESCE(co.sa_access, cb.sa_access))
+                   | ((COALESCE(link.sa_access, uc.claim_access) | COALESCE(co.sa_access, cb.sa_access)) & 16)
+               ),
+               co.scope
+        FROM target t
+            JOIN claimius.claim_object co
+                ON co.object_type = p_object_type
+               AND co.object_id = t.id
+               AND co.app_id = p_app_id
+               AND co.sa_deleted_at IS NULL
+            JOIN claimius.claim cb
+                ON cb.id = co.claim_id
+               AND cb.sa_deleted_at IS NULL
+               AND cb.inherits = TRUE
+            JOIN claimius.claim_object link
+                ON link.object_type = 'claimius.claim'
+               AND link.object_id = co.claim_id
+               AND link.app_id = p_app_id
+               AND link.sa_deleted_at IS NULL
+               AND link.inherits = TRUE
+            JOIN user_claims uc ON uc.claim_id = link.claim_id
+    ),
+    entries AS (
+        SELECT d.object_id,
+               (d.sa_access & 16) <> 0 AS is_deny,
+               d.path, d.tree_type, d.from_type, d.from_id, d.claim_id,
+               jsonb_build_object(
+                   'claim_id', d.claim_id,
+                   'access', d.sa_access & 15,
+                   'scope', d.scope,
+                   'cascaded_from', jsonb_build_object('type', d.from_type, 'id', d.from_id),
+                   'tree_type', d.tree_type
+               ) AS entry
+        FROM derivations d
+    ),
+    grouped AS (
+        SELECT e.object_id,
+               coalesce(
+                   jsonb_agg(e.entry ORDER BY e.path, e.tree_type, e.from_type, e.from_id, e.claim_id) FILTER (WHERE NOT e.is_deny),
+                   '[]'::JSONB
+               ) AS grants,
+               jsonb_agg(e.entry ORDER BY e.path, e.tree_type, e.from_type, e.from_id, e.claim_id) FILTER (WHERE e.is_deny) AS denies
+        FROM entries e
+        GROUP BY e.object_id
+    )
+    SELECT g.object_id,
+           CASE WHEN g.denies IS NULL THEN g.grants
+                ELSE claimius._apply_denies(g.grants, g.denies, p_object_type, g.object_id)
+           END
+    FROM grouped g
+$$;
+
+COMMENT ON FUNCTION claimius._build_grants_for_objects(UUID, UUID, TEXT, UUID[]) IS 'Grants jsonb of one user on a set of objects of one type, in one statement. Walks direct, hierarchy cascaded, and claim composition paths. Applies deny subtraction: direct denies clear every grant, inherited denies clear inherited grants.';
+
+-- _denormalize_objects
+-- Reads the name, description, sa_owner_id, sa_location_id, sa_root_id and
+-- sa_created_by of a set of rows of one registered table in one statement. A
+-- row of a table carrying sa_deleted_at is returned only while it is live.
+-- Tables that carry no sa_root_id derive the root from the owning
+-- organization or, failing that, the parent location.
+DROP FUNCTION IF EXISTS claimius._denormalize_object(TEXT, UUID);
+CREATE OR REPLACE FUNCTION claimius._denormalize_objects(
     p_object_type   TEXT,
-    p_object_id     UUID,
-    OUT sa_name TEXT,
-    OUT sa_description TEXT,
-    OUT sa_link TEXT,
-    OUT sa_owner_id UUID,
-    OUT sa_location_id UUID,
-    OUT sa_root_id UUID
-) AS $$
-#variable_conflict use_variable
+    p_object_ids    UUID[]
+) RETURNS TABLE (
+                    id              UUID,
+                    sa_name         TEXT,
+                    sa_description  TEXT,
+                    sa_link         TEXT,
+                    sa_owner_id     UUID,
+                    sa_location_id  UUID,
+                    sa_root_id      UUID,
+                    sa_created_by   UUID
+                ) AS $$
 DECLARE
-    v_schema        TEXT;
-    v_table         TEXT;
-    v_parts         TEXT[];
-    v_info          claimius.table_info%ROWTYPE;
-    v_sql           TEXT;
-    v_select_cols   TEXT;
+    v_info  claimius.table_info%ROWTYPE;
+    v_owner TEXT;
+    v_loc   TEXT;
 BEGIN
-    v_parts := claimius.split_object_type(p_object_type);
-    v_schema := v_parts[1];
-    v_table := v_parts[2];
-
-    SELECT * INTO v_info FROM claimius.table_info WHERE object_type = p_object_type;
-
-    IF v_info IS NULL THEN
+    SELECT ti.* INTO v_info FROM claimius.table_info ti WHERE ti.object_type = p_object_type;
+    IF NOT FOUND THEN
         RETURN;
     END IF;
 
-    v_select_cols := format(
-            '%s, %s, %s, %s, %s',
-            CASE WHEN v_info.has_name THEN 'name::TEXT' ELSE 'NULL::TEXT' END,
-            CASE WHEN v_info.has_description THEN 'description::TEXT' ELSE 'NULL::TEXT' END,
-            CASE WHEN v_info.has_sa_owner_id THEN 'sa_owner_id' ELSE 'NULL::UUID' END,
-            CASE WHEN v_info.has_sa_location_id THEN 'sa_location_id' ELSE 'NULL::UUID' END,
-            CASE WHEN v_info.has_sa_root_id THEN 'sa_root_id' ELSE 'NULL::UUID' END
-                     );
+    v_owner := CASE WHEN v_info.has_sa_owner_id THEN 'r.sa_owner_id' ELSE 'NULL::UUID' END;
+    v_loc   := CASE WHEN v_info.has_sa_location_id THEN 'r.sa_location_id' ELSE 'NULL::UUID' END;
 
-    v_sql := format('SELECT %s FROM %I.%I WHERE id = $1', v_select_cols, v_schema, v_table);
-    EXECUTE v_sql INTO sa_name, sa_description, sa_owner_id, sa_location_id, sa_root_id USING p_object_id;
-
-    -- Fallback: tables that carry no sa_root_id column derive the root from
-    -- the owning organization or, failing that, the parent location.
-    IF sa_root_id IS NULL AND sa_owner_id IS NOT NULL THEN
-        SELECT o.sa_root_id INTO sa_root_id
-        FROM claimius.organization o
-        WHERE o.id = sa_owner_id;
-    END IF;
-
-    IF sa_root_id IS NULL AND sa_location_id IS NOT NULL THEN
-        SELECT l.sa_root_id INTO sa_root_id
-        FROM claimius.location l
-        WHERE l.id = sa_location_id;
-    END IF;
-
-    sa_link := NULL;  -- apps may set this via update_object_metadata; left NULL by default
+    RETURN QUERY EXECUTE format(
+        'SELECT r.id, %s, %s, NULL::TEXT, %s, %s, coalesce(%s, o.sa_root_id, l.sa_root_id), %s
+           FROM %I.%I r
+                LEFT JOIN claimius.organization o ON o.id = %s
+                LEFT JOIN claimius.location l ON l.id = %s
+          WHERE r.id = ANY($1)%s',
+        CASE WHEN v_info.has_name THEN 'r.name::TEXT' ELSE 'NULL::TEXT' END,
+        CASE WHEN v_info.has_description THEN 'r.description::TEXT' ELSE 'NULL::TEXT' END,
+        v_owner,
+        v_loc,
+        CASE WHEN v_info.has_sa_root_id THEN 'r.sa_root_id' ELSE 'NULL::UUID' END,
+        CASE WHEN v_info.has_sa_created_by THEN 'r.sa_created_by' ELSE 'NULL::UUID' END,
+        split_part(p_object_type, '.', 1), split_part(p_object_type, '.', 2),
+        v_owner,
+        v_loc,
+        CASE WHEN v_info.has_sa_deleted_at THEN ' AND r.sa_deleted_at IS NULL' ELSE '' END
+    ) USING p_object_ids;
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql STABLE;
 
-COMMENT ON FUNCTION claimius._denormalize_object(p_object_type text, p_object_id uuid, OUT sa_name text, OUT sa_description text, OUT sa_link text, OUT sa_owner_id uuid, OUT sa_location_id uuid, OUT sa_root_id uuid) IS 'Reads name/description/owner/location/root from a registered row. Falls back to organization or location sa_root_id when the row carries no sa_root_id column.';
+COMMENT ON FUNCTION claimius._denormalize_objects(TEXT, UUID[]) IS 'Reads name, description, owner, location, root and creator of a set of live rows of one registered table. Falls back to organization or location sa_root_id when the row carries no sa_root_id column.';
 
 -- recompute_user_object
--- The single function that recomputes the user_object row for one
--- (app_id, user_id, object_type, object_id) tuple. It handles insert,
--- update, and delete based on whether grants survive. Also maintains the
--- companion object_users row. The user_users companion is rebuilt once per
--- viewer by the calling orchestrator after its recompute loop settles, since
--- a full rebuild per object is redundant when the viewer's object_users set
--- is only final at the end of the cascade.
+-- The single function that recomputes user_object for one user on a set of
+-- objects of one type: the one pair a check asks about, or the reader's share
+-- of an area in one statement per step. It handles insert, update, and delete
+-- based on whether grants survive, and maintains the companion object_users
+-- rows. A creator holds its row through sa_created_by, which is a
+-- user_claim.id, unless a deny bound on the row itself carries the owner bit.
+-- Returns whether the user's object_users set changed, which is the only case
+-- in which the calling orchestrator has to rebuild user_users.
+DROP FUNCTION IF EXISTS claimius.recompute_user_object(UUID, UUID, TEXT, UUID);
 CREATE OR REPLACE FUNCTION claimius.recompute_user_object(
     p_app_id        UUID,
     p_user_id       UUID,
     p_object_type   TEXT,
-    p_object_id     UUID
-) RETURNS VOID AS $$
+    VARIADIC p_object_ids UUID[]
+) RETURNS BOOLEAN AS $$
 DECLARE
-    v_grants        JSONB;
-    v_direct        BOOLEAN;
-    v_id            UUID;
-    v_eff_access    INTEGER;
-    v_eff_scope     JSONB;
-    v_grant_obj     JSONB;
-    v_any_unbounded BOOLEAN;
-    v_norm          RECORD;
-    v_search_vec    TSVECTOR;
-    v_has_soft      BOOLEAN;
-    v_obj_gone      BOOLEAN;
+    v_info      claimius.table_info%ROWTYPE;
+    v_ids       UUID[];
+    v_pairs     JSONB;
+    v_removed   INTEGER;
+    v_added     INTEGER;
 BEGIN
-    IF p_object_type IS NULL OR p_object_id IS NULL THEN
-        RETURN;
+    IF p_app_id IS NULL OR p_user_id IS NULL OR p_object_type IS NULL OR p_object_ids IS NULL THEN
+        RETURN FALSE;
     END IF;
 
-    v_id := claimius.composite_id(p_app_id::TEXT, p_user_id::TEXT, p_object_type, p_object_id::TEXT);
-
-    IF NOT EXISTS (SELECT 1 FROM claimius.table_info WHERE object_type = p_object_type) THEN
-        RETURN;
+    v_ids := ARRAY(SELECT DISTINCT i FROM unnest(p_object_ids) AS i WHERE i IS NOT NULL);
+    IF cardinality(v_ids) = 0 THEN
+        RETURN FALSE;
     END IF;
 
-    SELECT has_sa_deleted_at INTO v_has_soft
-    FROM claimius.table_info
-    WHERE object_type = p_object_type;
-
-    IF v_has_soft IS TRUE THEN
-        EXECUTE format(
-            'SELECT NOT EXISTS (SELECT 1 FROM %I.%I WHERE id = $1 AND sa_deleted_at IS NULL)',
-            split_part(p_object_type, '.', 1), split_part(p_object_type, '.', 2)
-        ) USING p_object_id INTO v_obj_gone;
-
-        IF v_obj_gone THEN
-            DELETE FROM claimius.user_object WHERE id = v_id;
-            DELETE FROM claimius.object_users
-            WHERE app_id = p_app_id AND object_id = p_object_id
-              AND object_type = p_object_type AND user_id = p_user_id;
-            RETURN;
-        END IF;
+    SELECT ti.* INTO v_info FROM claimius.table_info ti WHERE ti.object_type = p_object_type;
+    IF NOT FOUND THEN
+        RETURN FALSE;
     END IF;
 
-    v_grants := claimius._build_grants_for_object(p_user_id, p_app_id, p_object_type, p_object_id);
-    v_direct := claimius._direct_grant_for_object(p_user_id, p_app_id, p_object_type, p_object_id);
+    WITH target AS (
+        SELECT i.id, r.sa_name, r.sa_description, r.sa_link, r.sa_owner_id, r.sa_location_id, r.sa_root_id, r.sa_created_by
+        FROM unnest(v_ids) AS i(id)
+            LEFT JOIN claimius._denormalize_objects(p_object_type, v_ids) r ON r.id = i.id
+        WHERE r.id IS NOT NULL OR NOT v_info.has_sa_deleted_at
+    ),
+    built AS (
+        SELECT t.*,
+               coalesce(g.grants, '[]'::JSONB) AS grants,
+               (
+                   CASE
+                       WHEN p_object_type = 'claimius.samna_user' THEN EXISTS (
+                           SELECT 1 FROM claimius.samna_user su
+                           WHERE su.id = t.id
+                             AND su.user_id = p_user_id
+                             AND su.app_id = p_app_id
+                             AND su.sa_deleted_at IS NULL)
+                       ELSE t.sa_created_by = p_user_id OR EXISTS (
+                           SELECT 1 FROM claimius.user_claim uc
+                           WHERE uc.id = t.sa_created_by
+                             AND uc.user_id = p_user_id
+                             AND uc.app_id = p_app_id
+                             AND uc.sa_deleted_at IS NULL)
+                   END
+                   AND NOT EXISTS (
+                       SELECT 1
+                       FROM claimius.claim_object co
+                           JOIN claimius.claim c ON c.id = co.claim_id AND c.sa_deleted_at IS NULL
+                           JOIN claimius.user_claim uc
+                               ON uc.claim_id = c.id
+                              AND uc.user_id = p_user_id
+                              AND uc.app_id = p_app_id
+                              AND uc.sa_deleted_at IS NULL
+                       WHERE co.object_type = p_object_type
+                         AND co.object_id = t.id
+                         AND co.app_id = p_app_id
+                         AND co.sa_deleted_at IS NULL
+                         AND ((c.sa_access | co.sa_access) & 16) <> 0
+                         AND ((c.sa_access | co.sa_access) & 1) <> 0
+                   )
+               ) IS TRUE AS direct
+        FROM target t
+            LEFT JOIN claimius._build_grants_for_objects(p_user_id, p_app_id, p_object_type, v_ids) g ON g.object_id = t.id
+    )
+    SELECT coalesce(jsonb_agg(jsonb_build_object(
+               'object_id', b.id,
+               'sa_access', (CASE WHEN b.direct THEN 15 ELSE 0 END) | m.bits,
+               'scope', CASE WHEN b.direct OR m.unbounded THEN NULL ELSE m.scope END,
+               'grants', b.grants,
+               'direct_grant', b.direct,
+               'sa_owner_id', b.sa_owner_id,
+               'sa_location_id', b.sa_location_id,
+               'sa_root_id', b.sa_root_id,
+               'sa_name', b.sa_name,
+               'sa_description', b.sa_description,
+               'sa_link', b.sa_link
+           )), '[]'::JSONB)
+    INTO v_pairs
+    FROM built b
+        CROSS JOIN LATERAL (
+            SELECT coalesce(bit_or((g.value ->> 'access')::INTEGER), 0) AS bits,
+                   coalesce(bool_or(jsonb_typeof(coalesce(g.value -> 'scope', 'null'::JSONB)) = 'null'), FALSE) AS unbounded,
+                   coalesce(
+                       (SELECT jsonb_object_agg(s.key, s.value ORDER BY o.n)
+                        FROM jsonb_array_elements(b.grants) WITH ORDINALITY AS o(value, n)
+                            CROSS JOIN LATERAL jsonb_each(o.value -> 'scope') AS s
+                        WHERE jsonb_typeof(o.value -> 'scope') = 'object'),
+                       '{}'::JSONB
+                   ) AS scope
+            FROM jsonb_array_elements(b.grants) AS g
+        ) m
+    WHERE jsonb_array_length(b.grants) > 0 OR b.direct;
 
-    -- No surviving access at all: delete the user_object row and companions
-    IF jsonb_array_length(v_grants) = 0 AND NOT v_direct THEN
-        DELETE FROM claimius.user_object WHERE id = v_id;
-        DELETE FROM claimius.object_users
-        WHERE app_id = p_app_id AND object_id = p_object_id
-          AND object_type = p_object_type AND user_id = p_user_id;
-        RETURN;
-    END IF;
+    DELETE FROM claimius.user_object
+    WHERE id IN (
+            SELECT claimius.composite_id(p_app_id::TEXT, p_user_id::TEXT, p_object_type, i::TEXT)
+            FROM unnest(v_ids) AS i
+        )
+      AND object_id NOT IN (SELECT (p ->> 'object_id')::UUID FROM jsonb_array_elements(v_pairs) AS p);
 
-    IF v_direct THEN
-        v_eff_access := 15;
-    ELSE
-        v_eff_access := 0;
-    END IF;
-    FOR v_grant_obj IN SELECT * FROM jsonb_array_elements(v_grants) LOOP
-        v_eff_access := v_eff_access | (v_grant_obj ->> 'access')::INTEGER;
-    END LOOP;
-
-    v_any_unbounded := v_direct;
-    v_eff_scope := NULL;
-    IF NOT v_any_unbounded THEN
-        FOR v_grant_obj IN SELECT * FROM jsonb_array_elements(v_grants) LOOP
-            IF (v_grant_obj -> 'scope') IS NULL OR jsonb_typeof(v_grant_obj -> 'scope') = 'null' THEN
-                v_any_unbounded := TRUE;
-                EXIT;
-            END IF;
-        END LOOP;
-    END IF;
-    IF NOT v_any_unbounded THEN
-        v_eff_scope := '{}'::jsonb;
-        FOR v_grant_obj IN SELECT * FROM jsonb_array_elements(v_grants) LOOP
-            v_eff_scope := v_eff_scope || coalesce(v_grant_obj -> 'scope', '{}'::jsonb);
-        END LOOP;
-    END IF;
-
-    SELECT * INTO v_norm FROM claimius._denormalize_object(p_object_type, p_object_id);
-
-    v_search_vec :=
-            setweight(to_tsvector('simple', coalesce(v_norm.sa_name, '')), 'A') ||
-            setweight(to_tsvector('simple', coalesce(v_norm.sa_description, '')), 'B');
+    DELETE FROM claimius.object_users
+    WHERE id IN (
+            SELECT claimius.composite_id(p_app_id::TEXT, p_object_type, i::TEXT, p_user_id::TEXT)
+            FROM unnest(v_ids) AS i
+        )
+      AND object_id NOT IN (SELECT (p ->> 'object_id')::UUID FROM jsonb_array_elements(v_pairs) AS p);
+    GET DIAGNOSTICS v_removed = ROW_COUNT;
 
     INSERT INTO claimius.user_object (
         id, app_id, user_id, object_id, object_type,
         sa_access, scope, grants, direct_grant,
         sa_owner_id, sa_location_id, sa_root_id,
         sa_name, sa_description, sa_link, search_vector
-    ) VALUES (
-                 v_id, p_app_id, p_user_id, p_object_id, p_object_type,
-                 v_eff_access, v_eff_scope, v_grants, v_direct,
-                 v_norm.sa_owner_id, v_norm.sa_location_id, v_norm.sa_root_id,
-                 v_norm.sa_name, v_norm.sa_description, v_norm.sa_link, v_search_vec
-             )
+    )
+    SELECT claimius.composite_id(p_app_id::TEXT, p_user_id::TEXT, p_object_type, p.object_id::TEXT),
+           p_app_id, p_user_id, p.object_id, p_object_type,
+           p.sa_access, p.scope, p.grants, p.direct_grant,
+           p.sa_owner_id, p.sa_location_id, p.sa_root_id,
+           p.sa_name, p.sa_description, p.sa_link,
+           setweight(to_tsvector('simple', coalesce(p.sa_name, '')), 'A') ||
+           setweight(to_tsvector('simple', coalesce(p.sa_description, '')), 'B')
+    FROM jsonb_to_recordset(v_pairs) AS p(
+        object_id UUID, sa_access INTEGER, scope JSONB, grants JSONB, direct_grant BOOLEAN,
+        sa_owner_id UUID, sa_location_id UUID, sa_root_id UUID,
+        sa_name TEXT, sa_description TEXT, sa_link TEXT
+    )
     ON CONFLICT (id) DO UPDATE SET
                                    sa_access = EXCLUDED.sa_access,
                                    scope = EXCLUDED.scope,
@@ -1362,48 +1299,75 @@ BEGIN
        OR claimius.user_object.search_vector    IS DISTINCT FROM EXCLUDED.search_vector;
 
     INSERT INTO claimius.object_users (id, app_id, object_id, object_type, user_id)
-    VALUES (
-               claimius.composite_id(p_app_id::TEXT, p_object_type, p_object_id::TEXT, p_user_id::TEXT),
-               p_app_id, p_object_id, p_object_type, p_user_id
-           )
+    SELECT claimius.composite_id(p_app_id::TEXT, p_object_type, (p ->> 'object_id'), p_user_id::TEXT),
+           p_app_id, (p ->> 'object_id')::UUID, p_object_type, p_user_id
+    FROM jsonb_array_elements(v_pairs) AS p
     ON CONFLICT (id) DO NOTHING;
+    GET DIAGNOSTICS v_added = ROW_COUNT;
+
+    RETURN v_removed > 0 OR v_added > 0;
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius.recompute_user_object(p_app_id uuid, p_user_id uuid, p_object_type text, p_object_id uuid) IS 'Recomputes user_object and object_users for one (app, user, object) tuple. Purges the row when the object is soft deleted or absent. user_users is rebuilt per viewer by the calling orchestrator.';
+COMMENT ON FUNCTION claimius.recompute_user_object(UUID, UUID, TEXT, UUID[]) IS 'Recomputes user_object and object_users for one user on a set of objects of one type, one pair or a whole share. Purges the pairs whose object is soft deleted or absent or that no grant reaches. Returns whether the user''s object_users set changed.';
 
 -- _refresh_user_users
--- Recomputes user_users entries for one (app_id, viewer) pair from
--- object_users.
+-- Recomputes the user_users rows on both sides of one user from object_users:
+-- the rows where it is the viewer and the rows where it is the target, since
+-- the sharing of two users moves only with the objects of either. A settle
+-- that changes one user's objects refreshes that user alone. Rows that did
+-- not change are not rewritten.
 CREATE OR REPLACE FUNCTION claimius._refresh_user_users(p_app_id UUID, p_viewer_id UUID)
     RETURNS VOID AS $$
 BEGIN
-    -- Remove existing rows for this viewer
-    DELETE FROM claimius.user_users
-    WHERE app_id = p_app_id AND viewer_id = p_viewer_id;
-
-    -- Insert one row per other user the viewer shares any object with
-    INSERT INTO claimius.user_users (id, app_id, viewer_id, target_user_id, sharing_object_count, first_shared_at, last_shared_at)
-    SELECT
-        claimius.composite_id(p_app_id::TEXT, p_viewer_id::TEXT, target.user_id::TEXT),
-        p_app_id,
-        p_viewer_id,
-        target.user_id,
-        count(*),
-        min(target.sa_created_at),
-        max(target.sa_updated_at)
-    FROM claimius.object_users viewer
-             JOIN claimius.object_users target
-                  ON target.app_id = viewer.app_id
-                      AND target.object_id = viewer.object_id
-                      AND target.object_type = viewer.object_type
-                      AND target.user_id <> viewer.user_id
-    WHERE viewer.app_id = p_app_id AND viewer.user_id = p_viewer_id
-    GROUP BY target.user_id;
+    WITH shared AS (
+        SELECT other.user_id                AS other_id,
+               count(*)::INTEGER            AS sharing,
+               min(other.sa_created_at)     AS other_first,
+               max(other.sa_updated_at)     AS other_last,
+               min(mine.sa_created_at)      AS mine_first,
+               max(mine.sa_updated_at)      AS mine_last
+        FROM claimius.object_users mine
+            JOIN claimius.object_users other
+                ON other.app_id = mine.app_id
+               AND other.object_id = mine.object_id
+               AND other.object_type = mine.object_type
+               AND other.user_id <> mine.user_id
+        WHERE mine.app_id = p_app_id AND mine.user_id = p_viewer_id
+        GROUP BY other.user_id
+    ),
+    wanted AS (
+        SELECT claimius.composite_id(p_app_id::TEXT, p_viewer_id::TEXT, s.other_id::TEXT) AS id,
+               p_viewer_id AS viewer_id, s.other_id AS target_user_id,
+               s.sharing, s.other_first AS first_shared_at, s.other_last AS last_shared_at
+        FROM shared s
+        UNION ALL
+        SELECT claimius.composite_id(p_app_id::TEXT, s.other_id::TEXT, p_viewer_id::TEXT),
+               s.other_id, p_viewer_id,
+               s.sharing, s.mine_first, s.mine_last
+        FROM shared s
+    ),
+    written AS (
+        INSERT INTO claimius.user_users (id, app_id, viewer_id, target_user_id, sharing_object_count, first_shared_at, last_shared_at)
+        SELECT w.id, p_app_id, w.viewer_id, w.target_user_id, w.sharing, w.first_shared_at, w.last_shared_at
+        FROM wanted w
+        ON CONFLICT (id) DO UPDATE SET
+            sharing_object_count = EXCLUDED.sharing_object_count,
+            first_shared_at      = EXCLUDED.first_shared_at,
+            last_shared_at       = EXCLUDED.last_shared_at
+        WHERE (claimius.user_users.sharing_object_count, claimius.user_users.first_shared_at, claimius.user_users.last_shared_at)
+              IS DISTINCT FROM (EXCLUDED.sharing_object_count, EXCLUDED.first_shared_at, EXCLUDED.last_shared_at)
+        RETURNING 1
+    )
+    DELETE FROM claimius.user_users uu
+    WHERE uu.app_id = p_app_id
+      AND (uu.viewer_id = p_viewer_id OR uu.target_user_id = p_viewer_id)
+      AND uu.id NOT IN (SELECT w.id FROM wanted w);
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius._refresh_user_users(p_app_id uuid, p_viewer_id uuid) IS 'Rebuilds user_users rows for one (app, viewer).';
+COMMENT ON FUNCTION claimius._refresh_user_users(p_app_id uuid, p_viewer_id uuid) IS 'Rebuilds the user_users rows on both sides of one user in one app, rewriting only the rows that changed.';
+
 
 -- _affected_users_for_object
 -- Returns the list of users whose access to the given object could change.
@@ -1420,7 +1384,7 @@ DECLARE
     v_creator_uc_id UUID;
     v_creator_user  UUID;
 BEGIN
-    -- The creator of a row holds it through _direct_grant_for_object without
+    -- The creator of a row holds it through recompute_user_object without
     -- any claim binding, so they are resolved here from sa_created_by. Without
     -- this branch a creator who holds no claim on the object or an ancestor is
     -- never enumerated, no user_object row is ever written for them, and their
@@ -1950,7 +1914,8 @@ COMMENT ON FUNCTION claimius._actor_user_for_row(UUID, TEXT, ANYELEMENT) IS 'Use
 -- ----------------------------------------------------------------------------
 -- _raise_object_diff
 -- Marks the area around one object as needing recalculation. One row, no user
--- enumeration. Repeated changes to the same object collapse onto the same id.
+-- enumeration. Repeated changes to the same object collapse onto the same id
+-- and raise its generation, superseding every share settled before.
 -- ----------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION claimius._raise_object_diff(
     p_app_id        UUID,
@@ -1968,6 +1933,7 @@ BEGIN
             p_app_id, 'object', p_object_type, p_object_id, p_cascade)
     ON CONFLICT (id) DO UPDATE
         SET sa_updated_at = now(),
+            generation = claimius.access_diff.generation + 1,
             cascade = claimius.access_diff.cascade OR EXCLUDED.cascade;
 END;
 $$ LANGUAGE plpgsql;
@@ -1976,157 +1942,326 @@ COMMENT ON FUNCTION claimius._raise_object_diff(UUID, TEXT, UUID, BOOLEAN) IS 'M
 
 -- ----------------------------------------------------------------------------
 -- _raise_claim_diff
--- Marks the area around one claim as needing recalculation.
+-- Marks the area around one claim as needing recalculation, for every holder,
+-- or with p_user_id for the one user an assignment of the claim names.
 -- ----------------------------------------------------------------------------
+DROP FUNCTION IF EXISTS claimius._raise_claim_diff(UUID, UUID);
 CREATE OR REPLACE FUNCTION claimius._raise_claim_diff(
     p_app_id        UUID,
-    p_claim_id      UUID
+    p_claim_id      UUID,
+    p_user_id       UUID DEFAULT NULL
 ) RETURNS VOID AS $$
 BEGIN
     IF p_app_id IS NULL OR p_claim_id IS NULL THEN
         RETURN;
     END IF;
 
-    INSERT INTO claimius.access_diff (id, app_id, kind, claim_id)
-    VALUES (claimius.composite_id('claim', p_app_id::TEXT, p_claim_id::TEXT),
-            p_app_id, 'claim', p_claim_id)
-    ON CONFLICT (id) DO UPDATE SET sa_updated_at = now();
+    INSERT INTO claimius.access_diff (id, app_id, kind, claim_id, user_id)
+    VALUES (CASE WHEN p_user_id IS NULL
+                     THEN claimius.composite_id('claim', p_app_id::TEXT, p_claim_id::TEXT)
+                     ELSE claimius.composite_id('claim', p_app_id::TEXT, p_claim_id::TEXT, p_user_id::TEXT)
+                END,
+            p_app_id, 'claim', p_claim_id, p_user_id)
+    ON CONFLICT (id) DO UPDATE
+        SET sa_updated_at = now(),
+            generation = claimius.access_diff.generation + 1;
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius._raise_claim_diff(UUID, UUID) IS 'Marks a claim area outstanding in access_diff.';
+COMMENT ON FUNCTION claimius._raise_claim_diff(UUID, UUID, UUID) IS 'Marks a claim area outstanding in access_diff, for every holder or for the one assigned user.';
 
 -- ----------------------------------------------------------------------------
 -- _settle_object_diff
--- Recalculates one object area for every user it touches. This is the work the
--- write no longer does, paid once by the first read that targets the area.
+-- Settles one user's share of an object area, set based: the objects of the
+-- area, the object and with cascade its subtree, on which the user holds a
+-- pair or which a binding of the user's own claims reaches, plus the object
+-- itself so its creator is settled. One recompute per object type. Returns
+-- whether the user's object_users set changed.
 -- ----------------------------------------------------------------------------
+DROP FUNCTION IF EXISTS claimius._settle_object_diff(UUID, TEXT, UUID, BOOLEAN);
 CREATE OR REPLACE FUNCTION claimius._settle_object_diff(
     p_app_id        UUID,
+    p_user_id       UUID,
     p_object_type   TEXT,
     p_object_id     UUID,
     p_cascade       BOOLEAN DEFAULT FALSE
-) RETURNS SETOF UUID AS $$
+) RETURNS BOOLEAN AS $$
 DECLARE
-    v_user RECORD;
+    v_share     RECORD;
+    v_changed   BOOLEAN := FALSE;
 BEGIN
-    FOR v_user IN
-        SELECT user_id FROM claimius._affected_users_for_object(p_app_id, p_object_type, p_object_id)
-        LOOP
-            PERFORM claimius.recompute_user_object(p_app_id, v_user.user_id, p_object_type, p_object_id);
-            RETURN NEXT v_user.user_id;
-        END LOOP;
+    FOR v_share IN
+        WITH area AS (
+            SELECT p_object_type AS object_type, p_object_id AS object_id
+            UNION
+            SELECT e.descendant_type, e.descendant_id
+            FROM claimius.inheritance_info e
+            WHERE p_cascade
+              AND e.ancestor_type = p_object_type
+              AND e.ancestor_id = p_object_id
+              AND e.depth > 0
+        ),
+        bound AS MATERIALIZED (
+            SELECT co.object_type, co.object_id, (co.inherits AND c.inherits) AS inherits
+            FROM claimius.user_claim uc
+                JOIN claimius.claim c ON c.id = uc.claim_id AND c.sa_deleted_at IS NULL
+                JOIN claimius.claim_object co
+                    ON co.claim_id = c.id
+                   AND co.app_id = p_app_id
+                   AND co.sa_deleted_at IS NULL
+                   AND co.object_id IS NOT NULL
+            WHERE uc.user_id = p_user_id
+              AND uc.app_id = p_app_id
+              AND uc.sa_deleted_at IS NULL
 
-    -- A hierarchical row carries its subtree. The write records one diff and
-    -- the closure is walked here, once, by the reader that claims the area.
-    IF p_cascade THEN
-        FOR v_user IN
-            WITH descendants AS (
-                SELECT DISTINCT e.descendant_type AS object_type, e.descendant_id AS object_id
+            UNION ALL
+
+            SELECT co.object_type, co.object_id, FALSE
+            FROM claimius.user_claim uc
+                JOIN claimius.claim_object link
+                    ON link.claim_id = uc.claim_id
+                   AND link.app_id = p_app_id
+                   AND link.object_type = 'claimius.claim'
+                   AND link.sa_deleted_at IS NULL
+                JOIN claimius.claim_object co
+                    ON co.claim_id = link.object_id
+                   AND co.app_id = p_app_id
+                   AND co.sa_deleted_at IS NULL
+                   AND co.object_id IS NOT NULL
+            WHERE uc.user_id = p_user_id
+              AND uc.app_id = p_app_id
+              AND uc.sa_deleted_at IS NULL
+        )
+        SELECT a.object_type, array_agg(a.object_id) AS object_ids
+        FROM area a
+        WHERE (a.object_type = p_object_type AND a.object_id = p_object_id)
+           OR EXISTS (
+                SELECT 1 FROM claimius.user_object uo
+                WHERE uo.id = claimius.composite_id(p_app_id::TEXT, p_user_id::TEXT, a.object_type, a.object_id::TEXT))
+           OR EXISTS (
+                SELECT 1 FROM bound b
+                WHERE b.object_type = a.object_type AND b.object_id = a.object_id)
+           OR EXISTS (
+                SELECT 1
                 FROM claimius.inheritance_info e
-                WHERE e.ancestor_type = p_object_type
-                  AND e.ancestor_id = p_object_id
-                  AND e.depth > 0
-            )
-            SELECT DISTINCT u.user_id, d.object_type, d.object_id
-            FROM descendants d
-                CROSS JOIN LATERAL claimius._affected_users_for_object(p_app_id, d.object_type, d.object_id) u
-            LOOP
-                PERFORM claimius.recompute_user_object(
-                        p_app_id, v_user.user_id, v_user.object_type, v_user.object_id);
-                RETURN NEXT v_user.user_id;
-            END LOOP;
-    END IF;
+                    JOIN bound b
+                        ON b.inherits
+                       AND b.object_type = e.ancestor_type
+                       AND b.object_id = e.ancestor_id
+                WHERE e.descendant_type = a.object_type
+                  AND e.descendant_id = a.object_id
+                  AND e.depth > 0)
+        GROUP BY a.object_type
+    LOOP
+        v_changed := claimius.recompute_user_object(p_app_id, p_user_id, v_share.object_type, VARIADIC v_share.object_ids) OR v_changed;
+    END LOOP;
+
+    RETURN v_changed;
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius._settle_object_diff(UUID, TEXT, UUID, BOOLEAN) IS 'Recomputes one object for every user reaching it. Returns the users touched.';
-
--- ----------------------------------------------------------------------------
--- _settle_claim_diff_for_user
--- The single user slice of a claim area. A write settles the acting user and
--- the assigned user through this, so both read their own change back while
--- every other holder waits for the diff to be claimed by a read.
--- ----------------------------------------------------------------------------
-CREATE OR REPLACE FUNCTION claimius._settle_claim_diff_for_user(
-    p_app_id        UUID,
-    p_user_id       UUID,
-    p_claim_id      UUID
-) RETURNS VOID AS $$
-DECLARE
-    v_inherits  BOOLEAN;
-    v_target    RECORD;
-BEGIN
-    IF p_app_id IS NULL OR p_user_id IS NULL OR p_claim_id IS NULL THEN
-        RETURN;
-    END IF;
-
-    SELECT coalesce(c.inherits, FALSE) INTO v_inherits
-    FROM claimius.claim c WHERE c.id = p_claim_id;
-
-    FOR v_target IN
-        SELECT co.object_type, co.object_id
-        FROM claimius.claim_object co
-        WHERE co.claim_id = p_claim_id
-          AND co.app_id = p_app_id
-          AND co.sa_deleted_at IS NULL
-          AND co.object_type <> 'claimius.claim'
-
-        UNION
-
-        SELECT e.descendant_type, e.descendant_id
-        FROM claimius.claim_object co
-            JOIN claimius.inheritance_info e
-                ON e.ancestor_type = co.object_type
-               AND e.ancestor_id = co.object_id
-               AND e.depth > 0
-        WHERE co.claim_id = p_claim_id
-          AND co.app_id = p_app_id
-          AND co.sa_deleted_at IS NULL
-          AND co.inherits = TRUE
-          AND v_inherits
-        LOOP
-            PERFORM claimius.recompute_user_object(
-                    p_app_id, p_user_id, v_target.object_type, v_target.object_id);
-        END LOOP;
-END;
-$$ LANGUAGE plpgsql;
-
-COMMENT ON FUNCTION claimius._settle_claim_diff_for_user(UUID, UUID, UUID) IS 'Recomputes the objects a claim reaches, for one user only.';
+COMMENT ON FUNCTION claimius._settle_object_diff(UUID, UUID, TEXT, UUID, BOOLEAN) IS 'Recomputes one user''s share of an object area, set based. Returns whether the user''s object_users set changed.';
 
 -- ----------------------------------------------------------------------------
 -- _settle_claim_diff
--- Recalculates the area a claim covers for every user holding it, directly or
--- through a composition link.
+-- Settles one user's share of a claim area, set based: the objects the claim
+-- is bound on and, where the binding inherits, their subtrees; the objects
+-- bound by the claims it links to; and the user's pairs whose grants name the
+-- claim. Bindings and links removed or changed since the area opened, at
+-- p_since, count too, so the pairs they used to reach are settled away. One
+-- recompute per object type. Returns whether the user's object_users set
+-- changed.
 -- ----------------------------------------------------------------------------
+DROP FUNCTION IF EXISTS claimius._settle_claim_diff(UUID, UUID);
+DROP FUNCTION IF EXISTS claimius._settle_claim_diff_for_user(UUID, UUID, UUID);
 CREATE OR REPLACE FUNCTION claimius._settle_claim_diff(
     p_app_id        UUID,
-    p_claim_id      UUID
-) RETURNS SETOF UUID AS $$
+    p_user_id       UUID,
+    p_claim_id      UUID,
+    p_since         TIMESTAMPTZ
+) RETURNS BOOLEAN AS $$
 DECLARE
-    v_holder RECORD;
+    v_share     RECORD;
+    v_changed   BOOLEAN := FALSE;
 BEGIN
-    FOR v_holder IN
-        SELECT DISTINCT uc.user_id
-        FROM claimius.user_claim uc
-        WHERE uc.app_id = p_app_id
-          AND uc.sa_deleted_at IS NULL
-          AND (
-              uc.claim_id = p_claim_id
-              OR EXISTS (
-                  SELECT 1 FROM claimius.claim_object link
-                  WHERE link.claim_id = uc.claim_id
-                    AND link.app_id = p_app_id
-                    AND link.object_type = 'claimius.claim'
-                    AND link.object_id = p_claim_id
-                    AND link.sa_deleted_at IS NULL
-              )
-          )
-        LOOP
-            PERFORM claimius._settle_claim_diff_for_user(p_app_id, v_holder.user_id, p_claim_id);
-            RETURN NEXT v_holder.user_id;
-        END LOOP;
+    FOR v_share IN
+        WITH bound AS MATERIALIZED (
+            SELECT co.object_type, co.object_id,
+                   (co.inherits OR co.sa_updated_at >= p_since) AND (c.inherits OR c.sa_updated_at >= p_since) AS cascades
+            FROM claimius.claim_object co
+                JOIN claimius.claim c ON c.id = co.claim_id
+            WHERE co.claim_id = p_claim_id
+              AND co.app_id = p_app_id
+              AND co.object_id IS NOT NULL
+              AND (co.sa_deleted_at IS NULL OR co.sa_updated_at >= p_since)
+
+            UNION ALL
+
+            SELECT co.object_type, co.object_id, FALSE
+            FROM claimius.claim_object link
+                JOIN claimius.claim_object co
+                    ON co.claim_id = link.object_id
+                   AND co.app_id = p_app_id
+                   AND co.object_id IS NOT NULL
+                   AND (co.sa_deleted_at IS NULL OR co.sa_updated_at >= p_since)
+            WHERE link.claim_id = p_claim_id
+              AND link.app_id = p_app_id
+              AND link.object_type = 'claimius.claim'
+              AND (link.sa_deleted_at IS NULL OR link.sa_updated_at >= p_since)
+        ),
+        share AS (
+            SELECT b.object_type, b.object_id FROM bound b
+
+            UNION
+
+            SELECT e.descendant_type, e.descendant_id
+            FROM bound b
+                JOIN claimius.inheritance_info e
+                    ON e.ancestor_type = b.object_type
+                   AND e.ancestor_id = b.object_id
+                   AND e.depth > 0
+            WHERE b.cascades
+
+            UNION
+
+            SELECT uo.object_type, uo.object_id
+            FROM claimius.user_object uo
+            WHERE uo.app_id = p_app_id
+              AND uo.user_id = p_user_id
+              AND (uo.grants @> jsonb_build_array(jsonb_build_object('claim_id', p_claim_id))
+                   OR uo.grants @> jsonb_build_array(jsonb_build_object(
+                          'cascaded_from', jsonb_build_object('type', 'claimius.claim', 'id', p_claim_id))))
+        )
+        SELECT s.object_type, array_agg(s.object_id) AS object_ids
+        FROM share s
+        GROUP BY s.object_type
+    LOOP
+        v_changed := claimius.recompute_user_object(p_app_id, p_user_id, v_share.object_type, VARIADIC v_share.object_ids) OR v_changed;
+    END LOOP;
+
+    RETURN v_changed;
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius._settle_claim_diff(UUID, UUID) IS 'Recomputes the objects a claim reaches for every user holding it. Returns the users touched.';
+COMMENT ON FUNCTION claimius._settle_claim_diff(UUID, UUID, UUID, TIMESTAMPTZ) IS 'Recomputes one user''s share of a claim area, set based. Returns whether the user''s object_users set changed.';
+
+-- ----------------------------------------------------------------------------
+-- _clear_diff
+-- Deletes an area once every user it can reach has settled its current
+-- generation. The holders of a claim area are the users holding the claim or
+-- a claim linking to it, or the one user an assignment names. The holders of
+-- an object area are the users holding a pair on the object or its subtree,
+-- the users holding a claim bound on the object or an ancestor, and the
+-- creator of the object. The first holder found unsettled ends the test, and
+-- an area another transaction holds is left for the next settle to clear.
+-- ----------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION claimius._clear_diff(
+    p_app_id        UUID,
+    p_diff_id       UUID
+) RETURNS BOOLEAN AS $$
+DECLARE
+    v_diff      claimius.access_diff%ROWTYPE;
+    v_creator   UUID;
+    v_open      BOOLEAN;
+BEGIN
+    SELECT d.* INTO v_diff FROM claimius.access_diff d WHERE d.id = p_diff_id;
+    IF NOT FOUND THEN
+        RETURN FALSE;
+    END IF;
+
+    IF v_diff.kind = 'claim' AND v_diff.user_id IS NOT NULL THEN
+        v_open := NOT EXISTS (
+            SELECT 1 FROM claimius.access_diff_user du
+            WHERE du.diff_id = v_diff.id AND du.user_id = v_diff.user_id AND du.generation = v_diff.generation);
+    ELSIF v_diff.kind = 'claim' THEN
+        v_open := EXISTS (
+                SELECT 1 FROM claimius.user_claim uc
+                WHERE uc.claim_id = v_diff.claim_id
+                  AND uc.app_id = p_app_id
+                  AND uc.sa_deleted_at IS NULL
+                  AND NOT EXISTS (
+                      SELECT 1 FROM claimius.access_diff_user du
+                      WHERE du.diff_id = v_diff.id AND du.user_id = uc.user_id AND du.generation = v_diff.generation))
+            OR EXISTS (
+                SELECT 1
+                FROM claimius.claim_object link
+                    JOIN claimius.user_claim uc
+                        ON uc.claim_id = link.claim_id
+                       AND uc.app_id = p_app_id
+                       AND uc.sa_deleted_at IS NULL
+                WHERE link.object_type = 'claimius.claim'
+                  AND link.object_id = v_diff.claim_id
+                  AND link.app_id = p_app_id
+                  AND link.sa_deleted_at IS NULL
+                  AND NOT EXISTS (
+                      SELECT 1 FROM claimius.access_diff_user du
+                      WHERE du.diff_id = v_diff.id AND du.user_id = uc.user_id AND du.generation = v_diff.generation));
+    ELSE
+        SELECT uc.user_id INTO v_creator
+        FROM claimius._denormalize_objects(v_diff.object_type, ARRAY[v_diff.object_id]) r
+            JOIN claimius.user_claim uc ON uc.id = r.sa_created_by AND uc.app_id = p_app_id AND uc.sa_deleted_at IS NULL;
+
+        v_open := (v_creator IS NOT NULL AND NOT EXISTS (
+                SELECT 1 FROM claimius.access_diff_user du
+                WHERE du.diff_id = v_diff.id AND du.user_id = v_creator AND du.generation = v_diff.generation))
+            OR EXISTS (
+                SELECT 1 FROM claimius.object_users ou
+                WHERE ou.app_id = p_app_id
+                  AND ou.object_type = v_diff.object_type
+                  AND ou.object_id = v_diff.object_id
+                  AND NOT EXISTS (
+                      SELECT 1 FROM claimius.access_diff_user du
+                      WHERE du.diff_id = v_diff.id AND du.user_id = ou.user_id AND du.generation = v_diff.generation))
+            OR (v_diff.cascade AND EXISTS (
+                SELECT 1
+                FROM claimius.inheritance_info e
+                    JOIN claimius.object_users ou
+                        ON ou.app_id = p_app_id
+                       AND ou.object_type = e.descendant_type
+                       AND ou.object_id = e.descendant_id
+                WHERE e.ancestor_type = v_diff.object_type
+                  AND e.ancestor_id = v_diff.object_id
+                  AND e.depth > 0
+                  AND NOT EXISTS (
+                      SELECT 1 FROM claimius.access_diff_user du
+                      WHERE du.diff_id = v_diff.id AND du.user_id = ou.user_id AND du.generation = v_diff.generation)))
+            OR EXISTS (
+                SELECT 1
+                FROM (
+                    SELECT v_diff.object_type AS object_type, v_diff.object_id AS object_id
+                    UNION ALL
+                    SELECT e.ancestor_type, e.ancestor_id
+                    FROM claimius.inheritance_info e
+                    WHERE e.descendant_type = v_diff.object_type
+                      AND e.descendant_id = v_diff.object_id
+                      AND e.depth > 0
+                ) n
+                    JOIN claimius.claim_object co
+                        ON co.object_type = n.object_type
+                       AND co.object_id = n.object_id
+                       AND co.app_id = p_app_id
+                       AND co.sa_deleted_at IS NULL
+                    JOIN claimius.user_claim uc
+                        ON uc.claim_id = co.claim_id
+                       AND uc.app_id = p_app_id
+                       AND uc.sa_deleted_at IS NULL
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM claimius.access_diff_user du
+                    WHERE du.diff_id = v_diff.id AND du.user_id = uc.user_id AND du.generation = v_diff.generation));
+    END IF;
+
+    IF v_open THEN
+        RETURN FALSE;
+    END IF;
+
+    DELETE FROM claimius.access_diff
+    WHERE id IN (
+        SELECT d.id FROM claimius.access_diff d
+        WHERE d.id = v_diff.id AND d.generation = v_diff.generation
+        FOR UPDATE SKIP LOCKED
+    );
+    RETURN FOUND;
+END;
+$$ LANGUAGE plpgsql;
+
+COMMENT ON FUNCTION claimius._clear_diff(UUID, UUID) IS 'Deletes an access_diff area once every holder has settled its current generation. Stops at the first unsettled holder and skips an area another transaction holds.';

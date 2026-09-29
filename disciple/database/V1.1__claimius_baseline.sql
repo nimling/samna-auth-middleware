@@ -574,14 +574,17 @@ CREATE INDEX IF NOT EXISTS idx_reconcile_queue_user ON claimius.reconcile_queue 
 -- The outstanding areas of access that no longer reflect their inputs. A write
 -- records one row here, keyed on what changed and never on the users it
 -- affects, so write cost is constant in the number of users.
--- A read that targets one of these areas recalculates it and clears the row.
--- First come first serve: the first reader to reach an area settles it for
--- everyone, and an area nobody reads is never computed at all.
+-- Each user settles its own share of an area when it reads: a check settles
+-- the one pair it asks about, a listing settles the reader's share of every
+-- area it meets and records it in access_diff_user. An area nobody reads is
+-- never computed at all, and the row clears once every holder has settled it.
 -- kind 'object' carries object_type and object_id: a row entered or left a
 -- tree, changed owner or location, or was soft deleted. kind 'claim' carries
--- claim_id: a claim, a binding, or an assignment changed.
+-- claim_id: a claim or a binding changed, and with user_id an assignment of
+-- the claim to that one user changed.
 -- The id is deterministic on the area, so repeated changes to the same area
--- collapse into one outstanding row instead of a queue of duplicates.
+-- collapse into one outstanding row instead of a queue of duplicates. Each
+-- repeat raises generation, which supersedes every share settled before it.
 CREATE TABLE IF NOT EXISTS claimius.access_diff (
                                                     id              UUID PRIMARY KEY,
                                                     kind            TEXT NOT NULL,
@@ -593,10 +596,30 @@ CREATE TABLE IF NOT EXISTS claimius.access_diff (
                                                     sa_updated_at   TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-COMMENT ON TABLE claimius.access_diff IS 'Outstanding access areas awaiting recalculation. Written by calc triggers, cleared first come first serve by the read that targets the area.';
+ALTER TABLE claimius.access_diff ADD COLUMN IF NOT EXISTS user_id UUID;
+ALTER TABLE claimius.access_diff ADD COLUMN IF NOT EXISTS generation BIGINT NOT NULL DEFAULT 1;
+
+COMMENT ON TABLE claimius.access_diff IS 'Outstanding access areas awaiting recalculation. Written by calc triggers, settled per user by the reads that meet the area, cleared once every holder has settled the current generation.';
+COMMENT ON COLUMN claimius.access_diff.user_id IS 'Set on a claim area raised by an assignment: the one user whose access the assignment changed. NULL means every holder of the claim.';
+COMMENT ON COLUMN claimius.access_diff.generation IS 'Raised by every repeat of the area. A share settled at an older generation is superseded.';
 
 CREATE INDEX IF NOT EXISTS idx_access_diff_object ON claimius.access_diff (object_type, object_id) WHERE kind = 'object';
 CREATE INDEX IF NOT EXISTS idx_access_diff_claim ON claimius.access_diff (claim_id) WHERE kind = 'claim';
+CREATE INDEX IF NOT EXISTS idx_access_diff_user ON claimius.access_diff (user_id) WHERE kind = 'claim' AND user_id IS NOT NULL;
+
+-- access_diff_user
+-- One row per area and user that settled its share of the area, at the
+-- generation it settled. A user never settles the same generation twice, and
+-- the row goes with its area.
+CREATE TABLE IF NOT EXISTS claimius.access_diff_user (
+                                                         diff_id         UUID NOT NULL REFERENCES claimius.access_diff (id) ON DELETE CASCADE,
+                                                         user_id         UUID NOT NULL,
+                                                         generation      BIGINT NOT NULL,
+                                                         sa_created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+                                                         PRIMARY KEY (diff_id, user_id)
+);
+
+COMMENT ON TABLE claimius.access_diff_user IS 'Per user done record of an access_diff area. Written by the read that settles the user share, removed with the area.';
 
 -- claim_graph_cache
 -- Per user materialized result of claimius.get_claim_graph for the default

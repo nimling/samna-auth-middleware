@@ -48,7 +48,7 @@ CREATE OR REPLACE FUNCTION claimius.get_access(
                     direct_grant        BOOLEAN
                 ) AS $$
 BEGIN
-    PERFORM claimius.reconcile_if_pending(p_app_id, p_user_id);
+    PERFORM claimius.reconcile_if_pending(p_app_id, p_user_id, p_object_type, p_object_id);
 
     IF NOT claimius.check_user_active(p_app_id, p_user_id) THEN
         RETURN;
@@ -58,10 +58,7 @@ BEGIN
         WITH uo AS (
             SELECT u.*
             FROM claimius.user_object u
-            WHERE u.user_id = p_user_id
-              AND u.app_id = p_app_id
-              AND u.object_id = p_object_id
-              AND u.object_type = p_object_type
+            WHERE u.id = claimius.composite_id(p_app_id::TEXT, p_user_id::TEXT, p_object_type, p_object_id::TEXT)
               AND (u.sa_access & p_required_access) = p_required_access
         )
         SELECT
@@ -124,7 +121,7 @@ DECLARE
     v_exists   BOOLEAN;
     v_has_soft BOOLEAN;
 BEGIN
-    PERFORM claimius.reconcile_if_pending(p_app_id, p_user_id);
+    PERFORM claimius.reconcile_if_pending(p_app_id, p_user_id, p_object_type, p_object_id);
 
     IF NOT claimius.check_user_active(p_app_id, p_user_id) THEN
         RETURN;
@@ -806,7 +803,7 @@ CREATE OR REPLACE FUNCTION claimius.get_claims(
     p_object_type   TEXT
 ) RETURNS SETOF claimius.claim AS $$
 BEGIN
-    PERFORM claimius.reconcile_if_pending(p_app_id, p_user_id);
+    PERFORM claimius.reconcile_if_pending(p_app_id, p_user_id, p_object_type, p_object_id);
 
     IF NOT claimius.check_user_active(p_app_id, p_user_id) THEN
         RETURN;
@@ -2290,7 +2287,7 @@ COMMENT ON FUNCTION claimius.init_claimius_tables(VARIADIC p_object_types text[]
 -- exists. Inherits the caller's replay_mode setting; callers run this with
 -- replay_mode = true so emit_sync_event short circuits and the bulk seed
 -- produces no sync events. Per-row cost is bounded because the helpers
--- _affected_users_for_object and _build_grants_for_object both use indexed
+-- _affected_users_for_object and _build_grants_for_objects both use indexed
 -- joins against the inheritance_info closure table.
 CREATE OR REPLACE FUNCTION claimius._bulk_seed_user_object(p_object_type TEXT)
     RETURNS VOID AS $$

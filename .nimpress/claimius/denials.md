@@ -2,7 +2,7 @@
 layout: doc
 title: Denials
 description: Deny claims, the subtraction formula _apply_denies computes over the derivations of one pair, what a creator keeps, why a deny is a claim, and a worked scenario of an organization admin with a denied branch.
-tags: deny, ACCESS_DENY, direct deny, inherited deny, _apply_denies, _build_grants_for_object, creator, direct_grant, scenario
+tags: deny, ACCESS_DENY, direct deny, inherited deny, _apply_denies, _build_grants_for_objects, creator, direct_grant, scenario
 lastUpdated: true
 ---
 
@@ -12,7 +12,7 @@ A deny is a derivation whose effective mask carries the deny bit, 16: a claim st
 
 ## How a deny subtracts
 
-`_build_grants_for_object` collects every derivation reaching a user on an object and tags it with its class.
+`_build_grants_for_objects` collects every derivation reaching a user on an object and tags it with its class.
 
 | Class | `tree_type` in `grants` | Reaches the object through |
 |---|---|---|
@@ -42,7 +42,7 @@ The cost is `G × X` mask operations for `G` grants and `X` denies on one pair, 
 
 ## What a creator keeps
 
-The creator of a row, the user behind its `sa_created_by`, holds 15 on it through `direct_grant`, ORed with whatever grants survive. `_direct_grant_for_object` removes it only when the user holds a deny bound on the object itself whose mask, claim and binding together with the binding mask set, carries the owner bit. An inherited deny never touches the creator, so an author always reaches what they made inside a denied subtree.
+The creator of a row, the user behind its `sa_created_by`, holds 15 on it through `direct_grant`, ORed with whatever grants survive. `recompute_user_object` removes it only when the user holds a deny bound on the object itself whose mask, claim and binding together with the binding mask set, carries the owner bit. An inherited deny never touches the creator, so an author always reaches what they made inside a denied subtree.
 
 ## Why a deny is a claim
 

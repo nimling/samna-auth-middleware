@@ -29,12 +29,12 @@ Claimius stores the access relation `A` of [the model](./index.md#the-model) per
 | Step | Index entries |
 |---|---|
 | `table_info` twice, the object's live row once | 3 |
-| `_build_grants_for_object`: the user's grants and their claims | `1 + C` |
+| `_build_grants_for_objects`: the user's grants and their claims | `1 + C` |
 | the bindings on the object | `1 + B_0` |
 | the object's ancestors in every tree, then the bindings on each | `1 + a_x + t_x`, then `a_x` probes returning `B_x − B_0` |
 | the links out of the user's claims and the linked claims' bindings on the object | `C + L` |
-| `_direct_grant_for_object`: the creator, its grant, a direct owner deny | 3 |
-| `_denormalize_object`: `table_info`, the row, its root | 3 |
+| the creator test: the creator, its grant, a direct owner deny | 3 |
+| `_denormalize_objects`: `table_info`, the row, its root | 3 |
 
 ```
 R_read(u, x) = 2C + L + 2 a_x + B_x + t_x + O(1)

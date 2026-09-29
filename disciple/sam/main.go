@@ -225,14 +225,22 @@ func ClaimAreas(eventType string, raw json.RawMessage) ([]uuid.UUID, error) {
 // access settles locally, and the replay guard on the claim trigger means a
 // synced payload raises nothing by itself. Marking an area costs one row
 // whatever the claim reaches, and reconcile_if_pending settles it on the next
-// read that targets it.
+// read that targets it. An assignment moves the area of its one user only.
 func recomputeExternal(ctx context.Context, tx bun.Tx, eventType string, raw json.RawMessage) error {
 	areas, err := ClaimAreas(eventType, raw)
 	if err != nil {
 		return err
 	}
+	var assignee *uuid.UUID
+	if eventType == "claimius.user_claim" {
+		var envelope claimBindingEnvelope
+		if err := json.Unmarshal(raw, &envelope); err != nil {
+			return fmt.Errorf("unmarshal assignment envelope: %w", err)
+		}
+		assignee = envelope.UserID
+	}
 	for _, claimID := range areas {
-		if _, err := tx.ExecContext(ctx, "SELECT claimius._raise_claim_diff(?)", claimID); err != nil {
+		if _, err := tx.ExecContext(ctx, "SELECT claimius._raise_claim_diff(?, ?)", claimID, assignee); err != nil {
 			return fmt.Errorf("raise claim diff for %s: %w", claimID, err)
 		}
 	}
