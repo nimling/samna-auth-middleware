@@ -1268,6 +1268,51 @@ $$ LANGUAGE plpgsql STABLE;
 
 COMMENT ON FUNCTION claimius._denormalize_objects(TEXT, UUID[]) IS 'Reads name, description, owner, location, root and creator of a set of live rows of one registered table. Falls back to organization or location sa_root_id when the row carries no sa_root_id column.';
 
+-- _write_object_info
+-- Brings the object_info rows of a set of objects of one registered table in
+-- step with the rows themselves: a live row is written when a field differs,
+-- a row gone or soft deleted loses its object_info row. Called by the calc
+-- triggers on every write of the object and by the bulk paths, so a rename
+-- is one row here and no pair.
+CREATE OR REPLACE FUNCTION claimius._write_object_info(
+    p_object_type   TEXT,
+    p_object_ids    UUID[]
+) RETURNS VOID AS $$
+BEGIN
+    IF p_object_type IS NULL OR p_object_ids IS NULL OR cardinality(p_object_ids) = 0 THEN
+        RETURN;
+    END IF;
+
+    WITH live AS MATERIALIZED (
+        SELECT r.* FROM claimius._denormalize_objects(p_object_type, p_object_ids) r
+    ),
+    gone AS (
+        DELETE FROM claimius.object_info oi
+        WHERE oi.object_type = p_object_type
+          AND oi.object_id = ANY(p_object_ids)
+          AND oi.object_id NOT IN (SELECT l.id FROM live l)
+    )
+    INSERT INTO claimius.object_info (object_type, object_id, sa_owner_id, sa_location_id, sa_root_id, sa_name, sa_description, sa_link)
+    SELECT p_object_type, l.id, l.sa_owner_id, l.sa_location_id, l.sa_root_id, l.sa_name, l.sa_description, l.sa_link
+    FROM live l
+    ON CONFLICT (object_type, object_id) DO UPDATE SET
+        sa_owner_id    = EXCLUDED.sa_owner_id,
+        sa_location_id = EXCLUDED.sa_location_id,
+        sa_root_id     = EXCLUDED.sa_root_id,
+        sa_name        = EXCLUDED.sa_name,
+        sa_description = EXCLUDED.sa_description,
+        sa_link        = EXCLUDED.sa_link,
+        sa_updated_at  = now()
+    WHERE (claimius.object_info.sa_owner_id, claimius.object_info.sa_location_id, claimius.object_info.sa_root_id,
+           claimius.object_info.sa_name, claimius.object_info.sa_description, claimius.object_info.sa_link)
+          IS DISTINCT FROM
+          (EXCLUDED.sa_owner_id, EXCLUDED.sa_location_id, EXCLUDED.sa_root_id,
+           EXCLUDED.sa_name, EXCLUDED.sa_description, EXCLUDED.sa_link);
+END;
+$$ LANGUAGE plpgsql;
+
+COMMENT ON FUNCTION claimius._write_object_info(TEXT, UUID[]) IS 'Writes the object_info rows of a set of objects of one type from the rows themselves: upserts the live ones where a field differs, deletes the ones gone or soft deleted.';
+
 -- _lock_objects
 -- Takes the transaction advisory lock of every object named, one key per
 -- object_type:object_id, in sorted key order. A settle takes the locks of
@@ -1301,8 +1346,9 @@ COMMENT ON FUNCTION claimius._lock_objects(TEXT[]) IS 'Takes the per object tran
 -- row itself take. The pairs it inserts and deletes move
 -- user_users through _count_user_users. It takes the per object locks of its
 -- objects, sorted, before its first write, which inside a settle are already
--- held. Returns whether the user's pair set
--- changed.
+-- held. A pair holds only the per user columns; a pair written on an object
+-- that has no object_info row yet brings one, so no pair is ever without its
+-- object's fields. Returns whether the user's pair set changed.
 DROP FUNCTION IF EXISTS claimius.recompute_user_object(UUID, UUID, TEXT, UUID);
 CREATE OR REPLACE FUNCTION claimius.recompute_user_object(
     p_app_id        UUID,
@@ -1336,7 +1382,7 @@ BEGIN
     END IF;
 
     WITH target AS (
-        SELECT i.id, r.sa_name, r.sa_description, r.sa_link, r.sa_owner_id, r.sa_location_id, r.sa_root_id, r.sa_created_by
+        SELECT i.id, r.id IS NOT NULL AS live, r.sa_name, r.sa_description, r.sa_link, r.sa_owner_id, r.sa_location_id, r.sa_root_id, r.sa_created_by
         FROM unnest(v_ids) AS i(id)
             LEFT JOIN claimius._denormalize_objects(p_object_type, v_ids) r ON r.id = i.id
         WHERE r.id IS NOT NULL OR NOT v_info.has_sa_deleted_at
@@ -1370,6 +1416,7 @@ BEGIN
     )
     SELECT coalesce(jsonb_agg(jsonb_build_object(
                'object_id', b.id,
+               'live', b.live,
                'sa_access', b.access,
                'scope', b.scope,
                'grants', b.grants,
@@ -1386,56 +1433,42 @@ BEGIN
     WHERE b.access <> 0;
 
     DELETE FROM claimius.user_object
-    WHERE id IN (
-            SELECT claimius.composite_id(p_app_id::TEXT, p_user_id::TEXT, p_object_type, i::TEXT)
-            FROM unnest(v_ids) AS i
-        )
+    WHERE user_id = p_user_id
+      AND app_id = p_app_id
+      AND object_type = p_object_type
+      AND object_id = ANY(v_ids)
       AND object_id NOT IN (SELECT (p ->> 'object_id')::UUID FROM jsonb_array_elements(v_pairs) AS p);
     GET DIAGNOSTICS v_removed = ROW_COUNT;
 
+    INSERT INTO claimius.object_info (object_type, object_id, sa_owner_id, sa_location_id, sa_root_id, sa_name, sa_description, sa_link)
+    SELECT p_object_type, p.object_id, p.sa_owner_id, p.sa_location_id, p.sa_root_id, p.sa_name, p.sa_description, p.sa_link
+    FROM jsonb_to_recordset(v_pairs) AS p(
+        object_id UUID, live BOOLEAN, sa_owner_id UUID, sa_location_id UUID, sa_root_id UUID,
+        sa_name TEXT, sa_description TEXT, sa_link TEXT
+    )
+    WHERE p.live
+    ON CONFLICT (object_type, object_id) DO NOTHING;
+
     WITH written AS (
         INSERT INTO claimius.user_object (
-            id, app_id, user_id, object_id, object_type,
-            sa_access, scope, grants, direct_grant,
-            sa_owner_id, sa_location_id, sa_root_id,
-            sa_name, sa_description, sa_link, search_vector
+            app_id, user_id, object_id, object_type,
+            sa_access, scope, grants, direct_grant
         )
-        SELECT claimius.composite_id(p_app_id::TEXT, p_user_id::TEXT, p_object_type, p.object_id::TEXT),
-               p_app_id, p_user_id, p.object_id, p_object_type,
-               p.sa_access, p.scope, p.grants, p.direct_grant,
-               p.sa_owner_id, p.sa_location_id, p.sa_root_id,
-               p.sa_name, p.sa_description, p.sa_link,
-               setweight(to_tsvector('simple', coalesce(p.sa_name, '')), 'A') ||
-               setweight(to_tsvector('simple', coalesce(p.sa_description, '')), 'B')
+        SELECT p_app_id, p_user_id, p.object_id, p_object_type,
+               p.sa_access, p.scope, p.grants, p.direct_grant
         FROM jsonb_to_recordset(v_pairs) AS p(
-            object_id UUID, sa_access INTEGER, scope JSONB, grants JSONB, direct_grant BOOLEAN,
-            sa_owner_id UUID, sa_location_id UUID, sa_root_id UUID,
-            sa_name TEXT, sa_description TEXT, sa_link TEXT
+            object_id UUID, sa_access INTEGER, scope JSONB, grants JSONB, direct_grant BOOLEAN
         )
-        ON CONFLICT (id) DO UPDATE SET
+        ON CONFLICT (user_id, app_id, object_type, object_id) DO UPDATE SET
                                        sa_access = EXCLUDED.sa_access,
                                        scope = EXCLUDED.scope,
                                        grants = EXCLUDED.grants,
                                        direct_grant = EXCLUDED.direct_grant,
-                                       sa_owner_id = EXCLUDED.sa_owner_id,
-                                       sa_location_id = EXCLUDED.sa_location_id,
-                                       sa_root_id = EXCLUDED.sa_root_id,
-                                       sa_name = EXCLUDED.sa_name,
-                                       sa_description = EXCLUDED.sa_description,
-                                       sa_link = EXCLUDED.sa_link,
-                                       search_vector = EXCLUDED.search_vector,
                                        sa_updated_at = now()
         WHERE claimius.user_object.sa_access        IS DISTINCT FROM EXCLUDED.sa_access
            OR claimius.user_object.scope            IS DISTINCT FROM EXCLUDED.scope
            OR claimius.user_object.grants           IS DISTINCT FROM EXCLUDED.grants
            OR claimius.user_object.direct_grant     IS DISTINCT FROM EXCLUDED.direct_grant
-           OR claimius.user_object.sa_owner_id      IS DISTINCT FROM EXCLUDED.sa_owner_id
-           OR claimius.user_object.sa_location_id   IS DISTINCT FROM EXCLUDED.sa_location_id
-           OR claimius.user_object.sa_root_id       IS DISTINCT FROM EXCLUDED.sa_root_id
-           OR claimius.user_object.sa_name          IS DISTINCT FROM EXCLUDED.sa_name
-           OR claimius.user_object.sa_description   IS DISTINCT FROM EXCLUDED.sa_description
-           OR claimius.user_object.sa_link          IS DISTINCT FROM EXCLUDED.sa_link
-           OR claimius.user_object.search_vector    IS DISTINCT FROM EXCLUDED.search_vector
         RETURNING xmax = 0 AS inserted
     )
     SELECT count(*) FILTER (WHERE inserted) INTO v_added FROM written;
@@ -1484,7 +1517,7 @@ BEGIN
                 CROSS JOIN LATERAL (VALUES (c.user_id, o.user_id), (o.user_id, c.user_id)) AS d(viewer_id, target_user_id)
             WHERE c.object_type <> 'claimius.claim'
               AND (d.viewer_id = c.user_id
-                   OR NOT EXISTS (SELECT 1 FROM changed n WHERE n.id = o.id))
+                   OR NOT EXISTS (SELECT 1 FROM changed n WHERE n.user_id = o.user_id AND n.app_id = o.app_id AND n.object_type = o.object_type AND n.object_id = o.object_id))
         )
         INSERT INTO claimius.user_users (id, app_id, viewer_id, target_user_id, sharing_object_count)
         SELECT claimius.composite_id(m.app_id::TEXT, m.viewer_id::TEXT, m.target_user_id::TEXT),
@@ -2264,7 +2297,7 @@ BEGIN
     WHERE (a.object_type = p_object_type AND a.object_id = p_object_id)
        OR EXISTS (
             SELECT 1 FROM claimius.user_object uo
-            WHERE uo.id = claimius.composite_id(p_app_id::TEXT, p_user_id::TEXT, a.object_type, a.object_id::TEXT))
+            WHERE uo.user_id = p_user_id AND uo.app_id = p_app_id AND uo.object_type = a.object_type AND uo.object_id = a.object_id)
        OR EXISTS (
             SELECT 1 FROM bound b
             WHERE b.object_type = a.object_type AND b.object_id = a.object_id)

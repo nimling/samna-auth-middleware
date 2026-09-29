@@ -744,20 +744,13 @@ type Audit struct {
 type UserObject struct {
 	bun.BaseModel `bun:"table:claimius.user_object"`
 
-	ID          uuid.UUID        `bun:"id,pk" json:"id"`
-	UserID      uuid.UUID        `bun:"user_id" json:"user_id"`
-	ObjectID    uuid.UUID        `bun:"object_id" json:"object_id"`
-	ObjectType  ObjectType       `bun:"object_type" json:"object_type"`
+	UserID      uuid.UUID        `bun:"user_id,pk" json:"user_id"`
+	ObjectID    uuid.UUID        `bun:"object_id,pk" json:"object_id"`
+	ObjectType  ObjectType       `bun:"object_type,pk" json:"object_type"`
 	Access      ClaimAccess      `bun:"sa_access" json:"access"`
 	Scope       *json.RawMessage `bun:"scope,type:jsonb" json:"scope"`
 	Grants      json.RawMessage  `bun:"grants,type:jsonb,default:'[]'" json:"grants"`
 	DirectGrant bool             `bun:"direct_grant,default:false" json:"direct_grant"`
-	OwnerID     *uuid.UUID       `bun:"sa_owner_id" json:"owner_id"`
-	LocationID  *uuid.UUID       `bun:"sa_location_id" json:"location_id"`
-	RootID      *uuid.UUID       `bun:"sa_root_id" json:"root_id"`
-	Name        *string          `bun:"sa_name" json:"name"`
-	Description *string          `bun:"sa_description" json:"description"`
-	Link        *string          `bun:"sa_link" json:"link"`
 	CreatedAt   time.Time        `bun:"sa_created_at,default:now()" json:"created_at"`
 	UpdatedAt   time.Time        `bun:"sa_updated_at,default:now()" json:"updated_at"`
 }

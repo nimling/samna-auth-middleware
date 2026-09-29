@@ -32,7 +32,7 @@ Every read function takes the user and the app first. It runs `reconcile_if_pend
 
 `get_access` reads the pair and chooses a grant:
 
-1. The pair, filtered on `user_id`, `app_id`, `object_type`, `object_id` and the mask. The planner answers it from the shorter of two ranges: `idx_user_object_object` returns the `U_x` pairs of the object, `idx_user_object_user_type` the `V_{u,τ}` pairs of the reader's type with the mask tested in the index. The pair's primary key, a composite id of the same four values, is not part of the filter.
+1. The pair, one probe of the `user_object` primary key `(user_id, app_id, object_type, object_id)`, with the mask tested on the `sa_access` it carries, and its object's `object_info` row by key for the owner and location.
 
 2. `_best_grant` over the pair's `G_x` derivations: per derivation one probe of `idx_user_claim_unique` for the live grant inside its window and one `claim` primary key probe.
 
@@ -68,10 +68,10 @@ for `B'_x` bindings on those ancestors. Its location term follows each location'
 
 ## What a listing costs
 
-`get_objects(user, app, type, required, after, limit)` reads the reader's range of `idx_user_object_user_object`, keyed `(user_id, app_id, object_type, object_id)` and carrying `sa_access`, from the first key past `after`, the heap row of each pair for its `grants`, name and owner, and chooses a grant per row, until `limit` rows are kept:
+`get_objects(user, app, type, required, after, limit)` reads the reader's range of the `user_object` primary key, `(user_id, app_id, object_type, object_id)` carrying `sa_access`, from the first key past `after`, the heap row of each pair for its `grants`, the `object_info` row of each object by key for its name and owner, and chooses a grant per row, until `limit` rows are kept:
 
 ```
-entries(get_objects page) = Δ_a + h + p (1 + 2 G + 1)           comparisons = 0
+entries(get_objects page) = Δ_a + h + p (1 + 2 G + 2)           comparisons = 0
 ```
 
 for a page of `p` rows and a descent of `h` levels. Rows come in `object_id` order straight from the index, so nothing is sorted, and the next page starts after the last `object_id` of this one. Without `limit` the page is the whole range, `p = V_{u,τ}`. The settle of the reader's share, `Δ_a`, runs before the range is read and is the same for every page. Measured at `V_{u,τ} = 5,000` among 200,160 pairs, a page of 50 reads 50 entries of `user_object` indexes and 110 across the schema with no sort, where the unpaged listing read 5,000 and 10,010 and sorted 5,000 rows. The mask test is written `(sa_access & required) >= required`, the equality for a submask of `required`, which the planner estimates as a range and not a point, so it keeps the ordered scan. A page is linear in its own size and independent of the depth of the trees, the number of bindings, the number of other users and the size of the reader's range.

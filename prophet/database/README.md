@@ -38,7 +38,7 @@ Implementers don't need to know about `sa_root_id`. Just set the parent (`sa_own
 
 **Trees**: `inheritance_info` is a closure table: one row per ancestor-descendant edge across the three tree types (ownership, location, parenthood). Self-edges at depth 0 are included so a node is its own ancestor. Calc functions maintain edges incrementally on writes; full rebuilds happen via `build_ownership_tree`, `build_location_tree`, `build_parenthood_tree`. Reads use indexed JOINs against the closure or the `get_subtree` / `get_*_ancestors` helpers.
 
-**user_object**: the materialized reverse access index. One row per `(app, user, object)` with access. Carries the contributing grants array, denormalized rendering fields, and a tsvector for search. This is the table consumers read from indirectly through `get_*` functions.
+**user_object**: the materialized reverse access index. One row per `(app, user, object)` with access, keyed on that tuple. Carries the effective mask, the contributing grants array and the scope. The rendering fields and the search tsvector of each object live once in **object_info**, written when the object is written. This is the table consumers read from indirectly through `get_*` functions.
 
 **sync_event**: append only stream of changes to materialized state tables. Prophets write; disciples consume.
 
@@ -397,7 +397,7 @@ Optional:
 - `app_id UUID NOT NULL` (when omitted, the deployment's own app id is inferred via `claimius.get_app_id()` at trigger time. Required on prophets that host more than one app, since inference would be ambiguous; rejected at registration in that case.)
 - `sa_location_id UUID` (location the row is pinned to)
 - `sa_parent_id UUID NOT NULL` and `sa_root_id UUID NOT NULL` (must come together; declares this table is self referencing)
-- `name TEXT` and `description TEXT` (denormalized into `user_object` for search and rendering)
+- `name TEXT` and `description TEXT` (stored once per object in `object_info` for search and rendering)
 
 `init_claimius_tables` validates these and raises if any required column is missing or if the multi app guard fails on `app_id`.
 

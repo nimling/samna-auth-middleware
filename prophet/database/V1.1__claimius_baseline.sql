@@ -9,7 +9,7 @@
 --   3. Hierarchy roots          organization, location
 --   4. Claims and bindings      claim, user_claim, claim_object, user_token
 --   5. Registry                 table_info, inheritance_info
---   6. Materialized access      user_object, user_users
+--   6. Materialized access      user_object, object_info, user_users
 --   7. Sync                     sync_event, prophet_state, disciple_state,
 --                               reconcile_queue
 --   8. Audit                    audit
@@ -342,7 +342,7 @@ CREATE INDEX IF NOT EXISTS idx_claim_app_id ON claimius.claim (app_id);
 CREATE INDEX IF NOT EXISTS idx_claim_sa_owner_id ON claimius.claim (sa_owner_id);
 CREATE INDEX IF NOT EXISTS idx_claim_sa_root_id ON claimius.claim (sa_root_id);
 CREATE INDEX IF NOT EXISTS idx_claim_deny_bit ON claimius.claim ((sa_access & 16)) WHERE (sa_access & 16) <> 0;
-CREATE INDEX IF NOT EXISTS idx_claim_sa_deleted_at ON claimius.claim (sa_deleted_at);
+DROP INDEX IF EXISTS claimius.idx_claim_sa_deleted_at;
 
 -- user_claim
 -- Grants a claim to a user (or client). Optional time bounds. Reads filter
@@ -370,7 +370,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_user_claim_unique
 CREATE INDEX IF NOT EXISTS idx_user_claim_user_app ON claimius.user_claim (user_id, app_id);
 CREATE INDEX IF NOT EXISTS idx_user_claim_claim_id ON claimius.user_claim (claim_id);
 CREATE INDEX IF NOT EXISTS idx_user_claim_sa_owner_id ON claimius.user_claim (sa_owner_id);
-CREATE INDEX IF NOT EXISTS idx_user_claim_sa_deleted_at ON claimius.user_claim (sa_deleted_at);
+DROP INDEX IF EXISTS claimius.idx_user_claim_sa_deleted_at;
 
 -- claim_object
 -- Binds a claim. With (object_type, object_id) the binding targets that
@@ -408,7 +408,7 @@ CREATE INDEX IF NOT EXISTS idx_claim_object_claim_id ON claimius.claim_object (c
 CREATE INDEX IF NOT EXISTS idx_claim_object_object ON claimius.claim_object (object_type, object_id) WHERE object_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_claim_object_no_object ON claimius.claim_object (claim_id) WHERE object_id IS NULL AND sa_deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_claim_object_sa_owner_id ON claimius.claim_object (sa_owner_id);
-CREATE INDEX IF NOT EXISTS idx_claim_object_sa_deleted_at ON claimius.claim_object (sa_deleted_at);
+DROP INDEX IF EXISTS claimius.idx_claim_object_sa_deleted_at;
 CREATE INDEX IF NOT EXISTS idx_claim_object_lookup
     ON claimius.claim_object (claim_id, object_type, object_id)
     WHERE sa_deleted_at IS NULL AND object_id IS NOT NULL;
@@ -518,16 +518,16 @@ CREATE INDEX IF NOT EXISTS idx_inheritance_info_ancestor
 -- ----------------------------------------------------------------------------
 
 -- user_object
--- The reverse access index. One row per (app_id, user_id, object_type,
--- object_id) when the user has any access (claim based or direct). Carries
--- denormalized rendering fields and a tsvector for search. The same pairs
--- keyed from the object side are the index idx_user_object_object_user, so
--- the users of one object are read here and the pairs are stored once.
--- The id is a deterministic UUID hash of (app_id, user_id, object_type,
--- object_id) produced by claimius.composite_id, so prophet and disciple
--- converge on the same row identity.
+-- The reverse access index. One row per (user_id, app_id, object_type,
+-- object_id) when the user has any access (claim based or direct), keyed on
+-- exactly that tuple. The primary key carries sa_access so a listing of one
+-- reader's objects of one type is an index only range. A pair holds only what
+-- is per user: the mask, the grants, the scope and the direct flag. What is
+-- per object, the owner, location, root, name, description, link and search
+-- vector, lives once in object_info. The same pairs keyed from the object
+-- side are the index idx_user_object_object_user, so the users of one object
+-- are read here and the pairs are stored once.
 CREATE TABLE IF NOT EXISTS claimius.user_object (
-                                                    id                  UUID PRIMARY KEY,
                                                     app_id              UUID NOT NULL,
                                                     user_id             UUID NOT NULL,
                                                     object_id           UUID NOT NULL,
@@ -536,32 +536,92 @@ CREATE TABLE IF NOT EXISTS claimius.user_object (
                                                     grants              JSONB NOT NULL DEFAULT '[]'::jsonb,
                                                     scope               JSONB,
                                                     direct_grant        BOOLEAN NOT NULL DEFAULT FALSE,
+                                                    sa_created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+                                                    sa_updated_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+                                                    CONSTRAINT user_object_pkey PRIMARY KEY (user_id, app_id, object_type, object_id) INCLUDE (sa_access)
+);
+
+COMMENT ON TABLE claimius.user_object IS 'Reverse access index. Read path. One row per (user, app, object) with access, keyed on that tuple. Per object fields live in object_info.';
+COMMENT ON COLUMN claimius.user_object.grants IS 'JSON array of {claim_id, access, scope, cascaded_from, tree_type}. Empty when only direct.';
+COMMENT ON COLUMN claimius.user_object.direct_grant IS 'True when user is creator (via sa_created_by lookup).';
+COMMENT ON COLUMN claimius.user_object.sa_access IS 'Effective bitwise access mask: OR of grants[].access with deny bits subtracted. Bits: 0x01 owner, 0x02 write, 0x04 read, 0x08 execute. Direct creator gets 0x01|0x02|0x04|0x08.';
+COMMENT ON COLUMN claimius.user_object.scope IS 'Effective merged scope: union of grants[].scope keys when any grant has a scope, else NULL meaning whole object access.';
+
+-- object_info
+-- The per object fields every pair used to copy: owner, location, root, name,
+-- description, link and the search vector built from name and description.
+-- One row per live object of a registered table, written by the calc
+-- triggers when the object is written and by the bulk paths, so a rename
+-- touches one row and no pair. The owner and location indexes carry the name
+-- so the children of one node come in name order.
+CREATE TABLE IF NOT EXISTS claimius.object_info (
+                                                    object_type         TEXT NOT NULL,
+                                                    object_id           UUID NOT NULL,
                                                     sa_owner_id         UUID,
                                                     sa_location_id      UUID,
                                                     sa_root_id          UUID,
                                                     sa_name             TEXT,
                                                     sa_description      TEXT,
                                                     sa_link             TEXT,
-                                                    search_vector       TSVECTOR,
-                                                    sa_created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
-                                                    sa_updated_at       TIMESTAMPTZ NOT NULL DEFAULT now()
+                                                    search_vector       TSVECTOR GENERATED ALWAYS AS (
+                                                        setweight(to_tsvector('simple'::REGCONFIG, coalesce(sa_name, '')), 'A') ||
+                                                        setweight(to_tsvector('simple'::REGCONFIG, coalesce(sa_description, '')), 'B')
+                                                    ) STORED,
+                                                    sa_updated_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+                                                    PRIMARY KEY (object_type, object_id)
 );
 
-COMMENT ON TABLE claimius.user_object IS 'Reverse access index. Read path. One row per (app, user, object) with access.';
-COMMENT ON COLUMN claimius.user_object.grants IS 'JSON array of {claim_id, access, scope, cascaded_from, tree_type}. Empty when only direct.';
-COMMENT ON COLUMN claimius.user_object.direct_grant IS 'True when user is creator (via sa_created_by lookup).';
-COMMENT ON COLUMN claimius.user_object.sa_access IS 'Effective bitwise access mask: OR of grants[].access with deny bits subtracted. Bits: 0x01 owner, 0x02 write, 0x04 read, 0x08 execute. Direct creator gets 0x01|0x02|0x04|0x08.';
-COMMENT ON COLUMN claimius.user_object.scope IS 'Effective merged scope: union of grants[].scope keys when any grant has a scope, else NULL meaning whole object access.';
+COMMENT ON TABLE claimius.object_info IS 'Per object rendering and search fields of every live registered object, stored once. Written by calc_object_access, calc_hierarchical_access and the bulk seed; read by listings, search and the graphs.';
+COMMENT ON COLUMN claimius.object_info.search_vector IS 'Generated from sa_name (weight A) and sa_description (weight B).';
+
+CREATE INDEX IF NOT EXISTS idx_object_info_search ON claimius.object_info USING GIN (search_vector);
+CREATE INDEX IF NOT EXISTS idx_object_info_owner_name ON claimius.object_info (sa_owner_id, sa_name, object_id);
+CREATE INDEX IF NOT EXISTS idx_object_info_location_name ON claimius.object_info (sa_location_id, sa_name, object_id);
+
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM information_schema.columns
+               WHERE table_schema = 'claimius' AND table_name = 'user_object' AND column_name = 'sa_name') THEN
+        INSERT INTO claimius.object_info (object_type, object_id, sa_owner_id, sa_location_id, sa_root_id, sa_name, sa_description, sa_link)
+        SELECT DISTINCT ON (uo.object_type, uo.object_id)
+               uo.object_type, uo.object_id, uo.sa_owner_id, uo.sa_location_id, uo.sa_root_id, uo.sa_name, uo.sa_description, uo.sa_link
+        FROM claimius.user_object uo
+        ORDER BY uo.object_type, uo.object_id, uo.sa_updated_at DESC
+        ON CONFLICT (object_type, object_id) DO NOTHING;
+    END IF;
+    IF EXISTS (SELECT 1 FROM information_schema.columns
+               WHERE table_schema = 'claimius' AND table_name = 'user_object' AND column_name = 'id') THEN
+        ALTER TABLE claimius.user_object DROP CONSTRAINT IF EXISTS user_object_pkey;
+        ALTER TABLE claimius.user_object DROP COLUMN id;
+        ALTER TABLE claimius.user_object
+            ADD CONSTRAINT user_object_pkey PRIMARY KEY (user_id, app_id, object_type, object_id) INCLUDE (sa_access);
+    END IF;
+END $$;
+
+ALTER TABLE claimius.user_object
+    DROP COLUMN IF EXISTS sa_owner_id,
+    DROP COLUMN IF EXISTS sa_location_id,
+    DROP COLUMN IF EXISTS sa_root_id,
+    DROP COLUMN IF EXISTS sa_name,
+    DROP COLUMN IF EXISTS sa_description,
+    DROP COLUMN IF EXISTS sa_link,
+    DROP COLUMN IF EXISTS search_vector;
+
+ALTER TABLE claimius.user_object SET (
+    fillfactor = 90,
+    autovacuum_vacuum_scale_factor = 0.02,
+    autovacuum_analyze_scale_factor = 0.02
+);
 
 DROP INDEX IF EXISTS claimius.idx_user_object_user_type;
-CREATE INDEX IF NOT EXISTS idx_user_object_user_object ON claimius.user_object (user_id, app_id, object_type, object_id) INCLUDE (sa_access);
+DROP INDEX IF EXISTS claimius.idx_user_object_user_object;
 DROP INDEX IF EXISTS claimius.idx_user_object_object;
+DROP INDEX IF EXISTS claimius.idx_user_object_owner;
+DROP INDEX IF EXISTS claimius.idx_user_object_location;
+DROP INDEX IF EXISTS claimius.idx_user_object_root;
+DROP INDEX IF EXISTS claimius.idx_user_object_grants;
+DROP INDEX IF EXISTS claimius.idx_user_object_search;
 CREATE INDEX IF NOT EXISTS idx_user_object_object_user ON claimius.user_object (app_id, object_type, object_id, user_id);
-CREATE INDEX IF NOT EXISTS idx_user_object_owner ON claimius.user_object (app_id, sa_owner_id);
-CREATE INDEX IF NOT EXISTS idx_user_object_location ON claimius.user_object (app_id, sa_location_id) WHERE sa_location_id IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_user_object_root ON claimius.user_object (app_id, sa_root_id);
-CREATE INDEX IF NOT EXISTS idx_user_object_grants ON claimius.user_object USING GIN (grants jsonb_path_ops);
-CREATE INDEX IF NOT EXISTS idx_user_object_search ON claimius.user_object USING GIN (search_vector);
 
 -- object_users
 -- Held the pairs of user_object a second time, keyed from the object side.
@@ -619,8 +679,9 @@ COMMENT ON COLUMN claimius.sync_event.txid IS 'Transaction that wrote the event.
 DELETE FROM claimius.sync_event
 WHERE event_type IN ('claimius.object_users', 'claimius.user_object', 'claimius.user_users', 'claimius.audit');
 
-CREATE INDEX IF NOT EXISTS idx_sync_event_written_at ON claimius.sync_event (written_at);
-CREATE INDEX IF NOT EXISTS idx_sync_event_type_seq ON claimius.sync_event (event_type, seq);
+DROP INDEX IF EXISTS claimius.idx_sync_event_written_at;
+CREATE INDEX IF NOT EXISTS idx_sync_event_written_brin ON claimius.sync_event USING BRIN (written_at);
+DROP INDEX IF EXISTS claimius.idx_sync_event_type_seq;
 
 -- prophet_state
 -- Per app cursor on the prophet side. Tracks the lowest (txid, seq) position
@@ -740,6 +801,11 @@ CREATE TABLE IF NOT EXISTS claimius.access_diff (
 ALTER TABLE claimius.access_diff ADD COLUMN IF NOT EXISTS user_id UUID;
 ALTER TABLE claimius.access_diff ADD COLUMN IF NOT EXISTS generation BIGINT NOT NULL DEFAULT 1;
 
+ALTER TABLE claimius.access_diff SET (
+    autovacuum_vacuum_scale_factor = 0.02,
+    autovacuum_analyze_scale_factor = 0.02
+);
+
 COMMENT ON TABLE claimius.access_diff IS 'Outstanding access areas awaiting recalculation. Written by calc triggers, settled per user by the reads that meet the area, cleared once every holder has settled the current generation.';
 COMMENT ON COLUMN claimius.access_diff.user_id IS 'Set on a claim area raised by an assignment: the one user whose access the assignment changed. NULL means every holder of the claim.';
 COMMENT ON COLUMN claimius.access_diff.generation IS 'Raised by every repeat of the area. A share settled at an older generation is superseded.';
@@ -768,8 +834,8 @@ COMMENT ON TABLE claimius.access_diff_user IS 'Per user done record of an access
 -- argument shape: p_start_id IS NULL, p_depth = 0, p_required_access = 0. The
 -- graph column holds the full row set as a jsonb array, one element per
 -- (object_id, object_type, label, parent_id, data) tuple. Read path expands
--- back to rows. Invalidated by triggers on user_object, user_users,
--- samna_user, claim, and claim_object.
+-- back to rows. Invalidated by triggers on user_object, object_info,
+-- user_users, samna_user, claim, and claim_object.
 CREATE TABLE IF NOT EXISTS claimius.claim_graph_cache (
                                                           app_id          UUID NOT NULL,
                                                           user_id         UUID NOT NULL,

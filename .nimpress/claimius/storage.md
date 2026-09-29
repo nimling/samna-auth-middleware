@@ -28,11 +28,12 @@ A closure row is two object pairs, a root, a depth and two timestamps: about 140
 
 | Table | Indexes | Entries per row written |
 |---|---|---|
-| `user_object` | primary key; `(user_id, app_id, object_type, sa_access)`; `(app_id, object_type, object_id, user_id)`; `(app_id, sa_owner_id)`; `(app_id, sa_location_id)` partial; `(app_id, sa_root_id)`; GIN `jsonb_path_ops` on `grants`; GIN on `search_vector` | 5 or 6 btree, about 6 per derivation in `grants`, one per distinct lexeme |
+| `user_object` | primary key `(user_id, app_id, object_type, object_id)` including `sa_access`; `(app_id, object_type, object_id, user_id)` | 2 |
+| `object_info` | primary key `(object_type, object_id)`; `(sa_owner_id, sa_name, object_id)`; `(sa_location_id, sa_name, object_id)`; GIN on `search_vector` | 3 btree and one per distinct lexeme, per object write, not per pair |
 | `user_users` | primary key; `(app_id, viewer_id)`; `(app_id, target_user_id)` | 3 |
 | `inheritance_info` | primary key; descendant covering; ancestor covering | 3 |
 | `access_diff` | primary key; one of two partial indexes by kind | 2 |
-| `sync_event` | primary key; `(app_id, seq)`; `(event_type, seq)`; `written_at` | 4 |
+| `sync_event` | primary key; `(app_id, txid, seq)`; BRIN on `written_at` | 2, and a BRIN summary per range of pages |
 | `user_claim` | primary key; live unique `(claim_id, user_id, app_id)`; `(user_id, app_id)`; `claim_id`; `sa_owner_id`; `sa_deleted_at` | 6 |
 | `claim_object` | primary key; `app_id`; `claim_id`; `(object_type, object_id)` partial; `(claim_id)` partial for scope grants; `sa_owner_id`; `sa_deleted_at`; `(claim_id, object_type, object_id)` partial | 6 or 7 |
 | `audit` | primary key `(id, sa_created_at)`; `app_id`; `sa_owner_id`; `(object_type, object_id)`; BRIN on `sa_created_at`, per month partition | 4 and a BRIN summary |
@@ -54,7 +55,7 @@ The levels above the leaves are `1 / B` of the index, so a descent reads `h` pag
 
 1. The pair primary key is one UUID, `e = 28`, `B ≈ 262`: three levels hold 18 million pairs.
 
-2. `idx_user_object_user_object` is keyed `(user_id, app_id, object_type, object_id)` and includes `sa_access`, so every pair is its own entry of about 64 bytes and the reader's range of `V_{u,τ}` pairs is about `⌈V_{u,τ} × 64 / 7,337⌉` leaf pages in `object_id` order. A page of `p` rows reads `⌈p × 64 / 7,337⌉ + 1` of them after one descent, and a listing's further cost is the `p` heap rows it reads for `grants` and the rendering fields. Include columns disable deduplication ([Deduplication](https://www.postgresql.org/docs/17/btree.html#BTREE-DEDUPLICATION)); the key order is what lets a page stop after `p` entries.
+2. The `user_object` primary key is `(user_id, app_id, object_type, object_id)` and includes `sa_access`, so every pair is its own entry of about 64 bytes and the reader's range of `V_{u,τ}` pairs is about `⌈V_{u,τ} × 64 / 7,337⌉` leaf pages in `object_id` order. A page of `p` rows reads `⌈p × 64 / 7,337⌉ + 1` of them after one descent, and a listing's further cost is the `p` heap rows it reads for `grants` and the `p` `object_info` rows it probes for the rendering fields. Include columns disable deduplication ([Deduplication](https://www.postgresql.org/docs/17/btree.html#BTREE-DEDUPLICATION)); the key order is what lets a page stop after `p` entries.
 
 3. `idx_inheritance_info_descendant` and `idx_inheritance_info_ancestor` carry include columns, so they never deduplicate and every closure row pays its full entry, about 100 bytes.
 

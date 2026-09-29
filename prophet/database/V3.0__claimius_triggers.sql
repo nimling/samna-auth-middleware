@@ -279,6 +279,11 @@ CREATE TRIGGER tg_invalidate_claim_graph_cache
     AFTER INSERT OR UPDATE OR DELETE ON claimius.user_object
     FOR EACH ROW EXECUTE FUNCTION claimius._invalidate_claim_graph_cache();
 
+DROP TRIGGER IF EXISTS tg_invalidate_claim_graph_cache ON claimius.object_info;
+CREATE TRIGGER tg_invalidate_claim_graph_cache
+    AFTER UPDATE ON claimius.object_info
+    FOR EACH ROW EXECUTE FUNCTION claimius._invalidate_claim_graph_cache();
+
 DROP TRIGGER IF EXISTS tg_invalidate_claim_graph_cache ON claimius.user_users;
 CREATE TRIGGER tg_invalidate_claim_graph_cache
     AFTER INSERT OR UPDATE OR DELETE ON claimius.user_users

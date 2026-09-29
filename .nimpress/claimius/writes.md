@@ -32,7 +32,7 @@ A write changes a source row: a registered row, an organization, a location, a c
 | Write | Closure rows | Pairs recomputed in the write | Area rows |
 |---|---|---|---|
 | Registered row insert | `d_o + d_l + 2` inserted | the actor's pair on the row, then `F_actor` | 1 object |
-| Registered row rename | none | the actor's pair, then `F_actor` | none |
+| Registered row rename | none | the actor's pair, then `F_actor`; the one `object_info` row | none |
 | Registered row owner or location change, soft delete | `rows(x)` deleted, `d_o + d_l + 2` inserted on a change | the actor's pair, then `F_actor` | 1 object |
 | Row of a table with its own parenthood tree | `2 N_r` of its root, plus the attach above | the actor's pair, then `F_actor` | 1 object with `cascade` |
 | Organization, any write | `2 N_r` of its root's ownership closure | the actor's pair; on insert, every affected user per app link | 1 object with `cascade` |

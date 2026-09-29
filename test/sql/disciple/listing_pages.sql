@@ -40,8 +40,8 @@ BEGIN
     END LOOP;
 END $$;
 
-SELECT has_index('claimius', 'user_object', 'idx_user_object_user_object', ARRAY['user_id', 'object_type', 'object_id', 'sa_access'],
-    'the reader''s range is keyed on user, type and object id and carries the mask');
+SELECT has_index('claimius', 'user_object', 'user_object_pkey', ARRAY['user_id', 'object_type', 'object_id', 'sa_access'],
+    'the reader''s range is the primary key on user, type and object id and carries the mask');
 
 SELECT hasnt_index('claimius', 'user_object', 'idx_user_object_user_type', 'the range keyed on the mask is gone');
 

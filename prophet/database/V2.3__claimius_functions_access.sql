@@ -38,7 +38,6 @@ DECLARE
     v_op            TEXT;
     v_actor         UUID;
     v_structural    BOOLEAN := TRUE;
-    v_renamed       BOOLEAN := FALSE;
 BEGIN
     IF claimius.in_replay_mode() THEN
         RETURN coalesce(NEW, OLD);
@@ -69,15 +68,17 @@ BEGIN
     END IF;
 
     -- Tree maintenance: detach on delete or hard delete; attach on insert
-    -- or undelete; reattach on owner/location change. A write that moves
-    -- nothing access can follow refreshes what the acting user sees and
-    -- leaves every other user untouched, except a rename: it raises the
-    -- object area so every other reader's denormalized name and
-    -- description settle on its next read.
+    -- or undelete; reattach on owner/location change. The object's own fields
+    -- go to object_info, the one row every reader's listing reads them from,
+    -- so a write that moves nothing access can follow, a rename included,
+    -- refreshes what the acting user sees and leaves every other user
+    -- untouched.
     v_structural := claimius._retree_object(v_object_type, v_obj_id, to_jsonb(OLD), to_jsonb(NEW));
-    IF v_op = 'UPDATE' THEN
-        v_renamed := (to_jsonb(OLD) ->> 'name') IS DISTINCT FROM (to_jsonb(NEW) ->> 'name')
-                     OR (to_jsonb(OLD) ->> 'description') IS DISTINCT FROM (to_jsonb(NEW) ->> 'description');
+    IF v_op <> 'UPDATE' OR EXISTS (
+        SELECT 1 FROM unnest(ARRAY['name', 'description', 'sa_owner_id', 'sa_location_id', 'sa_root_id', 'sa_deleted_at']) AS k
+        WHERE (to_jsonb(OLD) ->> k) IS DISTINCT FROM (to_jsonb(NEW) ->> k)
+    ) THEN
+        PERFORM claimius._write_object_info(v_object_type, ARRAY[v_obj_id]);
     END IF;
 
     -- The acting user materializes immediately so a writer reads its own work
@@ -88,7 +89,7 @@ BEGIN
             PERFORM claimius.recompute_user_object(v_app_id, v_actor, v_object_type, v_obj_id);
         END IF;
 
-        IF v_structural OR v_renamed THEN
+        IF v_structural THEN
             PERFORM claimius._raise_object_diff(v_app_id, v_object_type, v_obj_id);
         END IF;
     END LOOP;
@@ -277,6 +278,7 @@ DECLARE
     v_old_parent    UUID;
     v_new_parent    UUID;
     v_actor         UUID;
+    v_renamed       BOOLEAN := FALSE;
 BEGIN
     IF claimius.in_replay_mode() THEN
         RETURN coalesce(NEW, OLD);
@@ -370,6 +372,18 @@ BEGIN
         PERFORM claimius._retree_object(v_object_type, v_obj_id, to_jsonb(OLD), to_jsonb(NEW));
     END IF;
 
+    -- The object's own fields go to object_info. A write that moves nothing
+    -- but the name and description is a rename: every reader's listing reads
+    -- it there, so it raises no area.
+    IF v_op <> 'UPDATE' OR EXISTS (
+        SELECT 1 FROM unnest(ARRAY['name', 'description', 'sa_owner_id', 'sa_location_id', 'sa_root_id', 'sa_deleted_at']) AS k
+        WHERE (to_jsonb(OLD) ->> k) IS DISTINCT FROM (to_jsonb(NEW) ->> k)
+    ) THEN
+        PERFORM claimius._write_object_info(v_object_type, ARRAY[v_obj_id]);
+    END IF;
+    v_renamed := v_op = 'UPDATE'
+                 AND to_jsonb(OLD) - ARRAY['name', 'description', 'sa_updated_at'] = to_jsonb(NEW) - ARRAY['name', 'description', 'sa_updated_at'];
+
     -- The acting user materializes immediately so a writer reads its own work
     -- back within the same request. One diff carries the row and its subtree,
     -- and the closure walk runs once, inside the read that claims the area.
@@ -379,7 +393,9 @@ BEGIN
             PERFORM claimius.recompute_user_object(v_app_id, v_actor, v_object_type, v_obj_id);
         END IF;
 
-        PERFORM claimius._raise_object_diff(v_app_id, v_object_type, v_obj_id, TRUE);
+        IF NOT v_renamed THEN
+            PERFORM claimius._raise_object_diff(v_app_id, v_object_type, v_obj_id, TRUE);
+        END IF;
     END LOOP;
 
     RETURN coalesce(NEW, OLD);
@@ -910,7 +926,7 @@ BEGIN
                                            AND link.object_type = 'claimius.claim'))
                               OR EXISTS (
                                   SELECT 1 FROM claimius.user_object uo
-                                  WHERE uo.id = claimius.composite_id(p_app_id::TEXT, p_user_id::TEXT, p_object_type, p_object_id::TEXT)
+                                  WHERE uo.user_id = p_user_id AND uo.app_id = p_app_id AND uo.object_type = p_object_type AND uo.object_id = p_object_id
                                     AND (uo.grants @> jsonb_build_array(jsonb_build_object('claim_id', d.claim_id))
                                          OR uo.grants @> jsonb_build_array(jsonb_build_object('composed_from', d.claim_id))))
                               OR (p_object_type = 'claimius.claim' AND p_object_id = d.claim_id))

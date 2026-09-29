@@ -118,8 +118,8 @@ with `X_d` the OR of the denies bound on `x` itself and `X_o` the OR of every ot
 | Query | Relational algebra | Served by |
 |---|---|---|
 | Check `(u, x, r)` | `σ_{u, x, A & r = r} A` | one pair of `user_object` |
-| Listing `(u, τ, r)` | `π_x σ_{u, type = τ, A & r = r} A` | the reader's range of `idx_user_object_user_object`, in `object_id` order |
-| Search | the listing restricted by `search_vector @@ q` | `user_object` |
+| Listing `(u, τ, r)` | `π_x σ_{u, type = τ, A & r = r} A` | the reader's range of the `user_object` primary key, in `object_id` order |
+| Search | the listing restricted by `search_vector @@ q` | `user_object` joined to `object_info` |
 | Members of `x` | `π_u σ_x A` | `idx_user_object_object_user` |
 | Visible users of `u` | `π_v σ_u user_users` | `idx_user_users_viewer` |
 | Capability `(u, path, r)` | `σ_{object = ⊥, jsonpath} (grant ⋈ claim ⋈ bind)` | the base relations, see [Capabilities](./capabilities.md) |

@@ -14,7 +14,8 @@ Claimius stores the access relation `A` of [the model](./index.md#the-model) per
 
 | Table | One row per | Holds | Indexes |
 |---|---|---|---|
-| `user_object` | app, user, object with `A ≠ 0` | `sa_access`, `grants`, `scope`, `direct_grant`, and the object's `sa_owner_id`, `sa_location_id`, `sa_root_id`, `sa_name`, `sa_description`, `sa_link`, `search_vector` | primary key `id = composite_id(app, user, type, object)`; `idx_user_object_user_type (user_id, app_id, object_type, sa_access)`; `idx_user_object_object_user (app_id, object_type, object_id, user_id)`; `idx_user_object_owner`, `idx_user_object_location`, `idx_user_object_root`; GIN on `grants`; GIN on `search_vector` |
+| `user_object` | app, user, object with `A ≠ 0` | `sa_access`, `grants`, `scope`, `direct_grant` | primary key `(user_id, app_id, object_type, object_id)` including `sa_access`; `idx_user_object_object_user (app_id, object_type, object_id, user_id)` |
+| `object_info` | live registered object | `sa_owner_id`, `sa_location_id`, `sa_root_id`, `sa_name`, `sa_description`, `sa_link`, and `search_vector` generated from the name and description | primary key `(object_type, object_id)`; `(sa_owner_id, sa_name, object_id)`; `(sa_location_id, sa_name, object_id)`; GIN on `search_vector` |
 | `user_users` | app, viewer, target | `sharing_object_count = |V_u ∩ V_v|`, kept by counting, first and last time; see [Users](./users.md) | primary key; `(app_id, viewer_id)`; `(app_id, target_user_id)` |
 | `access_diff` | outstanding area | `kind` (`object` or `claim`), the object pair or the claim, `cascade` | primary key; `(app_id, object_type, object_id) WHERE kind = 'object'`; `(app_id, claim_id) WHERE kind = 'claim'` |
 | `reconcile_queue` | app, user, object | a pair whose recompute failed and waits for its user's next read | primary key; `(app_id, user_id)` |
@@ -125,9 +126,9 @@ With `R_read ≈ 2C + 2a_x + B_x` the right side is a few units for any tree of 
 
 **Sources.** E. N. Hanson, [A Performance Analysis of View Materialization Strategies](https://www2.eecs.berkeley.edu/Pubs/TechRpts/1986/789.html), SIGMOD 1987, which compares a view answered by query modification with immediate and deferred maintenance and finds none best everywhere; R. Chirkova and J. Yang, [Materialized Views](https://dsf.berkeley.edu/cs286/papers/mv-fntdb2012.pdf), Foundations and Trends in Databases 2012, on deferred maintenance.
 
-## Why the pair carries the fields of the object
+## Why the fields of the object live once
 
-`user_object` holds the object's name, description, link, owner, location and search vector, so a listing, a search and a graph render without reading the implementing side's table: one range, no join. The cost is that these are stored `U_x` times per object, `Ū_o = 19` times on the data set of [the index](./index.md#symbols), and that a rename, which raises no area, rewrites only the actor's copy; the other copies take the new name when a later area covering the object is settled.
+`object_info` holds the object's name, description, link, owner, location and search vector, one row per object, written by `calc_object_access` and `calc_hierarchical_access` when the object is written and by the bulk seed. A listing, a search and a graph join it by key, one probe per row they return, and never read the implementing side's table. Stored on the pair these fields cost `U_x` copies per object, `Ū_o = 19` on the data set of [the index](./index.md#symbols), and a rename had to rewrite every copy or raise an area for every reader to settle. In `object_info` a rename writes one row and raises no area, and every reader's next listing shows it. A pair written on an object that has no `object_info` row yet brings one, so no pair is without the fields of its object.
 
 ## The minimal set of stored relations
 

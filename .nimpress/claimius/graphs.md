@@ -24,7 +24,7 @@ The registered types a graph covers are read from `table_info`, so an implementi
 
 2. The walk: every live organization below the roots to `depth` levels, 0 meaning all, one recursive query over `idx_organization_sa_owner_id`. Each organization walked probes the reader's pair and is kept when the reader reaches it.
 
-3. The walked organizations are written to a transaction temporary table, and the locations owned by them and every registered row owned by them or pinned in their locations are read type by type, each joined to the reader's pair and kept when the mask covers `required`.
+3. The walked organizations are written to a transaction temporary table, and the locations owned by them and every registered row owned by them or pinned in their locations are read type by type, each joined to the reader's pair and kept when the mask covers `required`. A registered row takes its name, description, owner and location from its `object_info` row, and the rows of one type come in `(sa_owner_id, sa_name, id)` order, the order of `idx_object_info_owner_name`, whose twin `idx_object_info_location_name` serves the same window under a location.
 
 With `N_w` organizations in the walked subtree and `R_w` rows of all registered types owned or pinned under it:
 
@@ -46,6 +46,7 @@ The default shape is stored per user in `claim_graph_cache` as one jsonb array, 
 | Write | Drops |
 |---|---|
 | Any row of `user_object` or `user_users` of the user, or the user's `samna_user` row | That user's entry, one probe |
+| An `object_info` row updated, a rename or a move | The entry of every user holding a pair on the object, one range of `idx_user_object_object_user` per app |
 | Any `claim` or `claim_object` row of the app | Every entry of the app, one range of the primary key |
 
 With `w` invalidating writes between two opens of the graph by one user, arriving independently of the opens, the fraction of opens served from the cache is `1 / (1 + w)`. Dropping every entry of the app on a claim or binding change keeps every served graph current without enumerating the holders of the claim, at the cost of a lower hit ratio in an app whose claims change often: every claim write in the app counts in `w` for every user.

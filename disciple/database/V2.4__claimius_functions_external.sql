@@ -56,13 +56,16 @@ BEGIN
 
     RETURN QUERY
         WITH uo AS (
-            SELECT u.*
+            SELECT u.*, oi.sa_owner_id, oi.sa_location_id
             FROM claimius.user_object u
-            WHERE u.id = claimius.composite_id(p_user_id::TEXT, p_object_type, p_object_id::TEXT)
+                LEFT JOIN claimius.object_info oi ON oi.object_type = u.object_type AND oi.object_id = u.object_id
+            WHERE u.user_id = p_user_id
+              AND u.object_type = p_object_type
+              AND u.object_id = p_object_id
               AND (u.sa_access & p_required_access) = p_required_access
         )
         SELECT
-            uo.id,
+            claimius.composite_id(p_user_id::TEXT, p_object_type, p_object_id::TEXT),
             best.user_claim_id,
             best.claim_id,
             best.claim_name,
@@ -305,13 +308,15 @@ COMMENT ON FUNCTION claimius.get_direct_access(UUID, UUID, TEXT, INTEGER, BOOLEA
 -- Returns object ids of the given object_type whose effective access mask
 -- covers all bits in p_required_access. The default 0 returns every object
 -- the user has any access to. Rows come in object_id order straight from the
--- reader's range of idx_user_object_user_object: p_after starts the page past
+-- reader's range of the user_object primary key: p_after starts the page past
 -- the last object_id of the previous one and p_limit bounds it, so a page of
 -- p rows reads p index entries and sorts nothing. The mask test reads
 -- (sa_access & required) >= required, which for a submask of required is
 -- the equality, and which the planner estimates as a range rather than a
 -- point, so it keeps the ordered range instead of sorting a bitmap scan. The
 -- reader's share settles before the page is read and does not depend on it.
+-- The owner, location, name, description and link of each row come from
+-- object_info by its key, so a rename shows on every reader's next page.
 -- ----------------------------------------------------------------------------
 
 DROP FUNCTION IF EXISTS claimius.get_objects(UUID, UUID, TEXT, INTEGER);
@@ -353,15 +358,18 @@ BEGIN
             COALESCE(best.claim_name, 'direct'),
             claimius.user_object.sa_access,
             claimius.user_object.scope,
-            claimius.user_object.sa_owner_id,
-            claimius.user_object.sa_location_id,
-            (SELECT o.sa_root_id FROM claimius.organization o WHERE o.id = claimius.user_object.sa_owner_id),
-            claimius.user_object.sa_name,
-            claimius.user_object.sa_description,
-            claimius.user_object.sa_link,
+            oi.sa_owner_id,
+            oi.sa_location_id,
+            (SELECT o.sa_root_id FROM claimius.organization o WHERE o.id = oi.sa_owner_id),
+            oi.sa_name,
+            oi.sa_description,
+            oi.sa_link,
             (claimius.user_object.direct_grant AND best.user_claim_id IS NULL)
         FROM claimius.user_object
                  LEFT JOIN LATERAL claimius._best_grant(claimius.user_object.grants, p_user_id, p_required_access) best ON TRUE
+                 LEFT JOIN claimius.object_info oi
+                           ON oi.object_type = claimius.user_object.object_type
+                          AND oi.object_id = claimius.user_object.object_id
         WHERE claimius.user_object.user_id = p_user_id
           AND claimius.user_object.object_type = p_object_type
           AND claimius.user_object.object_id > coalesce(p_after, '00000000-0000-0000-0000-000000000000'::UUID)
@@ -1248,7 +1256,7 @@ BEGIN
             v_sql := format($f$
             SELECT t.id::UUID,
                    %L::TEXT,
-                   coalesce(uo.sa_name, t.id::TEXT)::TEXT,
+                   coalesce(oi.sa_name, t.id::TEXT)::TEXT,
                    CASE
                        %s
                        %s
@@ -1258,9 +1266,9 @@ BEGIN
                    jsonb_build_object(
                        'access', uo.sa_access, 'scope', uo.scope,
                        'level', NULL::INTEGER,
-                       'description', uo.sa_description,
-                       'owner_id', uo.sa_owner_id,
-                       'location_id', uo.sa_location_id
+                       'description', oi.sa_description,
+                       'owner_id', oi.sa_owner_id,
+                       'location_id', oi.sa_location_id
                    )
             FROM %I.%I t
             JOIN claimius.user_object uo
@@ -1269,11 +1277,15 @@ BEGIN
              AND uo.user_id = $1
              AND TRUE
              AND (uo.sa_access & $2) = $2
+            LEFT JOIN claimius.object_info oi
+              ON oi.object_type = %L
+             AND oi.object_id = t.id
             WHERE %s
               AND (
                   %s
                   %s
               )
+            ORDER BY oi.sa_owner_id, oi.sa_name, t.id
         $f$,
                             v_table.object_type,
                 -- parent_id CASE arms in priority order: parent, location, owner
@@ -1282,6 +1294,7 @@ BEGIN
                             CASE WHEN v_table.has_sa_owner_id THEN 'WHEN t.sa_owner_id IS NOT NULL AND t.sa_owner_id <> t.id THEN t.sa_owner_id' ELSE '' END,
                             split_part(v_table.object_type, '.', 1),
                             split_part(v_table.object_type, '.', 2),
+                            v_table.object_type,
                             v_table.object_type,
                 -- soft-delete predicate (table dependent)
                             CASE WHEN v_table.has_sa_deleted_at THEN 't.sa_deleted_at IS NULL' ELSE 'TRUE' END,
@@ -1398,10 +1411,10 @@ BEGIN
                uo.object_type        AS uo_object_type,
                uo.sa_access          AS uo_access,
                uo.scope              AS uo_scope,
-               uo.sa_name            AS uo_name,
-               uo.sa_description     AS uo_description,
-               uo.sa_owner_id        AS uo_owner_id,
-               uo.sa_location_id     AS uo_location_id,
+               oi.sa_name            AS uo_name,
+               oi.sa_description     AS uo_description,
+               oi.sa_owner_id        AS uo_owner_id,
+               oi.sa_location_id     AS uo_location_id,
                (e->>'claim_id')::UUID  AS claim_id,
                e->>'tree_type'         AS tree_type,
                CASE WHEN e->>'tree_type' = 'direct'
@@ -1411,6 +1424,9 @@ BEGIN
                     THEN uo.object_id
                     ELSE (e -> 'cascaded_from' ->> 'id')::UUID END  AS anchor_id
         FROM claimius.user_object uo
+                 LEFT JOIN claimius.object_info oi
+                      ON oi.object_type = uo.object_type
+                          AND oi.object_id = uo.object_id
                  CROSS JOIN LATERAL jsonb_array_elements(uo.grants) e
         WHERE p_start_id IS NULL
           AND uo.user_id = p_user_id
@@ -1530,7 +1546,7 @@ BEGIN
     claim_object_node AS (
         SELECT co.id                AS object_id,
                'claimius.claim_object'::TEXT  AS object_type,
-               coalesce(uo.sa_name, co.object_id::TEXT, '')::TEXT  AS label,
+               coalesce(oi.sa_name, co.object_id::TEXT, '')::TEXT  AS label,
                co.claim_id          AS parent_id,
                jsonb_build_object(
                    'access', co.sa_access,
@@ -1545,6 +1561,9 @@ BEGIN
                       ON uo.object_id = co.object_id
                           AND uo.object_type = co.object_type
                           AND uo.user_id = p_user_id
+                 LEFT JOIN claimius.object_info oi
+                      ON oi.object_type = uo.object_type
+                          AND oi.object_id = uo.object_id
                           AND TRUE
         WHERE TRUE
           AND co.sa_deleted_at IS NULL
@@ -1574,7 +1593,7 @@ BEGIN
         UNION ALL
         SELECT r.object_id            AS object_id,
                r.object_type          AS object_type,
-               coalesce(uo.sa_name, r.object_id::TEXT)::TEXT  AS label,
+               coalesce(oi.sa_name, r.object_id::TEXT)::TEXT  AS label,
                r.co_id                AS parent_id,
                jsonb_build_object(
                    'access', r.access & 15,
@@ -1588,6 +1607,9 @@ BEGIN
                       ON uo.object_id = r.object_id
                           AND uo.object_type = r.object_type
                           AND uo.user_id = p_user_id
+                 LEFT JOIN claimius.object_info oi
+                      ON oi.object_type = uo.object_type
+                          AND oi.object_id = uo.object_id
                           AND TRUE
     ),
     all_nodes AS (
@@ -1653,6 +1675,12 @@ BEGIN
         v_user_id := COALESCE(NEW.user_id, OLD.user_id);
         DELETE FROM claimius.claim_graph_cache
         WHERE TRUE AND user_id = v_user_id;
+    ELSIF TG_TABLE_NAME = 'object_info' THEN
+        DELETE FROM claimius.claim_graph_cache c
+        USING claimius.user_object uo
+        WHERE uo.object_type = NEW.object_type
+          AND uo.object_id = NEW.object_id
+          AND c.user_id = uo.user_id;
     ELSIF TG_TABLE_NAME = 'claim' OR TG_TABLE_NAME = 'claim_object' THEN
         DELETE FROM claimius.claim_graph_cache
         WHERE TRUE;
@@ -1662,14 +1690,14 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius._invalidate_claim_graph_cache() IS 'Trigger function. Drops claim_graph_cache rows affected by writes to user_object, user_users, samna_user, claim, claim_object.';
+COMMENT ON FUNCTION claimius._invalidate_claim_graph_cache() IS 'Trigger function. Drops claim_graph_cache rows affected by writes to user_object, object_info, user_users, samna_user, claim, claim_object.';
 
 -- ----------------------------------------------------------------------------
 -- search
 -- Full text search over accessible objects (anything with a user_object row),
--- gated by access. Matches against the precomputed search_vector column.
--- The search_vector is fed by sa_name, sa_description, sa_link via the
--- denormalization in V2.2.
+-- gated by access. Matches against the search_vector of the object's one
+-- object_info row, generated from its name and description, so a rename is
+-- searchable by every reader at once.
 -- ----------------------------------------------------------------------------
 
 DROP FUNCTION IF EXISTS claimius.search_objects(UUID, UUID, TEXT, TEXT[], INTEGER, INTEGER, INTEGER);
@@ -1713,23 +1741,26 @@ BEGIN
             claimius.user_object.object_id,
             claimius.user_object.object_type,
             best.user_claim_id,
-            claimius.user_object.sa_name,
-            claimius.user_object.sa_description,
-            claimius.user_object.sa_link,
+            oi.sa_name,
+            oi.sa_description,
+            oi.sa_link,
             claimius.user_object.sa_access,
             claimius.user_object.scope,
-            claimius.user_object.sa_owner_id,
-            claimius.user_object.sa_location_id,
+            oi.sa_owner_id,
+            oi.sa_location_id,
             (claimius.user_object.direct_grant AND best.user_claim_id IS NULL),
-            ts_rank(claimius.user_object.search_vector, v_tsquery)
+            ts_rank(oi.search_vector, v_tsquery)
         FROM claimius.user_object
                  LEFT JOIN LATERAL claimius._best_grant(claimius.user_object.grants, p_user_id, p_required_access) best ON TRUE
+                 JOIN claimius.object_info oi
+                      ON oi.object_type = claimius.user_object.object_type
+                     AND oi.object_id = claimius.user_object.object_id
         WHERE claimius.user_object.user_id = p_user_id
           AND (claimius.user_object.sa_access & p_required_access) = p_required_access
-          AND claimius.user_object.search_vector @@ v_tsquery
+          AND oi.search_vector @@ v_tsquery
           AND (p_object_types IS NULL OR claimius.user_object.object_type = ANY(p_object_types))
           AND (best.user_claim_id IS NOT NULL OR claimius.user_object.direct_grant)
-        ORDER BY ts_rank(claimius.user_object.search_vector, v_tsquery) DESC
+        ORDER BY ts_rank(oi.search_vector, v_tsquery) DESC
         LIMIT p_limit OFFSET p_offset;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = claimius, pg_temp;
@@ -1795,21 +1826,24 @@ BEGIN
             claimius.user_object.object_id           AS object_id,
             claimius.user_object.object_type         AS object_type,
             best.user_claim_id                       AS user_claim_id,
-            claimius.user_object.sa_name             AS name,
-            claimius.user_object.sa_description      AS description,
-            claimius.user_object.sa_link             AS link,
+            oi.sa_name             AS name,
+            oi.sa_description      AS description,
+            oi.sa_link             AS link,
             claimius.user_object.sa_access           AS sa_access,
             claimius.user_object.scope               AS scope,
-            claimius.user_object.sa_owner_id         AS owner_id,
-            claimius.user_object.sa_location_id      AS location_id,
+            oi.sa_owner_id         AS owner_id,
+            oi.sa_location_id      AS location_id,
             (claimius.user_object.direct_grant AND best.user_claim_id IS NULL) AS is_direct_grant,
-            ts_rank(claimius.user_object.search_vector, v_tsquery)     AS rank
+            ts_rank(oi.search_vector, v_tsquery)     AS rank
         FROM claimius.user_object
                  LEFT JOIN LATERAL claimius._best_grant(claimius.user_object.grants, p_user_id, p_required_access) best ON TRUE
+                 JOIN claimius.object_info oi
+                      ON oi.object_type = claimius.user_object.object_type
+                     AND oi.object_id = claimius.user_object.object_id
         WHERE v_include_others
           AND claimius.user_object.user_id = p_user_id
           AND (claimius.user_object.sa_access & p_required_access) = p_required_access
-          AND claimius.user_object.search_vector @@ v_tsquery
+          AND oi.search_vector @@ v_tsquery
           AND (p_object_types IS NULL OR claimius.user_object.object_type = ANY(p_object_types))
           AND (p_object_ids IS NULL OR claimius.user_object.object_id = ANY(p_object_ids))
           AND (p_exclude_object_ids IS NULL OR NOT (claimius.user_object.object_id = ANY(p_exclude_object_ids)))
@@ -2330,6 +2364,7 @@ BEGIN
                  WHERE ancestor_type = v_old_object_type
                     OR descendant_type = v_old_object_type;
                 DELETE FROM claimius.user_object WHERE object_type = v_old_object_type;
+                DELETE FROM claimius.object_info WHERE object_type = v_old_object_type;
                 DELETE FROM claimius.reconcile_queue WHERE object_type = v_old_object_type;
                 RAISE NOTICE 'Deregistered table %', v_old_object_type;
             END LOOP;
@@ -2364,8 +2399,9 @@ $$ LANGUAGE plpgsql;
 COMMENT ON FUNCTION claimius.init_claimius_tables(VARIADIC p_object_types text[]) IS 'Registers external tables. Idempotent. Called by implementer migrations.';
 
 -- _bulk_seed_user_object
--- For a registered table with existing rows, populates user_object for
--- every (user, object) pair where access exists, then rebuilds user_users for
+-- For a registered table with existing rows, writes the object_info row of
+-- every row, populates user_object for every (user, object) pair where
+-- access exists, then rebuilds user_users for
 -- the users it holds pairs for, since no count moves under replay_mode.
 -- Inherits the caller's replay_mode setting; callers run this with
 -- replay_mode = true so emit_sync_event short circuits and the bulk seed
@@ -2382,10 +2418,14 @@ DECLARE
     v_user RECORD;
     v_obj RECORD;
     v_sql TEXT;
+    v_ids UUID[];
 BEGIN
     v_parts := claimius.split_object_type(p_object_type);
     v_schema := v_parts[1];
     v_table := v_parts[2];
+
+    EXECUTE format('SELECT ARRAY(SELECT r.id FROM %I.%I r)', v_schema, v_table) INTO v_ids;
+    PERFORM claimius._write_object_info(p_object_type, v_ids);
 
     v_sql := format('SELECT id FROM %I.%I WHERE sa_deleted_at IS NULL', v_schema, v_table);
     FOR v_obj IN EXECUTE v_sql LOOP
@@ -2409,7 +2449,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius._bulk_seed_user_object(p_object_type text) IS 'Seeds user_object for an existing table at registration time.';
+COMMENT ON FUNCTION claimius._bulk_seed_user_object(p_object_type text) IS 'Seeds object_info and user_object for an existing table at registration time.';
 
 -- ----------------------------------------------------------------------------
 -- recompute_state
@@ -2615,7 +2655,7 @@ BEGIN
              claimius.init_claimius_tables, claimius.init_claimius_internal,
              claimius.recompute_state
              FROM claimius_reader';
-    EXECUTE 'GRANT INSERT, UPDATE, DELETE ON claimius.user_object, claimius.user_users,
+    EXECUTE 'GRANT INSERT, UPDATE, DELETE ON claimius.user_object, claimius.object_info, claimius.user_users,
              claimius.disciple_state, claimius.samna_user, claimius.samna_client,
              claimius.samna_secret, claimius.organization, claimius.location,
              claimius.claim, claimius.user_claim, claimius.claim_object,
