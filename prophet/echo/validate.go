@@ -38,8 +38,11 @@ func (o *Organization) ValidatePost() error {
 	if o.Name == "" {
 		return errors.New("name required")
 	}
-	if o.OwnerID == nil || *o.OwnerID == uuid.Nil {
-		return errors.New("owner_id required")
+	if o.OwnerID != nil && *o.OwnerID == uuid.Nil {
+		return errors.New("owner_id must not be the nil uuid")
+	}
+	if o.CreatedBy == nil || *o.CreatedBy == uuid.Nil {
+		return errors.New("created_by required")
 	}
 	return nil
 }
@@ -73,6 +76,9 @@ func (l *Location) ValidatePost() error {
 	}
 	if l.OwnerID == uuid.Nil {
 		return errors.New("owner_id required")
+	}
+	if l.CreatedBy == nil || *l.CreatedBy == uuid.Nil {
+		return errors.New("created_by required")
 	}
 	return nil
 }

@@ -44,3 +44,24 @@ func TestPostClaimObjectBindsADiscipleBindingToItsOwnTable(t *testing.T) {
 		t.Fatalf("object_type: want public.checkin, got %v", bound.ObjectType)
 	}
 }
+
+func TestPostOrganizationAndLocationRequireTheActor(t *testing.T) {
+	createdBy := uuid.New()
+	ownerID := uuid.New()
+	root := &pecho.Organization{Name: "Root", CreatedBy: &createdBy}
+	if err := root.ValidatePost(); err != nil {
+		t.Fatalf("a root organization carries no owner_id and must validate: %v", err)
+	}
+	child := &pecho.Organization{Name: "Child", OwnerID: &ownerID}
+	if err := child.ValidatePost(); err == nil {
+		t.Fatal("an organization without created_by must be refused before the insert")
+	}
+	location := &pecho.Location{Name: "Floor", OwnerID: ownerID}
+	if err := location.ValidatePost(); err == nil {
+		t.Fatal("a location without created_by must be refused before the insert")
+	}
+	location.CreatedBy = &createdBy
+	if err := location.ValidatePost(); err != nil {
+		t.Fatalf("location: %v", err)
+	}
+}
