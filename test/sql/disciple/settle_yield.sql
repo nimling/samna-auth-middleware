@@ -1,5 +1,5 @@
 CREATE EXTENSION IF NOT EXISTS dblink;
-SELECT plan(6);
+SELECT plan(8);
 CREATE TEMP TABLE started AS SELECT pg_current_xact_id()::TEXT::BIGINT AS txid;
 SELECT dblink_connect('yield_writer', 'dbname=' || current_database() || ' user=' || current_user);
 
@@ -58,6 +58,22 @@ SELECT lives_ok($$SELECT count(*) FROM claimius.get_objects('a0000000-0000-4000-
     'the reader lists again once the writer is done');
 
 SELECT is(pg_temp.unsettled(), 0::BIGINT, 'and settles its share of the area');
+COMMIT;
+
+SELECT dblink_exec('yield_writer', 'BEGIN');
+SELECT dblink_exec('yield_writer', 'LOCK TABLE claimius.access_diff IN ACCESS EXCLUSIVE MODE');
+BEGIN;
+SET LOCAL lock_timeout = '10s';
+CREATE TEMP TABLE held_from AS SELECT clock_timestamp() AS at;
+
+SELECT lives_ok($$SELECT count(*) FROM claimius.get_objects('a0000000-0000-4000-8000-000000000e91', 'claimius.organization')$$,
+    'the reader lists while another transaction holds the open areas themselves');
+
+SELECT cmp_ok(clock_timestamp() - (SELECT at FROM held_from), '<', INTERVAL '2 seconds',
+    'and gives up choosing areas instead of failing the read');
+COMMIT;
+
+SELECT dblink_exec('yield_writer', 'COMMIT');
 
 SELECT dblink_disconnect('yield_writer');
 DO $$

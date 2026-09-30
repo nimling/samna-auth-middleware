@@ -863,40 +863,44 @@ BEGIN
             NULL;
         END;
     ELSIF pg_try_advisory_xact_lock(hashtextextended('claimius.share:' || p_user_id::TEXT, 0)) THEN
-        v_areas := ARRAY(
-            SELECT d.id FROM claimius.access_diff d
-            WHERE (
-                      (d.kind = 'object' AND (
-                          p_object_type IS NULL
-                          OR d.object_type = p_object_type
-                          OR (d.cascade AND EXISTS (
-                              SELECT 1 FROM claimius.inheritance_info e
-                              WHERE e.ancestor_type = d.object_type
-                                AND e.ancestor_id = d.object_id
-                                AND e.descendant_type = p_object_type
-                                AND e.depth > 0))))
-                      OR d.user_id = p_user_id
-                      OR (d.user_id IS NULL AND EXISTS (
-                          SELECT 1 FROM claimius.user_claim uc
-                          WHERE uc.user_id = p_user_id
-                            AND uc.sa_deleted_at IS NULL
-                            AND (
-                                uc.claim_id = d.claim_id
-                                OR EXISTS (
-                                    SELECT 1 FROM claimius.claim_object link
-                                    WHERE link.claim_id = uc.claim_id
-                                      AND link.object_type = 'claimius.claim'
-                                      AND link.object_id = d.claim_id
-                                      AND link.sa_deleted_at IS NULL
+        BEGIN
+            v_areas := ARRAY(
+                SELECT d.id FROM claimius.access_diff d
+                WHERE (
+                          (d.kind = 'object' AND (
+                              p_object_type IS NULL
+                              OR d.object_type = p_object_type
+                              OR (d.cascade AND EXISTS (
+                                  SELECT 1 FROM claimius.inheritance_info e
+                                  WHERE e.ancestor_type = d.object_type
+                                    AND e.ancestor_id = d.object_id
+                                    AND e.descendant_type = p_object_type
+                                    AND e.depth > 0))))
+                          OR d.user_id = p_user_id
+                          OR (d.user_id IS NULL AND EXISTS (
+                              SELECT 1 FROM claimius.user_claim uc
+                              WHERE uc.user_id = p_user_id
+                                AND uc.sa_deleted_at IS NULL
+                                AND (
+                                    uc.claim_id = d.claim_id
+                                    OR EXISTS (
+                                        SELECT 1 FROM claimius.claim_object link
+                                        WHERE link.claim_id = uc.claim_id
+                                          AND link.object_type = 'claimius.claim'
+                                          AND link.object_id = d.claim_id
+                                          AND link.sa_deleted_at IS NULL
+                                    )
                                 )
-                            )
-                      ))
-                  )
-              AND NOT EXISTS (
-                  SELECT 1 FROM claimius.access_diff_user du
-                  WHERE du.diff_id = d.id AND du.user_id = p_user_id AND du.raise_count = d.raise_count)
-            ORDER BY d.sa_created_at, d.id
-            FOR KEY SHARE OF d SKIP LOCKED);
+                          ))
+                      )
+                  AND NOT EXISTS (
+                      SELECT 1 FROM claimius.access_diff_user du
+                      WHERE du.diff_id = d.id AND du.user_id = p_user_id AND du.raise_count = d.raise_count)
+                ORDER BY d.sa_created_at, d.id
+                FOR KEY SHARE OF d SKIP LOCKED);
+        EXCEPTION WHEN lock_not_available THEN
+            v_areas := '{}';
+        END;
 
         IF cardinality(v_areas) * 4 > claimius._object_lock_budget() THEN
             BEGIN
@@ -952,30 +956,34 @@ DECLARE
     v_users     UUID[] := '{}';
 BEGIN
     PERFORM set_config('lock_timeout', claimius._settle_lock_timeout(), TRUE);
-    FOR v_share IN
-        SELECT s.user_id, s.diff_id
-        FROM (
-            SELECT DISTINCT h.user_id, d.id AS diff_id, a.last_used_at
-            FROM claimius.access_diff d
-                CROSS JOIN LATERAL claimius._diff_holders(ARRAY[d.id]) h
-                JOIN claimius.user_activity a ON a.user_id = h.user_id
-            WHERE extract(epoch FROM now() - d.sa_created_at) >= d.raise_count * extract(epoch FROM now() - a.last_used_at)
-              AND NOT EXISTS (
-                  SELECT 1 FROM claimius.access_diff_user du
-                  WHERE du.diff_id = d.id AND du.user_id = h.user_id AND du.raise_count = d.raise_count)
-        ) s
-        ORDER BY s.last_used_at DESC, s.diff_id, s.user_id
-        LIMIT greatest(p_limit_pairs, 0)
-    LOOP
-        EXIT WHEN coalesce(nullif(current_setting('claimius.object_locks', TRUE), ''), '0')::INTEGER * 2 >= claimius._object_lock_budget();
-        IF NOT v_share.user_id = ANY(v_users) THEN
-            CONTINUE WHEN cardinality(v_users) >= 64;
-            v_users := v_users || v_share.user_id;
-        END IF;
-        IF claimius._settle_diff_share(v_share.user_id, ARRAY[v_share.diff_id]) > 0 THEN
-            v_settled := v_settled + 1;
-        END IF;
-    END LOOP;
+    BEGIN
+        FOR v_share IN
+            SELECT s.user_id, s.diff_id
+            FROM (
+                SELECT DISTINCT h.user_id, d.id AS diff_id, a.last_used_at
+                FROM claimius.access_diff d
+                    CROSS JOIN LATERAL claimius._diff_holders(ARRAY[d.id]) h
+                    JOIN claimius.user_activity a ON a.user_id = h.user_id
+                WHERE extract(epoch FROM now() - d.sa_created_at) >= d.raise_count * extract(epoch FROM now() - a.last_used_at)
+                  AND NOT EXISTS (
+                      SELECT 1 FROM claimius.access_diff_user du
+                      WHERE du.diff_id = d.id AND du.user_id = h.user_id AND du.raise_count = d.raise_count)
+            ) s
+            ORDER BY s.last_used_at DESC, s.diff_id, s.user_id
+            LIMIT greatest(p_limit_pairs, 0)
+        LOOP
+            EXIT WHEN coalesce(nullif(current_setting('claimius.object_locks', TRUE), ''), '0')::INTEGER * 2 >= claimius._object_lock_budget();
+            IF NOT v_share.user_id = ANY(v_users) THEN
+                CONTINUE WHEN cardinality(v_users) >= 64;
+                v_users := v_users || v_share.user_id;
+            END IF;
+            IF claimius._settle_diff_share(v_share.user_id, ARRAY[v_share.diff_id]) > 0 THEN
+                v_settled := v_settled + 1;
+            END IF;
+        END LOOP;
+    EXCEPTION WHEN lock_not_available THEN
+        NULL;
+    END;
 
     PERFORM set_config('lock_timeout', v_lock_timeout, TRUE);
     RETURN v_settled;
