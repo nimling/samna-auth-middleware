@@ -116,9 +116,9 @@ Every advisory lock a transaction holds is an entry in the server's shared lock 
 
 2. A listing of one type settles only the areas that can hold a pair of that type, and all of them. The number of areas does not bound the locks: items 1 and 3 do, so a listing needs no cap on the areas it settles.
 
-3. `_lock_objects` counts the per object locks the transaction holds in `claimius.object_locks`. The first call of a transaction takes the covering lock every per object locker holds shared, `hashtext('claimius._lock_objects')`. A call that would carry the count past 512 takes the covering lock exclusive instead, one lock standing for every object, and every later call in the transaction returns at once. So a transaction holds at most 512 per object locks, the covering lock and its share locks.
+3. `_lock_objects` counts the per object locks the transaction holds in `claimius.object_locks`. The first call of a transaction takes the covering lock every per object locker holds shared, `hashtext('claimius._lock_objects')`. A call that would carry the count past 512 takes the covering lock exclusive instead, one lock standing for every object, and every later call in the transaction returns at once. A transaction holding no per object lock waits for it; one holding some only tries, item 4. So a transaction holds at most 512 per object locks, the covering lock and its share locks, unless it crossed while another transaction was locking objects.
 
-4. Taking the covering lock exclusive while holding it shared is an upgrade, which can deadlock with a transaction waiting on one of the per object locks held. At four object locks an area, a batch of more than `512 / 4 = 128` areas spends the budget, so a read that settles that many takes the covering lock exclusive through `_lock_all_objects` before its first per object lock, and `_lock_all_objects` refuses, answering false, in a transaction that already holds one.
+4. Taking the covering lock exclusive while holding it shared is an upgrade, and waiting for it deadlocks with a writer that holds it shared and waits on one of the per object locks held: each waits on the other. So a transaction that already holds per object locks never waits for it. It tries, `pg_try_advisory_xact_lock`, which succeeds when no other transaction holds the covering lock, since a transaction never conflicts with its own locks; when another does, it goes on one lock per object past 512. The overshoot is the objects of the settle that crossed and those after it, paid only when a crossing meets a concurrent locker. At four object locks an area, a batch of more than `512 / 4 = 128` areas spends the budget, so a read that settles that many takes the covering lock exclusive through `_lock_all_objects` before its first per object lock, and `_lock_all_objects` refuses, answering false, in a transaction that already holds one.
 
 5. Exclusion is kept past the budget: the exclusive covering lock conflicts with the shared one every per object locker holds, so a transaction over the budget excludes every settle at once where it would have excluded its objects one by one. That is the price of a crossing, paid only by a read with that many areas open.
 
@@ -127,7 +127,8 @@ With `A_u` the reader's open areas that a read needs:
 ```
 share locks     = 1
 areas settled   = A_u, oldest first
-object locks    ≤ 512, then one exclusive covering lock in place of any more, taken first when areas settled > 128
+object locks    ≤ 512, then one exclusive covering lock in place of any more, taken first when areas settled > 128,
+                or one per object past 512 when a crossing meets another locker
 ```
 
 ### The share of an area

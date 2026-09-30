@@ -1357,11 +1357,12 @@ COMMENT ON FUNCTION claimius._lock_all_objects() IS 'Takes every object under on
 -- one order and cannot deadlock. A lock already held is taken again without
 -- waiting and without reordering. The locks a transaction has taken are
 -- counted in claimius.object_locks, and past _object_lock_budget the
--- transaction takes every object at once instead, so it never holds more
--- than the budget. Crossing it while per object locks are held upgrades the
--- shared lock, which can deadlock with a transaction waiting on one of them,
--- so a settle that knows it will cross takes every object before its first
--- lock.
+-- transaction takes every object at once instead. A transaction that holds
+-- no per object lock waits for it. One that holds some only tries: waiting
+-- would deadlock with a transaction that shares the lock and waits on one of
+-- its objects, so when another transaction shares it the locks go on one per
+-- object past the budget. A settle that knows it will cross takes every
+-- object before its first lock.
 CREATE OR REPLACE FUNCTION claimius._lock_objects(p_keys TEXT[])
     RETURNS VOID AS $$
 DECLARE
@@ -1383,9 +1384,15 @@ BEGIN
     END IF;
 
     IF v_held + cardinality(v_keys) > claimius._object_lock_budget() THEN
-        PERFORM pg_advisory_xact_lock(hashtext('claimius._lock_objects'), 0);
-        PERFORM set_config('claimius.object_locks', '-1', TRUE);
-        RETURN;
+        IF v_held = 0 THEN
+            PERFORM pg_advisory_xact_lock(hashtext('claimius._lock_objects'), 0);
+            PERFORM set_config('claimius.object_locks', '-1', TRUE);
+            RETURN;
+        END IF;
+        IF pg_try_advisory_xact_lock(hashtext('claimius._lock_objects'), 0) THEN
+            PERFORM set_config('claimius.object_locks', '-1', TRUE);
+            RETURN;
+        END IF;
     END IF;
 
     IF v_held = 0 THEN
@@ -1398,7 +1405,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius._lock_objects(TEXT[]) IS 'Takes the per object transaction advisory locks of a set of object_type:object_id keys in sorted key order, under the lock every object shares, or every object at once past _object_lock_budget.';
+COMMENT ON FUNCTION claimius._lock_objects(TEXT[]) IS 'Takes the per object transaction advisory locks of a set of object_type:object_id keys in sorted key order, under the lock every object shares, or every object at once past _object_lock_budget, waited for only while no per object lock is held.';
 
 -- recompute_user_object
 -- The single function that recomputes user_object for one user on a set of

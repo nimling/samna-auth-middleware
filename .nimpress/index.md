@@ -67,7 +67,7 @@ The SQL is not copied into consumers, and a consumer holds none of it on disk. T
     path: disciple/database
 ```
 
-A prophet uses `prophet/database` in the same step. Moving the ref replays the changed base files through smig's preflight. The table alters a consumer needs to reach the new shape are the consumer's own migration, `V2.0.0__claimius_unified.sql` in its own `database/migrations/`; the middleware carries no `migrations/` folder under either role.
+A prophet uses `prophet/database` in the same step. Moving the ref replays the changed base files through smig's preflight. The base sets bring the claimius tables to the new shape themselves. What a consumer made of its own for the earlier line and must drop is the consumer's own migration, `V2.0.0__claimius_unified.sql` in its own `database/migrations/`; the middleware carries no `migrations/` folder under either role.
 
 ## Configuration
 
