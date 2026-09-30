@@ -757,7 +757,8 @@ DECLARE
     v_row       RECORD;
     v_open      BOOLEAN;
     v_areas     UUID[];
-    v_area      UUID;
+    v_at        INTEGER;
+    v_batch     INTEGER := claimius._object_lock_budget() / 4;
 BEGIN
     IF p_user_id IS NULL THEN
         RETURN;
@@ -898,10 +899,14 @@ BEGIN
             FOR KEY SHARE OF d SKIP LOCKED);
 
         IF cardinality(v_areas) * 4 > claimius._object_lock_budget() THEN
-            PERFORM claimius._lock_all_objects();
+            BEGIN
+                PERFORM claimius._lock_all_objects();
+            EXCEPTION WHEN lock_not_available THEN
+                NULL;
+            END;
         END IF;
-        FOREACH v_area IN ARRAY v_areas LOOP
-            PERFORM claimius._settle_diff_share(p_user_id, v_area);
+        FOR v_at IN 1 .. coalesce(cardinality(v_areas), 0) BY v_batch LOOP
+            PERFORM claimius._settle_diff_share(p_user_id, v_areas[v_at : v_at + v_batch - 1]);
         END LOOP;
 
         FOR v_row IN
@@ -952,7 +957,7 @@ BEGIN
         FROM (
             SELECT DISTINCT h.user_id, d.id AS diff_id, a.last_used_at
             FROM claimius.access_diff d
-                CROSS JOIN LATERAL claimius._diff_holders(d.id) h
+                CROSS JOIN LATERAL claimius._diff_holders(ARRAY[d.id]) h
                 JOIN claimius.user_activity a ON a.user_id = h.user_id
             WHERE extract(epoch FROM now() - d.sa_created_at) >= d.raise_count * extract(epoch FROM now() - a.last_used_at)
               AND NOT EXISTS (
@@ -967,7 +972,7 @@ BEGIN
             CONTINUE WHEN cardinality(v_users) >= 64;
             v_users := v_users || v_share.user_id;
         END IF;
-        IF claimius._settle_diff_share(v_share.user_id, v_share.diff_id) THEN
+        IF claimius._settle_diff_share(v_share.user_id, ARRAY[v_share.diff_id]) > 0 THEN
             v_settled := v_settled + 1;
         END IF;
     END LOOP;
