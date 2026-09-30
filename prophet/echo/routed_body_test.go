@@ -8,8 +8,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
-	pecho "github.com/nimling/samna-auth-middleware/prophet/echo"
-	"github.com/nimling/samna-auth-middleware/shared"
+	pecho "github.com/nimling/samna-auth-middleware/v2/prophet/echo"
+	"github.com/nimling/samna-auth-middleware/v2/shared"
 )
 
 func TestPostClaimObjectBindsADiscipleBindingToItsOwnTable(t *testing.T) {

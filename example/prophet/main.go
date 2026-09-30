@@ -2,9 +2,9 @@ package main
 
 import (
 	"github.com/labstack/echo/v4"
-	sam "github.com/nimling/samna-auth-middleware/prophet/sam"
-	sdb "github.com/nimling/samna-auth-middleware/prophet/sdb"
-	smw "github.com/nimling/samna-auth-middleware/smw"
+	sam "github.com/nimling/samna-auth-middleware/v2/prophet/sam"
+	sdb "github.com/nimling/samna-auth-middleware/v2/prophet/sdb"
+	smw "github.com/nimling/samna-auth-middleware/v2/smw"
 )
 
 func main() {

@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
-	"github.com/nimling/samna-auth-middleware/shared"
+	"github.com/nimling/samna-auth-middleware/v2/shared"
 )
 
 // Notification carries the content of a notification. It maps to the claimius

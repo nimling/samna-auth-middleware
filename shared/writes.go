@@ -10,7 +10,7 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 
-	"github.com/nimling/samna-auth-middleware/client"
+	"github.com/nimling/samna-auth-middleware/v2/client"
 )
 
 func (d *DB) ValidateToken(ctx context.Context, token string) (*SamnaUser, uuid.UUID, error) {

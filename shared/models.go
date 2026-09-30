@@ -13,8 +13,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/nimling/nimbody"
-	"github.com/nimling/samna-auth-middleware/client"
-	"github.com/nimling/samna-auth-middleware/pkg/jsonx"
+	"github.com/nimling/samna-auth-middleware/v2/client"
+	"github.com/nimling/samna-auth-middleware/v2/pkg/jsonx"
 	"github.com/uptrace/bun"
 )
 

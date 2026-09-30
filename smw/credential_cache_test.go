@@ -8,8 +8,8 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
-	pecho "github.com/nimling/samna-auth-middleware/prophet/echo"
-	"github.com/nimling/samna-auth-middleware/shared"
+	pecho "github.com/nimling/samna-auth-middleware/v2/prophet/echo"
+	"github.com/nimling/samna-auth-middleware/v2/shared"
 	"golang.org/x/crypto/bcrypt"
 )
 

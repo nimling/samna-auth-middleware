@@ -11,8 +11,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
-	pecho "github.com/nimling/samna-auth-middleware/prophet/echo"
-	psdb "github.com/nimling/samna-auth-middleware/prophet/sdb"
+	pecho "github.com/nimling/samna-auth-middleware/v2/prophet/echo"
+	psdb "github.com/nimling/samna-auth-middleware/v2/prophet/sdb"
 )
 
 var (

@@ -5,7 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"fmt"
-	"github.com/nimling/samna-auth-middleware/utils"
+	"github.com/nimling/samna-auth-middleware/v2/utils"
 	"net/url"
 )
 

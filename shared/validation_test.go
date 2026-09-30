@@ -3,7 +3,7 @@ package shared_test
 import (
 	"testing"
 
-	sdb "github.com/nimling/samna-auth-middleware/shared"
+	sdb "github.com/nimling/samna-auth-middleware/v2/shared"
 )
 
 func TestOrganizationValidatePutAcceptsEmptyType(t *testing.T) {

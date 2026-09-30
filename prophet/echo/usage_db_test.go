@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/labstack/echo/v4"
-	psdb "github.com/nimling/samna-auth-middleware/prophet/sdb"
+	psdb "github.com/nimling/samna-auth-middleware/v2/prophet/sdb"
 )
 
 const usageSeed = `

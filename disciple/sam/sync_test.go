@@ -9,8 +9,8 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
-	"github.com/nimling/samna-auth-middleware/client"
-	sam "github.com/nimling/samna-auth-middleware/disciple/sam"
+	"github.com/nimling/samna-auth-middleware/v2/client"
+	sam "github.com/nimling/samna-auth-middleware/v2/disciple/sam"
 	"github.com/uptrace/bun"
 )
 

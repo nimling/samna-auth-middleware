@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/labstack/echo/v4"
-	saecho "github.com/nimling/samna-auth-middleware/disciple/echo"
+	saecho "github.com/nimling/samna-auth-middleware/v2/disciple/echo"
 )
 
 func TestGetCallbackSetsTokenAndCSRFCookies(t *testing.T) {

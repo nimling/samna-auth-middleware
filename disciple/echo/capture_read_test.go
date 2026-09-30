@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/labstack/echo/v4"
-	saecho "github.com/nimling/samna-auth-middleware/disciple/echo"
+	saecho "github.com/nimling/samna-auth-middleware/v2/disciple/echo"
 )
 
 func captureReadStub(t *testing.T, path *string, query *string) {

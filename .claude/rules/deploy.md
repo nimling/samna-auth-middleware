@@ -1,6 +1,6 @@
 # Deploy rules
 
-This repo publishes two artefacts: the Go module consumed via `go get github.com/nimling/samna-auth-middleware` and the typescript package under `ts/` consumed via npm. The full procedure lives at `.claude/skills/deploy/SKILL.md`. The constraints below apply outside of any single deploy run.
+This repo publishes two artefacts: the Go module consumed via `go get github.com/nimling/samna-auth-middleware/v2` and the typescript package under `ts/` consumed via npm. The full procedure lives at `.claude/skills/deploy/SKILL.md`. The constraints below apply outside of any single deploy run.
 
 ## Never
 

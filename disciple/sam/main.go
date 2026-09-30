@@ -10,12 +10,12 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/nimling/samna-auth-middleware/client"
-	sdb "github.com/nimling/samna-auth-middleware/disciple/sdb"
-	"github.com/nimling/samna-auth-middleware/internal/store"
-	"github.com/nimling/samna-auth-middleware/sauth"
-	"github.com/nimling/samna-auth-middleware/shared"
-	"github.com/nimling/samna-auth-middleware/utils"
+	"github.com/nimling/samna-auth-middleware/v2/client"
+	sdb "github.com/nimling/samna-auth-middleware/v2/disciple/sdb"
+	"github.com/nimling/samna-auth-middleware/v2/internal/store"
+	"github.com/nimling/samna-auth-middleware/v2/sauth"
+	"github.com/nimling/samna-auth-middleware/v2/shared"
+	"github.com/nimling/samna-auth-middleware/v2/utils"
 	"github.com/uptrace/bun"
 )
 

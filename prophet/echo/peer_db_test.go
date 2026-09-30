@@ -15,12 +15,12 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
-	sam "github.com/nimling/samna-auth-middleware/disciple/sam"
-	"github.com/nimling/samna-auth-middleware/pkg/encryption"
-	psam "github.com/nimling/samna-auth-middleware/prophet/sam"
-	psdb "github.com/nimling/samna-auth-middleware/prophet/sdb"
-	"github.com/nimling/samna-auth-middleware/shared"
-	"github.com/nimling/samna-auth-middleware/smw"
+	sam "github.com/nimling/samna-auth-middleware/v2/disciple/sam"
+	"github.com/nimling/samna-auth-middleware/v2/pkg/encryption"
+	psam "github.com/nimling/samna-auth-middleware/v2/prophet/sam"
+	psdb "github.com/nimling/samna-auth-middleware/v2/prophet/sdb"
+	"github.com/nimling/samna-auth-middleware/v2/shared"
+	"github.com/nimling/samna-auth-middleware/v2/smw"
 )
 
 // getPeerDB connects to the second prophet database just test keeps next to

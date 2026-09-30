@@ -8,11 +8,11 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
-	"github.com/nimling/samna-auth-middleware/pkg/encryption"
-	"github.com/nimling/samna-auth-middleware/pkg/errorsx"
-	"github.com/nimling/samna-auth-middleware/pkg/respond"
-	sdb "github.com/nimling/samna-auth-middleware/prophet/sdb"
-	"github.com/nimling/samna-auth-middleware/utils"
+	"github.com/nimling/samna-auth-middleware/v2/pkg/encryption"
+	"github.com/nimling/samna-auth-middleware/v2/pkg/errorsx"
+	"github.com/nimling/samna-auth-middleware/v2/pkg/respond"
+	sdb "github.com/nimling/samna-auth-middleware/v2/prophet/sdb"
+	"github.com/nimling/samna-auth-middleware/v2/utils"
 )
 
 func GetSecrets(ctx echo.Context) error {

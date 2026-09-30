@@ -1,6 +1,6 @@
 package disciple
 
-import "github.com/nimling/samna-auth-middleware/shared"
+import "github.com/nimling/samna-auth-middleware/v2/shared"
 
 type (
 	SamnaUser    = shared.SamnaUser

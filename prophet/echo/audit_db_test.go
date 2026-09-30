@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
-	psdb "github.com/nimling/samna-auth-middleware/prophet/sdb"
+	psdb "github.com/nimling/samna-auth-middleware/v2/prophet/sdb"
 	"github.com/uptrace/bun"
 )
 

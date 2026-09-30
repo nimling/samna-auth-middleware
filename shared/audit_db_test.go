@@ -9,7 +9,7 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
-	sdb "github.com/nimling/samna-auth-middleware/shared"
+	sdb "github.com/nimling/samna-auth-middleware/v2/shared"
 	"github.com/uptrace/bun"
 )
 

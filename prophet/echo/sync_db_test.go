@@ -13,10 +13,10 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
-	"github.com/nimling/samna-auth-middleware/client"
-	pecho "github.com/nimling/samna-auth-middleware/prophet/echo"
-	psdb "github.com/nimling/samna-auth-middleware/prophet/sdb"
-	"github.com/nimling/samna-auth-middleware/smw"
+	"github.com/nimling/samna-auth-middleware/v2/client"
+	pecho "github.com/nimling/samna-auth-middleware/v2/prophet/echo"
+	psdb "github.com/nimling/samna-auth-middleware/v2/prophet/sdb"
+	"github.com/nimling/samna-auth-middleware/v2/smw"
 )
 
 func getAppHead(t *testing.T, appID uuid.UUID) client.SyncCursor {

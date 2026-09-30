@@ -5,7 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/nimling/samna-auth-middleware/utils"
+	"github.com/nimling/samna-auth-middleware/v2/utils"
 	"io"
 	"net/http"
 	"strconv"

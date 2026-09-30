@@ -3,7 +3,7 @@ package main
 import (
 	"context"
 
-	"github.com/nimling/samna-auth-middleware/bff"
+	"github.com/nimling/samna-auth-middleware/v2/bff"
 )
 
 func main() {

@@ -11,9 +11,9 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 
-	"github.com/nimling/samna-auth-middleware/pkg/encryption"
-	"github.com/nimling/samna-auth-middleware/shared"
-	"github.com/nimling/samna-auth-middleware/utils"
+	"github.com/nimling/samna-auth-middleware/v2/pkg/encryption"
+	"github.com/nimling/samna-auth-middleware/v2/shared"
+	"github.com/nimling/samna-auth-middleware/v2/utils"
 )
 
 type GuestTokenResponse struct {

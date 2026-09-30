@@ -17,10 +17,10 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
-	"github.com/nimling/samna-auth-middleware/client"
-	sam "github.com/nimling/samna-auth-middleware/disciple/sam"
-	sdb "github.com/nimling/samna-auth-middleware/disciple/sdb"
-	"github.com/nimling/samna-auth-middleware/shared"
+	"github.com/nimling/samna-auth-middleware/v2/client"
+	sam "github.com/nimling/samna-auth-middleware/v2/disciple/sam"
+	sdb "github.com/nimling/samna-auth-middleware/v2/disciple/sdb"
+	"github.com/nimling/samna-auth-middleware/v2/shared"
 )
 
 func database(t *testing.T) *shared.DB {

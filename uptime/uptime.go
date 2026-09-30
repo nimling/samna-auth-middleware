@@ -9,9 +9,9 @@ import (
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 
-	"github.com/nimling/samna-auth-middleware/client"
-	"github.com/nimling/samna-auth-middleware/shared"
-	"github.com/nimling/samna-auth-middleware/utils"
+	"github.com/nimling/samna-auth-middleware/v2/client"
+	"github.com/nimling/samna-auth-middleware/v2/shared"
+	"github.com/nimling/samna-auth-middleware/v2/utils"
 )
 
 const defaultInterval = 60 * time.Second

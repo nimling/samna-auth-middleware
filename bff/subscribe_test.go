@@ -10,7 +10,7 @@ import (
 	"testing"
 
 	"github.com/labstack/echo/v4"
-	"github.com/nimling/samna-auth-middleware/bff"
+	"github.com/nimling/samna-auth-middleware/v2/bff"
 )
 
 type forwardCapture struct {

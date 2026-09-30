@@ -6,9 +6,9 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
-	"github.com/nimling/samna-auth-middleware/client"
-	"github.com/nimling/samna-auth-middleware/pkg/respond"
-	sdb "github.com/nimling/samna-auth-middleware/prophet/sdb"
+	"github.com/nimling/samna-auth-middleware/v2/client"
+	"github.com/nimling/samna-auth-middleware/v2/pkg/respond"
+	sdb "github.com/nimling/samna-auth-middleware/v2/prophet/sdb"
 )
 
 // SyncSeq stamps, on a successful prophet answer to a write, the highest sync

@@ -7,7 +7,7 @@ Every consuming service runs a local PostgreSQL database with the `claimius` sch
 ## Installation
 
 ```
-go get github.com/nimling/samna-auth-middleware
+go get github.com/nimling/samna-auth-middleware/v2
 ```
 
 ## The two roles

@@ -7,8 +7,8 @@ import (
 	"testing"
 
 	"github.com/labstack/echo/v4"
-	saecho "github.com/nimling/samna-auth-middleware/disciple/echo"
-	"github.com/nimling/samna-auth-middleware/uptime"
+	saecho "github.com/nimling/samna-auth-middleware/v2/disciple/echo"
+	"github.com/nimling/samna-auth-middleware/v2/uptime"
 )
 
 func statusStub(t *testing.T, path *string, headers *http.Header, status int, body string) {

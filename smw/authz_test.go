@@ -11,8 +11,8 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/lestrrat-go/jwx/v2/jwk"
-	"github.com/nimling/samna-auth-middleware/dpop"
-	"github.com/nimling/samna-auth-middleware/smw"
+	"github.com/nimling/samna-auth-middleware/v2/dpop"
+	"github.com/nimling/samna-auth-middleware/v2/smw"
 )
 
 const (

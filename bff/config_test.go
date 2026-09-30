@@ -3,7 +3,7 @@ package bff_test
 import (
 	"testing"
 
-	"github.com/nimling/samna-auth-middleware/bff"
+	"github.com/nimling/samna-auth-middleware/v2/bff"
 )
 
 func TestConfigDefaultsThePortAndBasePath(t *testing.T) {

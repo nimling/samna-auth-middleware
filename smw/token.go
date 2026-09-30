@@ -10,8 +10,8 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
-	discipledb "github.com/nimling/samna-auth-middleware/disciple/sdb"
-	"github.com/nimling/samna-auth-middleware/dpop"
+	discipledb "github.com/nimling/samna-auth-middleware/v2/disciple/sdb"
+	"github.com/nimling/samna-auth-middleware/v2/dpop"
 )
 
 func authenticateBearer(ctx echo.Context, config *AuthMiddlewareConfig, keyFunc jwt.Keyfunc) error {

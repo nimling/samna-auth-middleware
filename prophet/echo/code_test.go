@@ -8,7 +8,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
-	pecho "github.com/nimling/samna-auth-middleware/prophet/echo"
+	pecho "github.com/nimling/samna-auth-middleware/v2/prophet/echo"
 )
 
 func postJSON(t *testing.T, body string, handler echo.HandlerFunc) int {

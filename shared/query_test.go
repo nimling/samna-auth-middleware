@@ -8,7 +8,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
-	sdb "github.com/nimling/samna-auth-middleware/shared"
+	sdb "github.com/nimling/samna-auth-middleware/v2/shared"
 	"github.com/uptrace/bun"
 	"github.com/uptrace/bun/dialect/pgdialect"
 	"github.com/uptrace/bun/driver/pgdriver"

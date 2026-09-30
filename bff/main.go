@@ -8,10 +8,10 @@ import (
 	"time"
 
 	"github.com/labstack/echo/v4"
-	h "github.com/nimling/samna-auth-middleware/disciple/echo"
-	sam "github.com/nimling/samna-auth-middleware/disciple/sam"
-	sdb "github.com/nimling/samna-auth-middleware/disciple/sdb"
-	"github.com/nimling/samna-auth-middleware/smw"
+	h "github.com/nimling/samna-auth-middleware/v2/disciple/echo"
+	sam "github.com/nimling/samna-auth-middleware/v2/disciple/sam"
+	sdb "github.com/nimling/samna-auth-middleware/v2/disciple/sdb"
+	"github.com/nimling/samna-auth-middleware/v2/smw"
 )
 
 type Config struct {

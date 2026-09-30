@@ -1,7 +1,7 @@
 package client
 
 import (
-	"github.com/nimling/samna-auth-middleware/utils"
+	"github.com/nimling/samna-auth-middleware/v2/utils"
 )
 
 func VerifyRequest(slug string, secret string) bool {

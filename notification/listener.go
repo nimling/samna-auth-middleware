@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/nimling/samna-auth-middleware/shared"
+	"github.com/nimling/samna-auth-middleware/v2/shared"
 )
 
 func (r *runner) listenLoop(ctx context.Context) {

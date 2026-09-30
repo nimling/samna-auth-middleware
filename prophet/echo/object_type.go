@@ -1,6 +1,6 @@
 package echo
 
-import "github.com/nimling/samna-auth-middleware/shared"
+import "github.com/nimling/samna-auth-middleware/v2/shared"
 
 type ObjectType = shared.ObjectType
 

@@ -5,7 +5,7 @@ description: Build, test, mirror, commit, push, and tag a new version of samna_a
 
 # deploy
 
-Ship a new version of `samna_auth_middleware`. The repo publishes two artefacts that must stay in sync: the Go module consumed via `go get github.com/nimling/samna-auth-middleware` and the typescript package under `ts/` consumed via npm. A deploy that ships the Go side without the typescript mirror is a deploy that breaks consumers.
+Ship a new version of `samna_auth_middleware`. The repo publishes two artefacts that must stay in sync: the Go module consumed via `go get github.com/nimling/samna-auth-middleware/v2` and the typescript package under `ts/` consumed via npm. A deploy that ships the Go side without the typescript mirror is a deploy that breaks consumers.
 
 When the user says "deploy" in this repo, execute these steps in order. Stop on the first failure and surface the error.
 
@@ -68,7 +68,7 @@ If the working tree has nothing to commit after the build outputs are excluded b
 just deploy
 ```
 
-Calls `sbump patch --env APP_VERSION --json ts/package.json@.version --push-version --auto --workflow`. Patch bump, tag write, tag push. The GitHub Actions workflows attached to tag pushes create the release, build and publish the `@nimling` typescript package, and publish `.nimpress` to the docs site; consumers of the Go module pick the new tag up via `go get github.com/nimling/samna-auth-middleware@vX.Y.Z` and move the `ref` of their claimius git include to the same tag. The module path stays `github.com/nimling/samna-auth-middleware` at every major.
+Calls `sbump patch --env APP_VERSION --json ts/package.json@.version --push-version --auto --workflow`. Patch bump, tag write, tag push. The GitHub Actions workflows attached to tag pushes create the release, build and publish the `@nimling` typescript package, and publish `.nimpress` to the docs site; consumers of the Go module pick the new tag up via `go get github.com/nimling/samna-auth-middleware/v2@vX.Y.Z` and move the `ref` of their claimius git include to the same tag. The module path carries the major version, `github.com/nimling/samna-auth-middleware/v2` from 2.0.0 on, because Go accepts a tag at v2 or above only for a path ending in its major; a breaking release moves both the tag and the path, and every import in every consumer follows.
 
 For minor or major releases, run `sbump major|minor --env APP_VERSION --json ts/package.json@.version --push-version --auto --workflow` instead of `just deploy`, which always bumps a patch. A release carries its `.nimpress/changelog/v<version>.md` entry in the commit before the bump.
 

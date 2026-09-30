@@ -11,11 +11,11 @@ import (
 	"sync"
 
 	"github.com/labstack/echo/v4"
-	"github.com/nimling/samna-auth-middleware/pkg/encryption"
-	pecho "github.com/nimling/samna-auth-middleware/prophet/echo"
-	sdb "github.com/nimling/samna-auth-middleware/prophet/sdb"
-	"github.com/nimling/samna-auth-middleware/shared"
-	"github.com/nimling/samna-auth-middleware/utils"
+	"github.com/nimling/samna-auth-middleware/v2/pkg/encryption"
+	pecho "github.com/nimling/samna-auth-middleware/v2/prophet/echo"
+	sdb "github.com/nimling/samna-auth-middleware/v2/prophet/sdb"
+	"github.com/nimling/samna-auth-middleware/v2/shared"
+	"github.com/nimling/samna-auth-middleware/v2/utils"
 	"github.com/uptrace/bun"
 )
 

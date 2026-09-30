@@ -3,9 +3,9 @@ package sdb
 import (
 	"context"
 
-	"github.com/nimling/samna-auth-middleware/client"
-	"github.com/nimling/samna-auth-middleware/internal/store"
-	"github.com/nimling/samna-auth-middleware/shared"
+	"github.com/nimling/samna-auth-middleware/v2/client"
+	"github.com/nimling/samna-auth-middleware/v2/internal/store"
+	"github.com/nimling/samna-auth-middleware/v2/shared"
 )
 
 func (d *DB) IssueUserToken(ctx context.Context, ac *AccessClaim, payload SamnaUserToken) (*SamnaUser, bool, error) {

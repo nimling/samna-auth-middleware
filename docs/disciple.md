@@ -20,9 +20,9 @@ import (
 	"context"
 
 	"github.com/labstack/echo/v4"
-	sam "github.com/nimling/samna-auth-middleware/disciple/sam"
-	sdb "github.com/nimling/samna-auth-middleware/disciple/sdb"
-	smw "github.com/nimling/samna-auth-middleware/smw"
+	sam "github.com/nimling/samna-auth-middleware/v2/disciple/sam"
+	sdb "github.com/nimling/samna-auth-middleware/v2/disciple/sdb"
+	smw "github.com/nimling/samna-auth-middleware/v2/smw"
 )
 
 func main() {

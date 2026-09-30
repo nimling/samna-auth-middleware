@@ -6,7 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	sclient "github.com/nimling/samna-auth-middleware/client"
+	sclient "github.com/nimling/samna-auth-middleware/v2/client"
 )
 
 func TestPostClientCredentialsSendsFormCredentialsWithoutAppHeaders(t *testing.T) {

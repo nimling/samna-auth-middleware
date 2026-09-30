@@ -8,10 +8,10 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/uptrace/bun"
 
-	"github.com/nimling/samna-auth-middleware/notification"
-	"github.com/nimling/samna-auth-middleware/pkg/respond"
-	sdb "github.com/nimling/samna-auth-middleware/prophet/sdb"
-	"github.com/nimling/samna-auth-middleware/shared"
+	"github.com/nimling/samna-auth-middleware/v2/notification"
+	"github.com/nimling/samna-auth-middleware/v2/pkg/respond"
+	sdb "github.com/nimling/samna-auth-middleware/v2/prophet/sdb"
+	"github.com/nimling/samna-auth-middleware/v2/shared"
 )
 
 func GetNotifications(ctx echo.Context) error {

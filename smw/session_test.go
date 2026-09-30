@@ -8,8 +8,8 @@ import (
 	"testing"
 
 	"github.com/labstack/echo/v4"
-	"github.com/nimling/samna-auth-middleware/smw"
-	"github.com/nimling/samna-auth-middleware/utils"
+	"github.com/nimling/samna-auth-middleware/v2/smw"
+	"github.com/nimling/samna-auth-middleware/v2/utils"
 )
 
 func newAuthServerWithFailingRefresh(t *testing.T) *httptest.Server {

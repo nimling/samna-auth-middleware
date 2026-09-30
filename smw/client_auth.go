@@ -13,9 +13,9 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
-	sdb "github.com/nimling/samna-auth-middleware/disciple/sdb"
-	"github.com/nimling/samna-auth-middleware/shared"
-	"github.com/nimling/samna-auth-middleware/utils"
+	sdb "github.com/nimling/samna-auth-middleware/v2/disciple/sdb"
+	"github.com/nimling/samna-auth-middleware/v2/shared"
+	"github.com/nimling/samna-auth-middleware/v2/utils"
 	"golang.org/x/crypto/bcrypt"
 )
 

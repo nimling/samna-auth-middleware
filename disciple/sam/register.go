@@ -2,7 +2,7 @@ package sam
 
 import (
 	"github.com/labstack/echo/v4"
-	h "github.com/nimling/samna-auth-middleware/disciple/echo"
+	h "github.com/nimling/samna-auth-middleware/v2/disciple/echo"
 )
 
 func RegisterEndpoints(g *echo.Group) {

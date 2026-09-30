@@ -8,9 +8,9 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/uptrace/bun"
 
-	sdb "github.com/nimling/samna-auth-middleware/disciple/sdb"
-	"github.com/nimling/samna-auth-middleware/notification"
-	"github.com/nimling/samna-auth-middleware/shared"
+	sdb "github.com/nimling/samna-auth-middleware/v2/disciple/sdb"
+	"github.com/nimling/samna-auth-middleware/v2/notification"
+	"github.com/nimling/samna-auth-middleware/v2/shared"
 )
 
 func GetNotifications(ctx echo.Context) error {

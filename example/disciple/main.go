@@ -9,10 +9,10 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
-	sam "github.com/nimling/samna-auth-middleware/disciple/sam"
-	sdb "github.com/nimling/samna-auth-middleware/disciple/sdb"
-	"github.com/nimling/samna-auth-middleware/shared"
-	smw "github.com/nimling/samna-auth-middleware/smw"
+	sam "github.com/nimling/samna-auth-middleware/v2/disciple/sam"
+	sdb "github.com/nimling/samna-auth-middleware/v2/disciple/sdb"
+	"github.com/nimling/samna-auth-middleware/v2/shared"
+	smw "github.com/nimling/samna-auth-middleware/v2/smw"
 )
 
 type accessCheck struct {

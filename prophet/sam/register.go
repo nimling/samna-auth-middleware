@@ -2,8 +2,8 @@ package sam
 
 import (
 	"github.com/labstack/echo/v4"
-	h "github.com/nimling/samna-auth-middleware/prophet/echo"
-	"github.com/nimling/samna-auth-middleware/smw"
+	h "github.com/nimling/samna-auth-middleware/v2/prophet/echo"
+	"github.com/nimling/samna-auth-middleware/v2/smw"
 )
 
 // RegisterEndpoints mounts the full prophet API on the passed group. It carries

@@ -1,6 +1,6 @@
 package shared
 
-import "github.com/nimling/samna-auth-middleware/sauth"
+import "github.com/nimling/samna-auth-middleware/v2/sauth"
 
 func (m *SamnaUser) MarshalWrite() ([]byte, error)   { return sauth.Marshal(m) }
 func (m *SamnaUser) UnmarshalWrite(raw []byte) error { return sauth.Unmarshal(raw, m) }

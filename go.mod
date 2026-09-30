@@ -1,4 +1,4 @@
-module github.com/nimling/samna-auth-middleware
+module github.com/nimling/samna-auth-middleware/v2
 
 go 1.25.0
 
