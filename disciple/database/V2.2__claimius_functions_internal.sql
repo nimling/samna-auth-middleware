@@ -1156,6 +1156,23 @@ $$ LANGUAGE sql IMMUTABLE;
 
 COMMENT ON FUNCTION claimius._object_lock_budget() IS 'The most per object locks one transaction takes.';
 
+-- _settle_lock_timeout
+-- The longest a read's settle waits for any lock: a twentieth of
+-- deadlock_timeout, or the caller's own lock_timeout when shorter. A settle
+-- runs each unit in its own block, so a wait past it gives up that unit and
+-- the read takes its pairs as they stand. A read then leaves a wait it closes
+-- into a cycle before the deadlock check of the writer it blocks runs, and
+-- the writer is never the one aborted.
+CREATE OR REPLACE FUNCTION claimius._settle_lock_timeout()
+    RETURNS TEXT AS $$
+    SELECT greatest(1, least(
+               (extract(epoch FROM current_setting('deadlock_timeout')::INTERVAL) * 50)::INTEGER,
+               coalesce(nullif((extract(epoch FROM current_setting('lock_timeout')::INTERVAL) * 1000)::INTEGER, 0), 2147483647)
+           ))::TEXT || 'ms'
+$$ LANGUAGE sql STABLE;
+
+COMMENT ON FUNCTION claimius._settle_lock_timeout() IS 'The lock_timeout a read''s settle runs under: a twentieth of deadlock_timeout, or the caller''s lock_timeout when shorter.';
+
 -- _lock_all_objects
 -- Takes every object at once: the exclusive transaction advisory lock that
 -- every per object locker holds shared, one lock in place of any number. A

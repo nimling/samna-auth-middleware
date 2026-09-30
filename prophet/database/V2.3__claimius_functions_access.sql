@@ -948,6 +948,9 @@ COMMENT ON FUNCTION claimius.notify_sync_event() IS 'Statement trigger on sync_e
 -- settles nothing. A batch big enough to spend the per object lock budget
 -- takes every object at once instead, so however many areas are open the
 -- read holds a bounded number of locks.
+-- Every lock the settle waits for is bounded by _settle_lock_timeout: a
+-- unit that waits longer is given up, stays open, and the read takes its
+-- pairs as they stand, so a read never holds a writer into a deadlock.
 --
 -- The retry queue. reconcile_queue holds sync event applications that failed.
 -- A check drains the pair it asks about, a listing every pair of the reader.
@@ -959,6 +962,7 @@ CREATE OR REPLACE FUNCTION claimius.reconcile_if_pending(
 )
     RETURNS VOID AS $$
 DECLARE
+    v_lock_timeout TEXT := current_setting('lock_timeout');
     v_row       RECORD;
     v_open      BOOLEAN;
     v_areas     UUID[];
@@ -967,6 +971,7 @@ BEGIN
     IF p_app_id IS NULL OR p_user_id IS NULL THEN
         RETURN;
     END IF;
+    PERFORM set_config('lock_timeout', claimius._settle_lock_timeout(), TRUE);
 
     IF p_object_type IS NOT NULL AND p_object_id IS NOT NULL THEN
         BEGIN
@@ -1134,6 +1139,7 @@ BEGIN
                 END;
             END LOOP;
     END IF;
+    PERFORM set_config('lock_timeout', v_lock_timeout, TRUE);
 END;
 $$ LANGUAGE plpgsql;
 
@@ -1158,10 +1164,12 @@ CREATE OR REPLACE FUNCTION claimius.drain_access_diff(
     p_limit_pairs   INTEGER DEFAULT 1000
 ) RETURNS INTEGER AS $$
 DECLARE
+    v_lock_timeout TEXT := current_setting('lock_timeout');
     v_share     RECORD;
     v_settled   INTEGER := 0;
     v_users     UUID[] := '{}';
 BEGIN
+    PERFORM set_config('lock_timeout', claimius._settle_lock_timeout(), TRUE);
     FOR v_share IN
         SELECT s.app_id, s.user_id, s.diff_id
         FROM (
@@ -1194,6 +1202,7 @@ BEGIN
         END IF;
     END LOOP;
 
+    PERFORM set_config('lock_timeout', v_lock_timeout, TRUE);
     RETURN v_settled;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = claimius, pg_temp;
