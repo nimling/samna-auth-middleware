@@ -2818,18 +2818,18 @@ COMMENT ON FUNCTION claimius.init_claimius_tables(VARIADIC p_object_types text[]
 -- the users it holds pairs for, since no count moves under replay_mode.
 -- Inherits the caller's replay_mode setting; callers run this with
 -- replay_mode = true so emit_sync_event short circuits and the bulk seed
--- produces no sync events. Per-row cost is bounded because the helpers
--- _affected_users_for_object and _build_grants_for_objects both use indexed
--- joins against the inheritance_info closure table.
+-- produces no sync events. The pairs are collected in one statement and grouped by
+-- user, and each user's objects are recomputed in chunks of 1000 per call,
+-- so the fixed cost of a recompute is paid once per user and chunk, not once
+-- per pair.
 CREATE OR REPLACE FUNCTION claimius._bulk_seed_user_object(p_object_type TEXT)
     RETURNS VOID AS $$
 DECLARE
     v_schema TEXT;
     v_table TEXT;
     v_parts TEXT[];
-    v_row_count INTEGER := 0;
     v_user RECORD;
-    v_obj RECORD;
+    v_at INTEGER;
     v_sql TEXT;
     v_ids UUID[];
 BEGIN
@@ -2841,19 +2841,13 @@ BEGIN
     PERFORM claimius._write_object_info(p_object_type, v_ids);
 
     v_sql := format(
-            'SELECT r.id, a AS app_id FROM %I.%I r CROSS JOIN LATERAL claimius._app_ids_for_row(%L, to_jsonb(r)) a WHERE r.sa_deleted_at IS NULL',
-            v_schema, v_table, p_object_type);
-    FOR v_obj IN EXECUTE v_sql LOOP
-            FOR v_user IN
-                SELECT user_id FROM claimius._affected_users_for_object(v_obj.app_id, p_object_type, v_obj.id)
-                LOOP
-                    PERFORM claimius.recompute_user_object(v_obj.app_id, v_user.user_id, p_object_type, v_obj.id);
-                END LOOP;
-            v_row_count := v_row_count + 1;
-            IF v_row_count % 100 = 0 THEN
-                RAISE NOTICE '  ... seeded % rows of %', v_row_count, p_object_type;
-            END IF;
+            'SELECT p.app_id, a.user_id, array_agg(r.id ORDER BY r.id) AS object_ids FROM %I.%I r CROSS JOIN LATERAL claimius._app_ids_for_row(%L, to_jsonb(r)) p(app_id) CROSS JOIN LATERAL claimius._affected_users_for_object(p.app_id, %L, r.id) a WHERE r.sa_deleted_at IS NULL GROUP BY p.app_id, a.user_id',
+            v_schema, v_table, p_object_type, p_object_type);
+    FOR v_user IN EXECUTE v_sql LOOP
+        FOR v_at IN 1 .. cardinality(v_user.object_ids) BY 1000 LOOP
+            PERFORM claimius.recompute_user_object(v_user.app_id, v_user.user_id, p_object_type, VARIADIC v_user.object_ids[v_at : v_at + 999]);
         END LOOP;
+    END LOOP;
 
     PERFORM claimius._refresh_user_users(s.app_id, s.user_id)
     FROM (
