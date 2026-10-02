@@ -515,6 +515,12 @@ BEGIN
     END IF;
     IF EXISTS (SELECT 1 FROM information_schema.columns
                WHERE table_schema = 'claimius' AND table_name = 'user_object' AND column_name = 'id') THEN
+        DELETE FROM claimius.user_object a
+        USING claimius.user_object b
+        WHERE a.user_id = b.user_id
+          AND a.object_type = b.object_type
+          AND a.object_id = b.object_id
+          AND (a.sa_updated_at, a.id) < (b.sa_updated_at, b.id);
         ALTER TABLE claimius.user_object DROP CONSTRAINT IF EXISTS user_object_pkey;
         ALTER TABLE claimius.user_object DROP COLUMN id;
         ALTER TABLE claimius.user_object

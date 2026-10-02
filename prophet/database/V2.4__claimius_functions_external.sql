@@ -859,6 +859,7 @@ BEGIN
         SELECT c.*
         FROM claimius.claim c
         WHERE c.sa_deleted_at IS NULL
+          AND c.app_id = p_app_id
           AND (
               EXISTS (
                   SELECT 1 FROM claimius.user_claim uc
