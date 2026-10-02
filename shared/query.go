@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"reflect"
 	"strconv"
 	"strings"
@@ -338,6 +339,7 @@ type InsertQuery struct {
 	confSet     []conflictSet
 	returns     string
 	seq         client.SyncCursor
+	created     bool
 }
 
 func (d *DB) NewInsert() *InsertQuery {
@@ -425,13 +427,17 @@ func (q *InsertQuery) route(ctx context.Context, dest ...any) error {
 		return err
 	}
 	var raw json.RawMessage
-	if err := client.Post(client.WithSyncSeq(ctx, &q.seq), path, json.RawMessage(body), &raw); err != nil {
+	var status int
+	if err := client.Post(client.WithStatus(client.WithSyncSeq(ctx, &q.seq), &status), path, json.RawMessage(body), &raw); err != nil {
 		return err
 	}
+	q.created = status == http.StatusCreated
 	return q.db.applyRouted(ctx, q.model, raw, dest...)
 }
 
 func (q *InsertQuery) Seq() client.SyncCursor { return q.seq }
+
+func (q *InsertQuery) Created() bool { return q.created }
 
 func (q *InsertQuery) execClaimius(ctx context.Context, dest ...any) (bool, error) {
 	switch m := q.model.(type) {
@@ -440,13 +446,15 @@ func (q *InsertQuery) execClaimius(ctx context.Context, dest ...any) (bool, erro
 		if err != nil {
 			return true, err
 		}
-		return true, dispatchScan(result, dest...)
+		q.created = result.Created
+		return true, dispatchScan(result.SamnaUser, dest...)
 	case *SamnaUserExternal:
 		result, err := q.db.upsertUserExternal(ctx, q.accessClaim, *m)
 		if err != nil {
 			return true, err
 		}
-		return true, dispatchScan(result, dest...)
+		q.created = result.Created
+		return true, dispatchScan(result.SamnaUser, dest...)
 	}
 	switch modelTableName(q.db, q.model) {
 	case "claimius.claim":
@@ -493,10 +501,11 @@ func (q *InsertQuery) execClaimius(ctx context.Context, dest ...any) (bool, erro
 		if !ok {
 			return false, nil
 		}
-		result, err := q.db.insertUser(ctx, m)
+		result, created, err := q.db.insertUser(ctx, q.accessClaim, m)
 		if err != nil {
 			return true, err
 		}
+		q.created = created
 		*m = *result
 		return true, dispatchScan(q.model, dest...)
 	case "claimius.user_token":

@@ -14,6 +14,7 @@ import (
 	sdb "github.com/nimling/samna-auth-middleware/v2/prophet/sdb"
 	"github.com/nimling/samna-auth-middleware/v2/utils"
 	"github.com/uptrace/bun"
+	"github.com/uptrace/bun/driver/pgdriver"
 )
 
 type BodyUser struct {
@@ -28,22 +29,26 @@ type BodyUser struct {
 	ClaimID    *uuid.UUID `json:"claim_id"`
 	AppID      *uuid.UUID `json:"app_id"`
 	Reason     *string    `json:"reason"`
+	OwnerID    *uuid.UUID `json:"owner_id"`
+	CreatedBy  *uuid.UUID `json:"created_by"`
 }
 
 type SamnaUserToken struct {
-	Token   string     `json:"token"`
-	IDClaim *string    `json:"id_claim"`
-	User    *SamnaUser `json:"user"`
-	ClaimID *uuid.UUID `json:"claim_id"`
-	OwnerID *uuid.UUID `json:"owner_id"`
-	Reason  *string    `json:"reason"`
+	Token     string     `json:"token"`
+	IDClaim   *string    `json:"id_claim"`
+	User      *SamnaUser `json:"user"`
+	ClaimID   *uuid.UUID `json:"claim_id"`
+	OwnerID   *uuid.UUID `json:"owner_id"`
+	Reason    *string    `json:"reason"`
+	CreatedBy *uuid.UUID `json:"created_by"`
 }
 
 type SamnaUserExternal struct {
-	User    *SamnaUser `json:"user"`
-	ClaimID *uuid.UUID `json:"claim_id"`
-	OwnerID *uuid.UUID `json:"owner_id"`
-	Reason  *string    `json:"reason"`
+	User      *SamnaUser `json:"user"`
+	ClaimID   *uuid.UUID `json:"claim_id"`
+	OwnerID   *uuid.UUID `json:"owner_id"`
+	Reason    *string    `json:"reason"`
+	CreatedBy *uuid.UUID `json:"created_by"`
 }
 
 type BodyUserTokenValidate struct {
@@ -232,6 +237,14 @@ func PostUser(ctx echo.Context) error {
 		return respond.Error(ctx, http.StatusBadRequest, "invalid json body")
 	}
 
+	if req.OwnerID != nil {
+		user, status, err := createOrganizationUser(ctx, req.CreatedBy, req.OwnerID, req.ClaimID, req, false, nil, req.Reason)
+		if err != nil {
+			return respond.Error(ctx, status, err.Error())
+		}
+		return respond.JSON(ctx, status, user, 1)
+	}
+
 	if req.Email == "" {
 		return respond.Error(ctx, http.StatusBadRequest, "email required")
 	}
@@ -353,16 +366,13 @@ func PostUserToken(ctx echo.Context) error {
 	if !ok || externalID == "" {
 		return respond.Error(ctx, http.StatusBadRequest, "id claim not a string")
 	}
-	var userID uuid.UUID
-	if req.User != nil && req.User.UserID != uuid.Nil {
-		userID = req.User.UserID
+	in := SamnaUser{}
+	if req.User != nil {
+		in = *req.User
 	}
-	claimsJSON, err := json.Marshal(claims)
-	if err != nil {
-		ctx.Logger().Errorf("marshal token claims: %v", err)
-		return respond.Error(ctx, http.StatusInternalServerError, "Internal server error")
-	}
-	user, status, err := upsertOrganizationUser(ctx, *req.OwnerID, *req.ClaimID, userID, idClaim, externalID, "token", claimsJSON, req.User, req.Reason)
+	in.ExternalID = &externalID
+	identity := map[string]any{"external_id": externalID, "id_claim": idClaim, "type": "token", "data": claims}
+	user, status, err := createOrganizationUser(ctx, req.CreatedBy, req.OwnerID, req.ClaimID, in, true, identity, req.Reason)
 	if err != nil {
 		return respond.Error(ctx, status, err.Error())
 	}
@@ -444,7 +454,8 @@ func PostUserExternal(ctx echo.Context) error {
 	if req.User == nil || req.User.ExternalID == nil || *req.User.ExternalID == "" {
 		return respond.Error(ctx, http.StatusBadRequest, "user.external_id is required")
 	}
-	user, status, err := upsertOrganizationUser(ctx, *req.OwnerID, *req.ClaimID, req.User.UserID, "external", *req.User.ExternalID, "external", json.RawMessage("{}"), req.User, req.Reason)
+	identity := map[string]any{"external_id": *req.User.ExternalID, "id_claim": "external", "type": "external", "data": map[string]any{}}
+	user, status, err := createOrganizationUser(ctx, req.CreatedBy, req.OwnerID, req.ClaimID, req.User, true, identity, req.Reason)
 	if err != nil {
 		return respond.Error(ctx, status, err.Error())
 	}
@@ -677,142 +688,69 @@ func putUser(ctx echo.Context, user *SamnaUser) error {
 	return nil
 }
 
-func upsertOrganizationUser(ctx echo.Context, ownerID, claimID, userID uuid.UUID, idClaim, externalID, identType string, data json.RawMessage, in *SamnaUser, reason *string) (*SamnaUser, int, error) {
+func createOrganizationUser(ctx echo.Context, createdBy, ownerID, claimID *uuid.UUID, user any, upsert bool, identity map[string]any, reason *string) (*SamnaUser, int, error) {
 	appID := ctx.Get("app_id").(uuid.UUID)
 	if appID == uuid.Nil {
 		return nil, http.StatusUnauthorized, errors.New("Unauthorized")
 	}
-	reqctx := ctx.Request().Context()
-
-	var rootID uuid.UUID
-	var callerUC uuid.UUID
-	if err := sdb.Instance().NewRaw(
-		"SELECT sa_root_id, sa_created_by FROM claimius.organization WHERE id = ? AND sa_deleted_at IS NULL AND claimius.app_has_object(?, 'claimius.organization', id) LIMIT 1",
-		ownerID, appID,
-	).Scan(reqctx, &rootID, &callerUC); err != nil {
-		ctx.Logger().Errorf("organization lookup: %v", err)
-		return nil, http.StatusInternalServerError, errors.New("Internal server error")
+	if createdBy == nil || *createdBy == uuid.Nil {
+		return nil, http.StatusBadRequest, errors.New("created_by is required")
 	}
-
-	var existingUserID uuid.UUID
-	err := sdb.Instance().NewRaw(
-		"SELECT user_id FROM claimius.user_token WHERE app_id = ? AND sa_owner_id = ? AND id_claim = ? AND external_id = ? AND sa_deleted_at IS NULL LIMIT 1",
-		appID, ownerID, idClaim, externalID,
-	).Scan(reqctx, &existingUserID)
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		ctx.Logger().Errorf("user_token lookup: %v", err)
-		return nil, http.StatusInternalServerError, errors.New("Internal server error")
+	if ownerID == nil || claimID == nil {
+		return nil, http.StatusBadRequest, errors.New("claim_id and owner_id are required")
 	}
-	created := existingUserID == uuid.Nil
-	if existingUserID != uuid.Nil {
-		userID = existingUserID
-	}
-	if userID == uuid.Nil {
-		userID = uuid.New()
-	}
-
-	firstName, lastName, userName, email, phone := "", "", "", "", ""
-	if in != nil {
-		firstName, lastName, email = in.FirstName, in.LastName, in.Email
-		if in.UserName != nil {
-			userName = *in.UserName
-		}
-		if in.Phone != nil {
-			phone = *in.Phone
-		}
-	}
-
-	var user SamnaUser
-	err = sdb.Instance().NewRaw(
-		"INSERT INTO claimius.samna_user (user_id, app_id, first_name, last_name, user_name, email, phone, external_id, status, type) "+
-			"VALUES (?, ?, NULLIF(?,''), NULLIF(?,''), NULLIF(?,''), NULLIF(?,''), NULLIF(?,''), NULLIF(?,''), 'active', 'user') "+
-			"ON CONFLICT (user_id, app_id) WHERE sa_deleted_at IS NULL DO UPDATE SET "+
-			"first_name = COALESCE(EXCLUDED.first_name, claimius.samna_user.first_name), "+
-			"last_name = COALESCE(EXCLUDED.last_name, claimius.samna_user.last_name), "+
-			"user_name = COALESCE(EXCLUDED.user_name, claimius.samna_user.user_name), "+
-			"email = COALESCE(EXCLUDED.email, claimius.samna_user.email), "+
-			"phone = COALESCE(EXCLUDED.phone, claimius.samna_user.phone), "+
-			"external_id = COALESCE(EXCLUDED.external_id, claimius.samna_user.external_id), "+
-			"sa_updated_at = now() RETURNING *",
-		userID, appID, firstName, lastName, userName, email, phone, externalID,
-	).Scan(reqctx, &user)
+	raw, err := json.Marshal(user)
 	if err != nil {
-		ctx.Logger().Errorf("upsert samna_user: %v", err)
-		return nil, http.StatusInternalServerError, errors.New("Internal server error")
+		return nil, http.StatusBadRequest, errors.New("Malformed request")
 	}
-	userID = user.UserID
-
-	var hasClaim bool
-	if err := sdb.Instance().NewRaw("SELECT EXISTS (SELECT 1 FROM claimius.user_claim WHERE app_id = ? AND claim_id = ? AND user_id = ? AND sa_deleted_at IS NULL)", appID, claimID, userID).Scan(reqctx, &hasClaim); err != nil {
-		ctx.Logger().Errorf("lookup user_claim: %v", err)
-		return nil, http.StatusInternalServerError, errors.New("Internal server error")
+	body := map[string]any{}
+	if err := json.Unmarshal(raw, &body); err != nil {
+		return nil, http.StatusBadRequest, errors.New("Malformed request")
 	}
-	if !hasClaim {
-		if _, err := sdb.Instance().NewRaw("SELECT claimius.assign_claim_user(p_app_id := ?, p_claim_id := ?, p_user_id := ?, p_sa_owner_id := ?, p_sa_created_by := ?, p_reason := ?)", appID, claimID, userID, ownerID, callerUC, reason).Exec(reqctx); err != nil {
-			ctx.Logger().Errorf("assign_claim_user: %v", err)
-			return nil, http.StatusInternalServerError, errors.New("Internal server error")
+	body["claim_id"] = *claimID
+	userJSON, err := json.Marshal(body)
+	if err != nil {
+		return nil, http.StatusBadRequest, errors.New("Malformed request")
+	}
+	var identityJSON *string
+	if identity != nil {
+		b, err := json.Marshal(identity)
+		if err != nil {
+			return nil, http.StatusBadRequest, errors.New("Malformed request")
 		}
-	}
-
-	virtualName := "user:" + userID.String()
-	var virtualID uuid.UUID
-	err = sdb.Instance().NewRaw("SELECT id FROM claimius.claim WHERE app_id = ? AND name = ? AND type = 'virtual' AND sa_deleted_at IS NULL LIMIT 1", appID, virtualName).Scan(reqctx, &virtualID)
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		ctx.Logger().Errorf("lookup virtual claim: %v", err)
-		return nil, http.StatusInternalServerError, errors.New("Internal server error")
-	}
-	if virtualID == uuid.Nil {
-		if err := sdb.Instance().NewRaw("SELECT (claimius.create_claim(p_app_id := ?, p_name := ?, p_description := NULL, p_sa_access := 15, p_sa_owner_id := ?, p_sa_root_id := ?, p_sa_created_by := ?, p_inherits := TRUE, p_type := 'virtual') -> 'claim' ->> 'id')::uuid", appID, virtualName, ownerID, rootID, callerUC).Scan(reqctx, &virtualID); err != nil {
-			ctx.Logger().Errorf("create virtual claim: %v", err)
-			return nil, http.StatusInternalServerError, errors.New("Internal server error")
-		}
+		s := string(b)
+		identityJSON = &s
 	}
 
-	var hasObj bool
-	if err := sdb.Instance().NewRaw("SELECT EXISTS (SELECT 1 FROM claimius.claim_object WHERE app_id = ? AND claim_id = ? AND object_id = ? AND object_type = 'claimius.samna_user' AND sa_deleted_at IS NULL)", appID, virtualID, userID).Scan(reqctx, &hasObj); err != nil {
-		ctx.Logger().Errorf("lookup virtual claim_object: %v", err)
-		return nil, http.StatusInternalServerError, errors.New("Internal server error")
-	}
-	if !hasObj {
-		if _, err := sdb.Instance().NewRaw("SELECT claimius.assign_claim_object(p_app_id := ?, p_claim_id := ?, p_sa_owner_id := ?, p_sa_root_id := ?, p_sa_created_by := ?, p_object_id := ?, p_object_type := 'claimius.samna_user')", appID, virtualID, ownerID, rootID, callerUC, userID).Exec(reqctx); err != nil {
-			ctx.Logger().Errorf("assign virtual claim_object: %v", err)
-			return nil, http.StatusInternalServerError, errors.New("Internal server error")
-		}
-	}
-
-	var callerUserID uuid.UUID
-	if err := sdb.Instance().NewRaw("SELECT user_id FROM claimius.user_claim WHERE id = ? AND sa_deleted_at IS NULL", callerUC).Scan(reqctx, &callerUserID); err != nil && !errors.Is(err, sql.ErrNoRows) {
-		ctx.Logger().Errorf("lookup caller user: %v", err)
-		return nil, http.StatusInternalServerError, errors.New("Internal server error")
-	}
-	if callerUserID != uuid.Nil {
-		var hasCaller bool
-		if err := sdb.Instance().NewRaw("SELECT EXISTS (SELECT 1 FROM claimius.user_claim WHERE app_id = ? AND claim_id = ? AND user_id = ? AND sa_deleted_at IS NULL)", appID, virtualID, callerUserID).Scan(reqctx, &hasCaller); err != nil {
-			ctx.Logger().Errorf("lookup caller user_claim: %v", err)
-			return nil, http.StatusInternalServerError, errors.New("Internal server error")
-		}
-		if !hasCaller {
-			if _, err := sdb.Instance().NewRaw("SELECT claimius.assign_claim_user(p_app_id := ?, p_claim_id := ?, p_user_id := ?, p_sa_owner_id := ?, p_sa_created_by := ?)", appID, virtualID, callerUserID, ownerID, callerUC).Exec(reqctx); err != nil {
-				ctx.Logger().Errorf("assign caller user_claim: %v", err)
-				return nil, http.StatusInternalServerError, errors.New("Internal server error")
+	var payload []byte
+	if err := sdb.Instance().NewRaw(
+		"SELECT claimius.create_organization_user(?, ?, ?, ?::jsonb, ?, ?::jsonb, ?)",
+		appID, *createdBy, *ownerID, string(userJSON), upsert, identityJSON, reason,
+	).Scan(ctx.Request().Context(), &payload); err != nil {
+		var pgErr pgdriver.Error
+		if errors.As(err, &pgErr) {
+			switch pgErr.Field('C') {
+			case "23505":
+				return nil, http.StatusConflict, errors.New("user already exists")
+			case "P0001":
+				return nil, http.StatusBadRequest, errors.New(pgErr.Field('M'))
 			}
 		}
-	}
-
-	if _, err := sdb.Instance().NewRaw(
-		"INSERT INTO claimius.user_token (app_id, user_id, id_claim, external_id, type, claim_id, data, sa_owner_id) "+
-			"VALUES (?, ?, ?, ?, ?, ?, ?::jsonb, ?) "+
-			"ON CONFLICT (app_id, sa_owner_id, external_id) WHERE sa_deleted_at IS NULL DO UPDATE SET "+
-			"user_id = EXCLUDED.user_id, type = EXCLUDED.type, claim_id = EXCLUDED.claim_id, data = EXCLUDED.data, sa_updated_at = now()",
-		appID, userID, idClaim, externalID, identType, claimID, string(data), ownerID,
-	).Exec(reqctx); err != nil {
-		ctx.Logger().Errorf("upsert user_token: %v", err)
+		ctx.Logger().Errorf("create_organization_user: %v", err)
 		return nil, http.StatusInternalServerError, errors.New("Internal server error")
 	}
 
+	var result struct {
+		SamnaUser *SamnaUser `json:"samna_user"`
+		Created   bool       `json:"created"`
+	}
+	if err := json.Unmarshal(payload, &result); err != nil || result.SamnaUser == nil {
+		ctx.Logger().Errorf("unmarshal create_organization_user: %v", err)
+		return nil, http.StatusInternalServerError, errors.New("Internal server error")
+	}
 	status := http.StatusOK
-	if created {
+	if result.Created {
 		status = http.StatusCreated
 	}
-	return &user, status, nil
+	return result.SamnaUser, status, nil
 }

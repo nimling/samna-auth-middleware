@@ -166,6 +166,14 @@ func WithSyncSeq(ctx context.Context, seq *SyncCursor) context.Context {
 	return context.WithValue(ctx, syncSeqKey{}, seq)
 }
 
+type statusKey struct{}
+
+// WithStatus returns a context whose writes record the status the prophet
+// answered with in status.
+func WithStatus(ctx context.Context, status *int) context.Context {
+	return context.WithValue(ctx, statusKey{}, status)
+}
+
 type timeoutKey struct{}
 
 // WithTimeout overrides the request timeout for a request the prophet may hold
@@ -284,6 +292,9 @@ func (e *httpClient) execute(ctx context.Context, method string, reqBody any, ta
 		if v, err := ParseSyncCursor(resp.Header.Get(HeaderSyncSeq)); err == nil && seq.Less(v) {
 			*seq = v
 		}
+	}
+	if status, ok := ctx.Value(statusKey{}).(*int); ok {
+		*status = resp.StatusCode
 	}
 	if prophet, ok := ctx.Value(prophetKey{}).(*string); ok && resp.StatusCode >= 200 && resp.StatusCode < 300 {
 		*prophet = resp.Header.Get(HeaderProphet)

@@ -1,5 +1,5 @@
 BEGIN;
-SELECT plan(5);
+SELECT plan(9);
 
 CREATE TEMP TABLE crew (key TEXT PRIMARY KEY, id UUID);
 
@@ -56,7 +56,7 @@ CREATE FUNCTION pg_temp.crew(p_key TEXT) RETURNS UUID AS $$
 $$ LANGUAGE sql;
 
 SELECT lives_ok($$
-    SELECT claimius.create_organization_user(pg_temp.crew('owner_uc'), pg_temp.crew('owner_claim'), '10000000-0000-4000-8000-000000000e51',
+    SELECT claimius.create_organization_user(pg_temp.crew('owner_uc'), '10000000-0000-4000-8000-000000000e51',
         jsonb_build_object('user_id', 'a0000000-0000-4000-8000-000000000e53', 'first_name', 'New', 'claim_id', pg_temp.crew('member')))
 $$, 'an owner of the organization creates a user in it');
 
@@ -71,7 +71,7 @@ SELECT ok(EXISTS (SELECT 1 FROM claimius.get_user_access('a0000000-0000-4000-800
     'the owner holds the new user in full');
 
 SELECT throws_like($$
-    SELECT claimius.create_organization_user(pg_temp.crew('reader_uc'), pg_temp.crew('reader_claim'), '10000000-0000-4000-8000-000000000e51',
+    SELECT claimius.create_organization_user(pg_temp.crew('reader_uc'), '10000000-0000-4000-8000-000000000e51',
         jsonb_build_object('user_id', 'a0000000-0000-4000-8000-000000000e54', 'first_name', 'Refused', 'claim_id', pg_temp.crew('member')))
 $$, 'cannot grant more access than held%', 'a reader of the organization is refused a user in it');
 
@@ -82,6 +82,34 @@ SELECT throws_like($$
         p_sa_created_by => pg_temp.crew('owner_uc'),
         p_object_id => 'a0000000-0000-4000-8000-000000000e55', p_object_type => 'claimius.samna_user')
 $$, 'cannot grant more access than held%', 'an owner binding on a user holding no claim of the organization is refused');
+
+CREATE FUNCTION pg_temp.identity_user() RETURNS JSONB AS $$
+    SELECT claimius.create_organization_user(
+        pg_temp.crew('owner_uc'), '10000000-0000-4000-8000-000000000e51',
+        jsonb_build_object('first_name', 'Linked', 'claim_id', pg_temp.crew('member')),
+        p_identity => jsonb_build_object('external_id', 'ext-e5', 'id_claim', 'sub', 'type', 'token', 'data', '{}'::JSONB),
+        p_reason => 'Invited')
+$$ LANGUAGE sql;
+
+CREATE TEMP TABLE first_identity AS SELECT pg_temp.identity_user() AS result;
+CREATE TEMP TABLE second_identity AS SELECT pg_temp.identity_user() AS result;
+
+SELECT is((SELECT (result ->> 'created')::BOOLEAN FROM first_identity), TRUE,
+    'the first call for an outside identity creates its user');
+
+SELECT is((SELECT (result ->> 'created')::BOOLEAN FROM second_identity), FALSE,
+    'the second call for the same identity finds that user');
+
+SELECT is((SELECT result -> 'samna_user' ->> 'user_id' FROM second_identity),
+          (SELECT result -> 'samna_user' ->> 'user_id' FROM first_identity),
+    'both calls name the same user');
+
+SELECT ok(EXISTS (
+        SELECT 1 FROM claimius.user_token t JOIN claimius.user_claim uc ON uc.user_id = t.user_id
+        WHERE t.external_id = 'ext-e5'
+          AND t.user_id = (SELECT (result -> 'samna_user' ->> 'user_id')::UUID FROM first_identity)
+          AND uc.claim_id = pg_temp.crew('member') AND uc.reason = 'Invited' AND t.sa_deleted_at IS NULL),
+    'the identity is recorded and the user holds the claim with its reason');
 
 SELECT * FROM finish();
 ROLLBACK;

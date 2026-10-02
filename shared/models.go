@@ -343,6 +343,7 @@ type SamnaUser struct {
 	UpdatedAt  time.Time        `bun:"sa_updated_at,default:now()" json:"updated_at"`
 	OwnerID    *uuid.UUID       `bun:"-" json:"owner_id,omitempty"`
 	ClaimID    *uuid.UUID       `bun:"-" json:"claim_id,omitempty"`
+	CreatedBy  *uuid.UUID       `bun:"-" json:"created_by,omitempty"`
 }
 
 type SamnaUserToken struct {
@@ -354,6 +355,7 @@ type SamnaUserToken struct {
 	AppID        *uuid.UUID `json:"app_id"`
 	Reason       *string    `json:"reason,omitempty"`
 	OwnerID      *uuid.UUID `json:"owner_id,omitempty"`
+	CreatedBy    *uuid.UUID `json:"created_by,omitempty"`
 }
 
 type SamnaUserExternal struct {
@@ -363,6 +365,7 @@ type SamnaUserExternal struct {
 	AppID        *uuid.UUID `json:"app_id"`
 	Reason       *string    `json:"reason,omitempty"`
 	OwnerID      *uuid.UUID `json:"owner_id,omitempty"`
+	CreatedBy    *uuid.UUID `json:"created_by,omitempty"`
 }
 
 type UserToken struct {

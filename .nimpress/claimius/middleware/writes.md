@@ -21,16 +21,18 @@ err = q.Scan(ctx, &location)
 
 ## Where a write lands
 
-| Table | Deployed disciple | Prophet, and debug mode |
+| Table | Deployed disciple | Disciple in debug mode |
 |---|---|---|
 | `claim`, `claim_object`, `user_claim` | Sent to the prophet, the answer upserted locally | The local claimius functions |
 | `organization`, `location`, `user_relation`, `samna_secret`, `samna_user` | Sent to the prophet, the answer upserted locally | Local, through the triggers |
 | The implementing side's own registered tables | Local | Local |
 | Claimius tables the prophet serves no route for, such as `notification` | Local | Local |
 
-There is one builder, `shared`'s. Each role's `Init` sets where it sends a write once: the prophet's leaves `RouteToProphet` off, and the disciple's turns it on unless `SAUTH_DEBUG_USER_ID` or `SAUTH_DEBUG_CLIENTS` is set. The builder routes a model exactly when that is on and `shared.EndpointFor` knows its type, and otherwise runs the local executor, the claimius function for that type. No other code decides it.
+There is one builder, `shared`'s. The disciple's `Init` turns `RouteToProphet` on unless `SAUTH_DEBUG_USER_ID` or `SAUTH_DEBUG_CLIENTS` is set. The builder routes a model exactly when that is on and `shared.EndpointFor` knows its type, and otherwise runs the local executor, the function for that type in the disciple set. No other code decides it. The prophet's writes are its `/sam` handlers, which call the prophet set's functions with the calling app.
 
-The write helpers write through that builder only, so each does the same on both roles: `CreateClaim`, `Claim.AssignObject`, `Claim.AssignUser`, `CreateVirtualClaim` as those three, `InsertRootOrganization`, `UpdateMe` and `DeleteUser`. `IssueUserToken` and `UpsertUserExternal` insert their payload, `SamnaUserToken` or `SamnaUserExternal`: routed, it goes to `user/token` or `user/external` and the user the prophet answers with is upserted; local, it runs the token transaction. Each reads the existing token first to answer whether the user was created. `CreateOrganizationUser` runs `create_organization_user` directly and has no prophet route.
+The write helpers write through that builder only: `CreateClaim`, `Claim.AssignObject`, `Claim.AssignUser`, `CreateVirtualClaim` as those three, `InsertRootOrganization`, `UpdateMe`, `DeleteUser`, `CreateOrganizationUser`, `IssueUserToken` and `UpsertUserExternal`.
+
+The last three are one operation, `create_organization_user`: the user, the grant of the claim it is created with, its virtual claim bound to it and the actor's grant of that, and with an identity the `user_token` naming it. `CreateOrganizationUser` inserts a `SamnaUser` carrying `OwnerID` and `ClaimID`, routed to `user`. `IssueUserToken` and `UpsertUserExternal` insert their payload, `SamnaUserToken` or `SamnaUserExternal`, routed to `user/token` or `user/external`. Locally each runs the disciple set's function; on the prophet each endpoint runs the prophet set's with the calling app and the payload's `created_by` as the actor. `Created()` on the insert answers whether the user was new: routed, from the prophet's `201`; local, from the function. A `SamnaUser` without `OwnerID` is an app user with no organization and runs `ensure_app_user`.
 
 1. `.Access(ac)` stamps `sa_created_by` with `ac.UserClaimID` and `sa_owner_id` from the grant, pointer fields included. Nothing else stamps an actor.
 

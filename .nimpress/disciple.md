@@ -44,7 +44,7 @@ Where the write lands depends on the table.
 | The service's own registered tables | Local, through bun | Local, through bun |
 | Claimius tables the prophet serves no route for, such as `notification` | Local | Local |
 
-The helpers on `sdb.Instance()`, `CreateClaim`, `AssignObject`, `AssignUser`, `CreateVirtualClaim`, `InsertRootOrganization`, `UpdateMe`, `DeleteUser`, `IssueUserToken` and `UpsertUserExternal`, write through the same builder, so they are routed exactly like a direct `NewInsert`. `CreateOrganizationUser` has no prophet route and runs locally.
+The helpers on `sdb.Instance()`, `CreateClaim`, `AssignObject`, `AssignUser`, `CreateVirtualClaim`, `InsertRootOrganization`, `UpdateMe`, `DeleteUser`, `CreateOrganizationUser`, `IssueUserToken` and `UpsertUserExternal`, write through the same builder, so they are routed exactly like a direct `NewInsert`.
 
 A routed write stamps `sa_created_by` and `sa_owner_id` from the `AccessClaim`, posts the model to the prophet over the app key, and upserts the row the prophet answers with. The write is visible on the disciple as soon as the call returns, and every other disciple of the app receives it through sync.
 
