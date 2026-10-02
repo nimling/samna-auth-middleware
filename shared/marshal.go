@@ -94,6 +94,7 @@ func (m *UserRelation) PatchBody() map[string]any {
 
 func (m *SamnaUserToken) MarshalWrite() ([]byte, error)   { return sauth.Marshal(m) }
 func (m *SamnaUserToken) UnmarshalWrite(raw []byte) error { return sauth.Unmarshal(raw, m) }
+func (m *SamnaUserToken) WriteResult() any                { return &SamnaUser{} }
 func (m *SamnaUserToken) PatchBody() map[string]any {
 	if bv := m.Validator(); bv != nil {
 		return bv.Body
@@ -103,6 +104,7 @@ func (m *SamnaUserToken) PatchBody() map[string]any {
 
 func (m *SamnaUserExternal) MarshalWrite() ([]byte, error)   { return sauth.Marshal(m) }
 func (m *SamnaUserExternal) UnmarshalWrite(raw []byte) error { return sauth.Unmarshal(raw, m) }
+func (m *SamnaUserExternal) WriteResult() any                { return &SamnaUser{} }
 func (m *SamnaUserExternal) PatchBody() map[string]any {
 	if bv := m.Validator(); bv != nil {
 		return bv.Body

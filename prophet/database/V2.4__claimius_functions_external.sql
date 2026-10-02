@@ -859,32 +859,21 @@ BEGIN
         SELECT c.*
         FROM claimius.claim c
         WHERE c.sa_deleted_at IS NULL
-          AND c.app_id = p_app_id
-          AND (
-              EXISTS (
-                  SELECT 1 FROM claimius.user_claim uc
-                  WHERE uc.claim_id = c.id
-                    AND uc.user_id = p_user_id
-                    AND uc.app_id = p_app_id
-                    AND uc.sa_deleted_at IS NULL
-                    AND (uc.starts_at IS NULL OR uc.starts_at <= now())
-                    AND (uc.ends_at IS NULL OR uc.ends_at > now())
-                    AND (c.sa_access & p_required_access) = p_required_access
-              )
-              OR EXISTS (
-                  SELECT 1 FROM claimius.user_object uo
-                  WHERE uo.app_id = p_app_id
-                    AND uo.user_id = p_user_id
-                    AND uo.object_type = 'claimius.claim'
-                    AND uo.object_id = c.id
-                    AND (uo.sa_access & p_required_access) = p_required_access
-              )
+          AND EXISTS (
+              SELECT 1 FROM claimius.user_claim uc
+              WHERE uc.claim_id = c.id
+                AND uc.user_id = p_user_id
+                AND uc.app_id = p_app_id
+                AND uc.sa_deleted_at IS NULL
+                AND (uc.starts_at IS NULL OR uc.starts_at <= now())
+                AND (uc.ends_at IS NULL OR uc.ends_at > now())
+                AND (c.sa_access & p_required_access) = p_required_access
           )
         ORDER BY claimius._popcount(c.sa_access) DESC;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = claimius, pg_temp;
 
-COMMENT ON FUNCTION claimius.get_claims(UUID, UUID, INTEGER) IS 'All claims the user can read at the required level: either via a direct user_claim grant or via the materialized user_object index (cascade or direct creator grant).';
+COMMENT ON FUNCTION claimius.get_claims(UUID, UUID, INTEGER) IS 'The claims the user holds through a live user_claim, at the required level. The claims the user can see or manage, held or reached through a cascade, are get_objects of type claimius.claim.';
 
 -- ----------------------------------------------------------------------------
 -- get_claims (overload: against an object)

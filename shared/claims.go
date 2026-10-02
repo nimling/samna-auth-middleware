@@ -80,7 +80,7 @@ func (d *DB) GetClaimsQuery(claims *[]Claim, userID uuid.UUID, requiredAccess Cl
 		Model(claims).
 		Where("claim.sa_deleted_at IS NULL").
 		ExcludeColumn("sa_deleted_at").
-		Where("claim.id IN (SELECT id FROM claimius.get_claims(?,?))", userID, requiredAccess)
+		Where(ClaimWhere(userID, requiredAccess))
 }
 
 func (d *DB) GetClaimAudit(ctx context.Context, actorID, claimID uuid.UUID, requiredAccess ClaimAccess) ([]Audit, error) {
@@ -407,52 +407,40 @@ func (d *DB) CreateVirtualClaim(ctx context.Context, ac *AccessClaim, p CreateVi
 	if ac == nil || ac.UserClaimID == nil {
 		return nil, ErrNoAccess
 	}
-	var result AccessClaim
-	err := d.NewRaw(`
-		SELECT
-			NULL::uuid AS user_object_id,
-			((granted_user.data ->> 'id')::uuid) AS user_claim_id,
-			((created_claim.data ->> 'id')::uuid) AS claim_id,
-			(created_claim.data ->> 'name') AS claim_name,
-			((created_claim.data ->> 'sa_access')::int) AS sa_access,
-			NULL::jsonb AS scope,
-			((created_claim.data ->> 'sa_owner_id')::uuid) AS sa_owner_id,
-			((created_claim.data ->> 'sa_root_id')::uuid) AS sa_root_id,
-			NULL::uuid AS sa_location_id,
-			FALSE AS direct_grant
-		FROM (
-			SELECT claimius.create_claim(
-				?, ?, ?, ?,
-				(SELECT sa_root_id FROM claimius.organization WHERE id = ?),
-				?, TRUE, 'virtual'::claimius.claim_type
-			) -> 'claim' AS data
-		) created_claim
-		CROSS JOIN LATERAL (
-			SELECT claimius.assign_claim_object(
-				p_claim_id      := ((created_claim.data ->> 'id')::uuid),
-				p_sa_owner_id   := ?,
-				p_sa_root_id    := (SELECT sa_root_id FROM claimius.organization WHERE id = ?),
-				p_sa_created_by := ?,
-				p_object_id     := ?,
-				p_object_type   := ?,
-				p_sa_access     := NULL,
-				p_inherits      := TRUE
-			) -> 'claim_object' AS data
-		) bound_object
-		CROSS JOIN LATERAL (
-			SELECT claimius.assign_claim_user(
-				((created_claim.data ->> 'id')::uuid),
-				?, ?, ?
-			) -> 'user_claim' AS data
-		) granted_user
-	`,
-		p.Name, p.Description, p.Access, p.OwnerID, p.OwnerID, *ac.UserClaimID,
-		p.OwnerID, p.OwnerID, *ac.UserClaimID, p.ObjectID, p.ObjectType,
-		p.TargetUserID, p.OwnerID, *ac.UserClaimID,
-	).Scan(ctx, &result)
+	owner := *ac
+	owner.OwnerID = p.OwnerID
+	claim, err := d.CreateClaim(ctx, &owner, CreateClaimParams{
+		Name:        p.Name,
+		Description: p.Description,
+		Access:      p.Access,
+		Type:        CLAIM_TYPE_VIRTUAL,
+	})
 	if err != nil {
 		return nil, err
 	}
-	return &result, nil
+	objectType := ObjectType(p.ObjectType)
+	if _, err := claim.AssignObject(&ClaimObject{
+		ObjectID:   &p.ObjectID,
+		ObjectType: &objectType,
+		Inherits:   true,
+		OwnerID:    claim.OwnerID,
+		RootID:     claim.RootID,
+	}); err != nil {
+		return nil, err
+	}
+	granted, err := claim.AssignUser(p.TargetUserID)
+	if err != nil {
+		return nil, err
+	}
+	if len(granted) == 0 {
+		return nil, ErrNoAccess
+	}
+	return &AccessClaim{
+		UserClaimID: &granted[0].ID,
+		ClaimID:     &claim.ID,
+		ClaimName:   &claim.Name,
+		Access:      claim.Access,
+		OwnerID:     claim.OwnerID,
+		RootID:      claim.RootID,
+	}, nil
 }
-

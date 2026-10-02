@@ -18,6 +18,7 @@ func Init(logger echo.Logger) (*DB, error) {
 	if err != nil {
 		return nil, err
 	}
+	d.RouteToProphet = shared.GetDebugMode() == shared.DebugModeNone
 	instance = &DB{d}
 	return instance, nil
 }

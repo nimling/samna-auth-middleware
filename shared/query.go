@@ -11,6 +11,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
+	"github.com/nimling/samna-auth-middleware/v2/client"
+	"github.com/nimling/samna-auth-middleware/v2/internal/store"
 	"github.com/uptrace/bun"
 )
 
@@ -105,7 +107,7 @@ func UserWhere(userID uuid.UUID, requiredAccess ClaimAccess) string {
 
 func ClaimWhere(userID uuid.UUID, requiredAccess ClaimAccess) string {
 	return fmt.Sprintf(
-		`claim.id IN (SELECT id FROM claimius.get_claims('%[1]s', %[2]d))`,
+		`(claim.id IN (SELECT id FROM claimius.get_claims('%[1]s', %[2]d)) OR claim.id IN (SELECT object_id FROM claimius.get_objects('%[1]s', 'claimius.claim', %[2]d)))`,
 		userID, requiredAccess,
 	)
 }
@@ -147,18 +149,89 @@ type endpointSpec struct {
 }
 
 var endpointSpecs = map[ObjectType]endpointSpec{
-	OBJECT_TYPE_CLAIM:        {base: "claim"},
-	OBJECT_TYPE_CLAIM_OBJECT: {base: "object", parents: []string{"claim"}},
-	OBJECT_TYPE_USER_CLAIM:   {base: "user", parents: []string{"claim"}},
-	OBJECT_TYPE_USER:         {base: "user"},
-	OBJECT_TYPE_ORGANIZATION: {base: "organization"},
-	OBJECT_TYPE_LOCATION:     {base: "location"},
+	OBJECT_TYPE_CLAIM:         {base: "claim"},
+	OBJECT_TYPE_CLAIM_OBJECT:  {base: "object", parents: []string{"claim"}},
+	OBJECT_TYPE_USER_CLAIM:    {base: "user", parents: []string{"claim"}},
+	OBJECT_TYPE_USER:          {base: "user"},
+	OBJECT_TYPE_ORGANIZATION:  {base: "organization"},
+	OBJECT_TYPE_LOCATION:      {base: "location"},
 	OBJECT_TYPE_SAMNA_CLIENT:  {base: "samna_client"},
 	OBJECT_TYPE_SAMNA_SECRET:  {base: "secret"},
 	OBJECT_TYPE_USER_RELATION: {base: "relation"},
 }
 
+var payloadEndpoints = map[reflect.Type]string{
+	reflect.TypeOf(&SamnaUserToken{}):    "user/token",
+	reflect.TypeOf(&SamnaUserExternal{}): "user/external",
+}
+
+func (d *DB) routes(model any) bool {
+	if !d.RouteToProphet {
+		return false
+	}
+	if _, ok := payloadEndpoints[reflect.TypeOf(model)]; ok {
+		return true
+	}
+	otype, err := ObjectTypeOf(model)
+	if err != nil {
+		return false
+	}
+	_, ok := endpointSpecs[otype]
+	return ok
+}
+
+type writeMarshaler interface{ MarshalWrite() ([]byte, error) }
+type writeUnmarshaler interface{ UnmarshalWrite([]byte) error }
+type patchBodyer interface{ PatchBody() map[string]any }
+type writeResulter interface{ WriteResult() any }
+
+func marshalWrite(model any) ([]byte, error) {
+	m, ok := model.(writeMarshaler)
+	if !ok {
+		return nil, fmt.Errorf("model %T does not implement MarshalWrite", model)
+	}
+	return m.MarshalWrite()
+}
+
+func unmarshalWrite(model any, raw []byte) error {
+	m, ok := model.(writeUnmarshaler)
+	if !ok {
+		return fmt.Errorf("model %T does not implement UnmarshalWrite", model)
+	}
+	return m.UnmarshalWrite(raw)
+}
+
+func patchBody(model any) map[string]any {
+	if m, ok := model.(patchBodyer); ok {
+		return m.PatchBody()
+	}
+	return nil
+}
+
+func writeResult(model any) any {
+	if m, ok := model.(writeResulter); ok {
+		return m.WriteResult()
+	}
+	return model
+}
+
+func (d *DB) applyRouted(ctx context.Context, model any, raw json.RawMessage, dest ...any) error {
+	result := writeResult(model)
+	if len(raw) > 0 {
+		if err := unmarshalWrite(result, raw); err != nil {
+			return err
+		}
+		if _, err := store.Upsert(ctx, d.DB, result); err != nil {
+			return err
+		}
+	}
+	return dispatchScan(result, dest...)
+}
+
 func EndpointFor(model any, recordID uuid.UUID) (string, error) {
+	if path, ok := payloadEndpoints[reflect.TypeOf(model)]; ok {
+		return path, nil
+	}
 	otype, err := ObjectTypeOf(model)
 	if err != nil {
 		return "", err
@@ -264,6 +337,7 @@ type InsertQuery struct {
 	conflict    string
 	confSet     []conflictSet
 	returns     string
+	seq         client.SyncCursor
 }
 
 func (d *DB) NewInsert() *InsertQuery {
@@ -318,6 +392,9 @@ func (q *InsertQuery) buildBun() *bun.InsertQuery {
 }
 
 func (q *InsertQuery) Exec(ctx context.Context, dest ...any) (sql.Result, error) {
+	if q.db.routes(q.model) {
+		return nil, q.route(ctx, dest...)
+	}
 	if handled, err := q.execClaimius(ctx, dest...); handled {
 		return nil, err
 	}
@@ -325,13 +402,52 @@ func (q *InsertQuery) Exec(ctx context.Context, dest ...any) (sql.Result, error)
 }
 
 func (q *InsertQuery) Scan(ctx context.Context, dest ...any) error {
+	if q.db.routes(q.model) {
+		return q.route(ctx, dest...)
+	}
 	if handled, err := q.execClaimius(ctx, dest...); handled {
 		return err
 	}
 	return q.buildBun().Scan(ctx, dest...)
 }
 
+func (q *InsertQuery) route(ctx context.Context, dest ...any) error {
+	path, err := EndpointFor(q.model, uuid.Nil)
+	if err != nil {
+		return err
+	}
+	StampAccessClaim(q.model, q.accessClaim)
+	if err := StampRoot(ctx, q.db, q.model, q.accessClaim); err != nil {
+		return err
+	}
+	body, err := marshalWrite(q.model)
+	if err != nil {
+		return err
+	}
+	var raw json.RawMessage
+	if err := client.Post(client.WithSyncSeq(ctx, &q.seq), path, json.RawMessage(body), &raw); err != nil {
+		return err
+	}
+	return q.db.applyRouted(ctx, q.model, raw, dest...)
+}
+
+func (q *InsertQuery) Seq() client.SyncCursor { return q.seq }
+
 func (q *InsertQuery) execClaimius(ctx context.Context, dest ...any) (bool, error) {
+	switch m := q.model.(type) {
+	case *SamnaUserToken:
+		result, err := q.db.issueUserToken(ctx, q.accessClaim, *m)
+		if err != nil {
+			return true, err
+		}
+		return true, dispatchScan(result, dest...)
+	case *SamnaUserExternal:
+		result, err := q.db.upsertUserExternal(ctx, q.accessClaim, *m)
+		if err != nil {
+			return true, err
+		}
+		return true, dispatchScan(result, dest...)
+	}
 	switch modelTableName(q.db, q.model) {
 	case "claimius.claim":
 		m, ok := embeddedPtr(q.model, reflect.TypeOf(Claim{})).(*Claim)
@@ -377,7 +493,7 @@ func (q *InsertQuery) execClaimius(ctx context.Context, dest ...any) (bool, erro
 		if !ok {
 			return false, nil
 		}
-		result, err := q.db.InsertUser(ctx, m)
+		result, err := q.db.insertUser(ctx, m)
 		if err != nil {
 			return true, err
 		}
@@ -433,7 +549,6 @@ func (q *InsertQuery) execClaimius(ctx context.Context, dest ...any) (bool, erro
 	}
 	return false, nil
 }
-
 
 func StampAccessClaim(model any, ac *AccessClaim) {
 	if ac == nil {
@@ -513,7 +628,6 @@ func setStructUUID(v reflect.Value, field string, val uuid.UUID, onlyIfZero bool
 	}
 }
 
-
 type UpdateQuery struct {
 	db          *DB
 	model       any
@@ -525,6 +639,7 @@ type UpdateQuery struct {
 	returns     string
 	setCols     []conflictSet
 	whereExpr   []conflictSet
+	seq         client.SyncCursor
 }
 
 func (d *DB) NewUpdate() *UpdateQuery {
@@ -608,6 +723,9 @@ func (q *UpdateQuery) Exec(ctx context.Context, dest ...any) (sql.Result, error)
 	if q.recordID == uuid.Nil {
 		q.recordID = recordIDFromModel(q.db, q.model)
 	}
+	if q.db.routes(q.model) {
+		return nil, q.route(ctx, dest...)
+	}
 	if handled, err := q.execClaimius(ctx, dest...); handled {
 		return nil, err
 	}
@@ -618,12 +736,38 @@ func (q *UpdateQuery) Scan(ctx context.Context, dest ...any) error {
 	if q.recordID == uuid.Nil {
 		q.recordID = recordIDFromModel(q.db, q.model)
 	}
+	if q.db.routes(q.model) {
+		return q.route(ctx, dest...)
+	}
 	if handled, err := q.execClaimius(ctx, dest...); handled {
 		return err
 	}
 	return q.buildBun().Scan(ctx, dest...)
 }
 
+func (q *UpdateQuery) route(ctx context.Context, dest ...any) error {
+	path, err := EndpointFor(q.model, q.recordID)
+	if err != nil {
+		return err
+	}
+	var payload any
+	if body := patchBody(q.model); body != nil {
+		payload = body
+	} else {
+		body, err := marshalWrite(q.model)
+		if err != nil {
+			return err
+		}
+		payload = json.RawMessage(body)
+	}
+	var raw json.RawMessage
+	if err := client.Patch(client.WithSyncSeq(ctx, &q.seq), path, payload, &raw); err != nil {
+		return err
+	}
+	return q.db.applyRouted(ctx, q.model, raw, dest...)
+}
+
+func (q *UpdateQuery) Seq() client.SyncCursor { return q.seq }
 
 func (q *UpdateQuery) execClaimius(ctx context.Context, dest ...any) (bool, error) {
 	if q.recordID == uuid.Nil {
@@ -701,7 +845,6 @@ func (q *UpdateQuery) execClaimius(ctx context.Context, dest ...any) (bool, erro
 	return false, nil
 }
 
-
 type DeleteQuery struct {
 	db          *DB
 	model       any
@@ -709,6 +852,7 @@ type DeleteQuery struct {
 	recordID    uuid.UUID
 	whereExpr   []conflictSet
 	returns     string
+	seq         client.SyncCursor
 }
 
 func (d *DB) NewDelete() *DeleteQuery {
@@ -797,6 +941,9 @@ func (q *DeleteQuery) Exec(ctx context.Context, dest ...any) (sql.Result, error)
 	if q.recordID == uuid.Nil {
 		q.recordID = recordIDFromModel(q.db, q.model)
 	}
+	if q.db.routes(q.model) {
+		return nil, q.route(ctx, dest...)
+	}
 	if handled, err := q.execClaimius(ctx, dest...); handled {
 		return nil, err
 	}
@@ -807,12 +954,28 @@ func (q *DeleteQuery) Scan(ctx context.Context, dest ...any) error {
 	if q.recordID == uuid.Nil {
 		q.recordID = recordIDFromModel(q.db, q.model)
 	}
+	if q.db.routes(q.model) {
+		return q.route(ctx, dest...)
+	}
 	if handled, err := q.execClaimius(ctx, dest...); handled {
 		return err
 	}
 	return q.buildBun().Scan(ctx, dest...)
 }
 
+func (q *DeleteQuery) route(ctx context.Context, dest ...any) error {
+	path, err := EndpointFor(q.model, q.recordID)
+	if err != nil {
+		return err
+	}
+	var raw json.RawMessage
+	if err := client.Delete(client.WithSyncSeq(ctx, &q.seq), path, nil, &raw); err != nil {
+		return err
+	}
+	return q.db.applyRouted(ctx, q.model, raw, dest...)
+}
+
+func (q *DeleteQuery) Seq() client.SyncCursor { return q.seq }
 
 func (q *DeleteQuery) execClaimius(ctx context.Context, dest ...any) (bool, error) {
 	if q.recordID == uuid.Nil {
@@ -859,7 +1022,16 @@ func (q *DeleteQuery) execClaimius(ctx context.Context, dest ...any) (bool, erro
 		*m = *result
 		return true, dispatchScan(q.model, dest...)
 	case "claimius.samna_user":
-		return true, fmt.Errorf("samna_user deletion reserved; use DeleteUser")
+		m, ok := embeddedPtr(q.model, reflect.TypeOf(SamnaUser{})).(*SamnaUser)
+		if !ok {
+			return false, nil
+		}
+		result, err := q.db.deleteUser(ctx, q.accessClaim, q.recordID)
+		if err != nil {
+			return true, err
+		}
+		*m = *result
+		return true, dispatchScan(q.model, dest...)
 	case "claimius.organization":
 		m, ok := embeddedPtr(q.model, reflect.TypeOf(Organization{})).(*Organization)
 		if !ok {
@@ -910,7 +1082,6 @@ func (q *DeleteQuery) execClaimius(ctx context.Context, dest ...any) (bool, erro
 	}
 	return false, nil
 }
-
 
 func (q *InsertQuery) Built() (any, *AccessClaim) { return q.model, q.accessClaim }
 

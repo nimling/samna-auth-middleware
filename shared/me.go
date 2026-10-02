@@ -49,7 +49,11 @@ func (d *DB) GetMeClaims(ctx echo.Context) ([]Claim, error) {
 		return nil, err
 	}
 	claims := make([]Claim, 0)
-	q := d.GetClaimsQuery(&claims, userID, ACCESS_NONE)
+	q := d.NewSelect().
+		Model(&claims).
+		Where("claim.sa_deleted_at IS NULL").
+		ExcludeColumn("sa_deleted_at").
+		Where("claim.id IN (SELECT id FROM claimius.get_claims(?,?))", userID, ACCESS_NONE)
 	for _, w := range with {
 		switch w {
 		case OBJECT_TYPE_CLAIM_OBJECT:

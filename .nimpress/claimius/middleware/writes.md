@@ -26,6 +26,11 @@ err = q.Scan(ctx, &location)
 | `claim`, `claim_object`, `user_claim` | Sent to the prophet, the answer upserted locally | The local claimius functions |
 | `organization`, `location`, `user_relation`, `samna_secret`, `samna_user` | Sent to the prophet, the answer upserted locally | Local, through the triggers |
 | The implementing side's own registered tables | Local | Local |
+| Claimius tables the prophet serves no route for, such as `notification` | Local | Local |
+
+There is one builder, `shared`'s. Each role's `Init` sets where it sends a write once: the prophet's leaves `RouteToProphet` off, and the disciple's turns it on unless `SAUTH_DEBUG_USER_ID` or `SAUTH_DEBUG_CLIENTS` is set. The builder routes a model exactly when that is on and `shared.EndpointFor` knows its type, and otherwise runs the local executor, the claimius function for that type. No other code decides it.
+
+The write helpers write through that builder only, so each does the same on both roles: `CreateClaim`, `Claim.AssignObject`, `Claim.AssignUser`, `CreateVirtualClaim` as those three, `InsertRootOrganization`, `UpdateMe` and `DeleteUser`. `IssueUserToken` and `UpsertUserExternal` insert their payload, `SamnaUserToken` or `SamnaUserExternal`: routed, it goes to `user/token` or `user/external` and the user the prophet answers with is upserted; local, it runs the token transaction. Each reads the existing token first to answer whether the user was created. `CreateOrganizationUser` runs `create_organization_user` directly and has no prophet route.
 
 1. `.Access(ac)` stamps `sa_created_by` with `ac.UserClaimID` and `sa_owner_id` from the grant, pointer fields included. Nothing else stamps an actor.
 

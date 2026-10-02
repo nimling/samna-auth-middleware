@@ -62,26 +62,26 @@ SELECT ok(EXISTS (
           AND sa_owner_id = '10000000-0000-4000-8000-000000000e51'),
     'the second app owns a claim under the organization the reader reads in the first');
 
+SELECT set_eq($$
+    SELECT id FROM claimius.get_claims('a0000000-0000-4000-8000-000000000e51', pg_temp.scope('sys_app'), 0)$$,
+    $$SELECT claim_id FROM claimius.user_claim
+      WHERE user_id = 'a0000000-0000-4000-8000-000000000e51' AND app_id = pg_temp.scope('sys_app') AND sa_deleted_at IS NULL$$,
+    'get_claims lists the claims the reader holds and nothing it only reaches');
+
 SELECT ok(EXISTS (
-        SELECT 1 FROM claimius.get_claims('a0000000-0000-4000-8000-000000000e51', pg_temp.scope('sys_app'), 0)
-        WHERE id = pg_temp.scope('read')),
-    'the reader lists the claim it holds in its own app');
+        SELECT 1 FROM claimius.get_objects('a0000000-0000-4000-8000-000000000e51', pg_temp.scope('sys_app'), 'claimius.claim', 4)
+        WHERE object_id = pg_temp.scope('tenant_claim')),
+    'the reader sees the claim of the other app the shared organization owns, through get_objects');
 
-SELECT is_empty($$
-    SELECT id FROM claimius.get_claims('a0000000-0000-4000-8000-000000000e51', pg_temp.scope('sys_app'), 0)
-    WHERE app_id <> pg_temp.scope('sys_app')$$,
-    'the listing of one app holds no claim of another app the shared organization owns');
+SELECT ok(EXISTS (
+        SELECT 1 FROM claimius.get_access('a0000000-0000-4000-8000-000000000e51', pg_temp.scope('sys_app'),
+            pg_temp.scope('tenant_claim'), 'claimius.claim', 4)),
+    'the cascade from the shared organization reads the claim of the other app');
 
-SELECT is_empty($$
-    SELECT 1 FROM claimius.get_access('a0000000-0000-4000-8000-000000000e51', pg_temp.scope('sys_app'),
-        pg_temp.scope('tenant_claim'), 'claimius.claim', 4)$$,
-    'the cascade from the shared organization grants nothing on a claim of another app');
-
-SELECT is_empty($$
-    SELECT 1 FROM claimius.user_object uo
-    JOIN claimius.claim c ON c.id = uo.object_id
-    WHERE uo.app_id = pg_temp.scope('sys_app') AND uo.object_type = 'claimius.claim' AND c.app_id <> uo.app_id$$,
-    'no pair of the first app names a claim of another app');
+SELECT ok(EXISTS (
+        SELECT 1 FROM claimius.get_objects('a0000000-0000-4000-8000-000000000e51', pg_temp.scope('sys_app'), 'claimius.claim', 4)
+        WHERE object_id = pg_temp.scope('read')),
+    'the visible view holds the claim the reader holds as well');
 
 SELECT * FROM finish();
 ROLLBACK;

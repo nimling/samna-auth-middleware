@@ -26,6 +26,8 @@ type DB struct {
 	ConnStr string
 	Usage   *ObjectUsage
 	stmts   sync.Map
+
+	RouteToProphet bool
 }
 
 type stmtKey struct {

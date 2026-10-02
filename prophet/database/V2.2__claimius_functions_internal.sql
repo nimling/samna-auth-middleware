@@ -1046,9 +1046,6 @@ COMMENT ON FUNCTION claimius._apply_denies(JSONB, JSONB, BOOLEAN, TEXT[]) IS 'Se
 -- claim)); a composed one the grant bits both sides carry. On a claim, a held
 -- claim and a link to it each give read. p_created names the objects the
 -- user created. Denies, scopes and the creator settle through _apply_denies.
--- A claim belongs to one app, so a claim of another app is no target: an
--- organization shared between apps cascades to the claims it owns in every
--- app, and only the claims of p_app_id take a pair in p_app_id.
 -- An object neither derivation nor creation reaches has no row. Every path
 -- starts at the targets and reaches their ancestors through the descendant
 -- index, so the cost follows the objects asked about, never the size of the
@@ -1073,8 +1070,6 @@ CREATE OR REPLACE FUNCTION claimius._build_grants_for_objects(
     ),
     target AS (
         SELECT DISTINCT t.id, t.id = ANY(coalesce(p_created, '{}'::UUID[])) AS created FROM unnest(p_object_ids) AS t(id)
-        WHERE p_object_type <> 'claimius.claim'
-           OR EXISTS (SELECT 1 FROM claimius.claim c WHERE c.id = t.id AND c.app_id = p_app_id)
     ),
     fields AS (
         SELECT coalesce(array_agg(a.attname::TEXT), '{}'::TEXT[]) AS names
