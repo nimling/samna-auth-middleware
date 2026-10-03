@@ -165,6 +165,7 @@ Tables that have a write function:
 - `user_claim` → `insert_user_claim`, `update_user_claim`, `delete_user_claim`
 - `claim_object` → `insert_claim_object`, `update_claim_object`, `delete_claim_object`
 - `samna_user` → `upsert_app_user` for the per app row
+- `samna_secret` → `insert_secret`, which stores the encrypted value and binds the secret to the actor's claim; updates are direct
 - Cross app moves → `merge_user`
 - Cross root moves → `migrate_root`. Admin only, rare.
 - Bootstrap → `upsert_system_app` on the prophet set, taking the system app fields, and `upsert_disciple_state` on the disciple set, taking `p_disciple_app_slug`; the prophet set carries `upsert_disciple_state` and `upsert_prophet_peer` too. `upsert_prophet_peer` takes the system app fields plus `p_upstream_prophet`, `p_upstream_endpoint`, `p_upstream_app_slug` and `p_upstream_app_secret`, runs `upsert_system_app`, and registers the upstream in `prophet_peer`: a hybrid is a prophet that mirrors one app of a peer prophet, and it has no `disciple_state` row
@@ -177,7 +178,7 @@ Tables where direct INSERT/UPDATE is the documented path:
 - `samna_app` updates. Create an app with `upsert_system_app`, the system app, or `upsert_app`, every other app; never INSERT it by hand.
 - `organization`. Prefer `upsert_root_organization` for roots; it links `app_object` for you.
 - `location`
-- `samna_client`, `samna_secret`
+- `samna_client`, `samna_secret` updates
 - `object_field`, `user_field`, `user_relation`
 - `prophet_state`, `disciple_state`
 - `prophet_peer`, by the prophet's admin only: one row per app mirrored from a peer. `upsert_prophet_peer` writes the first

@@ -13,6 +13,7 @@ import (
 	"github.com/nimling/samna-auth-middleware/v2/pkg/respond"
 	sdb "github.com/nimling/samna-auth-middleware/v2/prophet/sdb"
 	"github.com/nimling/samna-auth-middleware/v2/utils"
+	"github.com/uptrace/bun/driver/pgdriver"
 )
 
 func GetSecrets(ctx echo.Context) error {
@@ -50,6 +51,9 @@ func PostSecret(ctx echo.Context) error {
 	}
 	if err := secret.ValidatePost(); err != nil {
 		return respond.Error(ctx, http.StatusBadRequest, err.Error())
+	}
+	if secret.CreatedBy == nil || *secret.CreatedBy == uuid.Nil {
+		return respond.Error(ctx, http.StatusBadRequest, "created_by is required")
 	}
 
 	encrypted, err := utils.AesEncrypt(secret.Value, masterKey.Seed)
@@ -160,14 +164,19 @@ func secretSelect(ctx echo.Context, secretID, appID uuid.UUID) (*SamnaSecret, er
 }
 
 func secretInsert(ctx echo.Context, secret *SamnaSecret) (*SamnaSecret, error) {
-	if _, err := sdb.Instance().NewInsert().
-		Model(secret).
-		Returning("*").
-		Exec(ctx.Request().Context()); err != nil {
+	var secretID uuid.UUID
+	if err := sdb.Instance().NewRaw(
+		"SELECT (claimius.insert_secret(?, ?, ?, ?, ?, ?) -> 'samna_secret' ->> 'id')::uuid",
+		secret.AppID, secret.Key, secret.Value, secret.ExpiresAt, secret.OwnerID, *secret.CreatedBy,
+	).Scan(ctx.Request().Context(), &secretID); err != nil {
+		var pgErr pgdriver.Error
+		if errors.As(err, &pgErr) && pgErr.Field('C') == "P0001" {
+			return nil, errorsx.ErrBadRequest
+		}
 		ctx.Logger().Errorf("secretInsert: %v", err)
 		return nil, errorsx.ErrDbUnexpected
 	}
-	return secret, nil
+	return secretSelect(ctx, secretID, secret.AppID)
 }
 
 func secretUpdate(ctx echo.Context, secret *SamnaSecret, secretID, appID uuid.UUID) error {

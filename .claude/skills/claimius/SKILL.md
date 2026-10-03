@@ -63,6 +63,7 @@ It depends on the table.
 - `user_claim` → `insert_user_claim`, `update_user_claim`, `delete_user_claim`
 - `claim_object` → `insert_claim_object`, `update_claim_object`, `delete_claim_object`
 - `samna_user` per app row creation → `upsert_app_user`
+- `samna_secret` creation → `insert_secret`, which stores the encrypted value and binds the secret to the actor's claim
 - Cross app moves → `merge_user`
 - Cross root moves → `migrate_root`, which hangs the object and its subtree under a live root of the same type, walking organizations through `sa_owner_id`, under `claimius.migrating_root`; flag every call for human review
 - App creation → `upsert_system_app` for the system app, every row stamped with the system user's `user_claim.id`; `upsert_app(p_actor_user_claim_id, p_slug, p_name, p_org_id, p_private_key, p_private_seed, p_redirect_uris, p_sync_uri, p_description, p_connection, p_owner_access, p_default_claim, p_app_id)` for every other app, by an actor holding owner on `p_org_id` in its own app
@@ -74,7 +75,7 @@ It depends on the table.
 
 - `samna_app` updates only. An app is created by `upsert_system_app` or `upsert_app`.
 - `organization`, `location`
-- `samna_client`, `samna_secret`
+- `samna_client`, `samna_secret` updates
 - `object_field`, `user_field`, `user_relation`
 - `prophet_state`, `disciple_state`
 - `prophet_peer`, by the prophet's admin only. `app_handover` only through `insert_app_handover` and `update_app_handover`
@@ -301,7 +302,7 @@ When the AI assistant has Claimius rules loaded, it should:
 - Refuse to write a SELECT from any `claimius.*` table directly. Always use `get_*` functions.
 - Refuse to INSERT/UPDATE on `claim`, `user_claim`, `claim_object` without using the write functions.
 - Refuse to INSERT/UPDATE/DELETE on `user_object`, `object_info`, `user_users`, `inheritance_info`, `table_info`, `sync_event`, `audit`, `reconcile_queue`, `access_diff`, `access_diff_user`, `user_activity`, `claim_graph_cache` or `peer_collision` ever.
-- Allow direct INSERT/UPDATE on `samna_app`, `organization`, `location`, `samna_user`, `samna_client`, `samna_secret`, `object_field`, `user_field`, `user_relation`, `prophet_state`, `disciple_state` on the prophet side, with the required `sa_*` columns populated.
+- Allow direct INSERT/UPDATE on `samna_app`, `organization`, `location`, `samna_user`, `samna_client`, `samna_secret` updates, `object_field`, `user_field`, `user_relation`, `prophet_state`, `disciple_state` on the prophet side, with the required `sa_*` columns populated.
 - Reject any registered table missing required columns and tell the user.
 - Always include `app_id` in filters against materialized state.
 - Default to soft delete; raise hard delete as a flag for the user.

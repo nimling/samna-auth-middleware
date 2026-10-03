@@ -1,5 +1,5 @@
 BEGIN;
-SELECT plan(5);
+SELECT plan(7);
 
 DO $$
 DECLARE
@@ -43,6 +43,18 @@ SELECT is_empty(
     $$SELECT 1 FROM claimius.get_sync_events('50000000-0000-4000-8000-0000000000a1', 0, 0) e
        WHERE e.event_type = 'claimius.organization' AND (e.payload ->> 'id')::UUID = '10000000-0000-4000-8000-0000000000e2'$$,
     'an organization linked only to another app never reaches this app''s delta feed'
+);
+
+SELECT is_empty(
+    $$SELECT 1 FROM claimius.get_sync_events('50000000-0000-4000-8000-0000000000a1', 0, 0) e
+       WHERE e.event_type = 'claimius.organization' AND e.payload ? 'private_seed'$$,
+    'a disciple''s delta feed carries no organization private_seed'
+);
+
+SELECT ok(
+    EXISTS (SELECT 1 FROM claimius.get_sync_events('50000000-0000-4000-8000-0000000000a1', 0, 0, 1000, TRUE) e
+             WHERE e.event_type = 'claimius.organization' AND e.payload ->> 'private_seed' = 'seed-mine'),
+    'a peer''s delta feed carries the organization private_seed a home needs to check app_secret'
 );
 
 SELECT ok(

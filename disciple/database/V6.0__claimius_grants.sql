@@ -3,7 +3,7 @@
 -- ----------------------------------------------------------------------------
 -- Last step of the base set. Defines the role grant helper init calls and
 -- runs it at the top level, so every build and every replay of the set
--- leaves the roles holding what init grants them on every table and function
+-- leaves the roles holding what the bootstrap grants them on every table and function
 -- the set carries, with no consumer calling an internal function, and brings
 -- every audit partition to the grants of the partitioned table. A change to
 -- what a role holds is made here, which replays this file.
@@ -17,7 +17,7 @@ BEGIN
              claimius.insert_user_claim, claimius.update_user_claim, claimius.delete_user_claim,
              claimius.insert_claim_object, claimius.update_claim_object, claimius.delete_claim_object,
              claimius.merge_user, claimius.migrate_root,
-             claimius.upsert_disciple_state,
+             claimius.upsert_disciple_state, claimius.insert_secret,
              claimius.upsert_table_info, claimius.upsert_internal_table_info,
              claimius.recompute_state
              FROM claimius_reader';

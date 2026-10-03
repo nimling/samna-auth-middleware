@@ -1,10 +1,10 @@
 -- ============================================================================
 -- Claimius V6.0 Grants
 -- ----------------------------------------------------------------------------
--- Last step of the base set. Defines the role grant helpers init calls and
+-- Last step of the base set. Defines the role grant helpers the bootstrap calls and
 -- runs the one that fits the deployment, a disciple initialized through
 -- upsert_disciple_state or else a prophet, at the top level, so every build and every
--- replay of the set leaves the roles holding what init grants them on every
+-- replay of the set leaves the roles holding what the bootstrap grants them on every
 -- table and function the set carries, with no consumer calling an internal
 -- function, and brings every audit partition to the grants of the
 -- partitioned table. A change to what a role holds is made here, which
@@ -22,7 +22,7 @@ BEGIN
              claimius.insert_claim_object, claimius.update_claim_object, claimius.delete_claim_object,
              claimius.merge_user, claimius.migrate_root,
              claimius.upsert_system_app, claimius.upsert_disciple_state, claimius.upsert_prophet_peer, claimius.upsert_app,
-             claimius.insert_app_handover, claimius.update_app_handover, claimius.apply_peer_event,
+             claimius.insert_app_handover, claimius.update_app_handover, claimius.apply_peer_event, claimius.insert_secret,
              claimius.upsert_table_info, claimius.upsert_internal_table_info,
              claimius.recompute_state
              FROM claimius_reader';
@@ -55,7 +55,7 @@ BEGIN
              claimius.insert_claim_object, claimius.update_claim_object, claimius.delete_claim_object,
              claimius.merge_user, claimius.migrate_root,
              claimius.upsert_system_app, claimius.upsert_disciple_state, claimius.upsert_prophet_peer, claimius.upsert_app,
-             claimius.insert_app_handover, claimius.update_app_handover, claimius.apply_peer_event,
+             claimius.insert_app_handover, claimius.update_app_handover, claimius.apply_peer_event, claimius.insert_secret,
              claimius.upsert_table_info, claimius.upsert_internal_table_info,
              claimius.recompute_state
              FROM claimius_reader';

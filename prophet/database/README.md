@@ -205,7 +205,7 @@ Calc triggers handle tree maintenance, the writer's own `user_object` pairs and 
 
 ## App secret
 
-`samna_app.app_secret` is the API key disciples (or any other consumer) authenticate with against this prophet's sync endpoints. It is intentionally not a Claimius bootstrap input. The implementing service generates it (typically as `sha256(seed || raw_secret)` with the raw returned to the caller exactly once) and writes the hash to `samna_app.app_secret` on demand. `secret_version` increments on each rotation. Set both fields directly via UPDATE; there is no Claimius helper for this since the secret format and validation are the implementer's concern.
+`samna_app.app_secret` is the API key disciples (or any other consumer) authenticate with against this prophet's sync endpoints. It is intentionally not a Claimius bootstrap input. The implementing service generates it (HMAC SHA256 of the raw secret keyed with the owning organization's `private_seed`, the raw returned to the caller exactly once) and writes the hash to `samna_app.app_secret` on demand. `secret_version` increments on each rotation. Set both fields directly via UPDATE; there is no Claimius helper for this since the secret format and validation are the implementer's concern.
 
 For the system app on a fresh prophet, `app_secret` is NULL after `upsert_system_app` runs. The implementer fills it in if and when the system app needs to be authenticated against externally. For non system apps the implementer creates, the same applies: generate a secret, write it to `samna_app.app_secret`, return the raw to the caller once.
 

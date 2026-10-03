@@ -5246,3 +5246,60 @@ END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = claimius, pg_temp;
 
 COMMENT ON FUNCTION claimius.apply_peer_event(TEXT, TEXT, TEXT, TEXT, JSONB) IS 'Applies one row of a peer''s feed of a mirrored app under replay_mode, refusing and recording a colliding id in peer_collision. Returns false for a refused row.';
+
+CREATE OR REPLACE FUNCTION claimius.insert_secret(
+    p_app_id        UUID,
+    p_key           TEXT,
+    p_value         TEXT,
+    p_expires_at    TIMESTAMPTZ,
+    p_sa_owner_id   UUID,
+    p_sa_created_by UUID
+) RETURNS JSONB AS $$
+DECLARE
+    v_claim_id UUID;
+    v_root_id  UUID;
+    v_secret   claimius.samna_secret;
+    v_binding  JSONB;
+BEGIN
+    SELECT claim_id INTO v_claim_id
+      FROM claimius.user_claim
+     WHERE id = p_sa_created_by
+       AND app_id = p_app_id
+       AND sa_deleted_at IS NULL;
+    IF v_claim_id IS NULL THEN
+        RAISE EXCEPTION 'created_by invalid';
+    END IF;
+
+    SELECT sa_root_id INTO v_root_id
+      FROM claimius.organization
+     WHERE id = p_sa_owner_id
+       AND sa_deleted_at IS NULL
+       AND claimius.app_has_object(p_app_id, 'claimius.organization', id);
+    IF v_root_id IS NULL THEN
+        RAISE EXCEPTION 'owner_id invalid';
+    END IF;
+
+    INSERT INTO claimius.samna_secret (app_id, key, value, expires_at, sa_owner_id, sa_created_by)
+    VALUES (p_app_id, p_key, p_value, p_expires_at, p_sa_owner_id, p_sa_created_by)
+    RETURNING * INTO v_secret;
+
+    v_binding := claimius.insert_claim_object(
+        p_app_id        => p_app_id,
+        p_claim_id      => v_claim_id,
+        p_sa_owner_id   => p_sa_owner_id,
+        p_sa_root_id    => v_root_id,
+        p_sa_created_by => p_sa_created_by,
+        p_object_id     => v_secret.id,
+        p_object_type   => 'claimius.samna_secret',
+        p_sa_access     => 7,
+        p_inherits      => TRUE
+    );
+
+    RETURN jsonb_build_object(
+        'samna_secret', to_jsonb(v_secret),
+        'claim_object', v_binding -> 'claim_object'
+    );
+END;
+$$ LANGUAGE plpgsql;
+
+COMMENT ON FUNCTION claimius.insert_secret(UUID, TEXT, TEXT, TIMESTAMPTZ, UUID, UUID) IS 'Stores a secret of an app, its value already encrypted under the app seed, owned by an organization linked to the app, and binds it to the claim of the actor p_sa_created_by with owner, write and read, so the secret is reached through the actor''s claim on the prophet and on every disciple of the app. Returns samna_secret and claim_object.';

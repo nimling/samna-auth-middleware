@@ -393,7 +393,7 @@ type Organization struct {
 	Name        string           `bun:"name" json:"name"`
 	Description *string          `bun:"description" json:"description"`
 	Type        OrganizationType `bun:"type" json:"type"`
-	PrivateSeed string           `bun:"private_seed" sauth:"private_seed" json:"-"`
+	PrivateSeed string           `bun:"private_seed" json:"-"`
 	OwnerID     uuid.UUID        `bun:"sa_owner_id" json:"owner_id"`
 	RootID      uuid.UUID        `bun:"sa_root_id" json:"root_id"`
 	LocationID  *uuid.UUID       `bun:"sa_location_id" json:"location_id,omitzero"`

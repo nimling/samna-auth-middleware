@@ -18,10 +18,11 @@ A write changes a source row: a registered row, an organization, a location, a c
 | `user_claim` | `insert_user_claim`, `update_user_claim`, `delete_user_claim` |
 | `claim_object` | `insert_claim_object`, `update_claim_object`, `delete_claim_object` |
 | `samna_user` | `upsert_app_user`, `merge_user` |
+| `samna_secret` | `insert_secret` |
 | `organization` roots | `upsert_root_organization` |
 | `samna_app` | `upsert_system_app` for the system app, `upsert_app` for every other app; see [Apps](./apps.md#creating-an-app) |
 | `app_object` | `upsert_app_object`, `delete_app_object` |
-| `organization`, `location`, `samna_app` updates, `samna_client`, `samna_secret`, `object_field`, `user_field`, `user_relation`, `prophet_state` | Direct insert and update |
+| `organization`, `location`, `samna_app` updates, `samna_client`, `samna_secret` updates, `object_field`, `user_field`, `user_relation`, `prophet_state` | Direct insert and update |
 | The implementing side's registered tables | Direct insert and update, by the implementing side |
 | Cross root moves | `migrate_root`, reviewed by a person on every call |
 

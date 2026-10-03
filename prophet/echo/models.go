@@ -160,7 +160,7 @@ type Organization struct {
 	RootID      *uuid.UUID  `bun:"sa_root_id,type:uuid" json:"root_id"`
 	LocationID  *uuid.UUID  `bun:"sa_location_id,type:uuid" json:"location_id,omitempty"`
 	Type        *string     `bun:"type" json:"type,omitempty"`
-	PrivateSeed string      `bun:"private_seed" sauth:"private_seed" json:"-"`
+	PrivateSeed string      `bun:"private_seed" json:"-"`
 	Level       int         `bun:"sa_level,notnull,default:0" json:"level"`
 	ExternalID  *string     `bun:"external_id" json:"external_id,omitempty"`
 	ProviderID  *string     `bun:"provider_id,type:uuid" json:"-"`

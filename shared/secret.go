@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/uptrace/bun"
 )
 
 type BodySecret struct {
@@ -47,10 +46,7 @@ func (d *DB) GetSecret(ctx context.Context, secretID uuid.UUID) (*SamnaSecret, e
 }
 
 func (d *DB) insertSecret(ctx context.Context, ac *AccessClaim, body BodySecret) (*SamnaSecret, error) {
-	if ac == nil {
-		return nil, ErrNoAccess
-	}
-	if ac.ClaimID == nil {
+	if ac == nil || ac.UserClaimID == nil {
 		return nil, ErrNoAccess
 	}
 	app, err := d.GetApp(ctx)
@@ -65,41 +61,14 @@ func (d *DB) insertSecret(ctx context.Context, ac *AccessClaim, body BodySecret)
 	if err != nil {
 		return nil, fmt.Errorf("encrypt: %w", err)
 	}
-	secret := SamnaSecret{
-		Key:       *body.Key,
-		Value:     hex.EncodeToString(encrypted),
-		ExpiresAt: body.ExpiresAt,
-		OwnerID:   *body.OwnerID,
-		CreatedBy: ac.UserClaimID,
+	var secretID uuid.UUID
+	if err := d.NewRaw(
+		"SELECT (claimius.insert_secret(?, ?, ?, ?, ?) -> 'samna_secret' ->> 'id')::uuid",
+		*body.Key, hex.EncodeToString(encrypted), body.ExpiresAt, *body.OwnerID, *ac.UserClaimID,
+	).Scan(ctx, &secretID); err != nil {
+		return nil, fmt.Errorf("insert_secret: %w", err)
 	}
-	err = d.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
-		if _, err := tx.NewInsert().
-			Model(&secret).
-			ExcludeColumn("id", "sa_created_at", "sa_updated_at", "sa_deleted_at").
-			Returning("*").
-			Exec(ctx, &secret); err != nil {
-			return fmt.Errorf("insert secret: %w", err)
-		}
-		if _, err := tx.NewRaw(`
-			SELECT claimius.insert_claim_object(
-				p_claim_id      := ?,
-				p_sa_owner_id   := ?,
-				p_sa_root_id    := ?,
-				p_sa_created_by := ?,
-				p_object_id     := ?,
-				p_object_type   := 'claimius.samna_secret',
-				p_sa_access     := ?,
-				p_inherits      := TRUE
-			)
-		`, *ac.ClaimID, ac.OwnerID, ac.RootID, *ac.UserClaimID, secret.ID, int(ACCESS_OWNER|ACCESS_WRITE|ACCESS_READ)).Exec(ctx); err != nil {
-			return fmt.Errorf("assign claim object: %w", err)
-		}
-		return nil
-	})
-	if err != nil {
-		return nil, err
-	}
-	return &secret, nil
+	return d.GetSecret(ctx, secretID)
 }
 
 func (d *DB) updateSecret(ctx context.Context, ac *AccessClaim, secretID uuid.UUID, body BodySecret) (*SamnaSecret, error) {

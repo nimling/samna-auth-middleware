@@ -41,11 +41,13 @@ Every read function of the external surface, the `get_*` access, listing, scope,
 
 2. `samna_app` carries `private_key` and `private_seed`. Its events carry no `app_id` and no pull serves them, and a disciple skips the event type, so the keys never reach a disciple. They reach a peer prophet only in the app row of `get_peer_snapshot`, served over the mirrored app's own credential to a prophet that mirrors that app.
 
-3. `samna_client.secret_hash` and `samna_app.app_secret` are bcrypt hashes: a copy can verify a credential and cannot recover it.
+3. `samna_client.secret_hash` is a bcrypt hash and `samna_app.app_secret` is HMAC SHA256 of the raw secret keyed with the owning organization's `private_seed`: a copy can verify a credential and cannot recover it.
 
 4. The middleware pays bcrypt once per credential. `verifyClientSecret` keeps, per `client_id`, the SHA-256 digest of the secret that passed and the `secret_hash` it passed against. A later request rereads the client row by primary key for its status, expiry and hash, and compares its secret's digest to the kept one in constant time while the hash is unchanged. Per request that is one primary key probe and one digest, and bcrypt runs again only when the client presents another secret or its `secret_hash` changes, so a revoked client or a rotated secret stops on the next request. `smw.AppMiddleware` keeps the imported key pair of an app per app id and imports it again when the row's `private_key` or `private_seed` differs.
 
-5. `organization.private_seed` is generated at a root and inherited by its children, and keys `app_secret` hashing for the apps owned in the tree.
+5. `organization.private_seed` is generated at a root and inherited by its children, and keys `app_secret` hashing for the apps owned in the tree. It travels to peer prophets only: `get_sync_events` drops it from organization payloads for a disciple, and the disciple snapshot never marshals it, so a disciple cannot verify or forge an `app_secret`.
+
+6. `insert_secret` stores a secret and binds it to the claim of the actor in `sa_created_by` with owner, write and read in one statement, on the prophet for a routed write and on a debug disciple locally. The binding travels with the secret, so every disciple of the app reaches it through `get_secrets` and gates it with `MutationAccess` like any other object.
 
 ## Ephemeral tables
 
