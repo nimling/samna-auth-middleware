@@ -8,7 +8,7 @@ lastUpdated: true
 
 # Denials
 
-A deny is a derivation whose effective mask carries the deny bit, 16: a claim stored with bit 16 and bound with a NULL mask or a mask that keeps bit 16, or a composition whose link or binding carries it. Its other bits, `e & 15`, name what it takes away. A deny mask is stored as given, never expanded, and a deny claim is bound and granted like any claim: `assign_claim_object` puts it on an object, `assign_claim_user` gives it to the users it applies to.
+A deny is a derivation whose effective mask carries the deny bit, 16: a claim stored with bit 16 and bound with a NULL mask or a mask that keeps bit 16, or a composition whose link or binding carries it. Its other bits, `e & 15`, name what it takes away. A deny mask is stored as given, never expanded, and a deny claim is bound and granted like any claim: `insert_claim_object` puts it on an object, `insert_user_claim` gives it to the users it applies to.
 
 ## The classes
 
@@ -74,10 +74,10 @@ Ada administers the organization Acme. One branch, Research, is closed to her fo
 | Table | Row |
 |---|---|
 | `organization` | Acme, root. Sales and Research under Acme. Lab and Archive under Research |
-| `public.doc` | Two documents under each organization, registered with `init_claimius_tables('public.doc')` |
-| `claim` | Admin, `create_claim(p_sa_access => 1)`, stored 15 |
-| `claim` | No write on Research, `create_claim(p_sa_access => 18)`, stored 18 |
-| `claim` | Share, `create_claim(p_sa_access => 4)`, stored 4 |
+| `public.doc` | Two documents under each organization, registered with `upsert_table_info('public.doc')` |
+| `claim` | Admin, `insert_claim(p_sa_access => 1)`, stored 15 |
+| `claim` | No write on Research, `insert_claim(p_sa_access => 18)`, stored 18 |
+| `claim` | Share, `insert_claim(p_sa_access => 4)`, stored 4 |
 | `claim_object` | Admin on Acme, `inherits` true |
 | `claim_object` | No write on Research on Research, `inherits` true |
 | `claim_object` | Share on Lab doc 1 |

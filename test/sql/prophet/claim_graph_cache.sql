@@ -42,27 +42,27 @@ DECLARE
     v_root  UUID := '10000000-0000-4000-8000-0000000000c0';
     v_crew  UUID;
 BEGIN
-    v_app := (claimius.init(
+    v_app := (claimius.upsert_system_app(
         p_system_app_slug         => 'sqltest_graph',
         p_system_app_name         => 'SQL graph cache test',
         p_system_app_private_key  => 'key',
         p_system_app_private_seed => 'seed',
         p_default_claim           => '{"name": "Member", "description": "Default member claim"}'::JSONB
     ) -> 'samna_app' ->> 'id')::UUID;
-    PERFORM claimius.ensure_app_user(p_user_id => 'a0000000-0000-4000-8000-0000000000c1', p_app_id => v_app, p_first_name => 'Graph');
+    PERFORM claimius.upsert_app_user(p_user_id => 'a0000000-0000-4000-8000-0000000000c1', p_app_id => v_app, p_first_name => 'Graph');
 
     INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
     VALUES (v_root, 'Graph root', 'company', v_root, v_root, 0, v_sys);
-    PERFORM claimius.link_app_object(v_app, 'claimius.organization', v_root);
+    PERFORM claimius.upsert_app_object(v_app, 'claimius.organization', v_root);
 
-    v_crew := (claimius.create_claim(
+    v_crew := (claimius.insert_claim(
         p_app_id => v_app, p_name => 'Graph crew', p_description => NULL, p_sa_access => 4,
         p_sa_owner_id => v_root, p_sa_root_id => v_root, p_sa_created_by => v_sys
     ) -> 'claim' ->> 'id')::UUID;
-    PERFORM claimius.assign_claim_object(
+    PERFORM claimius.insert_claim_object(
         p_app_id => v_app, p_claim_id => v_crew, p_sa_owner_id => v_root, p_sa_root_id => v_root, p_sa_created_by => v_sys,
         p_object_id => v_root, p_object_type => 'claimius.organization', p_inherits => TRUE);
-    PERFORM claimius.assign_claim_user(p_app_id => v_app, p_claim_id => v_crew, p_user_id => 'a0000000-0000-4000-8000-0000000000c1',
+    PERFORM claimius.insert_user_claim(p_app_id => v_app, p_claim_id => v_crew, p_user_id => 'a0000000-0000-4000-8000-0000000000c1',
         p_sa_owner_id => v_root, p_sa_created_by => v_sys);
 END $$;
 COMMIT;

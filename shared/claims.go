@@ -190,7 +190,7 @@ func (d *DB) insertClaim(ctx context.Context, ac *AccessClaim, claim *Claim) (*C
 	claim.RootID = ac.RootID
 	var payload []byte
 	err := d.NewRaw(`
-		SELECT (claimius.create_claim(
+		SELECT (claimius.insert_claim(
 			?, ?, ?, ?, ?, ?, ?, ?::claimius.claim_type
 		) -> 'claim')::jsonb
 	`,
@@ -260,7 +260,7 @@ func (d *DB) deleteClaim(ctx context.Context, ac *AccessClaim, claimID uuid.UUID
 	var claim Claim
 	err := d.NewSelect().
 		Model(&claim).
-		ModelTableExpr("claimius.remove_claim(?, ?) AS claim", claimID, *ac.UserClaimID).
+		ModelTableExpr("claimius.delete_claim(?, ?) AS claim", claimID, *ac.UserClaimID).
 		Scan(ctx)
 	if err != nil {
 		return nil, err
@@ -277,7 +277,7 @@ func (d *DB) insertClaimObject(ctx context.Context, ac *AccessClaim, claimID uui
 	co.CreatedBy = ac.UserClaimID
 	var payload []byte
 	err := d.NewRaw(`
-		SELECT (claimius.assign_claim_object(
+		SELECT (claimius.insert_claim_object(
 			p_claim_id      := ?,
 			p_sa_owner_id   := ?,
 			p_sa_root_id    := ?,
@@ -330,7 +330,7 @@ func (d *DB) deleteClaimObject(ctx context.Context, ac *AccessClaim, claimID, ob
 	var co ClaimObject
 	err = d.NewSelect().
 		Model(&co).
-		ModelTableExpr("claimius.remove_claim_object(?, ?) AS claim_object", rowID, *ac.UserClaimID).
+		ModelTableExpr("claimius.delete_claim_object(?, ?) AS claim_object", rowID, *ac.UserClaimID).
 		Scan(ctx)
 	if err != nil {
 		return nil, err
@@ -346,7 +346,7 @@ func (d *DB) insertClaimUser(ctx context.Context, ac *AccessClaim, claimID uuid.
 	uc.CreatedBy = *ac.UserClaimID
 	var payload []byte
 	err := d.NewRaw(`
-		SELECT (claimius.assign_claim_user(
+		SELECT (claimius.insert_user_claim(
 			?, ?, ?, ?, ?, ?, ?
 		) -> 'user_claim')::jsonb
 	`,
@@ -385,7 +385,7 @@ func (d *DB) deleteClaimUser(ctx context.Context, ac *AccessClaim, claimID, user
 	var uc UserClaim
 	err = d.NewSelect().
 		Model(&uc).
-		ModelTableExpr("claimius.remove_user_claim(?, ?) AS user_claim", rowID, *ac.UserClaimID).
+		ModelTableExpr("claimius.delete_user_claim(?, ?) AS user_claim", rowID, *ac.UserClaimID).
 		Scan(ctx)
 	if err != nil {
 		return nil, err

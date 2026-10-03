@@ -98,5 +98,5 @@ uptime.Init(e.Logger, uptime.Options{
 
 Sync is pull only. There is no inbound sync endpoint on a disciple and none on the prophet; the disciple reaches out to `GET /sam/sync/snapshot` and `GET /sam/sync/:cursor` through `sam.SyncStart`, with a `(txid, seq)` cursor written `<txid>.<seq>`. The feed carries source rows only, and the disciple settles its own access from them. It binds to the prophet that answers it and routes its writes there. See [Sync](sync.md).
 
-Object types pass through the middleware untouched over JSON and into the database. A disciple's own tables are qualified by the consumer in their `table:` tags, which `ObjectTypeOf` returns as written, and `init_claimius_tables` raises on an unqualified name. `ObjectType.Validate` is the opt in check for the consumer's own types.
+Object types pass through the middleware untouched over JSON and into the database. A disciple's own tables are qualified by the consumer in their `table:` tags, which `ObjectTypeOf` returns as written, and `upsert_table_info` raises on an unqualified name. `ObjectType.Validate` is the opt in check for the consumer's own types.
 </content>

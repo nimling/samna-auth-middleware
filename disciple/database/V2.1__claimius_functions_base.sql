@@ -110,7 +110,7 @@ $$;
 
 COMMENT ON FUNCTION claimius.ensure_uuid_null(p uuid) IS 'Returns NULL when input is NULL or the zero UUID; otherwise the UUID unchanged.';
 
--- write_audit
+-- insert_audit
 -- Inserts a row into claimius.audit, in the transaction of the change it
 -- records, opening the month's partition on its first row. Used by audit
 -- triggers, by error paths inside other triggers and by the service.
@@ -118,7 +118,8 @@ COMMENT ON FUNCTION claimius.ensure_uuid_null(p uuid) IS 'Returns NULL when inpu
 -- triggers, replay, denied access attempts).
 DROP FUNCTION IF EXISTS claimius.write_audit(UUID, TEXT, TEXT, TEXT, UUID, UUID, UUID, TEXT);
 
-CREATE OR REPLACE FUNCTION claimius.write_audit(
+DROP FUNCTION IF EXISTS claimius.write_audit(text,text,text,uuid,uuid,uuid,text);
+CREATE OR REPLACE FUNCTION claimius.insert_audit(
     p_operation     TEXT,
     p_type          TEXT,
     p_object_type   TEXT,
@@ -130,7 +131,7 @@ CREATE OR REPLACE FUNCTION claimius.write_audit(
 DECLARE
     v_row claimius.audit;
 BEGIN
-    PERFORM claimius.ensure_audit_partition(now());
+    PERFORM claimius.upsert_audit_partition(now());
     INSERT INTO claimius.audit (
         operation, type, object_type, object_id,
         sa_owner_id, sa_created_by, message
@@ -143,7 +144,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius.write_audit(p_operation text, p_type text, p_object_type text, p_object_id uuid, p_sa_owner_id uuid, p_sa_created_by uuid, p_message text) IS 'Inserts a row into the audit log and returns it.';
+COMMENT ON FUNCTION claimius.insert_audit(p_operation text, p_type text, p_object_type text, p_object_id uuid, p_sa_owner_id uuid, p_sa_created_by uuid, p_message text) IS 'Inserts a row into the audit log and returns it.';
 
 -- in_replay_mode
 -- Returns true if claimius.replay_mode is set on this session. Used by

@@ -344,7 +344,7 @@ func codeRedeem(ctx echo.Context, c *Code, userID uuid.UUID) error {
 		}
 
 		if _, err = tx.NewRaw(
-			"SELECT claimius.assign_claim_user(?, ?, ?, ?, ?, NULL, ?, ?)",
+			"SELECT claimius.insert_user_claim(?, ?, ?, ?, ?, NULL, ?, ?)",
 			c.AppID, *c.ClaimID, userID, ownerID, c.CreatedBy,
 			c.StartsAt, c.EndsAt,
 		).Exec(ctx.Request().Context()); err != nil {

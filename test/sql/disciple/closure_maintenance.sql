@@ -82,8 +82,8 @@ DECLARE
     v_n1 UUID := '30000000-0000-4000-8000-0000000000c2';
     v_n2 UUID := '30000000-0000-4000-8000-0000000000c3';
 BEGIN
-    PERFORM claimius.init();
-    PERFORM claimius.init_claimius_tables('public.sqltest_node', 'public.sqltest_leaf');
+    PERFORM claimius.upsert_disciple_state();
+    PERFORM claimius.upsert_table_info('public.sqltest_node', 'public.sqltest_leaf');
 
     INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
     VALUES (v_r, 'Closure root', 'company', v_r, v_r, 0, v_a);

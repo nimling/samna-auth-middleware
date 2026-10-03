@@ -623,11 +623,11 @@ func getUserLocations(ctx echo.Context, userID uuid.UUID) ([]Location, error) {
 func postUser(ctx echo.Context, req BodyUser, userName string) (*SamnaUser, error) {
 	var userID uuid.UUID
 	err := sdb.Instance().NewRaw(
-		"SELECT (claimius.ensure_app_user(?, ?, ?, ?, ?, ?, ?, ?, ?) -> 'samna_user' ->> 'user_id')::uuid",
+		"SELECT (claimius.upsert_app_user(?, ?, ?, ?, ?, ?, ?, ?, ?) -> 'samna_user' ->> 'user_id')::uuid",
 		req.UserID, *req.AppID, req.FirstName, req.LastName, userName, req.Email, req.Phone, req.ExternalID, req.UserImage,
 	).Scan(ctx.Request().Context(), &userID)
 	if err != nil {
-		ctx.Logger().Errorf("ensure_app_user: %v", err)
+		ctx.Logger().Errorf("upsert_app_user: %v", err)
 		return nil, errorsx.ErrDbUnexpected
 	}
 
@@ -724,7 +724,7 @@ func createOrganizationUser(ctx echo.Context, createdBy, ownerID, claimID *uuid.
 
 	var payload []byte
 	if err := sdb.Instance().NewRaw(
-		"SELECT claimius.create_organization_user(?, ?, ?, ?::jsonb, ?, ?::jsonb, ?)",
+		"SELECT claimius.insert_organization_user(?, ?, ?, ?::jsonb, ?, ?::jsonb, ?)",
 		appID, *createdBy, *ownerID, string(userJSON), upsert, identityJSON, reason,
 	).Scan(ctx.Request().Context(), &payload); err != nil {
 		var pgErr pgdriver.Error
@@ -736,7 +736,7 @@ func createOrganizationUser(ctx echo.Context, createdBy, ownerID, claimID *uuid.
 				return nil, http.StatusBadRequest, errors.New(pgErr.Field('M'))
 			}
 		}
-		ctx.Logger().Errorf("create_organization_user: %v", err)
+		ctx.Logger().Errorf("insert_organization_user: %v", err)
 		return nil, http.StatusInternalServerError, errors.New("Internal server error")
 	}
 
@@ -745,7 +745,7 @@ func createOrganizationUser(ctx echo.Context, createdBy, ownerID, claimID *uuid.
 		Created   bool       `json:"created"`
 	}
 	if err := json.Unmarshal(payload, &result); err != nil || result.SamnaUser == nil {
-		ctx.Logger().Errorf("unmarshal create_organization_user: %v", err)
+		ctx.Logger().Errorf("unmarshal insert_organization_user: %v", err)
 		return nil, http.StatusInternalServerError, errors.New("Internal server error")
 	}
 	status := http.StatusOK

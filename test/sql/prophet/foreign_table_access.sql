@@ -9,7 +9,7 @@ DECLARE
     v_foreign UUID := '20000000-0000-4000-8000-0000000000f2';
     v_claim   UUID;
 BEGIN
-    v_app := (claimius.init(
+    v_app := (claimius.upsert_system_app(
         p_system_app_slug         => 'sqltest_foreign',
         p_system_app_name         => 'SQL foreign test',
         p_system_app_private_key  => 'key',
@@ -17,19 +17,19 @@ BEGIN
         p_default_claim           => '{"name": "Member", "description": "Default member claim"}'::JSONB
     ) -> 'samna_app' ->> 'id')::UUID;
 
-    PERFORM claimius.ensure_app_user(p_user_id => v_a, p_app_id => v_app, p_first_name => 'Ada');
+    PERFORM claimius.upsert_app_user(p_user_id => v_a, p_app_id => v_app, p_first_name => 'Ada');
 
     INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
     VALUES (v_root, 'Foreign root', 'company', v_root, v_root, 0, v_a);
-    PERFORM claimius.link_app_object(v_app, 'claimius.organization', v_root);
+    PERFORM claimius.upsert_app_object(v_app, 'claimius.organization', v_root);
 
-    v_claim := (claimius.create_claim(
+    v_claim := (claimius.insert_claim(
         p_app_id => v_app, p_name => 'Disciple writer', p_description => NULL, p_sa_access => 6,
         p_sa_owner_id => v_root, p_sa_root_id => v_root, p_sa_created_by => v_a, p_inherits => TRUE
     ) -> 'claim' ->> 'id')::UUID;
-    PERFORM claimius.assign_claim_user(p_app_id => v_app, p_claim_id => v_claim, p_user_id => v_a, p_sa_owner_id => v_root, p_sa_created_by => v_a);
+    PERFORM claimius.insert_user_claim(p_app_id => v_app, p_claim_id => v_claim, p_user_id => v_a, p_sa_owner_id => v_root, p_sa_created_by => v_a);
 
-    PERFORM claimius.assign_claim_object(
+    PERFORM claimius.insert_claim_object(
         p_app_id => v_app, p_claim_id => v_claim, p_sa_owner_id => v_root, p_sa_root_id => v_root, p_sa_created_by => v_a,
         p_object_id => v_foreign, p_object_type => 'public.sqltest_disciple_only', p_sa_access => 6, p_inherits => TRUE
     );

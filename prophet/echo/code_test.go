@@ -29,7 +29,7 @@ func postJSON(t *testing.T, body string, handler echo.HandlerFunc) int {
 func TestPostCodeRequiresCreatedBy(t *testing.T) {
 	body := `{"owner_id":"10000000-0000-4000-8000-000000000001","claim_id":"20000000-0000-4000-8000-000000000002"}`
 	if code := postJSON(t, body, pecho.PostCode); code != http.StatusBadRequest {
-		t.Errorf("status = %d, want 400 when created_by is absent, because sa_created_by is not null and the redeem hands it to assign_claim_user", code)
+		t.Errorf("status = %d, want 400 when created_by is absent, because sa_created_by is not null and the redeem hands it to insert_user_claim", code)
 	}
 }
 

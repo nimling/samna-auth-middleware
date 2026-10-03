@@ -25,10 +25,10 @@ DECLARE
     v_crew  UUID;
     v_user  UUID;
 BEGIN
-    PERFORM claimius.init();
+    PERFORM claimius.upsert_disciple_state();
 
     FOREACH v_user IN ARRAY ARRAY['a0000000-0000-4000-8000-0000000000b1', 'a0000000-0000-4000-8000-0000000000b2']::UUID[] LOOP
-        PERFORM claimius.ensure_app_user(p_user_id => v_user, p_first_name => 'Reader');
+        PERFORM claimius.upsert_app_user(p_user_id => v_user, p_first_name => 'Reader');
     END LOOP;
 
     INSERT INTO claimius.organization (id, name, description, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
@@ -38,15 +38,15 @@ BEGIN
            ('10000000-0000-4000-8000-0000000000b2', 'Info quarry', 'Stone and gravel', 'company', v_root, v_root, 1, v_sys),
            ('10000000-0000-4000-8000-0000000000b3', 'Info meadow', 'Grass and sheep', 'company', v_root, v_root, 1, v_sys);
 
-    v_crew := (claimius.create_claim(
+    v_crew := (claimius.insert_claim(
         p_name => 'Info crew', p_description => 'Reads the info tree', p_sa_access => 4,
         p_sa_owner_id => v_root, p_sa_root_id => v_root, p_sa_created_by => v_sys
     ) -> 'claim' ->> 'id')::UUID;
-    PERFORM claimius.assign_claim_object(
+    PERFORM claimius.insert_claim_object(
         p_claim_id => v_crew, p_sa_owner_id => v_root, p_sa_root_id => v_root, p_sa_created_by => v_sys,
         p_object_id => v_root, p_object_type => 'claimius.organization', p_inherits => TRUE);
     FOREACH v_user IN ARRAY ARRAY['a0000000-0000-4000-8000-0000000000b1', 'a0000000-0000-4000-8000-0000000000b2']::UUID[] LOOP
-        PERFORM claimius.assign_claim_user(p_claim_id => v_crew, p_user_id => v_user, p_sa_owner_id => v_root, p_sa_created_by => v_sys);
+        PERFORM claimius.insert_user_claim(p_claim_id => v_crew, p_user_id => v_user, p_sa_owner_id => v_root, p_sa_created_by => v_sys);
     END LOOP;
 END $$;
 

@@ -9,7 +9,7 @@ DECLARE
     v_write UUID;
     v_page  UUID;
 BEGIN
-    v_app := (claimius.init(
+    v_app := (claimius.upsert_system_app(
         p_system_app_slug         => 'sqltest_reader',
         p_system_app_name         => 'SQL reader test',
         p_system_app_private_key  => 'key',
@@ -17,33 +17,33 @@ BEGIN
         p_default_claim           => '{"name": "Member", "description": "Default member claim"}'::JSONB
     ) -> 'samna_app' ->> 'id')::UUID;
 
-    PERFORM claimius.ensure_app_user(p_user_id => v_a, p_app_id => v_app, p_first_name => 'Reader', p_external_id => 'ext-reader');
+    PERFORM claimius.upsert_app_user(p_user_id => v_a, p_app_id => v_app, p_first_name => 'Reader', p_external_id => 'ext-reader');
 
     INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
     VALUES (v_root, 'Reader root', 'company', v_root, v_root, 0, v_a);
-    PERFORM claimius.link_app_object(v_app, 'claimius.organization', v_root);
+    PERFORM claimius.upsert_app_object(v_app, 'claimius.organization', v_root);
 
-    v_write := (claimius.create_claim(
+    v_write := (claimius.insert_claim(
         p_app_id => v_app, p_name => 'Reader writer', p_description => NULL, p_sa_access => 6,
         p_sa_owner_id => v_root, p_sa_root_id => v_root, p_sa_created_by => v_a, p_inherits => TRUE
     ) -> 'claim' ->> 'id')::UUID;
-    PERFORM claimius.assign_claim_object(
+    PERFORM claimius.insert_claim_object(
         p_app_id => v_app, p_claim_id => v_write, p_sa_owner_id => v_root, p_sa_root_id => v_root, p_sa_created_by => v_a,
         p_object_id => v_root, p_object_type => 'claimius.organization', p_sa_access => 6, p_inherits => TRUE
     );
-    PERFORM claimius.assign_claim_user(p_app_id => v_app, p_claim_id => v_write, p_user_id => v_a, p_sa_owner_id => v_root, p_sa_created_by => v_a);
+    PERFORM claimius.insert_user_claim(p_app_id => v_app, p_claim_id => v_write, p_user_id => v_a, p_sa_owner_id => v_root, p_sa_created_by => v_a);
 
-    v_page := (claimius.create_claim(
+    v_page := (claimius.insert_claim(
         p_app_id => v_app, p_name => 'Reader page', p_description => NULL, p_sa_access => 4,
         p_sa_owner_id => v_root, p_sa_root_id => v_root, p_sa_created_by => v_a, p_inherits => FALSE
     ) -> 'claim' ->> 'id')::UUID;
-    PERFORM claimius.assign_claim_object(
+    PERFORM claimius.insert_claim_object(
         p_app_id => v_app, p_claim_id => v_page, p_sa_owner_id => v_root, p_sa_root_id => v_root, p_sa_created_by => v_a,
         p_sa_access => 4, p_inherits => FALSE, p_scope => '{"page": {"reports": true}}'::JSONB
     );
-    PERFORM claimius.assign_claim_user(p_app_id => v_app, p_claim_id => v_page, p_user_id => v_a, p_sa_owner_id => v_root, p_sa_created_by => v_a);
+    PERFORM claimius.insert_user_claim(p_app_id => v_app, p_claim_id => v_page, p_user_id => v_a, p_sa_owner_id => v_root, p_sa_created_by => v_a);
 
-    PERFORM claimius.write_audit(v_app, 'update', 'test', 'claimius.organization', v_root, v_root, NULL, 'reader audit');
+    PERFORM claimius.insert_audit(v_app, 'update', 'test', 'claimius.organization', v_root, v_root, NULL, 'reader audit');
 END $$;
 
 CREATE TEMP TABLE app_ids AS SELECT id FROM claimius.samna_app WHERE slug = 'sqltest_reader';

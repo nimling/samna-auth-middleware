@@ -14,7 +14,7 @@ DECLARE
     v_system UUID;
     v_user   UUID;
 BEGIN
-    v_system := (claimius.init(
+    v_system := (claimius.upsert_system_app(
         p_system_app_slug         => 'sqltest_cursor',
         p_system_app_name         => 'SQL cursor test',
         p_system_app_private_key  => 'key',
@@ -28,7 +28,7 @@ BEGIN
 
     FOREACH v_user IN ARRAY ARRAY['a0000000-0000-4000-8000-0000000000c6', 'a0000000-0000-4000-8000-0000000000c7',
                                   'a0000000-0000-4000-8000-0000000000c8']::UUID[] LOOP
-        PERFORM claimius.ensure_app_user(p_user_id => v_user, p_app_id => pg_temp.app(), p_first_name => 'Cursor');
+        PERFORM claimius.upsert_app_user(p_user_id => v_user, p_app_id => pg_temp.app(), p_first_name => 'Cursor');
     END LOOP;
 END $$;
 

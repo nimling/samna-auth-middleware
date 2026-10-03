@@ -52,7 +52,7 @@ func main() {
 
 ## App scoping
 
-The prophet hosts every app, so every read it performs is scoped. Most tables carry an `app_id` column. `organization` and `location` do not: they are shared objects linked to apps through `claimius.app_object`, filtered with `app_object_ids(app_id, object_type)` and linked with `link_app_object`. See [App scoping](app_scoping.md).
+The prophet hosts every app, so every read it performs is scoped. Most tables carry an `app_id` column. `organization` and `location` do not: they are shared objects linked to apps through `claimius.app_object`, filtered with `app_object_ids(app_id, object_type)` and linked with `upsert_app_object`. See [App scoping](app_scoping.md).
 
 ## Machine clients
 
@@ -64,7 +64,7 @@ The prophet is where consent and interaction capture live. `claimius.consent` re
 
 `RegisterEndpoints` mounts the routes a disciple forwards to: `GET` and `POST /consent`, `POST /analytics`, and `GET /analytics/event` and `/analytics/session` for reading back. `analytics.Init(db)` starts the async writer, so capture never blocks a request.
 
-Consent is enforced in SQL, not in the handler. `post_analytics_events` writes nothing when the analytics category is absent for that visitor, so a disciple that forwards a batch for someone who has not granted it stores nothing.
+Consent is enforced in SQL, not in the handler. `insert_analytics_events` writes nothing when the analytics category is absent for that visitor, so a disciple that forwards a batch for someone who has not granted it stores nothing.
 
 Reach is enforced in SQL too. Every capture row carries the app_id of the app that recorded it, and an app reads another app's capture by holding a live `app_object` link to that app's `samna_app` row, the same link organizations and locations cross apps on. `claimius.capture_app_ids` returns the readable set, `claimius.analytics_enabled` answers whether an app has capture switched on, and `claimius.capture_app_access` combines the two. `get_analytics_events` and `get_analytics_sessions` take the calling app and the target app and return nothing when the pair does not resolve, so the scope cannot be bypassed by a handler.
 
@@ -74,7 +74,7 @@ The policy a decision is recorded against and the document the banner links are 
 
 Sync is pull only. The prophet serves the snapshot and delta feed at `GET sync/snapshot` and `GET sync/:cursor` under the registered group, the delta read through `claimius.get_sync_events` after a `<txid>.<seq>` cursor, source rows only, organizations and locations once per linked app. A pull is served only when `claimius.check_sync_home` agrees the prophet serves that consumer; otherwise it answers `409` with the prophet the consumer stays with in `SAuth-Home`. There is no inbound sync route on the prophet and it does not run `SyncStart`; that is the disciple side.
 
-Federation runs in SQL and in one Go call. Each `claimius.prophet_peer` row names a peer prophet, its endpoint and the slug and secret of one app mirrored from it; `sam.PeerSyncStart(ctx, db)` pulls every row as that app, with `peer=true`, and applies each row through `claimius.apply_peer_event`. `claimius.offer_handover` and `claimius.accept_handover` move an app's home between two prophets. See [Prophets and disciples](../.nimpress/claimius/prophets.md).
+Federation runs in SQL and in one Go call. Each `claimius.prophet_peer` row names a peer prophet, its endpoint and the slug and secret of one app mirrored from it; `sam.PeerSyncStart(ctx, db)` pulls every row as that app, with `peer=true`, and applies each row through `claimius.apply_peer_event`. `claimius.insert_app_handover` and `claimius.update_app_handover` move an app's home between two prophets. See [Prophets and disciples](../.nimpress/claimius/prophets.md).
 
 Object types are schema qualified over JSON and in the database alike.
 </content>

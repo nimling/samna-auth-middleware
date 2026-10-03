@@ -33,11 +33,11 @@ A live link is unique per `(app_id, object_type, object_id)`. One organization t
 | `app_object_ids(app_id, object_type)` | `SETOF UUID` | The filter that stands in for `app_id = ?` on organizations and locations |
 | `apps_for_object(object_type, object_id)` | `SETOF UUID` | Which apps see this object |
 | `app_has_object(app_id, object_type, object_id)` | `BOOLEAN` | Guard before acting on a shared object |
-| `link_app_object(app_id, object_type, object_id, created_by)` | `UUID` | Create the link and recompute the pair of every user who can reach the object in the app. Idempotent |
-| `unlink_app_object(app_id, object_type, object_id)` | `BOOLEAN` | Soft delete the link and delete the app's `user_object` rows on the object |
-| `create_root_organization(app_id, name, ...)` | | Create a root and link it in one call. Idempotent on app and name |
+| `upsert_app_object(app_id, object_type, object_id, created_by)` | `UUID` | Create the link and recompute the pair of every user who can reach the object in the app. Idempotent |
+| `delete_app_object(app_id, object_type, object_id)` | `BOOLEAN` | Soft delete the link and delete the app's `user_object` rows on the object |
+| `upsert_root_organization(app_id, name, ...)` | | Create a root and link it in one call. Idempotent on app and name |
 
-`app_object` is never written directly. `link_app_object` and `unlink_app_object` also maintain the materialized access rows, which a bare INSERT would skip.
+`app_object` is never written directly. `upsert_app_object` and `delete_app_object` also maintain the materialized access rows, which a bare INSERT would skip.
 
 Filtering a shared table:
 
@@ -61,4 +61,4 @@ So app scoping is written on the prophet side only. A disciple query that filter
 
 A disciple whose prophet fails to select organizations receives none, and `RootAccess` then finds no root organization for the actor's first `user_claim`. Every handler that gates on `RootAccess` answers 403 while every other part of the service looks healthy. When a disciple reports blanket 403s on listing endpoints, check the organization count in its replica before looking at claims.
 
-A new app on an existing prophet does not get organizations by copying them. It gets them by linking: `create_app` links the owning organization and its tree when it creates the app, `create_root_organization` links a fresh tree, and `link_app_object` links an existing one.
+A new app on an existing prophet does not get organizations by copying them. It gets them by linking: `upsert_app` links the owning organization and its tree when it creates the app, `upsert_root_organization` links a fresh tree, and `upsert_app_object` links an existing one.

@@ -12,8 +12,8 @@ DECLARE
     v_fenced UUID;
     v_deny   UUID;
 BEGIN
-    PERFORM claimius.init();
-    PERFORM claimius.ensure_app_user(p_user_id => v_a, p_first_name => 'Ada');
+    PERFORM claimius.upsert_disciple_state();
+    PERFORM claimius.upsert_app_user(p_user_id => v_a, p_first_name => 'Ada');
 
     INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
     VALUES (v_root, 'Walk root', 'company', v_root, v_root, 0, v_a),
@@ -22,35 +22,35 @@ BEGIN
     VALUES (v_child, 'Walk child', 'company', v_root, v_root, 1, v_a),
            (v_leaf, 'Walk leaf', 'company', v_other, v_other, 1, v_a);
 
-    v_writer := (claimius.create_claim(
+    v_writer := (claimius.insert_claim(
         p_name => 'Root writer', p_description => NULL, p_sa_access => 6,
         p_sa_owner_id => v_root, p_sa_root_id => v_root, p_sa_created_by => v_a, p_inherits => TRUE
     ) -> 'claim' ->> 'id')::UUID;
-    PERFORM claimius.assign_claim_object(
+    PERFORM claimius.insert_claim_object(
         p_claim_id => v_writer, p_sa_owner_id => v_root, p_sa_root_id => v_root, p_sa_created_by => v_a,
         p_object_id => v_root, p_object_type => 'claimius.organization', p_sa_access => 6, p_inherits => TRUE
     );
-    PERFORM claimius.assign_claim_user(p_claim_id => v_writer, p_user_id => v_a, p_sa_owner_id => v_root, p_sa_created_by => v_a);
+    PERFORM claimius.insert_user_claim(p_claim_id => v_writer, p_user_id => v_a, p_sa_owner_id => v_root, p_sa_created_by => v_a);
 
-    v_deny := (claimius.create_claim(
+    v_deny := (claimius.insert_claim(
         p_name => 'Child write deny', p_description => NULL, p_sa_access => 18,
         p_sa_owner_id => v_root, p_sa_root_id => v_root, p_sa_created_by => v_a, p_inherits => TRUE
     ) -> 'claim' ->> 'id')::UUID;
-    PERFORM claimius.assign_claim_object(
+    PERFORM claimius.insert_claim_object(
         p_claim_id => v_deny, p_sa_owner_id => v_root, p_sa_root_id => v_root, p_sa_created_by => v_a,
         p_object_id => v_child, p_object_type => 'claimius.organization', p_sa_access => 18, p_inherits => TRUE
     );
-    PERFORM claimius.assign_claim_user(p_claim_id => v_deny, p_user_id => v_a, p_sa_owner_id => v_root, p_sa_created_by => v_a);
+    PERFORM claimius.insert_user_claim(p_claim_id => v_deny, p_user_id => v_a, p_sa_owner_id => v_root, p_sa_created_by => v_a);
 
-    v_fenced := (claimius.create_claim(
+    v_fenced := (claimius.insert_claim(
         p_name => 'Other root only', p_description => NULL, p_sa_access => 6,
         p_sa_owner_id => v_other, p_sa_root_id => v_other, p_sa_created_by => v_a, p_inherits => TRUE
     ) -> 'claim' ->> 'id')::UUID;
-    PERFORM claimius.assign_claim_object(
+    PERFORM claimius.insert_claim_object(
         p_claim_id => v_fenced, p_sa_owner_id => v_other, p_sa_root_id => v_other, p_sa_created_by => v_a,
         p_object_id => v_other, p_object_type => 'claimius.organization', p_sa_access => 6, p_inherits => FALSE
     );
-    PERFORM claimius.assign_claim_user(p_claim_id => v_fenced, p_user_id => v_a, p_sa_owner_id => v_other, p_sa_created_by => v_a);
+    PERFORM claimius.insert_user_claim(p_claim_id => v_fenced, p_user_id => v_a, p_sa_owner_id => v_other, p_sa_created_by => v_a);
 END $$;
 
 SELECT is_empty(

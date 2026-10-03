@@ -80,7 +80,7 @@ func postPeerApp(t *testing.T, actor uuid.UUID) peerApp {
 	`, app.ID, app.Slug, base64.RawURLEncoding.EncodeToString(x509.MarshalPKCS1PrivateKey(key)), hex.EncodeToString(orgSeed), hash, app.Org, actor); err != nil {
 		t.Fatalf("home app: %v", err)
 	}
-	if _, err := db.ExecContext(ctx, `SELECT claimius.link_app_object(?, 'claimius.organization', ?, ?)`, app.ID, app.Org, actor); err != nil {
+	if _, err := db.ExecContext(ctx, `SELECT claimius.upsert_app_object(?, 'claimius.organization', ?, ?)`, app.ID, app.Org, actor); err != nil {
 		t.Fatalf("link org: %v", err)
 	}
 	return app
@@ -90,7 +90,7 @@ func postPeerClaim(t *testing.T, db *shared.DB, appID, org, actor uuid.UUID, nam
 	t.Helper()
 	var id uuid.UUID
 	if err := db.NewRaw(`
-		SELECT (claimius.create_claim(p_app_id => ?, p_name => ?, p_description => NULL, p_sa_access => 4,
+		SELECT (claimius.insert_claim(p_app_id => ?, p_name => ?, p_description => NULL, p_sa_access => 4,
 		        p_sa_owner_id => ?, p_sa_root_id => ?, p_sa_created_by => ?) -> 'claim' ->> 'id')::UUID
 	`, appID, name, org, org, actor).Scan(context.Background(), &id); err != nil {
 		t.Fatalf("claim %s: %v", name, err)
@@ -122,7 +122,7 @@ func TestProphetMirrorsAPeersAppThroughItsFeed(t *testing.T) {
 	mirror := getPeerDB(t)
 	var actor uuid.UUID
 	if err := mirror.NewRaw(`
-		SELECT (claimius.init(p_system_app_slug => 'gotest_mirror', p_system_app_name => 'Go mirror',
+		SELECT (claimius.upsert_system_app(p_system_app_slug => 'gotest_mirror', p_system_app_name => 'Go mirror',
 		        p_system_app_private_key => 'key', p_system_app_private_seed => 'seed',
 		        p_default_claim => '{"name": "Member", "description": "Default member claim"}'::JSONB) -> 'user_claim' ->> 'id')::UUID
 	`).Scan(ctx, &actor); err != nil {

@@ -1,8 +1,8 @@
 ---
 layout: doc
 title: Apps
-description: samna_app, how init and create_app create an app, the two scoping mechanisms, app scoped tables and app_object links, what each costs a query, scoping per role, and the identity helpers that tell SQL which app it runs as.
-tags: samna_app, init, create_app, app_id, app_object, app_object_ids, link_app_object, unlink_app_object, _app_ids_for_row, get_app, get_app_id, get_disciple_app, scoping, tenancy
+description: samna_app, how upsert_system_app and upsert_app create an app, the two scoping mechanisms, app scoped tables and app_object links, what each costs a query, scoping per role, and the identity helpers that tell SQL which app it runs as.
+tags: samna_app, upsert_system_app, upsert_app, app_id, app_object, app_object_ids, upsert_app_object, delete_app_object, _app_ids_for_row, get_app, get_app_id, get_disciple_app, scoping, tenancy
 lastUpdated: true
 ---
 
@@ -17,7 +17,7 @@ An app is one product that claimius governs: Samna Auth itself, Bookable, Nimplo
 | `private_seed` | The seed the app's secrets are encrypted with |
 | `app_secret`, `secret_version` | The hashed secret a disciple authenticates with |
 | `redirect_uris`, `connection`, `provider_ids` | The login configuration |
-| `claim_id` | The default claim `ensure_app_user` grants a new user |
+| `claim_id` | The default claim `upsert_app_user` grants a new user |
 | `home_prophet` | The peer prophet that decides the app's writes, NULL when this prophet does; see [Prophets and disciples](./prophets.md) |
 | `sa_owner_id` | The organization that owns the app |
 
@@ -32,10 +32,10 @@ An app is one product that claimius governs: Samna Auth itself, Bookable, Nimplo
 | `app_object_ids(app_id, object_type)` | The object ids of one type linked to an app, the filter in place of `app_id = ?` | one range of `idx_app_object_unique` |
 | `app_has_object(app_id, object_type, object_id)` | The boolean guard | one probe |
 | `apps_for_object(object_type, object_id)` | The apps linked to one object | one range of `idx_app_object_object` |
-| `link_app_object(app_id, object_type, object_id, created_by)` | Links, idempotent | one probe; on a new link one row with four index entries and, outside replay, `|affected(x)|` pair recomputes |
-| `unlink_app_object(app_id, object_type, object_id)` | Soft deletes the link | one update, and a delete of the app's `U_x` pairs on the object, counted out of `user_users` |
-| `create_root_organization(app_id, name, actor, ...)` | Creates a root and links it, idempotent on app and name | see [Organizations](./organizations.md) |
-| `link_app_organization(app_id, org_id, cascade)` | Links an organization and, with `cascade`, every organization and location under it | one `link_app_object` per node |
+| `upsert_app_object(app_id, object_type, object_id, created_by)` | Links, idempotent | one probe; on a new link one row with four index entries and, outside replay, `|affected(x)|` pair recomputes |
+| `delete_app_object(app_id, object_type, object_id)` | Soft deletes the link | one update, and a delete of the app's `U_x` pairs on the object, counted out of `user_users` |
+| `upsert_root_organization(app_id, name, actor, ...)` | Creates a root and links it, idempotent on app and name | see [Organizations](./organizations.md) |
+| `upsert_app_organization(app_id, org_id, cascade)` | Links an organization and, with `cascade`, every organization and location under it | one `upsert_app_object` per node |
 
 The unique index is `(app_id, object_type, object_id)` where `sa_deleted_at IS NULL`, so a live link is unique per app and object. `app_object` is never written directly.
 
@@ -45,12 +45,12 @@ Users, grants and access are per app by nature, since the same person holds diff
 
 Every row claimius holds carries the `user_claim.id` it was written under in `sa_created_by`, and every binding is judged against what that grant's user holds. An app is created by one of two functions, so that both hold from its first row.
 
-`init` creates the system app of a fresh prophet with its system organization, system user, system claim and default claim. It settles the system user's `user_claim.id` first, the live one on a rerun or a fresh id that the grant row takes once its claim exists, and stamps every row it writes with it. The grant lands before the bindings and the system user's pairs on the organization and the app are recomputed, so each binding is judged against the access the system user holds as creator of both.
+`upsert_system_app` creates the system app of a fresh prophet with its system organization, system user, system claim and default claim. It settles the system user's `user_claim.id` first, the live one on a rerun or a fresh id that the grant row takes once its claim exists, and stamps every row it writes with it. The grant lands before the bindings and the system user's pairs on the organization and the app are recomputed, so each binding is judged against the access the system user holds as creator of both.
 
-`create_app` registers every other app, owned by an existing organization, under the authority of an actor of another app:
+`upsert_app` registers every other app, owned by an existing organization, under the authority of an actor of another app:
 
 ```sql
-claimius.create_app(
+claimius.upsert_app(
     p_actor_user_claim_id UUID,
     p_slug                TEXT,
     p_name                TEXT,
@@ -75,19 +75,19 @@ It stamps `p_actor_user_claim_id` into every `sa_created_by` and:
 
 3. Copies the actor's `samna_user` row from the actor's app into the new app.
 
-4. Links the organization and its tree to the app, `link_app_organization` with `cascade`.
+4. Links the organization and its tree to the app, `upsert_app_organization` with `cascade`.
 
 5. Creates the owner claim, `<name> Owner` with `p_owner_access`, inheriting, binds it on the organization and on the app, and grants it to the actor's user in the app.
 
 6. Creates the default claim, `<name> Reader` with read unless `p_default_claim` gives `name`, `description` or `sa_access`, binds it on the app and on the organization, and sets it as the app's `claim_id`.
 
-It is idempotent on the slug and on each claim's name, and returns one jsonb object keyed `samna_app`, `organization`, `samna_user`, `claim`, `default_claim`, `user_claim` and `claim_object`. The owner claim's first binding is the one binding of an app that no pair can authorize, because the app has none yet; it passes when the actor holds owner on the organization that owns the app, judged in the actor's own app. That rule is how the authority over an organization extends to the apps it owns; see [Claims](./claims.md). `app_secret` is written afterwards by the implementing side, as for the system app, and the reader role cannot call `create_app`.
+It is idempotent on the slug and on each claim's name, and returns one jsonb object keyed `samna_app`, `organization`, `samna_user`, `claim`, `default_claim`, `user_claim` and `claim_object`. The owner claim's first binding is the one binding of an app that no pair can authorize, because the app has none yet; it passes when the actor holds owner on the organization that owns the app, judged in the actor's own app. That rule is how the authority over an organization extends to the apps it owns; see [Claims](./claims.md). `app_secret` is written afterwards by the implementing side, as for the system app, and the reader role cannot call `upsert_app`.
 
 ## Which apps a write belongs to
 
 `_app_ids_for_row(object_type, row)` scopes a row for its calc trigger: the row's `app_id` when its table has the column; otherwise its live `app_object` links; otherwise, for a table of the implementing side, `get_app_id()`. An internal table without `app_id`, an organization or location, resolves to no app until it is linked, and the link settles its pairs when it lands. The calc trigger runs its per app work once per app the row resolves to, so a row linked to `n_a` apps raises `n_a` areas.
 
-`init_claimius_tables` refuses a table without `app_id` on a prophet that hosts apps besides its system app, because `get_app_id()` would scope every row of it to the system app.
+`upsert_table_info` refuses a table without `app_id` on a prophet that hosts apps besides its system app, because `get_app_id()` would scope every row of it to the system app.
 
 ## Scoping per role
 
@@ -102,8 +102,8 @@ The identity helpers live in the prophet set, where more than one app exists.
 | Function | Returns | Reads |
 |---|---|---|
 | `get_app()` | The system app, by the slug marked in `prophet_state.system_app_slug`; raises when none is marked | two probes |
-| `get_disciple_app()` | The app named in `disciple_state.disciple_app_slug`, written by `init_disciple`; raises when no `disciple_state` row exists | two probes |
+| `get_disciple_app()` | The app named in `disciple_state.disciple_app_slug`, written by `upsert_disciple_state`; raises when no `disciple_state` row exists | two probes |
 | `get_prophet_app_id()`, `get_disciple_app_id()` | The same as scalars | two probes |
 | `get_app_id()` | The system app when one is marked, otherwise the app of `disciple_state` | two probes |
 
-A hybrid is a prophet: `init_hybrid` runs `init` and registers its upstream in `prophet_peer`, and writes no `disciple_state` row. So on a hybrid `get_app()` and `get_app_id()` return the system app and `get_disciple_app()` raises; the app it mirrors is found by its slug in `prophet_peer`. The scalar forms exist for `DEFAULT` expressions, which cannot hold a subquery. A system app slug is never written into SQL, because every deployment names its own.
+A hybrid is a prophet: `upsert_prophet_peer` runs `upsert_system_app` and registers its upstream in `prophet_peer`, and writes no `disciple_state` row. So on a hybrid `get_app()` and `get_app_id()` return the system app and `get_disciple_app()` raises; the app it mirrors is found by its slug in `prophet_peer`. The scalar forms exist for `DEFAULT` expressions, which cannot hold a subquery. A system app slug is never written into SQL, because every deployment names its own.

@@ -16,7 +16,7 @@ go get github.com/nimling/samna-auth-middleware/v2
 |------|-------|------|-----|
 | Prophet | Full app row with key and seed material | Serves the snapshot and delta feed | `sam.RegisterEndpoints` mounts the full admin API |
 | Disciple | App identity from the environment | Pulls in the background via `sam.SyncStart`, one pod per database | `sam.RegisterEndpoints` mounts the me and login routes |
-| Hybrid | A prophet set up with `claimius.init_hybrid` | Serves its own apps, and pulls one app of a peer prophet via `sam.PeerSyncStart` | As the prophet; writes of the mirrored app are refused and belong to the peer |
+| Hybrid | A prophet set up with `claimius.upsert_prophet_peer` | Serves its own apps, and pulls one app of a peer prophet via `sam.PeerSyncStart` | As the prophet; writes of the mirrored app are refused and belong to the peer |
 
 A binary is one role. Both roles wire the same four identifiers. Each app has one home prophet that decides its writes, and a disciple relies on exactly one prophet, the one it is bound to.
 
@@ -138,9 +138,9 @@ At `sdb.Init` the prophet and disciple resolve the OIDC issuer, token, and jwks 
 
 ## Object types
 
-An object type passes through the middleware untouched in both directions: `ObjectType.MarshalJSON` sends the string the row stores and `UnmarshalJSON` keeps the string it is given. The middleware validates only claimius's own types: `ResolveObjectType` in `shared` resolves a bare claimius name such as `organization` to `claimius.organization` and refuses a `claimius.` type the schema does not register, and passes every other type through as given. A consumer type is metadata with an id; the middleware neither qualifies nor refuses it, and `ObjectTypeOf` returns a model's `table:` tag as written. A consumer that wants its own types checked calls `ObjectType.Validate`, which requires the schema and, given a list, membership in it. `init_claimius_tables` raises on an unqualified name, so a consumer qualifies its table tags.
+An object type passes through the middleware untouched in both directions: `ObjectType.MarshalJSON` sends the string the row stores and `UnmarshalJSON` keeps the string it is given. The middleware validates only claimius's own types: `ResolveObjectType` in `shared` resolves a bare claimius name such as `organization` to `claimius.organization` and refuses a `claimius.` type the schema does not register, and passes every other type through as given. A consumer type is metadata with an id; the middleware neither qualifies nor refuses it, and `ObjectTypeOf` returns a model's `table:` tag as written. A consumer that wants its own types checked calls `ObjectType.Validate`, which requires the schema and, given a list, membership in it. `upsert_table_info` raises on an unqualified name, so a consumer qualifies its table tags.
 
-The middleware knows the shared claimius types only: `organization`, `location`, `claim`, `claim_object`, `user_claim`, `samna_user`, `samna_client`, `samna_secret` and `user_relation`. A consumer's own tables register with `init_claimius_tables`, and the consumer wraps `claimius.search` and the graph functions in its own SQL for its own shapes.
+The middleware knows the shared claimius types only: `organization`, `location`, `claim`, `claim_object`, `user_claim`, `samna_user`, `samna_client`, `samna_secret` and `user_relation`. A consumer's own tables register with `upsert_table_info`, and the consumer wraps `claimius.search` and the graph functions in its own SQL for its own shapes.
 
 ## Debug mode
 
@@ -151,7 +151,7 @@ Setting `SAUTH_DEBUG_USER_ID` to a valid UUID makes the middleware skip authenti
 The repo ships the Claimius schema as two complete, role tailored base SQL sets, and nothing else for the schema:
 
 - `prophet/database` is the full schema. It hosts many apps and scopes them two ways: an `app_id` column on most tables, and `claimius.app_object` links for `organization` and `location`, which carry no `app_id`. It is the source of truth: a write keeps the closure, settles the writer's own pairs in `user_object`, records what else it changed in `access_diff`, and emits one `sync_event` row per source row it wrote for downstream disciples.
-- `disciple/database` is the same schema with `app_id` removed from every table, index, and function and without `app_object`. A disciple mirrors exactly one app, so it needs neither mechanism, and it bootstraps with `claimius.init()`. The feed carries source rows only. Under `replay_mode` the calc triggers keep the closure and raise the areas each applied row moves, and the disciple settles its own `user_object` from them on its reads, for the shared types and its own tables alike. In debug mode the same engine serves standalone local writes.
+- `disciple/database` is the same schema with `app_id` removed from every table, index, and function and without `app_object`. A disciple mirrors exactly one app, so it needs neither mechanism, and it bootstraps with `claimius.upsert_disciple_state()`. The feed carries source rows only. Under `replay_mode` the calc triggers keep the closure and raise the areas each applied row moves, and the disciple settles its own `user_object` from them on its reads, for the shared types and its own tables alike. In debug mode the same engine serves standalone local writes.
 
 Both scoping mechanisms exist only on the prophet. The disciple schema knows nothing about either. [App scoping](docs/app_scoping.md) has the full rules.
 

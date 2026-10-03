@@ -24,7 +24,7 @@ DECLARE
     v_crew  UUID;
     v_user  UUID;
 BEGIN
-    v_app := (claimius.init(
+    v_app := (claimius.upsert_system_app(
         p_system_app_slug         => 'sqltest_settle',
         p_system_app_name         => 'SQL settle test',
         p_system_app_private_key  => 'key',
@@ -32,15 +32,15 @@ BEGIN
         p_default_claim           => '{"name": "Member", "description": "Default member claim"}'::JSONB
     ) -> 'samna_app' ->> 'id')::UUID;
 
-    PERFORM claimius.ensure_app_user(p_user_id => v_ada, p_app_id => v_app, p_first_name => 'Ada');
+    PERFORM claimius.upsert_app_user(p_user_id => v_ada, p_app_id => v_app, p_first_name => 'Ada');
     FOREACH v_user IN ARRAY ARRAY['a0000000-0000-4000-8000-0000000000d1', 'a0000000-0000-4000-8000-0000000000d2',
                                   'a0000000-0000-4000-8000-0000000000d3']::UUID[] LOOP
-        PERFORM claimius.ensure_app_user(p_user_id => v_user, p_app_id => v_app, p_first_name => 'Holder');
+        PERFORM claimius.upsert_app_user(p_user_id => v_user, p_app_id => v_app, p_first_name => 'Holder');
     END LOOP;
 
     INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
     VALUES (v_root, 'Settle root', 'company', v_root, v_root, 0, v_sys);
-    PERFORM claimius.link_app_object(v_app, 'claimius.organization', v_root);
+    PERFORM claimius.upsert_app_object(v_app, 'claimius.organization', v_root);
     INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
     VALUES (v_node, 'Settle node', 'company', v_root, v_root, 1, v_sys);
     INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
@@ -49,25 +49,25 @@ BEGIN
     INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
     VALUES ('10000000-0000-4000-8000-0000000000d4', 'Settle three', 'company', '10000000-0000-4000-8000-0000000000d3', v_root, 3, v_sys);
 
-    v_admin := (claimius.create_claim(
+    v_admin := (claimius.insert_claim(
         p_app_id => v_app, p_name => 'Settle admin', p_description => NULL, p_sa_access => 1,
         p_sa_owner_id => v_root, p_sa_root_id => v_root, p_sa_created_by => v_sys
     ) -> 'claim' ->> 'id')::UUID;
-    PERFORM claimius.assign_claim_object(
+    PERFORM claimius.insert_claim_object(
         p_app_id => v_app, p_claim_id => v_admin, p_sa_owner_id => v_root, p_sa_root_id => v_root, p_sa_created_by => v_sys,
         p_object_id => v_root, p_object_type => 'claimius.organization', p_inherits => TRUE);
-    PERFORM claimius.assign_claim_user(p_app_id => v_app, p_claim_id => v_admin, p_user_id => v_ada, p_sa_owner_id => v_root, p_sa_created_by => v_sys);
+    PERFORM claimius.insert_user_claim(p_app_id => v_app, p_claim_id => v_admin, p_user_id => v_ada, p_sa_owner_id => v_root, p_sa_created_by => v_sys);
 
-    v_crew := (claimius.create_claim(
+    v_crew := (claimius.insert_claim(
         p_app_id => v_app, p_name => 'Settle crew', p_description => NULL, p_sa_access => 4,
         p_sa_owner_id => v_root, p_sa_root_id => v_root, p_sa_created_by => v_sys
     ) -> 'claim' ->> 'id')::UUID;
-    PERFORM claimius.assign_claim_object(
+    PERFORM claimius.insert_claim_object(
         p_app_id => v_app, p_claim_id => v_crew, p_sa_owner_id => v_root, p_sa_root_id => v_root, p_sa_created_by => v_sys,
         p_object_id => v_node, p_object_type => 'claimius.organization', p_inherits => TRUE);
     FOREACH v_user IN ARRAY ARRAY['a0000000-0000-4000-8000-0000000000d1', 'a0000000-0000-4000-8000-0000000000d2',
                                   'a0000000-0000-4000-8000-0000000000d3']::UUID[] LOOP
-        PERFORM claimius.assign_claim_user(p_app_id => v_app, p_claim_id => v_crew, p_user_id => v_user, p_sa_owner_id => v_root, p_sa_created_by => v_sys);
+        PERFORM claimius.insert_user_claim(p_app_id => v_app, p_claim_id => v_crew, p_user_id => v_user, p_sa_owner_id => v_root, p_sa_created_by => v_sys);
     END LOOP;
 END $$;
 
@@ -143,11 +143,11 @@ DECLARE
                        AND claim_id = (SELECT id FROM claimius.claim WHERE name = 'Settle admin'));
     v_desk  UUID;
 BEGIN
-    v_desk := (claimius.create_claim(
+    v_desk := (claimius.insert_claim(
         p_app_id => v_app, p_name => 'Settle desk', p_description => NULL, p_sa_access => 4,
         p_sa_owner_id => v_root, p_sa_root_id => v_root, p_sa_created_by => v_actor
     ) -> 'claim' ->> 'id')::UUID;
-    PERFORM claimius.assign_claim_object(
+    PERFORM claimius.insert_claim_object(
         p_app_id => v_app, p_claim_id => v_desk, p_sa_owner_id => v_root, p_sa_root_id => v_root, p_sa_created_by => v_actor,
         p_object_id => '10000000-0000-4000-8000-0000000000d1', p_object_type => 'claimius.organization', p_sa_access => 4, p_inherits => TRUE);
 END $$;
@@ -165,7 +165,7 @@ SELECT set_eq(
 
 DO $$
 BEGIN
-    PERFORM claimius.remove_claim_object(
+    PERFORM claimius.delete_claim_object(
         (SELECT co.id FROM claimius.claim_object co
            JOIN claimius.claim c ON c.id = co.claim_id
           WHERE c.name = 'Settle crew' AND co.sa_deleted_at IS NULL),

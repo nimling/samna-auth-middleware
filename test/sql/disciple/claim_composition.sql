@@ -16,11 +16,11 @@ DECLARE
     v_d      UUID;
     v_uma_b  UUID;
 BEGIN
-    PERFORM claimius.init();
+    PERFORM claimius.upsert_disciple_state();
 
-    PERFORM claimius.ensure_app_user(p_user_id => v_uma, p_first_name => 'Uma');
-    PERFORM claimius.ensure_app_user(p_user_id => v_vic, p_first_name => 'Vic');
-    PERFORM claimius.ensure_app_user(p_user_id => v_wes, p_first_name => 'Wes');
+    PERFORM claimius.upsert_app_user(p_user_id => v_uma, p_first_name => 'Uma');
+    PERFORM claimius.upsert_app_user(p_user_id => v_vic, p_first_name => 'Vic');
+    PERFORM claimius.upsert_app_user(p_user_id => v_wes, p_first_name => 'Wes');
 
     INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
     VALUES (v_q, 'Claim home', 'company', v_q, v_q, 0, v_sys),
@@ -29,41 +29,41 @@ BEGIN
     VALUES (v_y, 'Y', 'company', v_x, v_x, 1, v_sys),
            (v_z, 'Z', 'company', v_x, v_x, 1, v_sys);
 
-    v_b := (claimius.create_claim(
+    v_b := (claimius.insert_claim(
         p_name => 'B', p_description => NULL, p_sa_access => 2,
         p_sa_owner_id => v_q, p_sa_root_id => v_q, p_sa_created_by => v_sys
     ) -> 'claim' ->> 'id')::UUID;
-    v_a := (claimius.create_claim(
+    v_a := (claimius.insert_claim(
         p_name => 'A', p_description => NULL, p_sa_access => 4,
         p_sa_owner_id => v_q, p_sa_root_id => v_q, p_sa_created_by => v_sys
     ) -> 'claim' ->> 'id')::UUID;
-    v_d := (claimius.create_claim(
+    v_d := (claimius.insert_claim(
         p_name => 'No read on X', p_description => NULL, p_sa_access => 20,
         p_sa_owner_id => v_q, p_sa_root_id => v_q, p_sa_created_by => v_sys
     ) -> 'claim' ->> 'id')::UUID;
-    PERFORM claimius.create_claim(
+    PERFORM claimius.insert_claim(
         p_name => 'C', p_description => NULL, p_sa_access => 4,
         p_sa_owner_id => v_q, p_sa_root_id => v_q, p_sa_created_by => v_sys);
 
-    PERFORM claimius.assign_claim_object(
+    PERFORM claimius.insert_claim_object(
         p_claim_id => v_b, p_sa_owner_id => v_x, p_sa_root_id => v_x, p_sa_created_by => v_sys,
         p_object_id => v_x, p_object_type => 'claimius.organization', p_inherits => TRUE);
-    PERFORM claimius.assign_claim_object(
+    PERFORM claimius.insert_claim_object(
         p_claim_id => v_b, p_sa_owner_id => v_x, p_sa_root_id => v_x, p_sa_created_by => v_sys,
         p_object_id => v_y, p_object_type => 'claimius.organization', p_inherits => TRUE);
-    PERFORM claimius.assign_claim_object(
+    PERFORM claimius.insert_claim_object(
         p_claim_id => v_d, p_sa_owner_id => v_x, p_sa_root_id => v_x, p_sa_created_by => v_sys,
         p_object_id => v_x, p_object_type => 'claimius.organization', p_inherits => TRUE);
 
-    v_uma_b := (claimius.assign_claim_user(
+    v_uma_b := (claimius.insert_user_claim(
         p_claim_id => v_b, p_user_id => v_uma, p_sa_owner_id => v_q, p_sa_created_by => v_sys
     ) -> 'user_claim' ->> 'id')::UUID;
-    PERFORM claimius.assign_claim_user(p_claim_id => v_a, p_user_id => v_vic, p_sa_owner_id => v_q, p_sa_created_by => v_sys);
-    PERFORM claimius.assign_claim_user(p_claim_id => v_d, p_user_id => v_vic, p_sa_owner_id => v_q, p_sa_created_by => v_sys);
-    PERFORM claimius.assign_claim_user(p_claim_id => (SELECT id FROM claimius.claim WHERE name = 'C'), p_user_id => v_wes,
+    PERFORM claimius.insert_user_claim(p_claim_id => v_a, p_user_id => v_vic, p_sa_owner_id => v_q, p_sa_created_by => v_sys);
+    PERFORM claimius.insert_user_claim(p_claim_id => v_d, p_user_id => v_vic, p_sa_owner_id => v_q, p_sa_created_by => v_sys);
+    PERFORM claimius.insert_user_claim(p_claim_id => (SELECT id FROM claimius.claim WHERE name = 'C'), p_user_id => v_wes,
         p_sa_owner_id => v_q, p_sa_created_by => v_sys);
 
-    PERFORM claimius.assign_claim_object(
+    PERFORM claimius.insert_claim_object(
         p_claim_id => v_a, p_sa_owner_id => v_q, p_sa_root_id => v_q, p_sa_created_by => v_uma_b,
         p_object_id => v_b, p_object_type => 'claimius.claim', p_inherits => TRUE);
 END $$;
@@ -108,7 +108,7 @@ SELECT is(
 );
 
 SELECT throws_ok(
-    $$SELECT claimius.assign_claim_object(
+    $$SELECT claimius.insert_claim_object(
         p_claim_id => (SELECT id FROM claimius.claim WHERE name = 'C'),
         p_sa_owner_id => '10000000-0000-4000-8000-000000000b00', p_sa_root_id => '10000000-0000-4000-8000-000000000b00',
         p_sa_created_by => (SELECT uc.id FROM claimius.user_claim uc WHERE uc.user_id = 'a0000000-0000-4000-8000-0000000000b3'

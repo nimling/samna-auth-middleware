@@ -8,7 +8,7 @@
 -- click still lands as a click and a folded pointer field lands as pointer.
 -- ============================================================================
 
-CREATE OR REPLACE FUNCTION claimius.post_analytics_heat(
+CREATE OR REPLACE FUNCTION claimius.upsert_analytics_heat(
     p_from   DATE,
     p_to     DATE,
     p_app_id UUID DEFAULT NULL
@@ -81,4 +81,4 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius.post_analytics_heat(DATE, DATE, UUID) IS 'Folds every positioned signal and every browser folded heat event on a range of whole days into its cell and returns the cells written. A day is the unit because a cell is replaced rather than added to.';
+COMMENT ON FUNCTION claimius.upsert_analytics_heat(DATE, DATE, UUID) IS 'Folds every positioned signal and every browser folded heat event on a range of whole days into its cell and returns the cells written. A day is the unit because a cell is replaced rather than added to.';

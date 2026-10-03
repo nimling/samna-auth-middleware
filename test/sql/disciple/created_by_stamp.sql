@@ -19,41 +19,41 @@ DECLARE
     v_planted UUID;
     v_stray   UUID;
 BEGIN
-    PERFORM claimius.init();
-    PERFORM claimius.ensure_app_user(p_user_id => v_ada, p_first_name => 'Ada');
-    PERFORM claimius.ensure_app_user(p_user_id => v_bo, p_first_name => 'Bo');
-    PERFORM claimius.ensure_app_user(p_user_id => v_cy, p_first_name => 'Cy');
+    PERFORM claimius.upsert_disciple_state();
+    PERFORM claimius.upsert_app_user(p_user_id => v_ada, p_first_name => 'Ada');
+    PERFORM claimius.upsert_app_user(p_user_id => v_bo, p_first_name => 'Bo');
+    PERFORM claimius.upsert_app_user(p_user_id => v_cy, p_first_name => 'Cy');
 
     INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
     VALUES (v_root, 'Stamp root', 'company', v_root, v_root, 0, v_sys);
 
-    v_member := (claimius.create_claim(
+    v_member := (claimius.insert_claim(
         p_name => 'Stamp member', p_description => NULL, p_sa_access => 4,
         p_sa_owner_id => v_root, p_sa_root_id => v_root, p_sa_created_by => v_sys
     ) -> 'claim' ->> 'id')::UUID;
-    v_crew := (claimius.create_claim(
+    v_crew := (claimius.insert_claim(
         p_name => 'Stamp crew', p_description => NULL, p_sa_access => 4,
         p_sa_owner_id => v_root, p_sa_root_id => v_root, p_sa_created_by => v_sys
     ) -> 'claim' ->> 'id')::UUID;
-    v_planted := (claimius.create_claim(
+    v_planted := (claimius.insert_claim(
         p_name => 'Stamp planted', p_description => NULL, p_sa_access => 4,
         p_sa_owner_id => v_root, p_sa_root_id => v_root, p_sa_created_by => v_sys
     ) -> 'claim' ->> 'id')::UUID;
-    v_stray := (claimius.create_claim(
+    v_stray := (claimius.insert_claim(
         p_name => 'Stamp stray', p_description => NULL, p_sa_access => 4,
         p_sa_owner_id => v_root, p_sa_root_id => v_root, p_sa_created_by => v_sys
     ) -> 'claim' ->> 'id')::UUID;
-    PERFORM claimius.assign_claim_object(
+    PERFORM claimius.insert_claim_object(
         p_claim_id => v_crew, p_sa_owner_id => v_root, p_sa_root_id => v_root, p_sa_created_by => v_sys,
         p_object_id => v_root, p_object_type => 'claimius.organization', p_inherits => TRUE);
 
     INSERT INTO stamp VALUES
         ('root', v_root), ('crew', v_crew), ('planted', v_planted), ('stray', v_stray),
-        ('ada_uc', (claimius.assign_claim_user(p_claim_id => v_member, p_user_id => v_ada,
+        ('ada_uc', (claimius.insert_user_claim(p_claim_id => v_member, p_user_id => v_ada,
             p_sa_owner_id => v_root, p_sa_created_by => v_sys) -> 'user_claim' ->> 'id')::UUID);
-    PERFORM claimius.assign_claim_user(p_claim_id => v_member, p_user_id => v_bo, p_sa_owner_id => v_root, p_sa_created_by => v_sys);
-    PERFORM claimius.assign_claim_user(p_claim_id => v_crew, p_user_id => v_bo, p_sa_owner_id => v_root, p_sa_created_by => v_sys);
-    PERFORM claimius.assign_claim_user(p_claim_id => v_member, p_user_id => v_cy, p_sa_owner_id => v_root, p_sa_created_by => v_sys);
+    PERFORM claimius.insert_user_claim(p_claim_id => v_member, p_user_id => v_bo, p_sa_owner_id => v_root, p_sa_created_by => v_sys);
+    PERFORM claimius.insert_user_claim(p_claim_id => v_crew, p_user_id => v_bo, p_sa_owner_id => v_root, p_sa_created_by => v_sys);
+    PERFORM claimius.insert_user_claim(p_claim_id => v_member, p_user_id => v_cy, p_sa_owner_id => v_root, p_sa_created_by => v_sys);
     UPDATE claimius.user_claim SET sa_deleted_at = now() WHERE user_id = v_cy;
 
     UPDATE claimius.user_claim SET sa_created_by = v_ada WHERE id = pg_temp.stamp('ada_uc');

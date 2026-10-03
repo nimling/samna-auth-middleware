@@ -12,7 +12,7 @@ DECLARE
     v_narrow UUID;
     v_reader UUID;
 BEGIN
-    v_app := (claimius.init(
+    v_app := (claimius.upsert_system_app(
         p_system_app_slug         => 'sqltest_mask',
         p_system_app_name         => 'SQL mask test',
         p_system_app_private_key  => 'key',
@@ -20,54 +20,54 @@ BEGIN
         p_default_claim           => '{"name": "Member", "description": "Default member claim"}'::JSONB
     ) -> 'samna_app' ->> 'id')::UUID;
 
-    PERFORM claimius.ensure_app_user(p_user_id => v_wes, p_app_id => v_app, p_first_name => 'Wes');
-    PERFORM claimius.ensure_app_user(p_user_id => v_uma, p_app_id => v_app, p_first_name => 'Uma');
+    PERFORM claimius.upsert_app_user(p_user_id => v_wes, p_app_id => v_app, p_first_name => 'Wes');
+    PERFORM claimius.upsert_app_user(p_user_id => v_uma, p_app_id => v_app, p_first_name => 'Uma');
 
     INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
     VALUES (v_root, 'Mask root', 'company', v_root, v_root, 0, v_sys);
-    PERFORM claimius.link_app_object(v_app, 'claimius.organization', v_root);
+    PERFORM claimius.upsert_app_object(v_app, 'claimius.organization', v_root);
     INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
     VALUES (v_child, 'Mask child', 'company', v_root, v_root, 1, v_sys);
 
-    v_narrow := (claimius.create_claim(
+    v_narrow := (claimius.insert_claim(
         p_app_id => v_app, p_name => 'Narrowed', p_description => NULL, p_sa_access => 2,
         p_sa_owner_id => v_root, p_sa_root_id => v_root, p_sa_created_by => v_sys
     ) -> 'claim' ->> 'id')::UUID;
-    PERFORM claimius.assign_claim_object(
+    PERFORM claimius.insert_claim_object(
         p_app_id => v_app, p_claim_id => v_narrow, p_sa_owner_id => v_root, p_sa_root_id => v_root, p_sa_created_by => v_sys,
         p_object_id => v_root, p_object_type => 'claimius.organization', p_sa_access => 4, p_inherits => TRUE);
-    PERFORM claimius.assign_claim_user(p_app_id => v_app, p_claim_id => v_narrow, p_user_id => v_uma, p_sa_owner_id => v_root, p_sa_created_by => v_sys);
+    PERFORM claimius.insert_user_claim(p_app_id => v_app, p_claim_id => v_narrow, p_user_id => v_uma, p_sa_owner_id => v_root, p_sa_created_by => v_sys);
 
-    v_reader := (claimius.create_claim(
+    v_reader := (claimius.insert_claim(
         p_app_id => v_app, p_name => 'Reader', p_description => NULL, p_sa_access => 4,
         p_sa_owner_id => v_root, p_sa_root_id => v_root, p_sa_created_by => v_sys
     ) -> 'claim' ->> 'id')::UUID;
-    PERFORM claimius.assign_claim_object(
+    PERFORM claimius.insert_claim_object(
         p_app_id => v_app, p_claim_id => v_reader, p_sa_owner_id => v_root, p_sa_root_id => v_root, p_sa_created_by => v_sys,
         p_object_id => v_root, p_object_type => 'claimius.organization', p_inherits => TRUE);
-    PERFORM claimius.assign_claim_user(p_app_id => v_app, p_claim_id => v_reader, p_user_id => v_wes, p_sa_owner_id => v_root, p_sa_created_by => v_sys);
+    PERFORM claimius.insert_user_claim(p_app_id => v_app, p_claim_id => v_reader, p_user_id => v_wes, p_sa_owner_id => v_root, p_sa_created_by => v_sys);
 
-    PERFORM claimius.create_claim(
+    PERFORM claimius.insert_claim(
         p_app_id => v_app, p_name => 'Editor', p_description => NULL, p_sa_access => 2,
         p_sa_owner_id => v_root, p_sa_root_id => v_root, p_sa_created_by => v_sys);
 END $$;
 
 SELECT throws_ok(
-    $$SELECT claimius.create_claim(
+    $$SELECT claimius.insert_claim(
         p_app_id => (SELECT id FROM claimius.samna_app WHERE slug = 'sqltest_mask'), p_name => 'Deny only', p_description => NULL,
         p_sa_access => 16, p_sa_owner_id => '10000000-0000-4000-8000-000000000c01', p_sa_root_id => '10000000-0000-4000-8000-000000000c01',
         p_sa_created_by => '00000000-0000-4000-8000-0000000000c0')$$,
     '22023', NULL,
-    'create_claim refuses a mask carrying only the deny bit'
+    'insert_claim refuses a mask carrying only the deny bit'
 );
 
 SELECT throws_ok(
-    $$SELECT claimius.create_claim(
+    $$SELECT claimius.insert_claim(
         p_app_id => (SELECT id FROM claimius.samna_app WHERE slug = 'sqltest_mask'), p_name => 'Nothing', p_description => NULL,
         p_sa_access => 0, p_sa_owner_id => '10000000-0000-4000-8000-000000000c01', p_sa_root_id => '10000000-0000-4000-8000-000000000c01',
         p_sa_created_by => '00000000-0000-4000-8000-0000000000c0')$$,
     '22023', NULL,
-    'create_claim refuses an empty mask'
+    'insert_claim refuses an empty mask'
 );
 
 SELECT throws_ok(
@@ -78,7 +78,7 @@ SELECT throws_ok(
 
 SELECT is(
     ARRAY(
-        SELECT (claimius.create_claim(
+        SELECT (claimius.insert_claim(
             p_app_id => (SELECT id FROM claimius.samna_app WHERE slug = 'sqltest_mask'), p_name => 'Expanded ' || m, p_description => NULL,
             p_sa_access => m, p_sa_owner_id => '10000000-0000-4000-8000-000000000c01', p_sa_root_id => '10000000-0000-4000-8000-000000000c01',
             p_sa_created_by => '00000000-0000-4000-8000-0000000000c0') -> 'claim' ->> 'sa_access')::INTEGER
@@ -86,7 +86,7 @@ SELECT is(
         ORDER BY i
     ),
     ARRAY[15, 14, 12, 4, 32, 47, 17, 18, 20, 24],
-    'create_claim expands grant masks and stores deny masks verbatim'
+    'insert_claim expands grant masks and stores deny masks verbatim'
 );
 
 SELECT is(
@@ -130,7 +130,7 @@ SELECT is_empty(
 );
 
 SELECT throws_ok(
-    $$SELECT claimius.assign_claim_object(
+    $$SELECT claimius.insert_claim_object(
         p_app_id => (SELECT id FROM claimius.samna_app WHERE slug = 'sqltest_mask'),
         p_claim_id => (SELECT id FROM claimius.claim WHERE name = 'Editor'),
         p_sa_owner_id => '10000000-0000-4000-8000-000000000c01', p_sa_root_id => '10000000-0000-4000-8000-000000000c01',
@@ -142,7 +142,7 @@ SELECT throws_ok(
 );
 
 SELECT lives_ok(
-    $$SELECT claimius.assign_claim_object(
+    $$SELECT claimius.insert_claim_object(
         p_app_id => (SELECT id FROM claimius.samna_app WHERE slug = 'sqltest_mask'),
         p_claim_id => (SELECT id FROM claimius.claim WHERE name = 'Editor'),
         p_sa_owner_id => '10000000-0000-4000-8000-000000000c01', p_sa_root_id => '10000000-0000-4000-8000-000000000c01',

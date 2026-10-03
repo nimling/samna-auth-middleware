@@ -20,9 +20,9 @@ DECLARE
     v_claim UUID;
     v_bind  RECORD;
 BEGIN
-    PERFORM claimius.init();
-    PERFORM claimius.init_claimius_tables('public.sqltest_page');
-    PERFORM claimius.ensure_app_user(p_user_id => v_rae, p_first_name => 'Rae');
+    PERFORM claimius.upsert_disciple_state();
+    PERFORM claimius.upsert_table_info('public.sqltest_page');
+    PERFORM claimius.upsert_app_user(p_user_id => v_rae, p_first_name => 'Rae');
 
     INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
     VALUES (v_root, 'Redaction root', 'company', v_root, v_root, 0, v_sys);
@@ -46,13 +46,13 @@ BEGIN
     LOOP
         SELECT id INTO v_claim FROM claimius.claim WHERE name = v_bind.claim_name;
         IF v_claim IS NULL THEN
-            v_claim := (claimius.create_claim(
+            v_claim := (claimius.insert_claim(
                 p_name => v_bind.claim_name, p_description => NULL, p_sa_access => v_bind.access,
                 p_sa_owner_id => v_root, p_sa_root_id => v_root, p_sa_created_by => v_sys
             ) -> 'claim' ->> 'id')::UUID;
-            PERFORM claimius.assign_claim_user(p_claim_id => v_claim, p_user_id => v_rae, p_sa_owner_id => v_root, p_sa_created_by => v_sys);
+            PERFORM claimius.insert_user_claim(p_claim_id => v_claim, p_user_id => v_rae, p_sa_owner_id => v_root, p_sa_created_by => v_sys);
         END IF;
-        PERFORM claimius.assign_claim_object(
+        PERFORM claimius.insert_claim_object(
             p_claim_id => v_claim, p_sa_owner_id => v_root, p_sa_root_id => v_root, p_sa_created_by => v_sys,
             p_object_id => ('20000000-0000-4000-8000-000000000d7' || v_bind.page)::UUID, p_object_type => 'public.sqltest_page',
             p_scope => v_bind.scope);

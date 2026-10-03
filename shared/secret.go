@@ -81,7 +81,7 @@ func (d *DB) insertSecret(ctx context.Context, ac *AccessClaim, body BodySecret)
 			return fmt.Errorf("insert secret: %w", err)
 		}
 		if _, err := tx.NewRaw(`
-			SELECT claimius.assign_claim_object(
+			SELECT claimius.insert_claim_object(
 				p_claim_id      := ?,
 				p_sa_owner_id   := ?,
 				p_sa_root_id    := ?,

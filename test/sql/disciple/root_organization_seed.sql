@@ -1,7 +1,7 @@
 BEGIN;
 SELECT plan(2);
 
-DO $$ BEGIN PERFORM claimius.init(); END $$;
+DO $$ BEGIN PERFORM claimius.upsert_disciple_state(); END $$;
 
 INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
 VALUES ('e0000000-0000-4000-8000-00000000000e', 'Seeded root', 'company',

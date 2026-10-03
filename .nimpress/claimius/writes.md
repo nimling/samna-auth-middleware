@@ -2,7 +2,7 @@
 layout: doc
 title: Writes
 description: The claimius write surface, which tables take a direct insert, what every trigger does inside the write's own transaction, the rows each write stores as a function of the data, one request worked through, and the locks a write takes.
-tags: create_claim, assign_claim_user, assign_claim_object, remove_claim, calc_object_access, calc_hierarchical_access, calc_claim_access, calc_object_trees, emit_sync_event, enforce_app_home, _check_claim_composition, _lock_objects, _object_lock_budget, create_app, write cost
+tags: insert_claim, insert_user_claim, insert_claim_object, delete_claim, calc_object_access, calc_hierarchical_access, calc_claim_access, calc_object_trees, emit_sync_event, enforce_app_home, _check_claim_composition, _lock_objects, _object_lock_budget, upsert_app, write cost
 lastUpdated: true
 ---
 
@@ -14,13 +14,13 @@ A write changes a source row: a registered row, an organization, a location, a c
 
 | Table | Written through |
 |---|---|
-| `claim` | `create_claim`, `update_claim`, `remove_claim` |
-| `user_claim` | `assign_claim_user`, `update_claim_user`, `remove_user_claim` |
-| `claim_object` | `assign_claim_object`, `update_claim_object`, `remove_claim_object` |
-| `samna_user` | `ensure_app_user`, `merge_user` |
-| `organization` roots | `create_root_organization` |
-| `samna_app` | `init` for the system app, `create_app` for every other app; see [Apps](./apps.md#creating-an-app) |
-| `app_object` | `link_app_object`, `unlink_app_object` |
+| `claim` | `insert_claim`, `update_claim`, `delete_claim` |
+| `user_claim` | `insert_user_claim`, `update_user_claim`, `delete_user_claim` |
+| `claim_object` | `insert_claim_object`, `update_claim_object`, `delete_claim_object` |
+| `samna_user` | `upsert_app_user`, `merge_user` |
+| `organization` roots | `upsert_root_organization` |
+| `samna_app` | `upsert_system_app` for the system app, `upsert_app` for every other app; see [Apps](./apps.md#creating-an-app) |
+| `app_object` | `upsert_app_object`, `delete_app_object` |
 | `organization`, `location`, `samna_app` updates, `samna_client`, `samna_secret`, `object_field`, `user_field`, `user_relation`, `prophet_state` | Direct insert and update |
 | The implementing side's registered tables | Direct insert and update, by the implementing side |
 | Cross root moves | `migrate_root`, reviewed by a person on every call |
@@ -68,7 +68,7 @@ A write changes a source row: a registered row, an organization, a location, a c
 
 A location is also a node of its owner's ownership tree: `_reattach_location_in_ownership` drops its ownership rows and inserts its self edge and its owner's chain, `d(owner) + 2` rows, when its owner changes or it is deleted or restored. An organization's own location pin, and a parenthood row's owner and pin, move through `_retree_object`. An update that changes `sa_root_id` outside replay is refused; `migrate_root` is the only path across roots.
 
-A new organization or location inherits the app links of its owner: per app the owner is linked to, `link_app_object` inserts the link and recomputes the pair of every user of `_affected_users_for_object`. Then `object_info` as above, the actor's pair per app, and one object area with `cascade` unless the update is a rename, `name` and `description` alone, which every reader sees through `object_info` without a settle.
+A new organization or location inherits the app links of its owner: per app the owner is linked to, `upsert_app_object` inserts the link and recomputes the pair of every user of `_affected_users_for_object`. Then `object_info` as above, the actor's pair per app, and one object area with `cascade` unless the update is a rename, `name` and `description` alone, which every reader sees through `object_info` without a settle.
 
 ### A claim, a binding or a grant
 
@@ -86,9 +86,9 @@ The assignee is not settled in the write. A grant changes one user's access and 
 
 1. A binding on an object whose effective mask, `eff(c, b)`, carries a bit the actor does not hold there is refused: `reconcile_if_pending` settles the actor's pair on the object, one range reads `max(sa_access)`, and `eff & ~A(actor, y) & 15` must be 0. A deny, a removal and a binding that does not change mask, claim or object are exempt. Two first bindings pass on the actor's owner bit on an organization in place of its access on the object:
 
-    1. On a prophet, the first live binding of an app, while the app carries none, from an actor whose grant belongs to another app, when the actor holds owner on the organization that owns the `samna_app` row, judged in the actor's own app, the app of its `user_claim`, after settling that one pair. A new app has no pairs, so no actor could hold anything in it; the owner of the organization that owns the app is the one with the authority to open it, and `create_app` binds under it.
+    1. On a prophet, the first live binding of an app, while the app carries none, from an actor whose grant belongs to another app, when the actor holds owner on the organization that owns the `samna_app` row, judged in the actor's own app, the app of its `user_claim`, after settling that one pair. A new app has no pairs, so no actor could hold anything in it; the owner of the organization that owns the app is the one with the authority to open it, and `upsert_app` binds under it.
 
-    2. The first live binding on a `samna_user` that holds a claim assigned under the binding's owning organization, when the actor holds owner on that organization in the binding's app. A new user has no pair anyone could hold yet; the owner of the organization the user was just made a member of may bind the user, which is how `create_organization_user` binds the new user's claim.
+    2. The first live binding on a `samna_user` that holds a claim assigned under the binding's owning organization, when the actor holds owner on that organization in the binding's app. A new user has no pair anyone could hold yet; the owner of the organization the user was just made a member of may bind the user, which is how `insert_organization_user` binds the new user's claim.
 
 2. A composition link must not point at its own claim or reverse a live link, one probe of `idx_claim_object_object`, and the actor must hold read on the target claim, its settled pair on `claimius.claim`.
 
@@ -135,7 +135,7 @@ A writer reads its own write back in the same request: a handler creates a row a
 
 ## Removing a claim
 
-`remove_claim` soft deletes, in four statements, the links pointing at the claim, its `|H_c|` grants, its `n_c` bindings, then the claim. Each soft delete is an update that fires the triggers of its table: per row one area raise, which collapses onto the claim's area or the assignee's, one outbox row, and the actor's pair on the claim, a pair that stops changing after the first. So the removal writes `|H_c| + n_c + 1 + links` source rows and outbox rows, and at most `2 + |H_c|` area rows, whatever the claim reaches. Each holder's pairs that reached `T_c` only through the claim are deleted by that holder's next read.
+`delete_claim` soft deletes, in four statements, the links pointing at the claim, its `|H_c|` grants, its `n_c` bindings, then the claim. Each soft delete is an update that fires the triggers of its table: per row one area raise, which collapses onto the claim's area or the assignee's, one outbox row, and the actor's pair on the claim, a pair that stops changing after the first. So the removal writes `|H_c| + n_c + 1 + links` source rows and outbox rows, and at most `2 + |H_c|` area rows, whatever the claim reaches. Each holder's pairs that reached `T_c` only through the claim are deleted by that holder's next read.
 
 ## Locks
 

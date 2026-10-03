@@ -63,11 +63,11 @@ DECLARE
     v_new_claim UUID;
     v_old_claim UUID;
 BEGIN
-    PERFORM claimius.init();
-    PERFORM claimius.init_claimius_tables('public.sqltest_migrate_row');
+    PERFORM claimius.upsert_disciple_state();
+    PERFORM claimius.upsert_table_info('public.sqltest_migrate_row');
 
-    PERFORM claimius.ensure_app_user(p_user_id => v_uma, p_first_name => 'Uma');
-    PERFORM claimius.ensure_app_user(p_user_id => v_vic, p_first_name => 'Vic');
+    PERFORM claimius.upsert_app_user(p_user_id => v_uma, p_first_name => 'Uma');
+    PERFORM claimius.upsert_app_user(p_user_id => v_vic, p_first_name => 'Vic');
 
     INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
     VALUES (v_old, 'Old root', 'company', v_old, v_old, 0, v_sys),
@@ -82,23 +82,23 @@ BEGIN
     INSERT INTO public.sqltest_migrate_row (id, name, sa_owner_id, sa_created_by)
     VALUES ('40000000-0000-4000-8000-000000000a90', 'Moved row', v_kid, v_sys);
 
-    v_new_claim := (claimius.create_claim(
+    v_new_claim := (claimius.insert_claim(
         p_name => 'New crew', p_description => NULL, p_sa_access => 4,
         p_sa_owner_id => v_new, p_sa_root_id => v_new, p_sa_created_by => v_sys
     ) -> 'claim' ->> 'id')::UUID;
-    PERFORM claimius.assign_claim_object(
+    PERFORM claimius.insert_claim_object(
         p_claim_id => v_new_claim, p_sa_owner_id => v_new, p_sa_root_id => v_new, p_sa_created_by => v_sys,
         p_object_id => v_new, p_object_type => 'claimius.organization', p_inherits => TRUE);
-    PERFORM claimius.assign_claim_user(p_claim_id => v_new_claim, p_user_id => v_uma, p_sa_owner_id => v_new, p_sa_created_by => v_sys);
+    PERFORM claimius.insert_user_claim(p_claim_id => v_new_claim, p_user_id => v_uma, p_sa_owner_id => v_new, p_sa_created_by => v_sys);
 
-    v_old_claim := (claimius.create_claim(
+    v_old_claim := (claimius.insert_claim(
         p_name => 'Old crew', p_description => NULL, p_sa_access => 4,
         p_sa_owner_id => v_sub, p_sa_root_id => v_old, p_sa_created_by => v_sys
     ) -> 'claim' ->> 'id')::UUID;
-    PERFORM claimius.assign_claim_object(
+    PERFORM claimius.insert_claim_object(
         p_claim_id => v_old_claim, p_sa_owner_id => v_old, p_sa_root_id => v_old, p_sa_created_by => v_sys,
         p_object_id => v_old, p_object_type => 'claimius.organization', p_inherits => TRUE);
-    PERFORM claimius.assign_claim_user(p_claim_id => v_old_claim, p_user_id => v_vic, p_sa_owner_id => v_old, p_sa_created_by => v_sys);
+    PERFORM claimius.insert_user_claim(p_claim_id => v_old_claim, p_user_id => v_vic, p_sa_owner_id => v_old, p_sa_created_by => v_sys);
 END $$;
 
 SELECT ok(pg_temp.sees('a0000000-0000-4000-8000-000000000a92', 'claimius.organization', '10000000-0000-4000-8000-000000000a93')

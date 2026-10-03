@@ -13,7 +13,7 @@ DECLARE
     v_claim UUID;
     v_user  UUID;
 BEGIN
-    v_app := (claimius.init(
+    v_app := (claimius.upsert_system_app(
         p_system_app_slug         => 'sqltest_sync_feed',
         p_system_app_name         => 'SQL sync feed test',
         p_system_app_private_key  => 'key',
@@ -23,28 +23,28 @@ BEGIN
 
     FOREACH v_user IN ARRAY ARRAY['a0000000-0000-4000-8000-0000000000f1', 'a0000000-0000-4000-8000-0000000000f2',
                                   'a0000000-0000-4000-8000-0000000000f3']::UUID[] LOOP
-        PERFORM claimius.ensure_app_user(p_user_id => v_user, p_app_id => v_app, p_first_name => 'Holder');
+        PERFORM claimius.upsert_app_user(p_user_id => v_user, p_app_id => v_app, p_first_name => 'Holder');
     END LOOP;
 
     INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
     VALUES (v_root, 'Feed root', 'company', v_root, v_root, 0, v_sys);
-    PERFORM claimius.link_app_object(v_app, 'claimius.organization', v_root);
+    PERFORM claimius.upsert_app_object(v_app, 'claimius.organization', v_root);
     INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
     VALUES ('10000000-0000-4000-8000-0000000000f1', 'Feed one', 'company', v_root, v_root, 1, v_sys),
            ('10000000-0000-4000-8000-0000000000f2', 'Feed two', 'company', v_root, v_root, 1, v_sys);
 
     CREATE TEMP TABLE before_grant AS SELECT coalesce(max(seq), 0) AS seq FROM claimius.sync_event;
 
-    v_claim := (claimius.create_claim(
+    v_claim := (claimius.insert_claim(
         p_app_id => v_app, p_name => 'Feed crew', p_description => NULL, p_sa_access => 4,
         p_sa_owner_id => v_root, p_sa_root_id => v_root, p_sa_created_by => v_sys
     ) -> 'claim' ->> 'id')::UUID;
-    PERFORM claimius.assign_claim_object(
+    PERFORM claimius.insert_claim_object(
         p_app_id => v_app, p_claim_id => v_claim, p_sa_owner_id => v_root, p_sa_root_id => v_root, p_sa_created_by => v_sys,
         p_object_id => v_root, p_object_type => 'claimius.organization', p_inherits => TRUE);
     FOREACH v_user IN ARRAY ARRAY['a0000000-0000-4000-8000-0000000000f1', 'a0000000-0000-4000-8000-0000000000f2',
                                   'a0000000-0000-4000-8000-0000000000f3']::UUID[] LOOP
-        PERFORM claimius.assign_claim_user(p_app_id => v_app, p_claim_id => v_claim, p_user_id => v_user,
+        PERFORM claimius.insert_user_claim(p_app_id => v_app, p_claim_id => v_claim, p_user_id => v_user,
             p_sa_owner_id => v_root, p_sa_created_by => v_sys);
     END LOOP;
 
@@ -116,9 +116,9 @@ BEGIN
             '10000000-0000-4000-8000-0000000000f9', '10000000-0000-4000-8000-0000000000f9', 0,
             '00000000-0000-4000-8000-0000000000f0');
     CREATE TEMP TABLE before_link AS SELECT coalesce(max(seq), 0) AS seq FROM claimius.sync_event;
-    PERFORM claimius.link_app_object(pg_temp.app(), 'claimius.organization', '10000000-0000-4000-8000-0000000000f9');
+    PERFORM claimius.upsert_app_object(pg_temp.app(), 'claimius.organization', '10000000-0000-4000-8000-0000000000f9');
     CREATE TEMP TABLE before_unlink AS SELECT coalesce(max(seq), 0) AS seq FROM claimius.sync_event;
-    PERFORM claimius.unlink_app_object(pg_temp.app(), 'claimius.organization', '10000000-0000-4000-8000-0000000000f9');
+    PERFORM claimius.delete_app_object(pg_temp.app(), 'claimius.organization', '10000000-0000-4000-8000-0000000000f9');
 END $$;
 
 SELECT is(

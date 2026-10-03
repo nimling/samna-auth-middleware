@@ -3,7 +3,7 @@
 -- ----------------------------------------------------------------------------
 -- Last step of the base set. Defines the role grant helpers init calls and
 -- runs the one that fits the deployment, a disciple initialized through
--- init_disciple or else a prophet, at the top level, so every build and every
+-- upsert_disciple_state or else a prophet, at the top level, so every build and every
 -- replay of the set leaves the roles holding what init grants them on every
 -- table and function the set carries, with no consumer calling an internal
 -- function, and brings every audit partition to the grants of the
@@ -17,13 +17,13 @@ BEGIN
     -- Reader: EXECUTE on all functions, then revoke the write functions and
     -- the init/admin ones. Reader sees no tables directly.
     EXECUTE 'GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA claimius TO claimius_reader';
-    EXECUTE 'REVOKE EXECUTE ON FUNCTION claimius.create_claim, claimius.update_claim, claimius.remove_claim,
-             claimius.assign_claim_user, claimius.update_claim_user, claimius.remove_user_claim,
-             claimius.assign_claim_object, claimius.update_claim_object, claimius.remove_claim_object,
+    EXECUTE 'REVOKE EXECUTE ON FUNCTION claimius.insert_claim, claimius.update_claim, claimius.delete_claim,
+             claimius.insert_user_claim, claimius.update_user_claim, claimius.delete_user_claim,
+             claimius.insert_claim_object, claimius.update_claim_object, claimius.delete_claim_object,
              claimius.merge_user, claimius.migrate_root,
-             claimius.init, claimius.init_disciple, claimius.init_hybrid, claimius.create_app,
-             claimius.offer_handover, claimius.accept_handover, claimius.apply_peer_event,
-             claimius.init_claimius_tables, claimius.init_claimius_internal,
+             claimius.upsert_system_app, claimius.upsert_disciple_state, claimius.upsert_prophet_peer, claimius.upsert_app,
+             claimius.insert_app_handover, claimius.update_app_handover, claimius.apply_peer_event,
+             claimius.upsert_table_info, claimius.upsert_internal_table_info,
              claimius.recompute_state
              FROM claimius_reader';
 
@@ -50,13 +50,13 @@ CREATE OR REPLACE FUNCTION claimius._grant_disciple_roles()
     RETURNS VOID AS $$
 BEGIN
     EXECUTE 'GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA claimius TO claimius_reader';
-    EXECUTE 'REVOKE EXECUTE ON FUNCTION claimius.create_claim, claimius.update_claim, claimius.remove_claim,
-             claimius.assign_claim_user, claimius.update_claim_user, claimius.remove_user_claim,
-             claimius.assign_claim_object, claimius.update_claim_object, claimius.remove_claim_object,
+    EXECUTE 'REVOKE EXECUTE ON FUNCTION claimius.insert_claim, claimius.update_claim, claimius.delete_claim,
+             claimius.insert_user_claim, claimius.update_user_claim, claimius.delete_user_claim,
+             claimius.insert_claim_object, claimius.update_claim_object, claimius.delete_claim_object,
              claimius.merge_user, claimius.migrate_root,
-             claimius.init, claimius.init_disciple, claimius.init_hybrid, claimius.create_app,
-             claimius.offer_handover, claimius.accept_handover, claimius.apply_peer_event,
-             claimius.init_claimius_tables, claimius.init_claimius_internal,
+             claimius.upsert_system_app, claimius.upsert_disciple_state, claimius.upsert_prophet_peer, claimius.upsert_app,
+             claimius.insert_app_handover, claimius.update_app_handover, claimius.apply_peer_event,
+             claimius.upsert_table_info, claimius.upsert_internal_table_info,
              claimius.recompute_state
              FROM claimius_reader';
     EXECUTE 'GRANT INSERT, UPDATE, DELETE ON claimius.user_object, claimius.object_info, claimius.user_users,

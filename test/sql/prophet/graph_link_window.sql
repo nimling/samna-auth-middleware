@@ -9,7 +9,7 @@ DECLARE
     v_crew  UUID;
     v_reader UUID;
 BEGIN
-    v_app := (claimius.init(
+    v_app := (claimius.upsert_system_app(
         p_system_app_slug         => 'sqltest_link_window',
         p_system_app_name         => 'SQL link window test',
         p_system_app_private_key  => 'key',
@@ -17,29 +17,29 @@ BEGIN
         p_default_claim           => '{"name": "Member", "description": "Default member claim"}'::JSONB
     ) -> 'samna_app' ->> 'id')::UUID;
 
-    v_reader := (claimius.ensure_app_user(p_user_id => 'a0000000-0000-4000-8000-000000000f71', p_app_id => v_app, p_first_name => 'Linker')
+    v_reader := (claimius.upsert_app_user(p_user_id => 'a0000000-0000-4000-8000-000000000f71', p_app_id => v_app, p_first_name => 'Linker')
         -> 'user_claim' ->> 'id')::UUID;
     INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
     VALUES (v_root, 'Link root', 'company', v_root, v_root, 0, v_sys);
-    PERFORM claimius.link_app_object(v_app, 'claimius.organization', v_root);
+    PERFORM claimius.upsert_app_object(v_app, 'claimius.organization', v_root);
     INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
     VALUES ('10000000-0000-4000-8000-000000000f73', 'Charlie', 'company', v_root, v_root, 1, v_sys),
            ('10000000-0000-4000-8000-000000000f71', 'Alpha', 'company', v_root, v_root, 1, v_sys),
            ('10000000-0000-4000-8000-000000000f72', 'Bravo', 'company', v_root, v_root, 1, v_sys);
 
-    v_crew := (claimius.create_claim(
+    v_crew := (claimius.insert_claim(
         p_app_id => v_app, p_name => 'Link crew', p_description => NULL, p_sa_access => 4,
         p_sa_owner_id => v_root, p_sa_root_id => v_root, p_sa_created_by => v_sys
     ) -> 'claim' ->> 'id')::UUID;
-    PERFORM claimius.assign_claim_object(
+    PERFORM claimius.insert_claim_object(
         p_app_id => v_app, p_claim_id => v_crew, p_sa_owner_id => v_root, p_sa_root_id => v_root, p_sa_created_by => v_sys,
         p_object_id => v_root, p_object_type => 'claimius.organization', p_inherits => TRUE);
-    PERFORM claimius.assign_claim_user(p_app_id => v_app, p_claim_id => v_crew, p_user_id => 'a0000000-0000-4000-8000-000000000f71',
+    PERFORM claimius.insert_user_claim(p_app_id => v_app, p_claim_id => v_crew, p_user_id => 'a0000000-0000-4000-8000-000000000f71',
         p_sa_owner_id => v_root, p_sa_created_by => v_sys);
     INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
     VALUES ('10000000-0000-4000-8000-000000000f7f', 'Lone root', 'company', '10000000-0000-4000-8000-000000000f7f', '10000000-0000-4000-8000-000000000f7f', 0, v_reader);
-    PERFORM claimius.link_app_object(v_app, 'claimius.organization', '10000000-0000-4000-8000-000000000f7f');
-    PERFORM claimius.create_claim(
+    PERFORM claimius.upsert_app_object(v_app, 'claimius.organization', '10000000-0000-4000-8000-000000000f7f');
+    PERFORM claimius.insert_claim(
         p_app_id => v_app, p_name => 'Empty claim', p_description => NULL, p_sa_access => 4,
         p_sa_owner_id => v_root, p_sa_root_id => v_root, p_sa_created_by => v_sys);
     PERFORM claimius.get_objects('a0000000-0000-4000-8000-000000000f71', v_app, 'claimius.organization');

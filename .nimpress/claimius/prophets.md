@@ -2,7 +2,7 @@
 layout: doc
 title: Prophets and disciples
 description: The authority and its mirrors, the three bootstraps, why ids are random and what that costs in collision probability, how prophets federate through peers with one home per app, refused collisions and agreed handovers, what each role reads and writes per request, and what happens when any of them fails.
-tags: prophet, disciple, hybrid, federation, init, init_disciple, init_hybrid, prophet_peer, home_prophet, get_app_home, enforce_app_home, check_sync_home, apply_peer_event, peer_collision, app_handover, offer_handover, accept_handover, availability, failure
+tags: prophet, disciple, hybrid, federation, upsert_system_app, upsert_disciple_state, upsert_prophet_peer, prophet_peer, home_prophet, get_app_home, enforce_app_home, check_sync_home, apply_peer_event, peer_collision, app_handover, insert_app_handover, update_app_handover, availability, failure
 lastUpdated: true
 ---
 
@@ -12,19 +12,19 @@ The same schema runs in two roles and their combination.
 
 | Role | Bootstrap | Holds | Writes |
 |---|---|---|---|
-| Prophet | `init` | Every app it is home for, with keys and seeds, and every app it mirrors from a peer | Every shared row of the apps it is home for; their feeds |
-| Disciple | `init_disciple(p_disciple_app_slug)` | One app, mirrored, without `app_id` and without `app_object` | Its own registered tables; routes shared writes to its prophet |
-| Hybrid | `init_hybrid` | Its own system app, and one app of an upstream prophet mirrored as a peer | As a prophet |
+| Prophet | `upsert_system_app` | Every app it is home for, with keys and seeds, and every app it mirrors from a peer | Every shared row of the apps it is home for; their feeds |
+| Disciple | `upsert_disciple_state(p_disciple_app_slug)` | One app, mirrored, without `app_id` and without `app_object` | Its own registered tables; routes shared writes to its prophet |
+| Hybrid | `upsert_prophet_peer` | Its own system app, and one app of an upstream prophet mirrored as a peer | As a prophet |
 
 Samna Auth is the prophet of the ecosystem. Bookable and Nimployer are disciples.
 
 ## The bootstraps
 
-1. `init` creates the system app, its root organization, its system user, its administrator claim with its binding and grant, and the system app's `prophet_state` row marked with `system_app_slug`, and returns the six rows as one jsonb object.
+1. `upsert_system_app` creates the system app, its root organization, its system user, its administrator claim with its binding and grant, and the system app's `prophet_state` row marked with `system_app_slug`, and returns the six rows as one jsonb object.
 
-2. `init_disciple(p_disciple_app_slug)` writes the one `disciple_state` row naming the mirrored app and grants the disciple roles. The rows arrive from the prophet's snapshot.
+2. `upsert_disciple_state(p_disciple_app_slug)` writes the one `disciple_state` row naming the mirrored app and grants the disciple roles. The rows arrive from the prophet's snapshot.
 
-3. `init_hybrid(p_system_app_slug, p_system_app_name, p_system_app_private_key, p_system_app_private_seed, p_upstream_prophet, p_upstream_endpoint, p_upstream_app_slug, p_upstream_app_secret, ...)` refuses an empty upstream and an upstream named like itself, runs `init` with the system app fields, and upserts one `prophet_peer` row on `app_slug`: the upstream's slug and endpoint and the mirrored app's slug and secret, created by the system grant `init` returned. A hybrid is a prophet that mirrors one app the way prophets federate; it writes no `disciple_state` row, so `get_disciple_app` and `get_disciple_app_id` raise on a hybrid and `get_app_id` returns its system app.
+3. `upsert_prophet_peer(p_system_app_slug, p_system_app_name, p_system_app_private_key, p_system_app_private_seed, p_upstream_prophet, p_upstream_endpoint, p_upstream_app_slug, p_upstream_app_secret, ...)` refuses an empty upstream and an upstream named like itself, runs `upsert_system_app` with the system app fields, and upserts one `prophet_peer` row on `app_slug`: the upstream's slug and endpoint and the mirrored app's slug and secret, created by the system grant `upsert_system_app` returned. A hybrid is a prophet that mirrors one app the way prophets federate; it writes no `disciple_state` row, so `get_disciple_app` and `get_disciple_app_id` raise on a hybrid and `get_app_id` returns its system app.
 
 ## The principle
 
@@ -83,9 +83,9 @@ Prophets federate by mirroring each other's apps. A prophet that serves users of
 
 A handover moves an app's home in two steps, each one row of `app_handover`:
 
-1. The home calls `offer_handover(app, peer, created_by)`. It refuses unless this prophet is the home and the peer is an active peer, inserts the offer and an audit row. From that commit `get_app_home` names the peer, so this prophet decides none of the app's writes. The offer travels on the app's feed to peers only.
+1. The home calls `insert_app_handover(app, peer, created_by)`. It refuses unless this prophet is the home and the peer is an active peer, inserts the offer and an audit row. From that commit `get_app_home` names the peer, so this prophet decides none of the app's writes. The offer travels on the app's feed to peers only.
 
-2. The peer, which mirrors the app and so holds every row the app has, calls `accept_handover(offer, created_by)`. It refuses unless the offer names it and the app is mirrored from the offering prophet, marks the offer `accepted`, sets `home_prophet` to NULL, and writes an audit row. This prophet is now the home.
+2. The peer, which mirrors the app and so holds every row the app has, calls `update_app_handover(offer, created_by)`. It refuses unless the offer names it and the app is mirrored from the offering prophet, marks the offer `accepted`, sets `home_prophet` to NULL, and writes an audit row. This prophet is now the home.
 
 3. The acceptance travels back on the new home's feed. The old home, which now pulls the app from the new home, applies it in `apply_peer_event`: its own offer turns `accepted` and `home_prophet` names the new home.
 

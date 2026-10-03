@@ -14,7 +14,7 @@ Once your app tables register with Claimius, every read can ask one question: "w
 
 ## Core concepts
 
-**Claim**: a permission template with an `sa_access` INTEGER bitwise mask and an `inherits` flag for cascading. The bits are owner `1`, write `2`, read `4`, execute `8`, deny `16` and member `32`; `ACCESS_ALL` is `15`. An access check is `(stored & required) = required`. `create_claim` expands a grant mask: owner implies write, read and execute; write implies read and execute; execute implies read. The member bit stands alone. A claim with the deny bit set is a deny claim, covered in "Deny claims" below. The same mask sits on `claim_object.sa_access`, where NULL inherits the claim mask, and on `user_object.sa_access`, the effective mask per user and object.
+**Claim**: a permission template with an `sa_access` INTEGER bitwise mask and an `inherits` flag for cascading. The bits are owner `1`, write `2`, read `4`, execute `8`, deny `16` and member `32`; `ACCESS_ALL` is `15`. An access check is `(stored & required) = required`. `insert_claim` expands a grant mask: owner implies write, read and execute; write implies read and execute; execute implies read. The member bit stands alone. A claim with the deny bit set is a deny claim, covered in "Deny claims" below. The same mask sits on `claim_object.sa_access`, where NULL inherits the claim mask, and on `user_object.sa_access`, the effective mask per user and object.
 
 **user_claim**: a grant of a claim to a user, optionally time bounded.
 
@@ -32,7 +32,7 @@ Once your app tables register with Claimius, every read can ask one question: "w
 - **Root row** (parent column NULL or set to `NEW.id`): self references both columns to `NEW.id`.
 - **Child row** (parent column set, `sa_root_id` NULL): copies parent's `sa_root_id`.
 
-Implementers don't need to know about `sa_root_id`. Just set the parent (`sa_owner_id` for orgs, `sa_parent_id` for locations and parenthood tables) or leave both NULL for a root, and the trigger fills in the rest. Attached to `claimius.organization` and `claimius.location` by claimius itself, and attached to implementer parenthood tables when registered via `init_claimius_tables`.
+Implementers don't need to know about `sa_root_id`. Just set the parent (`sa_owner_id` for orgs, `sa_parent_id` for locations and parenthood tables) or leave both NULL for a root, and the trigger fills in the rest. Attached to `claimius.organization` and `claimius.location` by claimius itself, and attached to implementer parenthood tables when registered via `upsert_table_info`.
 
 **Composite ids**: identifiers that span polymorphic tables use the format `<object_type>:<object_id>` where `object_type` is the schema qualified table name (`public.device`, `claimius.organization`).
 
@@ -44,7 +44,7 @@ Implementers don't need to know about `sa_root_id`. Just set the parent (`sa_own
 
 **sync_event**: append only outbox of changes to the source tables, one event per source row written, keyed for a consumer by `(txid, seq)`. Derived tables, `user_object`, `user_users` and `audit`, never publish. Prophets write; disciples and peer prophets pull.
 
-**Owner claim rule**: every resource that participates in the access model must carry at least one direct `claim_object` binding to a claim. The "owner claim" is the claim used to create the resource, captured from the actor's `user_claim_id` at write time, or specified explicitly when the writer wants a different binding. The direct binding exists so access is never reliant solely on cascade: even if the cascade machinery is bypassed, disabled per binding, or interrupted by an `inherits = FALSE` flag somewhere up the chain, the resource still has at least one user who can see and modify it. Two exceptions: `samna_user` rows (handled by `user_users` denormalization and `ensure_app_user`), and the claim itself (a claim does not bind itself via `claim_object`; that would be circular). Implementer write paths that insert organizations, locations, apps, or registered application table rows must follow up with an `assign_claim_object` (or direct `claim_object` insert during bootstrap) so the owner claim binding exists before any read tries to find the row.
+**Owner claim rule**: every resource that participates in the access model must carry at least one direct `claim_object` binding to a claim. The "owner claim" is the claim used to create the resource, captured from the actor's `user_claim_id` at write time, or specified explicitly when the writer wants a different binding. The direct binding exists so access is never reliant solely on cascade: even if the cascade machinery is bypassed, disabled per binding, or interrupted by an `inherits = FALSE` flag somewhere up the chain, the resource still has at least one user who can see and modify it. Two exceptions: `samna_user` rows (handled by `user_users` denormalization and `upsert_app_user`), and the claim itself (a claim does not bind itself via `claim_object`; that would be circular). Implementer write paths that insert organizations, locations, apps, or registered application table rows must follow up with an `insert_claim_object` (or direct `claim_object` insert during bootstrap) so the owner claim binding exists before any read tries to find the row.
 
 **Inheritance**: cascades fire only when BOTH `claim.inherits` and the specific `claim_object.inherits` are TRUE. The claim's flag is the master switch for the whole claim; the per binding flag narrows that to specific bindings. Either FALSE blocks cascade for that binding. A claim with `inherits = FALSE` means none of its bindings cascade regardless of their per row flag.
 
@@ -54,12 +54,12 @@ Four Postgres roles enforce the access boundary:
 
 - **claimius_admin**: schema owner. Used during migrations.
 - **claimius_writer**: prophet runtime. EXECUTE on every function, SELECT on every table, INSERT and UPDATE on the tables without write functions (`samna_app`, `samna_user`, `samna_client`, `samna_secret`, `organization`, `location`, `object_field`, `user_field`, `user_relation`, `notification`, `prophet_state`, `sync_consumer`), UPDATE on `prophet_peer`.
-- **claimius_reader**: app code runtime. No table privilege. EXECUTE on every function except the claim, grant and binding writers, `merge_user`, `migrate_root`, the `init` functions, `create_app`, `offer_handover`, `accept_handover`, `apply_peer_event`, `init_claimius_tables`, `init_claimius_internal` and `recompute_state`. The read surface runs as its owner with a pinned `search_path`, so the reader gets answers through it and nothing else.
+- **claimius_reader**: app code runtime. No table privilege. EXECUTE on every function except the claim, grant and binding writers, `merge_user`, `migrate_root`, the bootstrap functions, `upsert_app`, `insert_app_handover`, `update_app_handover`, `apply_peer_event`, `upsert_table_info`, `upsert_internal_table_info` and `recompute_state`. The read surface runs as its owner with a pinned `search_path`, so the reader gets answers through it and nothing else.
 - **claimius_disciple_client**: disciple runtime and sync layer. EXECUTE on every function, SELECT on every table, and INSERT, UPDATE and DELETE on the mirrored source tables, the derived tables, `disciple_state`, `audit`, `inheritance_info`, `table_info`, `notification` and `claim_graph_cache`.
 
 App connections never own the schema. They inherit the appropriate role.
 
-The grants are written by `_grant_prophet_roles` and `_grant_disciple_roles`, defined in `V6.0__claimius_grants.sql`, the last file of the base set. That file runs the one that fits at the top level, the disciple helper on a database initialized through `init_disciple` and the prophet helper otherwise, so every build and every replay of the set leaves the roles holding their grants on every table and function the set carries, and no consumer calls a `_grant_*` function. It also brings every `audit` partition to exactly the grants of `audit` through `_match_audit_partition_grants`, which `ensure_audit_partition` runs on each month it attaches. A change to what a role holds is made in that file.
+The grants are written by `_grant_prophet_roles` and `_grant_disciple_roles`, defined in `V6.0__claimius_grants.sql`, the last file of the base set. That file runs the one that fits at the top level, the disciple helper on a database initialized through `upsert_disciple_state` and the prophet helper otherwise, so every build and every replay of the set leaves the roles holding their grants on every table and function the set carries, and no consumer calls a `_grant_*` function. It also brings every `audit` partition to exactly the grants of `audit` through `_match_audit_partition_grants`, which `upsert_audit_partition` runs on each month it attaches. A change to what a role holds is made in that file.
 
 ## Deployment shapes
 
@@ -67,9 +67,9 @@ The grants are written by `_grant_prophet_roles` and `_grant_disciple_roles`, de
 
 **Disciple only**: a mirror of one app. Empty database; the sync layer applies the source rows of the prophet's feed under `replay_mode = true`, where the calc triggers keep the closure and raise the areas each row moves but settle no actor and emit no event. The disciple settles its own `user_object` from them on its reads, so its reads serve the same results as the prophet's.
 
-**Hybrid**: a prophet that is home for its own system app and mirrors one app of a peer prophet, the way prophets federate. `init_hybrid` runs `init` and registers the peer in `prophet_peer`; the peer pull applies the peer's feed of that app through `apply_peer_event`. The mirrored app's writes belong to the peer, and this prophet refuses them.
+**Hybrid**: a prophet that is home for its own system app and mirrors one app of a peer prophet, the way prophets federate. `upsert_prophet_peer` runs `upsert_system_app` and registers the peer in `prophet_peer`; the peer pull applies the peer's feed of that app through `apply_peer_event`. The mirrored app's writes belong to the peer, and this prophet refuses them.
 
-The role is determined at init time by which init function is called: `init`, `init_disciple`, or `init_hybrid`. There is no separate config table for role. A prophet and a hybrid carry the system app slug in `prophet_state`; a disciple carries its app slug in `disciple_state`, and a hybrid has no `disciple_state` row.
+The role is determined by which bootstrap function is called: `upsert_system_app`, `upsert_disciple_state`, or `upsert_prophet_peer`. There is no separate config table for role. A prophet and a hybrid carry the system app slug in `prophet_state`; a disciple carries its app slug in `disciple_state`, and a hybrid has no `disciple_state` row.
 
 ## Migration layout
 
@@ -79,15 +79,15 @@ The prophet base set, read by smig as a git include of `prophet/database` at a p
 V1.0__claimius_roles.sql              claimius_admin, _writer, _reader, _disciple_client
 V1.1__claimius_baseline.sql           All tables, indexes, comments, enums
 V1.2__claimius_notification.sql       Notification tables
-V2.1__claimius_functions_base.sql     Utilities: composite_id, masks, write_audit, get_subtree
+V2.1__claimius_functions_base.sql     Utilities: composite_id, masks, insert_audit, get_subtree
 V2.2__claimius_functions_internal.sql Tree builders, calc helpers, recompute_user_object
 V2.3__claimius_functions_access.sql   Trigger functions: calc_*_access, emit_sync_event, app home,
                                       reconcile_if_pending, drain_access_diff
 V2.4__claimius_functions_external.sql Public surface: get_*, search, claim management,
-                                      merge_user, init, ensure_app_user, sync cursor,
+                                      merge_user, upsert_system_app, upsert_app_user, sync cursor,
                                       trimming, handover, apply_peer_event
 V3.0__claimius_triggers.sql           Attaches trigger functions to internal tables
-V4.0__claimius_init.sql               Calls init_claimius_internal()
+V4.0__claimius_init.sql               Calls upsert_internal_table_info()
 V5.x__claimius_*.sql                  Prophet services: session, dpop, rate limit, par,
                                       jwks, sync feed, app client and bff, analytics
 V6.0__claimius_grants.sql             Role grants and audit partition grants, run on every
@@ -105,7 +105,7 @@ After Claimius migrations finish, the implementing app runs:
 -- service on demand via samna_app.app_secret. See "App secret" below.
 -- Returns a JSONB object keyed by table name, with the full row each table
 -- received. Capture it if you need ids for follow on inserts.
-SELECT claimius.init(
+SELECT claimius.upsert_system_app(
            p_system_app_slug          => 'my_app',
            p_system_app_name          => 'My Application',
            p_system_app_private_key   => '<rsa private key from Go>',
@@ -135,14 +135,14 @@ SELECT claimius.init(
 -- typically read from an env var like CLAIMIUS_DISCIPLE_APP_SLUG so the
 -- same migration artefact deploys against any prophet. Returns empty
 -- jsonb {}.
-SELECT claimius.init_disciple(
+SELECT claimius.upsert_disciple_state(
            p_disciple_app_slug => 'mainapp'
        );
 
 -- Or a hybrid: a prophet home for its own system app that mirrors one app
--- of an upstream prophet as its peer. Runs init, then writes the prophet_peer
--- row the peer pull reads. Returns the same jsonb shape as init.
-SELECT claimius.init_hybrid(
+-- of an upstream prophet as its peer. Runs upsert_system_app, then writes the prophet_peer
+-- row the peer pull reads. Returns the same jsonb shape as upsert_system_app.
+SELECT claimius.upsert_prophet_peer(
            p_system_app_slug          => 'my_app',
            p_system_app_name          => 'My Application',
            p_system_app_private_key   => '<rsa private key from Go>',
@@ -159,7 +159,7 @@ SELECT claimius.init_hybrid(
        );
 
 -- Then register app tables:
-SELECT claimius.init_claimius_tables(
+SELECT claimius.upsert_table_info(
            'public.device',
            'public.sensor',
            'public.recipe'
@@ -168,38 +168,38 @@ SELECT claimius.init_claimius_tables(
 
 ## Bootstrap and creation order on a prophet
 
-A fresh prophet has nothing in the database. Bringing it up requires a precise order because tables reference each other circularly (app references org, org links back to the app through `app_object`, claims reference org, user_claim references claim, etc). `init` already encapsulates this for the system app and system org. When you create additional apps, organizations, and resources later, you follow the same pattern.
+A fresh prophet has nothing in the database. Bringing it up requires a precise order because tables reference each other circularly (app references org, org links back to the app through `app_object`, claims reference org, user_claim references claim, etc). `upsert_system_app` already encapsulates this for the system app and system org. When you create additional apps, organizations, and resources later, you follow the same pattern.
 
-**Order for a fresh prophet (executed automatically by `init`):**
+**Order for a fresh prophet (executed automatically by `upsert_system_app`):**
 
-0. **The system user's `user_claim.id`** is settled first: the live grant of the system claim on a rerun, or a fresh id the grant row takes in step 8. Every row `init` writes carries it in `sa_created_by`, so the bootstrap keeps the rule that `sa_created_by` is a `user_claim.id`.
+0. **The system user's `user_claim.id`** is settled first: the live grant of the system claim on a rerun, or a fresh id the grant row takes in step 8. Every row `upsert_system_app` writes carries it in `sa_created_by`, so the bootstrap keeps the rule that `sa_created_by` is a `user_claim.id`.
 1. **System app** is inserted first, with a placeholder `sa_owner_id` referencing a UUID that will become the system org.
 2. **System samna_user** is inserted, scoped to the system app.
 3. **System organization** is inserted with `sa_owner_id = sa_root_id = id` (self rooted), and an `app_object` link ties it to the system app.
 4. **App's `sa_owner_id`** is reconciled with an UPDATE to point at the real system org.
 5. **`inheritance_info` self edge** for the system org is inserted (`ownership` tree, depth 0), bootstrapping the closure for that root.
-6. **System claim** ('System Administrator', `sa_access = 15`, `ACCESS_ALL`) is created, owned by the system org. This claim is sidelined: granted only to the system user, never via `ensure_app_user`.
+6. **System claim** ('System Administrator', `sa_access = 15`, `ACCESS_ALL`) is created, owned by the system org. This claim is sidelined: granted only to the system user, never via `upsert_app_user`.
    6b. **Default claim** is created from `p_default_claim` (`name` and `description` required, `sa_access` mask optional and defaulting to `4`, read). Type is `'user'`, `inherits = false`, no `claim_object` binding. Holding this claim alone grants no resource access; it is a "you have an account" marker.
-7. **App's `claim_id`** is updated to point at the **default claim** (NOT the system claim). This is the claim every regular user receives via `ensure_app_user`.
+7. **App's `claim_id`** is updated to point at the **default claim** (NOT the system claim). This is the claim every regular user receives via `upsert_app_user`.
 8. **user_claim** grants the system claim to the system user under the id of step 0, and the system user's pairs on the system org and the system app are recomputed, so the bindings below are judged against the access the system user holds as creator of both.
 9. **claim_object bindings** bind the system claim to the system org with `inherits = TRUE` (cascades to everything in the system org tree) and to the system app directly.
 10. **prophet_state row** is inserted for the system app, marked with `system_app_slug`, its cursor `(last_applied_txid, last_applied_seq)` at `(0, 0)`.
 11. **Role grants** are applied so `claimius_writer` can do its job; `V6.0__claimius_grants.sql` applies them again on every replay of the set.
 
-After this, the system user has full access to everything in the system org tree. Regular users created via `ensure_app_user` automatically receive the default claim, which by itself gives them no resource access. The implementing app grants additional claims as users earn permissions through normal flow.
+After this, the system user has full access to everything in the system org tree. Regular users created via `upsert_app_user` automatically receive the default claim, which by itself gives them no resource access. The implementing app grants additional claims as users earn permissions through normal flow.
 
 **Order for a new (non system) app on an existing prophet:**
 
 1. **Owning organization must exist first**. Either pick an existing org (typically the system org, or a tenant org) or create a fresh root org for the new app. The actor creating the app must hold owner on it in its own app.
-2. **`claimius.create_app`** with the actor's `user_claim.id`. It writes the `samna_app` row and its `prophet_state` row, cursor `(0, 0)`, copies the actor's `samna_user` into the app, links the organization tree, creates the owner claim, binds it on the org and the app and grants it to the actor, and creates the default claim, binds it and sets it as `samna_app.claim_id`. See "A new app" below.
-3. **Register external app tables** if any: `SELECT claimius.init_claimius_tables(...)` with the table list.
+2. **`claimius.upsert_app`** with the actor's `user_claim.id`. It writes the `samna_app` row and its `prophet_state` row, cursor `(0, 0)`, copies the actor's `samna_user` into the app, links the organization tree, creates the owner claim, binds it on the org and the app and grants it to the actor, and creates the default claim, binds it and sets it as `samna_app.claim_id`. See "A new app" below.
+3. **Register external app tables** if any: `SELECT claimius.upsert_table_info(...)` with the table list.
 
 **Order for adding resources to an existing app (the common case):**
 
 1. **Organization** (if needed): direct INSERT with `sa_owner_id` pointing at parent org, or self referential for a new root.
 2. **Location** (if needed): direct INSERT with `sa_owner_id` pointing at owning org and `sa_parent_id` pointing at parent location, or self referential for a root.
 3. **Application table rows** (devices, recipes, etc): direct INSERT with all required `sa_*` columns.
-4. **Grant access**: `create_claim` (if needed) → `assign_claim_object` (bind the claim to the resource) → `assign_claim_user` (grant to a user). See "Granting a user access to something" in the "Creating things" section.
+4. **Grant access**: `insert_claim` (if needed) → `insert_claim_object` (bind the claim to the resource) → `insert_user_claim` (grant to a user). See "Granting a user access to something" in the "Creating things" section.
 
 Calc triggers handle tree maintenance, the writer's own `user_object` pairs and the areas for everyone else automatically at every step. You do not need to call any "rebuild" or "refresh" functions in the normal flow.
 
@@ -207,7 +207,7 @@ Calc triggers handle tree maintenance, the writer's own `user_object` pairs and 
 
 `samna_app.app_secret` is the API key disciples (or any other consumer) authenticate with against this prophet's sync endpoints. It is intentionally not a Claimius bootstrap input. The implementing service generates it (typically as `sha256(seed || raw_secret)` with the raw returned to the caller exactly once) and writes the hash to `samna_app.app_secret` on demand. `secret_version` increments on each rotation. Set both fields directly via UPDATE; there is no Claimius helper for this since the secret format and validation are the implementer's concern.
 
-For the system app on a fresh prophet, `app_secret` is NULL after `init` runs. The implementer fills it in if and when the system app needs to be authenticated against externally. For non system apps the implementer creates, the same applies: generate a secret, write it to `samna_app.app_secret`, return the raw to the caller once.
+For the system app on a fresh prophet, `app_secret` is NULL after `upsert_system_app` runs. The implementer fills it in if and when the system app needs to be authenticated against externally. For non system apps the implementer creates, the same applies: generate a secret, write it to `samna_app.app_secret`, return the raw to the caller once.
 
 ## Self identity
 
@@ -251,10 +251,10 @@ CREATE TABLE public.thing (
 );
 ```
 
-The slugs are stored at init:
+The slugs are stored at bootstrap:
 
-- `init(p_system_app_slug => 'mainapp', ...)` writes `'mainapp'` to `claimius.prophet_state.system_app_slug` on the system app's row. A partial unique index (`WHERE system_app_slug IS NOT NULL`) enforces "at most one system row."
-- `init_disciple(p_disciple_app_slug => 'mainapp')` writes `'mainapp'` to `claimius.disciple_state.disciple_app_slug` (singleton, NOT NULL).
+- `upsert_system_app(p_system_app_slug => 'mainapp', ...)` writes `'mainapp'` to `claimius.prophet_state.system_app_slug` on the system app's row. A partial unique index (`WHERE system_app_slug IS NOT NULL`) enforces "at most one system row."
+- `upsert_disciple_state(p_disciple_app_slug => 'mainapp')` writes `'mainapp'` to `claimius.disciple_state.disciple_app_slug` (singleton, NOT NULL).
 
 Implementer middleware should call `claimius.get_app_id()` for the deployment's own app, or `claimius.get_disciple_app()` on a disciple for the row, instead of maintaining a parallel `app_id()` helper. On a disciple `claimius.samna_app` only ever contains rows that arrive via sync; the slug keyed lookup gives you the canonical row even before any migration runs against it.
 
@@ -315,13 +315,13 @@ WHERE id = :recipe_id;
 
 The list and graph functions (`get_organizations`, `get_locations`, `get_users`, `get_claims`, `get_audit`, `get_secrets`, `get_owner_graph`, `get_claim_graph`) do NOT include `user_claim_id`. If you need it after listing, call `get_access` for the specific object you're about to act on.
 
-Writes go through functions when one exists for the operation (`create_claim`, `assign_claim_user`, `assign_claim_object`, `merge_user`, etc). For tables without dedicated functions, direct INSERT/UPDATE on the prophet is fine; the prophet runtime role (`claimius_writer`) has the necessary grants. The triggers attached to each table fire either way.
+Writes go through functions when one exists for the operation (`insert_claim`, `insert_user_claim`, `insert_claim_object`, `merge_user`, etc). For tables without dedicated functions, direct INSERT/UPDATE on the prophet is fine; the prophet runtime role (`claimius_writer`) has the necessary grants. The triggers attached to each table fire either way.
 
 Write functions return a single jsonb object keyed by the affected table name(s). The caller can pull values out with the `->` and `->>` jsonb operators, or pipe the whole object back to a service in Go/Python without further translation.
 
 ```sql
 -- Create a claim
-SELECT claimius.create_claim(
+SELECT claimius.insert_claim(
     p_app_id        => :app_id,
     p_name          => 'Device Operator',
     p_description   => 'Read and operate devices',
@@ -332,7 +332,7 @@ SELECT claimius.create_claim(
 );
 
 -- Grant a claim to a user
-SELECT claimius.assign_claim_user(
+SELECT claimius.insert_user_claim(
     p_app_id        => :app_id,
     p_claim_id      => :claim_id,
     p_user_id       => :user_id,
@@ -341,7 +341,7 @@ SELECT claimius.assign_claim_user(
 );
 
 -- Bind a claim to an object
-SELECT claimius.assign_claim_object(
+SELECT claimius.insert_claim_object(
     p_app_id        => :app_id,
     p_claim_id      => :claim_id,
     p_object_id     => :device_id,
@@ -362,7 +362,7 @@ DECLARE
     v_org_id   UUID;
     v_claim_id UUID;
 BEGIN
-    v_init := claimius.init(
+    v_init := claimius.upsert_system_app(
         p_system_app_slug          => 'my_app',
         p_system_app_name          => 'My App',
         p_system_app_private_key   => :'private_key',
@@ -387,7 +387,7 @@ BEGIN
         (v_init -> 'user_claim' ->> 'id')::UUID
     ) RETURNING id INTO v_org_id;
 
-    PERFORM claimius.link_app_object(
+    PERFORM claimius.upsert_app_object(
         v_app_id, 'claimius.organization', v_org_id,
         (v_init -> 'user_claim' ->> 'id')::UUID
     );
@@ -396,7 +396,7 @@ END $$;
 
 ## Required columns on registered tables
 
-Every external table registered through `init_claimius_tables` must include:
+Every external table registered through `upsert_table_info` must include:
 
 - `id UUID PRIMARY KEY`
 - `sa_owner_id UUID NOT NULL` (organization)
@@ -412,20 +412,20 @@ Optional:
 - `sa_parent_id UUID NOT NULL` and `sa_root_id UUID NOT NULL` (must come together; declares this table is self referencing)
 - `name TEXT` and `description TEXT` (stored once per object in `object_info` for search and rendering)
 
-`init_claimius_tables` validates these and raises if any required column is missing or if the multi app guard fails on `app_id`.
+`upsert_table_info` validates these and raises if any required column is missing or if the multi app guard fails on `app_id`.
 
 ## Creating things
 
 For every create, `sa_created_by` must be a `user_claim.id` belonging to the actor in this app. Calc triggers handle tree maintenance, the actor's `user_object` pairs and the areas for everyone else automatically; the notes below say what you should do afterward.
 
-**Function vs direct INSERT.** Some entities have dedicated write functions (`create_app`, `create_claim`, `assign_claim_user`, `assign_claim_object`, `merge_user`, `ensure_app_user`). Use the function when it exists. For everything else, direct INSERT/UPDATE is allowed on the prophet side; the prophet runtime's role (`claimius_writer`) has the necessary grants. The triggers attached to each table fire either way, so the tree maintenance and access calculations are identical.
+**Function vs direct INSERT.** Some entities have dedicated write functions (`upsert_app`, `insert_claim`, `insert_user_claim`, `insert_claim_object`, `merge_user`, `upsert_app_user`). Use the function when it exists. For everything else, direct INSERT/UPDATE is allowed on the prophet side; the prophet runtime's role (`claimius_writer`) has the necessary grants. The triggers attached to each table fire either way, so the tree maintenance and access calculations are identical.
 
 ### A new app
 
 Apps carry per app cryptographic material. `private_key` and `private_seed` (RSA keypair plus seed) are required at insert time and generated externally in your Go service. `app_secret` is the consumer facing API key for sync; it is generated and written separately, often after the app is created. Claimius does not generate any of these.
 
 ```sql
-SELECT claimius.create_app(
+SELECT claimius.upsert_app(
     p_actor_user_claim_id => :acting_user_claim,
     p_slug                => :slug,
     p_name                => :name,
@@ -442,20 +442,20 @@ SELECT claimius.create_app(
 );
 ```
 
-The full signature is `create_app(p_actor_user_claim_id UUID, p_slug TEXT, p_name TEXT, p_org_id UUID, p_private_key TEXT, p_private_seed TEXT, p_redirect_uris TEXT[] DEFAULT ARRAY[]::TEXT[], p_sync_uri TEXT DEFAULT '', p_description TEXT DEFAULT '', p_connection TEXT DEFAULT 'code', p_owner_access INTEGER DEFAULT 15, p_default_claim JSONB DEFAULT NULL, p_app_id UUID DEFAULT NULL) RETURNS JSONB`. Every row it writes carries `p_actor_user_claim_id` in `sa_created_by`. It refuses, SQLSTATE `22023`, an actor that is not a live `user_claim`, an organization that is not live, and a slug owned by another organization. It upserts the app on its slug and its `prophet_state` row, copies the actor's `samna_user` from the actor's app, links the organization and its tree with `link_app_organization`, creates `<name> Owner` with `p_owner_access`, binds it on the organization and the app and grants it to the actor's user, and creates the default claim, `<name> Reader` with read unless `p_default_claim` says otherwise, binds it on the app and the organization and sets it as `claim_id`. It is idempotent on the slug and on each claim's name, and returns jsonb keyed `samna_app`, `organization`, `samna_user`, `claim`, `default_claim`, `user_claim`, `claim_object`.
+The full signature is `upsert_app(p_actor_user_claim_id UUID, p_slug TEXT, p_name TEXT, p_org_id UUID, p_private_key TEXT, p_private_seed TEXT, p_redirect_uris TEXT[] DEFAULT ARRAY[]::TEXT[], p_sync_uri TEXT DEFAULT '', p_description TEXT DEFAULT '', p_connection TEXT DEFAULT 'code', p_owner_access INTEGER DEFAULT 15, p_default_claim JSONB DEFAULT NULL, p_app_id UUID DEFAULT NULL) RETURNS JSONB`. Every row it writes carries `p_actor_user_claim_id` in `sa_created_by`. It refuses, SQLSTATE `22023`, an actor that is not a live `user_claim`, an organization that is not live, and a slug owned by another organization. It upserts the app on its slug and its `prophet_state` row, copies the actor's `samna_user` from the actor's app, links the organization and its tree with `upsert_app_organization`, creates `<name> Owner` with `p_owner_access`, binds it on the organization and the app and grants it to the actor's user, and creates the default claim, `<name> Reader` with read unless `p_default_claim` says otherwise, binds it on the app and the organization and sets it as `claim_id`. It is idempotent on the slug and on each claim's name, and returns jsonb keyed `samna_app`, `organization`, `samna_user`, `claim`, `default_claim`, `user_claim`, `claim_object`.
 
 The owner claim's first binding is authorized by the actor holding owner on the organization that owns the app, judged in the actor's own app: `_check_claim_composition` accepts the first binding of an app that carries none on that ground, because the new app has no pairs anyone could hold. Every later binding is judged the usual way, against the pairs the grant to the actor gives it in the new app.
 
 When the implementing service is ready to issue an API key for this app (typically returned to the caller of the create app endpoint), generate it externally and `UPDATE claimius.samna_app SET app_secret = :hash, secret_version = secret_version + 1 WHERE id = :new_app_id`.
 
-For the system app (the very first app on a fresh prophet), use `claimius.init` instead. It handles the ordering between the system app and the system org and leaves `app_secret` NULL for the implementer to fill on demand.
+For the system app (the very first app on a fresh prophet), use `claimius.upsert_system_app` instead. It handles the ordering between the system app and the system org and leaves `app_secret` NULL for the implementer to fill on demand.
 
 ### A new organization (root)
 
-Use `create_root_organization`. The function handles the self reference on `sa_owner_id` and `sa_root_id` internally and is idempotent on `(app_id, name)`.
+Use `upsert_root_organization`. The function handles the self reference on `sa_owner_id` and `sa_root_id` internally and is idempotent on `(app_id, name)`.
 
 ```sql
-SELECT claimius.create_root_organization(
+SELECT claimius.upsert_root_organization(
     p_app_id              => :app_id,
     p_name                => 'Acme Inc',
     p_actor_user_claim_id => :acting_user_claim,
@@ -480,10 +480,10 @@ INSERT INTO claimius.organization (
     :acting_user_claim
 ) RETURNING id;
 
-SELECT claimius.link_app_object(:app_id, 'claimius.organization', :new_org_id, :acting_user_claim);
+SELECT claimius.upsert_app_object(:app_id, 'claimius.organization', :new_org_id, :acting_user_claim);
 ```
 
-`organization` and `location` carry no `app_id` column. They belong to an app through a live `claimius.app_object` row, written by `link_app_object`.
+`organization` and `location` carry no `app_id` column. They belong to an app through a live `claimius.app_object` row, written by `upsert_app_object`.
 
 After: calc trigger splices the new org into the existing ownership tree. Anyone with an inheriting claim on an ancestor reaches it: the actor's pair is settled in the write, and every other user's pair on that user's next check or listing.
 
@@ -511,7 +511,7 @@ INSERT INTO claimius.location (
 ) RETURNING id;
 
 -- Link each new location to the app
-SELECT claimius.link_app_object(:app_id, 'claimius.location', :new_loc_id, :acting_user_claim);
+SELECT claimius.upsert_app_object(:app_id, 'claimius.location', :new_loc_id, :acting_user_claim);
 ```
 
 After: calc trigger updates the location tree and (if applicable) splices the location into the owning org's ownership tree.
@@ -538,7 +538,7 @@ This is the standard pattern whenever you create a new "thing" and want someone 
 
 ```sql
 -- 1. Create the claim
-SELECT claimius.create_claim(
+SELECT claimius.insert_claim(
     p_app_id        => :app_id,
     p_name          => 'Admin: Acme NYC',
     p_description   => 'Full access to Acme NYC and descendants',
@@ -549,7 +549,7 @@ SELECT claimius.create_claim(
 );
 
 -- 2. Bind it to the object
-SELECT claimius.assign_claim_object(
+SELECT claimius.insert_claim_object(
     p_app_id        => :app_id,
     p_claim_id      => :claim_id,
     p_object_id     => :org_id,
@@ -561,7 +561,7 @@ SELECT claimius.assign_claim_object(
 );
 
 -- 3. Grant the claim to the user
-SELECT claimius.assign_claim_user(
+SELECT claimius.insert_user_claim(
     p_app_id        => :app_id,
     p_claim_id      => :claim_id,
     p_user_id       => :user_id,
@@ -575,7 +575,7 @@ Each step settles the actor's own pairs on the rows it names and raises one clai
 ### A user logs in to an app for the first time
 
 ```sql
-SELECT claimius.ensure_app_user(
+SELECT claimius.upsert_app_user(
     p_user_id    => :user_id,
     p_app_id     => :app_id,
     p_first_name => :first,
@@ -585,7 +585,7 @@ SELECT claimius.ensure_app_user(
 );
 ```
 
-Idempotent. Inserts the `samna_user` row if missing. If the app has `samna_app.claim_id` set (the default claim, configured during `init` via `p_default_claim`), also grants that claim to the user as a `user_claim` row. Returns:
+Idempotent. Inserts the `samna_user` row if missing. If the app has `samna_app.claim_id` set (the default claim, configured during `upsert_system_app` via `p_default_claim`), also grants that claim to the user as a `user_claim` row. Returns:
 
 ```json
 {
@@ -598,7 +598,7 @@ After: nothing else from the Claimius side. The user now has the default claim g
 
 ## Deny claims
 
-A claim whose `sa_access` has the deny bit `16` set is a deny claim. `create_claim` stores its bits verbatim, without the grant expansion, and the owner, write, read and execute bits enumerate what it subtracts: `20` (deny with read) removes read, `18` (deny with write) removes write, `31` removes all four. Bind it with `assign_claim_object` like any other claim.
+A claim whose `sa_access` has the deny bit `16` set is a deny claim. `insert_claim` stores its bits verbatim, without the grant expansion, and the owner, write, read and execute bits enumerate what it subtracts: `20` (deny with read) removes read, `18` (deny with write) removes write, `31` removes all four. Bind it with `insert_claim_object` like any other claim.
 
 A deny bound directly on the object subtracts its bits from every grant on that object, on any path.
 

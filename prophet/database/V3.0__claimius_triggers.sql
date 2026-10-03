@@ -2,7 +2,7 @@
 -- Claimius V3.0 Triggers
 -- ----------------------------------------------------------------------------
 -- Attaches the functions defined in V2.x to claimius.* tables. Triggers on
--- registered external tables are attached separately by init_claimius_tables.
+-- registered external tables are attached separately by upsert_table_info.
 --
 -- Trigger families on internal tables:
 --   tg_update_timestamp     BEFORE UPDATE: maintains sa_updated_at

@@ -1,8 +1,8 @@
 ---
 layout: doc
 title: Objects
-description: What an object is to claimius, how an implementing side registers its tables with init_claimius_tables, the sa_* columns and table_info, the inheritance_info closure with its row counts and the rows each write moves, object_info written once per object, and why the closure is a table.
-tags: object_type, object_id, init_claimius_tables, table_info, inheritance_info, closure, object_info, _write_object_info, _splice_subtree, _retree_object, apply_row_delta, recompute_state, object_field
+description: What an object is to claimius, how an implementing side registers its tables with upsert_table_info, the sa_* columns and table_info, the inheritance_info closure with its row counts and the rows each write moves, object_info written once per object, and why the closure is a table.
+tags: object_type, object_id, upsert_table_info, table_info, inheritance_info, closure, object_info, _write_object_info, _splice_subtree, _retree_object, apply_row_delta, recompute_state, object_field
 lastUpdated: true
 ---
 
@@ -12,13 +12,13 @@ To claimius an object is an `object_type` and `object_id` pair that a `claim_obj
 
 ## Object types and ids
 
-1. An `object_type` is schema qualified at every boundary: `claimius.organization`, `public.bookable`, never `bookable`. `init_claimius_tables` refuses a type without a schema.
+1. An `object_type` is schema qualified at every boundary: `claimius.organization`, `public.bookable`, never `bookable`. `upsert_table_info` refuses a type without a schema.
 
 2. A composite id is built with `claimius.composite_id(parts...)`, the MD5 of the parts joined by `:` read as a UUID. The primary keys of `user_users`, `access_diff` and `reconcile_queue` are composite ids of their key columns, so every copy of the schema derives the same id for the same row, and a repeated write of one area collapses onto one row. `user_object` is keyed on its columns themselves, `(user_id, app_id, object_type, object_id)`.
 
 ## Registration
 
-The implementing side makes a table participate by carrying the `sa_*` columns and naming it in `init_claimius_tables('public.doc', ...)`.
+The implementing side makes a table participate by carrying the `sa_*` columns and naming it in `upsert_table_info('public.doc', ...)`.
 
 | Column | Means | Required |
 |---|---|---|
@@ -30,7 +30,7 @@ The implementing side makes a table participate by carrying the `sa_*` columns a
 | `name`, `description` | Rendering and search text, copied into `object_info` | no |
 | `app_id` | The app of the row | on a prophet that hosts apps besides its system app |
 
-`init_claimius_tables` takes the complete list of the implementing side's tables:
+`upsert_table_info` takes the complete list of the implementing side's tables:
 
 1. For each it records the column shape in `table_info`, one row with one `has_*` flag per column, read from `information_schema` once, and attaches the calc trigger `tg_calc_access`: `calc_hierarchical_access` when the table has both `sa_parent_id` and `sa_root_id`, `calc_object_access` otherwise, plus the before insert self root trigger.
 

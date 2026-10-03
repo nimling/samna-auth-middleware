@@ -35,7 +35,7 @@ The routes live under the group `sam.RegisterEndpoints` mounts, guarded by `smw.
 
 A client with no claim authenticates and sees nothing. Bind a claim the same way you would for a user:
 
-- Object access. `assign_claim_object` binds the claim to organizations, locations or registered rows; the client's `user_object` pairs settle on its first check or listing, and `ObjectWhere(q, clientID, objectType, level, nil, after, limit)` filters a listing by them.
+- Object access. `insert_claim_object` binds the claim to organizations, locations or registered rows; the client's `user_object` pairs settle on its first check or listing, and `ObjectWhere(q, clientID, objectType, level, nil, after, limit)` filters a listing by them.
 - Capability access. A `claim_object` with a NULL `object_id` and a `scope` payload, read back with `ScopeAccess(clientID, jsonpath, level)`. This is how a client is told it may read only the public subset of a resource. See [Capabilities](../.nimpress/claimius/capabilities.md).
 
 `POST /samna_client/:id/claim` takes a `user_claim` body and stamps `app_id` from the app context. Time bounds through `starts_at` and `ends_at` apply to clients exactly as to users.

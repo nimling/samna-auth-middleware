@@ -95,7 +95,7 @@ BEGIN
 
     RETURN coalesce(NEW, OLD);
 EXCEPTION WHEN OTHERS THEN
-    PERFORM claimius.write_audit(
+    PERFORM claimius.insert_audit(
             v_app_id, v_op, 'error', v_object_type, v_obj_id,
             coalesce(v_owner_id, '00000000-0000-0000-0000-000000000000'::UUID),
             coalesce((to_jsonb(coalesce(NEW, OLD)) ->> 'sa_created_by')::UUID, '00000000-0000-0000-0000-000000000000'::UUID),
@@ -297,7 +297,7 @@ BEGIN
     -- New organizations and locations inherit the app links of their owning
     -- organization so apps linked to a tree see rows added under it.
     IF v_op = 'INSERT' AND NOT v_replay AND v_object_type IN ('claimius.organization', 'claimius.location') THEN
-        PERFORM claimius.link_app_object(a, v_object_type, v_obj_id, (to_jsonb(NEW) ->> 'sa_created_by')::UUID)
+        PERFORM claimius.upsert_app_object(a, v_object_type, v_obj_id, (to_jsonb(NEW) ->> 'sa_created_by')::UUID)
         FROM claimius.apps_for_object('claimius.organization', (to_jsonb(NEW) ->> 'sa_owner_id')::UUID) a
         WHERE (to_jsonb(NEW) ->> 'sa_owner_id')::UUID <> v_obj_id;
     END IF;
@@ -396,7 +396,7 @@ BEGIN
     RETURN coalesce(NEW, OLD);
 EXCEPTION WHEN OTHERS THEN
     IF coalesce(v_app_id, v_app_ids[1]) IS NOT NULL THEN
-        PERFORM claimius.write_audit(
+        PERFORM claimius.insert_audit(
                 coalesce(v_app_id, v_app_ids[1]), v_op, 'error', v_object_type, v_obj_id,
                 coalesce((to_jsonb(coalesce(NEW, OLD)) ->> 'sa_owner_id')::UUID, '00000000-0000-0000-0000-000000000000'::UUID),
                 coalesce((to_jsonb(coalesce(NEW, OLD)) ->> 'sa_created_by')::UUID, '00000000-0000-0000-0000-000000000000'::UUID),
@@ -537,7 +537,7 @@ COMMENT ON FUNCTION claimius.calc_claim_access() IS 'Trigger on claim, claim_obj
 -- user_claim. That is how a new app on a prophet receives its first claim.
 -- The first binding on a samna_user that a claim of the binding's owning
 -- organization is assigned to may come from an actor holding owner on that
--- organization. That is how create_organization_user binds a new user's
+-- organization. That is how insert_organization_user binds a new user's
 -- virtual claim.
 -- ----------------------------------------------------------------------------
 

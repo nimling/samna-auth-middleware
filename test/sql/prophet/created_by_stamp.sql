@@ -22,7 +22,7 @@ DECLARE
     v_planted UUID;
     v_stray   UUID;
 BEGIN
-    v_init := claimius.init(
+    v_init := claimius.upsert_system_app(
         p_system_app_slug         => 'sqltest_stamp',
         p_system_app_name         => 'SQL stamp test',
         p_system_app_private_key  => 'key',
@@ -34,31 +34,31 @@ BEGIN
     v_sys_uc := (v_init -> 'user_claim' ->> 'id')::UUID;
     INSERT INTO stamp VALUES ('app', v_app), ('sys_uc', v_sys_uc), ('root', v_root);
 
-    PERFORM claimius.create_root_organization(v_app, 'Stamp root', v_sys_uc, p_id => v_root);
+    PERFORM claimius.upsert_root_organization(v_app, 'Stamp root', v_sys_uc, p_id => v_root);
 
     INSERT INTO stamp VALUES
-        ('ada_uc', (claimius.ensure_app_user(p_user_id => v_ada, p_app_id => v_app, p_first_name => 'Ada') -> 'user_claim' ->> 'id')::UUID),
-        ('bo_uc', (claimius.ensure_app_user(p_user_id => v_bo, p_app_id => v_app, p_first_name => 'Bo') -> 'user_claim' ->> 'id')::UUID),
-        ('cy_uc', (claimius.ensure_app_user(p_user_id => v_cy, p_app_id => v_app, p_first_name => 'Cy') -> 'user_claim' ->> 'id')::UUID),
-        ('dan_uc', (claimius.ensure_app_user(p_user_id => v_dan, p_app_id => v_app, p_first_name => 'Dan', p_sa_created_by => v_sys_uc) -> 'user_claim' ->> 'id')::UUID),
-        ('ev_uc', (claimius.ensure_app_user(p_user_id => v_ev, p_app_id => v_app, p_first_name => 'Ev') -> 'user_claim' ->> 'id')::UUID);
+        ('ada_uc', (claimius.upsert_app_user(p_user_id => v_ada, p_app_id => v_app, p_first_name => 'Ada') -> 'user_claim' ->> 'id')::UUID),
+        ('bo_uc', (claimius.upsert_app_user(p_user_id => v_bo, p_app_id => v_app, p_first_name => 'Bo') -> 'user_claim' ->> 'id')::UUID),
+        ('cy_uc', (claimius.upsert_app_user(p_user_id => v_cy, p_app_id => v_app, p_first_name => 'Cy') -> 'user_claim' ->> 'id')::UUID),
+        ('dan_uc', (claimius.upsert_app_user(p_user_id => v_dan, p_app_id => v_app, p_first_name => 'Dan', p_sa_created_by => v_sys_uc) -> 'user_claim' ->> 'id')::UUID),
+        ('ev_uc', (claimius.upsert_app_user(p_user_id => v_ev, p_app_id => v_app, p_first_name => 'Ev') -> 'user_claim' ->> 'id')::UUID);
 
-    v_crew := (claimius.create_claim(
+    v_crew := (claimius.insert_claim(
         p_app_id => v_app, p_name => 'Stamp crew', p_description => NULL, p_sa_access => 4,
         p_sa_owner_id => v_root, p_sa_root_id => v_root, p_sa_created_by => v_sys_uc
     ) -> 'claim' ->> 'id')::UUID;
-    PERFORM claimius.assign_claim_object(
+    PERFORM claimius.insert_claim_object(
         p_app_id => v_app, p_claim_id => v_crew, p_sa_owner_id => v_root, p_sa_root_id => v_root, p_sa_created_by => v_sys_uc,
         p_object_id => v_root, p_object_type => 'claimius.organization', p_inherits => TRUE);
-    PERFORM claimius.assign_claim_user(p_app_id => v_app, p_claim_id => v_crew, p_user_id => v_bo,
+    PERFORM claimius.insert_user_claim(p_app_id => v_app, p_claim_id => v_crew, p_user_id => v_bo,
         p_sa_owner_id => v_root, p_sa_created_by => v_sys_uc);
     UPDATE claimius.user_claim SET sa_deleted_at = now() WHERE app_id = v_app AND user_id = v_cy;
 
-    v_planted := (claimius.create_claim(
+    v_planted := (claimius.insert_claim(
         p_app_id => v_app, p_name => 'Stamp planted', p_description => NULL, p_sa_access => 4,
         p_sa_owner_id => v_root, p_sa_root_id => v_root, p_sa_created_by => v_sys_uc
     ) -> 'claim' ->> 'id')::UUID;
-    v_stray := (claimius.create_claim(
+    v_stray := (claimius.insert_claim(
         p_app_id => v_app, p_name => 'Stamp stray', p_description => NULL, p_sa_access => 4,
         p_sa_owner_id => v_root, p_sa_root_id => v_root, p_sa_created_by => v_sys_uc
     ) -> 'claim' ->> 'id')::UUID;
@@ -74,9 +74,9 @@ BEGIN
 END $$;
 
 SELECT is((SELECT sa_created_by FROM claimius.user_claim WHERE id = pg_temp.stamp('ev_uc')), pg_temp.stamp('ev_uc'),
-    'ensure_app_user stamps the default claim of a first login with the new user_claim''s own id');
+    'upsert_app_user stamps the default claim of a first login with the new user_claim''s own id');
 SELECT is((SELECT sa_created_by FROM claimius.user_claim WHERE id = pg_temp.stamp('dan_uc')), pg_temp.stamp('sys_uc'),
-    'ensure_app_user stamps it with the acting user_claim.id a caller passes');
+    'upsert_app_user stamps it with the acting user_claim.id a caller passes');
 
 SELECT cmp_ok(claimius._restamp_created_by(), '>=', 4, 'the upgrade rewrites the stamps a v1.1.9 set wrote as user ids');
 

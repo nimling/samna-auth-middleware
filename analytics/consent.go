@@ -118,7 +118,7 @@ func PostConsent(ctx context.Context, appID uuid.UUID, in shared.ConsentRequest,
 	}
 	var result string
 	if err := run.db.NewRaw(
-		"SELECT claimius.post_consent(?, ?, ?::jsonb, ?, ?, ?::inet, ?)",
+		"SELECT claimius.insert_consent(?, ?, ?::jsonb, ?, ?, ?::inet, ?)",
 		appID, in.AnonymousID, json.RawMessage(categories), in.PolicyVersion, userID, nullString(ip), nullString(userAgent),
 	).Scan(ctx, &result); err != nil {
 		return nil, err

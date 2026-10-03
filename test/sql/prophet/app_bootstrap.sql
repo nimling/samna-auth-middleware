@@ -15,7 +15,7 @@ DECLARE
     v_read_uc UUID;
     v_made    JSONB;
 BEGIN
-    v_init := claimius.init(
+    v_init := claimius.upsert_system_app(
         p_system_app_slug         => 'sqltest_boot',
         p_system_app_name         => 'SQL bootstrap test',
         p_system_app_private_key  => 'key',
@@ -27,24 +27,24 @@ BEGIN
     v_sys_uc  := (v_init -> 'user_claim' ->> 'id')::UUID;
     INSERT INTO boot VALUES ('sys_app', v_sys_app), ('sys_uc', v_sys_uc);
 
-    PERFORM claimius.create_root_organization(v_sys_app, 'Tenant', v_sys_uc, p_id => v_tenant);
-    PERFORM claimius.create_root_organization(v_sys_app, 'Other', v_sys_uc, p_id => v_other);
+    PERFORM claimius.upsert_root_organization(v_sys_app, 'Tenant', v_sys_uc, p_id => v_tenant);
+    PERFORM claimius.upsert_root_organization(v_sys_app, 'Other', v_sys_uc, p_id => v_other);
 
-    PERFORM claimius.ensure_app_user(p_user_id => v_reader, p_app_id => v_sys_app, p_first_name => 'Reader');
-    v_read := (claimius.create_claim(
+    PERFORM claimius.upsert_app_user(p_user_id => v_reader, p_app_id => v_sys_app, p_first_name => 'Reader');
+    v_read := (claimius.insert_claim(
         p_app_id => v_sys_app, p_name => 'Tenant reader', p_description => NULL, p_sa_access => 4,
         p_sa_owner_id => v_tenant, p_sa_root_id => v_tenant, p_sa_created_by => v_sys_uc
     ) -> 'claim' ->> 'id')::UUID;
-    PERFORM claimius.assign_claim_object(
+    PERFORM claimius.insert_claim_object(
         p_app_id => v_sys_app, p_claim_id => v_read, p_sa_owner_id => v_tenant, p_sa_root_id => v_tenant,
         p_sa_created_by => v_sys_uc, p_object_id => v_tenant, p_object_type => 'claimius.organization', p_inherits => TRUE);
-    v_read_uc := (claimius.assign_claim_user(
+    v_read_uc := (claimius.insert_user_claim(
         p_app_id => v_sys_app, p_claim_id => v_read, p_user_id => v_reader,
         p_sa_owner_id => v_tenant, p_sa_created_by => v_sys_uc
     ) -> 'user_claim' ->> 'id')::UUID;
     INSERT INTO boot VALUES ('read_uc', v_read_uc);
 
-    v_made := claimius.create_app(
+    v_made := claimius.upsert_app(
         p_actor_user_claim_id => v_sys_uc,
         p_slug                => 'sqltest_boot_tenant',
         p_name                => 'Tenant app',
@@ -94,7 +94,7 @@ SELECT ok(EXISTS (SELECT 1 FROM claimius.get_access('00000000-0000-4000-8000-000
 SELECT is(
     (SELECT sa_created_by FROM claimius.samna_app WHERE slug = 'sqltest_boot_tenant'),
     pg_temp.boot('sys_uc'),
-    'create_app stamps the new app with the actor user_claim.id');
+    'upsert_app stamps the new app with the actor user_claim.id');
 
 SELECT is_empty($$
     SELECT 1 FROM claimius.claim WHERE app_id = pg_temp.boot('tenant_app') AND sa_created_by <> pg_temp.boot('sys_uc')
@@ -115,21 +115,21 @@ SELECT ok(EXISTS (SELECT 1 FROM claimius.get_access('00000000-0000-4000-8000-000
         '10000000-0000-4000-8000-000000000d01', 'claimius.organization', 15)),
     'the actor holds the owning organization in full inside the new app');
 
-SELECT is(claimius.create_app(
+SELECT is(claimius.upsert_app(
         p_actor_user_claim_id => pg_temp.boot('sys_uc'), p_slug => 'sqltest_boot_tenant', p_name => 'Tenant app',
         p_org_id => '10000000-0000-4000-8000-000000000d01', p_private_key => 'key', p_private_seed => 'seed') -> 'samna_app' ->> 'id',
     pg_temp.boot('tenant_app')::TEXT,
-    'create_app is idempotent on the slug');
+    'upsert_app is idempotent on the slug');
 
 SELECT throws_like($$
-    SELECT claimius.create_app(
+    SELECT claimius.upsert_app(
         p_actor_user_claim_id => pg_temp.boot('read_uc'), p_slug => 'sqltest_boot_reader', p_name => 'Reader app',
         p_org_id => '10000000-0000-4000-8000-000000000d01', p_private_key => 'key', p_private_seed => 'seed')
 $$, 'cannot grant more access than held%',
     'an actor reading but not owning the owning organization is refused the first binding');
 
 SELECT throws_like($$
-    SELECT claimius.create_app(
+    SELECT claimius.upsert_app(
         p_actor_user_claim_id => pg_temp.boot('tenant_uc'), p_slug => 'sqltest_boot_other', p_name => 'Other app',
         p_org_id => '10000000-0000-4000-8000-000000000d02', p_private_key => 'key', p_private_seed => 'seed')
 $$, 'cannot grant more access than held%',

@@ -15,7 +15,7 @@
 --
 -- claimius.analytics_session holds the durable context of one visit.
 -- claimius.analytics_event is append only and holds one row per captured
--- signal, pointer samples included. post_analytics_events refuses to write a
+-- signal, pointer samples included. insert_analytics_events refuses to write a
 -- row when the analytics category is not granted, so consent is enforced in
 -- the schema and not only in the caller.
 -- ============================================================================
@@ -129,7 +129,8 @@ $$ LANGUAGE sql STABLE;
 
 COMMENT ON FUNCTION claimius.get_consent(UUID, UUID, TEXT) IS 'Strongest live consent for an identity. A known user matches across apps, preferring the asking app. An anonymous visitor matches within the app only.';
 
-CREATE OR REPLACE FUNCTION claimius.post_consent(
+DROP FUNCTION IF EXISTS claimius.post_consent(uuid,text,jsonb,text,uuid,inet,text);
+CREATE OR REPLACE FUNCTION claimius.insert_consent(
     p_app_id         UUID,
     p_anonymous_id   TEXT,
     p_categories     JSONB,
@@ -161,7 +162,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius.post_consent(UUID, TEXT, JSONB, TEXT, UUID, INET, TEXT) IS 'Records a consent decision, revoking the previous live one for the same identity.';
+COMMENT ON FUNCTION claimius.insert_consent(UUID, TEXT, JSONB, TEXT, UUID, INET, TEXT) IS 'Records a consent decision, revoking the previous live one for the same identity.';
 
 CREATE OR REPLACE FUNCTION claimius.consent_allows(
     p_app_id       UUID,
@@ -182,7 +183,8 @@ COMMENT ON FUNCTION claimius.consent_allows(UUID, TEXT, UUID, TEXT) IS 'True whe
 -- Capture
 -- ----------------------------------------------------------------------------
 
-CREATE OR REPLACE FUNCTION claimius.post_analytics_session(
+DROP FUNCTION IF EXISTS claimius.post_analytics_session(uuid,text,text,jsonb,uuid,inet,text);
+CREATE OR REPLACE FUNCTION claimius.upsert_analytics_session(
     p_app_id       UUID,
     p_anonymous_id TEXT,
     p_session_key  TEXT,
@@ -225,9 +227,10 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius.post_analytics_session(UUID, TEXT, TEXT, JSONB, UUID, INET, TEXT) IS 'Opens or touches the session row for a visit. Returns a null body when the analytics category is not granted.';
+COMMENT ON FUNCTION claimius.upsert_analytics_session(UUID, TEXT, TEXT, JSONB, UUID, INET, TEXT) IS 'Opens or touches the session row for a visit. Returns a null body when the analytics category is not granted.';
 
-CREATE OR REPLACE FUNCTION claimius.post_analytics_events(
+DROP FUNCTION IF EXISTS claimius.post_analytics_events(uuid,text,jsonb);
+CREATE OR REPLACE FUNCTION claimius.insert_analytics_events(
     p_app_id      UUID,
     p_session_key TEXT,
     p_events      JSONB
@@ -269,7 +272,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius.post_analytics_events(UUID, TEXT, JSONB) IS 'Writes a batch against an open session. Returns 0 and writes nothing when consent is absent or the session is unknown.';
+COMMENT ON FUNCTION claimius.insert_analytics_events(UUID, TEXT, JSONB) IS 'Writes a batch against an open session. Returns 0 and writes nothing when consent is absent or the session is unknown.';
 
 -- ----------------------------------------------------------------------------
 -- Reach
@@ -420,11 +423,11 @@ COMMENT ON FUNCTION claimius.get_analytics_apps(UUID) IS 'The producer apps one 
 
 GRANT EXECUTE ON FUNCTION claimius.get_consent(UUID, UUID, TEXT) TO claimius_writer;
 GRANT EXECUTE ON FUNCTION claimius.get_consent(UUID, UUID, TEXT) TO claimius_reader;
-GRANT EXECUTE ON FUNCTION claimius.post_consent(UUID, TEXT, JSONB, TEXT, UUID, INET, TEXT) TO claimius_writer;
+GRANT EXECUTE ON FUNCTION claimius.insert_consent(UUID, TEXT, JSONB, TEXT, UUID, INET, TEXT) TO claimius_writer;
 GRANT EXECUTE ON FUNCTION claimius.consent_allows(UUID, TEXT, UUID, TEXT) TO claimius_writer;
 GRANT EXECUTE ON FUNCTION claimius.consent_allows(UUID, TEXT, UUID, TEXT) TO claimius_reader;
-GRANT EXECUTE ON FUNCTION claimius.post_analytics_session(UUID, TEXT, TEXT, JSONB, UUID, INET, TEXT) TO claimius_writer;
-GRANT EXECUTE ON FUNCTION claimius.post_analytics_events(UUID, TEXT, JSONB) TO claimius_writer;
+GRANT EXECUTE ON FUNCTION claimius.upsert_analytics_session(UUID, TEXT, TEXT, JSONB, UUID, INET, TEXT) TO claimius_writer;
+GRANT EXECUTE ON FUNCTION claimius.insert_analytics_events(UUID, TEXT, JSONB) TO claimius_writer;
 GRANT EXECUTE ON FUNCTION claimius.capture_user_apps(UUID) TO claimius_writer;
 GRANT EXECUTE ON FUNCTION claimius.capture_user_apps(UUID) TO claimius_reader;
 GRANT EXECUTE ON FUNCTION claimius.analytics_enabled(UUID) TO claimius_writer;

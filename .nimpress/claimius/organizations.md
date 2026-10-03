@@ -1,8 +1,8 @@
 ---
 layout: doc
 title: Organizations
-description: Root and child organizations, the ownership closure, the closure rows each organization write inserts and deletes, create_root_organization, migrate_root, and how an organization reaches an app through app_object.
-tags: organization, ownership, sa_owner_id, sa_root_id, calc_hierarchical_access, _splice_subtree, build_ownership_tree, create_root_organization, link_app_organization, app_object, migrate_root
+description: Root and child organizations, the ownership closure, the closure rows each organization write inserts and deletes, upsert_root_organization, migrate_root, and how an organization reaches an app through app_object.
+tags: organization, ownership, sa_owner_id, sa_root_id, calc_hierarchical_access, _splice_subtree, build_ownership_tree, upsert_root_organization, upsert_app_organization, app_object, migrate_root
 lastUpdated: true
 ---
 
@@ -28,7 +28,7 @@ An organization is who owns something. Every registered row carries `sa_owner_id
 
 3. A root is a tenant. Every row under it resolves to it, and an update that changes `sa_root_id` outside replay and outside `migrate_root` is refused by `calc_hierarchical_access`. `migrate_root(object_type, object_id, new_root_id)` is the only path across roots, and every call is reviewed by a person.
 
-4. `create_root_organization(app_id, name, actor, ...)` probes for a live root of that name linked to the app and returns it, and otherwise inserts the root and links it with `link_app_object`. It is idempotent on app and name, so a bootstrap may run it on every start.
+4. `upsert_root_organization(app_id, name, actor, ...)` probes for a live root of that name linked to the app and returns it, and otherwise inserts the root and links it with `upsert_app_object`. It is idempotent on app and name, so a bootstrap may run it on every start.
 
 ## The ownership closure
 
@@ -62,7 +62,7 @@ Beside the closure, the same trigger:
 
 2. Writes the organization's `object_info` row through `_write_object_info` when the name, description, owner, location, root or deletion changed, one row; see [Objects](./objects.md#objectinfo).
 
-3. On insert of a child, links it to every app its owner is linked to, one `link_app_object` per app.
+3. On insert of a child, links it to every app its owner is linked to, one `upsert_app_object` per app.
 
 4. Per app the row resolves to, recomputes the actor's pair on the organization and raises one object area with `cascade` on it, unless the write only renamed it: a rename raises no area, because no access follows a name. See [Materialization](./materialization.md).
 
@@ -86,7 +86,7 @@ The work of a write is linear in the subtree it moves and constant in the size o
 
 3. One update gives every node of the subtree the new root and the object the new root as its parent, under the transaction setting `claimius.migrating_root`, which is the one case `calc_hierarchical_access` lets a root change through outside replay. The trigger runs as for any reparent: it splices the moved subtree into the new tree incrementally and raises the object area, with `cascade`, of every node it moves, so every holder on either side settles on its next read.
 
-4. For an organization, the rows of registered tables owned in the subtree that carry `sa_root_id` and no parenthood of their own, and whose `sa_root_id` names the old root, take the new one, one update per such table. On a prophet the moved organization then joins every app of the new root, `link_app_organization` with `cascade`.
+4. For an organization, the rows of registered tables owned in the subtree that carry `sa_root_id` and no parenthood of their own, and whose `sa_root_id` names the old root, take the new one, one update per such table. On a prophet the moved organization then joins every app of the new root, `upsert_app_organization` with `cascade`.
 
 With `n_S` the moved subtree, the move writes `n_S` rows, the closure rows the splice moves and `n_S` areas, and nothing in the rest of either tenant. It still crosses the tenant boundary every other write keeps, which is why it is kept off the normal write path and every call is reviewed.
 
@@ -94,11 +94,11 @@ With `n_S` the moved subtree, the move writes `n_S` rows, the closure rows the s
 
 An organization has no `app_id`. It is shared structure, and an app reaches it through a live `claimius.app_object` row.
 
-1. `link_app_object(app_id, object_type, object_id, created_by)` probes `idx_app_object_unique` for a live link and returns it, or inserts one and, outside replay, recomputes the pair of every user of `_affected_users_for_object`: the creator, the pair holders of the object and the holders of claims bound on it or, inheriting, on an ancestor. One link row with its four index entries, and `|affected(o)|` pair recomputes.
+1. `upsert_app_object(app_id, object_type, object_id, created_by)` probes `idx_app_object_unique` for a live link and returns it, or inserts one and, outside replay, recomputes the pair of every user of `_affected_users_for_object`: the creator, the pair holders of the object and the holders of claims bound on it or, inheriting, on an ancestor. One link row with its four index entries, and `|affected(o)|` pair recomputes.
 
-2. `unlink_app_object` soft deletes the live link and deletes every `user_object` row of the app on the object; `user_users` counts those pairs down.
+2. `delete_app_object` soft deletes the live link and deletes every `user_object` row of the app on the object; `user_users` counts those pairs down.
 
-3. `link_app_organization(app_id, org_id, cascade)` links an existing organization and, with `cascade`, every organization and location under it in the ownership closure: one `link_app_object` per node, additive and idempotent.
+3. `upsert_app_organization(app_id, org_id, cascade)` links an existing organization and, with `cascade`, every organization and location under it in the ownership closure: one `upsert_app_object` per node, additive and idempotent.
 
 4. `app_object_ids(app_id, object_type)` is the filter a prophet query uses in place of `app_id = ?`, one range of `idx_app_object_unique`. `app_has_object` is the boolean guard, one probe. `apps_for_object` is the reverse through `idx_app_object_object`.
 

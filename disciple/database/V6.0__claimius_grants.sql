@@ -13,12 +13,12 @@ CREATE OR REPLACE FUNCTION claimius._grant_disciple_roles()
     RETURNS VOID AS $$
 BEGIN
     EXECUTE 'GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA claimius TO claimius_reader';
-    EXECUTE 'REVOKE EXECUTE ON FUNCTION claimius.create_claim, claimius.update_claim, claimius.remove_claim,
-             claimius.assign_claim_user, claimius.update_claim_user, claimius.remove_user_claim,
-             claimius.assign_claim_object, claimius.update_claim_object, claimius.remove_claim_object,
+    EXECUTE 'REVOKE EXECUTE ON FUNCTION claimius.insert_claim, claimius.update_claim, claimius.delete_claim,
+             claimius.insert_user_claim, claimius.update_user_claim, claimius.delete_user_claim,
+             claimius.insert_claim_object, claimius.update_claim_object, claimius.delete_claim_object,
              claimius.merge_user, claimius.migrate_root,
-             claimius.init,
-             claimius.init_claimius_tables, claimius.init_claimius_internal,
+             claimius.upsert_disciple_state,
+             claimius.upsert_table_info, claimius.upsert_internal_table_info,
              claimius.recompute_state
              FROM claimius_reader';
     EXECUTE 'GRANT INSERT, UPDATE, DELETE ON claimius.user_object, claimius.object_info, claimius.user_users,

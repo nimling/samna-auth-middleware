@@ -3,6 +3,21 @@ SELECT plan(1);
 
 CREATE TEMP TABLE superseded (signature TEXT PRIMARY KEY);
 INSERT INTO superseded VALUES
+        ('claimius.ensure_audit_partition(timestamp with time zone)'),
+        ('claimius.write_audit(text,text,text,uuid,uuid,uuid,text)'),
+        ('claimius.create_claim(text,text,integer,uuid,uuid,uuid,boolean,claimius.claim_type)'),
+        ('claimius.remove_claim(uuid,uuid)'),
+        ('claimius.assign_claim_user(uuid,uuid,uuid,uuid,text,timestamp with time zone,timestamp with time zone)'),
+        ('claimius.update_claim_user(uuid,text,timestamp with time zone,timestamp with time zone)'),
+        ('claimius.remove_user_claim(uuid,uuid)'),
+        ('claimius.assign_claim_object(uuid,uuid,uuid,uuid,uuid,text,integer,boolean,text,uuid,jsonb)'),
+        ('claimius.remove_claim_object(uuid,uuid)'),
+        ('claimius.init_claimius_tables(text[])'),
+        ('claimius.init_claimius_internal()'),
+        ('claimius.create_root_organization(text,uuid,text,text,uuid,text)'),
+        ('claimius.init(text)'),
+        ('claimius.ensure_app_user(uuid,text,text,text,text,text,text,text)'),
+        ('claimius.create_organization_user(uuid,uuid,jsonb,boolean,jsonb,text)'),
         ('claimius._apply_denies(jsonb,jsonb,text,uuid)'),
         ('claimius._attach_object_to_trees(text,uuid,record)'),
         ('claimius._build_grants_for_object(uuid,text,uuid)'),

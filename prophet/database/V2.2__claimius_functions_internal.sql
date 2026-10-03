@@ -443,11 +443,12 @@ $$ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = claimius, pg_temp;
 
 COMMENT ON FUNCTION claimius.app_has_object(UUID, TEXT, UUID) IS 'True when the app holds a live app_object link to the object.';
 
--- link_app_object
+-- upsert_app_object
 -- Creates a live app_object link and materializes access for the newly
 -- linked (app, object) pair. Idempotent: an existing live link is returned
 -- untouched.
-CREATE OR REPLACE FUNCTION claimius.link_app_object(
+DROP FUNCTION IF EXISTS claimius.link_app_object(uuid,text,uuid,uuid);
+CREATE OR REPLACE FUNCTION claimius.upsert_app_object(
     p_app_id      UUID,
     p_object_type TEXT,
     p_object_id   UUID,
@@ -483,12 +484,13 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius.link_app_object(UUID, TEXT, UUID, UUID) IS 'Creates a live app_object link and materializes access for the pair. Idempotent.';
+COMMENT ON FUNCTION claimius.upsert_app_object(UUID, TEXT, UUID, UUID) IS 'Creates a live app_object link and materializes access for the pair. Idempotent.';
 
--- unlink_app_object
+-- delete_app_object
 -- Soft deletes a live link and purges the materialized access rows the
 -- app held on the object.
-CREATE OR REPLACE FUNCTION claimius.unlink_app_object(
+DROP FUNCTION IF EXISTS claimius.unlink_app_object(uuid,text,uuid);
+CREATE OR REPLACE FUNCTION claimius.delete_app_object(
     p_app_id      UUID,
     p_object_type TEXT,
     p_object_id   UUID
@@ -512,7 +514,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius.unlink_app_object(UUID, TEXT, UUID) IS 'Soft deletes an app_object link and purges the app''s materialized access on the object.';
+COMMENT ON FUNCTION claimius.delete_app_object(UUID, TEXT, UUID) IS 'Soft deletes an app_object link and purges the app''s materialized access on the object.';
 
 -- _app_ids_for_row
 -- Returns every app_id a registered row is scoped to. Reads the row's

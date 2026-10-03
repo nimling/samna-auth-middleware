@@ -35,7 +35,7 @@ BEGIN
     IF EXISTS (SELECT 1 FROM claimius.claim WHERE name = 'Grant writer') THEN
         RETURN;
     END IF;
-    v_init := claimius.init(
+    v_init := claimius.upsert_system_app(
         p_system_app_slug         => 'gotest',
         p_system_app_name         => 'Go test',
         p_system_app_private_key  => 'key',
@@ -48,21 +48,21 @@ BEGIN
     SELECT '50000000-0000-4000-8000-0000000000c9', 'gotest_other', 'Other', 'key', 'seed', sa_owner_id, sa_created_by
     FROM claimius.samna_app WHERE id = v_app;
 
-    PERFORM claimius.ensure_app_user(p_user_id => v_user, p_app_id => v_app, p_first_name => 'Ada');
+    PERFORM claimius.upsert_app_user(p_user_id => v_user, p_app_id => v_app, p_first_name => 'Ada');
     INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
     VALUES (v_root, 'Grant root', 'company', v_root, v_root, 0, v_user),
            (v_object, 'Grant object', 'company', v_root, v_root, 1, v_user);
-    PERFORM claimius.link_app_object(v_app, 'claimius.organization', v_root);
+    PERFORM claimius.upsert_app_object(v_app, 'claimius.organization', v_root);
 
-    v_claim := (claimius.create_claim(
+    v_claim := (claimius.insert_claim(
         p_app_id => v_app, p_name => 'Grant writer', p_description => NULL, p_sa_access => 6,
         p_sa_owner_id => v_root, p_sa_root_id => v_root, p_sa_created_by => v_user, p_inherits => TRUE
     ) -> 'claim' ->> 'id')::UUID;
-    PERFORM claimius.assign_claim_object(
+    PERFORM claimius.insert_claim_object(
         p_app_id => v_app, p_claim_id => v_claim, p_sa_owner_id => v_root, p_sa_root_id => v_root, p_sa_created_by => v_user,
         p_object_id => v_object, p_object_type => 'claimius.organization', p_sa_access => 6, p_inherits => TRUE
     );
-    PERFORM claimius.assign_claim_user(p_app_id => v_app, p_claim_id => v_claim, p_user_id => v_user, p_sa_owner_id => v_root, p_sa_created_by => v_user);
+    PERFORM claimius.insert_user_claim(p_app_id => v_app, p_claim_id => v_claim, p_user_id => v_user, p_sa_owner_id => v_root, p_sa_created_by => v_user);
 END $$;
 `
 

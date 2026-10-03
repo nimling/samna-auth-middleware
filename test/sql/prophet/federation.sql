@@ -50,7 +50,7 @@ DO $$
 DECLARE
     v_system JSONB;
 BEGIN
-    v_system := claimius.init(
+    v_system := claimius.upsert_system_app(
         p_system_app_slug         => 'sqltest_home',
         p_system_app_name         => 'SQL federation test',
         p_system_app_private_key  => 'key',
@@ -67,7 +67,7 @@ BEGIN
 END $$;
 
 CREATE TEMP TABLE local_claim AS
-SELECT (claimius.create_claim(
+SELECT (claimius.insert_claim(
     p_app_id        => pg_temp.local_app(),
     p_name          => 'Local claim',
     p_description   => NULL,
@@ -164,17 +164,17 @@ SELECT is(claimius.check_sync_home(pg_temp.local_app(), 'elsewhere'), 'elsewhere
 SELECT is(claimius.check_sync_home(pg_temp.mirror_app(), NULL), 'sqltest_peer', 'a mirror sends consumers of the app to its home');
 
 SELECT throws_ok(
-    format('SELECT claimius.offer_handover(%L, %L, %L)', pg_temp.local_app(), 'unknown_peer', pg_temp.actor()),
+    format('SELECT claimius.insert_app_handover(%L, %L, %L)', pg_temp.local_app(), 'unknown_peer', pg_temp.actor()),
     'P0409', NULL, 'an app is offered only to an active peer'
 );
 
 SELECT throws_ok(
-    format('SELECT claimius.offer_handover(%L, %L, %L)', pg_temp.mirror_app(), 'sqltest_peer', pg_temp.actor()),
+    format('SELECT claimius.insert_app_handover(%L, %L, %L)', pg_temp.mirror_app(), 'sqltest_peer', pg_temp.actor()),
     'P0409', NULL, 'only the home offers an app'
 );
 
 CREATE TEMP TABLE offer AS
-SELECT (claimius.offer_handover(pg_temp.local_app(), 'sqltest_peer', pg_temp.actor()) -> 'app_handover') AS row;
+SELECT (claimius.insert_app_handover(pg_temp.local_app(), 'sqltest_peer', pg_temp.actor()) -> 'app_handover') AS row;
 
 SELECT is(
     (SELECT status FROM claimius.app_handover WHERE id = (SELECT (row ->> 'id')::UUID FROM offer)),
@@ -188,12 +188,12 @@ SELECT throws_ok(
 );
 
 SELECT throws_ok(
-    format('SELECT claimius.offer_handover(%L, %L, %L)', pg_temp.local_app(), 'sqltest_peer', pg_temp.actor()),
+    format('SELECT claimius.insert_app_handover(%L, %L, %L)', pg_temp.local_app(), 'sqltest_peer', pg_temp.actor()),
     'P0409', NULL, 'an app under offer is not offered twice'
 );
 
 SELECT throws_ok(
-    format('SELECT claimius.accept_handover(%L, %L)', (SELECT (row ->> 'id')::UUID FROM offer), pg_temp.actor()),
+    format('SELECT claimius.update_app_handover(%L, %L)', (SELECT (row ->> 'id')::UUID FROM offer), pg_temp.actor()),
     'P0409', NULL, 'the prophet that offered an app does not accept it'
 );
 
@@ -224,7 +224,7 @@ SELECT ok(
 SELECT is(claimius.check_sync_home(pg_temp.mirror_app(), 'sqltest_peer'), 'sqltest_peer', 'before the acceptance the target does not serve the home''s disciple');
 
 SELECT is(
-    (SELECT claimius.accept_handover('60000000-0000-4000-8000-0000000000f5', pg_temp.actor()) -> 'app_handover' ->> 'status'),
+    (SELECT claimius.update_app_handover('60000000-0000-4000-8000-0000000000f5', pg_temp.actor()) -> 'app_handover' ->> 'status'),
     'accepted',
     'the target accepts the offer'
 );

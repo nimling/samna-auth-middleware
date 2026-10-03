@@ -2,7 +2,7 @@
 layout: doc
 title: Users
 description: One person or machine, one stable user_id, one samna_user row per app, machine clients, delegation through get_user_access, and user_users with the count it holds, what counting it reads and writes, and why the count is exact.
-tags: samna_user, user_id, ensure_app_user, check_user_active, merge_user, samna_client, get_user_access, get_users, user_users, _count_user_users, _lock_objects, delegation
+tags: samna_user, user_id, upsert_app_user, check_user_active, merge_user, samna_client, get_user_access, get_users, user_users, _count_user_users, _lock_objects, delegation
 lastUpdated: true
 ---
 
@@ -23,7 +23,7 @@ A user is who acts. A person and a machine client are both users, and both hold 
 
 1. The rows of one person across apps share `user_id` and differ in everything else; `idx_samna_user_user_app` is unique on `(user_id, app_id)` among live rows. A foreign key from an application table targets `samna_user.user_id`, never `samna_user.id`, the split [RFC 7643](https://www.rfc-editor.org/rfc/rfc7643) draws between a subject identifier and a per system record.
 
-2. `ensure_app_user(user_id, app_id, first_name, last_name, user_name, email, phone, external_id, user_image, sa_created_by)` probes for the live row and inserts it when absent, then, when the app names a default claim in `samna_app.claim_id`, probes for a live grant of it and inserts one. The grant is stamped with `sa_created_by`, the acting `user_claim.id`, when a caller granting it passes one, as `ensure_app_client` does, and otherwise with its own id: a first login is the grant acting on its own authority, and the user it names is the user behind it, so the write settles that user. At most two rows written, and none after the first call, so it runs on every login without a guard.
+2. `upsert_app_user(user_id, app_id, first_name, last_name, user_name, email, phone, external_id, user_image, sa_created_by)` probes for the live row and inserts it when absent, then, when the app names a default claim in `samna_app.claim_id`, probes for a live grant of it and inserts one. The grant is stamped with `sa_created_by`, the acting `user_claim.id`, when a caller granting it passes one, as `upsert_app_client` does, and otherwise with its own id: a first login is the grant acting on its own authority, and the user it names is the user behind it, so the write settles that user. At most two rows written, and none after the first call, so it runs on every login without a guard.
 
 3. `merge_user(target, source, actor)` moves a person's grants, relations and field values from one `user_id` to another in every app, deletes the source's pairs and rows, and writes one audit row per app. Authorship survives it, because `sa_created_by` holds a `user_claim.id` and never a user id. A v1.1.9 set stamped some rows with a user id, the default grant of a first login among them; every replay of the base set runs `_restamp_created_by`, which rewrites such a stamp on every claimius table but `audit` to the user's `user_claim.id` where it is unambiguous, the stamp being the `user_id` of a `samna_user` of the row's app that holds exactly one live `user_claim` in that app, and leaves every other stamp. The row's app is its `app_id`, the app itself for a `samna_app`, and the apps an organization or location is linked to; a disciple holds one app. It writes under `replay_mode`, since the creator a recompute finds is the same user before and after, and a second run rewrites nothing.
 
@@ -35,7 +35,7 @@ A user is who acts. A person and a machine client are both users, and both hold 
 
 1. A client is a `samna_client` row with a unique `client_id`, a bcrypt `secret_hash`, a `status` and an optional `expires_at`.
 
-2. `samna_client.client_id` is the client's `user_id`. The client has a per app `samna_user` row of type `client`, created with `ensure_app_user(client_id, ...)`, and its grants are `user_claim` rows on that id.
+2. `samna_client.client_id` is the client's `user_id`. The client has a per app `samna_user` row of type `client`, created with `upsert_app_user(client_id, ...)`, and its grants are `user_claim` rows on that id.
 
 3. Writes the client performs stamp `sa_created_by` with one of the client's own grants on the target app. A client without a grant on the app has no actor token and cannot create rows.
 
@@ -86,7 +86,7 @@ rows written    ≤ Σ_{pairs entering or leaving} 2 (U_x − 1)
 
 A pair entering on an object one other user holds writes two rows, one in each direction, as the pgTAP suite `pair_storage` checks. A settle that changes one pair of `u` touches the users of that one object, not the `V_u` objects of `u` and every other user on each of them.
 
-The counts stay quiet under `replay_mode`. The bulk seed of `init_claimius_tables`, whose pairs are written under it, and `rebuild_user_object`, which repairs any drift, rebuild them with `_refresh_user_users(app, u)`, which reads `u`'s pairs and every other user on each of their objects, `V_u + Σ_{x ∈ V_u} U_x` entries, and rewrites only the counts that changed.
+The counts stay quiet under `replay_mode`. The bulk seed of `upsert_table_info`, whose pairs are written under it, and `rebuild_user_object`, which repairs any drift, rebuild them with `_refresh_user_users(app, u)`, which reads `u`'s pairs and every other user on each of their objects, `V_u + Σ_{x ∈ V_u} U_x` entries, and rewrites only the counts that changed.
 
 ### Why the count is exact
 

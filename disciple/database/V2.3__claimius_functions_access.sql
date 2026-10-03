@@ -84,7 +84,7 @@ BEGIN
 
     RETURN coalesce(NEW, OLD);
 EXCEPTION WHEN OTHERS THEN
-    PERFORM claimius.write_audit(
+    PERFORM claimius.insert_audit(
             v_op, 'error', v_object_type, v_obj_id,
             coalesce(v_owner_id, '00000000-0000-0000-0000-000000000000'::UUID),
             coalesce((to_jsonb(coalesce(NEW, OLD)) ->> 'sa_created_by')::UUID, '00000000-0000-0000-0000-000000000000'::UUID),
@@ -368,7 +368,7 @@ BEGIN
 
     RETURN coalesce(NEW, OLD);
 EXCEPTION WHEN OTHERS THEN
-    PERFORM claimius.write_audit(
+    PERFORM claimius.insert_audit(
             v_op, 'error', v_object_type, v_obj_id,
             coalesce((to_jsonb(coalesce(NEW, OLD)) ->> 'sa_owner_id')::UUID, '00000000-0000-0000-0000-000000000000'::UUID),
             coalesce((to_jsonb(coalesce(NEW, OLD)) ->> 'sa_created_by')::UUID, '00000000-0000-0000-0000-000000000000'::UUID),
@@ -502,7 +502,7 @@ COMMENT ON FUNCTION claimius.calc_claim_access() IS 'Trigger on claim, claim_obj
 -- target claim. Bypassed during disciple replay.
 -- The first binding on a samna_user that a claim of the binding's owning
 -- organization is assigned to may come from an actor holding owner on that
--- organization. That is how create_organization_user binds a new user's
+-- organization. That is how insert_organization_user binds a new user's
 -- virtual claim.
 -- ----------------------------------------------------------------------------
 

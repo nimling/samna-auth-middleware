@@ -42,7 +42,7 @@ A listing filters through the materialized index. `ObjectWhere(q, actor, objectT
 
 ## Graphs
 
-`GetOwnerGraph(ctx, actor, startID, depth, required, window)` and `GetClaimGraph(ctx, actor, startID, depth, required, window)` return flat nodes, `object_id`, `object_type`, `label`, `parent_id` and a `data` payload with the access mask and depth. `window` is a `GraphWindow{Width, Sort, NextID}`: at most `Width` children of each type per parent, 0 meaning all, in name order or by the actor's decayed usage with `GRAPH_SORT_USAGE`, continuing after `NextID`. The graphs cover the shared claimius types and every table registered with `init_claimius_tables`, read from `table_info`.
+`GetOwnerGraph(ctx, actor, startID, depth, required, window)` and `GetClaimGraph(ctx, actor, startID, depth, required, window)` return flat nodes, `object_id`, `object_type`, `label`, `parent_id` and a `data` payload with the access mask and depth. `window` is a `GraphWindow{Width, Sort, NextID}`: at most `Width` children of each type per parent, 0 meaning all, in name order or by the actor's decayed usage with `GRAPH_SORT_USAGE`, continuing after `NextID`. The graphs cover the shared claimius types and every table registered with `upsert_table_info`, read from `table_info`.
 
 ## Usage
 

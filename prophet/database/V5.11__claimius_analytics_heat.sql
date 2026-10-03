@@ -61,7 +61,8 @@ COMMENT ON FUNCTION claimius.analytics_event_weight(TEXT) IS 'What one signal co
 -- Fold
 -- ----------------------------------------------------------------------------
 
-CREATE OR REPLACE FUNCTION claimius.post_analytics_heat(
+DROP FUNCTION IF EXISTS claimius.post_analytics_heat(date,date,uuid);
+CREATE OR REPLACE FUNCTION claimius.upsert_analytics_heat(
     p_from   DATE,
     p_to     DATE,
     p_app_id UUID DEFAULT NULL
@@ -101,7 +102,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius.post_analytics_heat(DATE, DATE, UUID) IS 'Folds every positioned signal on a range of whole days into its cell and returns the cells written. A day is the unit because a cell is replaced rather than added to: re folding a whole day is always correct, and folding half a day would throw the other half away.';
+COMMENT ON FUNCTION claimius.upsert_analytics_heat(DATE, DATE, UUID) IS 'Folds every positioned signal on a range of whole days into its cell and returns the cells written. A day is the unit because a cell is replaced rather than added to: re folding a whole day is always correct, and folding half a day would throw the other half away.';
 
 -- ----------------------------------------------------------------------------
 -- Read
@@ -148,7 +149,7 @@ BEGIN
         RAISE EXCEPTION 'delete_analytics_event cannot drop a day that has not finished';
     END IF;
 
-    PERFORM claimius.post_analytics_heat(NULL, p_before - 1);
+    PERFORM claimius.upsert_analytics_heat(NULL, p_before - 1);
 
     DELETE FROM claimius.analytics_event
     WHERE (occurred_at AT TIME ZONE 'UTC')::date < p_before;

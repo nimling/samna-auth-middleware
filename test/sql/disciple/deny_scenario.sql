@@ -29,11 +29,11 @@ DECLARE
     v_noown     UUID;
     v_ada_admin UUID;
 BEGIN
-    PERFORM claimius.init();
-    PERFORM claimius.init_claimius_tables('public.sqltest_doc');
+    PERFORM claimius.upsert_disciple_state();
+    PERFORM claimius.upsert_table_info('public.sqltest_doc');
 
-    PERFORM claimius.ensure_app_user(p_user_id => v_ada, p_first_name => 'Ada');
-    PERFORM claimius.ensure_app_user(p_user_id => v_vic, p_first_name => 'Vic');
+    PERFORM claimius.upsert_app_user(p_user_id => v_ada, p_first_name => 'Ada');
+    PERFORM claimius.upsert_app_user(p_user_id => v_vic, p_first_name => 'Vic');
 
     INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
     VALUES (v_acme, 'Acme', 'company', v_acme, v_acme, 0, v_sys);
@@ -51,55 +51,55 @@ BEGIN
         CROSS JOIN generate_series(1, 2) n
     WHERE o.sa_root_id = v_acme;
 
-    v_admin := (claimius.create_claim(
+    v_admin := (claimius.insert_claim(
         p_name => 'Admin', p_description => NULL, p_sa_access => 1,
         p_sa_owner_id => v_acme, p_sa_root_id => v_acme, p_sa_created_by => v_sys
     ) -> 'claim' ->> 'id')::UUID;
-    v_nowrite := (claimius.create_claim(
+    v_nowrite := (claimius.insert_claim(
         p_name => 'No write on Research', p_description => NULL, p_sa_access => 18,
         p_sa_owner_id => v_acme, p_sa_root_id => v_acme, p_sa_created_by => v_sys
     ) -> 'claim' ->> 'id')::UUID;
-    v_share := (claimius.create_claim(
+    v_share := (claimius.insert_claim(
         p_name => 'Share', p_description => NULL, p_sa_access => 4,
         p_sa_owner_id => v_acme, p_sa_root_id => v_acme, p_sa_created_by => v_sys
     ) -> 'claim' ->> 'id')::UUID;
-    v_vendor := (claimius.create_claim(
+    v_vendor := (claimius.insert_claim(
         p_name => 'Vendor', p_description => NULL, p_sa_access => 4,
         p_sa_owner_id => v_acme, p_sa_root_id => v_acme, p_sa_created_by => v_sys
     ) -> 'claim' ->> 'id')::UUID;
-    v_noown := (claimius.create_claim(
+    v_noown := (claimius.insert_claim(
         p_name => 'No owner on Ada sales doc', p_description => NULL, p_sa_access => 17,
         p_sa_owner_id => v_acme, p_sa_root_id => v_acme, p_sa_created_by => v_sys
     ) -> 'claim' ->> 'id')::UUID;
 
-    PERFORM claimius.assign_claim_object(
+    PERFORM claimius.insert_claim_object(
         p_claim_id => v_admin, p_sa_owner_id => v_acme, p_sa_root_id => v_acme, p_sa_created_by => v_sys,
         p_object_id => v_acme, p_object_type => 'claimius.organization', p_inherits => TRUE);
-    PERFORM claimius.assign_claim_object(
+    PERFORM claimius.insert_claim_object(
         p_claim_id => v_nowrite, p_sa_owner_id => v_acme, p_sa_root_id => v_acme, p_sa_created_by => v_sys,
         p_object_id => v_research, p_object_type => 'claimius.organization', p_inherits => TRUE);
-    PERFORM claimius.assign_claim_object(
+    PERFORM claimius.insert_claim_object(
         p_claim_id => v_share, p_sa_owner_id => v_acme, p_sa_root_id => v_acme, p_sa_created_by => v_sys,
         p_object_id => '20000000-0000-4000-8000-000000000e41', p_object_type => 'public.sqltest_doc', p_inherits => TRUE);
 
-    v_ada_admin := (claimius.assign_claim_user(
+    v_ada_admin := (claimius.insert_user_claim(
         p_claim_id => v_admin, p_user_id => v_ada, p_sa_owner_id => v_acme, p_sa_created_by => v_sys
     ) -> 'user_claim' ->> 'id')::UUID;
-    PERFORM claimius.assign_claim_user(p_claim_id => v_nowrite, p_user_id => v_ada, p_sa_owner_id => v_acme, p_sa_created_by => v_sys);
-    PERFORM claimius.assign_claim_user(p_claim_id => v_share, p_user_id => v_ada, p_sa_owner_id => v_acme, p_sa_created_by => v_sys);
-    PERFORM claimius.assign_claim_user(p_claim_id => v_noown, p_user_id => v_ada, p_sa_owner_id => v_acme, p_sa_created_by => v_sys);
+    PERFORM claimius.insert_user_claim(p_claim_id => v_nowrite, p_user_id => v_ada, p_sa_owner_id => v_acme, p_sa_created_by => v_sys);
+    PERFORM claimius.insert_user_claim(p_claim_id => v_share, p_user_id => v_ada, p_sa_owner_id => v_acme, p_sa_created_by => v_sys);
+    PERFORM claimius.insert_user_claim(p_claim_id => v_noown, p_user_id => v_ada, p_sa_owner_id => v_acme, p_sa_created_by => v_sys);
 
-    PERFORM claimius.assign_claim_object(
+    PERFORM claimius.insert_claim_object(
         p_claim_id => v_vendor, p_sa_owner_id => v_acme, p_sa_root_id => v_acme, p_sa_created_by => v_ada_admin,
         p_object_id => v_admin, p_object_type => 'claimius.claim', p_sa_access => 4, p_inherits => TRUE);
-    PERFORM claimius.assign_claim_user(p_claim_id => v_vendor, p_user_id => v_vic, p_sa_owner_id => v_acme, p_sa_created_by => v_sys);
-    PERFORM claimius.assign_claim_user(p_claim_id => v_nowrite, p_user_id => v_vic, p_sa_owner_id => v_acme, p_sa_created_by => v_sys);
+    PERFORM claimius.insert_user_claim(p_claim_id => v_vendor, p_user_id => v_vic, p_sa_owner_id => v_acme, p_sa_created_by => v_sys);
+    PERFORM claimius.insert_user_claim(p_claim_id => v_nowrite, p_user_id => v_vic, p_sa_owner_id => v_acme, p_sa_created_by => v_sys);
 
     INSERT INTO public.sqltest_doc (id, name, sa_owner_id, sa_created_by)
     VALUES ('20000000-0000-4000-8000-000000000e49', 'Ada lab doc', v_lab, v_ada_admin),
            ('20000000-0000-4000-8000-000000000e29', 'Ada sales doc', v_sales, v_ada_admin);
 
-    PERFORM claimius.assign_claim_object(
+    PERFORM claimius.insert_claim_object(
         p_claim_id => v_noown, p_sa_owner_id => v_acme, p_sa_root_id => v_acme, p_sa_created_by => v_sys,
         p_object_id => '20000000-0000-4000-8000-000000000e29', p_object_type => 'public.sqltest_doc', p_inherits => TRUE);
 END $$;
@@ -220,14 +220,14 @@ DECLARE
     v_sys  UUID := '00000000-0000-4000-8000-0000000000e0';
     v_deny UUID;
 BEGIN
-    v_deny := (claimius.create_claim(
+    v_deny := (claimius.insert_claim(
         p_name => 'No read on Ada lab doc', p_description => NULL, p_sa_access => 20,
         p_sa_owner_id => v_acme, p_sa_root_id => v_acme, p_sa_created_by => v_sys
     ) -> 'claim' ->> 'id')::UUID;
-    PERFORM claimius.assign_claim_object(
+    PERFORM claimius.insert_claim_object(
         p_claim_id => v_deny, p_sa_owner_id => v_acme, p_sa_root_id => v_acme, p_sa_created_by => v_sys,
         p_object_id => '20000000-0000-4000-8000-000000000e49', p_object_type => 'public.sqltest_doc', p_inherits => TRUE);
-    PERFORM claimius.assign_claim_user(p_claim_id => v_deny, p_user_id => 'a0000000-0000-4000-8000-0000000000e1',
+    PERFORM claimius.insert_user_claim(p_claim_id => v_deny, p_user_id => 'a0000000-0000-4000-8000-0000000000e1',
         p_sa_owner_id => v_acme, p_sa_created_by => v_sys);
 END $$;
 

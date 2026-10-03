@@ -21,17 +21,17 @@ BEGIN
     IF EXISTS (SELECT 1 FROM claimius.claim WHERE name = 'Other reader') THEN
         RETURN;
     END IF;
-    PERFORM claimius.ensure_app_user(p_user_id => v_user, p_app_id => v_other, p_first_name => 'Ada');
-    PERFORM claimius.link_app_object(v_other, 'claimius.organization', v_root);
-    v_claim := (claimius.create_claim(
+    PERFORM claimius.upsert_app_user(p_user_id => v_user, p_app_id => v_other, p_first_name => 'Ada');
+    PERFORM claimius.upsert_app_object(v_other, 'claimius.organization', v_root);
+    v_claim := (claimius.insert_claim(
         p_app_id => v_other, p_name => 'Other reader', p_description => NULL, p_sa_access => 4,
         p_sa_owner_id => v_root, p_sa_root_id => v_root, p_sa_created_by => v_user, p_inherits => TRUE
     ) -> 'claim' ->> 'id')::UUID;
-    PERFORM claimius.assign_claim_object(
+    PERFORM claimius.insert_claim_object(
         p_app_id => v_other, p_claim_id => v_claim, p_sa_owner_id => v_root, p_sa_root_id => v_root, p_sa_created_by => v_user,
         p_object_id => v_root, p_object_type => 'claimius.organization', p_inherits => TRUE
     );
-    PERFORM claimius.assign_claim_user(p_app_id => v_other, p_claim_id => v_claim, p_user_id => v_user, p_sa_owner_id => v_root, p_sa_created_by => v_user);
+    PERFORM claimius.insert_user_claim(p_app_id => v_other, p_claim_id => v_claim, p_user_id => v_user, p_sa_owner_id => v_root, p_sa_created_by => v_user);
 END $$;
 `
 

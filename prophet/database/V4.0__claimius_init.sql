@@ -6,8 +6,8 @@
 -- sa_created_by an older set stamped with a user id where it is unambiguous.
 --
 -- After this file runs, the schema is "ready" for the implementing app to:
---   1. Run init, init_disciple, or init_hybrid (as appropriate)
---   2. Run init_claimius_tables(...) with their app's table list
+--   1. Run upsert_system_app, upsert_disciple_state, or upsert_prophet_peer (as appropriate)
+--   2. Run upsert_table_info(...) with their app's table list
 --
 -- The implementer's migration tooling is responsible for those calls. They
 -- are NOT included in claimius's own migrations.
@@ -15,9 +15,9 @@
 
 DO $$
     BEGIN
-        PERFORM claimius.init_claimius_internal();
+        PERFORM claimius.upsert_internal_table_info();
         PERFORM claimius._restamp_created_by();
         RAISE NOTICE 'Claimius internal tables registered. Schema ready.';
-        RAISE NOTICE 'Implementer must now call: init | init_disciple | init_hybrid';
-        RAISE NOTICE 'Then: init_claimius_tables(VARIADIC <schema.table list>)';
+        RAISE NOTICE 'Implementer must now call: upsert_system_app | upsert_disciple_state | upsert_prophet_peer';
+        RAISE NOTICE 'Then: upsert_table_info(VARIADIC <schema.table list>)';
     END $$;

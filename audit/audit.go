@@ -20,7 +20,7 @@ func Write(d *shared.DB, operation, auditType, objectType string, objectID, owne
 				defer cancel()
 				var row shared.Audit
 				return d.NewRaw(
-					`SELECT * FROM claimius.write_audit(?, ?, ?, ?, ?, ?, ?)`,
+					`SELECT * FROM claimius.insert_audit(?, ?, ?, ?, ?, ?, ?)`,
 					operation, auditType, objectType, objectID, ownerID, createdBy, message,
 				).Scan(ctx, &row)
 			}()

@@ -356,7 +356,7 @@ func PostAnalyticsCapture(ctx echo.Context) error {
 		contentType = echo.MIMEApplicationJSON
 	}
 	_, err = sdb.Instance().
-		NewRaw(`SELECT claimius.post_analytics_capture(?, ?, ?, ?)`, appID, path, contentType, body).
+		NewRaw(`SELECT claimius.upsert_analytics_capture(?, ?, ?, ?)`, appID, path, contentType, body).
 		Exec(ctx.Request().Context())
 	if err != nil {
 		ctx.Logger().Errorf("PostAnalyticsCapture: %v", err)

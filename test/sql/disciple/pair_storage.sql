@@ -41,11 +41,11 @@ DECLARE
     v_desk  UUID;
     v_user  UUID;
 BEGIN
-    PERFORM claimius.init();
+    PERFORM claimius.upsert_disciple_state();
 
     FOREACH v_user IN ARRAY ARRAY['a0000000-0000-4000-8000-0000000000e1', 'a0000000-0000-4000-8000-0000000000e2',
                                   'a0000000-0000-4000-8000-0000000000e3', 'a0000000-0000-4000-8000-0000000000e4']::UUID[] LOOP
-        PERFORM claimius.ensure_app_user(p_user_id => v_user, p_first_name => 'Sharer');
+        PERFORM claimius.upsert_app_user(p_user_id => v_user, p_first_name => 'Sharer');
     END LOOP;
 
     INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
@@ -57,26 +57,26 @@ BEGIN
            ('10000000-0000-4000-8000-0000000000e3', 'Pairs two', 'company', v_node, v_root, 2, v_sys),
            ('10000000-0000-4000-8000-0000000000e4', 'Pairs three', 'company', v_node, v_root, 2, v_sys);
 
-    v_crew := (claimius.create_claim(
+    v_crew := (claimius.insert_claim(
         p_name => 'Pairs crew', p_description => NULL, p_sa_access => 4,
         p_sa_owner_id => v_root, p_sa_root_id => v_root, p_sa_created_by => v_sys
     ) -> 'claim' ->> 'id')::UUID;
-    PERFORM claimius.assign_claim_object(
+    PERFORM claimius.insert_claim_object(
         p_claim_id => v_crew, p_sa_owner_id => v_root, p_sa_root_id => v_root, p_sa_created_by => v_sys,
         p_object_id => v_node, p_object_type => 'claimius.organization', p_inherits => TRUE);
     FOREACH v_user IN ARRAY ARRAY['a0000000-0000-4000-8000-0000000000e1', 'a0000000-0000-4000-8000-0000000000e2',
                                   'a0000000-0000-4000-8000-0000000000e3']::UUID[] LOOP
-        PERFORM claimius.assign_claim_user(p_claim_id => v_crew, p_user_id => v_user, p_sa_owner_id => v_root, p_sa_created_by => v_sys);
+        PERFORM claimius.insert_user_claim(p_claim_id => v_crew, p_user_id => v_user, p_sa_owner_id => v_root, p_sa_created_by => v_sys);
     END LOOP;
 
-    v_desk := (claimius.create_claim(
+    v_desk := (claimius.insert_claim(
         p_name => 'Pairs desk', p_description => NULL, p_sa_access => 4,
         p_sa_owner_id => v_root, p_sa_root_id => v_root, p_sa_created_by => v_sys
     ) -> 'claim' ->> 'id')::UUID;
-    PERFORM claimius.assign_claim_object(
+    PERFORM claimius.insert_claim_object(
         p_claim_id => v_desk, p_sa_owner_id => v_root, p_sa_root_id => v_root, p_sa_created_by => v_sys,
         p_object_id => '10000000-0000-4000-8000-0000000000e2', p_object_type => 'claimius.organization', p_inherits => FALSE);
-    PERFORM claimius.assign_claim_user(p_claim_id => v_desk, p_user_id => 'a0000000-0000-4000-8000-0000000000e4',
+    PERFORM claimius.insert_user_claim(p_claim_id => v_desk, p_user_id => 'a0000000-0000-4000-8000-0000000000e4',
         p_sa_owner_id => v_root, p_sa_created_by => v_sys);
 END $$;
 
@@ -94,7 +94,7 @@ SELECT ok(
 
 DO $$
 BEGIN
-    PERFORM claimius.remove_user_claim(
+    PERFORM claimius.delete_user_claim(
         (SELECT uc.id FROM claimius.user_claim uc JOIN claimius.claim c ON c.id = uc.claim_id
           WHERE c.name = 'Pairs crew' AND uc.user_id = 'a0000000-0000-4000-8000-0000000000e3' AND uc.sa_deleted_at IS NULL),
         '00000000-0000-4000-8000-0000000000e0');
@@ -110,14 +110,14 @@ DECLARE
     v_sys  UUID := '00000000-0000-4000-8000-0000000000e0';
     v_deny UUID;
 BEGIN
-    v_deny := (claimius.create_claim(
+    v_deny := (claimius.insert_claim(
         p_name => 'Pairs deny', p_description => NULL, p_sa_access => 20,
         p_sa_owner_id => v_root, p_sa_root_id => v_root, p_sa_created_by => v_sys
     ) -> 'claim' ->> 'id')::UUID;
-    PERFORM claimius.assign_claim_object(
+    PERFORM claimius.insert_claim_object(
         p_claim_id => v_deny, p_sa_owner_id => v_root, p_sa_root_id => v_root, p_sa_created_by => v_sys,
         p_object_id => '10000000-0000-4000-8000-0000000000e3', p_object_type => 'claimius.organization', p_inherits => FALSE);
-    PERFORM claimius.assign_claim_user(p_claim_id => v_deny, p_user_id => 'a0000000-0000-4000-8000-0000000000e2',
+    PERFORM claimius.insert_user_claim(p_claim_id => v_deny, p_user_id => 'a0000000-0000-4000-8000-0000000000e2',
         p_sa_owner_id => v_root, p_sa_created_by => v_sys);
 END $$;
 SELECT pg_temp.list_all();
@@ -179,13 +179,13 @@ DECLARE
     v_badge UUID;
     v_user  UUID;
 BEGIN
-    v_badge := (claimius.create_claim(
+    v_badge := (claimius.insert_claim(
         p_name => 'Pairs badge', p_description => NULL, p_sa_access => 4,
         p_sa_owner_id => v_root, p_sa_root_id => v_root, p_sa_created_by => v_sys
     ) -> 'claim' ->> 'id')::UUID;
     FOREACH v_user IN ARRAY ARRAY['a0000000-0000-4000-8000-0000000000e5', 'a0000000-0000-4000-8000-0000000000e6']::UUID[] LOOP
-        PERFORM claimius.ensure_app_user(p_user_id => v_user, p_first_name => 'Badge');
-        PERFORM claimius.assign_claim_user(p_claim_id => v_badge, p_user_id => v_user, p_sa_owner_id => v_root, p_sa_created_by => v_sys);
+        PERFORM claimius.upsert_app_user(p_user_id => v_user, p_first_name => 'Badge');
+        PERFORM claimius.insert_user_claim(p_claim_id => v_badge, p_user_id => v_user, p_sa_owner_id => v_root, p_sa_created_by => v_sys);
     END LOOP;
 END $$;
 

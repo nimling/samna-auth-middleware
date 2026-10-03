@@ -5,7 +5,7 @@ DO $$
 DECLARE
     v_app UUID;
 BEGIN
-    v_app := (claimius.init(
+    v_app := (claimius.upsert_system_app(
         p_system_app_slug         => 'sqltest_audit',
         p_system_app_name         => 'SQL audit test',
         p_system_app_private_key  => 'key',
@@ -14,7 +14,7 @@ BEGIN
     ) -> 'samna_app' ->> 'id')::UUID;
 
     CREATE TEMP TABLE written AS
-    SELECT (claimius.write_audit(v_app, 'update', 'test', 'claimius.organization',
+    SELECT (claimius.insert_audit(v_app, 'update', 'test', 'claimius.organization',
                                  '10000000-0000-4000-8000-0000000000a7', '10000000-0000-4000-8000-0000000000a7',
                                  NULL, 'audit partition')).id AS id;
 
@@ -38,7 +38,7 @@ SELECT is(
 SELECT is(
     (SELECT a.tableoid::REGCLASS::TEXT FROM claimius.audit a WHERE a.id = (SELECT id FROM written)),
     'claimius.audit_' || to_char(now() AT TIME ZONE 'UTC', 'YYYYMM'),
-    'write_audit opens the month''s partition and writes the row into it'
+    'insert_audit opens the month''s partition and writes the row into it'
 );
 
 SELECT is(
@@ -47,7 +47,7 @@ SELECT is(
     'a row of a month with no partition lands in audit_default'
 );
 
-SELECT claimius.ensure_audit_partition('2019-03-01T00:00:00Z');
+SELECT claimius.upsert_audit_partition('2019-03-01T00:00:00Z');
 
 SELECT is(
     (SELECT a.tableoid::REGCLASS::TEXT FROM claimius.audit a WHERE a.id = '90000000-0000-4000-8000-0000000000a7'),

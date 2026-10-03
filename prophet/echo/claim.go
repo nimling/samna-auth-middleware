@@ -340,10 +340,10 @@ func PatchClaimUser(ctx echo.Context) error {
 		return respond.Error(ctx, http.StatusBadRequest, err.Error())
 	}
 	var result struct {
-		UserClaim json.RawMessage `bun:"update_claim_user"`
+		UserClaim json.RawMessage `bun:"update_user_claim"`
 	}
 	if err := sdb.Instance().NewRaw(
-		"SELECT claimius.update_claim_user(?, ?, ?, ?) AS update_claim_user",
+		"SELECT claimius.update_user_claim(?, ?, ?, ?) AS update_user_claim",
 		userClaimID, patch.Reason, patch.StartsAt, patch.EndsAt,
 	).Scan(ctx.Request().Context(), &result); err != nil {
 		ctx.Logger().Errorf("PatchClaimUser update: %v", err)

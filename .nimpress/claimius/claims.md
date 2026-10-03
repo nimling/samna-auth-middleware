@@ -35,7 +35,7 @@ The rows grow with the grants and the bindings, never with their product: one cl
 
 ### Expansion
 
-`create_claim` and `update_claim` store `X(m)` of [the masks](./index.md#masks) for a mask with the deny bit clear: owner adds write, read and execute, write adds read and execute, execute adds read. So 1 stores 15, 2 stores 14, 8 stores 12, 4 stores 4, 33 stores 47. A deny mask is stored as given, and a mask with no bit besides deny is refused with SQLSTATE `22023`. `update_claim` treats a NULL or 0 mask and an empty name as unchanged. The expansion runs once per claim write, so every claim mask read afterwards already carries the bits it implies.
+`insert_claim` and `update_claim` store `X(m)` of [the masks](./index.md#masks) for a mask with the deny bit clear: owner adds write, read and execute, write adds read and execute, execute adds read. So 1 stores 15, 2 stores 14, 8 stores 12, 4 stores 4, 33 stores 47. A deny mask is stored as given, and a mask with no bit besides deny is refused with SQLSTATE `22023`. `update_claim` treats a NULL or 0 mask and an empty name as unchanged. The expansion runs once per claim write, so every claim mask read afterwards already carries the bits it implies.
 
 ## The effective mask of a binding
 
@@ -57,9 +57,9 @@ with `A(writer, y) = 0` when the writer holds no pair. It reads the writer's gra
 
 Two first bindings are judged on the writer's owner bit on an organization instead, `A = 15` when it holds owner there, because no one can hold a pair on what has no binding yet:
 
-1. On a prophet, the first live binding of an app that carries none, from a writer whose grant belongs to another app, when the writer holds owner, in its own app, on the organization that owns the `samna_app` row. This is how `create_app` opens a new app; see [Apps](./apps.md#creating-an-app).
+1. On a prophet, the first live binding of an app that carries none, from a writer whose grant belongs to another app, when the writer holds owner, in its own app, on the organization that owns the `samna_app` row. This is how `upsert_app` opens a new app; see [Apps](./apps.md#creating-an-app).
 
-2. The first live binding on a `samna_user` who holds a claim assigned under the binding's owning organization, when the writer holds owner on that organization in the binding's app. This is how `create_organization_user` binds a new member's claim.
+2. The first live binding on a `samna_user` who holds a claim assigned under the binding's owning organization, when the writer holds owner on that organization in the binding's app. This is how `insert_organization_user` binds a new member's claim.
 
 Each costs one pair settle and one probe of the writer's pair on the organization, and is tested only when the plain rule would refuse.
 
@@ -158,4 +158,4 @@ A `claim_object` with no object pair and a `scope` payload is a capability: a pa
 
 ## Removing a claim
 
-`remove_claim(claim, actor)` soft deletes the links pointing at the claim, then its grants, then its bindings, then the claim: four updates. Each soft delete fires the triggers of its table, which raise the claim area of each row, once per claim and once per assignment, and settle the actor's pairs on the claim and on each binding's object. The holders settle on their own next reads; see [Materialization](./materialization.md).
+`delete_claim(claim, actor)` soft deletes the links pointing at the claim, then its grants, then its bindings, then the claim: four updates. Each soft delete fires the triggers of its table, which raise the claim area of each row, once per claim and once per assignment, and settle the actor's pairs on the claim and on each binding's object. The holders settle on their own next reads; see [Materialization](./materialization.md).

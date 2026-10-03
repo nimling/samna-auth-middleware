@@ -1,4 +1,5 @@
-CREATE OR REPLACE FUNCTION claimius.ensure_app_client(
+DROP FUNCTION IF EXISTS claimius.ensure_app_client(uuid,uuid,text,text,text,integer,uuid,text,jsonb);
+CREATE OR REPLACE FUNCTION claimius.upsert_app_client(
     p_app_id        UUID,
     p_client_id     UUID,
     p_secret_hash   TEXT,
@@ -28,7 +29,7 @@ BEGIN
     LIMIT 1;
 
     IF v_claim_id IS NULL THEN
-        v_claim_id := (claimius.create_claim(
+        v_claim_id := (claimius.insert_claim(
             p_app_id        => p_app_id,
             p_name          => p_claim_name,
             p_description   => p_description,
@@ -42,7 +43,7 @@ BEGIN
     END IF;
 
     IF p_scope IS NOT NULL THEN
-        PERFORM claimius.assign_claim_object(
+        PERFORM claimius.insert_claim_object(
             p_app_id        => p_app_id,
             p_claim_id      => v_claim_id,
             p_sa_owner_id   => v_org_id,
@@ -82,7 +83,7 @@ BEGIN
           AND object_type = 'claimius.samna_client' AND object_id = v_client_pk
           AND sa_deleted_at IS NULL
     ) THEN
-        PERFORM claimius.assign_claim_object(
+        PERFORM claimius.insert_claim_object(
             p_app_id        => p_app_id,
             p_claim_id      => v_claim_id,
             p_object_id     => v_client_pk,
@@ -95,7 +96,7 @@ BEGIN
         );
     END IF;
 
-    PERFORM claimius.ensure_app_user(
+    PERFORM claimius.upsert_app_user(
         p_user_id    => p_client_id,
         p_app_id     => p_app_id,
         p_first_name => p_name,
@@ -109,7 +110,7 @@ BEGIN
         WHERE app_id = p_app_id AND claim_id = v_claim_id AND user_id = p_client_id
           AND sa_deleted_at IS NULL
     ) THEN
-        PERFORM claimius.assign_claim_user(
+        PERFORM claimius.insert_user_claim(
             p_app_id        => p_app_id,
             p_claim_id      => v_claim_id,
             p_user_id       => p_client_id,
@@ -127,4 +128,4 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius.ensure_app_client(uuid, uuid, text, text, text, integer, uuid, text, jsonb) IS 'Idempotently provisions a machine client for an app with one capability claim. p_sa_access is a bitwise mask. p_scope, when given, is bound as an object-less capability payload the consuming service reads through get_access on a scope key, and it is where per operation limits live.';
+COMMENT ON FUNCTION claimius.upsert_app_client(uuid, uuid, text, text, text, integer, uuid, text, jsonb) IS 'Idempotently provisions a machine client for an app with one capability claim. p_sa_access is a bitwise mask. p_scope, when given, is bound as an object-less capability payload the consuming service reads through get_access on a scope key, and it is where per operation limits live.';

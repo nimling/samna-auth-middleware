@@ -20,7 +20,7 @@ Every consuming service runs the [claimius](./claimius/index.md) schema in its o
 |---|---|---|---|
 | Prophet | Samna Auth itself | Every app, with key and seed material | Owns every grant and serves the sync feed |
 | Disciple | A product service such as Bookable or Nimployer | One app, `app_id` stripped | Sends grant writes to the prophet, owns its own tables |
-| Hybrid | A prophet set up with `init_hybrid` | Its own apps, and one app mirrored from a peer prophet | Owns its own apps; the mirrored app's writes belong to the peer |
+| Hybrid | A prophet set up with `upsert_prophet_peer` | Its own apps, and one app mirrored from a peer prophet | Owns its own apps; the mirrored app's writes belong to the peer |
 
 The prophet is the authority, and each app has one home prophet that decides its writes. A disciple is a mirror that answers the same reads from its own database, relies on exactly one prophet, and settles access for the tables only it carries. See [Disciple](./disciple.md) for how writes and sync move between the two, and [Prophets and disciples](./claimius/prophets.md) for federation.
 

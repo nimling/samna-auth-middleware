@@ -15,7 +15,7 @@ DECLARE
     v_write   UUID;
     v_read    UUID;
 BEGIN
-    v_app := (claimius.init(
+    v_app := (claimius.upsert_system_app(
         p_system_app_slug         => 'sqltest',
         p_system_app_name         => 'SQL test',
         p_system_app_private_key  => 'key',
@@ -23,8 +23,8 @@ BEGIN
         p_default_claim           => '{"name": "Member", "description": "Default member claim"}'::JSONB
     ) -> 'samna_app' ->> 'id')::UUID;
 
-    PERFORM claimius.ensure_app_user(p_user_id => v_a, p_app_id => v_app, p_first_name => 'Ada', p_external_id => 'ext-a');
-    PERFORM claimius.ensure_app_user(p_user_id => v_b, p_app_id => v_app, p_first_name => 'Bo', p_external_id => 'ext-b');
+    PERFORM claimius.upsert_app_user(p_user_id => v_a, p_app_id => v_app, p_first_name => 'Ada', p_external_id => 'ext-a');
+    PERFORM claimius.upsert_app_user(p_user_id => v_b, p_app_id => v_app, p_first_name => 'Bo', p_external_id => 'ext-b');
 
     INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
     VALUES (v_root, 'Root', 'company', v_root, v_root, 0, v_a);
@@ -35,28 +35,28 @@ BEGIN
     INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
     VALUES (v_grand, 'Grand', 'company', v_alpha, v_root, 2, v_a);
     FOREACH v_org IN ARRAY ARRAY[v_root, v_alpha, v_bravo, v_charlie, v_grand] LOOP
-        PERFORM claimius.link_app_object(v_app, 'claimius.organization', v_org);
+        PERFORM claimius.upsert_app_object(v_app, 'claimius.organization', v_org);
     END LOOP;
 
-    v_write := (claimius.create_claim(
+    v_write := (claimius.insert_claim(
         p_app_id => v_app, p_name => 'Root writer', p_description => NULL, p_sa_access => 6,
         p_sa_owner_id => v_root, p_sa_root_id => v_root, p_sa_created_by => v_a, p_inherits => TRUE
     ) -> 'claim' ->> 'id')::UUID;
-    PERFORM claimius.assign_claim_object(
+    PERFORM claimius.insert_claim_object(
         p_app_id => v_app, p_claim_id => v_write, p_sa_owner_id => v_root, p_sa_root_id => v_root, p_sa_created_by => v_a,
         p_object_id => v_root, p_object_type => 'claimius.organization', p_sa_access => 6, p_inherits => TRUE
     );
-    PERFORM claimius.assign_claim_user(p_app_id => v_app, p_claim_id => v_write, p_user_id => v_a, p_sa_owner_id => v_root, p_sa_created_by => v_a);
+    PERFORM claimius.insert_user_claim(p_app_id => v_app, p_claim_id => v_write, p_user_id => v_a, p_sa_owner_id => v_root, p_sa_created_by => v_a);
 
-    v_read := (claimius.create_claim(
+    v_read := (claimius.insert_claim(
         p_app_id => v_app, p_name => 'Alpha reader', p_description => NULL, p_sa_access => 4,
         p_sa_owner_id => v_alpha, p_sa_root_id => v_root, p_sa_created_by => v_a, p_inherits => TRUE
     ) -> 'claim' ->> 'id')::UUID;
-    PERFORM claimius.assign_claim_object(
+    PERFORM claimius.insert_claim_object(
         p_app_id => v_app, p_claim_id => v_read, p_sa_owner_id => v_alpha, p_sa_root_id => v_root, p_sa_created_by => v_a,
         p_object_id => v_alpha, p_object_type => 'claimius.organization', p_sa_access => 4, p_inherits => TRUE
     );
-    PERFORM claimius.assign_claim_user(p_app_id => v_app, p_claim_id => v_read, p_user_id => v_a, p_sa_owner_id => v_alpha, p_sa_created_by => v_a);
+    PERFORM claimius.insert_user_claim(p_app_id => v_app, p_claim_id => v_read, p_user_id => v_a, p_sa_owner_id => v_alpha, p_sa_created_by => v_a);
 END $$;
 
 SELECT is(

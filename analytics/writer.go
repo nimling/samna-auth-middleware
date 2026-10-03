@@ -19,7 +19,7 @@ func PostSession(ctx context.Context, appID uuid.UUID, anonymousID, sessionKey s
 	}
 	var result string
 	if err := run.db.NewRaw(
-		"SELECT claimius.post_analytics_session(?, ?, ?, ?::jsonb, ?, ?::inet, ?)",
+		"SELECT claimius.upsert_analytics_session(?, ?, ?, ?::jsonb, ?, ?::inet, ?)",
 		appID, anonymousID, sessionKey, body, userID, nullString(ip), nullString(userAgent),
 	).Scan(ctx, &result); err != nil {
 		return false, err
@@ -65,7 +65,7 @@ func (r *runner) exec(ctx context.Context, j job) {
 	}
 	var written int
 	if err := r.db.NewRaw(
-		"SELECT claimius.post_analytics_events(?, ?, ?::jsonb)",
+		"SELECT claimius.insert_analytics_events(?, ?, ?::jsonb)",
 		j.appID, j.sessionKey, json.RawMessage(body),
 	).Scan(ctx, &written); err != nil {
 		r.logger.Errorf("analytics exec: %v", err)
@@ -99,7 +99,7 @@ func (r *runner) fold(ctx context.Context) {
 
 	var cells int64
 	if err := r.db.NewRaw(
-		"SELECT claimius.post_analytics_heat(?::date, ?::date)",
+		"SELECT claimius.upsert_analytics_heat(?::date, ?::date)",
 		day(now.AddDate(0, 0, -1)), day(now),
 	).Scan(ctx, &cells); err != nil {
 		r.logger.Errorf("analytics fold: %v", err)

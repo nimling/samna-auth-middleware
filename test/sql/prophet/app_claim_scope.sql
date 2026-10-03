@@ -13,7 +13,7 @@ DECLARE
     v_read    UUID;
     v_made    JSONB;
 BEGIN
-    v_init := claimius.init(
+    v_init := claimius.upsert_system_app(
         p_system_app_slug         => 'sqltest_claim_scope',
         p_system_app_name         => 'SQL claim scope test',
         p_system_app_private_key  => 'key',
@@ -24,20 +24,20 @@ BEGIN
     v_sys_app := (v_init -> 'samna_app' ->> 'id')::UUID;
     v_sys_uc  := (v_init -> 'user_claim' ->> 'id')::UUID;
 
-    PERFORM claimius.create_root_organization(v_sys_app, 'Shared tenant', v_sys_uc, p_id => v_tenant);
-    PERFORM claimius.ensure_app_user(p_user_id => v_reader, p_app_id => v_sys_app, p_first_name => 'Reader');
-    v_read := (claimius.create_claim(
+    PERFORM claimius.upsert_root_organization(v_sys_app, 'Shared tenant', v_sys_uc, p_id => v_tenant);
+    PERFORM claimius.upsert_app_user(p_user_id => v_reader, p_app_id => v_sys_app, p_first_name => 'Reader');
+    v_read := (claimius.insert_claim(
         p_app_id => v_sys_app, p_name => 'Shared tenant reader', p_description => NULL, p_sa_access => 4,
         p_sa_owner_id => v_tenant, p_sa_root_id => v_tenant, p_sa_created_by => v_sys_uc
     ) -> 'claim' ->> 'id')::UUID;
-    PERFORM claimius.assign_claim_object(
+    PERFORM claimius.insert_claim_object(
         p_app_id => v_sys_app, p_claim_id => v_read, p_sa_owner_id => v_tenant, p_sa_root_id => v_tenant,
         p_sa_created_by => v_sys_uc, p_object_id => v_tenant, p_object_type => 'claimius.organization', p_inherits => TRUE);
-    PERFORM claimius.assign_claim_user(
+    PERFORM claimius.insert_user_claim(
         p_app_id => v_sys_app, p_claim_id => v_read, p_user_id => v_reader,
         p_sa_owner_id => v_tenant, p_sa_created_by => v_sys_uc);
 
-    v_made := claimius.create_app(
+    v_made := claimius.upsert_app(
         p_actor_user_claim_id => v_sys_uc,
         p_slug                => 'sqltest_claim_scope_tenant',
         p_name                => 'Shared tenant app',

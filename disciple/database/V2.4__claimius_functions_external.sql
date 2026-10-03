@@ -2190,11 +2190,12 @@ GRANT EXECUTE ON FUNCTION claimius.touch_object_usage(UUID[], TEXT[], UUID[], BI
 -- Write functions: claim management
 -- ============================================================================
 
--- create_claim
+-- insert_claim
 DROP FUNCTION IF EXISTS claimius.create_claim(UUID, TEXT, TEXT, INTEGER, UUID, UUID, UUID, BOOLEAN, BOOLEAN, claimius.claim_type);
 DROP FUNCTION IF EXISTS claimius.create_claim(UUID, TEXT, TEXT, INTEGER, UUID, UUID, UUID, BOOLEAN, claimius.claim_type);
 
-CREATE OR REPLACE FUNCTION claimius.create_claim(
+DROP FUNCTION IF EXISTS claimius.create_claim(text,text,integer,uuid,uuid,uuid,boolean,claimius.claim_type);
+CREATE OR REPLACE FUNCTION claimius.insert_claim(
     p_name              TEXT,
     p_description       TEXT,
     p_sa_access         INTEGER,
@@ -2235,7 +2236,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius.create_claim(p_name text, p_description text, p_sa_access integer, p_sa_owner_id uuid, p_sa_root_id uuid, p_sa_created_by uuid, p_inherits boolean, p_type claimius.claim_type) IS 'Creates a new claim. p_sa_access is a bitwise mask: 0x01 owner, 0x02 write, 0x04 read, 0x08 execute, 0x10 deny, 0x20 member. On grant claims with the deny bit unset owner implies write+read+execute, write implies read+execute, execute implies read. Member bit 0x20 stands alone. Deny claims store the supplied bits verbatim so callers can deny any subset of read, write, execute, owner. A mask with no bit besides deny is refused with SQLSTATE 22023.';
+COMMENT ON FUNCTION claimius.insert_claim(p_name text, p_description text, p_sa_access integer, p_sa_owner_id uuid, p_sa_root_id uuid, p_sa_created_by uuid, p_inherits boolean, p_type claimius.claim_type) IS 'Creates a new claim. p_sa_access is a bitwise mask: 0x01 owner, 0x02 write, 0x04 read, 0x08 execute, 0x10 deny, 0x20 member. On grant claims with the deny bit unset owner implies write+read+execute, write implies read+execute, execute implies read. Member bit 0x20 stands alone. Deny claims store the supplied bits verbatim so callers can deny any subset of read, write, execute, owner. A mask with no bit besides deny is refused with SQLSTATE 22023.';
 
 -- update_claim
 DROP FUNCTION IF EXISTS claimius.update_claim(UUID, TEXT, TEXT, INTEGER, BOOLEAN, BOOLEAN);
@@ -2281,10 +2282,11 @@ $$ LANGUAGE plpgsql;
 
 COMMENT ON FUNCTION claimius.update_claim(p_claim_id uuid, p_name text, p_description text, p_sa_access integer, p_inherits boolean) IS 'Patches selected fields on a claim. p_sa_access is expanded on grant claims so owner implies write+read+execute, write implies read+execute, execute implies read. Member bit 0x20 stands alone. Deny claims keep the supplied bits verbatim. Empty p_name and zero p_sa_access are treated as preserve so PATCH callers that send only one field do not wipe the others. A mask with no bit besides deny is refused with SQLSTATE 22023.';
 
--- remove_claim
+-- delete_claim
 DROP FUNCTION IF EXISTS claimius.remove_claim(UUID, UUID);
 
-CREATE OR REPLACE FUNCTION claimius.remove_claim(
+DROP FUNCTION IF EXISTS claimius.remove_claim(uuid,uuid);
+CREATE OR REPLACE FUNCTION claimius.delete_claim(
     p_claim_id   UUID,
     p_deleted_by UUID
 ) RETURNS SETOF claimius.claim AS $$
@@ -2304,10 +2306,11 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius.remove_claim(p_claim_id uuid, p_deleted_by uuid) IS 'Soft deletes a claim, its user_claim, its claim_object, and any inbound composition links pointing at it. Returns the deleted claim row.';
+COMMENT ON FUNCTION claimius.delete_claim(p_claim_id uuid, p_deleted_by uuid) IS 'Soft deletes a claim, its user_claim, its claim_object, and any inbound composition links pointing at it. Returns the deleted claim row.';
 
--- assign_claim_user
-CREATE OR REPLACE FUNCTION claimius.assign_claim_user(
+-- insert_user_claim
+DROP FUNCTION IF EXISTS claimius.assign_claim_user(uuid,uuid,uuid,uuid,text,timestamp with time zone,timestamp with time zone);
+CREATE OR REPLACE FUNCTION claimius.insert_user_claim(
     p_claim_id      UUID,
     p_user_id       UUID,
     p_sa_owner_id   UUID,
@@ -2330,10 +2333,11 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius.assign_claim_user(p_claim_id uuid, p_user_id uuid, p_sa_owner_id uuid, p_sa_created_by uuid, p_reason text, p_starts_at timestamp with time zone, p_ends_at timestamp with time zone) IS 'Grants a claim to a user in an app.';
+COMMENT ON FUNCTION claimius.insert_user_claim(p_claim_id uuid, p_user_id uuid, p_sa_owner_id uuid, p_sa_created_by uuid, p_reason text, p_starts_at timestamp with time zone, p_ends_at timestamp with time zone) IS 'Grants a claim to a user in an app.';
 
--- update_claim_user
-CREATE OR REPLACE FUNCTION claimius.update_claim_user(
+-- update_user_claim
+DROP FUNCTION IF EXISTS claimius.update_claim_user(uuid,text,timestamp with time zone,timestamp with time zone);
+CREATE OR REPLACE FUNCTION claimius.update_user_claim(
     p_user_claim_id UUID,
     p_reason        TEXT DEFAULT NULL,
     p_starts_at     TIMESTAMPTZ DEFAULT NULL,
@@ -2352,12 +2356,13 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius.update_claim_user(p_user_claim_id uuid, p_reason text, p_starts_at timestamp with time zone, p_ends_at timestamp with time zone) IS 'Patches selected fields on a user_claim.';
+COMMENT ON FUNCTION claimius.update_user_claim(p_user_claim_id uuid, p_reason text, p_starts_at timestamp with time zone, p_ends_at timestamp with time zone) IS 'Patches selected fields on a user_claim.';
 
--- remove_user_claim
+-- delete_user_claim
 DROP FUNCTION IF EXISTS claimius.remove_user_claim(UUID, UUID);
 
-CREATE OR REPLACE FUNCTION claimius.remove_user_claim(
+DROP FUNCTION IF EXISTS claimius.remove_user_claim(uuid,uuid);
+CREATE OR REPLACE FUNCTION claimius.delete_user_claim(
     p_user_claim_id UUID,
     p_deleted_by    UUID
 ) RETURNS SETOF claimius.user_claim AS $$
@@ -2369,12 +2374,13 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius.remove_user_claim(p_user_claim_id uuid, p_deleted_by uuid) IS 'Soft deletes a user_claim row. Returns the deleted user_claim row.';
+COMMENT ON FUNCTION claimius.delete_user_claim(p_user_claim_id uuid, p_deleted_by uuid) IS 'Soft deletes a user_claim row. Returns the deleted user_claim row.';
 
--- assign_claim_object
+-- insert_claim_object
 DROP FUNCTION IF EXISTS claimius.assign_claim_object(UUID, UUID, UUID, TEXT, UUID, UUID, UUID, INTEGER, BOOLEAN, TEXT, UUID, TEXT);
 
-CREATE OR REPLACE FUNCTION claimius.assign_claim_object(
+DROP FUNCTION IF EXISTS claimius.assign_claim_object(uuid,uuid,uuid,uuid,uuid,text,integer,boolean,text,uuid,jsonb);
+CREATE OR REPLACE FUNCTION claimius.insert_claim_object(
     p_claim_id      UUID,
     p_sa_owner_id   UUID,
     p_sa_root_id    UUID,
@@ -2401,7 +2407,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius.assign_claim_object(p_claim_id uuid, p_sa_owner_id uuid, p_sa_root_id uuid, p_sa_created_by uuid, p_object_id uuid, p_object_type text, p_sa_access integer, p_inherits boolean, p_reason text, p_ref_id uuid, p_scope jsonb) IS 'Binds a claim. With (object_type, object_id) p_scope keys are field names; without them p_scope keys are custom. p_sa_access is a bitwise mask.';
+COMMENT ON FUNCTION claimius.insert_claim_object(p_claim_id uuid, p_sa_owner_id uuid, p_sa_root_id uuid, p_sa_created_by uuid, p_object_id uuid, p_object_type text, p_sa_access integer, p_inherits boolean, p_reason text, p_ref_id uuid, p_scope jsonb) IS 'Binds a claim. With (object_type, object_id) p_scope keys are field names; without them p_scope keys are custom. p_sa_access is a bitwise mask.';
 
 -- update_claim_object
 DROP FUNCTION IF EXISTS claimius.update_claim_object(UUID, TEXT, BOOLEAN);
@@ -2429,10 +2435,11 @@ $$ LANGUAGE plpgsql;
 
 COMMENT ON FUNCTION claimius.update_claim_object(p_claim_object_id uuid, p_reason text, p_inherits boolean, p_sa_access integer, p_scope jsonb) IS 'Patches selected fields on a claim_object.';
 
--- remove_claim_object
+-- delete_claim_object
 DROP FUNCTION IF EXISTS claimius.remove_claim_object(UUID, UUID);
 
-CREATE OR REPLACE FUNCTION claimius.remove_claim_object(
+DROP FUNCTION IF EXISTS claimius.remove_claim_object(uuid,uuid);
+CREATE OR REPLACE FUNCTION claimius.delete_claim_object(
     p_claim_object_id UUID,
     p_deleted_by      UUID
 ) RETURNS SETOF claimius.claim_object AS $$
@@ -2444,7 +2451,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius.remove_claim_object(p_claim_object_id uuid, p_deleted_by uuid) IS 'Soft deletes a claim_object row. Returns the deleted claim_object row.';
+COMMENT ON FUNCTION claimius.delete_claim_object(p_claim_object_id uuid, p_deleted_by uuid) IS 'Soft deletes a claim_object row. Returns the deleted claim_object row.';
 
 -- ============================================================================
 -- merge_user
@@ -2452,7 +2459,7 @@ COMMENT ON FUNCTION claimius.remove_claim_object(p_claim_object_id uuid, p_delet
 -- user_id (not row PK) and unifies across apps. Hard deletes the source
 -- samna_user row(s) and migrates user_claim, user_relation, user_field and
 -- user_object to the target, and user_users follows the deleted pairs.
--- External tables registered through init_claimius_tables can opt in by
+-- External tables registered through upsert_table_info can opt in by
 -- passing themselves in p_external_tables; the function will UPDATE their
 -- sa_created_by references where applicable.
 -- ============================================================================
@@ -2521,7 +2528,7 @@ BEGIN
         DELETE FROM claimius.samna_user WHERE id = v_source_app_user.id;
     END IF;
 
-    PERFORM claimius.write_audit(
+    PERFORM claimius.insert_audit(
             'merge_user', 'merge', 'claimius.samna_user',
             p_target_user_id,
             p_target_user_id,
@@ -2619,12 +2626,13 @@ COMMENT ON FUNCTION claimius.migrate_root(p_object_type text, p_object_id uuid, 
 -- Init functions
 -- ============================================================================
 
--- init_claimius_tables
+-- upsert_table_info
 -- Registers external app tables. Called by the implementing app's migration.
 -- Idempotent: rebuilds registration state from the input list each call.
 -- For tables that already have data, seeds materialized state in bulk
 -- under replay_mode (triggers do not fire, no events emitted).
-CREATE OR REPLACE FUNCTION claimius.init_claimius_tables(
+DROP FUNCTION IF EXISTS claimius.init_claimius_tables(text[]);
+CREATE OR REPLACE FUNCTION claimius.upsert_table_info(
     VARIADIC p_object_types TEXT[]
 ) RETURNS VOID AS $$
 DECLARE
@@ -2688,7 +2696,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius.init_claimius_tables(VARIADIC p_object_types text[]) IS 'Registers external tables. Idempotent. Called by implementer migrations.';
+COMMENT ON FUNCTION claimius.upsert_table_info(VARIADIC p_object_types text[]) IS 'Registers external tables. Idempotent. Called by implementer migrations.';
 
 -- _bulk_seed_user_object
 -- For a registered table with existing rows, writes the object_info row of
@@ -2747,7 +2755,7 @@ COMMENT ON FUNCTION claimius._bulk_seed_user_object(p_object_type text) IS 'Seed
 -- to be reconciled with current rows.
 --
 -- Self contained: reads the registry from claimius.table_info; takes no
--- arguments; assumes init_claimius_internal() and init_claimius_tables(...)
+-- arguments; assumes upsert_internal_table_info() and upsert_table_info(...)
 -- have already registered the relevant tables. If table_info is empty the
 -- function is a no-op.
 -- ----------------------------------------------------------------------------
@@ -2814,12 +2822,13 @@ $$ LANGUAGE plpgsql;
 COMMENT ON FUNCTION claimius.recompute_state() IS 'Rebuilds inheritance_info and user_object for every registered table from live data. Idempotent. Run after bulk writes that bypassed calc triggers.';
 
 -- ----------------------------------------------------------------------------
--- init_claimius_internal
+-- upsert_internal_table_info
 -- Registers all claimius.* tables in table_info. Called once at the end of
 -- claimius schema bootstrap (VX.0__init.sql). Not callable by implementers.
 -- ----------------------------------------------------------------------------
 
-CREATE OR REPLACE FUNCTION claimius.init_claimius_internal()
+DROP FUNCTION IF EXISTS claimius.init_claimius_internal();
+CREATE OR REPLACE FUNCTION claimius.upsert_internal_table_info()
     RETURNS VOID AS $$
 DECLARE
     v_internal_tables TEXT[] := ARRAY[
@@ -2845,7 +2854,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius.init_claimius_internal() IS 'Registers internal claimius.* tables in table_info. Called once at schema bootstrap.';
+COMMENT ON FUNCTION claimius.upsert_internal_table_info() IS 'Registers internal claimius.* tables in table_info. Called once at schema bootstrap.';
 
 -- ----------------------------------------------------------------------------
 -- _restamp_created_by
@@ -2907,7 +2916,7 @@ $$ LANGUAGE plpgsql;
 COMMENT ON FUNCTION claimius._restamp_created_by() IS 'Rewrites each sa_created_by that is the user_id of a samna_user holding exactly one live user_claim to that user_claim.id, under replay_mode, and leaves every other stamp. audit keeps its own. Idempotent. Run by the base set. Returns the rows rewritten.';
 
 -- ----------------------------------------------------------------------------
--- create_root_organization
+-- upsert_root_organization
 -- Creates a new root organization (one with no parent in the ownership
 -- tree). Two phase self reference is handled internally so callers do not
 -- need to know the convention.
@@ -2917,7 +2926,8 @@ COMMENT ON FUNCTION claimius._restamp_created_by() IS 'Rewrites each sa_created_
 -- the app, returns that row instead of creating a new one.
 -- ----------------------------------------------------------------------------
 
-CREATE OR REPLACE FUNCTION claimius.create_root_organization(
+DROP FUNCTION IF EXISTS claimius.create_root_organization(text,uuid,text,text,uuid,text);
+CREATE OR REPLACE FUNCTION claimius.upsert_root_organization(
     p_name              TEXT,
     p_actor_user_claim_id UUID,
     p_description       TEXT DEFAULT NULL,
@@ -2956,7 +2966,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius.create_root_organization(TEXT, UUID, TEXT, TEXT, UUID, TEXT) IS 'Creates a new root organization with self referencing sa_owner_id and sa_root_id. Idempotent on (name).';
+COMMENT ON FUNCTION claimius.upsert_root_organization(TEXT, UUID, TEXT, TEXT, UUID, TEXT) IS 'Creates a new root organization with self referencing sa_owner_id and sa_root_id. Idempotent on (name).';
 
 -- ----------------------------------------------------------------------------
 -- init
@@ -2966,7 +2976,8 @@ COMMENT ON FUNCTION claimius.create_root_organization(TEXT, UUID, TEXT, TEXT, UU
 -- data arrives via sync from the prophet.
 -- ----------------------------------------------------------------------------
 
-CREATE OR REPLACE FUNCTION claimius.init(
+DROP FUNCTION IF EXISTS claimius.init(text);
+CREATE OR REPLACE FUNCTION claimius.upsert_disciple_state(
     p_disciple_app_slug TEXT DEFAULT NULL
 )
     RETURNS JSONB AS $$
@@ -2984,17 +2995,18 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius.init(p_disciple_app_slug text) IS 'Bootstrap as a disciple. Ensures the sync cursor row and grants disciple roles. App identity comes from env. State arrives from prophet via sync.';
+COMMENT ON FUNCTION claimius.upsert_disciple_state(p_disciple_app_slug text) IS 'Bootstrap as a disciple. Ensures the sync cursor row and grants disciple roles. App identity comes from env. State arrives from prophet via sync.';
 
 -- ----------------------------------------------------------------------------
--- ensure_app_user
+-- upsert_app_user
 -- When a user logs in for the first time, upserts the samna_user row. On the
 -- disciple there is no app default claim: claim grants arrive via sync, so no
 -- user_claim is created here. Idempotent: re-running returns the existing row.
 -- ----------------------------------------------------------------------------
 
 DROP FUNCTION IF EXISTS claimius.ensure_app_user(UUID, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT);
-CREATE OR REPLACE FUNCTION claimius.ensure_app_user(
+DROP FUNCTION IF EXISTS claimius.ensure_app_user(uuid,text,text,text,text,text,text,text);
+CREATE OR REPLACE FUNCTION claimius.upsert_app_user(
     p_user_id    UUID,
     p_first_name TEXT DEFAULT NULL,
     p_last_name  TEXT DEFAULT NULL,
@@ -3029,7 +3041,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius.ensure_app_user(p_user_id uuid, p_first_name text, p_last_name text, p_user_name text, p_email text, p_phone text, p_external_id text, p_user_image text) IS 'Upserts the samna_user row. Idempotent. Claim grants arrive via sync on the disciple.';
+COMMENT ON FUNCTION claimius.upsert_app_user(p_user_id uuid, p_first_name text, p_last_name text, p_user_name text, p_email text, p_phone text, p_external_id text, p_user_image text) IS 'Upserts the samna_user row. Idempotent. Claim grants arrive via sync on the disciple.';
 
 DROP FUNCTION IF EXISTS claimius.get_access(UUID, TEXT, INTEGER);
 
@@ -3550,7 +3562,8 @@ DROP FUNCTION IF EXISTS claimius.create_organization_user(UUID, UUID, UUID, JSON
 DROP FUNCTION IF EXISTS claimius.create_organization_user(UUID, UUID, UUID, JSONB, BOOLEAN);
 DROP FUNCTION IF EXISTS claimius.create_organization_user(UUID, UUID, UUID, JSONB, BOOLEAN, JSONB, TEXT);
 
-CREATE OR REPLACE FUNCTION claimius.create_organization_user(
+DROP FUNCTION IF EXISTS claimius.create_organization_user(uuid,uuid,jsonb,boolean,jsonb,text);
+CREATE OR REPLACE FUNCTION claimius.insert_organization_user(
     p_caller_uc  UUID,
     p_owner_id   UUID,
     p_user       JSONB,
@@ -3700,7 +3713,7 @@ BEGIN
     IF v_existing_uc.id IS NOT NULL THEN
         v_claim_user := jsonb_build_object('user_claim', to_jsonb(v_existing_uc));
     ELSE
-        v_claim_user := claimius.assign_claim_user(
+        v_claim_user := claimius.insert_user_claim(
             p_claim_id      => v_claim_id,
             p_user_id       => v_user_row.user_id,
             p_sa_owner_id   => p_owner_id,
@@ -3721,7 +3734,7 @@ BEGIN
         v_virtual_claim    := jsonb_build_object('claim', to_jsonb(v_existing_virtual));
         v_virtual_claim_id := v_existing_virtual.id;
     ELSE
-        v_virtual_claim := claimius.create_claim(
+        v_virtual_claim := claimius.insert_claim(
             p_name          => 'user:' || v_user_row.user_id::text,
             p_description   => NULL,
             p_sa_access     => 15,
@@ -3746,7 +3759,7 @@ BEGIN
     IF v_existing_obj.id IS NOT NULL THEN
         v_claim_obj := jsonb_build_object('claim_object', to_jsonb(v_existing_obj));
     ELSE
-        v_claim_obj := claimius.assign_claim_object(
+        v_claim_obj := claimius.insert_claim_object(
             p_claim_id      => v_virtual_claim_id,
             p_sa_owner_id   => p_owner_id,
             p_sa_root_id    => v_root_id,
@@ -3768,7 +3781,7 @@ BEGIN
         IF v_existing_caller.id IS NOT NULL THEN
             v_caller_user_claim := jsonb_build_object('user_claim', to_jsonb(v_existing_caller));
         ELSE
-            v_caller_user_claim := claimius.assign_claim_user(
+            v_caller_user_claim := claimius.insert_user_claim(
                 p_claim_id      => v_virtual_claim_id,
                 p_user_id       => v_caller_user_id,
                 p_sa_owner_id   => p_owner_id,
@@ -3812,10 +3825,10 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius.create_organization_user(UUID, UUID, JSONB, BOOLEAN, JSONB, TEXT) IS
+COMMENT ON FUNCTION claimius.insert_organization_user(UUID, UUID, JSONB, BOOLEAN, JSONB, TEXT) IS
     'Adds a user to an organization of the app this disciple mirrors: inserts or upserts the samna_user, grants the supplied claim with p_reason, ensures a per-user virtual claim with full access bound to the user, and when p_caller_uc is not null grants that virtual claim to the caller. The caller must be a live user_claim. With p_identity, an outside identity {id_claim, external_id, type, data} names the user: a user_token of the owner and external_id reuses its user, the call upserts, and the user_token is written. Without p_identity and with p_upsert=FALSE, raises 23505 when user_id or external_id already exists. Returns samna_user, created, user_claim, virtual_claim, claim_object, caller_user_claim and user_token.';
 
-GRANT EXECUTE ON FUNCTION claimius.create_organization_user(UUID, UUID, JSONB, BOOLEAN, JSONB, TEXT)
+GRANT EXECUTE ON FUNCTION claimius.insert_organization_user(UUID, UUID, JSONB, BOOLEAN, JSONB, TEXT)
     TO claimius_disciple_client, claimius_writer, claimius_admin;
 
 -- ----------------------------------------------------------------------------

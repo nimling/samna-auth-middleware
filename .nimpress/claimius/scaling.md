@@ -142,9 +142,9 @@ Variables: users `U`, objects `O`, tree depth `D`, grants per user `C`, claims c
 | Search | 1 | `2C + 5` | `min(V_u, M_q)` | `min(V_u, M_q)` | 0 | 0 | none | `min(V_u, M_q) × (t_d + t_m)`; see [Search](./search.md) | `min(⌈V_u / 87⌉, M_q)` |
 | Owner graph window, depth `d`, width `W` | 1 | `n_r + 1` | `n_r` | `n_r` | 0 | 0 | none | `n_r × t_n`; see [Graphs](./graphs.md) | `n_r` |
 | Organization or location insert | 1 | `(D + 1)` reads, `≈ 5(D + 1) + 20` inserts | `D + 7` written | `D + 1` | `D + 7` | `≈ 250(D + 7) + 60 × index entries` B | row locks on new rows; `FOR KEY SHARE` on parent and app | `≈ 0.6 ms` | constant |
-| Grant, `assign_claim_user` | 1 | 16 inserts | 4 written | 0 | 4 | ≈ 2 kB | new rows; `FOR KEY SHARE` on claim, app, organization | ≈ 0.3 ms | constant |
-| Revoke, `remove_user_claim` | 1 | 16 | 4 | 1 | 4 | ≈ 2 kB | the `user_claim` row | ≈ 0.3 ms | constant |
-| Binding, `assign_claim_object` | 1 | one check + 16 inserts | 4 | 0 | 4 | ≈ 2 kB | the claim's area row until commit | ≈ 0.4 ms | constant |
+| Grant, `insert_user_claim` | 1 | 16 inserts | 4 written | 0 | 4 | ≈ 2 kB | new rows; `FOR KEY SHARE` on claim, app, organization | ≈ 0.3 ms | constant |
+| Revoke, `delete_user_claim` | 1 | 16 | 4 | 1 | 4 | ≈ 2 kB | the `user_claim` row | ≈ 0.3 ms | constant |
+| Binding, `insert_claim_object` | 1 | one check + 16 inserts | 4 | 0 | 4 | ≈ 2 kB | the claim's area row until commit | ≈ 0.4 ms | constant |
 | First listing of a reader under a raised area | 1 | as the read | as the read | `A_u` | `A_u + 1` | `≈ 360 A_u` B | the reader's marker, the reader's pairs | read `+ A_u × t` | `⌈A_u / 87⌉` |
 | Sync page of `n` events on a disciple | 1 transaction | `n (1 + i_e)` | `n` | `n` | `n + Σ(D + 1) + areas` | `≈ n (payload + 60 i_e)` | the page's rows | `n × a_e` | `≈ n` |
 | Audit row | inside the write | 3 | 1 | 0 | 1 | ≈ 400 B | none | 3.7 µs measured | 0 |

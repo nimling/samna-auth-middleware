@@ -7,7 +7,7 @@ DO $$
 DECLARE
     v_init JSONB;
 BEGIN
-    v_init := claimius.init(
+    v_init := claimius.upsert_system_app(
         p_system_app_slug         => 'sqltest_client_replay',
         p_system_app_name         => 'SQL client replay test',
         p_system_app_private_key  => 'key',
@@ -23,11 +23,11 @@ BEGIN
 END $$;
 
 SELECT lives_ok(
-    $$SELECT claimius.ensure_app_client(app_id, client_id, 'h', 'replay-client', 'Replay client', 4, actor) FROM t_ctx$$,
-    'ensure_app_client creates the client, its binding and its grant');
+    $$SELECT claimius.upsert_app_client(app_id, client_id, 'h', 'replay-client', 'Replay client', 4, actor) FROM t_ctx$$,
+    'upsert_app_client creates the client, its binding and its grant');
 SELECT lives_ok(
-    $$SELECT claimius.ensure_app_client(app_id, client_id, 'h', 'replay-client', 'Replay client', 4, actor) FROM t_ctx$$,
-    'ensure_app_client replays without a duplicate grant');
+    $$SELECT claimius.upsert_app_client(app_id, client_id, 'h', 'replay-client', 'Replay client', 4, actor) FROM t_ctx$$,
+    'upsert_app_client replays without a duplicate grant');
 SELECT is(
     (SELECT count(*)::int FROM claimius.user_claim uc JOIN claimius.claim c ON c.id = uc.claim_id AND c.name = 'Replay client', t_ctx
      WHERE uc.app_id = t_ctx.app_id AND uc.user_id = t_ctx.client_id AND uc.sa_deleted_at IS NULL),

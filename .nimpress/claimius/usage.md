@@ -82,15 +82,15 @@ A prophet records how its apps are used, gated by consent and read through a sco
 
 ### Recording
 
-1. Consent first. `post_consent` revokes the live decision and inserts the new one: one update, one insert. `consent_allows(app, category, user, anonymous)` reads the live decision, one probe, and a session is recorded only when it allows `analytics`.
+1. Consent first. `insert_consent` revokes the live decision and inserts the new one: one update, one insert. `consent_allows(app, category, user, anonymous)` reads the live decision, one probe, and a session is recorded only when it allows `analytics`.
 
-2. `post_analytics_session` upserts the session on `(app_id, session_key)`: one row.
+2. `upsert_analytics_session` upserts the session on `(app_id, session_key)`: one row.
 
-3. `post_analytics_events` inserts a batch of `n` events in one statement from a jsonb array and moves the session's `last_seen_at`: `n + 1` rows written, `4n` btree entries and a BRIN summary that changes only when a new page range starts. Arrival order is `received_at` order, which is why that column is BRIN: one summary per range of pages, where a btree would add one entry per event ([PostgreSQL, BRIN Indexes](https://www.postgresql.org/docs/17/brin.html)).
+3. `insert_analytics_events` inserts a batch of `n` events in one statement from a jsonb array and moves the session's `last_seen_at`: `n + 1` rows written, `4n` btree entries and a BRIN summary that changes only when a new page range starts. Arrival order is `received_at` order, which is why that column is BRIN: one summary per range of pages, where a btree would add one entry per event ([PostgreSQL, BRIN Indexes](https://www.postgresql.org/docs/17/brin.html)).
 
 ### The heat grid
 
-`post_analytics_heat(from, to, app)` folds every positioned event of whole days into cells: the page coordinates divided by `analytics_bucket_size()`, 16, floored, per app, path, viewport width, type and day, with the summed weight of `analytics_event_weight`, a click 4 and any other signal 1, and the distinct sessions. For `E` positioned events on one page, day, type and width of a page `W` wide and `H` high:
+`upsert_analytics_heat(from, to, app)` folds every positioned event of whole days into cells: the page coordinates divided by `analytics_bucket_size()`, 16, floored, per app, path, viewport width, type and day, with the summed weight of `analytics_event_weight`, a click 4 and any other signal 1, and the distinct sessions. For `E` positioned events on one page, day, type and width of a page `W` wide and `H` high:
 
 ```
 cells ≤ min(E, ⌈W / 16⌉ ⌈H / 16⌉)

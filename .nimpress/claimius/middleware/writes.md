@@ -32,7 +32,7 @@ There is one builder, `shared`'s. The disciple's `Init` turns `RouteToProphet` o
 
 The write helpers write through that builder only: `CreateClaim`, `Claim.AssignObject`, `Claim.AssignUser`, `CreateVirtualClaim` as those three, `InsertRootOrganization`, `UpdateMe`, `DeleteUser`, `CreateOrganizationUser`, `IssueUserToken` and `UpsertUserExternal`.
 
-The last three are one operation, `create_organization_user`: the user, the grant of the claim it is created with, its virtual claim bound to it and the actor's grant of that, and with an identity the `user_token` naming it. `CreateOrganizationUser` inserts a `SamnaUser` carrying `OwnerID` and `ClaimID`, routed to `user`. `IssueUserToken` and `UpsertUserExternal` insert their payload, `SamnaUserToken` or `SamnaUserExternal`, routed to `user/token` or `user/external`. Locally each runs the disciple set's function; on the prophet each endpoint runs the prophet set's with the calling app and the payload's `created_by` as the actor. `Created()` on the insert answers whether the user was new: routed, from the prophet's `201`; local, from the function. A `SamnaUser` without `OwnerID` is an app user with no organization and runs `ensure_app_user`.
+The last three are one operation, `insert_organization_user`: the user, the grant of the claim it is created with, its virtual claim bound to it and the actor's grant of that, and with an identity the `user_token` naming it. `CreateOrganizationUser` inserts a `SamnaUser` carrying `OwnerID` and `ClaimID`, routed to `user`. `IssueUserToken` and `UpsertUserExternal` insert their payload, `SamnaUserToken` or `SamnaUserExternal`, routed to `user/token` or `user/external`. Locally each runs the disciple set's function; on the prophet each endpoint runs the prophet set's with the calling app and the payload's `created_by` as the actor. `Created()` on the insert answers whether the user was new: routed, from the prophet's `201`; local, from the function. A `SamnaUser` without `OwnerID` is an app user with no organization and runs `upsert_app_user`.
 
 1. `.Access(ac)` stamps `sa_created_by` with `ac.UserClaimID` and `sa_owner_id` from the grant, pointer fields included. Nothing else stamps an actor.
 
@@ -46,7 +46,7 @@ The last three are one operation, `create_organization_user`: the user, the gran
 
 ## Audit in the write's transaction
 
-`shared.WriteAudit(ctx, idb, appID, operation, type, objectType, objectID, ownerID, createdBy, message)` calls `claimius.write_audit` on `idb`, the transaction of the change it records, so the row commits with the change or not at all. The role wrappers pass it on: `sdb.Write(ctx, idb, appID, ...)` on the prophet, and `sdb.Write(ctx, idb, ...)` on the disciple, which mirrors one app and passes no app id. The pull loop writes its reconcile row this way, in the transaction of the snapshot it applies. See [Audit](../audit.md).
+`shared.WriteAudit(ctx, idb, appID, operation, type, objectType, objectID, ownerID, createdBy, message)` calls `claimius.insert_audit` on `idb`, the transaction of the change it records, so the row commits with the change or not at all. The role wrappers pass it on: `sdb.Write(ctx, idb, appID, ...)` on the prophet, and `sdb.Write(ctx, idb, ...)` on the disciple, which mirrors one app and passes no app id. The pull loop writes its reconcile row this way, in the transaction of the snapshot it applies. See [Audit](../audit.md).
 
 ## Debug mode
 

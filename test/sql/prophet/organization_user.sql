@@ -15,7 +15,7 @@ DECLARE
     v_read   UUID;
     v_member UUID;
 BEGIN
-    v_init := claimius.init(
+    v_init := claimius.upsert_system_app(
         p_system_app_slug         => 'sqltest_crew',
         p_system_app_name         => 'SQL crew test',
         p_system_app_private_key  => 'key',
@@ -25,38 +25,38 @@ BEGIN
     v_app    := (v_init -> 'samna_app' ->> 'id')::UUID;
     v_sys_uc := (v_init -> 'user_claim' ->> 'id')::UUID;
 
-    PERFORM claimius.create_root_organization(v_app, 'Crew', v_sys_uc, p_id => v_org);
+    PERFORM claimius.upsert_root_organization(v_app, 'Crew', v_sys_uc, p_id => v_org);
     INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
     VALUES ('10000000-0000-4000-8000-000000000e5f', 'Unlinked', 'company', '10000000-0000-4000-8000-000000000e5f',
             '10000000-0000-4000-8000-000000000e5f', 0, v_sys_uc);
-    PERFORM claimius.ensure_app_user(p_user_id => v_owner, p_app_id => v_app, p_first_name => 'Owner');
-    PERFORM claimius.ensure_app_user(p_user_id => v_reader, p_app_id => v_app, p_first_name => 'Reader');
-    PERFORM claimius.ensure_app_user(p_user_id => 'a0000000-0000-4000-8000-000000000e55', p_app_id => v_app, p_first_name => 'Outsider');
+    PERFORM claimius.upsert_app_user(p_user_id => v_owner, p_app_id => v_app, p_first_name => 'Owner');
+    PERFORM claimius.upsert_app_user(p_user_id => v_reader, p_app_id => v_app, p_first_name => 'Reader');
+    PERFORM claimius.upsert_app_user(p_user_id => 'a0000000-0000-4000-8000-000000000e55', p_app_id => v_app, p_first_name => 'Outsider');
 
-    v_own := (claimius.create_claim(
+    v_own := (claimius.insert_claim(
         p_app_id => v_app, p_name => 'Crew owner', p_description => NULL, p_sa_access => 15,
         p_sa_owner_id => v_org, p_sa_root_id => v_org, p_sa_created_by => v_sys_uc
     ) -> 'claim' ->> 'id')::UUID;
-    PERFORM claimius.assign_claim_object(
+    PERFORM claimius.insert_claim_object(
         p_app_id => v_app, p_claim_id => v_own, p_sa_owner_id => v_org, p_sa_root_id => v_org, p_sa_created_by => v_sys_uc,
         p_object_id => v_org, p_object_type => 'claimius.organization', p_inherits => TRUE);
-    v_read := (claimius.create_claim(
+    v_read := (claimius.insert_claim(
         p_app_id => v_app, p_name => 'Crew reader', p_description => NULL, p_sa_access => 4,
         p_sa_owner_id => v_org, p_sa_root_id => v_org, p_sa_created_by => v_sys_uc
     ) -> 'claim' ->> 'id')::UUID;
-    PERFORM claimius.assign_claim_object(
+    PERFORM claimius.insert_claim_object(
         p_app_id => v_app, p_claim_id => v_read, p_sa_owner_id => v_org, p_sa_root_id => v_org, p_sa_created_by => v_sys_uc,
         p_object_id => v_org, p_object_type => 'claimius.organization', p_inherits => TRUE);
-    v_member := (claimius.create_claim(
+    v_member := (claimius.insert_claim(
         p_app_id => v_app, p_name => 'Crew member', p_description => NULL, p_sa_access => 4,
         p_sa_owner_id => v_org, p_sa_root_id => v_org, p_sa_created_by => v_sys_uc
     ) -> 'claim' ->> 'id')::UUID;
 
     INSERT INTO crew VALUES
-        ('owner_uc', (claimius.assign_claim_user(p_app_id => v_app, p_claim_id => v_own, p_user_id => v_owner,
+        ('owner_uc', (claimius.insert_user_claim(p_app_id => v_app, p_claim_id => v_own, p_user_id => v_owner,
                          p_sa_owner_id => v_org, p_sa_created_by => v_sys_uc) -> 'user_claim' ->> 'id')::UUID),
         ('owner_claim', v_own),
-        ('reader_uc', (claimius.assign_claim_user(p_app_id => v_app, p_claim_id => v_read, p_user_id => v_reader,
+        ('reader_uc', (claimius.insert_user_claim(p_app_id => v_app, p_claim_id => v_read, p_user_id => v_reader,
                           p_sa_owner_id => v_org, p_sa_created_by => v_sys_uc) -> 'user_claim' ->> 'id')::UUID),
         ('reader_claim', v_read),
         ('member', v_member);
@@ -67,7 +67,7 @@ CREATE FUNCTION pg_temp.crew(p_key TEXT) RETURNS UUID AS $$
 $$ LANGUAGE sql;
 
 SELECT lives_ok($$
-    SELECT claimius.create_organization_user((SELECT id FROM claimius.samna_app WHERE slug = 'sqltest_crew'), pg_temp.crew('owner_uc'), '10000000-0000-4000-8000-000000000e51',
+    SELECT claimius.insert_organization_user((SELECT id FROM claimius.samna_app WHERE slug = 'sqltest_crew'), pg_temp.crew('owner_uc'), '10000000-0000-4000-8000-000000000e51',
         jsonb_build_object('user_id', 'a0000000-0000-4000-8000-000000000e53', 'first_name', 'New', 'claim_id', pg_temp.crew('member')))
 $$, 'an owner of the organization creates a user in it');
 
@@ -82,12 +82,12 @@ SELECT ok(EXISTS (SELECT 1 FROM claimius.get_user_access('a0000000-0000-4000-800
     'the owner holds the new user in full');
 
 SELECT throws_like($$
-    SELECT claimius.create_organization_user((SELECT id FROM claimius.samna_app WHERE slug = 'sqltest_crew'), pg_temp.crew('reader_uc'), '10000000-0000-4000-8000-000000000e51',
+    SELECT claimius.insert_organization_user((SELECT id FROM claimius.samna_app WHERE slug = 'sqltest_crew'), pg_temp.crew('reader_uc'), '10000000-0000-4000-8000-000000000e51',
         jsonb_build_object('user_id', 'a0000000-0000-4000-8000-000000000e54', 'first_name', 'Refused', 'claim_id', pg_temp.crew('member')))
 $$, 'cannot grant more access than held%', 'a reader of the organization is refused a user in it');
 
 SELECT throws_like($$
-    SELECT claimius.assign_claim_object(
+    SELECT claimius.insert_claim_object(
         p_app_id => (SELECT id FROM claimius.samna_app WHERE slug = 'sqltest_crew'), p_claim_id => pg_temp.crew('owner_claim'),
         p_sa_owner_id => '10000000-0000-4000-8000-000000000e51', p_sa_root_id => '10000000-0000-4000-8000-000000000e51',
         p_sa_created_by => pg_temp.crew('owner_uc'),
@@ -95,7 +95,7 @@ SELECT throws_like($$
 $$, 'cannot grant more access than held%', 'an owner binding on a user holding no claim of the organization is refused');
 
 CREATE FUNCTION pg_temp.identity_user() RETURNS JSONB AS $$
-    SELECT claimius.create_organization_user(
+    SELECT claimius.insert_organization_user(
         (SELECT id FROM claimius.samna_app WHERE slug = 'sqltest_crew'), pg_temp.crew('owner_uc'), '10000000-0000-4000-8000-000000000e51',
         jsonb_build_object('first_name', 'Linked', 'claim_id', pg_temp.crew('member')),
         p_identity => jsonb_build_object('external_id', 'ext-e5', 'id_claim', 'sub', 'type', 'token', 'data', '{}'::JSONB),
@@ -123,7 +123,7 @@ SELECT ok(EXISTS (
     'the identity is recorded in the app and the user holds the claim with its reason');
 
 SELECT throws_like($$
-    SELECT claimius.create_organization_user((SELECT id FROM claimius.samna_app WHERE slug = 'sqltest_crew'), pg_temp.crew('owner_uc'),
+    SELECT claimius.insert_organization_user((SELECT id FROM claimius.samna_app WHERE slug = 'sqltest_crew'), pg_temp.crew('owner_uc'),
         '10000000-0000-4000-8000-000000000e5f',
         jsonb_build_object('first_name', 'Nowhere', 'claim_id', pg_temp.crew('member')))
 $$, 'owner_id invalid', 'an organization not linked to the app takes no user');

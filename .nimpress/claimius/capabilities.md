@@ -18,7 +18,7 @@ A scope grant is a `claim_object` whose `object_id` and `object_type` are both N
 { "page": { "time-report": { "_access": "READ|EXECUTE", "export": { "_access": "READ" } } } }
 ```
 
-It is written like any binding: `create_claim`, then `assign_claim_object` with a NULL object pair and the `scope` payload, then `assign_claim_user`. The partial index `idx_claim_object_no_object (claim_id) WHERE object_id IS NULL AND sa_deleted_at IS NULL` holds exactly these rows. A scope grant has no object, so it enters no tree, no `user_object` row and no settle share: the derivations read only bindings with an object.
+It is written like any binding: `insert_claim`, then `insert_claim_object` with a NULL object pair and the `scope` payload, then `insert_user_claim`. The partial index `idx_claim_object_no_object (claim_id) WHERE object_id IS NULL AND sa_deleted_at IS NULL` holds exactly these rows. A scope grant has no object, so it enters no tree, no `user_object` row and no settle share: the derivations read only bindings with an object.
 
 ## Matching
 

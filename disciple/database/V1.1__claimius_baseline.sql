@@ -367,7 +367,7 @@ CREATE INDEX IF NOT EXISTS idx_user_token_sa_deleted_at ON claimius.user_token (
 
 -- table_info
 -- Registry of every table managed by claimius. Populated by
--- init_claimius_internal (for claimius.* tables) and init_claimius_tables
+-- upsert_internal_table_info (for claimius.* tables) and upsert_table_info
 -- (for external app tables). Holds metadata used by triggers and calc
 -- functions to avoid information_schema reflection at runtime.
 CREATE TABLE IF NOT EXISTS claimius.table_info (
@@ -810,7 +810,7 @@ COMMENT ON COLUMN claimius.claim_graph_cache.snapshot IS 'pg_current_snapshot() 
 
 -- audit
 -- Append only audit log, partitioned by month on sa_created_at. Written by
--- write_audit, which creates the month's partition on the first row of the
+-- insert_audit, which creates the month's partition on the first row of the
 -- month. A row no month partition takes lands in audit_default and moves to
 -- its month when that partition is created. An unpartitioned audit table
 -- from before becomes audit_default and its rows move to their months.
@@ -909,7 +909,8 @@ CREATE INDEX IF NOT EXISTS idx_audit_sa_owner_id ON claimius.audit (sa_owner_id)
 CREATE INDEX IF NOT EXISTS idx_audit_sa_created_at ON claimius.audit USING brin (sa_created_at);
 CREATE INDEX IF NOT EXISTS idx_audit_object ON claimius.audit (object_type, object_id);
 
-CREATE OR REPLACE FUNCTION claimius.ensure_audit_partition(p_at TIMESTAMPTZ)
+DROP FUNCTION IF EXISTS claimius.ensure_audit_partition(timestamp with time zone);
+CREATE OR REPLACE FUNCTION claimius.upsert_audit_partition(p_at TIMESTAMPTZ)
     RETURNS VOID AS $$
 DECLARE
     v_from  TIMESTAMPTZ := date_trunc('month', p_at, 'UTC');
@@ -933,14 +934,14 @@ EXCEPTION WHEN duplicate_table THEN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = claimius, pg_temp;
 
-COMMENT ON FUNCTION claimius.ensure_audit_partition(TIMESTAMPTZ) IS 'Creates the audit partition of the UTC month holding p_at when it is missing, moving that month''s rows out of audit_default. Owner rights, so a writer that only inserts audit rows can open a month.';
+COMMENT ON FUNCTION claimius.upsert_audit_partition(TIMESTAMPTZ) IS 'Creates the audit partition of the UTC month holding p_at when it is missing, moving that month''s rows out of audit_default. Owner rights, so a writer that only inserts audit rows can open a month.';
 
 DO $$
 DECLARE
     v_month TIMESTAMPTZ;
 BEGIN
     FOR v_month IN SELECT DISTINCT date_trunc('month', a.sa_created_at, 'UTC') FROM claimius.audit_default a LOOP
-        PERFORM claimius.ensure_audit_partition(v_month);
+        PERFORM claimius.upsert_audit_partition(v_month);
     END LOOP;
 END $$;
 

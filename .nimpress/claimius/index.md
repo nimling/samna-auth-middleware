@@ -10,7 +10,7 @@ lastUpdated: true
 
 Claimius is a PostgreSQL schema named `claimius`. It is the access control system every Samna service runs inside its own database. It answers one question, what may this user or client do to this object, and it answers it from a per user index of pairs in the database that already holds the service's data.
 
-Claimius owns and validates its own types. It reads no more of the implementing side's rows than the `sa_*` columns, `name` and `description`. To claimius an object is an `object_type` and `object_id` pair that a `claim_object` binds and that `user_object` records access for. The implementing side registers its tables with `init_claimius_tables`, binds claims to its rows, and reads the answer through functions.
+Claimius owns and validates its own types. It reads no more of the implementing side's rows than the `sa_*` columns, `name` and `description`. To claimius an object is an `object_type` and `object_id` pair that a `claim_object` binds and that `user_object` records access for. The implementing side registers its tables with `upsert_table_info`, binds claims to its rows, and reads the answer through functions.
 
 ## Two halves
 

@@ -165,7 +165,7 @@ func postOrganization(ctx echo.Context, org Organization, appID uuid.UUID) (*Org
 		}
 		var rootID uuid.UUID
 		if err := sdb.Instance().NewRaw(
-			"SELECT (claimius.create_root_organization(?, ?, ?, ?, ?) -> 'organization' ->> 'id')::uuid",
+			"SELECT (claimius.upsert_root_organization(?, ?, ?, ?, ?) -> 'organization' ->> 'id')::uuid",
 			appID, org.Name, org.CreatedBy, org.Description, orgType,
 		).Scan(ctx.Request().Context(), &rootID); err != nil {
 			ctx.Logger().Errorf("postOrganization root: %v", err)

@@ -211,7 +211,7 @@ func (d *DB) insertUser(ctx context.Context, ac *AccessClaim, in *SamnaUser) (*S
 	}
 	var payload []byte
 	err := d.NewRaw(`
-		SELECT (claimius.ensure_app_user(?, ?, ?, ?, ?, ?, ?, ?) -> 'samna_user')::jsonb
+		SELECT (claimius.upsert_app_user(?, ?, ?, ?, ?, ?, ?, ?) -> 'samna_user')::jsonb
 	`, in.UserID, in.FirstName, in.LastName, in.UserName, in.Email, in.Phone, in.ExternalID, in.UserImage).Scan(ctx, &payload)
 	if err != nil {
 		return nil, false, err
@@ -421,21 +421,21 @@ func (d *DB) callCreateOrganizationUser(ctx context.Context, ac *AccessClaim, ow
 	}
 	var payload []byte
 	err = d.NewRaw(`
-		SELECT claimius.create_organization_user(?, ?, ?::jsonb, ?, ?::jsonb, ?)
+		SELECT claimius.insert_organization_user(?, ?, ?::jsonb, ?, ?::jsonb, ?)
 	`, *ac.UserClaimID, ownerID, string(userJSON), upsert, identityJSON, reason).Scan(ctx, &payload)
 	if err != nil {
 		var pgErr pgdriver.Error
 		if errors.As(err, &pgErr) && pgErr.Field('C') == "23505" {
 			return nil, ErrUserAlreadyExists
 		}
-		return nil, fmt.Errorf("create_organization_user: %w", err)
+		return nil, fmt.Errorf("insert_organization_user: %w", err)
 	}
 	var result OrganizationUserResult
 	if err := json.Unmarshal(payload, &result); err != nil {
-		return nil, fmt.Errorf("unmarshal create_organization_user: %w", err)
+		return nil, fmt.Errorf("unmarshal insert_organization_user: %w", err)
 	}
 	if result.SamnaUser == nil {
-		return nil, fmt.Errorf("create_organization_user returned no samna_user")
+		return nil, fmt.Errorf("insert_organization_user returned no samna_user")
 	}
 	return &result, nil
 }
