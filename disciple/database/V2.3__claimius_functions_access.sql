@@ -591,12 +591,12 @@ BEGIN
 
             IF (coalesce(v_effective, 0) & 16) = 0 AND (coalesce(v_effective, 0) & ~coalesce(v_actor_access, 0) & 15) <> 0 THEN
                 RAISE EXCEPTION 'cannot grant more access than held: user % holds % on % %, requested %',
-                    v_user_id, coalesce(v_actor_access, 0), NEW.object_type, NEW.object_id, v_effective;
+                    v_user_id, coalesce(v_actor_access, 0), NEW.object_type, NEW.object_id, v_effective USING ERRCODE = 'P0403';
             END IF;
 
             IF coalesce(v_level, 0) > coalesce(v_actor_level, 0) THEN
                 RAISE EXCEPTION 'cannot bind a claim of level % above the level % user % holds on % %',
-                    v_level, coalesce(v_actor_level, 0), v_user_id, NEW.object_type, NEW.object_id;
+                    v_level, coalesce(v_actor_level, 0), v_user_id, NEW.object_type, NEW.object_id USING ERRCODE = 'P0403';
             END IF;
         END IF;
     END IF;
@@ -641,7 +641,7 @@ BEGIN
     ) INTO v_has_access;
 
     IF NOT v_has_access THEN
-        RAISE EXCEPTION 'cannot compose: user % has no read access to claim %', v_user_id, NEW.object_id;
+        RAISE EXCEPTION 'cannot compose: user % has no read access to claim %', v_user_id, NEW.object_id USING ERRCODE = 'P0403';
     END IF;
 
     SELECT greatest(a.level, t.level) INTO v_level
@@ -659,7 +659,7 @@ BEGIN
 
         IF v_level > coalesce(v_actor_level, 0) THEN
             RAISE EXCEPTION 'cannot compose: user % holds level % on claim %, the link needs level %',
-                v_user_id, coalesce(v_actor_level, 0), NEW.object_id, v_level;
+                v_user_id, coalesce(v_actor_level, 0), NEW.object_id, v_level USING ERRCODE = 'P0403';
         END IF;
     END IF;
 
@@ -704,7 +704,7 @@ BEGIN
           AND object_id = p_claim_id
           AND (sa_access & 2) <> 0
     ) THEN
-        RAISE EXCEPTION 'cannot hand out claim % at level %: user % has no write on it', p_claim_id, p_level, v_user_id;
+        RAISE EXCEPTION 'cannot hand out claim % at level %: user % has no write on it', p_claim_id, p_level, v_user_id USING ERRCODE = 'P0403';
     END IF;
 
     FOR v_binding IN
@@ -737,7 +737,7 @@ BEGIN
           );
         IF v_deny IS NOT NULL AND p_level > v_deny THEN
             RAISE EXCEPTION 'cannot hand out claim % at level %: user % is denied on % % at level %',
-                p_claim_id, p_level, v_user_id, v_binding.object_type, v_binding.object_id, v_deny;
+                p_claim_id, p_level, v_user_id, v_binding.object_type, v_binding.object_id, v_deny USING ERRCODE = 'P0403';
         END IF;
     END LOOP;
 END;

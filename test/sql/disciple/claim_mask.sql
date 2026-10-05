@@ -128,7 +128,7 @@ SELECT throws_ok(
         p_sa_created_by => (SELECT uc.id FROM claimius.user_claim uc JOIN claimius.claim c ON c.id = uc.claim_id
                              WHERE c.name = 'Reader' AND uc.user_id = 'a0000000-0000-4000-8000-0000000000c1'),
         p_object_id => '10000000-0000-4000-8000-000000000c02', p_object_type => 'claimius.organization')$$,
-    'P0001', NULL,
+    'P0403', NULL,
     'a NULL binding mask is judged as the full claim mask against the writer access'
 );
 

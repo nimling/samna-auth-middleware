@@ -114,7 +114,7 @@ SELECT throws_ok(
         p_sa_created_by => (SELECT uc.id FROM claimius.user_claim uc WHERE uc.user_id = 'a0000000-0000-4000-8000-0000000000b3'
                               AND uc.claim_id = (SELECT id FROM claimius.claim WHERE name = 'C')),
         p_object_id => (SELECT id FROM claimius.claim WHERE name = 'B'), p_object_type => 'claimius.claim')$$,
-    'P0001', NULL,
+    'P0403', NULL,
     'a writer who neither holds nor reads the target claim cannot compose it'
 );
 
