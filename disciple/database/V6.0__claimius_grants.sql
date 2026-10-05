@@ -27,7 +27,7 @@ BEGIN
              claimius.claim, claimius.user_claim, claimius.claim_object,
              claimius.object_field, claimius.user_field, claimius.user_relation,
              claimius.audit, claimius.inheritance_info, claimius.table_info,
-             claimius.notification, claimius.claim_graph_cache
+             claimius.notification, claimius.claim_graph_cache, claimius.sync_parked
              TO claimius_disciple_client';
     EXECUTE 'REVOKE INSERT, UPDATE, DELETE ON claimius.claim_graph_cache FROM claimius_reader';
     EXECUTE 'GRANT SELECT ON ALL TABLES IN SCHEMA claimius TO claimius_disciple_client';

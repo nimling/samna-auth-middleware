@@ -305,3 +305,69 @@ func TestDiscipleMovesOnlyToAProphetThatTookItsAppOver(t *testing.T) {
 		t.Fatal("an agreed move must apply the new prophet's snapshot")
 	}
 }
+
+func claimPayload(at client.SyncCursor, id, owner uuid.UUID) sam.SyncPayload {
+	return sam.SyncPayload{
+		SyncCursor: at,
+		Operation:  "upsert",
+		EventType:  "claimius.claim",
+		Payload: json.RawMessage(fmt.Sprintf(
+			`{"id":%q,"name":"Parked","sa_access":4,"inherits":true,"level":0,"type":"user","sa_owner_id":%q,"sa_root_id":%q,"sa_created_by":%q,"sa_created_at":"2026-01-01T00:00:00Z","sa_updated_at":"2026-01-01T00:00:00Z"}`,
+			id, owner, owner, owner)),
+	}
+}
+
+func TestApplyPageParksARecordWhoseParentIsMissing(t *testing.T) {
+	db := database(t)
+	ctx := context.Background()
+	from := cursor(t)
+	org, claim, kept := uuid.New(), uuid.New(), uuid.New()
+	parked := func() bool {
+		t.Helper()
+		var exists bool
+		if err := db.NewRaw(`SELECT EXISTS (SELECT 1 FROM claimius.sync_parked WHERE event_type = 'claimius.claim' AND object_id = ?)`, claim).
+			Scan(ctx, &exists); err != nil {
+			t.Fatalf("probe sync_parked: %v", err)
+		}
+		return exists
+	}
+	claimExists := func() bool {
+		t.Helper()
+		var exists bool
+		if err := db.NewRaw(`SELECT EXISTS (SELECT 1 FROM claimius.claim WHERE id = ?)`, claim).Scan(ctx, &exists); err != nil {
+			t.Fatalf("probe claim: %v", err)
+		}
+		return exists
+	}
+
+	page := []sam.SyncPayload{claimPayload(step(from, 1), claim, org), organizationPayload(step(from, 2), kept)}
+	if err := sam.Disciple().ApplyPage(ctx, from, sam.State{Cursor: step(from, 2)}, page, ""); err != nil {
+		t.Fatalf("a record failing on a foreign key must not fail the page, got %v", err)
+	}
+	if got := cursor(t); got != step(from, 2) {
+		t.Fatalf("the cursor must move past a parked record to %s, got %s", step(from, 2), got)
+	}
+	if !organizationExists(t, db, kept) {
+		t.Fatal("the rest of the page must apply around a parked record")
+	}
+	if claimExists() || !parked() {
+		t.Fatal("a record whose parent is missing must be parked, not applied")
+	}
+
+	if err := sam.Disciple().ApplyPage(ctx, step(from, 2), sam.State{Cursor: step(from, 3)}, nil, ""); err != nil {
+		t.Fatalf("apply an empty page: %v", err)
+	}
+	if claimExists() || !parked() {
+		t.Fatal("a parked record whose parent is still missing must stay parked")
+	}
+
+	if err := sam.Disciple().ApplyPage(ctx, step(from, 3), sam.State{Cursor: step(from, 4)}, []sam.SyncPayload{organizationPayload(step(from, 4), org)}, ""); err != nil {
+		t.Fatalf("apply the parent: %v", err)
+	}
+	if !claimExists() {
+		t.Fatal("a parked record must apply once its parent arrives")
+	}
+	if parked() {
+		t.Fatal("a parked record that applied must be dropped")
+	}
+}

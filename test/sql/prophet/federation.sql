@@ -61,6 +61,7 @@ BEGIN
     INSERT INTO claimius.samna_app (id, slug, name, private_key, private_seed, sa_owner_id, sa_created_by)
     VALUES (pg_temp.local_app(), 'sqltest_fed_local', 'Local app', 'key', 'seed',
             (v_system -> 'organization' ->> 'id')::UUID, (v_system -> 'user_claim' ->> 'id')::UUID);
+    PERFORM claimius.upsert_app_object(pg_temp.local_app(), 'claimius.organization', (v_system -> 'organization' ->> 'id')::UUID);
 
     INSERT INTO claimius.prophet_peer (prophet, endpoint, app_slug, app_secret, sa_created_by)
     VALUES ('sqltest_peer', 'http://peer.test', 'sqltest_fed_mirror', 'secret', pg_temp.actor());

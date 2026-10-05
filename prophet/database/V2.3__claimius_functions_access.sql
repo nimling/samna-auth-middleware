@@ -847,6 +847,72 @@ CREATE TRIGGER tg_check_claim_level
     BEFORE UPDATE OF level ON claimius.claim
     FOR EACH ROW WHEN (NEW.level > OLD.level) EXECUTE FUNCTION claimius._check_claim_grant();
 
+CREATE OR REPLACE FUNCTION claimius.app_has_scope(
+    p_app_id      UUID,
+    p_owner_id    UUID,
+    p_object_type TEXT DEFAULT NULL,
+    p_object_id   UUID DEFAULT NULL
+) RETURNS BOOLEAN AS $$
+    SELECT claimius.app_has_object(p_app_id, 'claimius.organization', p_owner_id)
+       AND (p_object_type IS NULL
+            OR p_object_type NOT IN ('claimius.organization', 'claimius.location')
+            OR claimius.app_has_object(p_app_id, p_object_type, p_object_id));
+$$ LANGUAGE sql STABLE;
+
+COMMENT ON FUNCTION claimius.app_has_scope(UUID, UUID, TEXT, UUID) IS 'True when the owning organization, and the object when it is an organization or a location, are live in the app through app_object, so a row of the app scoped to them reaches the app''s disciples.';
+
+CREATE OR REPLACE FUNCTION claimius._check_app_scope()
+    RETURNS TRIGGER AS $$
+DECLARE
+    v_object_type TEXT;
+    v_object_id   UUID;
+BEGIN
+    IF claimius.in_replay_mode() OR NEW.sa_deleted_at IS NOT NULL THEN
+        RETURN NEW;
+    END IF;
+    IF TG_TABLE_NAME = 'claim_object' THEN
+        v_object_type := NEW.object_type;
+        v_object_id := NEW.object_id;
+    END IF;
+    IF TG_OP = 'UPDATE'
+        AND NEW.app_id = OLD.app_id
+        AND NEW.sa_owner_id = OLD.sa_owner_id
+        AND OLD.sa_deleted_at IS NULL
+        AND (TG_TABLE_NAME <> 'claim_object'
+             OR (v_object_type IS NOT DISTINCT FROM (to_jsonb(OLD) ->> 'object_type')
+                 AND v_object_id IS NOT DISTINCT FROM (to_jsonb(OLD) ->> 'object_id')::UUID))
+    THEN
+        RETURN NEW;
+    END IF;
+    IF NOT claimius.app_has_object(NEW.app_id, 'claimius.organization', NEW.sa_owner_id) THEN
+        RAISE EXCEPTION 'cannot write claimius.% %: owning organization % is not linked to app %',
+            TG_TABLE_NAME, NEW.id, NEW.sa_owner_id, NEW.app_id USING ERRCODE = 'P0403';
+    END IF;
+    IF NOT claimius.app_has_scope(NEW.app_id, NEW.sa_owner_id, v_object_type, v_object_id) THEN
+        RAISE EXCEPTION 'cannot write claimius.% %: % % is not linked to app %',
+            TG_TABLE_NAME, NEW.id, v_object_type, v_object_id, NEW.app_id USING ERRCODE = 'P0403';
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+COMMENT ON FUNCTION claimius._check_app_scope() IS 'BEFORE INSERT/UPDATE trigger on claim, user_claim and claim_object. Refuses with P0403 a live row whose owning organization, or whose bound organization or location, is not linked to the row''s app, since the row could never reach the app''s disciples. An update that keeps the app, owner and object of a live row passes. Bypassed during replay.';
+
+DROP TRIGGER IF EXISTS tg_check_app_scope ON claimius.claim;
+CREATE TRIGGER tg_check_app_scope
+    BEFORE INSERT OR UPDATE ON claimius.claim
+    FOR EACH ROW EXECUTE FUNCTION claimius._check_app_scope();
+
+DROP TRIGGER IF EXISTS tg_check_app_scope ON claimius.user_claim;
+CREATE TRIGGER tg_check_app_scope
+    BEFORE INSERT OR UPDATE ON claimius.user_claim
+    FOR EACH ROW EXECUTE FUNCTION claimius._check_app_scope();
+
+DROP TRIGGER IF EXISTS tg_check_app_scope ON claimius.claim_object;
+CREATE TRIGGER tg_check_app_scope
+    BEFORE INSERT OR UPDATE ON claimius.claim_object
+    FOR EACH ROW EXECUTE FUNCTION claimius._check_app_scope();
+
 -- _cascade_recompute
 -- For an inheritable binding to (object_type, object_id), recomputes
 -- user_object for every descendant of that node in every tree it appears
@@ -967,11 +1033,34 @@ BEGIN
         VALUES ('upsert', v_link.object_type, v_payload, v_link.app_id);
     END IF;
 
+    INSERT INTO claimius.sync_event (operation, event_type, payload, app_id)
+    SELECT 'upsert', s.event_type, s.payload, v_link.app_id
+    FROM (
+        SELECT 1 AS step, 'claimius.claim' AS event_type, to_jsonb(c) - 'txid' AS payload, c.sa_created_at AS created
+        FROM claimius.claim c
+        WHERE c.app_id = v_link.app_id
+          AND v_link.object_type = 'claimius.organization'
+          AND c.sa_owner_id = v_link.object_id
+        UNION ALL
+        SELECT 2, 'claimius.user_claim', to_jsonb(uc) - 'txid', uc.sa_created_at
+        FROM claimius.user_claim uc
+        WHERE uc.app_id = v_link.app_id
+          AND v_link.object_type = 'claimius.organization'
+          AND uc.sa_owner_id = v_link.object_id
+        UNION ALL
+        SELECT 3, 'claimius.claim_object', to_jsonb(co) - 'txid', co.sa_created_at
+        FROM claimius.claim_object co
+        WHERE co.app_id = v_link.app_id
+          AND ((v_link.object_type = 'claimius.organization' AND co.sa_owner_id = v_link.object_id)
+               OR (co.object_type = v_link.object_type AND co.object_id = v_link.object_id))
+    ) s
+    ORDER BY s.step, s.created;
+
     RETURN coalesce(NEW, OLD);
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius.emit_app_object_sync_event() IS 'Trigger on app_object. Publishes the linked row to the app on link and its delete on unlink.';
+COMMENT ON FUNCTION claimius.emit_app_object_sync_event() IS 'Trigger on app_object. Publishes the linked row to the app on link, followed by the app''s claims, grants and bindings scoped to it, and its delete on unlink.';
 
 -- ----------------------------------------------------------------------------
 -- get_app_home

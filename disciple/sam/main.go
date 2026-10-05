@@ -17,6 +17,7 @@ import (
 	"github.com/nimling/samna-auth-middleware/v2/shared"
 	"github.com/nimling/samna-auth-middleware/v2/utils"
 	"github.com/uptrace/bun"
+	"github.com/uptrace/bun/driver/pgdriver"
 )
 
 const (
@@ -365,7 +366,9 @@ func stripAppID(raw json.RawMessage) json.RawMessage {
 // ApplyPage applies one page of payloads and moves the cursor from from to the
 // position of to in one transaction under replay_mode, so a page of p events
 // costs one commit and a page that fails anywhere rolls back whole, cursor
-// included, and is pulled again. The commit does not wait for its WAL flush: a
+// included, and is pulled again. A disciple record that fails on a foreign key
+// is parked in claimius.sync_parked instead and the cursor moves past it; the
+// parked records are retried after every page. The commit does not wait for its WAL flush: a
 // page lost to a crash is a cursor that did not move, and the page is pulled
 // again. The cursor moves first and only from the position the page was
 // pulled at, which holds its row for the page and refuses a page another
@@ -388,10 +391,15 @@ func (r *Replica) ApplyPage(ctx context.Context, from client.SyncCursor, to Stat
 			if r.Peer != nil {
 				err = r.applyPeerPayload(ctx, tx, payload)
 			} else {
-				err = ApplyPayload(ctx, tx, payload)
+				err = r.applyOrPark(ctx, tx, payload)
 			}
 			if err != nil {
 				return fmt.Errorf("apply %s seq %s: %w", payload.EventType, payload.SyncCursor, err)
+			}
+		}
+		if r.Peer == nil {
+			if err := r.retryParked(ctx, tx); err != nil {
+				return err
 			}
 		}
 		if reconcile == "" {
@@ -406,6 +414,74 @@ func (r *Replica) ApplyPage(ctx context.Context, from client.SyncCursor, to Stat
 		}
 		return sdb.Write(ctx, tx, "disciple sync reconcile", "update", "claimius.disciple_state", uuid.Nil, uuid.Nil, nil, reconcile)
 	})
+}
+
+func (r *Replica) applyOrPark(ctx context.Context, tx bun.Tx, payload SyncPayload) error {
+	err := applySavepoint(ctx, tx, payload)
+	if err == nil {
+		return dropParked(ctx, tx, payload)
+	}
+	if !isForeignKeyViolation(err) {
+		return err
+	}
+	if _, parkErr := tx.ExecContext(ctx, `INSERT INTO claimius.sync_parked (event_type, object_id, operation, payload, txid, seq, error)
+		VALUES (?, (?::JSONB ->> 'id')::UUID, ?, ?, ?, ?, ?)
+		ON CONFLICT (event_type, object_id) DO UPDATE SET
+			operation = EXCLUDED.operation, payload = EXCLUDED.payload, txid = EXCLUDED.txid, seq = EXCLUDED.seq,
+			error = EXCLUDED.error, sa_updated_at = now()`,
+		payload.EventType, string(payload.Payload), payload.Operation, string(payload.Payload), payload.Txid, payload.Seq, err.Error()); parkErr != nil {
+		return fmt.Errorf("park: %w", parkErr)
+	}
+	r.DB.Logger.Warnf("sync: %s seq %s parked until its parent row arrives: %v", payload.EventType, payload.SyncCursor, err)
+	return nil
+}
+
+func applySavepoint(ctx context.Context, tx bun.Tx, payload SyncPayload) error {
+	return tx.RunInTx(ctx, nil, func(ctx context.Context, sp bun.Tx) error {
+		return ApplyPayload(ctx, sp, payload)
+	})
+}
+
+func dropParked(ctx context.Context, tx bun.Tx, payload SyncPayload) error {
+	if _, err := tx.ExecContext(ctx, `DELETE FROM claimius.sync_parked WHERE event_type = ? AND object_id = (?::JSONB ->> 'id')::UUID`,
+		payload.EventType, string(payload.Payload)); err != nil {
+		return fmt.Errorf("drop parked %s seq %s: %w", payload.EventType, payload.SyncCursor, err)
+	}
+	return nil
+}
+
+func (r *Replica) retryParked(ctx context.Context, tx bun.Tx) error {
+	for {
+		var parked []SyncPayload
+		if err := tx.NewRaw(`SELECT txid, seq, operation, event_type, payload FROM claimius.sync_parked ORDER BY txid, seq`).
+			Scan(ctx, &parked); err != nil {
+			return fmt.Errorf("read parked: %w", err)
+		}
+		applied := 0
+		for _, payload := range parked {
+			if err := applySavepoint(ctx, tx, payload); err != nil {
+				if _, upErr := tx.ExecContext(ctx, `UPDATE claimius.sync_parked SET error = ?, sa_updated_at = now()
+					WHERE event_type = ? AND object_id = (?::JSONB ->> 'id')::UUID`,
+					err.Error(), payload.EventType, string(payload.Payload)); upErr != nil {
+					return fmt.Errorf("record parked error: %w", upErr)
+				}
+				continue
+			}
+			if err := dropParked(ctx, tx, payload); err != nil {
+				return err
+			}
+			applied++
+			r.DB.Logger.Infof("sync: parked %s seq %s applied", payload.EventType, payload.SyncCursor)
+		}
+		if applied == 0 {
+			return nil
+		}
+	}
+}
+
+func isForeignKeyViolation(err error) bool {
+	var pgErr pgdriver.Error
+	return errors.As(err, &pgErr) && pgErr.Field('C') == "23503"
 }
 
 // applyPeerPayload applies one row of the peer's feed on the mirroring

@@ -31,6 +31,8 @@ BEGIN
            (v_leaf, 'Walk leaf', 'company', v_other, v_other, 1, v_a);
     PERFORM claimius.upsert_app_object(v_app, 'claimius.organization', v_root);
     PERFORM claimius.upsert_app_object(v_app, 'claimius.organization', v_other);
+    PERFORM claimius.upsert_app_object(v_app, 'claimius.organization', v_child);
+    PERFORM claimius.upsert_app_object(v_app, 'claimius.organization', v_leaf);
 
     v_writer := (claimius.insert_claim(
         p_app_id => v_app, p_name => 'Root writer', p_description => NULL, p_sa_access => 6,

@@ -53,6 +53,7 @@ BEGIN
     VALUES (v_root, 'Grant root', 'company', v_root, v_root, 0, v_user),
            (v_object, 'Grant object', 'company', v_root, v_root, 1, v_user);
     PERFORM claimius.upsert_app_object(v_app, 'claimius.organization', v_root);
+    PERFORM claimius.upsert_app_object(v_app, 'claimius.organization', v_object);
 
     v_claim := (claimius.insert_claim(
         p_app_id => v_app, p_name => 'Grant writer', p_description => NULL, p_sa_access => 6,
