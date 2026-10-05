@@ -745,6 +745,108 @@ CREATE TRIGGER tg_check_claim_composition
     BEFORE INSERT OR UPDATE ON claimius.claim_object
     FOR EACH ROW EXECUTE FUNCTION claimius._check_claim_composition();
 
+CREATE OR REPLACE FUNCTION claimius._check_claim_level(
+    p_app_id    UUID,
+    p_actor_uc  UUID,
+    p_claim_id  UUID,
+    p_level     INTEGER
+) RETURNS VOID AS $$
+DECLARE
+    v_user_id UUID;
+    v_binding RECORD;
+    v_deny    INTEGER;
+BEGIN
+    IF coalesce(p_level, 0) = 0 THEN
+        RETURN;
+    END IF;
+
+    SELECT uc.user_id INTO v_user_id
+    FROM claimius.user_claim uc
+    WHERE uc.id = p_actor_uc
+      AND uc.app_id = p_app_id
+      AND uc.sa_deleted_at IS NULL;
+    IF v_user_id IS NULL THEN
+        RETURN;
+    END IF;
+
+    PERFORM claimius.reconcile_if_pending(p_app_id, v_user_id, 'claimius.claim', p_claim_id);
+    IF NOT EXISTS (
+        SELECT 1 FROM claimius.user_object
+        WHERE user_id = v_user_id
+          AND app_id = p_app_id
+          AND object_type = 'claimius.claim'
+          AND object_id = p_claim_id
+          AND (sa_access & 2) <> 0
+    ) THEN
+        RAISE EXCEPTION 'cannot hand out claim % at level %: user % has no write on it', p_claim_id, p_level, v_user_id;
+    END IF;
+
+    FOR v_binding IN
+        SELECT co.object_type, co.object_id, claimius._effective_access(c.sa_access, co.sa_access) & 15 AS bits
+        FROM claimius.claim_object co
+            JOIN claimius.claim c ON c.id = co.claim_id
+        WHERE co.claim_id = p_claim_id
+          AND co.app_id = p_app_id
+          AND co.sa_deleted_at IS NULL
+          AND co.object_id IS NOT NULL
+          AND co.object_type <> 'claimius.claim'
+          AND (claimius._effective_access(c.sa_access, co.sa_access) & 16) = 0
+    LOOP
+        SELECT max(d.level) INTO v_deny
+        FROM claimius.user_claim duc
+            JOIN claimius.claim d ON d.id = duc.claim_id AND d.sa_deleted_at IS NULL
+            JOIN claimius.claim_object dco ON dco.claim_id = d.id AND dco.app_id = p_app_id AND dco.sa_deleted_at IS NULL
+        WHERE duc.user_id = v_user_id
+          AND duc.app_id = p_app_id
+          AND duc.sa_deleted_at IS NULL
+          AND (claimius._effective_access(d.sa_access, dco.sa_access) & 16) <> 0
+          AND (claimius._effective_access(d.sa_access, dco.sa_access) & v_binding.bits) <> 0
+          AND (
+              (dco.object_type = v_binding.object_type AND dco.object_id = v_binding.object_id)
+              OR (d.inherits AND dco.inherits AND EXISTS (
+                  SELECT 1 FROM claimius.inheritance_info a
+                  WHERE a.descendant_type = v_binding.object_type
+                    AND a.descendant_id = v_binding.object_id
+                    AND a.ancestor_type = dco.object_type
+                    AND a.ancestor_id = dco.object_id
+                    AND a.depth > 0))
+          );
+        IF v_deny IS NOT NULL AND p_level > v_deny THEN
+            RAISE EXCEPTION 'cannot hand out claim % at level %: user % is denied on % % at level %',
+                p_claim_id, p_level, v_user_id, v_binding.object_type, v_binding.object_id, v_deny;
+        END IF;
+    END LOOP;
+END;
+$$ LANGUAGE plpgsql;
+
+COMMENT ON FUNCTION claimius._check_claim_level(UUID, UUID, UUID, INTEGER) IS 'Refuses to hand out a claim above level 0 that the actor could not: the actor, the user of p_actor_uc in the app, must hold write on the claim, and on no object the claim is bound to may the claim lift a deny of a lower level the actor faces on any of the bits it grants there. Level 0 and an actor that is not a live user_claim of the app pass as before.';
+
+CREATE OR REPLACE FUNCTION claimius._check_claim_grant()
+    RETURNS TRIGGER AS $$
+BEGIN
+    IF claimius.in_replay_mode() OR NEW.sa_deleted_at IS NOT NULL THEN
+        RETURN NEW;
+    END IF;
+    IF TG_TABLE_NAME = 'claim' THEN
+        PERFORM claimius._check_claim_level(NEW.app_id, NEW.sa_created_by, NEW.id, NEW.level);
+    ELSE
+        PERFORM claimius._check_claim_level(NEW.app_id, NEW.sa_created_by, NEW.claim_id,
+            (SELECT c.level FROM claimius.claim c WHERE c.id = NEW.claim_id));
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS tg_check_claim_grant ON claimius.user_claim;
+CREATE TRIGGER tg_check_claim_grant
+    BEFORE INSERT OR UPDATE OF claim_id, user_id ON claimius.user_claim
+    FOR EACH ROW EXECUTE FUNCTION claimius._check_claim_grant();
+
+DROP TRIGGER IF EXISTS tg_check_claim_level ON claimius.claim;
+CREATE TRIGGER tg_check_claim_level
+    BEFORE UPDATE OF level ON claimius.claim
+    FOR EACH ROW WHEN (NEW.level > OLD.level) EXECUTE FUNCTION claimius._check_claim_grant();
+
 -- _cascade_recompute
 -- For an inheritable binding to (object_type, object_id), recomputes
 -- user_object for every descendant of that node in every tree it appears

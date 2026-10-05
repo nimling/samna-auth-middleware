@@ -1,5 +1,5 @@
 BEGIN;
-SELECT plan(12);
+SELECT plan(17);
 
 CREATE TEMP TABLE lvl (key TEXT PRIMARY KEY, id UUID);
 
@@ -61,8 +61,6 @@ BEGIN
     PERFORM claimius.insert_claim_object(p_app_id => v_app, p_claim_id => c, p_sa_owner_id => v_root, p_sa_root_id => v_root,
         p_sa_created_by => v_sys, p_scope => '{"page": {"report": true}}'::JSONB)
     FROM unnest(ARRAY[v_s3, v_sd1, v_sd3]) c;
-    PERFORM set_config('claimius.replay_mode', 'false', TRUE);
-
     PERFORM claimius.insert_user_claim(p_app_id => v_app, p_claim_id => g.claim_id, p_user_id => g.user_id::UUID,
         p_sa_owner_id => v_root, p_sa_created_by => v_sys)
     FROM (VALUES
@@ -73,10 +71,46 @@ BEGIN
         (v_s3, 'a0000000-0000-4000-8000-0000000001a5'), (v_sd1, 'a0000000-0000-4000-8000-0000000001a5'),
         (v_s3, 'a0000000-0000-4000-8000-0000000001a6'), (v_sd3, 'a0000000-0000-4000-8000-0000000001a6')
     ) g(claim_id, user_id);
+    PERFORM set_config('claimius.replay_mode', 'false', TRUE);
 
     INSERT INTO lvl VALUES ('app', v_app), ('sys', v_sys), ('root', v_root), ('child', v_child), ('g0', v_g0), ('b0', v_b0),
         ('owner', (claimius.insert_user_claim(p_app_id => v_app, p_claim_id => v_g0, p_user_id => 'a0000000-0000-4000-8000-0000000001a6',
                    p_sa_owner_id => v_root, p_sa_created_by => v_sys) -> 'user_claim' ->> 'id')::UUID);
+END $$;
+
+DO $$
+DECLARE
+    v_root  UUID := '10000000-0000-4000-8000-0000000001a1';
+    v_child UUID := '10000000-0000-4000-8000-0000000001a2';
+    v_sys   UUID := (SELECT id FROM lvl WHERE key = 'sys');
+    v_app   UUID := (SELECT id FROM lvl WHERE key = 'app');
+    v_admin UUID;
+    v_deny3 UUID;
+    v_x     UUID;
+    v_g5    UUID;
+    v_g2    UUID;
+    v_mine  UUID;
+BEGIN
+    PERFORM claimius.upsert_app_user(p_user_id => 'a0000000-0000-4000-8000-0000000001b1', p_app_id => v_app, p_first_name => 'X');
+    v_admin := (claimius.insert_claim(v_app, 'Admin', NULL, 15, v_root, v_root, v_sys) -> 'claim' ->> 'id')::UUID;
+    v_deny3 := (claimius.insert_claim(v_app, 'Deny read level 3', NULL, 20, v_root, v_root, v_sys, p_level => 3) -> 'claim' ->> 'id')::UUID;
+    v_g5 := (claimius.insert_claim(v_app, 'Handout level 5', NULL, 4, v_root, v_root, v_sys, p_level => 5) -> 'claim' ->> 'id')::UUID;
+    v_g2 := (claimius.insert_claim(v_app, 'Handout level 2', NULL, 4, v_root, v_root, v_sys, p_level => 2) -> 'claim' ->> 'id')::UUID;
+    PERFORM set_config('claimius.replay_mode', 'true', TRUE);
+    PERFORM claimius.insert_claim_object(p_app_id => v_app, p_claim_id => v_admin, p_sa_owner_id => v_root, p_sa_root_id => v_root,
+        p_sa_created_by => v_sys, p_object_id => v_root, p_object_type => 'claimius.organization', p_inherits => TRUE);
+    PERFORM claimius.insert_claim_object(p_app_id => v_app, p_claim_id => c, p_sa_owner_id => v_root, p_sa_root_id => v_root,
+        p_sa_created_by => v_sys, p_object_id => v_child, p_object_type => 'claimius.organization', p_inherits => TRUE)
+    FROM unnest(ARRAY[v_deny3, v_g5, v_g2]) c;
+    v_x := (claimius.insert_user_claim(p_app_id => v_app, p_claim_id => v_admin, p_user_id => 'a0000000-0000-4000-8000-0000000001b1',
+        p_sa_owner_id => v_root, p_sa_created_by => v_sys) -> 'user_claim' ->> 'id')::UUID;
+    PERFORM claimius.insert_user_claim(p_app_id => v_app, p_claim_id => v_deny3, p_user_id => 'a0000000-0000-4000-8000-0000000001b1',
+        p_sa_owner_id => v_root, p_sa_created_by => v_sys);
+    v_mine := (claimius.insert_claim(v_app, 'Raised by X', NULL, 4, v_root, v_root, v_x, p_level => 2) -> 'claim' ->> 'id')::UUID;
+    PERFORM claimius.insert_claim_object(p_app_id => v_app, p_claim_id => v_mine, p_sa_owner_id => v_root, p_sa_root_id => v_root,
+        p_sa_created_by => v_sys, p_object_id => v_child, p_object_type => 'claimius.organization', p_inherits => TRUE);
+    PERFORM set_config('claimius.replay_mode', 'false', TRUE);
+    INSERT INTO lvl VALUES ('x', v_x), ('g5', v_g5), ('g2', v_g2), ('mine', v_mine);
 END $$;
 
 CREATE FUNCTION pg_temp.lvl(p_key TEXT) RETURNS UUID AS $$
@@ -130,6 +164,29 @@ SELECT lives_ok($$
         p_sa_owner_id => pg_temp.lvl('root'), p_sa_root_id => pg_temp.lvl('root'), p_sa_created_by => pg_temp.lvl('owner'),
         p_object_id => pg_temp.lvl('child'), p_object_type => 'claimius.organization')
 $$, 'an actor binds a deny at the level it holds');
+
+SELECT throws_like($$
+    SELECT claimius.insert_user_claim(p_app_id => pg_temp.lvl('app'), p_claim_id => pg_temp.lvl('g5'), p_user_id => 'a0000000-0000-4000-8000-0000000001a2',
+        p_sa_owner_id => pg_temp.lvl('root'), p_sa_created_by => pg_temp.lvl('x'))
+$$, '%is denied on%at level 3%', 'a grant of a claim cannot lift a deny of a lower level the granting actor faces');
+
+SELECT lives_ok($$
+    SELECT claimius.insert_user_claim(p_app_id => pg_temp.lvl('app'), p_claim_id => pg_temp.lvl('g2'), p_user_id => 'a0000000-0000-4000-8000-0000000001a2',
+        p_sa_owner_id => pg_temp.lvl('root'), p_sa_created_by => pg_temp.lvl('x'))
+$$, 'a grant of a claim below the deny the actor faces is accepted');
+
+SELECT throws_like($$
+    SELECT claimius.insert_user_claim(p_app_id => pg_temp.lvl('app'), p_claim_id => pg_temp.lvl('g2'), p_user_id => 'a0000000-0000-4000-8000-0000000001a3',
+        p_sa_owner_id => pg_temp.lvl('root'), p_sa_created_by => pg_temp.lvl('owner'))
+$$, '%has no write on it%', 'an actor without write on a claim above level 0 cannot hand it out');
+
+SELECT throws_like($$
+    SELECT claimius.update_claim(pg_temp.lvl('mine'), p_level => 5)
+$$, '%is denied on%at level 3%', 'a claim cannot be raised above a deny its authority faces');
+
+SELECT lives_ok($$
+    SELECT claimius.update_claim(pg_temp.lvl('mine'), p_level => 3)
+$$, 'a claim is raised up to the level of the deny its authority faces');
 
 SELECT * FROM finish();
 ROLLBACK;
