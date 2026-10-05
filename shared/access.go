@@ -131,7 +131,8 @@ func (d *DB) MutationAccessMany(ctx context.Context, requests []AccessRequest) (
 			g.sa_owner_id,
 			g.sa_root_id,
 			g.sa_location_id,
-			g.direct_grant
+			g.direct_grant,
+			g.level
 		FROM inputs
 		LEFT JOIN LATERAL claimius.resolve_access(inputs.user_id, inputs.object_id::text, inputs.object_type, inputs.required_access) g ON TRUE
 		ORDER BY inputs.idx
@@ -173,6 +174,7 @@ func (d *DB) ScopeAccess(ctx context.Context, userID uuid.UUID, scopePath string
 		ObjectScope   *json.RawMessage `bun:"object_scope,type:jsonb"`
 		ObjectAccess  *ClaimAccess     `bun:"object_access"`
 		ObjectInherit bool             `bun:"object_inherits"`
+		Level         int              `bun:"level"`
 	}
 	rows := make([]scopeAccessRow, 0)
 	err := d.Read(ctx, func(ctx context.Context, db *bun.DB) error {
@@ -201,6 +203,7 @@ func (d *DB) ScopeAccess(ctx context.Context, userID uuid.UUID, scopePath string
 				Access:      r.Access,
 				OwnerID:     r.OwnerID,
 				RootID:      r.RootID,
+				Level:       r.Level,
 			}
 			byClaim[r.ClaimID] = ac
 			order = append(order, r.ClaimID)

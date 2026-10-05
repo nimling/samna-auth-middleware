@@ -35,6 +35,9 @@ test target='':
                 out=$(smig test --schema=$role/database/migrate.yml --db-dir=$role/database --keep -s 2>&1 | sed 's/\x1b\[[0-9;]*m//g')
                 peer=$(echo "$out" | grep -o 'smig-test-[0-9]*' | head -1)
                 eval "$(echo "$out" | grep '^ *PG[A-Z]*=' | sed 's/^ *//; s/^/export PEER_/')"
+                out=$(smig test --schema=disciple/database/migrate.yml --db-dir=disciple/database --keep -s 2>&1 | sed 's/\x1b\[[0-9;]*m//g')
+                peer="$peer $(echo "$out" | grep -o 'smig-test-[0-9]*' | head -1)"
+                eval "$(echo "$out" | grep '^ *PG[A-Z]*=' | sed 's/^ *//; s/^/export DISCIPLE_/')"
             fi
             go test -tags dbtest -count=1 -p 1 $pkgs || { docker rm -f "$name" $peer >/dev/null; exit 1; }
             docker rm -f "$name" $peer >/dev/null
@@ -42,6 +45,22 @@ test target='':
     else
         go test ./{{target}}/...
     fi
+
+verify:
+    #!/usr/bin/env bash
+    set -e
+    export PGSSLMODE=disable
+    names=""
+    for role in prophet disciple; do
+        out=$(smig test --schema=$role/database/migrate.yml --db-dir=$role/database --keep -s 2>&1 | sed 's/\x1b\[[0-9;]*m//g')
+        names="$names $(echo "$out" | grep -o 'smig-test-[0-9]*' | head -1)"
+        prefix=""; [ $role = disciple ] && prefix=DISCIPLE_
+        eval "$(echo "$out" | grep '^ *PG[A-Z]*=' | sed "s/^ *//; s/^/export $prefix/")"
+    done
+    status=0
+    go test -tags dbtest -count=1 -run Scenario -v ./prophet/echo/ || status=$?
+    docker rm -f $names >/dev/null
+    exit $status
 
 test-hurl:
     #!/usr/bin/env bash

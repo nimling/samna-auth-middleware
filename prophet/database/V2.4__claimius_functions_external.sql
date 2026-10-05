@@ -30,6 +30,7 @@
 
 DROP FUNCTION IF EXISTS claimius.get_access(UUID, UUID, UUID, TEXT, INTEGER);
 
+DROP FUNCTION IF EXISTS claimius.get_access(UUID, UUID, UUID, TEXT, INTEGER);
 CREATE OR REPLACE FUNCTION claimius.get_access(
     p_user_id          UUID,
     p_app_id           UUID,
@@ -46,7 +47,8 @@ CREATE OR REPLACE FUNCTION claimius.get_access(
                     sa_owner_id         UUID,
                     sa_root_id          UUID,
                     sa_location_id      UUID,
-                    direct_grant        BOOLEAN
+                    direct_grant        BOOLEAN,
+                    level          INTEGER
                 ) AS $$
 BEGIN
     PERFORM claimius.reconcile_if_pending(p_app_id, p_user_id, p_object_type, p_object_id);
@@ -76,7 +78,8 @@ BEGIN
             uo.sa_owner_id,
             (SELECT o.sa_root_id FROM claimius.organization o WHERE o.id = uo.sa_owner_id),
             uo.sa_location_id,
-            FALSE
+            FALSE,
+            best.grant_level
         FROM uo
                  CROSS JOIN LATERAL claimius._best_grant(uo.grants, p_user_id, p_app_id, p_required_access) best;
 END;
@@ -110,6 +113,7 @@ COMMENT ON FUNCTION claimius.get_access(UUID, UUID, UUID, TEXT, INTEGER) IS 'Str
 
 DROP FUNCTION IF EXISTS claimius.get_direct_access(UUID, UUID, UUID, TEXT);
 
+DROP FUNCTION IF EXISTS claimius.get_direct_access(UUID, UUID, UUID, TEXT, INTEGER, BOOLEAN);
 CREATE OR REPLACE FUNCTION claimius.get_direct_access(
     p_user_id       UUID,
     p_app_id        UUID,
@@ -127,7 +131,8 @@ CREATE OR REPLACE FUNCTION claimius.get_direct_access(
                     sa_owner_id         UUID,
                     sa_root_id          UUID,
                     sa_location_id      UUID,
-                    direct_grant        BOOLEAN
+                    direct_grant        BOOLEAN,
+                    level          INTEGER
                 ) AS $$
 DECLARE
     v_exists   BOOLEAN;
@@ -151,7 +156,8 @@ BEGIN
                 uc.sa_owner_id,
                 c.sa_root_id,
                 NULL::UUID,
-                TRUE
+                TRUE,
+                0
             FROM claimius.user_claim uc
             JOIN claimius.claim c
               ON c.id = uc.claim_id
@@ -255,7 +261,8 @@ BEGIN
             s.sa_owner_id,
             s.sa_root_id,
             NULL::UUID,
-            FALSE
+            FALSE,
+            s.lvl
         FROM settled s
         WHERE s.access <> 0
           AND (s.access & p_required) = p_required
@@ -678,6 +685,7 @@ DROP FUNCTION IF EXISTS claimius.require_access(UUID, UUID, TEXT, INTEGER);
 
 DROP FUNCTION IF EXISTS claimius.resolve_access(UUID, UUID, UUID, TEXT, INTEGER);
 DROP FUNCTION IF EXISTS claimius.resolve_access(UUID, UUID, TEXT, INTEGER);
+DROP FUNCTION IF EXISTS claimius.resolve_access(UUID, UUID, TEXT, TEXT, INTEGER);
 CREATE OR REPLACE FUNCTION claimius.resolve_access(
     p_user_id     UUID,
     p_app_id      UUID,
@@ -694,7 +702,8 @@ CREATE OR REPLACE FUNCTION claimius.resolve_access(
                     sa_owner_id    UUID,
                     sa_root_id     UUID,
                     sa_location_id UUID,
-                    direct_grant   BOOLEAN
+                    direct_grant   BOOLEAN,
+                    level          INTEGER
                 ) AS $$
 BEGIN
     IF p_object_type <> 'claimius.samna_user'
@@ -707,7 +716,7 @@ BEGIN
             SELECT a.id, NULL::UUID, NULL::UUID, 'audit'::TEXT,
                    p_required, NULL::JSONB, a.sa_owner_id,
                    (SELECT o.sa_root_id FROM claimius.organization o WHERE o.id = a.sa_owner_id),
-                   NULL::UUID, TRUE
+                   NULL::UUID, TRUE, 0
             FROM claimius.audit a
             WHERE a.id = p_object_id::UUID
               AND a.app_id = p_app_id
@@ -719,7 +728,7 @@ BEGIN
     ELSIF p_object_type = 'claimius.user_relation' THEN
         RETURN QUERY
             SELECT r.id, NULL::UUID, NULL::UUID, 'user_relation'::TEXT,
-                   p_required, NULL::JSONB, p_user_id, p_user_id, NULL::UUID, TRUE
+                   p_required, NULL::JSONB, p_user_id, p_user_id, NULL::UUID, TRUE, 0
             FROM claimius.user_relation r
             WHERE r.id = p_object_id::UUID
               AND r.user_id = p_user_id
@@ -729,7 +738,7 @@ BEGIN
         RETURN QUERY
             SELECT u.target_user_id, u.user_claim_id, u.claim_id, u.claim_name, u.access,
                    NULL::JSONB, COALESCE(u.owner_id, p_user_id), COALESCE(u.root_id, p_user_id),
-                   u.location_id, u.direct_grant
+                   u.location_id, u.direct_grant, 0
             FROM claimius.get_user_access(p_user_id, p_app_id, p_object_id, p_required) u;
         RETURN;
     END IF;
@@ -742,10 +751,11 @@ BEGIN
 
     RETURN QUERY
         SELECT g.user_object_id, g.user_claim_id, g.claim_id, g.claim_name, g.sa_access,
-               g.scope, g.sa_owner_id, g.sa_root_id, g.sa_location_id, g.direct_grant
+               g.scope, g.sa_owner_id, g.sa_root_id, g.sa_location_id, g.direct_grant, g.level
         FROM claimius.get_direct_access(p_user_id, p_app_id, p_object_id::UUID, p_object_type, p_required) g;
 END;
 $$ LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path = claimius, pg_temp;
+DROP FUNCTION IF EXISTS claimius.resolve_access(UUID, TEXT, TEXT, INTEGER);
 CREATE OR REPLACE FUNCTION claimius.resolve_access(
     p_user_id     UUID,
     p_object_id   TEXT,
@@ -761,7 +771,8 @@ CREATE OR REPLACE FUNCTION claimius.resolve_access(
                     sa_owner_id    UUID,
                     sa_root_id     UUID,
                     sa_location_id UUID,
-                    direct_grant   BOOLEAN
+                    direct_grant   BOOLEAN,
+                    level          INTEGER
                 ) AS $$
     SELECT * FROM claimius.resolve_access(p_user_id, claimius.get_app_id(), p_object_id, p_object_type, p_required);
 $$ LANGUAGE sql VOLATILE SECURITY DEFINER SET search_path = claimius, pg_temp;
@@ -773,6 +784,7 @@ GRANT EXECUTE ON FUNCTION claimius.resolve_access(UUID, UUID, TEXT, TEXT, INTEGE
     TO claimius_disciple_client, claimius_writer, claimius_admin, claimius_reader;
 
 DROP FUNCTION IF EXISTS claimius.mutation_access(UUID, UUID, TEXT, INTEGER);
+DROP FUNCTION IF EXISTS claimius.mutation_access(UUID, TEXT, TEXT, INTEGER);
 CREATE OR REPLACE FUNCTION claimius.mutation_access(
     p_user_id     UUID,
     p_object_id   TEXT,
@@ -788,7 +800,8 @@ CREATE OR REPLACE FUNCTION claimius.mutation_access(
                     sa_owner_id    UUID,
                     sa_root_id     UUID,
                     sa_location_id UUID,
-                    direct_grant   BOOLEAN
+                    direct_grant   BOOLEAN,
+                    level          INTEGER
                 ) AS $$
 DECLARE
     v_app_id UUID := claimius.get_app_id();
@@ -928,6 +941,7 @@ COMMENT ON FUNCTION claimius.get_claims(UUID, UUID, UUID, TEXT) IS 'All claims t
 -- p_required_access is dropped. It reads no user_object and settles nothing.
 -- ----------------------------------------------------------------------------
 
+DROP FUNCTION IF EXISTS claimius.get_scope_access(UUID, UUID, JSONPATH, INTEGER);
 CREATE OR REPLACE FUNCTION claimius.get_scope_access(
     p_user_id          UUID,
     p_app_id           UUID,
@@ -943,7 +957,8 @@ CREATE OR REPLACE FUNCTION claimius.get_scope_access(
                     object_row_id   UUID,
                     object_scope    JSONB,
                     object_access   INTEGER,
-                    object_inherits BOOLEAN
+                    object_inherits BOOLEAN,
+                    level           INTEGER
                 ) LANGUAGE sql STABLE SECURITY DEFINER SET search_path = claimius, pg_temp AS $$
     WITH bound AS (
         SELECT uc.id AS held_id,
@@ -983,7 +998,7 @@ CREATE OR REPLACE FUNCTION claimius.get_scope_access(
         WHERE (b.e & 16) = 0
     )
     SELECT s.held_id, s.held_claim_id, s.held_claim_name, s.access, s.binding_owner_id, s.binding_root_id,
-           s.binding_id, s.binding_scope, s.binding_access, s.binding_inherits
+           s.binding_id, s.binding_scope, s.binding_access, s.binding_inherits, s.lvl
     FROM settled s
     WHERE s.access <> 0
       AND (s.access & p_required_access) = p_required_access
@@ -992,6 +1007,7 @@ $$;
 
 COMMENT ON FUNCTION claimius.get_scope_access(UUID, UUID, JSONPATH, INTEGER) IS 'Object-less bindings of the user''s live grants whose scope matches a jsonpath, one row per binding, each mask the claim mask narrowed by the binding mask, less the bits of the deny bindings matching the same path at the level of its claim or above, closed under implication.';
 
+DROP FUNCTION IF EXISTS claimius.get_scope_access(UUID, JSONPATH, INTEGER);
 CREATE OR REPLACE FUNCTION claimius.get_scope_access(
     p_user_id          UUID,
     p_path             JSONPATH,
@@ -1006,7 +1022,8 @@ CREATE OR REPLACE FUNCTION claimius.get_scope_access(
                     object_row_id   UUID,
                     object_scope    JSONB,
                     object_access   INTEGER,
-                    object_inherits BOOLEAN
+                    object_inherits BOOLEAN,
+                    level           INTEGER
                 ) LANGUAGE sql STABLE SECURITY DEFINER SET search_path = claimius, pg_temp AS $$
     SELECT * FROM claimius.get_scope_access(p_user_id, claimius.get_app_id(), p_path, p_required_access);
 $$;

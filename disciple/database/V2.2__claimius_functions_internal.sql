@@ -649,6 +649,7 @@ $$ LANGUAGE plpgsql STABLE;
 -- whose mask covers p_required_access. Inlinable SRF shared by get_access,
 -- get_objects, and search so every read path resolves the actor token
 -- identically.
+DROP FUNCTION IF EXISTS claimius._best_grant(JSONB, UUID, INTEGER);
 CREATE OR REPLACE FUNCTION claimius._best_grant(
     p_grants          JSONB,
     p_user_id         UUID,
@@ -659,7 +660,8 @@ CREATE OR REPLACE FUNCTION claimius._best_grant(
                     claim_name       TEXT,
                     access_bits      INTEGER,
                     grant_scope      JSONB,
-                    claim_created_at TIMESTAMPTZ
+                    claim_created_at TIMESTAMPTZ,
+                    grant_level      INTEGER
                 ) LANGUAGE sql STABLE AS $$
     SELECT
         uc.id,
@@ -667,7 +669,8 @@ CREATE OR REPLACE FUNCTION claimius._best_grant(
         c.name,
         (g ->> 'access')::INTEGER,
         g -> 'scope',
-        c.sa_created_at
+        c.sa_created_at,
+        coalesce((g ->> 'level')::INTEGER, 0)
     FROM jsonb_array_elements(p_grants) g
              JOIN claimius.user_claim uc ON uc.claim_id = (g ->> 'claim_id')::UUID
         AND uc.user_id = p_user_id
@@ -676,7 +679,7 @@ CREATE OR REPLACE FUNCTION claimius._best_grant(
         AND (uc.ends_at IS NULL OR uc.ends_at > now())
              JOIN claimius.claim c ON c.id = uc.claim_id AND c.sa_deleted_at IS NULL
     WHERE ((g ->> 'access')::INTEGER & p_required_access) = p_required_access
-    ORDER BY claimius._popcount((g ->> 'access')::INTEGER) DESC, (g ->> 'access')::INTEGER DESC, c.sa_created_at ASC
+    ORDER BY claimius._popcount((g ->> 'access')::INTEGER) DESC, (g ->> 'access')::INTEGER DESC, coalesce((g ->> 'level')::INTEGER, 0) DESC, c.sa_created_at ASC
     LIMIT 1
 $$;
 
