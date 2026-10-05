@@ -26,6 +26,8 @@ Results group by claim. Each returned `AccessClaim` carries `UserClaimID`, `Clai
 
 Two grants that ride this path in practice: page and navigation gating keyed by page slug, and machine client capabilities such as an api client that may read only the public subset of a resource.
 
+Every `AccessClaim` carries `Level`, the level of the claim its grant came through; a composed grant carries the higher level of its two claims, and a synthesized row carries 0. `ScopeAccess` fills it from the claim of each group.
+
 ## Why the self case matters
 
 `GetAccess` and `GetDirectAccess` both short circuit when `objectType == OBJECT_TYPE_USER` and `userID == objectID`:
@@ -36,7 +38,7 @@ if objectType == OBJECT_TYPE_USER && userID == objectID {
 }
 ```
 
-The synthesized `*AccessClaim` carries `UserObjectID = userID`, `Access = int(requiredAccess)`, `OwnerID = userID`, `RootID = userID`, `DirectGrant = true`. This is why `MutationAccess(actor, actor, OBJECT_TYPE_USER, ACCESS_WRITE)` succeeds for self writes even though no `user_claim` row binds a user to their own `samna_user` row in the database.
+The synthesized `*AccessClaim` carries `UserObjectID = userID`, `Access = int(requiredAccess)`, `OwnerID = userID`, `RootID = userID`, `DirectGrant = true`, `Level = 0`. This is why `MutationAccess(actor, actor, OBJECT_TYPE_USER, ACCESS_WRITE)` succeeds for self writes even though no `user_claim` row binds a user to their own `samna_user` row in the database.
 
 ## SQL gate semantics
 

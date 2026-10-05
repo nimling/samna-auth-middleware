@@ -19,6 +19,18 @@ A deny is a derivation whose effective mask carries the deny bit, 16: a claim st
 | `direct` | A binding on the object itself, held or composed |
 | `ownership`, `location`, `parenthood` | A binding on an ancestor, held or composed, through that tree |
 
+## Levels
+
+Every claim carries `level`, an integer from 0 that defaults to 0, and every derivation carries the level of its claim; a composed derivation carries the higher level of A and B. Levels order the denies before the classes do:
+
+1. A deny subtracts from every grant below its level, whatever the classes of the two. A level 9 deny bound on an organization removes a level 0 grant bound directly on an object below it.
+
+2. At the same level the classes decide, as below: a `direct` deny subtracts from every grant, a tree deny from the tree grants.
+
+3. A deny below a grant's level does not touch it.
+
+With every claim at level 0 the classes alone decide, so a deployment that never sets a level resolves as before levels existed. `_apply_denies`, the ancestor walk in `get_direct_access` and `get_scope_access` apply the same rule, and a derivation's level is stored in `grants` only when it is above 0.
+
 ## How a deny subtracts
 
 `_apply_denies` settles the derivations of one pair, with the symbols of [the model](./index.md#the-access-of-a-pair):

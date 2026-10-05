@@ -20,7 +20,7 @@ This repo publishes two artefacts: the Go module consumed via `go get github.com
 
 ## Always
 
-1. Update or add Go tests beside the package they cover, as `<package>/<name>_test.go`, for any change that has an observable contract on the Go side. Database backed Go tests carry the `dbtest` build tag and SQL tests are pgTAP files under `test/sql/<role>/`. `just test` runs `go test ./...`, then per role `smig test` on `<role>/database/migrate.yml` fresh and `--from` the last tag, then the `dbtest` tagged suites against the container that run keeps. Hurl tests live in `test/hurl/` and `just test-hurl` runs them against the example disciple. There is no `test/run.sh`.
+1. Update or add Go tests beside the package they cover, as `<package>/<name>_test.go`, for any change that has an observable contract on the Go side. Database backed Go tests carry the `dbtest` build tag and SQL tests are pgTAP files under `test/sql/<role>/`. `just test` runs `go test ./...`, then per role `smig test` on `<role>/database/migrate.yml` fresh and `--from` the last tag, then the `dbtest` tagged suites against the container that run keeps. Hurl tests live in `test/hurl/` and `just test-hurl` runs them against the example disciple. `just verify` builds a prophet and a disciple from the tree, serves the prophet in process and checks that every user of one scenario reads the same objects at the same level on both, after the snapshot and after a change through the feed; `just test` runs the same check. There is no `test/run.sh`.
 
 2. Update or add typescript tests beside the module they cover as `ts/src/<name>.test.ts` for any change that has an observable contract on the typescript side.
 

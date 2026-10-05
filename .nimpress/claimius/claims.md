@@ -86,11 +86,13 @@ so the grant bits are what both the link and the binding carry, and a deny on ei
 
 1. The link must inherit and B must inherit: `link.inherits` and `B.inherits`.
 
-2. A composed grant keeps the class of the binding's position. On B's bound object it is class `direct`; where B's binding inherits, it cascades to the descendants with the class of the tree, exactly as B's own grant does. So a deny treats a composed grant as it treats a grant of B; see [Denials](./denials.md).
+2. A composed grant takes the higher level of A and B, and the claim of that level decides its bits: eff(A, l) when A is higher, eff(B, b) when B is higher, and comp(A, l, B, b) at the same level, where A, the claim linking, controls.
 
-3. A does not absorb B's grants. Holding A does not make you whoever holds B.
+3. A composed grant keeps the class of the binding's position. On B's bound object it is class `direct`; where B's binding inherits, it cascades to the descendants with the class of the tree, exactly as B's own grant does. So a deny treats a composed grant as it treats a grant of B; see [Denials](./denials.md).
 
-4. Composition is single hop. The composition rules consume a binding of B, never a link of B, so a link on B is not followed.
+4. A does not absorb B's grants. Holding A does not make you whoever holds B.
+
+5. Composition is single hop. The composition rules consume a binding of B, never a link of B, so a link on B is not followed.
 
 `_check_claim_composition` enforces the link, outside replay: a link to its own claim and a link whose reverse is live are refused with one probe of `idx_claim_object_object`, and the writer must hold read on B: after settling the writer's pair on B, one probe of the writer's `user_object` row on `(claimius.claim, B)` with bit 4. A holder of B reads B, and so does a holder of a claim bound on B; see [the derivations](./index.md#derivations).
 
@@ -122,7 +124,7 @@ Nothing is revoked and no job runs, the way an [RFC 5280](https://www.rfc-editor
 
 ## Choosing the grant
 
-`_best_grant(grants, user, app, required)` returns, among the derivations of a pair whose mask covers `required` and whose grant is live and in its window, the one with the most bits set, then the highest mask, then the oldest claim. It reads per derivation one probe of `idx_user_claim_unique` and one `claim` primary key probe, `2 G_x`. `get_direct_access` orders its candidates by the fewest hops from the object, then the most bits, then the grant id.
+`_best_grant(grants, user, app, required)` returns, among the derivations of a pair whose mask covers `required` and whose grant is live and in its window, the one with the most bits set, then the highest mask, then the highest level, then the oldest claim. Every access row carries the level of the grant it chose. It reads per derivation one probe of `idx_user_claim_unique` and one `claim` primary key probe, `2 G_x`. `get_direct_access` orders its candidates by the fewest hops from the object, then the most bits, then the grant id.
 
 ## The single object gate
 

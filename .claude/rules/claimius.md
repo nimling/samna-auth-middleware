@@ -268,7 +268,7 @@ Disciples do not carry `app_object` at all, and their `organization` and `locati
 
 On a grant claim with the deny bit clear, `insert_claim` expands the mask: owner implies write, read and execute; write implies read and execute; execute implies read. The member bit stands alone. A `claim_object.sa_access` of NULL means the claim mask. A binding mask narrows its claim and never widens it: the mask a grant carries through a binding is `claim & expand(coalesce(binding, claim))`. A composed grant carries the bits both the link and the target binding carry, and cascades from the binding's position like any binding.
 
-There is no access level. Any column, parameter or payload key naming one is wrong.
+There is no access level: a required access is a mask. `claim.level` is precedence, not access: a deny subtracts from every grant below its level whatever their classes, at the same level the direct and tree classes decide, a link takes the higher level of its two claims, and every access row and `AccessClaim` carries the level of its grant. A binding or grant of a claim above level 0 needs an actor that could hand it out: the level on the object for a binding, write on the claim and no lower deny lifted for a grant or a raise. Level 0 everywhere resolves as before levels existed.
 
 ### Deny semantics
 
