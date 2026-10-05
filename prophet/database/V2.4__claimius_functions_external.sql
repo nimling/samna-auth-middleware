@@ -2613,6 +2613,12 @@ BEGIN
                 UPDATE claimius.samna_user
                 SET user_id = p_target_user_id, sa_updated_at = now()
                 WHERE id = v_source_app_user.id;
+                UPDATE claimius.user_claim SET user_id = p_target_user_id
+                WHERE user_id = p_source_user_id AND app_id = v_app_row.app_id;
+                UPDATE claimius.user_relation SET user_id = p_target_user_id
+                WHERE user_id = p_source_user_id AND app_id = v_app_row.app_id;
+                UPDATE claimius.user_field SET user_id = p_target_user_id
+                WHERE user_id = p_source_user_id AND app_id = v_app_row.app_id;
             ELSE
                 -- Target already has a row for this app. Merge claims/relations/fields.
                 UPDATE claimius.user_claim s SET sa_deleted_at = now()
@@ -2664,7 +2670,7 @@ BEGIN
                     v_app_row.app_id,
                     'merge_user', 'merge', 'claimius.samna_user',
                     p_target_user_id,
-                    v_target_app_user.app_id,
+                    v_app_row.app_id,
                     coalesce(p_acting_user_claim, p_target_user_id),
                     'Merged source ' || p_source_user_id::TEXT || ' into target ' || p_target_user_id::TEXT
                     );

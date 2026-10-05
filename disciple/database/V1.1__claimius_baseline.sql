@@ -11,7 +11,7 @@
 --   5. Registry                 table_info, inheritance_info
 --   6. Materialized access      user_object, object_info, user_users
 --   7. Sync                     sync_event, prophet_state, disciple_state,
---                               reconcile_queue, sync_parked
+--                               reconcile_queue
 --   8. Audit                    audit
 --   9. Extensibility            object_field, user_field, user_relation
 --
@@ -693,21 +693,6 @@ CREATE TABLE IF NOT EXISTS claimius.reconcile_queue (
 COMMENT ON TABLE claimius.reconcile_queue IS 'Disciple side retry queue for failed event applications.';
 
 CREATE INDEX IF NOT EXISTS idx_reconcile_queue_user ON claimius.reconcile_queue (user_id);
-
-CREATE TABLE IF NOT EXISTS claimius.sync_parked (
-                                                    event_type      TEXT NOT NULL,
-                                                    object_id       UUID NOT NULL,
-                                                    operation       claimius.sync_operation NOT NULL,
-                                                    payload         JSONB NOT NULL,
-                                                    txid            BIGINT NOT NULL,
-                                                    seq             BIGINT NOT NULL,
-                                                    error           TEXT NOT NULL,
-                                                    sa_created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
-                                                    sa_updated_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
-                                                    PRIMARY KEY (event_type, object_id)
-);
-
-COMMENT ON TABLE claimius.sync_parked IS 'Feed records the disciple could not apply for a missing parent row, one per row, the latest record of the row kept. The cursor moves past them; each applied page and snapshot retries them in feed order and drops those that apply. A later record of the same row that applies drops the parked one.';
 
 -- access_diff
 -- The outstanding areas of access that no longer reflect their inputs. A write

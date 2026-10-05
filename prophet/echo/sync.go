@@ -228,12 +228,6 @@ func GetSyncSnapshot(ctx echo.Context) error {
 					q = q.Order("sa_level", "id")
 				} else if t.filterApp && appID != uuid.Nil {
 					q = q.Where("app_id = ?", appID)
-					switch t.eventType {
-					case "claimius.claim", "claimius.user_claim":
-						q = q.Where("claimius.app_has_scope(?, sa_owner_id)", appID)
-					case "claimius.claim_object":
-						q = q.Where("claimius.app_has_scope(?, sa_owner_id, object_type, object_id)", appID)
-					}
 				}
 				if err := q.Scan(txCtx); err != nil {
 					ctx.Logger().Errorf("snapshot %s: %v", t.eventType, err)

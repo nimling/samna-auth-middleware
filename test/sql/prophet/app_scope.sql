@@ -1,5 +1,5 @@
 BEGIN;
-SELECT plan(15);
+SELECT plan(9);
 
 CREATE FUNCTION pg_temp.app() RETURNS UUID AS $$
     SELECT id FROM claimius.samna_app WHERE slug = 'sqltest_scope'
@@ -106,63 +106,11 @@ SELECT lives_ok(
     'an out of scope row can still be soft deleted'
 );
 
-DO $$
-BEGIN
-    PERFORM claimius.delete_app_object(pg_temp.app(), 'claimius.organization', '10000000-0000-4000-8000-0000000005c2');
-    PERFORM claimius.insert_claim(p_app_id => pg_temp.app(), p_name => 'In scope', p_description => NULL, p_sa_access => 4,
-        p_sa_owner_id => pg_temp.system_org(), p_sa_root_id => pg_temp.system_org(), p_sa_created_by => pg_temp.actor());
-END $$;
-
-SELECT ok(
-    EXISTS (SELECT 1 FROM claimius.sync_event
-             WHERE app_id = pg_temp.app() AND event_type = 'claimius.claim' AND payload ->> 'name' = 'Linked'),
-    'the claim written while its organization was linked is in the app''s sync_event'
-);
-
-SELECT is_empty(
-    format($$SELECT 1 FROM claimius.get_sync_events(%L, 0, 0) e
-              WHERE e.event_type = 'claimius.claim' AND e.payload ->> 'name' = 'Linked'$$, pg_temp.app()),
-    'the delta feed leaves out a claim whose organization is no longer linked to the app'
-);
-
-SELECT is_empty(
-    format($$SELECT 1 FROM claimius.get_peer_snapshot(%L) s
-              WHERE s.event_type = 'claimius.claim' AND s.payload ->> 'name' = 'Linked'$$, pg_temp.app()),
-    'the peer snapshot leaves out a claim whose organization is not linked to the app'
-);
-
-SELECT ok(
-    EXISTS (SELECT 1 FROM claimius.get_sync_events(pg_temp.app(), 0, 0) e
-             WHERE e.event_type = 'claimius.claim' AND e.payload ->> 'name' = 'In scope'),
-    'the delta feed still carries the claims in scope'
-);
-
 SELECT throws_ok(
     format($$UPDATE claimius.claim SET sa_owner_id = '10000000-0000-4000-8000-0000000005c1' WHERE id = %L$$, pg_temp.system_claim()),
     'P0403',
     NULL,
     'moving a claim to an organization not linked to its app is refused'
-);
-
-DO $$
-BEGIN
-    CREATE TEMP TABLE before_link AS SELECT coalesce(max(seq), 0) AS seq FROM claimius.sync_event;
-    PERFORM claimius.upsert_app_object(pg_temp.app(), 'claimius.organization', '10000000-0000-4000-8000-0000000005c2', pg_temp.actor());
-END $$;
-
-SELECT is(
-    ARRAY(SELECT e.event_type FROM claimius.get_sync_events(pg_temp.app(), 0, 0) e
-           WHERE e.seq > (SELECT seq FROM before_link)
-             AND (e.payload ->> 'id' = '10000000-0000-4000-8000-0000000005c2' OR e.payload ->> 'name' = 'Linked')
-           ORDER BY e.seq),
-    ARRAY['claimius.organization', 'claimius.claim'],
-    'linking the organization again publishes it, then the app''s claim it owns'
-);
-
-SELECT ok(
-    EXISTS (SELECT 1 FROM claimius.get_peer_snapshot(pg_temp.app()) s
-             WHERE s.event_type = 'claimius.claim' AND s.payload ->> 'name' = 'Linked'),
-    'once linked the snapshot carries the claim'
 );
 
 SELECT * FROM finish();

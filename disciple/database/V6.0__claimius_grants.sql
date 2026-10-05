@@ -16,7 +16,7 @@ BEGIN
     EXECUTE 'REVOKE EXECUTE ON FUNCTION claimius.insert_claim, claimius.update_claim, claimius.delete_claim,
              claimius.insert_user_claim, claimius.update_user_claim, claimius.delete_user_claim,
              claimius.insert_claim_object, claimius.update_claim_object, claimius.delete_claim_object,
-             claimius.merge_user, claimius.migrate_root,
+             claimius.migrate_root,
              claimius.upsert_disciple_state, claimius.insert_secret,
              claimius.upsert_table_info, claimius.upsert_internal_table_info,
              claimius.recompute_state
@@ -27,7 +27,7 @@ BEGIN
              claimius.claim, claimius.user_claim, claimius.claim_object,
              claimius.object_field, claimius.user_field, claimius.user_relation,
              claimius.audit, claimius.inheritance_info, claimius.table_info,
-             claimius.notification, claimius.claim_graph_cache, claimius.sync_parked
+             claimius.notification, claimius.claim_graph_cache
              TO claimius_disciple_client';
     EXECUTE 'REVOKE INSERT, UPDATE, DELETE ON claimius.claim_graph_cache FROM claimius_reader';
     EXECUTE 'GRANT SELECT ON ALL TABLES IN SCHEMA claimius TO claimius_disciple_client';

@@ -1033,34 +1033,11 @@ BEGIN
         VALUES ('upsert', v_link.object_type, v_payload, v_link.app_id);
     END IF;
 
-    INSERT INTO claimius.sync_event (operation, event_type, payload, app_id)
-    SELECT 'upsert', s.event_type, s.payload, v_link.app_id
-    FROM (
-        SELECT 1 AS step, 'claimius.claim' AS event_type, to_jsonb(c) - 'txid' AS payload, c.sa_created_at AS created
-        FROM claimius.claim c
-        WHERE c.app_id = v_link.app_id
-          AND v_link.object_type = 'claimius.organization'
-          AND c.sa_owner_id = v_link.object_id
-        UNION ALL
-        SELECT 2, 'claimius.user_claim', to_jsonb(uc) - 'txid', uc.sa_created_at
-        FROM claimius.user_claim uc
-        WHERE uc.app_id = v_link.app_id
-          AND v_link.object_type = 'claimius.organization'
-          AND uc.sa_owner_id = v_link.object_id
-        UNION ALL
-        SELECT 3, 'claimius.claim_object', to_jsonb(co) - 'txid', co.sa_created_at
-        FROM claimius.claim_object co
-        WHERE co.app_id = v_link.app_id
-          AND ((v_link.object_type = 'claimius.organization' AND co.sa_owner_id = v_link.object_id)
-               OR (co.object_type = v_link.object_type AND co.object_id = v_link.object_id))
-    ) s
-    ORDER BY s.step, s.created;
-
     RETURN coalesce(NEW, OLD);
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius.emit_app_object_sync_event() IS 'Trigger on app_object. Publishes the linked row to the app on link, followed by the app''s claims, grants and bindings scoped to it, and its delete on unlink.';
+COMMENT ON FUNCTION claimius.emit_app_object_sync_event() IS 'Trigger on app_object. Publishes the linked row to the app on link and its delete on unlink.';
 
 -- ----------------------------------------------------------------------------
 -- get_app_home

@@ -16,6 +16,7 @@ INSERT INTO superseded VALUES
         ('claimius.remove_claim_object(uuid,uuid)'),
         ('claimius.init_claimius_tables(text[])'),
         ('claimius.init_claimius_internal()'),
+        ('claimius.merge_user(uuid,uuid,uuid)'),
         ('claimius.create_root_organization(text,uuid,text,text,uuid,text)'),
         ('claimius.init(text)'),
         ('claimius.ensure_app_user(uuid,text,text,text,text,text,text,text)'),
