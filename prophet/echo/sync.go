@@ -221,10 +221,11 @@ func GetSyncSnapshot(ctx echo.Context) error {
 		} else {
 			for _, t := range tables {
 				q := tx.NewSelect().Model(t.model)
-				if t.eventType == "claimius.organization" || t.eventType == "claimius.location" {
+				if t.eventType == string(OBJECT_TYPE_ORGANIZATION) || t.eventType == string(OBJECT_TYPE_LOCATION) {
 					if appID != uuid.Nil {
 						q = q.Where("id IN (SELECT claimius.app_object_ids(?, ?))", appID, t.eventType)
 					}
+					q = q.Order("sa_level", "id")
 				} else if t.filterApp && appID != uuid.Nil {
 					q = q.Where("app_id = ?", appID)
 				}

@@ -434,6 +434,9 @@ func (q *InsertQuery) route(ctx context.Context, dest ...any) error {
 		if errors.Is(err, client.ErrForbidden) {
 			return fmt.Errorf("%w: %w", ErrNoAccess, err)
 		}
+		if errors.Is(err, client.ErrNotFound) {
+			return fmt.Errorf("%w: %w", ErrNotFound, err)
+		}
 		return err
 	}
 	q.created = status == http.StatusCreated
@@ -449,6 +452,8 @@ func (q *InsertQuery) execClaimius(ctx context.Context, dest ...any) (handled bo
 		var pgErr pgdriver.Error
 		if errors.As(err, &pgErr) && pgErr.Field('C') == "P0403" {
 			err = fmt.Errorf("%w: %w", ErrNoAccess, err)
+		} else if errors.As(err, &pgErr) && pgErr.Field('C') == "P0404" {
+			err = fmt.Errorf("%w: %w", ErrNotFound, err)
 		}
 	}()
 	switch m := q.model.(type) {
@@ -785,6 +790,9 @@ func (q *UpdateQuery) route(ctx context.Context, dest ...any) error {
 		if errors.Is(err, client.ErrForbidden) {
 			return fmt.Errorf("%w: %w", ErrNoAccess, err)
 		}
+		if errors.Is(err, client.ErrNotFound) {
+			return fmt.Errorf("%w: %w", ErrNotFound, err)
+		}
 		return err
 	}
 	return q.db.applyRouted(ctx, q.model, raw, dest...)
@@ -797,6 +805,8 @@ func (q *UpdateQuery) execClaimius(ctx context.Context, dest ...any) (handled bo
 		var pgErr pgdriver.Error
 		if errors.As(err, &pgErr) && pgErr.Field('C') == "P0403" {
 			err = fmt.Errorf("%w: %w", ErrNoAccess, err)
+		} else if errors.As(err, &pgErr) && pgErr.Field('C') == "P0404" {
+			err = fmt.Errorf("%w: %w", ErrNotFound, err)
 		}
 	}()
 	if q.recordID == uuid.Nil {
@@ -1002,6 +1012,9 @@ func (q *DeleteQuery) route(ctx context.Context, dest ...any) error {
 		if errors.Is(err, client.ErrForbidden) {
 			return fmt.Errorf("%w: %w", ErrNoAccess, err)
 		}
+		if errors.Is(err, client.ErrNotFound) {
+			return fmt.Errorf("%w: %w", ErrNotFound, err)
+		}
 		return err
 	}
 	return q.db.applyRouted(ctx, q.model, raw, dest...)
@@ -1014,6 +1027,8 @@ func (q *DeleteQuery) execClaimius(ctx context.Context, dest ...any) (handled bo
 		var pgErr pgdriver.Error
 		if errors.As(err, &pgErr) && pgErr.Field('C') == "P0403" {
 			err = fmt.Errorf("%w: %w", ErrNoAccess, err)
+		} else if errors.As(err, &pgErr) && pgErr.Field('C') == "P0404" {
+			err = fmt.Errorf("%w: %w", ErrNotFound, err)
 		}
 	}()
 	if q.recordID == uuid.Nil {

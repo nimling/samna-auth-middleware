@@ -229,6 +229,18 @@ func TestARefusedWriteIsErrNoAccessRoutedOrLocal(t *testing.T) {
 		t.Fatalf("a write the prophet answers 403 must be ErrNoAccess, got %v", err)
 	}
 
+	missing := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		w.Write([]byte(`{"data":null,"count":0,"error":{"message":"Not Found"}}`))
+	}))
+	defer missing.Close()
+	t.Setenv("SAUTH_ENDPOINT", missing.URL)
+	objectID := uuid.New()
+	if _, err := db.NewDelete().Model(&sdb.ClaimObject{ClaimID: uuid.New(), ObjectID: &objectID}).Access(ac).Exec(ctx); !errors.Is(err, sdb.ErrNotFound) {
+		t.Fatalf("a delete the prophet answers 404 must be ErrNotFound, got %v", err)
+	}
+
 	db.RouteToProphet = false
 	claim, err := db.CreateClaim(ctx, ac, sdb.CreateClaimParams{Name: "Level 5 grant", Access: sdb.ACCESS_READ, Level: 5})
 	if err != nil {
