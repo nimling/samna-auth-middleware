@@ -4780,6 +4780,10 @@ CREATE OR REPLACE FUNCTION claimius.notify_object(
     p_link TEXT, p_object_type TEXT, p_object_id UUID, p_created_by UUID,
     p_owner_id UUID, p_repeats_at INTERVAL
 ) RETURNS INTEGER AS $$
+    SELECT claimius.reconcile_if_pending(p_app_id, a.user_id, p_object_type, p_object_id)
+    FROM claimius._affected_users_for_object(p_app_id, p_object_type, p_object_id) a
+    WHERE p_created_by IS NULL OR a.user_id <> p_created_by;
+
     WITH inserted AS (
         INSERT INTO claimius.notification
             (app_id, user_id, title, description, style, type, link,
@@ -4798,7 +4802,7 @@ CREATE OR REPLACE FUNCTION claimius.notify_object(
     SELECT count(*)::INTEGER FROM inserted;
 $$ LANGUAGE sql;
 
-COMMENT ON FUNCTION claimius.notify_object(UUID, TEXT, TEXT, JSONB, TEXT, TEXT, TEXT, UUID, UUID, UUID, INTERVAL) IS 'Fans a notification out to every user holding read access on the object through user_object, excluding the triggering user. Returns the number of rows inserted.';
+COMMENT ON FUNCTION claimius.notify_object(UUID, TEXT, TEXT, JSONB, TEXT, TEXT, TEXT, UUID, UUID, UUID, INTERVAL) IS 'Fans a notification out to every user holding read access on the object in the app, excluding the triggering user. Settles first the pair of every user who may hold the object, so a reader who has not read it since the last write is reached. Returns the number of rows inserted.';
 
 GRANT EXECUTE ON FUNCTION claimius.notify_object(UUID, TEXT, TEXT, JSONB, TEXT, TEXT, TEXT, UUID, UUID, UUID, INTERVAL)
     TO claimius_writer, claimius_admin;
