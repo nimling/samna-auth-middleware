@@ -146,6 +146,22 @@ func checkSyncHome(ctx echo.Context, appID uuid.UUID) (bool, error) {
 	return false, nil
 }
 
+func checkPeerGrant(ctx echo.Context, appID uuid.UUID, peer bool) (bool, error) {
+	if !peer {
+		return false, nil
+	}
+	var granted bool
+	if err := sdb.Instance().NewRaw("SELECT EXISTS (SELECT 1 FROM claimius.get_peer_grant(?, ?))",
+		appID, ctx.Request().Header.Get(client.HeaderPeerSecret)).Scan(ctx.Request().Context(), &granted); err != nil {
+		ctx.Logger().Errorf("peer grant %s: %v", appID, err)
+		return true, respond.Error(ctx, http.StatusInternalServerError, "Internal server error")
+	}
+	if !granted {
+		return true, respond.Error(ctx, http.StatusForbidden, "No peer grant for this app")
+	}
+	return false, nil
+}
+
 func getSyncConsumer(ctx echo.Context) (uuid.UUID, error) {
 	raw := ctx.QueryParam("consumer")
 	if raw == "" {
@@ -163,6 +179,9 @@ func GetSyncSnapshot(ctx echo.Context) error {
 	peer := false
 	if err := echo.QueryParamsBinder(ctx).Bool("peer", &peer).BindError(); err != nil {
 		return respond.Error(ctx, http.StatusBadRequest, "Bad request")
+	}
+	if refused, err := checkPeerGrant(ctx, appID, peer); refused {
+		return err
 	}
 	if appID != uuid.Nil {
 		if refused, err := checkSyncHome(ctx, appID); refused {
@@ -279,6 +298,9 @@ func GetSyncEvents(ctx echo.Context) error {
 	appID, _ := ctx.Get("app_id").(uuid.UUID)
 	if appID == uuid.Nil {
 		return respond.Error(ctx, http.StatusUnauthorized, "Unauthorized")
+	}
+	if refused, err := checkPeerGrant(ctx, appID, peer); refused {
+		return err
 	}
 	if refused, err := checkSyncHome(ctx, appID); refused {
 		return err

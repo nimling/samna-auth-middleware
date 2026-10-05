@@ -166,6 +166,8 @@ Tables that have a write function:
 - `claim_object` → `insert_claim_object`, `update_claim_object`, `delete_claim_object`
 - `samna_user` → `upsert_app_user` for the per app row
 - `samna_secret` → `insert_secret`, which stores the encrypted value and binds the secret to the actor's claim; updates are direct
+- Guests → `upsert_guest_user`, prophet only, the guest of a claim in an app with its grant under the actor's owning grant
+- `peer_grant` → `upsert_peer_grant`, prophet only, a peer prophet's grant of an app this prophet is home for, keyed by its peer secret; `get_peer_grant` checks a secret
 - Cross app moves → `merge_user`
 - Cross root moves → `migrate_root`. Admin only, rare.
 - Bootstrap → `upsert_system_app` on the prophet set, taking the system app fields, and `upsert_disciple_state` on the disciple set, taking `p_disciple_app_slug`; the prophet set carries `upsert_disciple_state` and `upsert_prophet_peer` too. `upsert_prophet_peer` takes the system app fields plus `p_upstream_prophet`, `p_upstream_endpoint`, `p_upstream_app_slug` and `p_upstream_app_secret`, runs `upsert_system_app`, and registers the upstream in `prophet_peer`: a hybrid is a prophet that mirrors one app of a peer prophet, and it has no `disciple_state` row

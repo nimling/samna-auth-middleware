@@ -3,13 +3,14 @@ package sdb
 import (
 	"context"
 	"crypto/rsa"
-	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
+	"github.com/uptrace/bun/driver/pgdriver"
 
 	"github.com/nimling/samna-auth-middleware/v2/pkg/encryption"
 	"github.com/nimling/samna-auth-middleware/v2/shared"
@@ -26,78 +27,37 @@ type GuestTokenResponse struct {
 	EndsAt          *time.Time `json:"ends_at,omitempty"`
 }
 
-func IssueGuestToken(ctx context.Context, claimID uuid.UUID, userID uuid.UUID, issuer string) (*GuestTokenResponse, error) {
-	d := instance
+func IssueGuestToken(ctx context.Context, appID uuid.UUID, masterKey encryption.MasterKeyPair, claimID uuid.UUID, userID uuid.UUID, issuer string) (*GuestTokenResponse, error) {
+	guestUserID := uuid.NewSHA1(appID, []byte("guest:"+claimID.String()))
 
-	app, err := d.GetApp(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("get app: %w", err)
+	var payload []byte
+	if err := instance.NewRaw("SELECT claimius.upsert_guest_user(?, ?, ?, ?)", appID, claimID, userID, guestUserID).Scan(ctx, &payload); err != nil {
+		var pgErr pgdriver.Error
+		if errors.As(err, &pgErr) {
+			switch pgErr.Field('C') {
+			case "P0404":
+				return nil, shared.ErrNotFound
+			case "P0403":
+				return nil, shared.ErrNoAccess
+			}
+		}
+		return nil, fmt.Errorf("upsert guest user: %w", err)
 	}
-
-	var claim shared.Claim
-	err = d.NewSelect().
-		Model(&claim).
-		ExcludeColumn("sa_deleted_at").
-		Where("id = ?", claimID).
-		Where("sa_deleted_at IS NULL").
-		Limit(1).
-		Scan(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("read claim: %w", err)
+	var guest struct {
+		UserClaim struct {
+			StartsAt *time.Time `json:"starts_at"`
+			EndsAt   *time.Time `json:"ends_at"`
+		} `json:"user_claim"`
 	}
-
-	guestUserID := uuid.NewSHA1(app.ID, []byte("guest:"+claimID.String()))
-
-	var existingClaim shared.UserClaim
-	err = d.NewSelect().
-		Model(&existingClaim).
-		ExcludeColumn("sa_deleted_at").
-		Where("claim_id = ?", claimID).
-		Where("user_id = ?", guestUserID).
-		Where("sa_deleted_at IS NULL").
-		Limit(1).
-		Scan(ctx)
-
-	if errors.Is(err, sql.ErrNoRows) {
-		guestType := "guest"
-		guestFirst := "Guest"
-		guestUser := shared.SamnaUser{
-			UserID:    guestUserID,
-			FirstName: &guestFirst,
-			Type:      &guestType,
-		}
-		guestClaim := shared.UserClaim{
-			ClaimID: claimID,
-			UserID:  guestUserID,
-			OwnerID: claim.OwnerID,
-		}
-
-		if err := d.NewInsert().Model(&guestUser).Scan(ctx, &guestUser); err != nil {
-			return nil, fmt.Errorf("upsert guest user: %w", err)
-		}
-		ac, accErr := d.MutationAccess(ctx, userID, claimID, shared.OBJECT_TYPE_CLAIM, shared.ACCESS_OWNER)
-		if accErr != nil {
-			return nil, fmt.Errorf("guest claim access: %w", accErr)
-		}
-		guestClaim.ClaimID = claimID
-		if err := d.NewInsert().Model(&guestClaim).Access(ac).Scan(ctx, &guestClaim); err != nil {
-			return nil, fmt.Errorf("assign guest claim: %w", err)
-		}
-		existingClaim = guestClaim
-	} else if err != nil {
-		return nil, fmt.Errorf("read user_claim: %w", err)
-	}
-
-	masterKey, err := encryption.ImportMasterKeyPair(app.PrivateKey, app.PrivateSeed)
-	if err != nil {
-		return nil, fmt.Errorf("import master key: %w", err)
+	if err := json.Unmarshal(payload, &guest); err != nil {
+		return nil, fmt.Errorf("read guest grant: %w", err)
 	}
 
 	if issuer == "" {
 		issuer = utils.Cfg().Endpoint
 	}
 
-	accessToken, expiresIn, err := signGuestAccessToken(masterKey.PrivateKey, app.ID, guestUserID, issuer, existingClaim.StartsAt, existingClaim.EndsAt)
+	accessToken, expiresIn, err := signGuestAccessToken(masterKey.PrivateKey, appID, guestUserID, issuer, guest.UserClaim.StartsAt, guest.UserClaim.EndsAt)
 	if err != nil {
 		return nil, fmt.Errorf("sign access token: %w", err)
 	}
@@ -108,8 +68,8 @@ func IssueGuestToken(ctx context.Context, claimID uuid.UUID, userID uuid.UUID, i
 		TokenType:       "Bearer",
 		UserID:          guestUserID,
 		ClaimID:         claimID,
-		StartsAt:        existingClaim.StartsAt,
-		EndsAt:          existingClaim.EndsAt,
+		StartsAt:        guest.UserClaim.StartsAt,
+		EndsAt:          guest.UserClaim.EndsAt,
 	}, nil
 }
 

@@ -133,6 +133,10 @@ const HeaderProphet = "SAuth-Prophet"
 // consumer bound elsewhere, the slug of the prophet the request belongs on.
 const HeaderHome = "SAuth-Home"
 
+// HeaderPeerSecret carries, on a peer prophet's pull, the peer secret the home
+// of the app granted it in peer_grant, without which the home serves no peer.
+const HeaderPeerSecret = "SAuth-Peer-Secret"
+
 type prophetKey struct{}
 
 // WithProphet returns a context whose answers record, in prophet, the slug of
@@ -148,9 +152,10 @@ type targetKey struct{}
 // prophet pulling a peer's feed, or a disciple asking another prophet to take
 // it over.
 type Target struct {
-	Endpoint string
-	Slug     string
-	Secret   string
+	Endpoint   string
+	Slug       string
+	Secret     string
+	PeerSecret string
 }
 
 // WithTarget returns a context whose requests go to t.
@@ -260,6 +265,9 @@ func (e *httpClient) execute(ctx context.Context, method string, reqBody any, ta
 		req.SetBasicAuth(c.ID, c.Secret)
 	} else {
 		req.Header.Set("SAuth-App-Secret", e.clientSecret)
+	}
+	if t, ok := ctx.Value(targetKey{}).(Target); ok && t.PeerSecret != "" {
+		req.Header.Set(HeaderPeerSecret, t.PeerSecret)
 	}
 
 	if f, ok := forwardFrom(ctx); ok {

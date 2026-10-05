@@ -3515,6 +3515,7 @@ COMMENT ON FUNCTION claimius.upsert_disciple_state(p_disciple_app_slug text) IS 
 DROP FUNCTION IF EXISTS claimius.init_hybrid(TEXT, TEXT, TEXT, TEXT, TEXT, UUID, TEXT, TEXT, TEXT, TEXT, UUID[], JSONB, TEXT, TEXT, TEXT, UUID, JSONB);
 
 DROP FUNCTION IF EXISTS claimius.init_hybrid(text,text,text,text,text,text,text,text,uuid,text,text,text,text,uuid[],jsonb,text,text,text,uuid,jsonb);
+DROP FUNCTION IF EXISTS claimius.upsert_prophet_peer(text,text,text,text,text,text,text,text,uuid,text,text,text,text,uuid[],jsonb,text,text,text,uuid,jsonb);
 CREATE OR REPLACE FUNCTION claimius.upsert_prophet_peer(
     p_system_app_slug          TEXT,
     p_system_app_name          TEXT,
@@ -3524,6 +3525,7 @@ CREATE OR REPLACE FUNCTION claimius.upsert_prophet_peer(
     p_upstream_endpoint        TEXT,
     p_upstream_app_slug        TEXT,
     p_upstream_app_secret      TEXT,
+    p_upstream_peer_secret     TEXT,
     p_system_user_id           UUID DEFAULT NULL,
     p_system_app_redirect_uri  TEXT DEFAULT '',
     p_system_app_sync_uri      TEXT DEFAULT '',
@@ -3541,8 +3543,8 @@ DECLARE
     v_result JSONB;
 BEGIN
     IF coalesce(p_upstream_prophet, '') = '' OR coalesce(p_upstream_endpoint, '') = ''
-        OR coalesce(p_upstream_app_slug, '') = '' OR coalesce(p_upstream_app_secret, '') = '' THEN
-        RAISE EXCEPTION 'upsert_prophet_peer: the upstream prophet, its endpoint, the mirrored app slug and its secret are required.';
+        OR coalesce(p_upstream_app_slug, '') = '' OR coalesce(p_upstream_app_secret, '') = '' OR coalesce(p_upstream_peer_secret, '') = '' THEN
+        RAISE EXCEPTION 'upsert_prophet_peer: the upstream prophet, its endpoint, the mirrored app slug, its secret and the peer secret are required.';
     END IF;
     IF p_upstream_prophet = p_system_app_slug THEN
         RAISE EXCEPTION 'upsert_prophet_peer: the upstream prophet % is this prophet.', p_upstream_prophet;
@@ -3559,13 +3561,14 @@ BEGIN
             p_default_claim
                 );
 
-    INSERT INTO claimius.prophet_peer (prophet, endpoint, app_slug, app_secret, sa_created_by)
-    VALUES (p_upstream_prophet, p_upstream_endpoint, p_upstream_app_slug, p_upstream_app_secret,
+    INSERT INTO claimius.prophet_peer (prophet, endpoint, app_slug, app_secret, peer_secret, sa_created_by)
+    VALUES (p_upstream_prophet, p_upstream_endpoint, p_upstream_app_slug, p_upstream_app_secret, p_upstream_peer_secret,
             (v_result -> 'user_claim' ->> 'id')::UUID)
     ON CONFLICT (app_slug) DO UPDATE SET
         prophet    = EXCLUDED.prophet,
         endpoint   = EXCLUDED.endpoint,
         app_secret = EXCLUDED.app_secret,
+        peer_secret = EXCLUDED.peer_secret,
         status     = 'active';
 
     RAISE NOTICE 'Hybrid initialized, mirroring app % from prophet %.', p_upstream_app_slug, p_upstream_prophet;
@@ -3573,7 +3576,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius.upsert_prophet_peer(p_system_app_slug text, p_system_app_name text, p_system_app_private_key text, p_system_app_private_seed text, p_upstream_prophet text, p_upstream_endpoint text, p_upstream_app_slug text, p_upstream_app_secret text, p_system_user_id uuid, p_system_app_redirect_uri text, p_system_app_sync_uri text, p_system_app_contact_email text, p_system_app_image text, p_system_app_provider_ids uuid[], p_system_app_style jsonb, p_system_app_description text, p_system_org_name text, p_system_claim_name text, p_system_claim_id uuid, p_default_claim jsonb) IS 'Bootstrap as a hybrid: a prophet mirroring one app of an upstream prophet registered as its peer.';
+COMMENT ON FUNCTION claimius.upsert_prophet_peer(p_system_app_slug text, p_system_app_name text, p_system_app_private_key text, p_system_app_private_seed text, p_upstream_prophet text, p_upstream_endpoint text, p_upstream_app_slug text, p_upstream_app_secret text, p_upstream_peer_secret text, p_system_user_id uuid, p_system_app_redirect_uri text, p_system_app_sync_uri text, p_system_app_contact_email text, p_system_app_image text, p_system_app_provider_ids uuid[], p_system_app_style jsonb, p_system_app_description text, p_system_org_name text, p_system_claim_name text, p_system_claim_id uuid, p_default_claim jsonb) IS 'Bootstrap as a hybrid: a prophet mirroring one app of an upstream prophet registered as its peer.';
 
 -- ----------------------------------------------------------------------------
 -- upsert_app
@@ -5303,3 +5306,118 @@ END;
 $$ LANGUAGE plpgsql;
 
 COMMENT ON FUNCTION claimius.insert_secret(UUID, TEXT, TEXT, TIMESTAMPTZ, UUID, UUID) IS 'Stores a secret of an app, its value already encrypted under the app seed, owned by an organization linked to the app, and binds it to the claim of the actor p_sa_created_by with owner, write and read, so the secret is reached through the actor''s claim on the prophet and on every disciple of the app. Returns samna_secret and claim_object.';
+
+CREATE OR REPLACE FUNCTION claimius.upsert_peer_grant(
+    p_app_id        UUID,
+    p_prophet       TEXT,
+    p_secret        TEXT,
+    p_sa_created_by UUID
+) RETURNS JSONB AS $$
+DECLARE
+    v_home TEXT;
+    v_row  claimius.peer_grant;
+BEGIN
+    IF coalesce(p_prophet, '') = '' OR coalesce(p_secret, '') = '' THEN
+        RAISE EXCEPTION 'upsert_peer_grant: the peer prophet and its secret are required';
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM claimius.samna_app WHERE id = p_app_id AND sa_deleted_at IS NULL) THEN
+        RAISE EXCEPTION 'upsert_peer_grant: app % not found', p_app_id USING ERRCODE = 'P0404';
+    END IF;
+    v_home := claimius.get_app_home(p_app_id);
+    IF v_home IS NOT NULL THEN
+        RAISE EXCEPTION 'upsert_peer_grant: app % is decided by prophet %, only its home grants peers', p_app_id, v_home
+            USING ERRCODE = 'P0409', HINT = v_home;
+    END IF;
+
+    INSERT INTO claimius.peer_grant (app_id, prophet, secret_hash, sa_created_by)
+    VALUES (p_app_id, p_prophet, encode(digest(p_secret, 'sha256'), 'hex'), p_sa_created_by)
+    ON CONFLICT (app_id, prophet) WHERE sa_deleted_at IS NULL DO UPDATE SET
+        secret_hash   = EXCLUDED.secret_hash,
+        status        = 'active',
+        sa_updated_at = now()
+    RETURNING * INTO v_row;
+
+    RETURN jsonb_build_object('peer_grant', to_jsonb(v_row) - 'secret_hash');
+END;
+$$ LANGUAGE plpgsql;
+
+COMMENT ON FUNCTION claimius.upsert_peer_grant(UUID, TEXT, TEXT, UUID) IS 'Grants a peer prophet the app this prophet is home for, keyed by a random peer secret stored as its SHA-256. The peer keeps the raw secret in its prophet_peer.peer_secret and presents it to be served the feed and the snapshot as a peer. A second call for the same peer replaces the secret. Returns {"peer_grant": {...}} without the hash.';
+
+CREATE OR REPLACE FUNCTION claimius.get_peer_grant(
+    p_app_id UUID,
+    p_secret TEXT
+) RETURNS SETOF claimius.peer_grant AS $$
+    SELECT *
+    FROM claimius.peer_grant
+    WHERE app_id = p_app_id
+      AND secret_hash = encode(digest(coalesce(p_secret, ''), 'sha256'), 'hex')
+      AND status = 'active'
+      AND sa_deleted_at IS NULL
+$$ LANGUAGE sql STABLE;
+
+COMMENT ON FUNCTION claimius.get_peer_grant(UUID, TEXT) IS 'The live grant of the app whose peer secret is p_secret, or no row. A prophet serves an app as a peer only to a pull presenting such a secret.';
+
+CREATE OR REPLACE FUNCTION claimius.upsert_guest_user(
+    p_app_id        UUID,
+    p_claim_id      UUID,
+    p_actor_user_id UUID,
+    p_guest_user_id UUID
+) RETURNS JSONB AS $$
+DECLARE
+    v_claim    claimius.claim;
+    v_actor_uc UUID;
+    v_user     claimius.samna_user;
+    v_grant    claimius.user_claim;
+BEGIN
+    SELECT * INTO v_claim
+      FROM claimius.claim
+     WHERE id = p_claim_id
+       AND app_id = p_app_id
+       AND sa_deleted_at IS NULL;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'upsert_guest_user: claim % not found in the app', p_claim_id USING ERRCODE = 'P0404';
+    END IF;
+
+    SELECT a.user_claim_id INTO v_actor_uc
+      FROM claimius.get_access(p_actor_user_id, p_app_id, p_claim_id, 'claimius.claim', 1) a
+     LIMIT 1;
+    IF v_actor_uc IS NULL THEN
+        SELECT a.user_claim_id INTO v_actor_uc
+          FROM claimius.get_direct_access(p_actor_user_id, p_app_id, p_claim_id, 'claimius.claim', 1) a
+         LIMIT 1;
+    END IF;
+    IF v_actor_uc IS NULL THEN
+        RAISE EXCEPTION 'upsert_guest_user: the actor does not own claim %', p_claim_id USING ERRCODE = 'P0403';
+    END IF;
+
+    INSERT INTO claimius.samna_user (user_id, app_id, first_name, status, type)
+    VALUES (p_guest_user_id, p_app_id, 'Guest', 'active', 'guest')
+    ON CONFLICT (user_id, app_id) WHERE sa_deleted_at IS NULL DO UPDATE SET
+        sa_updated_at = claimius.samna_user.sa_updated_at
+    RETURNING * INTO v_user;
+
+    SELECT * INTO v_grant
+      FROM claimius.user_claim
+     WHERE app_id = p_app_id
+       AND claim_id = p_claim_id
+       AND user_id = p_guest_user_id
+       AND sa_deleted_at IS NULL
+     LIMIT 1;
+    IF NOT FOUND THEN
+        v_grant := jsonb_populate_record(NULL::claimius.user_claim, claimius.insert_user_claim(
+            p_app_id        => p_app_id,
+            p_claim_id      => p_claim_id,
+            p_user_id       => p_guest_user_id,
+            p_sa_owner_id   => v_claim.sa_owner_id,
+            p_sa_created_by => v_actor_uc
+        ) -> 'user_claim');
+    END IF;
+
+    RETURN jsonb_build_object(
+        'samna_user', to_jsonb(v_user),
+        'user_claim', to_jsonb(v_grant)
+    );
+END;
+$$ LANGUAGE plpgsql;
+
+COMMENT ON FUNCTION claimius.upsert_guest_user(UUID, UUID, UUID, UUID) IS 'Ensures the guest user of a claim in an app, a samna_user of type guest, and its grant of the claim, made under the grant by which the actor owns the claim. The guest and its grant are written on the prophet, which alone signs the guest token, and reach the app''s disciples through the feed. Raises P0404 for a claim outside the app and P0403 when the actor does not own it. Returns samna_user and user_claim.';

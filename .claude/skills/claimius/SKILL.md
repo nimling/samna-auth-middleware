@@ -64,6 +64,8 @@ It depends on the table.
 - `claim_object` → `insert_claim_object`, `update_claim_object`, `delete_claim_object`
 - `samna_user` per app row creation → `upsert_app_user`
 - `samna_secret` creation → `insert_secret`, which stores the encrypted value and binds the secret to the actor's claim
+- Guests → `upsert_guest_user`, prophet only
+- `peer_grant` → `upsert_peer_grant`, prophet only; `get_peer_grant` checks a peer secret
 - Cross app moves → `merge_user`
 - Cross root moves → `migrate_root`, which hangs the object and its subtree under a live root of the same type, walking organizations through `sa_owner_id`, under `claimius.migrating_root`; flag every call for human review
 - App creation → `upsert_system_app` for the system app, every row stamped with the system user's `user_claim.id`; `upsert_app(p_actor_user_claim_id, p_slug, p_name, p_org_id, p_private_key, p_private_seed, p_redirect_uris, p_sync_uri, p_description, p_connection, p_owner_access, p_default_claim, p_app_id)` for every other app, by an actor holding owner on `p_org_id` in its own app

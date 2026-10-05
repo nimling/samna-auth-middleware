@@ -39,7 +39,7 @@ Every read function of the external surface, the `get_*` access, listing, scope,
 
 1. `samna_secret.value` is AES 256 GCM ciphertext under the app's `private_seed`, with a random 96 bit nonce per value ([NIST SP 800-38D](https://csrc.nist.gov/pubs/sp/800/38/d/final)). GCM authenticates as it encrypts, so a changed ciphertext fails to open.
 
-2. `samna_app` carries `private_key` and `private_seed`. Its events carry no `app_id` and no pull serves them, and a disciple skips the event type, so the keys never reach a disciple. They reach a peer prophet only in the app row of `get_peer_snapshot`, served over the mirrored app's own credential to a prophet that mirrors that app.
+2. `samna_app` carries `private_key` and `private_seed`. Its events carry no `app_id` and no pull serves them, and a disciple skips the event type, so the keys never reach a disciple. They reach a peer prophet only in the app row of `get_peer_snapshot`, and the home serves `peer=true` only to a pull presenting the peer secret of a live `peer_grant` for that app in `SAuth-Peer-Secret`, so the app credential its disciples hold does not open them.
 
 3. `samna_client.secret_hash` is a bcrypt hash and `samna_app.app_secret` is HMAC SHA256 of the raw secret keyed with the owning organization's `private_seed`: a copy can verify a credential and cannot recover it.
 

@@ -840,6 +840,29 @@ COMMENT ON COLUMN claimius.prophet_peer.endpoint IS 'Base url of the peer. Its /
 COMMENT ON COLUMN claimius.prophet_peer.app_slug IS 'Slug of the mirrored app, the one the pull authenticates as.';
 COMMENT ON COLUMN claimius.prophet_peer.app_secret IS 'Raw app secret the peer''s /sam app auth validates.';
 
+ALTER TABLE claimius.prophet_peer ADD COLUMN IF NOT EXISTS peer_secret TEXT NOT NULL DEFAULT '';
+COMMENT ON COLUMN claimius.prophet_peer.peer_secret IS 'Raw peer secret the home of the app granted this prophet in its peer_grant; the pull presents it to be served as a peer.';
+
+CREATE TABLE IF NOT EXISTS claimius.peer_grant (
+                                                   id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                                                   app_id              UUID NOT NULL REFERENCES claimius.samna_app(id),
+                                                   prophet             TEXT NOT NULL,
+                                                   secret_hash         TEXT NOT NULL,
+                                                   status              TEXT NOT NULL DEFAULT 'active',
+                                                   sa_created_by       UUID NOT NULL,
+                                                   sa_created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+                                                   sa_updated_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+                                                   sa_deleted_at       TIMESTAMPTZ,
+                                                   CONSTRAINT peer_grant_status CHECK (status IN ('active', 'suspended'))
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_peer_grant_app_prophet ON claimius.peer_grant (app_id, prophet) WHERE sa_deleted_at IS NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_peer_grant_app_secret ON claimius.peer_grant (app_id, secret_hash) WHERE sa_deleted_at IS NULL;
+
+COMMENT ON TABLE claimius.peer_grant IS 'Peer prophets this prophet, the home of an app, serves that app as a peer: the feed with its handovers and the snapshot with the app keys and organization seeds a home needs. Written through upsert_peer_grant by the prophet''s admin.';
+COMMENT ON COLUMN claimius.peer_grant.prophet IS 'Slug of the peer prophet the grant is for.';
+COMMENT ON COLUMN claimius.peer_grant.secret_hash IS 'SHA-256 hex of the random peer secret, which the peer keeps raw in its prophet_peer.peer_secret.';
+
 -- app_handover
 -- Moving an app's home between two prophets. The current home offers the
 -- app to a peer and from then decides none of its writes; the peer, which

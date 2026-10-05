@@ -3,6 +3,7 @@ SELECT plan(1);
 
 CREATE TEMP TABLE superseded (signature TEXT PRIMARY KEY);
 INSERT INTO superseded VALUES
+        ('claimius.upsert_prophet_peer(text,text,text,text,text,text,text,text,uuid,text,text,text,text,uuid[],jsonb,text,text,text,uuid,jsonb)'),
         ('claimius.ensure_audit_partition(timestamp with time zone)'),
         ('claimius.write_audit(uuid,text,text,text,uuid,uuid,uuid,text)'),
         ('claimius.link_app_object(uuid,text,uuid,uuid)'),

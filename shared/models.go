@@ -1002,6 +1002,7 @@ type ProphetPeer struct {
 	Endpoint        string    `bun:"endpoint" json:"endpoint"`
 	AppSlug         string    `bun:"app_slug" json:"app_slug"`
 	AppSecret       string    `bun:"app_secret" json:"-"`
+	PeerSecret      string    `bun:"peer_secret" json:"-"`
 	Status          string    `bun:"status,default:'active'" json:"status"`
 	LastAppliedTxid int64     `bun:"last_applied_txid,default:0" json:"last_applied_txid"`
 	LastAppliedSeq  int64     `bun:"last_applied_seq,default:0" json:"last_applied_seq"`

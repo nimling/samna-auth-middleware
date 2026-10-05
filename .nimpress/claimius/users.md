@@ -41,6 +41,10 @@ A user is who acts. A person and a machine client are both users, and both hold 
 
 4. A disciple holds its app's `samna_client` rows, so it verifies a client against its own copy.
 
+## Guests
+
+A guest is the holder of one claim without an account: a `samna_user` of type `guest` with the id `uuid.NewSHA1(app, "guest:" + claim)`, one per app and claim. A disciple asks for one with `POST /sam/guest` and the claim and the user that owns it; the prophet runs `upsert_guest_user(app, claim, actor, guest)`, which refuses a claim outside the calling app with `P0404` and an actor that does not own the claim with `P0403`, writes the guest and its grant of the claim under the actor's owning grant, and signs the guest token with the calling app's key, bounded by the grant's `starts_at` and `ends_at`. The guest lives on the prophet, the only place that can sign its token, and reaches the app's disciples through the feed like any user, so a disciple answers a guest's access from the synced grant.
+
 ## Acting for another user
 
 An actor acts for a target without becoming the target. `get_user_access(actor, app, target, required)` settles what the actor's listing would, checks the actor active, resolves the target named as `external_id`, `user_id` or `samna_user.id`, in that order, among the app's live active users, and then ORs three branches:

@@ -28,7 +28,7 @@ type SnapshotResponse struct {
 // the prophet it is bound to, else the configured one.
 func (r *Replica) target(state State, endpoint string) client.Target {
 	if r.Peer != nil {
-		return client.Target{Endpoint: r.Peer.Endpoint, Slug: r.Peer.AppSlug, Secret: r.Peer.AppSecret}
+		return client.Target{Endpoint: r.Peer.Endpoint, Slug: r.Peer.AppSlug, Secret: r.Peer.AppSecret, PeerSecret: r.Peer.PeerSecret}
 	}
 	if endpoint == "" {
 		endpoint = state.Endpoint

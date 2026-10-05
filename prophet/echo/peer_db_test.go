@@ -9,12 +9,14 @@ import (
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/hex"
+	"net/http"
 	"net/http/httptest"
 	"os"
 	"testing"
 
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
+	"github.com/nimling/samna-auth-middleware/v2/client"
 	sam "github.com/nimling/samna-auth-middleware/v2/disciple/sam"
 	"github.com/nimling/samna-auth-middleware/v2/pkg/encryption"
 	psam "github.com/nimling/samna-auth-middleware/v2/prophet/sam"
@@ -128,12 +130,29 @@ func TestProphetMirrorsAPeersAppThroughItsFeed(t *testing.T) {
 	`).Scan(ctx, &actor); err != nil {
 		t.Fatalf("init mirror: %v", err)
 	}
+	if _, err := psdb.Instance().ExecContext(ctx, `SELECT claimius.upsert_peer_grant(?, 'gotest_mirror', 'gotest-peer-secret', ?)`, app.ID, grantUser); err != nil {
+		t.Fatalf("peer grant: %v", err)
+	}
 	var peer shared.ProphetPeer
 	if err := mirror.NewRaw(`
-		INSERT INTO claimius.prophet_peer (prophet, endpoint, app_slug, app_secret, sa_created_by)
-		VALUES (?, ?, ?, ?, ?) RETURNING *
+		INSERT INTO claimius.prophet_peer (prophet, endpoint, app_slug, app_secret, peer_secret, sa_created_by)
+		VALUES (?, ?, ?, ?, 'gotest-peer-secret', ?) RETURNING *
 	`, home, server.URL, app.Slug, app.Secret, actor).Scan(ctx, &peer); err != nil {
 		t.Fatalf("peer row: %v", err)
+	}
+	for _, secret := range []string{"", "gotest-wrong-secret"} {
+		req, _ := http.NewRequest(http.MethodGet, server.URL+"/sam/sync/snapshot?peer=true", nil)
+		req.Header.Set("SAuth-App-Slug", app.Slug)
+		req.Header.Set("SAuth-App-Secret", app.Secret)
+		req.Header.Set(client.HeaderPeerSecret, secret)
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("peer snapshot request: %v", err)
+		}
+		res.Body.Close()
+		if res.StatusCode != http.StatusForbidden {
+			t.Fatalf("a peer pull with the app credential and peer secret %q must answer 403, got %d", secret, res.StatusCode)
+		}
 	}
 	replica := &sam.Replica{DB: mirror, Peer: &peer}
 
