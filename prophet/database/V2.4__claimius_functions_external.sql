@@ -2615,6 +2615,12 @@ BEGIN
                 WHERE id = v_source_app_user.id;
             ELSE
                 -- Target already has a row for this app. Merge claims/relations/fields.
+                UPDATE claimius.user_claim s SET sa_deleted_at = now()
+                WHERE s.user_id = p_source_user_id AND s.app_id = v_app_row.app_id AND s.sa_deleted_at IS NULL
+                  AND EXISTS (
+                      SELECT 1 FROM claimius.user_claim t
+                      WHERE t.user_id = p_target_user_id AND t.app_id = s.app_id AND t.claim_id = s.claim_id AND t.sa_deleted_at IS NULL
+                  );
                 UPDATE claimius.user_claim SET user_id = p_target_user_id
                 WHERE user_id = p_source_user_id AND app_id = v_app_row.app_id;
                 UPDATE claimius.user_relation SET user_id = p_target_user_id
