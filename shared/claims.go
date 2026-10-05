@@ -191,7 +191,7 @@ func (d *DB) insertClaim(ctx context.Context, ac *AccessClaim, claim *Claim) (*C
 	var payload []byte
 	err := d.NewRaw(`
 		SELECT (claimius.insert_claim(
-			?, ?, ?, ?, ?, ?, ?, ?::claimius.claim_type
+			?, ?, ?, ?, ?, ?, ?, ?::claimius.claim_type, ?
 		) -> 'claim')::jsonb
 	`,
 		claim.Name,
@@ -202,6 +202,7 @@ func (d *DB) insertClaim(ctx context.Context, ac *AccessClaim, claim *Claim) (*C
 		claim.CreatedBy,
 		claim.Inherits,
 		string(claim.Type),
+		claim.Level,
 	).Scan(ctx, &payload)
 	if err != nil {
 		return nil, err
@@ -221,6 +222,7 @@ func (d *DB) updateClaim(ctx context.Context, ac *AccessClaim, claimID uuid.UUID
 		description interface{}
 		access      interface{}
 		inherits    interface{}
+		level       interface{}
 	)
 	if claim.HasKey("name") {
 		name = claim.Name
@@ -234,15 +236,19 @@ func (d *DB) updateClaim(ctx context.Context, ac *AccessClaim, claimID uuid.UUID
 	if claim.HasKey("inherits") {
 		inherits = claim.Inherits
 	}
+	if claim.HasKey("level") {
+		level = claim.Level
+	}
 	var payload []byte
 	err := d.NewRaw(`
-		SELECT (claimius.update_claim(?, ?, ?, ?, ?) -> 'claim')::jsonb
+		SELECT (claimius.update_claim(?, ?, ?, ?, ?, ?) -> 'claim')::jsonb
 	`,
 		claimID,
 		name,
 		description,
 		access,
 		inherits,
+		level,
 	).Scan(ctx, &payload)
 	if err != nil {
 		return nil, err

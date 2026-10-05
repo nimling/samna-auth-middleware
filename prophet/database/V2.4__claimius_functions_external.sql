@@ -179,7 +179,7 @@ BEGIN
               AND NOT pa.attisdropped
         ),
         held AS MATERIALIZED (
-            SELECT uc.id AS user_claim_id, c.id AS claim_id, c.name, c.sa_access, c.inherits
+            SELECT uc.id AS user_claim_id, c.id AS claim_id, c.name, c.sa_access, c.inherits, c.level
             FROM claimius.user_claim uc
                      JOIN claimius.claim c
                           ON c.id = uc.claim_id
@@ -193,7 +193,7 @@ BEGIN
         derivations AS (
             SELECT h.user_claim_id, h.claim_id, h.name, a.hop,
                    claimius._effective_access(h.sa_access, co.sa_access) AS e,
-                   co.scope, co.sa_owner_id, co.sa_root_id
+                   co.scope, co.sa_owner_id, co.sa_root_id, h.level AS lvl
             FROM anc a
                      JOIN claimius.claim_object co
                           ON co.app_id = p_app_id
@@ -206,11 +206,13 @@ BEGIN
             UNION ALL
 
             SELECT h.user_claim_id, h.claim_id, h.name, a.hop,
-                   (claimius._effective_access(h.sa_access, link.sa_access)
-                        & claimius._effective_access(cb.sa_access, co.sa_access) & ~16)
-                   | ((claimius._effective_access(h.sa_access, link.sa_access)
-                        | claimius._effective_access(cb.sa_access, co.sa_access)) & 16),
-                   co.scope, co.sa_owner_id, co.sa_root_id
+                   CASE WHEN h.level > cb.level THEN claimius._effective_access(h.sa_access, link.sa_access)
+                        WHEN cb.level > h.level THEN claimius._effective_access(cb.sa_access, co.sa_access)
+                        ELSE (claimius._effective_access(h.sa_access, link.sa_access)
+                                & claimius._effective_access(cb.sa_access, co.sa_access) & ~16)
+                             | ((claimius._effective_access(h.sa_access, link.sa_access)
+                                | claimius._effective_access(cb.sa_access, co.sa_access)) & 16) END,
+                   co.scope, co.sa_owner_id, co.sa_root_id, greatest(h.level, cb.level)
             FROM anc a
                      JOIN claimius.claim_object co
                           ON co.app_id = p_app_id
@@ -231,18 +233,16 @@ BEGIN
             WHERE (a.hop = 0 OR co.inherits)
               AND p_object_type <> 'claimius.claim'
         ),
-        denied AS (
-            SELECT coalesce(bit_or(d.e & 15) FILTER (WHERE d.hop = 0), 0) AS direct_bits,
-                   coalesce(bit_or(d.e & 15), 0) AS all_bits
-            FROM derivations d
-            WHERE (d.e & 16) <> 0
-              AND d.scope IS NULL
-        ),
         settled AS (
             SELECT d.*,
-                   claimius._close_access(d.e & 15 & ~CASE WHEN d.hop = 0 THEN x.direct_bits ELSE x.all_bits END) AS access
+                   claimius._close_access(d.e & 15 & ~coalesce((
+                       SELECT bit_or(x.e & 15)
+                       FROM derivations x
+                       WHERE (x.e & 16) <> 0
+                         AND x.scope IS NULL
+                         AND (x.lvl > d.lvl OR (x.lvl = d.lvl AND (x.hop = 0 OR d.hop > 0)))
+                   ), 0)) AS access
             FROM derivations d
-                     CROSS JOIN denied x
             WHERE (d.e & 16) = 0
         )
         SELECT
@@ -955,7 +955,8 @@ CREATE OR REPLACE FUNCTION claimius.get_scope_access(
                co.id AS binding_id,
                co.scope AS binding_scope,
                co.sa_access AS binding_access,
-               co.inherits AS binding_inherits
+               co.inherits AS binding_inherits,
+               c.level AS lvl
         FROM claimius.user_claim uc
                  JOIN claimius.claim c ON c.id = uc.claim_id
                  JOIN claimius.claim_object co
@@ -971,15 +972,14 @@ CREATE OR REPLACE FUNCTION claimius.get_scope_access(
           AND co.object_id IS NULL
           AND jsonb_path_exists(co.scope, p_path)
     ),
-    denied AS (
-        SELECT coalesce(bit_or(b.e & 15), 0) AS bits
-        FROM bound b
-        WHERE (b.e & 16) <> 0
-    ),
     settled AS (
-        SELECT b.*, claimius._close_access(b.e & 15 & ~x.bits) AS access
+        SELECT b.*, claimius._close_access(b.e & 15 & ~coalesce((
+                   SELECT bit_or(x.e & 15)
+                   FROM bound x
+                   WHERE (x.e & 16) <> 0
+                     AND x.lvl >= b.lvl
+               ), 0)) AS access
         FROM bound b
-            CROSS JOIN denied x
         WHERE (b.e & 16) = 0
     )
     SELECT s.held_id, s.held_claim_id, s.held_claim_name, s.access, s.binding_owner_id, s.binding_root_id,
@@ -990,7 +990,7 @@ CREATE OR REPLACE FUNCTION claimius.get_scope_access(
     ORDER BY s.held_claim_id, s.binding_id
 $$;
 
-COMMENT ON FUNCTION claimius.get_scope_access(UUID, UUID, JSONPATH, INTEGER) IS 'Object-less bindings of the user''s live grants whose scope matches a jsonpath, one row per binding, each mask the claim mask narrowed by the binding mask, less the bits of the deny bindings matching the same path, closed under implication.';
+COMMENT ON FUNCTION claimius.get_scope_access(UUID, UUID, JSONPATH, INTEGER) IS 'Object-less bindings of the user''s live grants whose scope matches a jsonpath, one row per binding, each mask the claim mask narrowed by the binding mask, less the bits of the deny bindings matching the same path at the level of its claim or above, closed under implication.';
 
 CREATE OR REPLACE FUNCTION claimius.get_scope_access(
     p_user_id          UUID,
@@ -2290,6 +2290,7 @@ DROP FUNCTION IF EXISTS claimius.create_claim(UUID, TEXT, TEXT, INTEGER, UUID, U
 DROP FUNCTION IF EXISTS claimius.create_claim(UUID, TEXT, TEXT, INTEGER, UUID, UUID, UUID, BOOLEAN, claimius.claim_type);
 
 DROP FUNCTION IF EXISTS claimius.create_claim(uuid,text,text,integer,uuid,uuid,uuid,boolean,claimius.claim_type);
+DROP FUNCTION IF EXISTS claimius.insert_claim(uuid,text,text,integer,uuid,uuid,uuid,boolean,claimius.claim_type);
 CREATE OR REPLACE FUNCTION claimius.insert_claim(
     p_app_id            UUID,
     p_name              TEXT,
@@ -2299,7 +2300,8 @@ CREATE OR REPLACE FUNCTION claimius.insert_claim(
     p_sa_root_id        UUID,
     p_sa_created_by     UUID,
     p_inherits          BOOLEAN DEFAULT TRUE,
-    p_type              claimius.claim_type DEFAULT 'user'
+    p_type              claimius.claim_type DEFAULT 'user',
+    p_level             INTEGER DEFAULT 0
 ) RETURNS JSONB AS $$
 DECLARE
     v_row    claimius.claim;
@@ -2323,27 +2325,29 @@ BEGIN
 
     INSERT INTO claimius.claim (
         app_id, name, description, sa_access, inherits, type,
-        sa_owner_id, sa_root_id, sa_created_by
+        sa_owner_id, sa_root_id, sa_created_by, level
     ) VALUES (
                  p_app_id, p_name, p_description, v_access, p_inherits, p_type,
-                 p_sa_owner_id, p_sa_root_id, p_sa_created_by
+                 p_sa_owner_id, p_sa_root_id, p_sa_created_by, coalesce(p_level, 0)
              ) RETURNING * INTO v_row;
     RETURN jsonb_build_object('claim', to_jsonb(v_row));
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius.insert_claim(p_app_id uuid, p_name text, p_description text, p_sa_access integer, p_sa_owner_id uuid, p_sa_root_id uuid, p_sa_created_by uuid, p_inherits boolean, p_type claimius.claim_type) IS 'Creates a new claim. p_sa_access is a bitwise mask: 0x01 owner, 0x02 write, 0x04 read, 0x08 execute, 0x10 deny, 0x20 member. On grant claims with the deny bit unset owner implies write+read+execute, write implies read+execute, execute implies read. Member bit 0x20 stands alone. Deny claims store the supplied bits verbatim so callers can deny any subset of read, write, execute, owner. A mask with no bit besides deny is refused with SQLSTATE 22023.';
+COMMENT ON FUNCTION claimius.insert_claim(p_app_id uuid, p_name text, p_description text, p_sa_access integer, p_sa_owner_id uuid, p_sa_root_id uuid, p_sa_created_by uuid, p_inherits boolean, p_type claimius.claim_type, p_level integer) IS 'Creates a new claim. p_sa_access is a bitwise mask: 0x01 owner, 0x02 write, 0x04 read, 0x08 execute, 0x10 deny, 0x20 member. On grant claims with the deny bit unset owner implies write+read+execute, write implies read+execute, execute implies read. Member bit 0x20 stands alone. Deny claims store the supplied bits verbatim so callers can deny any subset of read, write, execute, owner. A mask with no bit besides deny is refused with SQLSTATE 22023.';
 
 -- update_claim
 DROP FUNCTION IF EXISTS claimius.update_claim(UUID, TEXT, TEXT, INTEGER, BOOLEAN, BOOLEAN);
 DROP FUNCTION IF EXISTS claimius.update_claim(UUID, TEXT, TEXT, INTEGER, BOOLEAN);
+DROP FUNCTION IF EXISTS claimius.update_claim(uuid,text,text,integer,boolean);
 
 CREATE OR REPLACE FUNCTION claimius.update_claim(
     p_claim_id          UUID,
     p_name              TEXT DEFAULT NULL,
     p_description       TEXT DEFAULT NULL,
     p_sa_access         INTEGER DEFAULT NULL,
-    p_inherits          BOOLEAN DEFAULT NULL
+    p_inherits          BOOLEAN DEFAULT NULL,
+    p_level             INTEGER DEFAULT NULL
 ) RETURNS JSONB AS $$
 DECLARE
     v_row    claimius.claim;
@@ -2369,14 +2373,15 @@ BEGIN
                               name        = coalesce(NULLIF(p_name, ''), name),
                               description = coalesce(p_description, description),
                               sa_access   = coalesce(NULLIF(v_access, 0), sa_access),
-                              inherits    = coalesce(p_inherits, inherits)
+                              inherits    = coalesce(p_inherits, inherits),
+                              level       = coalesce(p_level, level)
     WHERE id = p_claim_id
     RETURNING * INTO v_row;
     RETURN jsonb_build_object('claim', to_jsonb(v_row));
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius.update_claim(p_claim_id uuid, p_name text, p_description text, p_sa_access integer, p_inherits boolean) IS 'Patches selected fields on a claim. p_sa_access is expanded on grant claims so owner implies write+read+execute, write implies read+execute, execute implies read. Member bit 0x20 stands alone. Deny claims keep the supplied bits verbatim. Empty p_name and zero p_sa_access are treated as preserve so PATCH callers that send only one field do not wipe the others. A mask with no bit besides deny is refused with SQLSTATE 22023.';
+COMMENT ON FUNCTION claimius.update_claim(p_claim_id uuid, p_name text, p_description text, p_sa_access integer, p_inherits boolean, p_level integer) IS 'Patches selected fields on a claim. p_sa_access is expanded on grant claims so owner implies write+read+execute, write implies read+execute, execute implies read. Member bit 0x20 stands alone. Deny claims keep the supplied bits verbatim. Empty p_name and zero p_sa_access are treated as preserve so PATCH callers that send only one field do not wipe the others. A mask with no bit besides deny is refused with SQLSTATE 22023.';
 
 -- delete_claim
 DROP FUNCTION IF EXISTS claimius.remove_claim(UUID, UUID);

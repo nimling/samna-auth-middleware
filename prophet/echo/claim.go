@@ -112,6 +112,9 @@ func PutClaim(ctx echo.Context) error {
 	if patch.HasKey("inherits") {
 		query = query.Set("inherits = ?", patch.Inherits)
 	}
+	if patch.HasKey("level") {
+		query = query.Set("level = ?", patch.Level)
+	}
 	res, err := query.Exec(ctx.Request().Context())
 	if err != nil {
 		ctx.Logger().Errorf("PutClaim: %v", err)

@@ -550,6 +550,8 @@ DECLARE
     v_has_access   BOOLEAN;
     v_actor_access INTEGER;
     v_effective    INTEGER;
+    v_level        INTEGER;
+    v_actor_level  INTEGER;
 BEGIN
     IF claimius.in_replay_mode() THEN
         RETURN NEW;
@@ -558,18 +560,20 @@ BEGIN
     -- A binding may never hand out more than the actor already holds on the
     -- object. What it hands out is its effective mask, the claim mask narrowed
     -- by the binding mask, so a NULL binding mask is judged as the full claim
-    -- mask. Denies are restrictive, so they are exempt, and so is a removal.
+    -- mask. Denies are exempt from the mask, and so is a removal, but a binding
+    -- of a claim above level 0, deny or grant, needs the actor to hold that
+    -- level on the object.
     -- No computed access counts as none held, so an actor who cannot reach an
     -- object cannot grant it away. Creating an object records the creator,
     -- which computes their access before any binding is written.
-    SELECT claimius._effective_access(c.sa_access, NEW.sa_access) INTO v_effective
+    SELECT claimius._effective_access(c.sa_access, NEW.sa_access), c.level INTO v_effective, v_level
     FROM claimius.claim c
     WHERE c.id = NEW.claim_id;
 
     IF NEW.object_id IS NOT NULL
         AND NEW.object_type IS DISTINCT FROM 'claimius.claim'
         AND NEW.sa_deleted_at IS NULL
-        AND (coalesce(v_effective, 0) & 16) = 0
+        AND ((coalesce(v_effective, 0) & 16) = 0 OR coalesce(v_level, 0) > 0)
         AND (TG_OP = 'INSERT'
              OR NEW.sa_access IS DISTINCT FROM OLD.sa_access
              OR NEW.claim_id IS DISTINCT FROM OLD.claim_id
@@ -589,6 +593,14 @@ BEGIN
               AND app_id      = NEW.app_id
               AND object_type = NEW.object_type
               AND object_id   = NEW.object_id;
+
+            SELECT coalesce(max(coalesce((g ->> 'level')::INTEGER, 0)), 0) INTO v_actor_level
+            FROM claimius.user_object uo
+                CROSS JOIN LATERAL jsonb_array_elements(uo.grants) g
+            WHERE uo.user_id = v_user_id
+              AND uo.app_id = NEW.app_id
+              AND uo.object_type = NEW.object_type
+              AND uo.object_id = NEW.object_id;
 
             IF (coalesce(v_effective, 0) & ~coalesce(v_actor_access, 0) & 15) <> 0
                 AND v_actor_app_id IS DISTINCT FROM NEW.app_id
@@ -647,9 +659,14 @@ BEGIN
                 END IF;
             END IF;
 
-            IF (coalesce(v_effective, 0) & ~coalesce(v_actor_access, 0) & 15) <> 0 THEN
+            IF (coalesce(v_effective, 0) & 16) = 0 AND (coalesce(v_effective, 0) & ~coalesce(v_actor_access, 0) & 15) <> 0 THEN
                 RAISE EXCEPTION 'cannot grant more access than held: user % holds % on % %, requested %',
                     v_user_id, coalesce(v_actor_access, 0), NEW.object_type, NEW.object_id, v_effective;
+            END IF;
+
+            IF coalesce(v_level, 0) > coalesce(v_actor_level, 0) THEN
+                RAISE EXCEPTION 'cannot bind a claim of level % above the level % user % holds on % %',
+                    v_level, coalesce(v_actor_level, 0), v_user_id, NEW.object_type, NEW.object_id;
             END IF;
         END IF;
     END IF;
@@ -695,6 +712,26 @@ BEGIN
 
     IF NOT v_has_access THEN
         RAISE EXCEPTION 'cannot compose: user % has no read access to claim %', v_user_id, NEW.object_id;
+    END IF;
+
+    SELECT greatest(a.level, t.level) INTO v_level
+    FROM claimius.claim a, claimius.claim t
+    WHERE a.id = NEW.claim_id
+      AND t.id = NEW.object_id;
+
+    IF coalesce(v_level, 0) > 0 THEN
+        SELECT coalesce(max(coalesce((g ->> 'level')::INTEGER, 0)), 0) INTO v_actor_level
+        FROM claimius.user_object uo
+            CROSS JOIN LATERAL jsonb_array_elements(uo.grants) g
+        WHERE uo.user_id = v_user_id
+              AND uo.app_id = NEW.app_id
+          AND uo.object_type = 'claimius.claim'
+          AND uo.object_id = NEW.object_id;
+
+        IF v_level > coalesce(v_actor_level, 0) THEN
+            RAISE EXCEPTION 'cannot compose: user % holds level % on claim %, the link needs level %',
+                v_user_id, coalesce(v_actor_level, 0), NEW.object_id, v_level;
+        END IF;
     END IF;
 
     RETURN NEW;

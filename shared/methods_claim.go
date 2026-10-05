@@ -38,6 +38,7 @@ func (d *DB) CreateClaim(ctx context.Context, ac *AccessClaim, p CreateClaimPara
 		Description: p.Description,
 		Access:      p.Access,
 		Inherits:    inherits,
+		Level:       p.Level,
 		Type:        claimType,
 		OwnerID:     ac.OwnerID,
 		RootID:      rootID,
@@ -213,6 +214,7 @@ func (c *Claim) ReCreateFor(access ClaimAccess, opts ReCreateForOptions, userIDs
 		Access:      access,
 		Inherits:    &inherits,
 		Type:        c.Type,
+		Level:       c.Level,
 	}
 	newClaim, err := c.sessionDB.CreateClaim(c.sessionCtx, c.accessClaim, params)
 	if err != nil {

@@ -3,6 +3,8 @@ SELECT plan(1);
 
 CREATE TEMP TABLE superseded (signature TEXT PRIMARY KEY);
 INSERT INTO superseded VALUES
+        ('claimius.insert_claim(text,text,integer,uuid,uuid,uuid,boolean,claimius.claim_type)'),
+        ('claimius.update_claim(uuid,text,text,integer,boolean)'),
         ('claimius.ensure_audit_partition(timestamp with time zone)'),
         ('claimius.write_audit(text,text,text,uuid,uuid,uuid,text)'),
         ('claimius.create_claim(text,text,integer,uuid,uuid,uuid,boolean,claimius.claim_type)'),

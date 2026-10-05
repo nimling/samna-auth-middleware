@@ -443,6 +443,7 @@ type Claim struct {
 	AccessSlice  []string      `bun:"-" json:"access_slice,omitempty"`
 	AccessString string        `bun:"-" json:"access_string,omitempty"`
 	Inherits     bool          `bun:"inherits" json:"inherits"`
+	Level        int           `bun:"level" json:"level"`
 	Type         ClaimType     `bun:"type,default:'user'" json:"type"`
 	OwnerID      uuid.UUID     `bun:"sa_owner_id" json:"owner_id"`
 	RootID       uuid.UUID     `bun:"sa_root_id" json:"root_id"`
@@ -467,6 +468,7 @@ type CreateClaimParams struct {
 	Access      ClaimAccess
 	Inherits    *bool
 	Type        ClaimType
+	Level       int
 }
 
 type ReCreateForOptions struct {

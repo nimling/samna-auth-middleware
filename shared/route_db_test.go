@@ -161,6 +161,14 @@ func TestADiscipleInDebugModeWritesTheSameHelpersLocally(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create claim: %v", err)
 	}
+	leveled, err := db.CreateClaim(ctx, ac, sdb.CreateClaimParams{Name: "Leveled claim", Access: sdb.ACCESS_READ, Level: 3})
+	if err != nil {
+		t.Fatalf("create leveled claim: %v", err)
+	}
+	var stored int
+	if err := db.NewRaw(`SELECT level FROM claimius.claim WHERE id = ?`, leveled.ID).Scan(ctx, &stored); err != nil || leveled.Level != 3 || stored != 3 {
+		t.Fatalf("a claim created with level 3 must carry it, got %d stored %d: %v", leveled.Level, stored, err)
+	}
 	if _, err := claim.AssignUser(userB); err != nil {
 		t.Fatalf("assign user: %v", err)
 	}

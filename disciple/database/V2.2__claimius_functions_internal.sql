@@ -739,10 +739,9 @@ CREATE OR REPLACE FUNCTION claimius._apply_denies(
     p_fields        TEXT[]
 ) RETURNS JSONB AS $$
 DECLARE
-    v_direct_bits   INTEGER := 0;
-    v_other_bits    INTEGER := 0;
-    v_direct_field  JSONB := '{}'::JSONB;
-    v_other_field   JSONB := '{}'::JSONB;
+    v_field         JSONB;
+    v_level         INTEGER;
+    v_deny_level    INTEGER;
     v_deny          JSONB;
     v_grant         JSONB;
     v_key           TEXT;
@@ -773,24 +772,6 @@ BEGIN
             'scope', NULL);
     END IF;
 
-    FOR v_deny IN SELECT * FROM jsonb_array_elements(coalesce(p_denies, '[]'::JSONB)) LOOP
-        v_bits := (v_deny ->> 'access')::INTEGER;
-        IF jsonb_typeof(v_deny -> 'scope') = 'object' THEN
-            FOR v_key IN SELECT jsonb_object_keys(v_deny -> 'scope') LOOP
-                CONTINUE WHEN NOT v_key = ANY(p_fields);
-                IF v_deny ->> 'tree_type' = 'direct' THEN
-                    v_direct_field := v_direct_field || jsonb_build_object(v_key, coalesce((v_direct_field ->> v_key)::INTEGER, 0) | v_bits);
-                ELSE
-                    v_other_field := v_other_field || jsonb_build_object(v_key, coalesce((v_other_field ->> v_key)::INTEGER, 0) | v_bits);
-                END IF;
-            END LOOP;
-        ELSIF v_deny ->> 'tree_type' = 'direct' THEN
-            v_direct_bits := v_direct_bits | v_bits;
-        ELSE
-            v_other_bits := v_other_bits | v_bits;
-        END IF;
-    END LOOP;
-
     FOR v_grant IN
         SELECT g FROM jsonb_array_elements(p_grants) g
         UNION ALL
@@ -798,7 +779,22 @@ BEGIN
     LOOP
         v_bits := (v_grant ->> 'access')::INTEGER;
         v_inherited := v_grant ->> 'tree_type' <> 'direct';
-        v_denied := v_direct_bits | CASE WHEN v_inherited THEN v_other_bits ELSE 0 END;
+        v_level := coalesce((v_grant ->> 'level')::INTEGER, 0);
+        v_denied := 0;
+        v_field := '{}'::JSONB;
+        FOR v_deny IN SELECT * FROM jsonb_array_elements(coalesce(p_denies, '[]'::JSONB)) LOOP
+            v_deny_level := coalesce((v_deny ->> 'level')::INTEGER, 0);
+            CONTINUE WHEN v_deny_level < v_level
+                OR (v_deny_level = v_level AND v_deny ->> 'tree_type' <> 'direct' AND NOT v_inherited);
+            IF jsonb_typeof(v_deny -> 'scope') = 'object' THEN
+                FOR v_key IN SELECT jsonb_object_keys(v_deny -> 'scope') LOOP
+                    CONTINUE WHEN NOT v_key = ANY(p_fields);
+                    v_field := v_field || jsonb_build_object(v_key, coalesce((v_field ->> v_key)::INTEGER, 0) | (v_deny ->> 'access')::INTEGER);
+                END LOOP;
+            ELSE
+                v_denied := v_denied | (v_deny ->> 'access')::INTEGER;
+            END IF;
+        END LOOP;
         v_map := NULL;
 
         IF jsonb_typeof(v_grant -> 'scope') = 'object' THEN
@@ -806,18 +802,14 @@ BEGIN
             v_access := 0;
             FOR v_key IN SELECT jsonb_object_keys(v_grant -> 'scope') LOOP
                 CONTINUE WHEN NOT v_key = ANY(p_fields);
-                v_value := claimius._close_access(v_bits & ~(v_denied
-                    | coalesce((v_direct_field ->> v_key)::INTEGER, 0)
-                    | CASE WHEN v_inherited THEN coalesce((v_other_field ->> v_key)::INTEGER, 0) ELSE 0 END));
+                v_value := claimius._close_access(v_bits & ~(v_denied | coalesce((v_field ->> v_key)::INTEGER, 0)));
                 v_map := v_map || jsonb_build_object(v_key, v_value);
                 v_access := v_access | v_value;
             END LOOP;
         ELSE
             v_star := claimius._close_access(v_bits & ~v_denied);
-            FOR v_key IN SELECT jsonb_object_keys(v_direct_field || CASE WHEN v_inherited THEN v_other_field ELSE '{}'::JSONB END) LOOP
-                v_value := claimius._close_access(v_bits & ~(v_denied
-                    | coalesce((v_direct_field ->> v_key)::INTEGER, 0)
-                    | CASE WHEN v_inherited THEN coalesce((v_other_field ->> v_key)::INTEGER, 0) ELSE 0 END));
+            FOR v_key IN SELECT jsonb_object_keys(v_field) LOOP
+                v_value := claimius._close_access(v_bits & ~(v_denied | coalesce((v_field ->> v_key)::INTEGER, 0)));
                 IF v_value <> v_star THEN
                     v_map := coalesce(v_map, '{}'::JSONB) || jsonb_build_object(v_key, v_value);
                 END IF;
@@ -871,7 +863,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql IMMUTABLE;
 
-COMMENT ON FUNCTION claimius._apply_denies(JSONB, JSONB, BOOLEAN, TEXT[]) IS 'Settles the derivations of one user on one object: direct denies subtract from every grant and from the creator, other denies from inherited grants, a scoped deny from its fields only; each remainder is closed under implication and a grant left empty is dropped. Returns grants, the creator mask, the mask over all grants and the merged field scope.';
+COMMENT ON FUNCTION claimius._apply_denies(JSONB, JSONB, BOOLEAN, TEXT[]) IS 'Settles the derivations of one user on one object: a deny of a higher level subtracts from a grant whatever its class; at the same level a direct deny subtracts from every grant and from the creator, another deny from inherited grants, a scoped deny from its fields only; each remainder is closed under implication and a grant left empty is dropped. Returns grants, the creator mask, the mask over all grants and the merged field scope.';
 
 -- _build_grants_for_objects
 -- Computes the grants of one user on a set of objects of one type in one
@@ -896,7 +888,7 @@ CREATE OR REPLACE FUNCTION claimius._build_grants_for_objects(
     p_created     UUID[] DEFAULT '{}'
 ) RETURNS TABLE (object_id UUID, grants JSONB, direct_access INTEGER, sa_access INTEGER, scope JSONB) LANGUAGE sql STABLE AS $$
     WITH user_claims AS (
-        SELECT uc.claim_id, c.sa_access AS claim_access, c.inherits
+        SELECT uc.claim_id, c.sa_access AS claim_access, c.inherits, c.level
         FROM claimius.user_claim uc
             JOIN claimius.claim c ON c.id = uc.claim_id
         WHERE uc.user_id = p_user_id
@@ -923,7 +915,8 @@ CREATE OR REPLACE FUNCTION claimius._build_grants_for_objects(
                1                    AS path,
                CASE WHEN p_object_type = 'claimius.claim' THEN 4
                     ELSE claimius._effective_access(uc.claim_access, co.sa_access) END AS sa_access,
-               co.scope
+               co.scope,
+               uc.level             AS level
         FROM target t
             JOIN claimius.claim_object co
                 ON co.object_type = p_object_type
@@ -935,7 +928,7 @@ CREATE OR REPLACE FUNCTION claimius._build_grants_for_objects(
 
         UNION ALL
 
-        SELECT t.id, t.id, p_object_type, t.id, NULL::UUID, 'direct'::TEXT, 1, 4, NULL::JSONB
+        SELECT t.id, t.id, p_object_type, t.id, NULL::UUID, 'direct'::TEXT, 1, 4, NULL::JSONB, uc.level
         FROM target t
             JOIN user_claims uc ON uc.claim_id = t.id
         WHERE p_object_type = 'claimius.claim'
@@ -950,7 +943,8 @@ CREATE OR REPLACE FUNCTION claimius._build_grants_for_objects(
                e.tree_type::TEXT,
                2,
                claimius._effective_access(uc.claim_access, co.sa_access),
-               co.scope
+               co.scope,
+               uc.level
         FROM target t
             CROSS JOIN LATERAL (
                 SELECT a.ancestor_type, a.ancestor_id, a.tree_type
@@ -976,11 +970,14 @@ CREATE OR REPLACE FUNCTION claimius._build_grants_for_objects(
                cb.id,
                n.tree_type,
                3,
-               (claimius._effective_access(uc.claim_access, link.sa_access)
-                    & claimius._effective_access(cb.sa_access, co.sa_access) & ~16)
-               | ((claimius._effective_access(uc.claim_access, link.sa_access)
-                    | claimius._effective_access(cb.sa_access, co.sa_access)) & 16),
-               co.scope
+               CASE WHEN uc.level > cb.level THEN claimius._effective_access(uc.claim_access, link.sa_access)
+                    WHEN cb.level > uc.level THEN claimius._effective_access(cb.sa_access, co.sa_access)
+                    ELSE (claimius._effective_access(uc.claim_access, link.sa_access)
+                            & claimius._effective_access(cb.sa_access, co.sa_access) & ~16)
+                         | ((claimius._effective_access(uc.claim_access, link.sa_access)
+                            | claimius._effective_access(cb.sa_access, co.sa_access)) & 16) END,
+               co.scope,
+               greatest(uc.level, cb.level)
         FROM (
             SELECT t.id AS target_id, p_object_type AS object_type, t.id AS object_id, 'direct'::TEXT AS tree_type
             FROM target t
@@ -1018,7 +1015,8 @@ CREATE OR REPLACE FUNCTION claimius._build_grants_for_objects(
                    'access', d.sa_access & 15,
                    'cascaded_from', jsonb_build_object('type', d.from_type, 'id', d.from_id),
                    'composed_from', d.composed_from,
-                   'tree_type', d.tree_type
+                   'tree_type', d.tree_type,
+                   'level', NULLIF(d.level, 0)
                )) || jsonb_build_object('scope', d.scope) AS entry
         FROM derivations d
     ),

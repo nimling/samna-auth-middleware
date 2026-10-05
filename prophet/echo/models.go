@@ -216,6 +216,7 @@ type Claim struct {
 	Description *string     `bun:"description" json:"description,omitempty"`
 	Access      ClaimAccess `bun:"sa_access,notnull" json:"access"`
 	Inherits    bool        `bun:"inherits,notnull,default:true" json:"inherits"`
+	Level       int         `bun:"level,notnull,default:0" json:"level"`
 	Type        ClaimType   `bun:"type,notnull,default:'system'" json:"type"`
 	CreatedBy   *uuid.UUID  `bun:"sa_created_by,type:uuid" json:"created_by,omitempty"`
 	OwnerID     uuid.UUID   `bun:"sa_owner_id,type:uuid,notnull" json:"owner_id"`
