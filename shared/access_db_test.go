@@ -459,3 +459,22 @@ func TestReadRunsOnAReadOnlyReplicaAndRetriesARefusedWrite(t *testing.T) {
 		t.Fatalf("expected the replica to refuse and the primary to answer, got %v", ran)
 	}
 }
+
+func TestASystemUserReadsItselfAndStaysHiddenFromOthers(t *testing.T) {
+	db := database(t)
+	ctx := context.Background()
+	system := uuid.MustParse("d0000000-0000-4000-8000-00000000000d")
+	if _, err := db.NewRaw(`SELECT claimius.upsert_app_user(p_user_id => ?, p_first_name => 'Root')`, system).Exec(ctx); err != nil {
+		t.Fatalf("seed system user: %v", err)
+	}
+	if _, err := db.NewRaw(`UPDATE claimius.samna_user SET type = 'system' WHERE user_id = ?`, system).Exec(ctx); err != nil {
+		t.Fatalf("mark system user: %v", err)
+	}
+	self, err := db.GetUser(ctx, system, system)
+	if err != nil || self.UserID != system {
+		t.Fatalf("a system user must read its own row, got %+v %v", self, err)
+	}
+	if _, err := db.GetUser(ctx, userA, system); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("a system user must stay hidden from other users, got %v", err)
+	}
+}
