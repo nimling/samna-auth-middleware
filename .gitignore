@@ -32,3 +32,5 @@ go.work.sum
 .vscode/
 # sqlsync exporter build artifact
 /sqlsync
+
+.playwright-mcp/
