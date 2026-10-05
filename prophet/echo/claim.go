@@ -79,7 +79,7 @@ func PostClaim(ctx echo.Context) error {
 		Returning("*").
 		Exec(ctx.Request().Context()); err != nil {
 		ctx.Logger().Errorf("PostClaim: %v", err)
-		return respond.Error(ctx, http.StatusInternalServerError, "claim insert failed")
+		return respond.Error(ctx, errorsx.ErrToHttpCode(err), "claim insert failed")
 	}
 	return respond.JSON(ctx, http.StatusCreated, claim, 1)
 }
@@ -106,7 +106,7 @@ func PutClaim(ctx echo.Context) error {
 		Where("app_id = ?", appID).
 		OmitZero().
 		Returning("*")
-	if patch.HasKey("sa_access") {
+	if patch.HasKey("access") {
 		query = query.Set("sa_access = ?", int(patch.Access))
 	}
 	if patch.HasKey("inherits") {
@@ -118,7 +118,7 @@ func PutClaim(ctx echo.Context) error {
 	res, err := query.Exec(ctx.Request().Context())
 	if err != nil {
 		ctx.Logger().Errorf("PutClaim: %v", err)
-		return respond.Error(ctx, http.StatusInternalServerError, "claim update failed")
+		return respond.Error(ctx, errorsx.ErrToHttpCode(err), "claim update failed")
 	}
 	affected, err := res.RowsAffected()
 	if err != nil {
@@ -179,7 +179,7 @@ func PostClaimObject(ctx echo.Context) error {
 		Returning("*").
 		Exec(ctx.Request().Context()); err != nil {
 		ctx.Logger().Errorf("PostClaimObject: %v", err)
-		return respond.Error(ctx, http.StatusInternalServerError, "claim_object insert failed")
+		return respond.Error(ctx, errorsx.ErrToHttpCode(err), "claim_object insert failed")
 	}
 	return respond.JSON(ctx, http.StatusCreated, claimObject, 1)
 }
@@ -232,7 +232,7 @@ func PatchClaimObject(ctx echo.Context) error {
 		claimObjectID, patch.Reason, inherits, patch.Access, scopeBytes,
 	).Exec(ctx.Request().Context()); err != nil {
 		ctx.Logger().Errorf("PatchClaimObject: %v", err)
-		return respond.Error(ctx, http.StatusInternalServerError, "claim_object update failed")
+		return respond.Error(ctx, errorsx.ErrToHttpCode(err), "claim_object update failed")
 	}
 	var updated ClaimObject
 	if err := sdb.Instance().NewSelect().
@@ -303,7 +303,7 @@ func PostClaimUser(ctx echo.Context) error {
 		Returning("*").
 		Exec(ctx.Request().Context()); err != nil {
 		ctx.Logger().Errorf("PostClaimUser: %v", err)
-		return respond.Error(ctx, http.StatusInternalServerError, "user_claim insert failed")
+		return respond.Error(ctx, errorsx.ErrToHttpCode(err), "user_claim insert failed")
 	}
 	return respond.JSON(ctx, http.StatusCreated, userClaim, 1)
 }
@@ -350,7 +350,7 @@ func PatchClaimUser(ctx echo.Context) error {
 		userClaimID, patch.Reason, patch.StartsAt, patch.EndsAt,
 	).Scan(ctx.Request().Context(), &result); err != nil {
 		ctx.Logger().Errorf("PatchClaimUser update: %v", err)
-		return respond.Error(ctx, http.StatusInternalServerError, "user_claim update failed")
+		return respond.Error(ctx, errorsx.ErrToHttpCode(err), "user_claim update failed")
 	}
 	wrapper := struct {
 		UserClaim UserClaim `json:"user_claim"`

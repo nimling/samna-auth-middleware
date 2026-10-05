@@ -208,3 +208,34 @@ func TestADiscipleInDebugModeWritesTheSameHelpersLocally(t *testing.T) {
 		t.Fatal("the organization user must hold the claim it was created with")
 	}
 }
+
+func TestARefusedWriteIsErrNoAccessRoutedOrLocal(t *testing.T) {
+	db := database(t)
+	ctx := context.Background()
+	ac, err := db.MutationAccess(ctx, userA, orgRoot, sdb.OBJECT_TYPE_ORGANIZATION, sdb.ACCESS_WRITE)
+	if err != nil {
+		t.Fatalf("access: %v", err)
+	}
+
+	refusing := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		w.Write([]byte(`{"data":null,"count":0,"error":{"message":"cannot bind a claim of level 5"}}`))
+	}))
+	defer refusing.Close()
+	t.Setenv("SAUTH_ENDPOINT", refusing.URL)
+	db.RouteToProphet = true
+	if _, err := db.CreateClaim(ctx, ac, sdb.CreateClaimParams{Name: "Refused routed", Access: sdb.ACCESS_READ}); !errors.Is(err, sdb.ErrNoAccess) {
+		t.Fatalf("a write the prophet answers 403 must be ErrNoAccess, got %v", err)
+	}
+
+	db.RouteToProphet = false
+	claim, err := db.CreateClaim(ctx, ac, sdb.CreateClaimParams{Name: "Level 5 grant", Access: sdb.ACCESS_READ, Level: 5})
+	if err != nil {
+		t.Fatalf("create level 5 claim: %v", err)
+	}
+	organization := sdb.ObjectType(sdb.OBJECT_TYPE_ORGANIZATION)
+	if _, err := claim.AssignObject(&sdb.ClaimObject{ObjectID: &orgAlpha, ObjectType: &organization, Inherits: true, OwnerID: orgRoot, RootID: orgRoot}); !errors.Is(err, sdb.ErrNoAccess) {
+		t.Fatalf("a binding above the level the actor holds must be ErrNoAccess, got %v", err)
+	}
+}

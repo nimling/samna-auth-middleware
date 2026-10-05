@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"reflect"
@@ -15,6 +16,7 @@ import (
 	"github.com/nimling/samna-auth-middleware/v2/client"
 	"github.com/nimling/samna-auth-middleware/v2/internal/store"
 	"github.com/uptrace/bun"
+	"github.com/uptrace/bun/driver/pgdriver"
 )
 
 func modelTableName(db *DB, model any) string {
@@ -429,6 +431,9 @@ func (q *InsertQuery) route(ctx context.Context, dest ...any) error {
 	var raw json.RawMessage
 	var status int
 	if err := client.Post(client.WithStatus(client.WithSyncSeq(ctx, &q.seq), &status), path, json.RawMessage(body), &raw); err != nil {
+		if errors.Is(err, client.ErrForbidden) {
+			return fmt.Errorf("%w: %w", ErrNoAccess, err)
+		}
 		return err
 	}
 	q.created = status == http.StatusCreated
@@ -439,7 +444,13 @@ func (q *InsertQuery) Seq() client.SyncCursor { return q.seq }
 
 func (q *InsertQuery) Created() bool { return q.created }
 
-func (q *InsertQuery) execClaimius(ctx context.Context, dest ...any) (bool, error) {
+func (q *InsertQuery) execClaimius(ctx context.Context, dest ...any) (handled bool, err error) {
+	defer func() {
+		var pgErr pgdriver.Error
+		if errors.As(err, &pgErr) && pgErr.Field('C') == "P0403" {
+			err = fmt.Errorf("%w: %w", ErrNoAccess, err)
+		}
+	}()
 	switch m := q.model.(type) {
 	case *SamnaUserToken:
 		result, err := q.db.issueUserToken(ctx, q.accessClaim, *m)
@@ -771,6 +782,9 @@ func (q *UpdateQuery) route(ctx context.Context, dest ...any) error {
 	}
 	var raw json.RawMessage
 	if err := client.Patch(client.WithSyncSeq(ctx, &q.seq), path, payload, &raw); err != nil {
+		if errors.Is(err, client.ErrForbidden) {
+			return fmt.Errorf("%w: %w", ErrNoAccess, err)
+		}
 		return err
 	}
 	return q.db.applyRouted(ctx, q.model, raw, dest...)
@@ -778,7 +792,13 @@ func (q *UpdateQuery) route(ctx context.Context, dest ...any) error {
 
 func (q *UpdateQuery) Seq() client.SyncCursor { return q.seq }
 
-func (q *UpdateQuery) execClaimius(ctx context.Context, dest ...any) (bool, error) {
+func (q *UpdateQuery) execClaimius(ctx context.Context, dest ...any) (handled bool, err error) {
+	defer func() {
+		var pgErr pgdriver.Error
+		if errors.As(err, &pgErr) && pgErr.Field('C') == "P0403" {
+			err = fmt.Errorf("%w: %w", ErrNoAccess, err)
+		}
+	}()
 	if q.recordID == uuid.Nil {
 		return false, nil
 	}
@@ -979,6 +999,9 @@ func (q *DeleteQuery) route(ctx context.Context, dest ...any) error {
 	}
 	var raw json.RawMessage
 	if err := client.Delete(client.WithSyncSeq(ctx, &q.seq), path, nil, &raw); err != nil {
+		if errors.Is(err, client.ErrForbidden) {
+			return fmt.Errorf("%w: %w", ErrNoAccess, err)
+		}
 		return err
 	}
 	return q.db.applyRouted(ctx, q.model, raw, dest...)
@@ -986,7 +1009,13 @@ func (q *DeleteQuery) route(ctx context.Context, dest ...any) error {
 
 func (q *DeleteQuery) Seq() client.SyncCursor { return q.seq }
 
-func (q *DeleteQuery) execClaimius(ctx context.Context, dest ...any) (bool, error) {
+func (q *DeleteQuery) execClaimius(ctx context.Context, dest ...any) (handled bool, err error) {
+	defer func() {
+		var pgErr pgdriver.Error
+		if errors.As(err, &pgErr) && pgErr.Field('C') == "P0403" {
+			err = fmt.Errorf("%w: %w", ErrNoAccess, err)
+		}
+	}()
 	if q.recordID == uuid.Nil {
 		return false, nil
 	}

@@ -3,6 +3,8 @@ package errorsx
 import (
 	"errors"
 	"net/http"
+
+	"github.com/uptrace/bun/driver/pgdriver"
 )
 
 var (
@@ -16,6 +18,11 @@ var (
 )
 
 func ErrToHttpCode(err error) int {
+	var pgErr pgdriver.Error
+	code := ""
+	if errors.As(err, &pgErr) {
+		code = pgErr.Field('C')
+	}
 	switch {
 	case errors.Is(err, ErrNotFound):
 		return http.StatusNotFound
@@ -27,6 +34,10 @@ func ErrToHttpCode(err error) int {
 		return http.StatusConflict
 	case errors.Is(err, ErrForbidden):
 		return http.StatusForbidden
+	case code == "P0403":
+		return http.StatusForbidden
+	case code == "P0404":
+		return http.StatusNotFound
 	default:
 		return http.StatusInternalServerError
 	}
