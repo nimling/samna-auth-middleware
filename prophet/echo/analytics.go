@@ -55,10 +55,6 @@ func forwardedUser(ctx echo.Context) *uuid.UUID {
 	return &id
 }
 
-// captureApp names the app a capture request belongs to. A disciple reaches
-// the prophet on the sam channel and AppMiddleware has already set app_id. The
-// prophet's own portal reaches these routes from a browser with no app
-// credentials, so the system app it is configured as answers for it.
 func captureApp(ctx echo.Context) (uuid.UUID, bool) {
 	if id, ok := ctx.Get("app_id").(uuid.UUID); ok && id != uuid.Nil {
 		return id, true
@@ -147,9 +143,6 @@ func GetConsent(ctx echo.Context) error {
 	return respond.JSON(ctx, http.StatusOK, state, 1)
 }
 
-// captured fills the paths the app holds a fresh snapshot for, so the browser
-// learns in the consent answer which pages need no capture instead of asking
-// once per view.
 func captured(ctx echo.Context, appID uuid.UUID, state *shared.ConsentState) error {
 	state.Captured = make([]string, 0)
 	if !state.Categories.Analytics {

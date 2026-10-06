@@ -68,7 +68,6 @@ var claimiusObjectTypes = map[string]ObjectType{
 	StripObjectSchema(OBJECT_TYPE_USER_TOKEN):    OBJECT_TYPE_USER_TOKEN,
 }
 
-// ResolveObjectType validates claimius's own types and passes every other type through untouched. A bare claimius name resolves to claimius.X and a claimius.X the schema does not register is refused. A consumer's type is metadata the middleware carries to SQL and back as given; the consumer checks it with ObjectType.Validate when it wants to.
 func ResolveObjectType(s string) (ObjectType, error) {
 	if s == "" {
 		return "", fmt.Errorf("object_type is required")
@@ -85,7 +84,6 @@ func ResolveObjectType(s string) (ObjectType, error) {
 	return ObjectType(s), nil
 }
 
-// Validate is the opt in check a consumer runs on its own types: the type is schema qualified and, when known is given, one of known. The middleware never calls it.
 func (o ObjectType) Validate(known ...ObjectType) error {
 	schema, table, ok := strings.Cut(string(o), ".")
 	if !ok || schema == "" || table == "" {
@@ -167,7 +165,6 @@ func (a *ClaimAccess) UnmarshalJSON(data []byte) error {
 
 	switch jsonType {
 	case jsonx.TypeNumber:
-		// checking for float
 		val, err := strconv.ParseInt(strData, 10, 64)
 		if err != nil {
 			return errors.New("failed to parse access")
@@ -994,14 +991,10 @@ type DiscipleState struct {
 	UpdatedAt       time.Time `bun:"sa_updated_at,default:now()" json:"updated_at"`
 }
 
-// Cursor is the prophet feed position the disciple applied.
 func (s DiscipleState) Cursor() client.SyncCursor {
 	return client.SyncCursor{Txid: s.LastAppliedTxid, Seq: s.LastAppliedSeq}
 }
 
-// ProphetPeer is one app a prophet mirrors from a peer prophet: the peer, the
-// app credential its /sam checks, and the prophet's place on the peer's feed
-// of the app.
 type ProphetPeer struct {
 	bun.BaseModel `bun:"table:claimius.prophet_peer"`
 

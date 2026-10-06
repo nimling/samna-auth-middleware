@@ -72,9 +72,6 @@ func (r *runner) exec(ctx context.Context, j job) {
 	}
 }
 
-// foldLoop keeps the heat grid current and the raw tier bounded. A pointer is
-// sampled every 100ms, so the raw table grows far faster than anything reads
-// it, while the field a reader wants is the same field a coarse grid holds.
 func (r *runner) foldLoop(ctx context.Context) {
 	ticker := time.NewTicker(foldInterval)
 	defer ticker.Stop()
@@ -91,9 +88,6 @@ func (r *runner) foldLoop(ctx context.Context) {
 	}
 }
 
-// fold refolds yesterday and today, then drops raw beyond the retention
-// window. Today is refolded on every tick because a cell is replaced rather
-// than added to, so folding the whole of the day so far is always right.
 func (r *runner) fold(ctx context.Context) {
 	now := time.Now().UTC()
 

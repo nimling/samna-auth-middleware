@@ -12,15 +12,6 @@ export interface ConsentCopy {
   categories: Record<keyof ConsentCategories, { name: string; description: string }>
 }
 
-/**
- * Which categories the sheet carries and how each one starts. A key that is
- * absent is a category this app does not use, so the sheet leaves it out and
- * the stored decision records it false. The value is the toggle's starting
- * position, which the visitor is free to change before saving.
- *
- * necessary is carried whether or not it is named, is always on, and cannot be
- * switched off.
- */
 export type ConsentCategoryDefaults = Partial<Record<keyof ConsentCategories, boolean>>
 
 export interface ConsentSheetConfig extends AnalyticsConfig {
@@ -167,10 +158,6 @@ const allCategories: ConsentCategoryDefaults = {
   marketing: true
 }
 
-/**
- * Resolves the declaration an app initialised with. Null or absent means the
- * app takes every category with each one starting on.
- */
 function declared(categories?: ConsentCategoryDefaults | null): ConsentCategoryDefaults {
   if (!categories) return { ...allCategories }
   return { ...categories, necessary: true }
@@ -341,10 +328,6 @@ function render(
   mount.appendChild(host)
 }
 
-/**
- * Opens the consent sheet regardless of whether a decision is already stored,
- * so an app can offer a "cookie settings" control that reopens it.
- */
 export function openConsentSheet(options: ConsentSheetConfig = {}): void {
   const state = getConsentState()
   if (!state) return
@@ -356,11 +339,6 @@ export function openConsentSheet(options: ConsentSheetConfig = {}): void {
   render(state, copy, options.mount ?? document.body, declared(options.categories))
 }
 
-/**
- * Reads consent, starts capture when it is already granted, and shows the
- * sheet when the visitor has not decided under the current policy. This is the
- * single call an app needs.
- */
 export async function configureConsent(options: ConsentSheetConfig = {}): Promise<ConsentState | null> {
   const state = await configureAnalytics(options)
   if (!state) return null
@@ -368,9 +346,6 @@ export async function configureConsent(options: ConsentSheetConfig = {}): Promis
   return state
 }
 
-/**
- * Removes the sheet without recording a decision.
- */
 export function closeConsentSheet(): void {
   removeSheet()
 }

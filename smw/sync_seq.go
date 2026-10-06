@@ -11,9 +11,6 @@ import (
 	sdb "github.com/nimling/samna-auth-middleware/v2/prophet/sdb"
 )
 
-// SyncSeq stamps, on a successful prophet answer to a write, the highest sync
-// position of the calling app once the write has run. A disciple that routed
-// the write waits until its cursor reaches it before it reads its own write.
 func SyncSeq(next echo.HandlerFunc) echo.HandlerFunc {
 	return func(ctx echo.Context) error {
 		switch ctx.Request().Method {
@@ -38,10 +35,6 @@ func SyncSeq(next echo.HandlerFunc) echo.HandlerFunc {
 	}
 }
 
-// AppHome refuses a write for an app another prophet decides: an app mirrored
-// from a peer, or one this prophet offered to a peer that has not yet taken
-// it. The refusal answers 409 and names that prophet in client.HeaderHome, so
-// every app keeps a single writer and a routed write learns where it belongs.
 func AppHome(next echo.HandlerFunc) echo.HandlerFunc {
 	return func(ctx echo.Context) error {
 		switch ctx.Request().Method {

@@ -7,7 +7,6 @@ import (
 	"strings"
 )
 
-// tagName parses the first comma part of a struct tag value.
 func tagName(tag string) (name string, omitEmpty bool, skip bool) {
 	tag = strings.TrimSpace(tag)
 	if tag == "" {
@@ -113,8 +112,6 @@ func Marshal(model any) ([]byte, error) {
 	return json.Marshal(m)
 }
 
-// Unmarshal decodes with encoding/json, then overlays the sauth-only fields by
-// their sauth key (covering json-hidden fields json.Unmarshal would skip).
 func Unmarshal(data []byte, model any) error {
 	if err := json.Unmarshal(data, model); err != nil {
 		return fmt.Errorf("sauth.Unmarshal: %w", err)

@@ -31,23 +31,15 @@ const (
 	moveInterval               = time.Minute
 )
 
-// Replica is one consumer of one app's feed and the database it applies the
-// feed into: the disciple database, or a prophet mirroring an app of a peer
-// prophet. Either relies on exactly one prophet, whose feed its cursor is a
-// position on.
 type Replica struct {
 	DB   *shared.DB
 	Peer *shared.ProphetPeer
 }
 
-// Disciple is the replica of the disciple's own database.
 func Disciple() *Replica {
 	return &Replica{DB: sdb.Instance().DB}
 }
 
-// State is a replica's place on its prophet's feed: the consumer id the
-// prophet keeps the replica's cursor under, the cursor, and the prophet the
-// replica is bound to with the endpoint it answers on.
 type State struct {
 	ID       uuid.UUID
 	Cursor   client.SyncCursor
@@ -55,12 +47,6 @@ type State struct {
 	Endpoint string
 }
 
-// reportStalledCursor records that the replica has stopped making progress at
-// its cursor. Two patterns produce this and neither recovers on its own: a
-// cursor the prophet's feed cannot serve, which the prophet answers with 409,
-// and an event the replica cannot apply, which fails forever. The loop answers
-// both with a snapshot, and the snapshot's transaction audits the reconcile
-// with the message this returns.
 func (r *Replica) reportStalledCursor(ctx context.Context, reason string) string {
 	state, err := r.GetState(ctx)
 	if err != nil {
@@ -71,11 +57,6 @@ func (r *Replica) reportStalledCursor(ctx context.Context, reason string) string
 	return fmt.Sprintf("cursor %s %s, reconciled from a fresh snapshot", state.Cursor, reason)
 }
 
-// SyncStart launches the background pull loop that keeps the disciple database
-// current. Call it once after the server starts, on every pod. Only the pod
-// holding the disciple's sync lock pulls; the others wait to take over. Every
-// pod routes its writes to the prophet the disciple is bound to. It runs until
-// the context ends and logs failures through the database logger.
 func SyncStart(ctx context.Context) {
 	if shared.GetDebugMode() != shared.DebugModeNone {
 		return
@@ -84,11 +65,6 @@ func SyncStart(ctx context.Context) {
 	go LeadSync(ctx, sdb.Instance().DB, SyncLockKey(utils.Cfg().AppSlug), leadInterval, Disciple().Pull)
 }
 
-// PeerSyncStart launches, on a prophet, the pull of every app it mirrors from
-// a peer in prophet_peer, through the same pull a disciple runs, into the
-// prophet database db. Call it once after the server starts, on every pod; one
-// pod per mirrored app pulls, and a peer row added later starts within an
-// interval.
 func PeerSyncStart(ctx context.Context, db *shared.DB) {
 	if shared.GetDebugMode() != shared.DebugModeNone {
 		return
@@ -117,9 +93,6 @@ func PeerSyncStart(ctx context.Context, db *shared.DB) {
 	}()
 }
 
-// bindClient keeps the requests of this process on the prophet r is bound to,
-// reading the binding every interval, so a pod that does not pull follows a
-// move the pulling pod made.
 func bindClient(ctx context.Context, r *Replica, interval time.Duration) {
 	for {
 		if state, err := r.GetState(ctx); err == nil {
@@ -133,19 +106,10 @@ func bindClient(ctx context.Context, r *Replica, interval time.Duration) {
 	}
 }
 
-// SyncLockKey names the advisory lock that makes one process the sync consumer
-// of the disciple database of an app.
 func SyncLockKey(appSlug string) string {
 	return "claimius.disciple_sync:" + appSlug
 }
 
-// LeadSync runs work for as long as this process holds the session level
-// advisory lock on key, on a dedicated connection taken from db. A process that
-// does not get the lock does no sync work and retries every interval, so N pods
-// apply each event once instead of N times. The lock lives and dies with its
-// connection: when the holder goes away the server releases it and another
-// process takes over, and a holder whose connection stops answering cancels
-// its work and discards the connection before it tries again.
 func LeadSync(ctx context.Context, db *shared.DB, key string, interval time.Duration, work func(context.Context)) {
 	for {
 		conn, err := takeSyncLock(ctx, db, key)
@@ -209,17 +173,11 @@ func holdSyncLock(ctx context.Context, conn *bun.Conn, interval time.Duration, w
 	}
 }
 
-// discardConn closes the session behind a connection instead of returning it
-// to the pool, so a session level lock never outlives the process that took it.
 func discardConn(conn *bun.Conn) {
 	_ = conn.Raw(func(any) error { return driver.ErrBadConn })
 	_ = conn.Close()
 }
 
-// Pull keeps the replica current from its prophet until ctx ends. A disciple
-// also asks the configured prophet to take it over when that is not the one it
-// is bound to, and drains its access areas between pulls. A peer replica pulls
-// while its row is active and the peer decides the app.
 func (r *Replica) Pull(ctx context.Context) {
 	log := r.DB.Logger
 	report := func(err error) {
@@ -293,10 +251,6 @@ func (r *Replica) Pull(ctx context.Context) {
 	}
 }
 
-// pulling reports whether the replica pulls now. A disciple always does. A
-// peer replica does while its row is active and the peer decides the app,
-// which stops once this prophet accepts the app's handover and decides it
-// itself.
 func (r *Replica) pulling(ctx context.Context) (bool, error) {
 	if r.Peer == nil {
 		return true, nil
@@ -318,11 +272,6 @@ func (r *Replica) pulling(ctx context.Context) (bool, error) {
 	return home.String == r.Peer.Prophet, nil
 }
 
-// Move asks the configured prophet to take the disciple over when it is not
-// the prophet the disciple is bound to. That prophet serves the disciple only
-// under a handover of the app the bound prophet offered and it accepted; the
-// disciple then takes its snapshot and binds to it, cursor included. Until
-// then it refuses with client.ErrNotHome and the disciple keeps its prophet.
 func (r *Replica) Move(ctx context.Context) error {
 	state, err := r.GetState(ctx)
 	if err != nil {
@@ -362,16 +311,6 @@ func stripAppID(raw json.RawMessage) json.RawMessage {
 	return cleaned
 }
 
-// ApplyPage applies one page of payloads and moves the cursor from from to the
-// position of to in one transaction under replay_mode, so a page of p events
-// costs one commit and a page that fails anywhere rolls back whole, cursor
-// included, and is pulled again. The commit does not wait for its WAL flush: a
-// page lost to a crash is a cursor that did not move, and the page is pulled
-// again. The cursor moves first and only from the position the page was
-// pulled at, which holds its row for the page and refuses a page another
-// consumer already applied. A disciple binds to the prophet to names in the
-// same transaction. A snapshot that replaces a stalled replica passes the
-// reconcile message, audited in the same transaction.
 func (r *Replica) ApplyPage(ctx context.Context, from client.SyncCursor, to State, payloads []SyncPayload, reconcile string) error {
 	return r.DB.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
 		if _, err := tx.ExecContext(ctx, "SET LOCAL claimius.replay_mode = 'true'"); err != nil {
@@ -408,10 +347,6 @@ func (r *Replica) ApplyPage(ctx context.Context, from client.SyncCursor, to Stat
 	})
 }
 
-// applyPeerPayload applies one row of the peer's feed on the mirroring
-// prophet. A row whose id this prophet holds for another app, or for an app
-// another prophet decides, is refused and recorded in peer_collision by the
-// database, and the page goes on.
 func (r *Replica) applyPeerPayload(ctx context.Context, tx bun.Tx, payload SyncPayload) error {
 	var applied bool
 	if err := tx.NewRaw("SELECT claimius.apply_peer_event(?, ?, ?, ?, ?)",
@@ -456,9 +391,6 @@ type claimBindingEnvelope struct {
 	ObjectID   *uuid.UUID `json:"object_id"`
 }
 
-// ClaimAreas resolves the claim areas a synced payload moves. A claim payload
-// names itself, a binding names the claim it binds, and a claim_object linking
-// one claim to another moves both. Any other event type moves no claim area.
 func ClaimAreas(eventType string, raw json.RawMessage) ([]uuid.UUID, error) {
 	var envelope claimBindingEnvelope
 	switch eventType {
@@ -487,12 +419,6 @@ func ClaimAreas(eventType string, raw json.RawMessage) ([]uuid.UUID, error) {
 	return areas, nil
 }
 
-// recomputeExternal marks the claim areas a payload moved as outstanding. The
-// disciple carries external tables the prophet knows nothing about, so their
-// access settles locally, and the replay guard on the claim trigger means a
-// synced payload raises nothing by itself. Marking an area costs one row
-// whatever the claim reaches, and reconcile_if_pending settles it on the next
-// read that targets it. An assignment moves the area of its one user only.
 func recomputeExternal(ctx context.Context, tx bun.Tx, eventType string, raw json.RawMessage) error {
 	areas, err := ClaimAreas(eventType, raw)
 	if err != nil {
@@ -619,11 +545,6 @@ func deleteEntity[T any](ctx context.Context, tx bun.Tx, id json.RawMessage) err
 	return nil
 }
 
-// UpdateSeq moves the cursor from from to the position of to. A page moves it
-// forward; a snapshot sets it to the snapshot's position, below a cursor the
-// prophet no longer serves when that is what sent the replica to the
-// snapshot, or on another prophet's feed when the snapshot moved a disciple
-// there. A disciple takes the prophet and endpoint to names as its binding.
 func (r *Replica) UpdateSeq(ctx context.Context, tx bun.Tx, from client.SyncCursor, to State) error {
 	q := tx.NewUpdate()
 	if r.Peer != nil {
@@ -654,10 +575,6 @@ func (r *Replica) UpdateSeq(ctx context.Context, tx bun.Tx, from client.SyncCurs
 	return nil
 }
 
-// GetState reads the replica's state row. Its id names the replica to the
-// prophet as a sync consumer. A disciple with no row yet reads as a zero
-// state. A peer replica rereads its prophet_peer row into r.Peer, so a
-// changed endpoint, credential or status takes effect on the next pull.
 func (r *Replica) GetState(ctx context.Context) (State, error) {
 	if r.Peer != nil {
 		var peer shared.ProphetPeer
@@ -693,7 +610,6 @@ func (r *Replica) GetState(ctx context.Context) (State, error) {
 	return state, nil
 }
 
-// GetSeq reads the disciple's cursor.
 func GetSeq(ctx context.Context) (client.SyncCursor, error) {
 	state, err := Disciple().GetState(ctx)
 	if err != nil {
@@ -702,9 +618,6 @@ func GetSeq(ctx context.Context) (client.SyncCursor, error) {
 	return state.Cursor, nil
 }
 
-// WaitForSeq waits until the disciple's cursor reaches target, the position a
-// routed write answered with, so a read that follows sees that write. It gives
-// up after timeout or when ctx ends.
 func WaitForSeq(ctx context.Context, target client.SyncCursor, timeout time.Duration) error {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()

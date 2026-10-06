@@ -8,9 +8,6 @@ import (
 	"github.com/uptrace/bun"
 )
 
-// Upsert writes model by its id and reports whether the row changed. A row the
-// database already holds with the same values is left untouched, so it fires
-// no trigger and costs only the probe.
 func Upsert(ctx context.Context, idb bun.IDB, model any) (bool, error) {
 	q := idb.NewInsert().
 		Model(model).

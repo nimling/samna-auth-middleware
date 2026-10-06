@@ -35,9 +35,6 @@ type stmtKey struct {
 	query string
 }
 
-// Read runs fn on the replica when one is configured and on the primary
-// otherwise. A replica that refuses the read with SQLSTATE 25006 because the
-// read had to write runs it once more on the primary.
 func (d *DB) Read(ctx context.Context, fn func(ctx context.Context, db *bun.DB) error) error {
 	if d.Replica == nil {
 		return fn(ctx, d.DB)
@@ -50,8 +47,6 @@ func (d *DB) Read(ctx context.Context, fn func(ctx context.Context, db *bun.DB) 
 	return err
 }
 
-// prepared runs query on db as a named prepared statement, parsed and planned
-// once per connection, and scans its rows into dest.
 func (d *DB) prepared(ctx context.Context, db *bun.DB, dest any, query string, args ...any) error {
 	key := stmtKey{db: db, query: query}
 	cached, ok := d.stmts.Load(key)
@@ -73,8 +68,6 @@ func (d *DB) prepared(ctx context.Context, db *bun.DB, dest any, query string, a
 	return db.ScanRows(ctx, rows, dest)
 }
 
-// GetConnectionString returns the DSN the pool was opened with. The
-// notification listener opens its own dedicated pq connection with it.
 func (d *DB) GetConnectionString() string {
 	return d.ConnStr
 }
@@ -84,8 +77,6 @@ var ErrSecretExpired = errors.New("secret expired")
 var ErrRoutedSet = errors.New("a routed update carries a Set expression the prophet cannot apply: set the field on the model, or use NewDelete for a soft delete")
 var ErrRoutedNoRecord = errors.New("a routed update or delete carries no record: populate the model's key or call ID, the record is never read from a Where expression")
 
-// GetApp reads the system app row from claimius.get_app. The prophet
-// holds the full row including key and seed material.
 func (d *DB) GetApp(ctx context.Context) (*SamnaApp, error) {
 	if seed := utils.Cfg().DebugSeed; seed != "" && GetDebugMode() != DebugModeNone {
 		app, err := d.GetAppEnv(ctx)
@@ -104,8 +95,6 @@ func (d *DB) GetApp(ctx context.Context) (*SamnaApp, error) {
 	return &app, nil
 }
 
-// GetAppEnv builds the disciple's app identity from the loaded config. A
-// disciple never signs or decrypts, so it holds no key or seed material.
 func (d *DB) GetAppEnv(ctx context.Context) (*SamnaApp, error) {
 	slug := utils.Cfg().AppSlug
 	if slug == "" {
@@ -195,7 +184,6 @@ func Connect(logger echo.Logger) (*DB, error) {
 	return db, nil
 }
 
-// openPool opens a pool on dsn with the pool shape every Samna service uses.
 func openPool(dsn string) *bun.DB {
 	sqlDB := sql.OpenDB(pgdriver.NewConnector(
 		pgdriver.WithDSN(dsn),

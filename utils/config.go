@@ -19,7 +19,7 @@ type Config struct {
 	DebugSeed     string
 	ReplicaDSN    string
 
-	Issuer      string
+	Issuer       string
 	TokenURL     url.URL
 	JWKSURL      url.URL
 	AuthDisabled bool

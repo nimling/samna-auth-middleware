@@ -10,10 +10,6 @@ import (
 	"github.com/labstack/echo/v4"
 )
 
-// Stream upgrades the response to a server sent event stream for the user and
-// pushes each notification the listener resolves for them. It writes a
-// heartbeat comment on an interval and returns when the client disconnects or
-// the runner stops.
 func Stream(ctx echo.Context, userID uuid.UUID) error {
 	if run == nil {
 		return errors.New("notification runner not started")

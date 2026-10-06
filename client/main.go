@@ -9,9 +9,6 @@ import (
 
 var boundEndpoint atomic.Value
 
-// Bind points every request without a target at endpoint, the prophet a
-// disciple is bound to, in place of the configured endpoint. An empty
-// endpoint returns to the configured one.
 func Bind(endpoint string) {
 	boundEndpoint.Store(endpoint)
 }

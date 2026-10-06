@@ -19,9 +19,6 @@ import (
 	"github.com/uptrace/bun"
 )
 
-// AppMiddleware is internal. It guards the endpoints apps use to reach the
-// prophet, reading the app slug and secret from the request and validating them
-// against the stored app row before the handler runs.
 func AppMiddleware(next echo.HandlerFunc) echo.HandlerFunc {
 	return func(ctx echo.Context) error {
 		ctx.Set("dry_run", ctx.Request().Header.Get("X-Is-Dry-Run") == "true")

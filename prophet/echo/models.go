@@ -350,9 +350,6 @@ type SamnaApp struct {
 	bun.BaseModel `bun:"table:claimius.samna_app" json:"-"`
 }
 
-// GetPrimaryOrigin returns the first registered redirect URI, the origin the app
-// is reached on. Every other entry is an additional callback the authorize
-// endpoint accepts.
 func (a SamnaApp) GetPrimaryOrigin() string {
 	if len(a.RedirectURIs) == 0 {
 		return ""

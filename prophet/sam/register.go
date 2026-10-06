@@ -6,11 +6,6 @@ import (
 	"github.com/nimling/samna-auth-middleware/v2/smw"
 )
 
-// RegisterEndpoints mounts the full prophet API on the passed group. It carries
-// the user, organization, location, claim, asset, app, sync, client, secret,
-// search, code, field and guest routes that apps and browsers reach the prophet
-// through. A write answers with the sync sequence of its change. A write for an
-// app another prophet decides is refused with the prophet that decides it.
 func RegisterEndpoints(g *echo.Group) {
 	g.Use(smw.SyncSeq, smw.AppHome)
 
@@ -159,10 +154,6 @@ func RegisterEndpoints(g *echo.Group) {
 	stat.GET("/session", h.GetAnalyticsSessions)
 }
 
-// RegisterCapture mounts consent and capture for the prophet's own portal. A
-// disciple reaches the same handlers on the sam channel carrying its app
-// credentials, so it never mounts this. The prophet answers for itself as the
-// system app named by SAUTH_APP_SLUG.
 func RegisterCapture(g *echo.Group) {
 	analytics := g.Group("/analytics")
 	analytics.GET("/consent", h.GetConsent)
@@ -171,9 +162,6 @@ func RegisterCapture(g *echo.Group) {
 	analytics.POST("/capture", h.PostAnalyticsCapture)
 }
 
-// RegisterCaptureRead mounts the capture read for the prophet's own portal. It
-// answers for the signed in reader, across every producer app their analytics
-// grant covers.
 func RegisterCaptureRead(g *echo.Group) {
 	analytics := g.Group("/analytics")
 	analytics.GET("/app", h.GetAnalyticsApps)

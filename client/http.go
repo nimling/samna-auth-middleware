@@ -33,25 +33,18 @@ type ResponseError struct {
 
 type forwardKey struct{}
 
-// Forward carries the browser identity of the visitor an app is acting for, so
-// the prophet records the visitor rather than the calling app. Every request
-// built from a context holding one sends it on the SAuth-Forwarded headers.
 type Forward struct {
 	IP        string
 	UserAgent string
 	UserID    string
 }
 
-// WithForward attaches the visitor identity to a context handed to Get, Post,
-// Put, Patch or Delete.
 func WithForward(ctx context.Context, f Forward) context.Context {
 	return context.WithValue(ctx, forwardKey{}, f)
 }
 
 type contentTypeKey struct{}
 
-// WithContentType overrides the request content type for a body handed to Post,
-// Put or Patch as raw bytes, for payloads that are not json.
 func WithContentType(ctx context.Context, contentType string) context.Context {
 	return context.WithValue(ctx, contentTypeKey{}, contentType)
 }
@@ -65,15 +58,11 @@ func contentTypeFrom(ctx context.Context) string {
 
 type clientCredentialsKey struct{}
 
-// ClientCredentials names the machine client a request acts as, for routes the
-// prophet gates on a client actor rather than the app itself.
 type ClientCredentials struct {
 	ID     string
 	Secret string
 }
 
-// WithClientCredentials attaches a machine client identity to a context handed
-// to Get, Post, Put, Patch or Delete.
 func WithClientCredentials(ctx context.Context, c ClientCredentials) context.Context {
 	return context.WithValue(ctx, clientCredentialsKey{}, c)
 }
@@ -88,32 +77,23 @@ func forwardFrom(ctx context.Context) (Forward, bool) {
 	return f, ok
 }
 
-// HeaderSyncSeq carries, on the prophet's answer to a write, the highest sync
-// position of the calling app once the write has run, as SyncCursor.String.
 const HeaderSyncSeq = "SAuth-Seq"
 
-// SyncCursor is a position on the prophet's sync feed. The feed is ordered by
-// the writing transaction and then the sequence, so a sequence taken late by
-// a transaction that started early is never passed over.
 type SyncCursor struct {
 	Txid int64 `bun:"txid" json:"txid"`
 	Seq  int64 `bun:"seq" json:"seq"`
 }
 
-// Less reports whether c comes before o on the feed.
 func (c SyncCursor) Less(o SyncCursor) bool {
 	return c.Txid < o.Txid || (c.Txid == o.Txid && c.Seq < o.Seq)
 }
 
-// IsZero reports whether c is the start of the feed.
 func (c SyncCursor) IsZero() bool { return c.Txid == 0 && c.Seq == 0 }
 
-// String encodes c as "<txid>.<seq>", the form of the sync path and HeaderSyncSeq.
 func (c SyncCursor) String() string {
 	return strconv.FormatInt(c.Txid, 10) + "." + strconv.FormatInt(c.Seq, 10)
 }
 
-// ParseSyncCursor reads the form SyncCursor.String writes.
 func ParseSyncCursor(s string) (SyncCursor, error) {
 	txid, seq, ok := strings.Cut(s, ".")
 	if !ok {
@@ -130,32 +110,20 @@ func ParseSyncCursor(s string) (SyncCursor, error) {
 	return SyncCursor{Txid: t, Seq: q}, nil
 }
 
-// HeaderProphet carries, on a prophet's answer to a sync pull, the slug the
-// prophet names itself by, the one a consumer binds to.
 const HeaderProphet = "SAuth-Prophet"
 
-// HeaderHome carries, on a prophet's refusal of an app it does not decide or a
-// consumer bound elsewhere, the slug of the prophet the request belongs on.
 const HeaderHome = "SAuth-Home"
 
-// HeaderPeerSecret carries, on a peer prophet's pull, the peer secret the home
-// of the app granted it in peer_grant, without which the home serves no peer.
 const HeaderPeerSecret = "SAuth-Peer-Secret"
 
 type prophetKey struct{}
 
-// WithProphet returns a context whose answers record, in prophet, the slug of
-// the prophet that answered.
 func WithProphet(ctx context.Context, prophet *string) context.Context {
 	return context.WithValue(ctx, prophetKey{}, prophet)
 }
 
 type targetKey struct{}
 
-// Target names the prophet a request goes to and the app it authenticates as,
-// for a caller that reaches a prophet other than the configured one: a
-// prophet pulling a peer's feed, or a disciple asking another prophet to take
-// it over.
 type Target struct {
 	Endpoint   string
 	Slug       string
@@ -163,31 +131,24 @@ type Target struct {
 	PeerSecret string
 }
 
-// WithTarget returns a context whose requests go to t.
 func WithTarget(ctx context.Context, t Target) context.Context {
 	return context.WithValue(ctx, targetKey{}, t)
 }
 
 type syncSeqKey struct{}
 
-// WithSyncSeq returns a context whose writes record the prophet position of
-// their change in seq, the token a disciple waits on to read its own write.
 func WithSyncSeq(ctx context.Context, seq *SyncCursor) context.Context {
 	return context.WithValue(ctx, syncSeqKey{}, seq)
 }
 
 type statusKey struct{}
 
-// WithStatus returns a context whose writes record the status the prophet
-// answered with in status.
 func WithStatus(ctx context.Context, status *int) context.Context {
 	return context.WithValue(ctx, statusKey{}, status)
 }
 
 type timeoutKey struct{}
 
-// WithTimeout overrides the request timeout for a request the prophet may hold
-// open, such as a sync pull.
 func WithTimeout(ctx context.Context, d time.Duration) context.Context {
 	return context.WithValue(ctx, timeoutKey{}, d)
 }

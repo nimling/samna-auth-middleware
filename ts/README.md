@@ -120,8 +120,32 @@ router.afterEach((to) => postView(to.fullPath))
 ```
 
 The decision is stored against the account on the prophet, so one answer covers
-every app the person signs in to. Reopen the banner from a settings control with
-`openConsentBanner()`.
+every app the person signs in to. Reopen the sheet from a settings control with
+`openConsentSheet()`, whether or not a decision is stored, and remove it without
+recording one with `closeConsentSheet()`.
+
+| Call | Does |
+|---|---|
+| `configureConsent(options)` | Reads consent, starts capture when it is already granted, and shows the sheet when the visitor has not decided under the current policy. The one call an app needs |
+| `configureAnalytics(options)` | Reads the visitor's consent first and starts recording only when the analytics category is granted |
+| `getConsent()` | Reads the decision from the backend; it resolves across every samna_auth app |
+| `postConsent(categories)` | Records the decision and starts or stops capture to match it |
+| `getConsentState()` | The current state, or null before the first read resolves |
+| `postView(path, title)` | Records a page view; a single page app calls it on every route change, since a history navigation fires no load event |
+| `flush(beacon)` | Posts the batch, from the worker when there is one; a failure is swallowed so capture never surfaces an error into the page |
+| `stopAnalytics()` | Stops capture, releases every listener and drops the queue, as when the visitor withdraws the analytics category |
+
+The categories a sheet carries come from the `data-categories` attribute, a comma
+separated list where a name on its own starts on and a name suffixed with `:off`
+starts off; absent means every category, each starting on. A category left out
+is one the app does not use: the sheet leaves it out and the stored decision
+records it false. `necessary` is always carried, always on and cannot be
+switched off.
+
+Pointer samples are folded into heat cells per page and viewport width as they
+arrive, on the grid the prophet folds into, so an hour of mouse movement sends a
+few hundred cell counts instead of tens of thousands of positions. The batch
+class is stringified into the worker, so it reaches nothing outside itself.
 
 The backend half mounts the same way every other saecho handler does. Put it
 outside any group that requires a session, because an anonymous visitor reaches

@@ -24,8 +24,6 @@ const (
 	userExternalHeader = "SAuth-User-ID"
 )
 
-// ClientAuthMiddleware authenticates service to service callers by their client
-// credentials. Mount it on routes that machines rather than browsers reach.
 func ClientAuthMiddleware() echo.MiddlewareFunc {
 	debugUserID := parseUUID(utils.Cfg().DebugUserID)
 	debugClients := parseDebugClients()

@@ -21,9 +21,6 @@ type rateLimiter struct {
 	lastSweep time.Time
 }
 
-// RateLimiter caps how many requests one client address may send to a route
-// within period. It is the guard for anonymous routes an app exposes to the
-// browser, where no credential identifies the caller.
 func RateLimiter(limit int, period time.Duration) echo.MiddlewareFunc {
 	l := &rateLimiter{
 		windows: map[string]*rateWindow{},

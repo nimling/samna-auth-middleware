@@ -6,7 +6,6 @@ import (
 	"github.com/google/uuid"
 )
 
-// Client is one connected browser stream for a user.
 type Client struct {
 	Send chan []byte
 }

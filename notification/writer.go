@@ -10,8 +10,6 @@ import (
 	"github.com/nimling/samna-auth-middleware/v2/shared"
 )
 
-// Notification carries the content of a notification. It maps to the claimius
-// notification columns other than the recipient and the target object.
 type Notification struct {
 	Title       string
 	Description *string
@@ -31,9 +29,6 @@ type job struct {
 	userIDs    []uuid.UUID
 }
 
-// Write fans a notification out to every user holding read access on the
-// object, resolved in claimius. It returns immediately and performs the access
-// lookup and the inserts on the worker.
 func Write(in Notification, objectType string, objectID uuid.UUID) {
 	if run == nil {
 		return
@@ -47,8 +42,6 @@ func Write(in Notification, objectType string, objectID uuid.UUID) {
 	enqueue(job{in: in, objectType: string(qualified), objectID: &id})
 }
 
-// WriteUser writes a notification straight to each named user. It returns
-// immediately and performs the inserts on the worker.
 func WriteUser(in Notification, userIDs ...uuid.UUID) {
 	if run == nil || len(userIDs) == 0 {
 		return

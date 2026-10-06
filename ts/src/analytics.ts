@@ -59,16 +59,6 @@ const defaults: Required<Omit<AnalyticsConfig, 'onConsent'>> = {
   worker: true
 }
 
-/**
- * The batch a flush drains. Discrete events are kept as they came. Pointer
- * samples are folded into heat cells per page and viewport width as they
- * arrive, so a session moving the mouse for an hour sends a few hundred cell
- * counts rather than tens of thousands of positions. The cell edge matches
- * the grid the prophet folds into, so the server adds the counts straight in.
- *
- * The class is self contained on purpose: its source is stringified into the
- * worker, so it may not reach anything outside itself.
- */
 class Batch {
   events: AnalyticsEventInput[] = []
   heat = new Map<string, { path: string; width: number; at: number; cells: Map<number, number> }>()
@@ -283,12 +273,6 @@ function send(body: string, beacon: boolean): void {
   } catch {}
 }
 
-/**
- * Flushes the batch. With a worker the queue lives there and this only asks it
- * to post; without one the batch is drained and posted from here. Failures are
- * swallowed on purpose: capture must never surface an error into the page it
- * is measuring.
- */
 export function flush(beacon = false): void {
   if (!started) return
   if (worker) {
@@ -438,10 +422,6 @@ function scheduleCapture(path: string): void {
   }, captureSettleMs)
 }
 
-/**
- * Records a page view. Single page apps call this on every route change,
- * because a history navigation fires no load event.
- */
 export function postView(path?: string, title?: string): void {
   const here = path ?? location.pathname + location.search
   push('view', { path: here, title: title ?? document.title })
@@ -479,10 +459,6 @@ function start(): void {
   postView()
 }
 
-/**
- * Stops capture, releases every listener and drops the queue. Called when the
- * visitor withdraws the analytics category.
- */
 export function stopAnalytics(): void {
   if (!started) return
   if (worker) {
@@ -501,10 +477,6 @@ export function stopAnalytics(): void {
   batch = null
 }
 
-/**
- * Reads the visitor's consent from the backend. The answer resolves across every
- * samna_auth app, so a decision made elsewhere is already known here.
- */
 export async function getConsent(): Promise<ConsentState | null> {
   try {
     const res = await fetch(`${consentUrl()}?anonymous_id=${encodeURIComponent(anonymousId)}`, {
@@ -519,9 +491,6 @@ export async function getConsent(): Promise<ConsentState | null> {
   }
 }
 
-/**
- * Records the visitor's decision and starts or stops capture to match it.
- */
 export async function postConsent(categories: ConsentCategories): Promise<ConsentState | null> {
   const policyVersion = consent?.policy_version ?? ''
   try {
@@ -559,18 +528,10 @@ function applyConsent(state: ConsentState): void {
   config.onConsent?.(state)
 }
 
-/**
- * The current consent state, or null before the first read resolves.
- */
 export function getConsentState(): ConsentState | null {
   return consent
 }
 
-/**
- * Wires capture into the page. It reads the visitor's consent first and starts
- * recording only when the analytics category is granted. Nothing it does can
- * throw into the host app.
- */
 export async function configureAnalytics(options: AnalyticsConfig = {}): Promise<ConsentState | null> {
   if (typeof window === 'undefined') return null
   config = { ...defaults, ...options }

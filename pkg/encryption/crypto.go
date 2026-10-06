@@ -176,4 +176,3 @@ func VerifyPassword(password string, encodedHash string, pepper []byte) (bool, e
 	}
 	return false, nil
 }
-

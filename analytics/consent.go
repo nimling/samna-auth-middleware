@@ -28,11 +28,6 @@ func PolicyURL() string {
 	return strings.TrimRight(utils.Cfg().Endpoint, "/") + policyPath
 }
 
-// AnonymousID resolves the durable id a visitor is known by before they sign
-// in. It reads the cookie, then the query parameter, and mints one when the
-// browser carries neither, writing the cookie back so the next request already
-// holds it. Every capture surface resolves the visitor through this, so the
-// prophet portal and a disciple agree on who is asking.
 func AnonymousID(ctx echo.Context) string {
 	id := ""
 	if cookie, err := ctx.Cookie(AnonymousCookie); err == nil && cookie.Value != "" {
@@ -48,9 +43,6 @@ func AnonymousID(ctx echo.Context) string {
 	return id
 }
 
-// WriteAnonymousID stores the id on the visitor's browser for a year. The
-// browser sdk keeps its own copy in local storage and never reads this cookie,
-// so it stays http only.
 func WriteAnonymousID(ctx echo.Context, value string) {
 	if value == "" {
 		return

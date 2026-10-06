@@ -26,8 +26,6 @@ const (
 	syncListenerPing = 90 * time.Second
 )
 
-// syncFeed wakes the pulls held open for an app when an event of the app
-// commits. One LISTEN connection per process carries every app.
 type syncFeed struct {
 	mu      sync.Mutex
 	waiters map[uuid.UUID]map[chan struct{}]struct{}
@@ -123,11 +121,6 @@ type SyncSnapshotResponse struct {
 	client.SyncCursor
 }
 
-// checkSyncHome answers whether this prophet serves the app's feed to the
-// consumer, which names the prophet it is bound to. A consumer this prophet
-// does not serve is refused with 409 and the prophet it stays with in
-// HeaderHome; a served one is told the slug this prophet answers under, the
-// one it binds to. It reports whether the request was refused.
 func checkSyncHome(ctx echo.Context, appID uuid.UUID) (bool, error) {
 	var home struct {
 		Prophet string         `bun:"prophet"`
@@ -275,12 +268,6 @@ func GetSyncSnapshot(ctx echo.Context) error {
 	}, 1)
 }
 
-// GetSyncEvents serves the page of the app's events after the cursor. With
-// wait set it holds an empty answer open up to wait seconds, at most
-// SyncHoldMax, and answers the moment an event of the app commits. A cursor the feed cannot
-// serve answers 409 and the consumer takes the snapshot. A consumer this prophet
-// does not serve the app to answers 409 naming the prophet it stays with. A
-// peer prophet is served the app's handovers too.
 func GetSyncEvents(ctx echo.Context) error {
 	seq, err := client.ParseSyncCursor(ctx.Param("cursor"))
 	if err != nil {
@@ -317,11 +304,6 @@ func GetSyncEvents(ctx echo.Context) error {
 		return respond.Error(ctx, http.StatusConflict, "Snapshot required: cursor "+stale.String)
 	}
 
-	// The incoming cursor is the disciple's proof of application: it only advances
-	// its cursor after every payload applied. What was served is not proof, and
-	// a disciple that fails to apply re-requests from the same point, so arming
-	// on the served position would report consumption that never happened and
-	// let the trim delete events still owed.
 	if _, err := sdb.Instance().NewRaw("SELECT claimius.update_sync_cursor(?, ?, ?, ?)", appID, consumerID, seq.Txid, seq.Seq).
 		Exec(reqCtx); err != nil {
 		ctx.Logger().Errorf("delta cursor %s: %v", appID, err)

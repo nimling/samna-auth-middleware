@@ -13,11 +13,6 @@ export {
   postConsent
 }
 
-/**
- * Reads the data-categories attribute, a comma separated list where a name on
- * its own starts on and a name suffixed with :off starts off. Absent means the
- * page takes every category.
- */
 function bootCategories(raw?: string): ConsentCategoryDefaults | null {
   if (!raw) return null
   const out: ConsentCategoryDefaults = {}

@@ -1,8 +1,3 @@
-// Package notification is the claimius live notification layer, shared by the
-// prophet and the disciple. Write and WriteUser create rows in
-// claimius.notification through the claimius writer functions off the request
-// path. An insert wakes a dedicated pq listener over the claimius_notification
-// channel, which pushes the row to any connected browser through Stream.
 package notification
 
 import (
@@ -36,9 +31,6 @@ type runner struct {
 
 var run *runner
 
-// Init opens the dedicated notification listener and starts the async write
-// worker and the wake loop. Call it once at startup with the database the
-// role's Init returned. A second call is a no op.
 func Init(db *shared.DB) error {
 	if run != nil {
 		return nil
@@ -66,7 +58,6 @@ func Init(db *shared.DB) error {
 	return nil
 }
 
-// Stop closes the listener, ends the loops and releases every connected client.
 func Stop() {
 	if run == nil {
 		return

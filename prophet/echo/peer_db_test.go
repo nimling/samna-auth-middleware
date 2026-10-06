@@ -25,8 +25,6 @@ import (
 	"github.com/nimling/samna-auth-middleware/v2/smw"
 )
 
-// getPeerDB connects to the second prophet database just test keeps next to
-// the first, named by the PEER_ prefixed libpq variables.
 func getPeerDB(t *testing.T) *shared.DB {
 	t.Helper()
 	for _, key := range []string{"PGHOST", "PGPORT", "PGDATABASE", "PGUSER", "PGPASSWORD"} {
@@ -51,8 +49,6 @@ type peerApp struct {
 	Secret string
 }
 
-// postPeerApp registers on the home prophet an app with the key material its
-// /sam app auth checks, owned by a root organization linked to it.
 func postPeerApp(t *testing.T, actor uuid.UUID) peerApp {
 	t.Helper()
 	ctx := context.Background()
