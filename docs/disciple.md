@@ -7,7 +7,7 @@ The disciple is a local replica. It never signs or decrypts, its app identity co
 | Package | Import | Role |
 |---------|--------|------|
 | `sdb` | `disciple/sdb` | Database layer. `sdb.Init(logger)` connects the pool and loads config once. |
-| `echo` | `disciple/echo` | The individual HTTP handlers: the me routes and the login flow. |
+| `echo` | `disciple/echo` | The individual HTTP handlers: the me routes, the login flow, notifications, consent, capture and uptime. |
 | `sam` | `disciple/sam` | `sam.RegisterEndpoints(group)` mounts the handlers, `sam.RegisterCapture(group)` and `sam.RegisterCaptureRead(group)` mount consent and capture, and `sam.SyncStart(ctx)` runs the pull loop. |
 | `smw` | `smw` | Middleware. |
 
@@ -45,7 +45,7 @@ func main() {
 
 1. `sdb.Init(e.Logger)` connects the database and loads the config from the environment once. The app identity comes from `SAUTH_APP_SLUG` and `SAUTH_APP_SECRET`. Nothing else in your code reads the `SAUTH_` variables.
 
-2. `sam.RegisterEndpoints(group)` mounts the login, callback, logout and me routes. To wire them yourself, mount the handlers from the `echo` package one by one, for example `g.GET("/me", echo.GetMe)`.
+2. `sam.RegisterEndpoints(group)` mounts the login, callback, logout, me and notification routes, and consent and capture through `sam.RegisterCapture`. To wire them yourself, mount the handlers from the `echo` package one by one, for example `g.GET("/me", echo.GetMe)`.
 
 3. `smw.UserAuthMiddleware(opts)` protects the routes. Pass `nil` to take the slug, secret, redirect and page redirect from the config.
 
@@ -63,7 +63,7 @@ A disciple that other services read from mounts `smw.UserAuthMiddleware(nil)` on
 
 ## Consent and capture
 
-Interaction capture records clicks, pointer samples, scroll depth, inputs and page views for a visitor who has granted the analytics category, and it works for anonymous visitors as well as signed in ones. The disciple never writes it and never holds it. Every consent decision and every capture batch forwards to the prophet on the app key, and every read goes back to the prophet the same way the audit log does. Capture is app owned: each row carries the app_id of the app that recorded it, so it stays on the prophet, where one app reads another's capture by holding a live `app_object` link to that app's `samna_app` row. `claimius.capture_app_ids` resolves that set at read time, which is how nimployer sees what nim.io recorded.
+Interaction capture records clicks, pointer samples, scroll depth, inputs and page views for a visitor who has granted the analytics category, and it works for anonymous visitors as well as signed in ones. The disciple never writes it and never holds it. Every consent decision and every capture batch forwards to the prophet on the app key, and every read goes back to the prophet the same way the audit log does. Capture is app owned: each row carries the app_id of the app that recorded it, so it stays on the prophet, where a person reads it through a live analytics grant that reaches the app its claim sits in and every app id listed under `analytics.app` in its scope. `claimius.capture_user_apps` resolves that set at read time, which is how a nimployer reader sees what nim.io recorded.
 
 The handlers are the same shape as every other one in `disciple/echo`, so a consumer mounts them itself:
 

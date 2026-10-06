@@ -4,7 +4,7 @@ A prophet hosts many apps in one database. A disciple mirrors exactly one. Scopi
 
 ## Own `app_id` column
 
-Most tables carry `app_id` and belong to exactly one app: `samna_user`, `claim`, `user_claim`, `claim_object`, `user_object`, `user_users`, `user_relation`, `user_field`, `object_field`, `samna_client`, `samna_secret`, `audit`.
+Most tables carry `app_id` and belong to exactly one app: `samna_user`, `claim`, `user_claim`, `claim_object`, `user_object`, `user_users`, `user_relation`, `user_field`, `object_field`, `samna_client`, `samna_secret`, `audit`, `access_diff`.
 
 The same human gets one `samna_user` row per app, all sharing one `user_id`. Every query against these tables on a prophet filters on `app_id`.
 
@@ -50,15 +50,16 @@ WHERE id IN (SELECT claimius.app_object_ids($app_id, 'claimius.organization'));
 
 A disciple has no `app_object` table, and its `organization` and `location` tables have no `app_id` column either. It holds one app's data by construction, so there is nothing to filter against.
 
-The two halves that make that work:
+The three pieces that make that work:
 
 1. The prophet selects organizations and locations for the sync snapshot through `app_object_ids`, and every other table through `app_id = ?`. On the feed an organization or location event is written once for every app linked to the row, stamped with that app, a new link publishes the linked row to its app, and an unlink publishes the row's delete to that app alone.
 2. The disciple strips `app_id` from every payload before upsert and skips `claimius.samna_app` entirely.
+3. The prophet refuses with `P0403` a `claim`, `user_claim` or `claim_object` whose owning organization, or whose bound organization or location, is not linked to the row's app, since that row could never reach the app's disciples. `claimius._check_app_scope` is the trigger and `claimius.app_has_scope(app_id, owner_id, object_type, object_id)` the test. So every row the feed carries lands on the disciple as it arrives; nothing is filtered or parked.
 
 So app scoping is written on the prophet side only. A disciple query that filters organizations by `app_id` refers to a column that does not exist there.
 
 ## Consequences worth knowing
 
-A disciple whose prophet fails to select organizations receives none, and `RootAccess` then finds no root organization for the actor's first `user_claim`. Every handler that gates on `RootAccess` answers 403 while every other part of the service looks healthy. When a disciple reports blanket 403s on listing endpoints, check the organization count in its replica before looking at claims.
+A disciple whose prophet fails to select organizations receives none, and `RootAccess`, which checks the lowest `sa_root_id` among the actor's live claims whose root organization is live, then finds none. Every handler that gates on `RootAccess` answers 403 while every other part of the service looks healthy. When a disciple reports blanket 403s on listing endpoints, check the organization count in its replica before looking at claims.
 
 A new app on an existing prophet does not get organizations by copying them. It gets them by linking: `upsert_app` links the owning organization and its tree when it creates the app, `upsert_root_organization` links a fresh tree, and `upsert_app_object` links an existing one.

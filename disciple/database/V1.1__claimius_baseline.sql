@@ -89,7 +89,7 @@ CREATE TABLE IF NOT EXISTS claimius.samna_user (
                                                    sa_updated_at   TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-COMMENT ON TABLE claimius.samna_user IS 'User record. One row per (user_id) pair.';
+COMMENT ON TABLE claimius.samna_user IS 'User record. One row per user_id.';
 COMMENT ON COLUMN claimius.samna_user.user_id IS 'Stable application identifier across apps. Used in all references.';
 COMMENT ON COLUMN claimius.samna_user.user_name IS 'Optional display username, distinct from first_name/last_name.';
 ALTER TABLE claimius.samna_user ADD COLUMN IF NOT EXISTS user_image TEXT;
@@ -690,7 +690,7 @@ CREATE TABLE IF NOT EXISTS claimius.reconcile_queue (
                                                         sa_created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-COMMENT ON TABLE claimius.reconcile_queue IS 'Disciple side retry queue for failed event applications.';
+COMMENT ON TABLE claimius.reconcile_queue IS 'Pairs left to recompute, drained by reconcile_if_pending on the next read of the pair or of the user. Nothing in the base set writes it: the sync applies each page in one transaction and parks nothing.';
 
 CREATE INDEX IF NOT EXISTS idx_reconcile_queue_user ON claimius.reconcile_queue (user_id);
 

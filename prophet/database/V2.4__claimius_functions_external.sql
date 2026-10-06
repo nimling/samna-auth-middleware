@@ -2678,7 +2678,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius.merge_user(p_target_user_id uuid, p_source_user_id uuid, p_acting_user_claim uuid) IS 'Reassigns all data from source user_id to target user_id across apps.';
+COMMENT ON FUNCTION claimius.merge_user(p_target_user_id uuid, p_source_user_id uuid, p_acting_user_claim uuid) IS 'Merges the source user_id into the target in every app the source has a row in: moves user_claim, user_relation and user_field, retires a source grant of a claim the target already holds, copies the source profile onto an existing target row and removes the source row with its user_object pairs. Prophet set only; samna_auth owns the merge flow.';
 
 -- ============================================================================
 -- migrate_root: cross root migration. Should be called rarely since

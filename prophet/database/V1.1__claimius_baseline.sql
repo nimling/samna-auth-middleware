@@ -928,7 +928,7 @@ CREATE TABLE IF NOT EXISTS claimius.reconcile_queue (
                                                         sa_created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-COMMENT ON TABLE claimius.reconcile_queue IS 'Disciple side retry queue for failed event applications.';
+COMMENT ON TABLE claimius.reconcile_queue IS 'Pairs left to recompute, drained by reconcile_if_pending on the next read of the pair or of the user. Nothing in the base set writes it: the sync applies each page in one transaction and parks nothing.';
 
 CREATE INDEX IF NOT EXISTS idx_reconcile_queue_user ON claimius.reconcile_queue (app_id, user_id);
 
@@ -1102,7 +1102,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = claimius, pg_temp;
 
-COMMENT ON FUNCTION claimius.get_disciple_app() IS 'Returns the upstream prophet app this disciple mirrors. Raises on pure prophet.';
+COMMENT ON FUNCTION claimius.get_disciple_app() IS 'Returns the upstream prophet app this disciple mirrors. Raises on a prophet and on a hybrid, which carry no disciple_state row.';
 
 CREATE OR REPLACE FUNCTION claimius.get_prophet_app_id()
     RETURNS UUID AS $$
@@ -1116,7 +1116,7 @@ CREATE OR REPLACE FUNCTION claimius.get_disciple_app_id()
 SELECT id FROM claimius.get_disciple_app();
 $$ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = claimius, pg_temp;
 
-COMMENT ON FUNCTION claimius.get_disciple_app_id() IS 'Scalar wrapper over get_disciple_app. Returns the upstream prophet app id; raises on pure prophet.';
+COMMENT ON FUNCTION claimius.get_disciple_app_id() IS 'Scalar wrapper over get_disciple_app. Returns the upstream prophet app id; raises on a prophet and on a hybrid.';
 
 CREATE OR REPLACE FUNCTION claimius.get_app_id()
     RETURNS UUID AS $$

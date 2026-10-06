@@ -30,7 +30,7 @@ This is why a machine client created on the prophet becomes usable on a disciple
 
 3. One puller per database. Every pod runs `LeadSync`, and only the pod holding the session level advisory lock `SyncLockKey(app slug)` pulls. The others try again every 5 s and take over when the holder goes.
 
-4. The pull loop. The snapshot when the cursor is zero, then one page after the cursor at a time, each applied in one transaction under `replay_mode` that moves the cursor first. Between pulls it drains open access areas whose holders read often enough to be settled ahead.
+4. The pull loop. The snapshot when the cursor is zero, then one page after the cursor at a time, each applied in one transaction under `replay_mode` that moves the cursor first. Every row of the page is applied as it arrives; nothing is filtered or parked, since the prophet refuses a claim, grant or binding the app's feed could not carry. Between pulls it drains open access areas whose holders read often enough to be settled ahead.
 
 5. Binding. The disciple binds to the prophet that answers it, routes its writes there on every pod, and moves only to a prophet that accepted a handover of the app from the bound one.
 

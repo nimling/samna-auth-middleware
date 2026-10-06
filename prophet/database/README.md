@@ -53,8 +53,8 @@ Implementers don't need to know about `sa_root_id`. Just set the parent (`sa_own
 Four Postgres roles enforce the access boundary:
 
 - **claimius_admin**: schema owner. Used during migrations.
-- **claimius_writer**: prophet runtime. EXECUTE on every function, SELECT on every table, INSERT and UPDATE on the tables without write functions (`samna_app`, `samna_user`, `samna_client`, `samna_secret`, `organization`, `location`, `object_field`, `user_field`, `user_relation`, `notification`, `prophet_state`, `sync_consumer`), UPDATE on `prophet_peer`.
-- **claimius_reader**: app code runtime. No table privilege. EXECUTE on every function except the claim, grant and binding writers, `merge_user`, `migrate_root`, the bootstrap functions, `upsert_app`, `insert_app_handover`, `update_app_handover`, `apply_peer_event`, `upsert_table_info`, `upsert_internal_table_info` and `recompute_state`. The read surface runs as its owner with a pinned `search_path`, so the reader gets answers through it and nothing else.
+- **claimius_writer**: prophet runtime. EXECUTE on every function, SELECT on every table, INSERT and UPDATE on the tables without write functions (`samna_app`, `samna_user`, `samna_client`, `samna_secret`, `organization`, `location`, `object_field`, `user_field`, `user_relation`, `notification`, `prophet_state`, `sync_consumer`, `peer_grant`), INSERT, UPDATE and DELETE on `claim_graph_cache`, UPDATE on `prophet_peer`.
+- **claimius_reader**: app code runtime. No table privilege. EXECUTE on every function except the claim, grant and binding writers, `merge_user`, `migrate_root`, the bootstrap functions, `upsert_app`, `insert_app_handover`, `update_app_handover`, `apply_peer_event`, `insert_secret`, `upsert_peer_grant`, `upsert_guest_user`, `upsert_table_info`, `upsert_internal_table_info` and `recompute_state`. The read surface runs as its owner with a pinned `search_path`, so the reader gets answers through it and nothing else.
 - **claimius_disciple_client**: disciple runtime and sync layer. EXECUTE on every function, SELECT on every table, and INSERT, UPDATE and DELETE on the mirrored source tables, the derived tables, `disciple_state`, `audit`, `inheritance_info`, `table_info`, `notification` and `claim_graph_cache`.
 
 App connections never own the schema. They inherit the appropriate role.
@@ -216,7 +216,7 @@ A disciple consumes from exactly one upstream prophet app. A prophet, and a hybr
 ```sql
 -- On prophet or hybrid: returns the system app row.
 -- Raises on a pure disciple.
-SELECT * FROM claimius.get_prophet_app();
+SELECT * FROM claimius.get_app();
 
 -- On a disciple: returns the upstream prophet app row.
 -- Raises on a prophet and on a hybrid, which carry no disciple_state row.
@@ -317,7 +317,7 @@ The list and graph functions (`get_organizations`, `get_locations`, `get_users`,
 
 Writes go through functions when one exists for the operation (`insert_claim`, `insert_user_claim`, `insert_claim_object`, `merge_user`, etc). For tables without dedicated functions, direct INSERT/UPDATE on the prophet is fine; the prophet runtime role (`claimius_writer`) has the necessary grants. The triggers attached to each table fire either way.
 
-Write functions return a single jsonb object keyed by the affected table name(s). The caller can pull values out with the `->` and `->>` jsonb operators, or pipe the whole object back to a service in Go/Python without further translation.
+Write functions return a single jsonb object keyed by the affected table name(s). The caller can pull values out with the `->` and `->>` jsonb operators, or pipe the whole object back to a service in Go without further translation.
 
 ```sql
 -- Create a claim
@@ -606,6 +606,8 @@ A deny that arrives by cascade subtracts its bits from inherited grants in any t
 
 A grant whose mask reaches `0` after subtraction is dropped. What remains of a grant is closed under implication: a bit whose implied bits were taken goes too, so denying read to an owner leaves nothing. A deny scoped to fields subtracts on those fields only. Denies are computed when a pair is settled (`_build_grants_for_objects`, `_apply_denies`); the resulting `user_object` row reflects only surviving grants, so reads never filter for denies.
 
+`claim.level` is precedence, not access. A deny subtracts from every grant below its level whatever their classes; at the same level the direct and tree rules above decide. A link takes the higher level of its two claims. Binding or granting a claim above level 0 needs an actor that could hand it out: `_check_claim_level` requires write on the claim and refuses to lift a deny of a lower level the actor faces. Every grant and every `AccessClaim` carries the level of the claim it came through. Level 0 everywhere resolves as before levels existed.
+
 ## Sync model
 
 Prophet:
@@ -617,7 +619,7 @@ Disciple:
 1. The pull loop, one process per database, fetches the next page after its cursor.
 2. It applies the page in one transaction with `claimius.replay_mode = true`, moving `disciple_state (last_applied_txid, last_applied_seq)` first. Under replay the calc triggers keep the closure and raise the areas each row moves, settle no actor and emit no event, and each claim, binding and grant raises its claim area.
 3. The disciple's reads settle its own pairs from those areas, as the prophet's do.
-4. Failed recomputes are queued in `reconcile_queue`, drained inline at the top of `get_*` functions.
+4. A page that fails anywhere rolls back whole, cursor included, and is pulled again. Nothing is filtered or parked: the prophet refuses a claim, grant or binding whose organization is not linked to its app, so every row of the feed applies. `reconcile_queue` is still drained at the top of `get_*` functions, but nothing in the base set writes it.
 
 The same ids on prophet and disciple guarantee idempotent upserts. Apply an event twice, get the same row.
 

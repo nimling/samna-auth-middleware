@@ -1356,4 +1356,4 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius.recompute_external_access(p_user_id uuid) IS 'Rebuilds user_object for one user over every external registered table, one set based recompute per table. Called by disciple sync after a claim binding arrives, since the prophet holds no external tables.';
+COMMENT ON FUNCTION claimius.recompute_external_access(p_user_id uuid) IS 'Rebuilds user_object for one user over every external registered table, one set based recompute per table. Not called by the sync, which raises the areas each applied row moves for the reads to settle; a manual rebuild for tables that exist only on the disciple.';
