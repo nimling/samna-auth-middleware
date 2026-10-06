@@ -9,7 +9,7 @@ $$ LANGUAGE sql;
 
 CREATE FUNCTION pg_temp.unsettled() RETURNS BIGINT AS $$
     SELECT count(*) FROM claimius.access_diff d
-    WHERE d.app_id = pg_temp.app() AND d.kind = 'object' AND d.object_id = '10000000-0000-4000-8000-000000000e90'
+    WHERE d.app_id = pg_temp.app() AND d.kind = 'claim' AND d.claim_id IN (SELECT c.id FROM claimius.claim c WHERE c.sa_owner_id = '10000000-0000-4000-8000-000000000e90')
       AND NOT EXISTS (
           SELECT 1 FROM claimius.access_diff_user du
           WHERE du.diff_id = d.id AND du.user_id = 'a0000000-0000-4000-8000-000000000e91' AND du.raise_count = d.raise_count)
@@ -37,13 +37,12 @@ BEGIN
         p_app_id => v_app, p_name => 'Yield crew', p_description => NULL, p_sa_access => 4,
         p_sa_owner_id => v_root, p_sa_root_id => v_root, p_sa_created_by => v_sys
     ) -> 'claim' ->> 'id')::UUID;
-    PERFORM claimius.insert_claim_object(
-        p_app_id => v_app, p_claim_id => v_crew, p_sa_owner_id => v_root, p_sa_root_id => v_root, p_sa_created_by => v_sys,
-        p_object_id => v_root, p_object_type => 'claimius.organization', p_inherits => TRUE);
     PERFORM claimius.insert_user_claim(p_app_id => v_app, p_claim_id => v_crew, p_user_id => 'a0000000-0000-4000-8000-000000000e91',
         p_sa_owner_id => v_root, p_sa_created_by => v_sys);
     PERFORM count(*) FROM claimius.get_objects('a0000000-0000-4000-8000-000000000e91', v_app, 'claimius.organization');
-    PERFORM claimius._raise_object_diff(v_app, 'claimius.organization', v_root, TRUE);
+    PERFORM claimius.insert_claim_object(
+        p_app_id => v_app, p_claim_id => v_crew, p_sa_owner_id => v_root, p_sa_root_id => v_root, p_sa_created_by => v_sys,
+        p_object_id => v_root, p_object_type => 'claimius.organization', p_inherits => TRUE);
 END $$;
 COMMIT;
 

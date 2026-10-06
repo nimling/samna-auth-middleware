@@ -862,16 +862,21 @@ COMMENT ON FUNCTION claimius.emit_sync_event() IS 'Trigger on the source tables.
 -- p_object_type, or that cascade over that type, every object area without
 -- one, and the claim areas of the reader's claims. It takes every one of
 -- them, oldest first, however many are open, so a listing never reads a pair
--- an open area still covers. Each share is set based, one recompute per
+-- an open area still covers while the pairs it moves fit the per object
+-- lock budget. Each share is set based, one recompute per
 -- object type, and is recorded in access_diff_user at the area's
 -- raise_count, so the reader never settles the same raise twice. The area row
 -- is cleared once every holder has settled it. A reader locks the areas it
 -- takes FOR KEY SHARE SKIP LOCKED, which writers raising the area again do
 -- not wait on, and its whole share with one transaction advisory lock, so two
 -- reads of one user never settle it at once; a read that finds it held
--- settles nothing. A batch big enough to spend the per object lock budget
--- takes every object at once instead, so however many areas are open the
--- read holds a bounded number of locks.
+-- settles nothing. A settle locks only the objects whose pair it moves and
+-- never takes every object at once: once the pairs it moves reach the
+-- budget it moves the leaving ones first, records nothing more and leaves
+-- the rest open for the next read, so however many areas are open the read
+-- holds at most the budget and never the lock every writer shares
+-- exclusive, and a writer waits on a read only for an object whose pair the
+-- read moved.
 -- Every lock the settle waits for is bounded by _settle_lock_timeout: a
 -- unit that waits longer is given up, stays open, and the read takes its
 -- pairs as they stand, so a read never holds a writer into a deadlock.
@@ -886,6 +891,7 @@ CREATE OR REPLACE FUNCTION claimius.reconcile_if_pending(
     RETURNS VOID AS $$
 DECLARE
     v_lock_timeout TEXT := current_setting('lock_timeout');
+    v_settling  TEXT := current_setting('claimius.settling', TRUE);
     v_row       RECORD;
     v_open      BOOLEAN;
     v_areas     UUID[];
@@ -896,6 +902,7 @@ BEGIN
         RETURN;
     END IF;
     PERFORM set_config('lock_timeout', claimius._settle_lock_timeout(), TRUE);
+    PERFORM set_config('claimius.settling', 'true', TRUE);
 
     IF p_object_type IS NOT NULL AND p_object_id IS NOT NULL THEN
         BEGIN
@@ -1034,13 +1041,6 @@ BEGIN
             v_areas := '{}';
         END;
 
-        IF cardinality(v_areas) * 4 > claimius._object_lock_budget() THEN
-            BEGIN
-                PERFORM claimius._lock_all_objects();
-            EXCEPTION WHEN lock_not_available THEN
-                NULL;
-            END;
-        END IF;
         FOR v_at IN 1 .. coalesce(cardinality(v_areas), 0) BY v_batch LOOP
             PERFORM claimius._settle_diff_share(p_user_id, v_areas[v_at : v_at + v_batch - 1]);
         END LOOP;
@@ -1060,6 +1060,7 @@ BEGIN
             END LOOP;
     END IF;
     PERFORM set_config('lock_timeout', v_lock_timeout, TRUE);
+    PERFORM set_config('claimius.settling', coalesce(v_settling, ''), TRUE);
 END;
 $$ LANGUAGE plpgsql;
 
@@ -1083,11 +1084,13 @@ CREATE OR REPLACE FUNCTION claimius.drain_access_diff(
 ) RETURNS INTEGER AS $$
 DECLARE
     v_lock_timeout TEXT := current_setting('lock_timeout');
+    v_settling  TEXT := current_setting('claimius.settling', TRUE);
     v_share     RECORD;
     v_settled   INTEGER := 0;
     v_users     UUID[] := '{}';
 BEGIN
     PERFORM set_config('lock_timeout', claimius._settle_lock_timeout(), TRUE);
+    PERFORM set_config('claimius.settling', 'true', TRUE);
     BEGIN
         FOR v_share IN
             SELECT s.user_id, s.diff_id
@@ -1118,6 +1121,7 @@ BEGIN
     END;
 
     PERFORM set_config('lock_timeout', v_lock_timeout, TRUE);
+    PERFORM set_config('claimius.settling', coalesce(v_settling, ''), TRUE);
     RETURN v_settled;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = claimius, pg_temp;

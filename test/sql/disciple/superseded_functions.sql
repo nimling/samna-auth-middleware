@@ -35,6 +35,7 @@ INSERT INTO superseded VALUES
         ('claimius._settle_object_diff(uuid,text,uuid,boolean)'),
         ('claimius._settle_diff_share(uuid,uuid)'),
         ('claimius._clear_diff(uuid)'),
+        ('claimius._lock_all_objects()'),
         ('claimius.create_organization_user(uuid,uuid,uuid,jsonb,boolean)'),
         ('claimius._diff_holders(uuid)'),
         ('claimius.build_location_tree(uuid)'),

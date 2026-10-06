@@ -146,7 +146,7 @@ A writer reads its own write back in the same request: a handler creates a row a
 
 3. A pair recompute takes the per object advisory keys of its objects, `_lock_objects`, sorted by key; a settle takes the keys of its whole share sorted before its first recompute, and the `user_users` trigger takes them again, which waits on nothing. So two settles over overlapping objects acquire their common keys in one order and cannot deadlock.
 
-4. Every per object locker holds the covering lock shared, and a transaction whose per object locks would pass `_object_lock_budget()`, 512, takes the covering lock exclusive in their place. So no transaction holds more than 512 per object entries of the server's shared lock table; see [Materialization](./materialization.md#the-lock-budget).
+4. Every per object locker holds the covering lock shared, and a writer whose per object locks would pass `_object_lock_budget()`, 512, takes the covering lock exclusive in their place; a read never does, and stops moving pairs at the budget instead. So no transaction holds more than 512 per object entries of the server's shared lock table, and no read holds every object; see [Materialization](./materialization.md#the-lock-budget).
 
 5. A read takes one transaction advisory lock for the reader's whole share, per app and user, with `pg_try_advisory_xact_lock`, so two reads of one user never settle at once and neither waits on the other.
 

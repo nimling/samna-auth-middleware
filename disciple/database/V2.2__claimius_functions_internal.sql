@@ -1182,44 +1182,23 @@ $$ LANGUAGE sql STABLE;
 
 COMMENT ON FUNCTION claimius._settle_lock_timeout() IS 'The lock_timeout a read''s settle runs under: a twentieth of deadlock_timeout, or the caller''s lock_timeout when shorter.';
 
--- _lock_all_objects
--- Takes every object at once: the exclusive transaction advisory lock that
--- every per object locker holds shared, one lock in place of any number. A
--- transaction that holds per object locks already would have to upgrade and
--- may deadlock doing it, so it is refused, FALSE. TRUE once held.
-CREATE OR REPLACE FUNCTION claimius._lock_all_objects()
-    RETURNS BOOLEAN AS $$
-DECLARE
-    v_held INTEGER := coalesce(nullif(current_setting('claimius.object_locks', TRUE), ''), '0')::INTEGER;
-BEGIN
-    IF v_held < 0 THEN
-        RETURN TRUE;
-    END IF;
-    IF v_held > 0 THEN
-        RETURN FALSE;
-    END IF;
-    PERFORM pg_advisory_xact_lock(hashtext('claimius._lock_objects'), 0);
-    PERFORM set_config('claimius.object_locks', '-1', TRUE);
-    RETURN TRUE;
-END;
-$$ LANGUAGE plpgsql;
-
-COMMENT ON FUNCTION claimius._lock_all_objects() IS 'Takes every object under one exclusive lock when the transaction holds no per object lock yet. TRUE once held.';
+DROP FUNCTION IF EXISTS claimius._lock_all_objects();
 
 -- _lock_objects
 -- Takes the transaction advisory lock of every object named, one key per
 -- object_type:object_id, in sorted key order, under the lock every object
--- shares. A settle takes the locks of every object it will write before its
--- first write, so two settles that overlap acquire their common objects in
--- one order and cannot deadlock. A lock already held is taken again without
--- waiting and without reordering. The locks a transaction has taken are
--- counted in claimius.object_locks, and past _object_lock_budget the
--- transaction takes every object at once instead. A transaction that holds
--- no per object lock waits for it. One that holds some only tries: waiting
--- would deadlock with a transaction that shares the lock and waits on one of
--- its objects, so when another transaction shares it the locks go on one per
--- object past the budget. A settle that knows it will cross takes every
--- object before its first lock.
+-- shares. recompute_user_object takes the locks of the objects whose pair it
+-- moves before its first write, so the counting trigger takes them again
+-- without waiting and without reordering. The locks a transaction has taken
+-- are counted in claimius.object_locks. Past _object_lock_budget a writer
+-- takes every object at once instead. A writer that holds no per object lock
+-- waits for it. One that holds some only tries: waiting would deadlock with a
+-- transaction that shares the lock and waits on one of its objects, so when
+-- another transaction shares it the locks go on one per object past the
+-- budget. A read's settle, under claimius.settling, never takes every object:
+-- a call that would carry it past the budget is refused with
+-- program_limit_exceeded, so no read holds the lock every writer shares
+-- exclusive.
 CREATE OR REPLACE FUNCTION claimius._lock_objects(p_keys TEXT[])
     RETURNS VOID AS $$
 DECLARE
@@ -1241,6 +1220,10 @@ BEGIN
     END IF;
 
     IF v_held + cardinality(v_keys) > claimius._object_lock_budget() THEN
+        IF current_setting('claimius.settling', TRUE) = 'true' THEN
+            RAISE EXCEPTION 'claimius: a settle past the object lock budget'
+                USING ERRCODE = 'program_limit_exceeded';
+        END IF;
         IF v_held = 0 THEN
             PERFORM pg_advisory_xact_lock(hashtext('claimius._lock_objects'), 0);
             PERFORM set_config('claimius.object_locks', '-1', TRUE);
@@ -1262,7 +1245,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius._lock_objects(TEXT[]) IS 'Takes the per object transaction advisory locks of a set of object_type:object_id keys in sorted key order, under the lock every object shares, or every object at once past _object_lock_budget, waited for only while no per object lock is held.';
+COMMENT ON FUNCTION claimius._lock_objects(TEXT[]) IS 'Takes the per object transaction advisory locks of a set of object_type:object_id keys in sorted key order, under the lock every object shares. Past _object_lock_budget a writer takes every object at once, waited for only while no per object lock is held, and a read''s settle is refused with program_limit_exceeded.';
 
 -- recompute_user_object
 -- The single function that recomputes user_object for one user on a set of
@@ -1271,9 +1254,15 @@ COMMENT ON FUNCTION claimius._lock_objects(TEXT[]) IS 'Takes the per object tran
 -- based on whether grants survive. A creator holds its row through
 -- sa_created_by, which is a user_claim.id, less what the denies bound on the
 -- row itself take. The pairs it inserts and deletes move
--- user_users through _count_user_users. It takes the per object locks of its
--- objects, sorted, before its first write, which inside a settle are already
--- held. A pair holds only the per user columns; a pair written on an object
+-- user_users through _count_user_users. It reads the pairs that leave and
+-- enter first and takes the per object locks of those objects only, sorted,
+-- before its first write; a pair whose access changes in place moves no count
+-- and takes no lock. Inside a read's settle, under claimius.settling, the
+-- counting trigger takes them instead, and when they would carry the
+-- transaction past _object_lock_budget it moves the leaving pairs first and
+-- the entering ones after up to the budget, leaves the rest as they stand and
+-- marks the budget spent, so a read never crosses it. A pair holds only the
+-- per user columns; a pair written on an object
 -- that has no object_info row yet brings one, so no pair is ever without its
 -- object's fields. Returns whether the user's pair set changed.
 DROP FUNCTION IF EXISTS claimius._direct_grant_for_object(UUID, TEXT, UUID);
@@ -1289,6 +1278,11 @@ DECLARE
     v_pairs     JSONB;
     v_removed   INTEGER;
     v_added     INTEGER;
+    v_gone      UUID[];
+    v_new       UUID[];
+    v_moved     UUID[];
+    v_held      INTEGER;
+    v_spent     BOOLEAN := FALSE;
 BEGIN
     IF p_user_id IS NULL OR p_object_type IS NULL OR p_object_ids IS NULL THEN
         RETURN FALSE;
@@ -1302,10 +1296,6 @@ BEGIN
     SELECT ti.* INTO v_info FROM claimius.table_info ti WHERE ti.object_type = p_object_type;
     IF NOT FOUND THEN
         RETURN FALSE;
-    END IF;
-
-    IF NOT claimius.in_replay_mode() THEN
-        PERFORM claimius._lock_objects(ARRAY(SELECT p_object_type || ':' || i::TEXT FROM unnest(v_ids) AS i));
     END IF;
 
     WITH target AS (
@@ -1357,11 +1347,40 @@ BEGIN
     FROM built b
     WHERE b.access <> 0;
 
+    v_gone := ARRAY(
+        SELECT uo.object_id FROM claimius.user_object uo
+        WHERE uo.user_id = p_user_id
+          AND uo.object_type = p_object_type
+          AND uo.object_id = ANY(v_ids)
+          AND uo.object_id NOT IN (SELECT (p ->> 'object_id')::UUID FROM jsonb_array_elements(v_pairs) AS p)
+        ORDER BY uo.object_id);
+    v_new := ARRAY(
+        SELECT (p ->> 'object_id')::UUID FROM jsonb_array_elements(v_pairs) AS p
+        WHERE NOT EXISTS (
+            SELECT 1 FROM claimius.user_object uo
+            WHERE uo.user_id = p_user_id
+              AND uo.object_type = p_object_type
+              AND uo.object_id = (p ->> 'object_id')::UUID)
+        ORDER BY 1);
+    v_moved := v_gone || v_new;
+
+    IF NOT claimius.in_replay_mode() THEN
+        IF current_setting('claimius.settling', TRUE) IS DISTINCT FROM 'true' THEN
+            PERFORM claimius._lock_objects(ARRAY(SELECT p_object_type || ':' || i::TEXT FROM unnest(v_moved) AS i));
+        ELSIF p_object_type <> 'claimius.claim' THEN
+            v_held := coalesce(nullif(current_setting('claimius.object_locks', TRUE), ''), '0')::INTEGER;
+            IF v_held >= 0 AND v_held + cardinality(v_moved) > claimius._object_lock_budget() THEN
+                v_moved := v_moved[1 : greatest(claimius._object_lock_budget() - v_held, 0)];
+                v_spent := TRUE;
+            END IF;
+        END IF;
+    END IF;
+
     DELETE FROM claimius.user_object
     WHERE user_id = p_user_id
       AND object_type = p_object_type
-      AND object_id = ANY(v_ids)
-      AND object_id NOT IN (SELECT (p ->> 'object_id')::UUID FROM jsonb_array_elements(v_pairs) AS p);
+      AND object_id = ANY(v_gone)
+      AND object_id = ANY(v_moved);
     GET DIAGNOSTICS v_removed = ROW_COUNT;
 
     INSERT INTO claimius.object_info (object_type, object_id, sa_owner_id, sa_location_id, sa_root_id, sa_name, sa_description, sa_link)
@@ -1383,6 +1402,7 @@ BEGIN
         FROM jsonb_to_recordset(v_pairs) AS p(
             object_id UUID, sa_access INTEGER, scope JSONB, grants JSONB, direct_grant BOOLEAN
         )
+        WHERE NOT (p.object_id = ANY(v_new)) OR p.object_id = ANY(v_moved)
         ON CONFLICT (user_id, object_type, object_id) DO UPDATE SET
                                        sa_access = EXCLUDED.sa_access,
                                        scope = EXCLUDED.scope,
@@ -1397,11 +1417,15 @@ BEGIN
     )
     SELECT count(*) FILTER (WHERE inserted) INTO v_added FROM written;
 
+    IF v_spent THEN
+        PERFORM set_config('claimius.object_locks', (claimius._object_lock_budget() + 1)::TEXT, TRUE);
+    END IF;
+
     RETURN v_removed > 0 OR v_added > 0;
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius.recompute_user_object(UUID, TEXT, UUID[]) IS 'Recomputes user_object for one user on a set of objects of one type, one pair or a whole share. Purges the pairs whose object is soft deleted or absent or that no grant reaches. Returns whether the user''s pair set changed.';
+COMMENT ON FUNCTION claimius.recompute_user_object(UUID, TEXT, UUID[]) IS 'Recomputes user_object for one user on a set of objects of one type, one pair or a whole share. Purges the pairs whose object is soft deleted or absent or that no grant reaches, locking only the objects whose pair leaves or enters. Inside a read''s settle it moves no more pairs than the lock budget leaves, leaving pairs first, and marks the budget spent when it stops short. Returns whether the user''s pair set changed.';
 
 -- _count_user_users
 -- Statement trigger on user_object that keeps user_users by counting. Every
@@ -1415,10 +1439,11 @@ COMMENT ON FUNCTION claimius.recompute_user_object(UUID, TEXT, UUID[]) IS 'Recom
 -- object two users share. Two transactions adding or removing
 -- pairs on one object serialize on an advisory lock per object, held before
 -- the other holders are read, so each reads the pairs the other committed
--- and no ordered pair is missed or counted twice. A settle and
--- recompute_user_object hold those locks, taken sorted before their first
+-- and no ordered pair is missed or counted twice. recompute_user_object
+-- holds the locks of the pairs it moves, taken sorted before its first
 -- write, so here they are taken again, which waits on nothing and reorders
--- nothing; any other writer of user_object takes them here. Quiet under
+-- nothing; inside a read's settle, and for any other writer of user_object,
+-- they are taken here. Quiet under
 -- replay_mode, where the bulk seed rebuilds it with _refresh_user_users.
 CREATE OR REPLACE FUNCTION claimius._count_user_users()
     RETURNS TRIGGER AS $$
@@ -2139,9 +2164,9 @@ COMMENT ON FUNCTION claimius._raise_claim_diff(UUID, UUID) IS 'Marks a claim are
 -- Settles one user's share of a batch of object areas, set based: the objects
 -- of every area, the object and with cascade its subtree, on which the user
 -- holds a pair or which a binding of the user's own claims reaches, plus the
--- object of each area itself so its creator is settled. The per object locks
--- of the whole batch are taken once, sorted, before the first write, then one
--- recompute per object type for the whole batch, so the fixed cost of a
+-- object of each area itself so its creator is settled. One recompute per
+-- object type for the whole batch locks only the objects whose pair moves,
+-- so the fixed cost of a
 -- recompute is paid once per type and batch, not once per area. Returns
 -- whether the user's pair set changed.
 -- ----------------------------------------------------------------------------
@@ -2227,8 +2252,6 @@ BEGIN
               AND e.descendant_id = a.object_id
               AND e.depth > 0);
 
-    PERFORM claimius._lock_objects(ARRAY(SELECT s.object_type || ':' || s.object_id::TEXT FROM unnest(v_types, v_ids) AS s(object_type, object_id)));
-
     FOR v_share IN
         SELECT s.object_type, array_agg(s.object_id) AS object_ids
         FROM unnest(v_types, v_ids) AS s(object_type, object_id)
@@ -2250,10 +2273,9 @@ COMMENT ON FUNCTION claimius._settle_object_diff(UUID, TEXT[], UUID[], BOOLEAN[]
 -- subtrees; the objects bound by the claims it links to and, where that
 -- binding cascades, their subtrees; and the user's pairs whose grants name the
 -- claim or were composed through it. Bindings and links removed or changed since the area opened, at
--- p_since, count too, so the pairs they used to reach are settled away. The
--- per object locks of the whole share are taken once, sorted, before the
--- first write, then one recompute per object type. Returns whether the
--- user's pair set changed.
+-- p_since, count too, so the pairs they used to reach are settled away. One
+-- recompute per object type locks only the objects whose pair moves. Returns
+-- whether the user's pair set changed.
 -- ----------------------------------------------------------------------------
 DROP FUNCTION IF EXISTS claimius._settle_claim_diff(UUID);
 DROP FUNCTION IF EXISTS claimius._settle_claim_diff_for_user(UUID, UUID);
@@ -2320,8 +2342,6 @@ BEGIN
     SELECT array_agg(s.object_type), array_agg(s.object_id)
     INTO v_types, v_ids
     FROM share s;
-
-    PERFORM claimius._lock_objects(ARRAY(SELECT s.object_type || ':' || s.object_id::TEXT FROM unnest(v_types, v_ids) AS s(object_type, object_id)));
 
     FOR v_share IN
         SELECT s.object_type, array_agg(s.object_id) AS object_ids
@@ -2490,7 +2510,10 @@ COMMENT ON FUNCTION claimius._clear_diff(UUID[]) IS 'Deletes the access_diff are
 -- _settle_lock_timeout is left open whole. A batch that fails otherwise is
 -- settled again one area at a time, so one area that cannot settle leaves
 -- the others settled. Areas already settled at the current raise, gone or
--- held are left as they are. Returns the areas settled.
+-- held are left as they are. A batch that stops short at the lock budget
+-- keeps the pairs it moved and records none of its areas, which stay open
+-- for the next read, and once the budget is spent the transaction settles
+-- nothing more. Returns the areas settled.
 -- ----------------------------------------------------------------------------
 DROP FUNCTION IF EXISTS claimius._settle_diff_share(UUID, UUID);
 CREATE OR REPLACE FUNCTION claimius._settle_diff_share(
@@ -2504,6 +2527,10 @@ DECLARE
     v_ids       UUID[];
     v_cascades  BOOLEAN[];
 BEGIN
+    IF coalesce(nullif(current_setting('claimius.object_locks', TRUE), ''), '0')::INTEGER > claimius._object_lock_budget() THEN
+        RETURN 0;
+    END IF;
+
     v_diffs := ARRAY(
         SELECT d FROM claimius.access_diff d
         WHERE d.id = ANY(p_diff_ids)
@@ -2534,6 +2561,10 @@ BEGIN
             PERFORM claimius._settle_claim_diff(p_user_id, v_diff.claim_id, v_diff.sa_created_at);
         END LOOP;
 
+        IF coalesce(nullif(current_setting('claimius.object_locks', TRUE), ''), '0')::INTEGER > claimius._object_lock_budget() THEN
+            RETURN 0;
+        END IF;
+
         INSERT INTO claimius.access_diff_user (diff_id, user_id, raise_count)
         SELECT x.id, p_user_id, x.raise_count FROM unnest(v_diffs) x
         ON CONFLICT (diff_id, user_id) DO UPDATE
@@ -2552,4 +2583,4 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius._settle_diff_share(UUID, UUID[]) IS 'Settles and records one user''s share of a batch of access_diff areas, then clears the areas no holder is left on. A batch that meets a lock past the timeout or fails otherwise is settled one area at a time, so one locked area never holds back the rest; a single area past the lock timeout stays open. Returns the areas settled.';
+COMMENT ON FUNCTION claimius._settle_diff_share(UUID, UUID[]) IS 'Settles and records one user''s share of a batch of access_diff areas, then clears the areas no holder is left on. A batch that meets a lock past the timeout or fails otherwise is settled one area at a time, so one locked area never holds back the rest; a single area past the lock timeout stays open. A batch that stops short at the lock budget records nothing and leaves its areas open. Returns the areas settled.';
