@@ -544,9 +544,7 @@ func getUserAudit(ctx echo.Context, objectType string, objectID *uuid.UUID, oper
 	audits := make([]Audit, 0)
 	query := sdb.Instance().NewSelect().
 		Model(&audits).
-		ExcludeColumn("sa_deleted_at").
 		Where("app_id = ?", appID).
-		Where("sa_deleted_at IS NULL").
 		OrderExpr("sa_created_at DESC").
 		Limit(100)
 
@@ -592,7 +590,7 @@ func getUserOrganizations(ctx echo.Context, userID uuid.UUID) ([]Organization, e
 	err := sdb.Instance().NewSelect().
 		Model(&organizations).
 		ExcludeColumn("sa_deleted_at").
-		Where("app_id = ?", appID).
+		Where("organization.id IN (SELECT claimius.app_object_ids(?, ?))", appID, OBJECT_TYPE_ORGANIZATION).
 		Where("sa_deleted_at IS NULL").
 		Where("EXISTS (SELECT 1 FROM claimius.user_object uo WHERE uo.object_id = organization.id AND uo.object_type = 'claimius.organization' AND uo.user_id = ? AND uo.app_id = ?)", userID, appID).
 		Scan(ctx.Request().Context())
@@ -609,7 +607,7 @@ func getUserLocations(ctx echo.Context, userID uuid.UUID) ([]Location, error) {
 	err := sdb.Instance().NewSelect().
 		Model(&locations).
 		ExcludeColumn("sa_deleted_at").
-		Where("app_id = ?", appID).
+		Where("location.id IN (SELECT claimius.app_object_ids(?, ?))", appID, OBJECT_TYPE_LOCATION).
 		Where("sa_deleted_at IS NULL").
 		Where("EXISTS (SELECT 1 FROM claimius.user_object uo WHERE uo.object_id = location.id AND uo.object_type = 'claimius.location' AND uo.user_id = ? AND uo.app_id = ?)", userID, appID).
 		Scan(ctx.Request().Context())

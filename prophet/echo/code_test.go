@@ -1,14 +1,18 @@
 package echo_test
 
 import (
+	"database/sql"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 	pecho "github.com/nimling/samna-auth-middleware/v2/prophet/echo"
+	"github.com/uptrace/bun"
+	"github.com/uptrace/bun/dialect/pgdialect"
 )
 
 func postJSON(t *testing.T, body string, handler echo.HandlerFunc) int {
@@ -58,5 +62,12 @@ func TestPostGuestTokenRequiresClaimID(t *testing.T) {
 	body := `{"user_id":"40000000-0000-4000-8000-000000000004"}`
 	if code := postJSON(t, body, pecho.PostGuestToken); code != http.StatusBadRequest {
 		t.Errorf("status = %d, want 400 when claim_id is absent", code)
+	}
+}
+
+func TestCodeLeavesItsValueToTheDatabaseDefault(t *testing.T) {
+	field, ok := bun.NewDB(&sql.DB{}, pgdialect.New()).Table(reflect.TypeOf(pecho.Code{})).FieldMap["code"]
+	if !ok || !field.NullZero {
+		t.Errorf("Code.Value must be nullzero, so an insert without a value takes gen_code_value() instead of an empty code that collides on uq_code_value")
 	}
 }

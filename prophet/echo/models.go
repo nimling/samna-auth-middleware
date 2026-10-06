@@ -25,6 +25,7 @@ type SamnaUser struct {
 	FirstName     string                     `bun:"first_name" json:"first_name"`
 	LastName      string                     `bun:"last_name" json:"last_name"`
 	UserName      *string                    `bun:"user_name" json:"user_name,omitempty"`
+	UserImage     *string                    `bun:"user_image" json:"user_image,omitempty"`
 	Phone         *string                    `bun:"phone" json:"phone,omitempty"`
 	Email         string                     `bun:"email" json:"email,omitempty"`
 	ExternalID    *string                    `bun:"external_id" json:"external_id,omitempty"`
@@ -69,6 +70,8 @@ type Asset struct {
 	CreatedBy     uuid.UUID  `bun:"sa_created_by,notnull,type:uuid" json:"created_by"`
 	Status        string     `bun:"column:status" json:"status"`
 	Type          *string    `bun:"column:type" json:"type,omitempty"`
+	BannerID      *uuid.UUID `bun:"banner_id,type:uuid,default:null" json:"banner_id,omitempty"`
+	Icon          *string    `bun:"icon,default:null" json:"icon,omitempty"`
 	Index         int        `bun:"column:index" json:"index"`
 	BlobURL       *string    `bun:"blob_url,default:null" json:"-"`
 	AssetURL      string     `bun:"-" json:"asset_url,omitempty"`
@@ -98,7 +101,7 @@ type ObjectAsset struct {
 type Code struct {
 	ID            uuid.UUID   `bun:"id,pk,type:uuid,default:gen_random_uuid()" json:"id"`
 	AppID         uuid.UUID   `bun:"app_id,notnull,type:uuid" json:"app_id"`
-	Value         string      `bun:"code,notnull" json:"code"`
+	Value         string      `bun:"code,notnull,nullzero" json:"code"`
 	Count         int         `bun:"count,notnull,default:1" json:"count"`
 	RedeemedCount int         `bun:"redeemed_count,notnull,default:0" json:"redeemed_count"`
 	StartsAt      *time.Time  `bun:"starts_at" json:"starts_at,omitempty"`

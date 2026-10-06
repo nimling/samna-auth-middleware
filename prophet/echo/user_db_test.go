@@ -54,3 +54,39 @@ func TestPostUserTokenValidateReturnsTheMappingOwner(t *testing.T) {
 		t.Fatalf("validate: want user %s owned by %s, got user %s owner %s", grantUser, grantRoot, body.Data.UserID, body.Data.OwnerID)
 	}
 }
+
+func TestGetUserAuditAnswersTheUsersAudit(t *testing.T) {
+	appID, _ := getGrantFixture(t)
+
+	e := echo.New()
+	rec := httptest.NewRecorder()
+	ectx := e.NewContext(httptest.NewRequest(http.MethodGet, "/", nil), rec)
+	ectx.SetParamNames("id")
+	ectx.SetParamValues(grantUser.String())
+	ectx.Set("app_id", appID)
+	ectx.Set("request_id", uuid.New())
+	_ = pecho.GetUserAudit(ectx)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("user audit: want 200, got %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestGetUserOrganizationsAndLocationsAnswerTheUsersTrees(t *testing.T) {
+	appID, _ := getGrantFixture(t)
+
+	for name, handler := range map[string]echo.HandlerFunc{"organizations": pecho.GetUserOrganizations, "locations": pecho.GetUserLocations} {
+		e := echo.New()
+		rec := httptest.NewRecorder()
+		ectx := e.NewContext(httptest.NewRequest(http.MethodGet, "/", nil), rec)
+		ectx.SetParamNames("id")
+		ectx.SetParamValues(grantUser.String())
+		ectx.Set("app_id", appID)
+		ectx.Set("request_id", uuid.New())
+		_ = handler(ectx)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("user %s: want 200, got %d %s", name, rec.Code, rec.Body.String())
+		}
+	}
+}

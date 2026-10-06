@@ -113,6 +113,9 @@ func (c *Claim) ValidatePost() error {
 	if c.OwnerID == uuid.Nil {
 		return errors.New("owner_id required")
 	}
+	if c.RootID == uuid.Nil {
+		return errors.New("root_id required")
+	}
 	if c.Access == 0 {
 		return errors.New("access required")
 	}

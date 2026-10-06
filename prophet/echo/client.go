@@ -298,6 +298,7 @@ func PostClientClaim(ctx echo.Context) error {
 		ctx.Logger().Error(err)
 		return respond.Error(ctx, http.StatusBadRequest, "Malformed request")
 	}
+	userClaim.UserID = client.ClientID
 	if err := userClaim.ValidatePost(); err != nil {
 		return respond.Error(ctx, http.StatusBadRequest, err.Error())
 	}
@@ -332,11 +333,27 @@ func DeleteClientClaim(ctx echo.Context) error {
 		return respond.Error(ctx, http.StatusBadRequest, "Malformed request")
 	}
 
+	var client SamnaClient
+	err = sdb.Instance().NewSelect().
+		Model(&client).
+		Where("id = ?", clientID).
+		Where("app_id = ?", appID).
+		Where("sa_deleted_at IS NULL").
+		Limit(1).
+		Scan(ctx.Request().Context())
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return respond.Error(ctx, http.StatusNotFound, "Client not found")
+		}
+		ctx.Logger().Error(err)
+		return respond.Error(ctx, http.StatusInternalServerError, "Internal server error")
+	}
+
 	var userClaim UserClaim
 	err = sdb.Instance().NewUpdate().
 		Model(&userClaim).
-		Where("id = ?", claimID).
-		Where("user_id = ?", clientID).
+		Where("claim_id = ?", claimID).
+		Where("user_id = ?", client.ClientID).
 		Where("app_id = ?", appID).
 		Where("sa_deleted_at IS NULL").
 		Set("sa_deleted_at = NOW()").
