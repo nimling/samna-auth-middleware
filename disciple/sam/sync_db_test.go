@@ -305,3 +305,35 @@ func TestDiscipleMovesOnlyToAProphetThatTookItsAppOver(t *testing.T) {
 		t.Fatal("an agreed move must apply the new prophet's snapshot")
 	}
 }
+
+func TestApplyPageStoresTheUserProfileFields(t *testing.T) {
+	db := database(t)
+	ctx := context.Background()
+	from := cursor(t)
+	id := uuid.New()
+	userID := uuid.New()
+
+	payload := sam.SyncPayload{
+		SyncCursor: step(from, 1),
+		Operation:  "upsert",
+		EventType:  "claimius.samna_user",
+		Payload: json.RawMessage(fmt.Sprintf(
+			`{"id":%q,"user_id":%q,"first_name":"Profile","email":"profile@example.no","bio":"Builds access control","job_title":"Engineer","company":"Nimtech","website":"https://example.no","linkedin":"https://www.linkedin.com/in/example","status":"active","sa_created_at":"2026-01-01T00:00:00Z","sa_updated_at":"2026-01-01T00:00:00Z"}`,
+			id, userID)),
+	}
+	if err := sam.Disciple().ApplyPage(ctx, from, sam.State{Cursor: step(from, 1)}, []sam.SyncPayload{payload}, ""); err != nil {
+		t.Fatalf("apply page: %v", err)
+	}
+
+	var stored shared.SamnaUser
+	if err := db.NewSelect().Model(&stored).Where("id = ?", id).Scan(ctx); err != nil {
+		t.Fatalf("read user: %v", err)
+	}
+	got := []*string{stored.Bio, stored.JobTitle, stored.Company, stored.Website, stored.Linkedin}
+	want := []string{"Builds access control", "Engineer", "Nimtech", "https://example.no", "https://www.linkedin.com/in/example"}
+	for i, value := range got {
+		if value == nil || *value != want[i] {
+			t.Fatalf("profile field %d: want %q, got %v", i, want[i], value)
+		}
+	}
+}

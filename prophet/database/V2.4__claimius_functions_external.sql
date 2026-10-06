@@ -2645,6 +2645,11 @@ BEGIN
                     last_name     = v_source_app_user.last_name,
                     user_name     = v_source_app_user.user_name,
                     user_image    = v_source_app_user.user_image,
+                    bio           = v_source_app_user.bio,
+                    job_title     = v_source_app_user.job_title,
+                    company       = v_source_app_user.company,
+                    website       = v_source_app_user.website,
+                    linkedin      = v_source_app_user.linkedin,
                     phone         = v_source_app_user.phone,
                     config        = v_source_app_user.config,
                     external_id   = coalesce(v_source_app_user.external_id, external_id),
@@ -3698,8 +3703,8 @@ BEGIN
         SELECT 1 FROM claimius.samna_user
         WHERE user_id = v_actor.user_id AND app_id = v_app.id AND sa_deleted_at IS NULL
     ) THEN
-        INSERT INTO claimius.samna_user (user_id, app_id, first_name, last_name, user_name, user_image, email, phone, status, type)
-        SELECT v_actor.user_id, v_app.id, su.first_name, su.last_name, su.user_name, su.user_image, su.email, su.phone, 'active', su.type
+        INSERT INTO claimius.samna_user (user_id, app_id, first_name, last_name, user_name, user_image, bio, job_title, company, website, linkedin, email, phone, status, type)
+        SELECT v_actor.user_id, v_app.id, su.first_name, su.last_name, su.user_name, su.user_image, su.bio, su.job_title, su.company, su.website, su.linkedin, su.email, su.phone, 'active', su.type
         FROM claimius.samna_user su
         WHERE su.user_id = v_actor.user_id AND su.app_id = v_actor.app_id AND su.sa_deleted_at IS NULL
         LIMIT 1;

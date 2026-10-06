@@ -26,6 +26,11 @@ type SamnaUser struct {
 	LastName      string                     `bun:"last_name" json:"last_name"`
 	UserName      *string                    `bun:"user_name" json:"user_name,omitempty"`
 	UserImage     *string                    `bun:"user_image" json:"user_image,omitempty"`
+	Bio           *string                    `bun:"bio" json:"bio,omitempty"`
+	JobTitle      *string                    `bun:"job_title" json:"job_title,omitempty"`
+	Company       *string                    `bun:"company" json:"company,omitempty"`
+	Website       *string                    `bun:"website" json:"website,omitempty"`
+	Linkedin      *string                    `bun:"linkedin" json:"linkedin,omitempty"`
 	Phone         *string                    `bun:"phone" json:"phone,omitempty"`
 	Email         string                     `bun:"email" json:"email,omitempty"`
 	ExternalID    *string                    `bun:"external_id" json:"external_id,omitempty"`
