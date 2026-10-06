@@ -251,3 +251,82 @@ func TestARefusedWriteIsErrNoAccessRoutedOrLocal(t *testing.T) {
 		t.Fatalf("a binding above the level the actor holds must be ErrNoAccess, got %v", err)
 	}
 }
+
+func recordingProphet(t *testing.T) *[]string {
+	t.Helper()
+	var mu sync.Mutex
+	calls := make([]string, 0)
+	prophet := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		calls = append(calls, r.Method+" "+r.URL.Path)
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		w.Write([]byte(`{"data":null,"count":0,"error":{"message":"Not Found"}}`))
+	}))
+	t.Cleanup(prophet.Close)
+	t.Setenv("SAUTH_ENDPOINT", prophet.URL)
+	return &calls
+}
+
+func TestARoutedWriteTakesItsRecordFromTheModelNeverTheWhere(t *testing.T) {
+	db := database(t)
+	ctx := context.Background()
+	calls := recordingProphet(t)
+	db.RouteToProphet = true
+	defer func() { db.RouteToProphet = false }()
+
+	relationID := uuid.New()
+	userID := uuid.New()
+	clientID := uuid.New()
+	_ = db.NewUpdate().Model(&sdb.UserRelation{ID: relationID, UserID: userID}).
+		Where("user_relation.user_id = ?", userID).
+		Where("user_relation.id = ?", relationID).
+		Scan(ctx)
+	_, _ = db.NewDelete().Model(&sdb.UserRelation{ID: relationID}).Exec(ctx)
+	_, _ = db.NewDelete().Model(&sdb.SamnaUser{UserID: userID}).Exec(ctx)
+	_, _ = db.NewDelete().Model(&sdb.SamnaClient{ID: clientID}).Exec(ctx)
+	want := []string{
+		"PATCH /relation/" + relationID.String(), "DELETE /relation/" + relationID.String(),
+		"DELETE /user/" + userID.String(), "DELETE /samna_client/" + clientID.String(),
+	}
+	if len(*calls) != len(want) {
+		t.Fatalf("want %v, got %v", want, *calls)
+	}
+	for i := range want {
+		if strings.Replace((*calls)[i], " /sam/", " /", 1) != want[i] {
+			t.Fatalf("write %d: want %s, got %s", i, want[i], (*calls)[i])
+		}
+	}
+
+	*calls = (*calls)[:0]
+	for _, where := range []string{"id = ?", "user_relation.id = ?", `"user_relation"."id" = ?`} {
+		if err := db.NewUpdate().Model(&sdb.UserRelation{}).Where(where, relationID).Scan(ctx); !errors.Is(err, sdb.ErrRoutedNoRecord) {
+			t.Fatalf("update where %q on an empty model: want ErrRoutedNoRecord, got %v", where, err)
+		}
+		if _, err := db.NewDelete().Model(&sdb.UserRelation{}).Where(where, relationID).Exec(ctx); !errors.Is(err, sdb.ErrRoutedNoRecord) {
+			t.Fatalf("delete where %q on an empty model: want ErrRoutedNoRecord, got %v", where, err)
+		}
+	}
+	if len(*calls) != 0 {
+		t.Fatalf("a write without a record must not reach the prophet, got %v", *calls)
+	}
+}
+
+func TestARoutedUpdateRefusesASetExpression(t *testing.T) {
+	db := database(t)
+	ctx := context.Background()
+	calls := recordingProphet(t)
+	db.RouteToProphet = true
+	defer func() { db.RouteToProphet = false }()
+
+	_, err := db.NewUpdate().Model(&sdb.UserRelation{ID: uuid.New()}).
+		Set("sa_deleted_at = NOW()").
+		Exec(ctx)
+	if !errors.Is(err, sdb.ErrRoutedSet) {
+		t.Fatalf("a routed update with a Set expression must be ErrRoutedSet, got %v", err)
+	}
+	if len(*calls) != 0 {
+		t.Fatalf("a refused routed update must not reach the prophet, got %v", *calls)
+	}
+}

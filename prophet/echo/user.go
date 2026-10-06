@@ -330,7 +330,7 @@ func DeleteUser(ctx echo.Context) error {
 		return respond.Error(ctx, http.StatusNotFound, "Not Found")
 	}
 
-	return respond.NoContent(ctx, http.StatusOK)
+	return respond.JSON(ctx, http.StatusOK, user, 1)
 }
 
 func PostUserToken(ctx echo.Context) error {

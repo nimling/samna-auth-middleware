@@ -15,6 +15,7 @@ import (
 	"github.com/labstack/echo/v4"
 	pecho "github.com/nimling/samna-auth-middleware/v2/prophet/echo"
 	psdb "github.com/nimling/samna-auth-middleware/v2/prophet/sdb"
+	"github.com/nimling/samna-auth-middleware/v2/shared"
 )
 
 func TestPostUserTokenValidateReturnsTheMappingOwner(t *testing.T) {
@@ -88,5 +89,40 @@ func TestGetUserOrganizationsAndLocationsAnswerTheUsersTrees(t *testing.T) {
 		if rec.Code != http.StatusOK {
 			t.Fatalf("user %s: want 200, got %d %s", name, rec.Code, rec.Body.String())
 		}
+	}
+}
+
+func TestDeleteUserAnswersTheDeletedRowARoutedDeleteReads(t *testing.T) {
+	appID, _ := getGrantFixture(t)
+	ctx := context.Background()
+	userID := uuid.New()
+	if _, err := psdb.Instance().ExecContext(ctx, `SELECT claimius.upsert_app_user(p_user_id => ?, p_app_id => ?, p_first_name => 'Leaving')`, userID, appID); err != nil {
+		t.Fatalf("seed user: %v", err)
+	}
+
+	e := echo.New()
+	rec := httptest.NewRecorder()
+	ectx := e.NewContext(httptest.NewRequest(http.MethodDelete, "/", nil), rec)
+	ectx.SetParamNames("id")
+	ectx.SetParamValues(userID.String())
+	ectx.Set("app_id", appID)
+	ectx.Set("request_id", uuid.New())
+	_ = pecho.DeleteUser(ectx)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("delete user: want 200, got %d %s", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		Data json.RawMessage `json:"data"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode envelope: %v", err)
+	}
+	var deleted shared.SamnaUser
+	if err := deleted.UnmarshalWrite(body.Data); err != nil {
+		t.Fatalf("a routed delete must read the answer as the user, body %s: %v", rec.Body.String(), err)
+	}
+	if deleted.UserID != userID || deleted.DeletedAt == nil {
+		t.Fatalf("delete user: want user %s soft deleted, got user %s deleted_at %v", userID, deleted.UserID, deleted.DeletedAt)
 	}
 }

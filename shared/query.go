@@ -289,29 +289,6 @@ type conflictSet struct {
 	args []any
 }
 
-func whereID(expr string, args []any) (uuid.UUID, bool) {
-	clean := strings.ToLower(strings.TrimSpace(expr))
-	if !strings.HasPrefix(clean, "id =") && !strings.HasPrefix(clean, "user_id =") {
-		return uuid.Nil, false
-	}
-	if len(args) == 0 {
-		return uuid.Nil, false
-	}
-	switch v := args[0].(type) {
-	case uuid.UUID:
-		return v, true
-	case *uuid.UUID:
-		if v != nil {
-			return *v, true
-		}
-	case string:
-		if parsed, err := uuid.Parse(v); err == nil {
-			return parsed, true
-		}
-	}
-	return uuid.Nil, false
-}
-
 func dispatchScan(src any, dest ...any) error {
 	for _, d := range dest {
 		if d == nil {
@@ -713,11 +690,6 @@ func (q *UpdateQuery) Set(expr string, args ...any) *UpdateQuery {
 
 func (q *UpdateQuery) Where(expr string, args ...any) *UpdateQuery {
 	q.whereExpr = append(q.whereExpr, conflictSet{expr: expr, args: args})
-	if q.recordID == uuid.Nil {
-		if id, ok := whereID(expr, args); ok {
-			q.recordID = id
-		}
-	}
 	return q
 }
 
@@ -771,6 +743,12 @@ func (q *UpdateQuery) Scan(ctx context.Context, dest ...any) error {
 }
 
 func (q *UpdateQuery) route(ctx context.Context, dest ...any) error {
+	if q.recordID == uuid.Nil {
+		return fmt.Errorf("%w: %T", ErrRoutedNoRecord, q.model)
+	}
+	if len(q.setCols) > 0 {
+		return fmt.Errorf("%w: %T", ErrRoutedSet, q.model)
+	}
 	path, err := EndpointFor(q.model, q.recordID)
 	if err != nil {
 		return err
@@ -920,11 +898,6 @@ func (q *DeleteQuery) Returning(s string) *DeleteQuery {
 
 func (q *DeleteQuery) Where(expr string, args ...any) *DeleteQuery {
 	q.whereExpr = append(q.whereExpr, conflictSet{expr: expr, args: args})
-	if q.recordID == uuid.Nil {
-		if id, ok := whereID(expr, args); ok {
-			q.recordID = id
-		}
-	}
 	return q
 }
 
@@ -944,6 +917,10 @@ func recordIDFromModel(d *DB, model any) uuid.UUID {
 		return uuid.Nil
 	}
 	switch modelTableName(d, model) {
+	case "claimius.samna_user":
+		if m, ok := embeddedPtr(model, reflect.TypeOf(SamnaUser{})).(*SamnaUser); ok {
+			return m.UserID
+		}
 	case "claimius.user_claim":
 		if m, ok := embeddedPtr(model, reflect.TypeOf(UserClaim{})).(*UserClaim); ok {
 			return m.UserID
@@ -970,6 +947,10 @@ func recordIDFromModel(d *DB, model any) uuid.UUID {
 		}
 	case "claimius.samna_secret":
 		if m, ok := embeddedPtr(model, reflect.TypeOf(SamnaSecret{})).(*SamnaSecret); ok {
+			return m.ID
+		}
+	case "claimius.samna_client":
+		if m, ok := embeddedPtr(model, reflect.TypeOf(SamnaClient{})).(*SamnaClient); ok {
 			return m.ID
 		}
 	}
@@ -1003,6 +984,9 @@ func (q *DeleteQuery) Scan(ctx context.Context, dest ...any) error {
 }
 
 func (q *DeleteQuery) route(ctx context.Context, dest ...any) error {
+	if q.recordID == uuid.Nil {
+		return fmt.Errorf("%w: %T", ErrRoutedNoRecord, q.model)
+	}
 	path, err := EndpointFor(q.model, q.recordID)
 	if err != nil {
 		return err

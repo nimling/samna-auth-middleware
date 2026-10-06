@@ -81,6 +81,8 @@ func (d *DB) GetConnectionString() string {
 
 var ErrSyncUnreachable = errors.New("sync unreachable: app inactive on samna_auth")
 var ErrSecretExpired = errors.New("secret expired")
+var ErrRoutedSet = errors.New("a routed update carries a Set expression the prophet cannot apply: set the field on the model, or use NewDelete for a soft delete")
+var ErrRoutedNoRecord = errors.New("a routed update or delete carries no record: populate the model's key or call ID, the record is never read from a Where expression")
 
 // GetApp reads the system app row from claimius.get_app. The prophet
 // holds the full row including key and seed material.
