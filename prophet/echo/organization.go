@@ -158,15 +158,15 @@ func getOrganization(ctx echo.Context, orgID, appID uuid.UUID) (*Organization, e
 }
 
 func postOrganization(ctx echo.Context, org Organization, appID uuid.UUID) (*Organization, error) {
-	if org.OwnerID == nil {
+	if org.OwnerID == nil || *org.OwnerID == org.ID {
 		orgType := "standard"
 		if org.Type != nil && *org.Type != "" {
 			orgType = *org.Type
 		}
 		var rootID uuid.UUID
 		if err := sdb.Instance().NewRaw(
-			"SELECT (claimius.upsert_root_organization(?, ?, ?, ?, ?) -> 'organization' ->> 'id')::uuid",
-			appID, org.Name, org.CreatedBy, org.Description, orgType,
+			"SELECT (claimius.upsert_root_organization(?, ?, ?, ?, ?, ?, ?) -> 'organization' ->> 'id')::uuid",
+			appID, org.Name, org.CreatedBy, org.Description, orgType, org.ID, org.ExternalID,
 		).Scan(ctx.Request().Context(), &rootID); err != nil {
 			ctx.Logger().Errorf("postOrganization root: %v", err)
 			return nil, errorsx.ErrDbUnexpected
