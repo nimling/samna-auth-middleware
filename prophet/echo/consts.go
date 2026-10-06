@@ -51,9 +51,10 @@ const (
 	ACCESS_MEMBER  ClaimAccess = 1 << 5
 	ACCESS_ALL     ClaimAccess = ACCESS_OWNER | ACCESS_WRITE | ACCESS_READ | ACCESS_EXECUTE
 
-	CLAIM_TYPE_SYSTEM   ClaimType = "system"
-	CLAIM_TYPE_USER     ClaimType = "user"
-	CLAIM_TYPE_EXTERNAL ClaimType = "external"
+	CLAIM_TYPE_SYSTEM  ClaimType = "system"
+	CLAIM_TYPE_USER    ClaimType = "user"
+	CLAIM_TYPE_SERVICE ClaimType = "service"
+	CLAIM_TYPE_VIRTUAL ClaimType = "virtual"
 
 	OBJECT_TYPE_USER         ObjectType = "claimius.samna_user"
 	OBJECT_TYPE_ORGANIZATION ObjectType = "claimius.organization"

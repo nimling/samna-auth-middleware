@@ -117,7 +117,7 @@ func (c *Claim) ValidatePost() error {
 		return errors.New("access required")
 	}
 	switch c.Type {
-	case "", CLAIM_TYPE_USER, CLAIM_TYPE_EXTERNAL:
+	case "", CLAIM_TYPE_USER, CLAIM_TYPE_SERVICE, CLAIM_TYPE_VIRTUAL:
 	case CLAIM_TYPE_SYSTEM:
 		return errors.New("type system not allowed")
 	default:

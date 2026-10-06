@@ -65,3 +65,32 @@ func TestPostOrganizationAndLocationRequireTheActor(t *testing.T) {
 		t.Fatalf("location: %v", err)
 	}
 }
+
+func TestPostClaimAcceptsEveryClaimTypeADiscipleWrites(t *testing.T) {
+	for _, claimType := range []shared.ClaimType{shared.CLAIM_TYPE_USER, shared.CLAIM_TYPE_SERVICE, shared.CLAIM_TYPE_VIRTUAL} {
+		createdBy := uuid.New()
+		routed := &shared.Claim{
+			Name:      "booking - routed",
+			Access:    shared.ACCESS_ALL | shared.ACCESS_MEMBER,
+			Inherits:  true,
+			Type:      claimType,
+			OwnerID:   uuid.New(),
+			RootID:    uuid.New(),
+			CreatedBy: &createdBy,
+		}
+		body, err := routed.MarshalWrite()
+		if err != nil {
+			t.Fatalf("marshal: %v", err)
+		}
+		req := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(body))
+		req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+		ctx := echo.New().NewContext(req, httptest.NewRecorder())
+		bound := &pecho.Claim{}
+		if err := bound.Bind(ctx); err != nil {
+			t.Fatalf("the prophet must bind a %s claim a disciple sends, body %s: %v", claimType, body, err)
+		}
+		if err := bound.ValidatePost(); err != nil {
+			t.Fatalf("the prophet must accept a %s claim a disciple sends: %v", claimType, err)
+		}
+	}
+}

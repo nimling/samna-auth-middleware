@@ -23,7 +23,12 @@ func requestTimeout() time.Duration {
 }
 
 type ResponseEnvelope struct {
-	Data json.RawMessage `json:"data"`
+	Data  json.RawMessage `json:"data"`
+	Error *ResponseError  `json:"error"`
+}
+
+type ResponseError struct {
+	Message string `json:"message"`
 }
 
 type forwardKey struct{}
@@ -323,7 +328,7 @@ func (e *httpClient) execute(ctx context.Context, method string, reqBody any, ta
 	case resp.StatusCode == http.StatusConflict:
 		return nil, ErrConflict
 	case resp.StatusCode == http.StatusBadRequest:
-		return nil, ErrBadRequest
+		return nil, refusal(resp.Body, ErrBadRequest)
 	default:
 		return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
 	}
@@ -410,4 +415,13 @@ func Delete(ctx context.Context, path string, payload any, out any) error {
 		return err
 	}
 	return decodeInto(body, out)
+}
+
+func refusal(body io.ReadCloser, sentinel error) error {
+	defer body.Close()
+	var envelope ResponseEnvelope
+	if err := json.NewDecoder(body).Decode(&envelope); err != nil || envelope.Error == nil || envelope.Error.Message == "" {
+		return sentinel
+	}
+	return fmt.Errorf("%w: %s", sentinel, envelope.Error.Message)
 }

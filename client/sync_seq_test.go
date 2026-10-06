@@ -100,3 +100,18 @@ func TestBindPointsRequestsAtTheBoundProphet(t *testing.T) {
 		t.Fatalf("a request must go to the bound prophet, got %v hit=%v", err, hit)
 	}
 }
+
+func TestARefusedWriteCarriesTheProphetsReason(t *testing.T) {
+	prophet := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte(`{"data":[],"error":{"Message":"type invalid"},"count":0}`))
+	}))
+	defer prophet.Close()
+	t.Setenv("SAUTH_ENDPOINT", prophet.URL)
+
+	err := sclient.Post(context.Background(), "claim", map[string]string{}, nil)
+	if !errors.Is(err, sclient.ErrBadRequest) || !strings.Contains(err.Error(), "type invalid") {
+		t.Fatalf("a refused write must stay ErrBadRequest and carry the prophet's reason, got %v", err)
+	}
+}
