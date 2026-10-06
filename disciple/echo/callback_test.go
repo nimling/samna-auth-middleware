@@ -180,3 +180,44 @@ func TestGetLogoutWithoutTokenRedirectsToEndSession(t *testing.T) {
 		t.Errorf("auth server called without an access token")
 	}
 }
+
+func TestGetCallbackStartsOverWhenTheCodeExchangeIsRefused(t *testing.T) {
+	tokenServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte(`{"error":"invalid_grant"}`))
+	}))
+	defer tokenServer.Close()
+
+	t.Setenv("SAUTH_ENDPOINT", tokenServer.URL)
+	t.Setenv("SAUTH_APP_SLUG", "testapp")
+	t.Setenv("SAUTH_APP_SECRET", "secret")
+	t.Setenv("SAUTH_REDIRECT_URI", "http://localhost:4200/api/sauth/callback")
+	t.Setenv("SAUTH_PAGE_REDIRECT", "http://localhost:4200/")
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/api/sauth/callback?code=used&state=st1", nil)
+	req.AddCookie(&http.Cookie{Name: "sauth_oauth_state", Value: "st1"})
+	req.AddCookie(&http.Cookie{Name: "sauth_pkce_verifier", Value: "ver1"})
+	rec := httptest.NewRecorder()
+	ctx := e.NewContext(req, rec)
+
+	if err := saecho.GetCallback(ctx); err != nil {
+		t.Fatalf("GetCallback: %v", err)
+	}
+	if rec.Code != http.StatusFound {
+		t.Fatalf("status = %d, want 302 so the visitor starts over instead of reading a json error", rec.Code)
+	}
+	if location := rec.Header().Get("Location"); location != "http://localhost:4200/" {
+		t.Fatalf("Location = %q, want the page redirect", location)
+	}
+	cleared := map[string]bool{}
+	for _, c := range rec.Result().Cookies() {
+		if c.MaxAge < 0 {
+			cleared[c.Name] = true
+		}
+	}
+	if !cleared["sauth_oauth_state"] || !cleared["sauth_pkce_verifier"] {
+		t.Fatalf("the flow cookies must be cleared, got %v", rec.Result().Cookies())
+	}
+}

@@ -134,7 +134,11 @@ func refreshTokens(ctx echo.Context, config AuthMiddlewareConfig) (*client.Respo
 		})
 	}
 
-	WriteCSRFCookie(ctx)
+	if held, heldErr := ctx.Cookie(csrfTokenCookieKey); heldErr == nil && held.Value != "" {
+		utils.WritePublicCookie(ctx, &http.Cookie{Name: csrfTokenCookieKey, Value: held.Value, Path: "/", MaxAge: 86400})
+	} else {
+		WriteCSRFCookie(ctx)
+	}
 
 	return tokenResp, nil
 }

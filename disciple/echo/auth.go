@@ -80,8 +80,10 @@ func GetCallback(ctx echo.Context) error {
 
 	tokens, err := client.PostAuthCode(ctx.Request().Context(), tokenURL, slug, secret, code, redirectURI, verifierCookie.Value)
 	if err != nil {
-		ctx.Logger().Errorf("GetCallback exchange: %v", err)
-		return respondError(ctx, http.StatusUnauthorized, "Unauthorized")
+		ctx.Logger().Warnf("GetCallback exchange refused, clearing the flow cookies and sending the visitor back to start over: %v", err)
+		utils.ClearCookie(ctx, client.PKCEVerifierCookie)
+		utils.ClearCookie(ctx, client.OAuthStateCookie)
+		return Redirect(ctx, http.StatusFound, startOver)
 	}
 
 	utils.ClearCookie(ctx, client.PKCEVerifierCookie)

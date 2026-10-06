@@ -151,3 +151,37 @@ func TestWithoutOptionalARequestCarryingNoCredentialIsRefused(t *testing.T) {
 		t.Fatalf("status = %d, want 401", rec.Code)
 	}
 }
+
+func TestARefreshKeepsTheCSRFTokenTheBrowserAlreadyHolds(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/jwks") {
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{"keys":[]}`))
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"data":{"access_token":"fresh","refresh_token":"next","token_type":"Bearer","access_expires_in":900,"refresh_expires_in":2592000},"count":1}`))
+	}))
+	defer server.Close()
+	handler := userAuthHandlerAgainst(t, server, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/thing", nil)
+	req.Header.Set("Sec-Fetch-Mode", "cors")
+	req.AddCookie(&http.Cookie{Name: "sauth_refresh_token", Value: "old"})
+	req.AddCookie(&http.Cookie{Name: "sauth_csrf_token", Value: "held"})
+	rec := httptest.NewRecorder()
+	_ = handler(echo.New().NewContext(req, rec))
+
+	for _, c := range rec.Result().Cookies() {
+		if c.Name == "sauth_csrf_token" {
+			if c.Value != "held" {
+				t.Fatalf("a refresh must keep the csrf token the browser holds, got %q", c.Value)
+			}
+			if c.MaxAge <= 0 {
+				t.Fatalf("a refresh must extend the csrf cookie, got max age %d", c.MaxAge)
+			}
+			return
+		}
+	}
+	t.Fatal("a refresh must rewrite the csrf cookie so it outlives a day")
+}
