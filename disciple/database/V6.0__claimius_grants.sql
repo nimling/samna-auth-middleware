@@ -1,14 +1,3 @@
--- ============================================================================
--- Claimius V6.0 Grants
--- ----------------------------------------------------------------------------
--- Last step of the base set. Defines the role grant helper init calls and
--- runs it at the top level, so every build and every replay of the set
--- leaves the roles holding what the bootstrap grants them on every table and function
--- the set carries, with no consumer calling an internal function, and brings
--- every audit partition to the grants of the partitioned table. A change to
--- what a role holds is made here, which replays this file.
--- ============================================================================
-
 CREATE OR REPLACE FUNCTION claimius._grant_disciple_roles()
     RETURNS VOID AS $$
 BEGIN
@@ -21,7 +10,7 @@ BEGIN
              claimius.upsert_table_info, claimius.upsert_internal_table_info,
              claimius.recompute_state
              FROM claimius_reader';
-    EXECUTE 'GRANT INSERT, UPDATE, DELETE ON claimius.user_object, claimius.object_info, claimius.user_users,
+    EXECUTE 'GRANT INSERT, UPDATE, DELETE ON claimius.user_object, claimius.object_info, claimius.user_users, claimius.user_users_diff,
              claimius.disciple_state, claimius.samna_user, claimius.samna_client,
              claimius.samna_secret, claimius.organization, claimius.location,
              claimius.claim, claimius.user_claim, claimius.claim_object,
@@ -34,6 +23,8 @@ BEGIN
     EXECUTE 'GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA claimius TO claimius_disciple_client';
 END;
 $$ LANGUAGE plpgsql;
+
+COMMENT ON FUNCTION claimius._grant_disciple_roles() IS 'The role grants of a disciple, run by V6.0 on every build and replay; never called by a consumer.';
 
 SELECT claimius._grant_disciple_roles();
 

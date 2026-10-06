@@ -69,5 +69,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+COMMENT ON FUNCTION claimius.rate_limit_gcra(text, double precision, double precision, double precision, double precision) IS 'Generic cell rate limiter over the unlogged rate_limit table, serialized per key: advances the theoretical arrival time of p_key by p_cost at p_rate per p_period with a burst of p_burst, and returns whether the request is allowed, the requests remaining, and the seconds to retry and to reset.';
+
 GRANT EXECUTE ON FUNCTION claimius.rate_limit_gcra(text, double precision, double precision, double precision, double precision) TO claimius_writer;
 GRANT EXECUTE ON FUNCTION claimius.rate_limit_gcra(text, double precision, double precision, double precision, double precision) TO claimius_reader;

@@ -394,6 +394,9 @@ func TestUsageFlushTouchesTheCheckedPair(t *testing.T) {
 		}
 	}
 	db.Usage.Stop()
+	if _, err := db.GetOrganizations(ctx, userA, sdb.ACCESS_READ, nil, 0); err != nil {
+		t.Fatalf("list: %v", err)
+	}
 	var after int64
 	if err := db.NewRaw(`SELECT used_count FROM claimius.user_object WHERE user_id = ? AND object_type = ? AND object_id = ?`,
 		userA, sdb.OBJECT_TYPE_ORGANIZATION, orgGrand).Scan(ctx, &after); err != nil {

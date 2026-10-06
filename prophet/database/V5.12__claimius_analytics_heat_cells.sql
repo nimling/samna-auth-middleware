@@ -1,13 +1,3 @@
--- ============================================================================
--- Analytics heat: folded cells arrive from the browser
--- ============================================================================
--- The capture script folds pointer samples into cells before it posts, so a
--- session sends one heat event per page and viewport width per flush, holding
--- [bucket_x, bucket_y, count] triples on the grid this schema already uses.
--- The fold reads those beside the positioned signals it always read, so a
--- click still lands as a click and a folded pointer field lands as pointer.
--- ============================================================================
-
 CREATE OR REPLACE FUNCTION claimius.upsert_analytics_heat(
     p_from   DATE,
     p_to     DATE,

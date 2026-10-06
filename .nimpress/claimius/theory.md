@@ -28,7 +28,7 @@ Every result below has one shape: the claim, the proof, the sources, and what it
 
 **Sources.** A. Gupta, I. S. Mumick, V. S. Subrahmanian, [Maintaining Views Incrementally](https://dl.acm.org/doi/10.1145/170035.170066), SIGMOD 1993. The overdeletion of DRed: B. Motik et al., [Incremental Update of Datalog Materialisation: the Backward/Forward Algorithm](https://www.cs.ox.ac.uk/people/boris.motik/pubs/mnph15incremental-BF.pdf), AAAI 2015. Stored derivations as provenance: T. J. Green, G. Karvounarakis, V. Tannen, [Provenance Semirings](https://web.cs.ucdavis.edu/~green/papers/pods07.pdf), PODS 2007.
 
-**For claimius.** Single hop composition keeps the program nonrecursive, and a nonrecursive program needs only first order deltas, each found by key. The `grants` array of a pair is its why provenance, `user_users.sharing_object_count` the derivation count of the counting algorithm on `A ⋈_x A` (Result 7), and an `access_diff` row the key of a change's support. A transitive link would make `reach` recursive and every settle a DRed step with overdeletion.
+**For claimius.** Single hop composition keeps the program nonrecursive, and a nonrecursive program needs only first order deltas, each found by key. The `grants` array of a pair is its why provenance, `user_users.sharing_object_count` the derivation count of the counting algorithm on `A ⋈_x A` (Result 7), a `user_users_diff` row one first order delta of that count, and an `access_diff` row the key of a change's support. A transitive link would make `reach` recursive and every settle a DRed step with overdeletion.
 
 ## Result 2: the model stays below the reachability bound
 
@@ -92,7 +92,7 @@ Every result below has one shape: the claim, the proof, the sources, and what it
 
 1. By Result 1 a pair `(u, x)` can be stale only when an open area's support contains it. `reconcile_if_pending(app, u, τ, x)` tests exactly those areas: an object area on `x`, or on an ancestor of `x` with `cascade`; a claim area of a claim `u` holds, links to, or was assigned (`user_id = u`), whose bindings, live or removed, sit on `x` or an ancestor, directly or through a claim it links to, or whose claim the pair's `grants` name as `claim_id` or `composed_from`, or which is `x` itself. An area is skipped only when `access_diff_user` records `u` at the area's current `raise_count`. When any area is open the pair is recomputed, so the pair read is current.
 
-2. A listing settles, through `_settle_diff_share`, the reader's share of every open object area of the app that can hold a pair of the type it lists, every one when it lists no type, and of every claim area of a claim the reader holds, links to or was assigned, all of them however many are open and none while another read of the reader is settling, and records it at `raise_count`, until the pairs it moves reach the lock budget, past which the areas left stay open for the next read, see [Materialization](./materialization.md#the-lock-budget). A later raise increments `raise_count`, which makes the record stale and the share open again.
+2. A listing settles, through `_settle_diff_share`, the reader's share of every open object area of the app that can hold a pair of the type it lists, every one when it lists no type, and of every claim area of a claim the reader holds, links to or was assigned, all of them however many are open and however many pairs they move, and none while another read of the reader is settling, and records it at `raise_count`; it takes no lock per object, so nothing in it grows with the pairs it moves, see [Materialization](./materialization.md#locks-a-settle-takes). A later raise increments `raise_count`, which makes the record stale and the share open again.
 
 3. The share of an object area is `{x} ∪ desc(x)` restricted to objects on which `u` holds a pair or which a binding of `u`'s claims, direct or through one link, reaches, plus `x` for its creator; the share of a claim area is the claim, its bindings and their cascading subtrees, those of the claims it links to, and `u`'s pairs naming it, with bindings changed since the area opened counted too. Each is the slice of Result 1's support that can hold a pair of `u`, so settling it leaves every pair of `u` in the area current.
 
@@ -116,19 +116,31 @@ The estimators are rows claimius already holds: `r̂_j = 1 / (now − user_activ
 
 **For claimius.** The drain settles ahead only the shares whose holders read often compared to how often their area moves. A holder with no `user_activity` row is never drained; its share waits for its own read. See [Materialization](./materialization.md#the-drain).
 
-## Result 7: counting keeps user_users exact
+## Result 7: folding keeps user_users exact
 
-**Claim.** `user_users` is kept exact by moving `sharing_object_count(u, v)` and `sharing_object_count(v, u)` by one for every other user `v` of `x` when a pair `(u, x)` of a type other than `claimius.claim` enters or leaves `user_object`, the moves of one statement summed per ordered pair.
+**Claim.** With `C(Q)(u, v) = Σ_x m_u(x) m_v(x)` over the objects that are not claims, a write that raises one `user_users_diff` row of `±1` per pair entering or leaving, and a fold that moves an object `x` only when it holds every row of `x` its statement sees, moving `user_users` by `C(P_x) − C(P_x ⊖ D_x)` and deleting `D_x` in one transaction, keep `user_users = C(P ⊖ D)` in every snapshot; so the stored range of `u` plus the moves of the rows still pending in a snapshot is `C(P)(u, ·)` of that snapshot, with no lock held by any write and no lock per object held by any fold.
 
-**Proof.** `sharing_object_count(u, v) = |{x : τ(x) ≠ claim, (u, x) ∈ P, (v, x) ∈ P}|`, a count over the self join `P ⋈_x P`, a nonrecursive view. A tuple `(u, x)` entering or leaving `P` changes exactly `(u, v)` and `(v, u)` for each other `v` holding `x`, by one: the counting algorithm of Result 1 on the join. Within a statement `_count_user_users` counts each ordered pair of users once per object, the pairs of the statement joined with themselves on the delete side and excluded from the other side on the insert side. Across transactions it is exact because they serialize per object: the trigger holds `pg_advisory_xact_lock` on every object of the statement before it reads the other holders, so of two transactions adding pairs on one object the second reads the first's committed pair. The settle took those keys already, sorted, through `_lock_objects`, so the trigger waits on nothing and no two settles take common keys in different orders.
+**Proof.**
 
-**Sources.** Gupta, Mumick, Subrahmanian as in Result 1. [PostgreSQL, Advisory Locks](https://www.postgresql.org/docs/17/explicit-locking.html#ADVISORY-LOCKS).
+1. A row and its pair change are written by one statement, so a snapshot sees both or neither, and `P ⊖ D` is the pairs as the committed folds left them. Before any row exists the counted table is `C(P)`.
 
-**For claimius.** A pair entering reads `U_x` entries and writes at most `2 (U_x − 1)` rows; the `pair_storage` test measures 2 rows written for a pair entering on an object one other user holds. Holding a claim reads the claim, but a claim is a template, not an object two users share, so its pairs move no count. See [Materialization](./materialization.md#what-a-changed-pair-writes).
+2. `sharing_object_count` is a count over the self join `P ⋈_x P`, a nonrecursive view; the counting algorithm of Result 1 moves it by `C(P_x) − C(P_x ⊖ D_x)` for a change of the pairs of `x`, `now(a) now(b) − before(a) before(b)` per ordered pair of users of `x`. A fold reads `P_x` and `D_x` in the one snapshot of its statement and deletes `D_x` in the same transaction.
+
+3. Snapshots of one server are nested by commit. Two folds overlapping in time on `x` see nested sets of rows, rows a committed fold deleted being absent from the later view and their change present in its `P_x`; a row is locked by at most one of them, and `FOR UPDATE SKIP LOCKED` lets the other pass it, so at most one locks every row it sees and moves `x`. The committed folds of `x` form a chain whose moves telescope.
+
+4. The moves of different objects are integers added to a row under its row lock, reapplied to the newest committed version under `READ COMMITTED`, so they commute.
+
+5. The changes of one pair are serial under the pair's row lock and a snapshot seeing the later sees the earlier, so a fold taking the later row takes the earlier, `P ⊖ D` is a set and no count is negative.
+
+By 1 to 4 the invariant holds, and adding `C(P_x) − C(P_x ⊖ D_x)` over the objects of `u` pending in the reader's snapshot gives `C(P)(u, ·)`.
+
+**Sources.** Gupta, Mumick, Subrahmanian as in Result 1. [PostgreSQL, Transaction Isolation, Read Committed](https://www.postgresql.org/docs/17/transaction-iso.html#XACT-READ-COMMITTED). [PostgreSQL, The Locking Clause](https://www.postgresql.org/docs/17/sql-select.html#SQL-FOR-UPDATE-SHARE). [PostgreSQL, Row-Level Locks](https://www.postgresql.org/docs/17/explicit-locking.html#LOCKING-ROWS).
+
+**For claimius.** A pair entering costs its write one row and two index entries, reads nothing and locks nothing; the fold that takes it reads `U_x` entries and writes at most `2 (U_x − 1)` rows, and the `pair_storage` test measures 2 rows written by the fold of a pair entering on an object one other user holds. The exactness that counting inside the write bought with an advisory lock per object until commit, and a lock budget to keep those locks from filling the server's lock table, comes here from the snapshot, so a settle needs no lock per object and a listing settles everything it needs in one read. Holding a claim reads the claim, but a claim is a template, not an object two users share, so its pairs raise no row. See [Users](./users.md#why-the-count-is-exact).
 
 ## Result 8: the minimal set of stored relations
 
-**Claim.** The relations claimius stores beyond its base tables are exactly those without which a query of the model reads more than its own answer: `inheritance_info`, `user_object`, `object_info`, `user_users`, and the maintenance state `access_diff`, `access_diff_user` and `user_activity`.
+**Claim.** The relations claimius stores beyond its base tables are exactly those without which a query of the model reads more than its own answer: `inheritance_info`, `user_object`, `object_info`, `user_users`, and the maintenance state `access_diff`, `access_diff_user`, `user_users_diff` and `user_activity`.
 
 **Proof.** For each, the cheapest plan without it:
 
@@ -140,7 +152,7 @@ The estimators are rows claimius already holds: `r̂_j = 1 / (now − user_activ
 
 4. Without `user_users`, `get_users` for `u` is the self join `Σ_{x ∈ V_u} U_x` per call, where the stored relation is one range of `S_u` rows.
 
-5. `access_diff` and `access_diff_user` are the state of lazy maintenance (Result 5), `user_activity` the estimator of Result 6.
+5. `access_diff` and `access_diff_user` are the state of lazy maintenance of `user_object` (Result 5), `user_users_diff` the state of lazy maintenance of `user_users` (Result 7), `usage_diff` that of the usage count, `user_activity` the estimator of Result 6.
 
 6. `claim_graph_cache` stores a rendering, not a relation of the model, validated on read; see [Graphs](./graphs.md). `reconcile_queue` holds recomputes that failed.
 

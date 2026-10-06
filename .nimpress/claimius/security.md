@@ -17,7 +17,7 @@ lastUpdated: true
 | `claimius_admin` | Owns every table and function | The same |
 | `claimius_writer` | `SELECT` on every table; `INSERT`, `UPDATE` on `samna_app`, `samna_user`, `samna_client`, `samna_secret`, `organization`, `location`, `object_field`, `user_field`, `user_relation`, `notification`, `prophet_state`, `sync_consumer`; `UPDATE` on `prophet_peer`; `INSERT`, `UPDATE`, `DELETE` on `claim_graph_cache`; `EXECUTE` on every function | not granted |
 | `claimius_reader` | No table; `EXECUTE` on every function except the claim, grant and binding writers, `merge_user`, `migrate_root`, `upsert_system_app`, `upsert_disciple_state`, `upsert_prophet_peer`, `upsert_app`, `insert_app_handover`, `update_app_handover`, `apply_peer_event`, `upsert_table_info`, `upsert_internal_table_info` and `recompute_state` | The same |
-| `claimius_disciple_client` | not granted | `SELECT` on every table; `INSERT`, `UPDATE`, `DELETE` on the mirrored tables, the derived tables `user_object`, `object_info`, `user_users`, `inheritance_info`, `table_info`, `claim_graph_cache`, and on `disciple_state`, `audit`, `notification`; `EXECUTE` on every function |
+| `claimius_disciple_client` | not granted | `SELECT` on every table; `INSERT`, `UPDATE`, `DELETE` on the mirrored tables, the derived tables `user_object`, `object_info`, `user_users`, `user_users_diff`, `inheritance_info`, `table_info`, `claim_graph_cache`, and on `disciple_state`, `audit`, `notification`; `EXECUTE` on every function |
 
 1. The reader holds no table privilege. It reaches data only through functions, and it cannot call a function that creates or changes a claim, a grant, a binding or a home, so a connection that only reads cannot change access.
 
@@ -29,7 +29,7 @@ lastUpdated: true
 
 Every read function of the external surface, the `get_*` access, listing, scope, audit, secret and graph functions, `search`, `resolve_access`, `mutation_access`, `touch_object_usage`, `drain_access_diff`, the identity helpers, the ancestor and subtree walks and `upsert_audit_partition`, is `SECURITY DEFINER` with `SET search_path = claimius, pg_temp` ([CREATE FUNCTION, Writing SECURITY DEFINER Functions Safely](https://www.postgresql.org/docs/17/sql-createfunction.html#SQL-CREATEFUNCTION-SECURITY)).
 
-1. A read settles what it meets: it writes `user_object`, `user_users`, `access_diff_user`, `claim_graph_cache` and clears `access_diff` rows. Running as the owner lets a reader that holds no table privilege pay that settle, and nothing else: the only writes it can cause are those the function body performs.
+1. A read settles what it meets: it writes `user_object`, `user_users_diff`, `user_users`, `usage_diff`, `access_diff_user`, `claim_graph_cache` and clears `access_diff` rows. Running as the owner lets a reader that holds no table privilege pay that settle, and nothing else: the only writes it can cause are those the function body performs.
 
 2. The pinned `search_path` resolves every unqualified name in the body to `claimius` and then the session's temporary schema, so a caller cannot shadow a claimius table or operator with an object of its own. `pg_temp` is named last, which is where the owner graph keeps its transaction temporary tables.
 

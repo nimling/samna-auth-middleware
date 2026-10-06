@@ -1,33 +1,3 @@
--- ============================================================================
--- Claimius V2.4 External Functions
--- ----------------------------------------------------------------------------
--- The public surface. All consumer reads go through these. Direct table
--- queries are forbidden by the role grant model: claimius_reader and
--- claimius_disciple_client only have EXECUTE on these functions.
---
--- Every read function:
---   1. Calls reconcile_if_pending to drain any pending disciple side queue
---   2. Calls check_user_active which cascades soft delete if applicable
---   3. Filters by sa_deleted_at and time validity (starts_at, ends_at)
---   4. Returns the result
--- ============================================================================
-
--- ----------------------------------------------------------------------------
--- get_access
--- Returns the surviving grant the user has against one object whose
--- effective access mask covers all bits in p_required_access. Joins
--- user_object grants array against user_claim and claim, filters by
--- sa_deleted_at and time validity. Returns one row, picking the grant
--- whose access mask carries the most bits set. scope is the settled field
--- scope of the pair, NULL when every field carries the same mask.
---
--- Contract: when claim_id is non-null, user_claim_id is also populated. This
--- is the actor token callers use as sa_created_by on follow-on writes.
--- When direct_grant is true and claim_id is null, user_claim_id is also null;
--- callers needing an actor for direct-only access must resolve a fallback
--- user_claim themselves (typically the user's bootstrap user_claim for the app).
--- ----------------------------------------------------------------------------
-
 DROP FUNCTION IF EXISTS claimius.get_access(UUID, UUID, UUID, TEXT, INTEGER);
 
 DROP FUNCTION IF EXISTS claimius.get_access(UUID, UUID, UUID, TEXT, INTEGER);
@@ -86,30 +56,6 @@ END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = claimius, pg_temp;
 
 COMMENT ON FUNCTION claimius.get_access(UUID, UUID, UUID, TEXT, INTEGER) IS 'Strongest active claim based grant for one (user, app, object) whose mask covers p_required_access. user_claim_id is the actor token for follow-on writes. sa_root_id is the owning organization root, suitable for FK to claimius.organization on follow-on claim and claim_object writes.';
-
--- ----------------------------------------------------------------------------
--- get_direct_access
--- Locates the closest, highest-privilege user_claim the calling user holds
--- that's structurally related to the given object. Walks the owner,
--- location, and parenthood ancestor chains; for each ancestor checks
--- whether the user has any user_claim bound to it via claim_object, or
--- holds a claim linking to a claim bound to it. A binding carries its
--- claim mask narrowed by the binding mask, a composed one the bits both
--- sides carry. The user's denies subtract at every required mask: one
--- bound on the object itself from every candidate, one on an ancestor from
--- the candidates found on an ancestor, so a share bound on the object
--- stands over an ancestor deny. What remains is closed under implication.
--- A binding scoped only to fields the type lacks grants nothing.
--- Returns the same row shape as get_access (user_object_id, user_claim_id,
--- claim_id, sa_access, scope, sa_owner_id, sa_root_id, sa_location_id,
--- direct_grant). Returns no rows when no claim is found anywhere up the
--- chain, which means the user has no access through the structural lookup.
---
--- Use this when get_access returns no row but the caller still expects an
--- actor token via the user's structural relationship to the object. In
--- normal flow, every resource should have a direct claim_object binding
--- (the owner claim rule), so this lookup mostly serves edge cases.
--- ----------------------------------------------------------------------------
 
 DROP FUNCTION IF EXISTS claimius.get_direct_access(UUID, UUID, UUID, TEXT);
 
@@ -314,22 +260,6 @@ $$ LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path = claimius, pg_tem
 
 COMMENT ON FUNCTION claimius.get_direct_access(UUID, UUID, UUID, TEXT, INTEGER, BOOLEAN) IS 'Locates the closest, strongest user_claim the user holds related to the given object via ancestor walk, directly or through composition, with the binding narrowing its claim and the user''s denies subtracted by class. VOLATILE: it settles through reconcile_if_pending.';
 
--- ----------------------------------------------------------------------------
--- get_objects
--- Returns object ids of the given object_type whose effective access mask
--- covers all bits in p_required_access. The default 0 returns every object
--- the user has any access to. Rows come in object_id order straight from the
--- reader's range of the user_object primary key: p_after starts the page past
--- the last object_id of the previous one and p_limit bounds it, so a page of
--- p rows reads p index entries and sorts nothing. The mask test reads
--- (sa_access & required) >= required, which for a submask of required is
--- the equality, and which the planner estimates as a range rather than a
--- point, so it keeps the ordered range instead of sorting a bitmap scan. The
--- reader's share settles before the page is read and does not depend on it.
--- The owner, location, name, description and link of each row come from
--- object_info by its key, so a rename shows on every reader's next page.
--- ----------------------------------------------------------------------------
-
 DROP FUNCTION IF EXISTS claimius.get_objects(UUID, UUID, TEXT, INTEGER);
 
 CREATE OR REPLACE FUNCTION claimius.get_objects(
@@ -361,10 +291,6 @@ BEGIN
         RETURN;
     END IF;
 
-    -- For each (user, object) row, pick the surviving claim grant whose
-    -- access mask carries the most bits, restricted to grants that cover
-    -- the required access bits. If only direct_grant applies,
-    -- user_claim_id is null and direct_grant is true.
     RETURN QUERY
         SELECT
             claimius.user_object.object_id,
@@ -398,11 +324,6 @@ $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = claimius, pg_temp;
 
 COMMENT ON FUNCTION claimius.get_objects(p_user_id uuid, p_app_id uuid, p_object_type text, p_required_access integer, p_after uuid, p_limit integer) IS 'Object ids and metadata for objects whose mask covers p_required_access, in object_id order after p_after, at most p_limit rows. user_claim_id is the actor token from the strongest surviving claim grant; null when only direct_grant applies. claim_id and claim_name describe the claim that contributed the strongest grant. sa_root_id is derived from the owning organization root.';
 
--- ----------------------------------------------------------------------------
--- get_organizations
--- Returns organizations whose mask covers p_required_access.
--- ----------------------------------------------------------------------------
-
 DROP FUNCTION IF EXISTS claimius.get_organizations(UUID, UUID, INTEGER);
 
 CREATE OR REPLACE FUNCTION claimius.get_organizations(
@@ -431,10 +352,6 @@ $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = claimius, pg_temp;
 
 COMMENT ON FUNCTION claimius.get_organizations(p_user_id uuid, p_app_id uuid, p_required_access integer, p_after uuid, p_limit integer) IS 'Organizations whose effective mask covers p_required_access, one get_objects page in id order.';
 
--- ----------------------------------------------------------------------------
--- get_locations
--- ----------------------------------------------------------------------------
-
 DROP FUNCTION IF EXISTS claimius.get_locations(UUID, UUID, INTEGER);
 
 CREATE OR REPLACE FUNCTION claimius.get_locations(
@@ -462,13 +379,6 @@ END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = claimius, pg_temp;
 
 COMMENT ON FUNCTION claimius.get_locations(p_user_id uuid, p_app_id uuid, p_required_access integer, p_after uuid, p_limit integer) IS 'Locations whose effective mask covers p_required_access, one get_objects page in id order.';
-
--- ----------------------------------------------------------------------------
--- get_users
--- Returns the users this user can see in this app: themselves, users they
--- hold direct claims on, plus users who share any object with them via
--- user_users.
--- ----------------------------------------------------------------------------
 
 DO $$
 BEGIN
@@ -509,6 +419,7 @@ DECLARE
     v_uuid           UUID;
 BEGIN
     PERFORM claimius.reconcile_if_pending(p_app_id, p_actor_id);
+    PERFORM claimius._settle_user_users_diff(p_app_id, p_actor_id);
 
     IF NOT claimius.check_user_active(p_app_id, p_actor_id) THEN
         RETURN;
@@ -559,10 +470,8 @@ BEGIN
                 NULL::UUID,
                 NULL::UUID,
                 FALSE
-            FROM claimius.user_users uu
-            WHERE uu.app_id        = p_app_id
-              AND uu.viewer_id     = p_actor_id
-              AND uu.target_user_id = v_target_user_id
+            FROM claimius._user_users_for_viewer(p_app_id, p_actor_id) uu
+            WHERE uu.target_user_id = v_target_user_id
 
             UNION ALL
 
@@ -613,6 +522,7 @@ CREATE OR REPLACE FUNCTION claimius.get_users(
 ) RETURNS SETOF claimius.samna_user AS $$
 BEGIN
     PERFORM claimius.reconcile_if_pending(p_app_id, p_user_id);
+    PERFORM claimius._settle_user_users_diff(p_app_id, p_user_id);
 
     IF NOT claimius.check_user_active(p_app_id, p_user_id) THEN
         RETURN;
@@ -626,9 +536,7 @@ BEGIN
             UNION ALL
 
             SELECT uu.target_user_id, 36::INTEGER
-            FROM claimius.user_users uu
-            WHERE uu.app_id    = p_app_id
-              AND uu.viewer_id = p_user_id
+            FROM claimius._user_users_for_viewer(p_app_id, p_user_id) uu
 
             UNION ALL
 
@@ -667,19 +575,6 @@ GRANT EXECUTE ON FUNCTION claimius.get_user_access(UUID, UUID, TEXT, INTEGER)
 
 GRANT EXECUTE ON FUNCTION claimius.get_users(UUID, UUID, INTEGER)
     TO claimius_disciple_client, claimius_writer, claimius_admin, claimius_reader;
-
--- ----------------------------------------------------------------------------
--- resolve_access + mutation_access
--- Single object access gate for the mutation path. resolve_access dispatches
--- audit, user_relation, and samna_user object types to their bespoke lookups
--- and everything else through get_access then get_direct_access. mutation_access
--- wraps it and RAISEs P0403 when the object exists but the caller lacks access,
--- P0404 when the object is absent or soft deleted, its id is malformed or its
--- type is not registered, so the Go side maps one round trip to 200 / 403 /
--- 404. All three are VOLATILE: get_access and get_direct_access settle the
--- pair through reconcile_if_pending, which writes. resolve_access returns no
--- row for a malformed id, so a batch never aborts on one.
--- ----------------------------------------------------------------------------
 
 DROP FUNCTION IF EXISTS claimius.require_access(UUID, UUID, TEXT, INTEGER);
 
@@ -755,6 +650,8 @@ BEGIN
         FROM claimius.get_direct_access(p_user_id, p_app_id, p_object_id::UUID, p_object_type, p_required) g;
 END;
 $$ LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path = claimius, pg_temp;
+
+COMMENT ON FUNCTION claimius.resolve_access(UUID, UUID, TEXT, TEXT, INTEGER) IS 'The access verdict on one object of any type: audit, relation and samna_user rows through their own lookups, every other type through get_access and then get_direct_access. No row for a malformed id, so a batch never aborts on one.';
 DROP FUNCTION IF EXISTS claimius.resolve_access(UUID, TEXT, TEXT, INTEGER);
 CREATE OR REPLACE FUNCTION claimius.resolve_access(
     p_user_id     UUID,
@@ -777,6 +674,7 @@ CREATE OR REPLACE FUNCTION claimius.resolve_access(
     SELECT * FROM claimius.resolve_access(p_user_id, claimius.get_app_id(), p_object_id, p_object_type, p_required);
 $$ LANGUAGE sql VOLATILE SECURITY DEFINER SET search_path = claimius, pg_temp;
 
+COMMENT ON FUNCTION claimius.resolve_access(UUID, TEXT, TEXT, INTEGER) IS 'resolve_access for the deployment''s own app, get_app_id().';
 
 GRANT EXECUTE ON FUNCTION claimius.resolve_access(UUID, TEXT, TEXT, INTEGER)
     TO claimius_disciple_client, claimius_writer, claimius_admin, claimius_reader;
@@ -848,12 +746,6 @@ COMMENT ON FUNCTION claimius.mutation_access(UUID, TEXT, TEXT, INTEGER) IS 'Sing
 GRANT EXECUTE ON FUNCTION claimius.mutation_access(UUID, TEXT, TEXT, INTEGER)
     TO claimius_disciple_client, claimius_writer, claimius_admin, claimius_reader;
 
--- ----------------------------------------------------------------------------
--- get_claims (overload: by user)
--- Returns every claim the user holds whose access mask covers
--- p_required_access.
--- ----------------------------------------------------------------------------
-
 DROP FUNCTION IF EXISTS claimius.get_claims(UUID, UUID, INTEGER);
 
 CREATE OR REPLACE FUNCTION claimius.get_claims(
@@ -887,11 +779,6 @@ END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = claimius, pg_temp;
 
 COMMENT ON FUNCTION claimius.get_claims(UUID, UUID, INTEGER) IS 'The claims the user holds through a live user_claim, at the required level. The claims the user can see or manage, held or reached through a cascade, are get_objects of type claimius.claim.';
-
--- ----------------------------------------------------------------------------
--- get_claims (overload: against an object)
--- Returns every claim the user holds against one object.
--- ----------------------------------------------------------------------------
 
 CREATE OR REPLACE FUNCTION claimius.get_claims(
     p_user_id       UUID,
@@ -930,16 +817,6 @@ END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = claimius, pg_temp;
 
 COMMENT ON FUNCTION claimius.get_claims(UUID, UUID, UUID, TEXT) IS 'All claims the user holds against one object.';
-
--- ----------------------------------------------------------------------------
--- get_scope_access
--- The object-less bindings of the user's live grants in the app whose scope
--- matches a jsonpath, one row per binding. A binding carries its claim mask
--- narrowed by its own, so a NULL binding mask is the claim mask. A deny
--- binding matching the same path subtracts its bits from every other, and
--- what remains is closed under implication. A row whose mask misses
--- p_required_access is dropped. It reads no user_object and settles nothing.
--- ----------------------------------------------------------------------------
 
 DROP FUNCTION IF EXISTS claimius.get_scope_access(UUID, UUID, JSONPATH, INTEGER);
 CREATE OR REPLACE FUNCTION claimius.get_scope_access(
@@ -1030,15 +907,6 @@ $$;
 
 COMMENT ON FUNCTION claimius.get_scope_access(UUID, JSONPATH, INTEGER) IS 'get_scope_access in the system app.';
 
--- ----------------------------------------------------------------------------
--- get_access (overload: scope key form)
--- Strongest active object-less binding whose scope contains p_scope_key and
--- whose mask covers p_required_access. Returns user_claim_id, claim_id,
--- sa_access, scope. It is get_scope_access at the path of the key.
--- It reads claim, user_claim and the object-less bindings, never user_object
--- or an area a diff can hold open, so it settles nothing.
--- ----------------------------------------------------------------------------
-
 CREATE OR REPLACE FUNCTION claimius.get_access(
     p_user_id          UUID,
     p_app_id           UUID,
@@ -1064,11 +932,6 @@ END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = claimius, pg_temp;
 
 COMMENT ON FUNCTION claimius.get_access(UUID, UUID, TEXT, INTEGER) IS 'Strongest active object-less binding whose scope contains p_scope_key and whose mask covers p_required_access. A NULL binding mask inherits the claim mask, and a deny binding carrying the key subtracts its bits.';
-
--- ----------------------------------------------------------------------------
--- get_audit
--- Returns audit rows for organizations the user can see.
--- ----------------------------------------------------------------------------
 
 DROP FUNCTION IF EXISTS claimius.get_audit(UUID, UUID, INTEGER, INTEGER, INTEGER);
 
@@ -1100,10 +963,6 @@ $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = claimius, pg_temp;
 
 COMMENT ON FUNCTION claimius.get_audit(p_user_id uuid, p_app_id uuid, p_required_access integer, p_limit integer, p_offset integer) IS 'Audit rows for organizations the user can see.';
 
--- ----------------------------------------------------------------------------
--- get_secrets
--- ----------------------------------------------------------------------------
-
 DROP FUNCTION IF EXISTS claimius.get_secrets(UUID, UUID, INTEGER);
 
 CREATE OR REPLACE FUNCTION claimius.get_secrets(
@@ -1132,28 +991,9 @@ $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = claimius, pg_temp;
 
 COMMENT ON FUNCTION claimius.get_secrets(p_user_id uuid, p_app_id uuid, p_required_access integer, p_after uuid, p_limit integer) IS 'Secrets whose effective mask covers p_required_access, one get_objects page in id order.';
 
--- Drop any stale earlier signatures of the graph functions before redefining.
--- The previous version of these functions had different argument lists; if a
--- migration re-runs against a database that still has the old signature, the
--- bare CREATE OR REPLACE below would create a second overloaded version
--- instead of replacing, and downstream COMMENT/REVOKE statements would not
--- resolve unambiguously.
 DROP FUNCTION IF EXISTS claimius.get_owner_graph(UUID, UUID, INTEGER);
 DROP FUNCTION IF EXISTS claimius.get_claim_graph(UUID, UUID, INTEGER);
 
--- ----------------------------------------------------------------------------
--- _window_graph
--- The window of a graph: the nodes of p_rows kept when every parent shows at
--- most p_width of its children of each type, 0 meaning all of them. A node
--- whose parent is not in the graph is a top node, and the top nodes are the
--- children of no parent. Children come in name order, label then id, or
--- with p_sort 'usage' by the reader's decayed usage of the pair, heaviest
--- first, then name. A
--- node is kept when it is inside its parent's window and its parent is kept.
--- With p_next_id the window continues after that node: its later siblings of
--- its type, p_width of them, with their windowed subtrees. The node itself
--- is not returned, and an id not in the graph returns nothing.
--- ----------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION claimius._window_graph(
     p_rows      JSONB,
     p_user_id   UUID,
@@ -1225,19 +1065,6 @@ $$ LANGUAGE sql STABLE;
 
 COMMENT ON FUNCTION claimius._window_graph(JSONB, UUID, UUID, INTEGER, TEXT, UUID) IS 'The nodes of a graph kept when each parent shows at most p_width children of each type, 0 meaning all, in name order or by the reader''s decayed usage with p_sort ''usage'', continuing after p_next_id when given.';
 
--- ----------------------------------------------------------------------------
--- _window_links
--- The window of a link graph, the same window _window_graph gives a node
--- graph: every link target is a node whose parent is the link source, and a
--- source no link targets is a top node. A link is kept when its target is
--- kept under its source. Types are matched back to the registered type they
--- normalize from, labels come from object_info, the claim or the samna_user
--- row, so name and usage order read as they do on the nodes. p_nodes names
--- the graph's nodes by short type and id, and one no link targets is a top
--- node too, so a root or a start that keeps no child is windowed like any
--- other. Returns the kept links and node_ids, the ids of every kept node, the
--- object set of the window.
--- ----------------------------------------------------------------------------
 DROP FUNCTION IF EXISTS claimius._window_links(JSONB, UUID, UUID, INTEGER, TEXT, UUID);
 CREATE OR REPLACE FUNCTION claimius._window_links(
     p_links     JSONB,
@@ -1307,32 +1134,6 @@ $$ LANGUAGE sql STABLE;
 
 COMMENT ON FUNCTION claimius._window_links(JSONB, JSONB, UUID, UUID, INTEGER, TEXT, UUID) IS 'The links of a link graph kept by the window _window_graph gives its nodes, a link staying when its target is kept under its source, with node_ids, the ids of every kept node, p_nodes no link targets windowed as top nodes.';
 
-
--- ----------------------------------------------------------------------------
--- get_owner_graph
--- Returns the ownership graph the user can see as a flat node list. Covers
--- organizations, locations, AND every registered application table that has
--- sa_owner_id and/or sa_location_id. Each row carries a single canonical
--- parent_id (priority: sa_parent_id, then sa_location_id, then sa_owner_id);
--- secondary relationships ride in the data jsonb so the frontend can draw
--- additional edges if it wants.
---
--- Args:
---   p_user_id   - reading user
---   p_app_id    - app scope
---   p_start_id  - optional organization id; when set, restricts the result to
---                 the subtree rooted at that org (and the org itself). NULL
---                 means every root the user can see.
---   p_depth     - how many levels of descent below the start org. 0 means
---                 unlimited. The org at p_start_id (or each accessible root
---                 when start is NULL) is depth 0; its direct children are
---                 depth 1; and so on.
---   p_required_access - access bit filter passed through to get_objects.
---   p_width, p_sort, p_next_id - the window of _window_graph: at most p_width
---                 children of each type per parent, 0 meaning all, in name or
---                 usage order, continuing after p_next_id.
--- ----------------------------------------------------------------------------
-
 DROP FUNCTION IF EXISTS claimius.get_owner_graph(UUID, UUID, UUID, INTEGER, INTEGER);
 CREATE OR REPLACE FUNCTION claimius.get_owner_graph(
     p_user_id          UUID,
@@ -1365,16 +1166,12 @@ BEGIN
     ) ON COMMIT DROP;
     DELETE FROM _owner_graph_rows;
 
-    -- Resolve the set of root organizations to walk from.
-    -- When p_start_id is null we use every root org the user can see.
-    -- When p_start_id is provided it must be an org the user can see; if not,
-    -- we return empty silently (no rows yielded, no error).
     IF p_start_id IS NULL THEN
         SELECT array_agg(o.id) INTO v_root_ids
         FROM claimius.organization o
         WHERE o.id IN (SELECT claimius.app_object_ids(p_app_id, 'claimius.organization'))
           AND o.sa_deleted_at IS NULL
-          AND o.sa_owner_id = o.id  -- root: self referential
+          AND o.sa_owner_id = o.id
           AND o.id IN (
             SELECT g.object_id FROM claimius.get_objects(p_user_id, p_app_id, 'claimius.organization', p_required_access) g
         );
@@ -1393,8 +1190,6 @@ BEGIN
         RETURN;
     END IF;
 
-    -- Organizations: walk each root's ownership tree, depth limited.
-    -- Recursive CTE bound to the access filter and the depth limit.
     INSERT INTO _owner_graph_rows (object_id, object_type, label, parent_id, data)
         WITH RECURSIVE org_walk AS (
             SELECT o.id, o.name::TEXT AS name, o.description, o.type::TEXT AS type, o.sa_level,
@@ -1408,7 +1203,7 @@ BEGIN
             FROM claimius.organization c
                      JOIN org_walk w ON c.sa_owner_id = w.id
             WHERE c.sa_deleted_at IS NULL
-              AND c.id <> c.sa_owner_id  -- don't re-walk the root
+              AND c.id <> c.sa_owner_id
               AND (p_depth = 0 OR w.lvl + 1 <= p_depth)
         )
         SELECT w.id ,
@@ -1434,10 +1229,6 @@ BEGIN
             SELECT g.object_id FROM claimius.get_objects(p_user_id, p_app_id, 'claimius.organization', p_required_access) g
         );
 
-    -- For every other registered table that has sa_owner_id or sa_location_id,
-    -- emit rows whose ownership chain lands inside the org subtree we walked.
-    -- The walked org subtree is captured as the same recursive CTE above,
-    -- materialized once into a temp set used by every per-table query.
     CREATE TEMP TABLE IF NOT EXISTS _owner_graph_orgs (org_id UUID PRIMARY KEY) ON COMMIT DROP;
     DELETE FROM _owner_graph_orgs;
 
@@ -1457,8 +1248,6 @@ BEGIN
     )
     SELECT id FROM org_walk;
 
-    -- Locations: handled explicitly so we keep longitude/latitude in data.
-    -- Filtered to locations whose owning org sits in the walked org set.
     INSERT INTO _owner_graph_rows (object_id, object_type, label, parent_id, data)
         SELECT l.id ,
                'claimius.location'::TEXT ,
@@ -1485,11 +1274,6 @@ BEGIN
             SELECT g.object_id FROM claimius.get_objects(p_user_id, p_app_id, 'claimius.location', p_required_access) g
         );
 
-    -- Iterate every registered table that participates in ownership/location
-    -- and emit rows whose sa_owner_id resolves into the walked org set.
-    -- Locations and other tables share the same general shape; we keep
-    -- locations separate only because their parent_id falls back to
-    -- sa_owner_id when sa_parent_id is self referential.
     FOR v_table IN
         SELECT claimius.table_info.object_type,
                claimius.table_info.has_sa_owner_id,
@@ -1537,7 +1321,6 @@ BEGIN
             ORDER BY oi.sa_owner_id, oi.sa_name, t.id
         $f$,
                             v_table.object_type,
-                -- parent_id CASE arms in priority order: parent, location, owner
                             CASE WHEN v_table.has_sa_parent_id THEN 'WHEN t.sa_parent_id IS NOT NULL AND t.sa_parent_id <> t.id THEN t.sa_parent_id' ELSE '' END,
                             CASE WHEN v_table.has_sa_location_id THEN 'WHEN t.sa_location_id IS NOT NULL THEN t.sa_location_id' ELSE '' END,
                             CASE WHEN v_table.has_sa_owner_id THEN 'WHEN t.sa_owner_id IS NOT NULL AND t.sa_owner_id <> t.id THEN t.sa_owner_id' ELSE '' END,
@@ -1545,9 +1328,7 @@ BEGIN
                             split_part(v_table.object_type, '.', 2),
                             v_table.object_type,
                             v_table.object_type,
-                -- soft-delete predicate (table dependent)
                             CASE WHEN v_table.has_sa_deleted_at THEN 't.sa_deleted_at IS NULL' ELSE 'TRUE' END,
-                -- ancestry: must root in the walked org set (via owner or via owner of location)
                             CASE WHEN v_table.has_sa_owner_id THEN 't.sa_owner_id IN (SELECT org_id FROM _owner_graph_orgs)' ELSE 'FALSE' END,
                             CASE WHEN v_table.has_sa_location_id THEN ' OR EXISTS (SELECT 1 FROM claimius.location loc WHERE loc.id = t.sa_location_id AND loc.sa_owner_id IN (SELECT org_id FROM _owner_graph_orgs))' ELSE '' END
                      );
@@ -1567,40 +1348,6 @@ $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = claimius, pg_temp;
 
 COMMENT ON FUNCTION claimius.get_owner_graph(UUID, UUID, UUID, INTEGER, INTEGER, INTEGER, TEXT, UUID) IS 'Ownership graph (orgs, locations, registered tables with sa_owner_id or sa_location_id) for the user. Optional start org and depth limit, and a window of p_width children of each type per parent in name or usage order continuing after p_next_id.';
 
--- ----------------------------------------------------------------------------
--- get_claim_graph
--- Returns the access graph: the requesting user, every other user this user
--- can see, every claim the user holds (or just the start claim), the
--- user_claim grants, the claim_object connector nodes that bind claims to
--- objects, and the actual objects reachable from those bindings (every
--- registered object_type, served via the user_object materialization).
---
--- Topology:
---   user (parent_id = NULL)
---     |- user_claim   (parent_id = user.id)
---     |     '- (the user_claim points at a claim by claim_id in data)
---     '- (other users seen via user_users; parent_id = the requesting user.id)
---   claim (parent_id = NULL)
---     '- claim_object   (parent_id = claim.id)
---           '- object   (parent_id = claim_object.id)
---
--- Args:
---   p_user_id   - reading user
---   p_app_id    - app scope
---   p_start_id  - optional claim id; when set, restricts the walk to that
---                 single claim (must be one the user holds, otherwise empty).
---                 NULL means every claim the user holds.
---   p_depth     - cascade depth from each claim_object binding. 0 = unlimited
---                 (all objects in user_object reachable through the binding).
---                 1 = directly bound objects only, no cascade descendants.
---                 N = directly bound plus N-1 cascade hops.
---   p_required_access - bit filter; claims and reachable objects whose
---                       effective mask does not cover these bits are excluded.
---   p_width, p_sort, p_next_id - the window of _window_graph: at most p_width
---                 children of each type per parent, 0 meaning all, in name or
---                 usage order, continuing after p_next_id.
--- ----------------------------------------------------------------------------
-
 DROP FUNCTION IF EXISTS claimius.get_claim_graph(UUID, UUID, UUID, INTEGER, INTEGER);
 CREATE OR REPLACE FUNCTION claimius.get_claim_graph(
     p_user_id          UUID,
@@ -1618,12 +1365,14 @@ DECLARE
     v_cacheable     BOOLEAN;
     v_graph         JSONB;
     v_snapshot      PG_SNAPSHOT;
+    v_pending       INTEGER;
 BEGIN
     IF p_sort IS NULL OR p_sort NOT IN ('name', 'usage') OR p_width IS NULL OR p_width < 0 THEN
         RAISE EXCEPTION 'graph window: p_sort is name or usage and p_width at least 0' USING ERRCODE = '22023';
     END IF;
 
     PERFORM claimius.reconcile_if_pending(p_app_id, p_user_id);
+    v_pending := claimius._settle_user_users_diff(p_app_id, p_user_id);
 
     IF NOT claimius.check_user_active(p_app_id, p_user_id) THEN
         RETURN;
@@ -1631,7 +1380,7 @@ BEGIN
 
     v_cacheable := (p_start_id IS NULL AND p_depth = 0 AND p_required_access = 0);
 
-    IF v_cacheable THEN
+    IF v_cacheable AND v_pending = 0 THEN
         SELECT c.graph INTO v_graph
         FROM claimius.claim_graph_cache c
         WHERE c.app_id = p_app_id
@@ -1764,10 +1513,8 @@ BEGIN
                        'status', u.status
                    )                                                                        AS data
             FROM claimius.samna_user u
-                     JOIN claimius.user_users uu
-                          ON uu.viewer_id = p_user_id
-                              AND uu.app_id = p_app_id
-                              AND uu.target_user_id = u.user_id
+                     JOIN claimius._user_users_for_viewer(p_app_id, p_user_id) uu
+                          ON uu.target_user_id = u.user_id
                      LEFT JOIN claimius.user_object uo
                           ON uo.object_id = u.id
                               AND uo.object_type = 'claimius.samna_user'
@@ -1974,17 +1721,6 @@ END;
 $$ LANGUAGE plpgsql;
 
 COMMENT ON FUNCTION claimius._invalidate_claim_graph_cache() IS 'Trigger function. Drops claim_graph_cache rows affected by writes to user_object, object_info, user_users, samna_user. A claim or binding change is caught on read by get_claim_graph.';
-
--- ----------------------------------------------------------------------------
--- search
--- Full text search over accessible objects (anything with a user_object row),
--- gated by access. Matches against the search_vector of the object's one
--- object_info row, generated from its name and description, so a rename is
--- searchable by every reader at once.
--- A row ranks by its text match plus the reader's decayed usage of the
--- pair, so among equal matches what the reader uses most and lately comes
--- first.
--- ----------------------------------------------------------------------------
 
 DROP FUNCTION IF EXISTS claimius.search_objects(UUID, UUID, TEXT, TEXT[], INTEGER, INTEGER, INTEGER);
 DROP FUNCTION IF EXISTS claimius.search(UUID, UUID, TEXT, TEXT[], INTEGER, UUID[], UUID[], INTEGER, INTEGER);
@@ -2210,18 +1946,6 @@ COMMENT ON FUNCTION claimius.search(UUID, UUID, TEXT, TEXT[], INTEGER, UUID[], U
 GRANT EXECUTE ON FUNCTION claimius.search(UUID, UUID, TEXT, TEXT[], INTEGER, INTEGER, INTEGER) TO claimius_disciple_client, claimius_writer, claimius_admin, claimius_reader;
 GRANT EXECUTE ON FUNCTION claimius.search(UUID, UUID, TEXT, TEXT[], INTEGER, UUID[], UUID[], UUID[], UUID, TEXT, INTEGER, INTEGER) TO claimius_disciple_client, claimius_writer, claimius_admin, claimius_reader;
 
--- ----------------------------------------------------------------------------
--- touch_object_usage
--- Adds counted checks to the pairs they were made on, one call per flush of
--- the middleware's in process counter. Row i of the arrays is one pair and the
--- checks counted on it; repeats of a pair add up. A pair that is not settled,
--- that has no user_object row, is skipped, so usage never makes a pair and
--- never outlives one. The touched pairs are locked in key order first, so two
--- replicas flushing the same pairs wait on each other instead of deadlocking.
--- Every user and app counted moves its user_activity row to now. Nothing here
--- publishes to sync_event: usage is local to this database. Returns the pairs
--- touched.
--- ----------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION claimius.touch_object_usage(
     p_user_ids      UUID[],
     p_app_ids       UUID[],
@@ -2242,27 +1966,17 @@ BEGIN
           AND u.n > 0
         GROUP BY u.user_id, u.app_id, u.object_type, u.object_id
     ),
-    locked AS (
-        SELECT uo.user_id, uo.app_id, uo.object_type, uo.object_id, used.n
-        FROM claimius.user_object uo
-            JOIN used
-                ON used.user_id = uo.user_id
-               AND used.app_id = uo.app_id
-               AND used.object_type = uo.object_type
-               AND used.object_id = uo.object_id
-        ORDER BY uo.user_id, uo.app_id, uo.object_type, uo.object_id
-        FOR NO KEY UPDATE OF uo
-    ),
     touched AS (
-        UPDATE claimius.user_object uo
-        SET used_count = uo.used_count + l.n,
-            last_used_at = now()
-        FROM locked l
-        WHERE uo.user_id = l.user_id
-          AND uo.app_id = l.app_id
-          AND uo.object_type = l.object_type
-          AND uo.object_id = l.object_id
-        RETURNING uo.user_id
+        INSERT INTO claimius.usage_diff (app_id, user_id, object_type, object_id, used_count)
+        SELECT used.app_id, used.user_id, used.object_type, used.object_id, used.n
+        FROM used
+        WHERE EXISTS (
+            SELECT 1 FROM claimius.user_object uo
+            WHERE uo.user_id = used.user_id
+              AND uo.app_id = used.app_id
+              AND uo.object_type = used.object_type
+              AND uo.object_id = used.object_id)
+        RETURNING user_id
     ),
     active AS (
         INSERT INTO claimius.user_activity (user_id, app_id, last_used_at)
@@ -2279,7 +1993,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = claimius, pg_temp;
 
-COMMENT ON FUNCTION claimius.touch_object_usage(UUID[], UUID[], TEXT[], UUID[], BIGINT[]) IS 'Adds counted checks to user_object.used_count and moves last_used_at, per (user, app, type, object) row of the arrays, skipping pairs not settled, and moves each counted user''s user_activity for the app. Local, never synced. Returns the pairs touched.';
+COMMENT ON FUNCTION claimius.touch_object_usage(UUID[], UUID[], TEXT[], UUID[], BIGINT[]) IS 'Records counted checks as usage_diff rows, folded into user_object.used_count and last_used_at by the user''s next listing, per (user, app, type, object) row of the arrays, skipping pairs not settled and locking no pair, and moves each counted user''s user_activity for the app. Local, never synced. Returns the pairs touched.';
 
 CREATE OR REPLACE FUNCTION claimius.touch_object_usage(
     p_user_ids      UUID[],
@@ -2298,11 +2012,6 @@ COMMENT ON FUNCTION claimius.touch_object_usage(UUID[], TEXT[], UUID[], BIGINT[]
 GRANT EXECUTE ON FUNCTION claimius.touch_object_usage(UUID[], UUID[], TEXT[], UUID[], BIGINT[]) TO claimius_disciple_client, claimius_writer, claimius_admin, claimius_reader;
 GRANT EXECUTE ON FUNCTION claimius.touch_object_usage(UUID[], TEXT[], UUID[], BIGINT[]) TO claimius_disciple_client, claimius_writer, claimius_admin, claimius_reader;
 
--- ============================================================================
--- Write functions: claim management
--- ============================================================================
-
--- insert_claim
 DROP FUNCTION IF EXISTS claimius.create_claim(UUID, TEXT, TEXT, INTEGER, UUID, UUID, UUID, BOOLEAN, BOOLEAN, claimius.claim_type);
 DROP FUNCTION IF EXISTS claimius.create_claim(UUID, TEXT, TEXT, INTEGER, UUID, UUID, UUID, BOOLEAN, claimius.claim_type);
 
@@ -2353,7 +2062,6 @@ $$ LANGUAGE plpgsql;
 
 COMMENT ON FUNCTION claimius.insert_claim(p_app_id uuid, p_name text, p_description text, p_sa_access integer, p_sa_owner_id uuid, p_sa_root_id uuid, p_sa_created_by uuid, p_inherits boolean, p_type claimius.claim_type, p_level integer) IS 'Creates a new claim. p_sa_access is a bitwise mask: 0x01 owner, 0x02 write, 0x04 read, 0x08 execute, 0x10 deny, 0x20 member. On grant claims with the deny bit unset owner implies write+read+execute, write implies read+execute, execute implies read. Member bit 0x20 stands alone. Deny claims store the supplied bits verbatim so callers can deny any subset of read, write, execute, owner. A mask with no bit besides deny is refused with SQLSTATE 22023.';
 
--- update_claim
 DROP FUNCTION IF EXISTS claimius.update_claim(UUID, TEXT, TEXT, INTEGER, BOOLEAN, BOOLEAN);
 DROP FUNCTION IF EXISTS claimius.update_claim(UUID, TEXT, TEXT, INTEGER, BOOLEAN);
 DROP FUNCTION IF EXISTS claimius.update_claim(uuid,text,text,integer,boolean);
@@ -2400,7 +2108,6 @@ $$ LANGUAGE plpgsql;
 
 COMMENT ON FUNCTION claimius.update_claim(p_claim_id uuid, p_name text, p_description text, p_sa_access integer, p_inherits boolean, p_level integer) IS 'Patches selected fields on a claim. p_sa_access is expanded on grant claims so owner implies write+read+execute, write implies read+execute, execute implies read. Member bit 0x20 stands alone. Deny claims keep the supplied bits verbatim. Empty p_name and zero p_sa_access are treated as preserve so PATCH callers that send only one field do not wipe the others. A mask with no bit besides deny is refused with SQLSTATE 22023.';
 
--- delete_claim
 DROP FUNCTION IF EXISTS claimius.remove_claim(UUID, UUID);
 
 DROP FUNCTION IF EXISTS claimius.remove_claim(uuid,uuid);
@@ -2426,7 +2133,6 @@ $$ LANGUAGE plpgsql;
 
 COMMENT ON FUNCTION claimius.delete_claim(p_claim_id uuid, p_deleted_by uuid) IS 'Soft deletes a claim, its user_claim, its claim_object, and any inbound composition links pointing at it. Returns the deleted claim row.';
 
--- insert_user_claim
 DROP FUNCTION IF EXISTS claimius.assign_claim_user(uuid,uuid,uuid,uuid,uuid,text,timestamp with time zone,timestamp with time zone);
 CREATE OR REPLACE FUNCTION claimius.insert_user_claim(
     p_app_id        UUID,
@@ -2454,7 +2160,6 @@ $$ LANGUAGE plpgsql;
 
 COMMENT ON FUNCTION claimius.insert_user_claim(p_app_id uuid, p_claim_id uuid, p_user_id uuid, p_sa_owner_id uuid, p_sa_created_by uuid, p_reason text, p_starts_at timestamp with time zone, p_ends_at timestamp with time zone) IS 'Grants a claim to a user in an app.';
 
--- update_user_claim
 DROP FUNCTION IF EXISTS claimius.update_claim_user(uuid,text,timestamp with time zone,timestamp with time zone);
 CREATE OR REPLACE FUNCTION claimius.update_user_claim(
     p_user_claim_id UUID,
@@ -2477,7 +2182,6 @@ $$ LANGUAGE plpgsql;
 
 COMMENT ON FUNCTION claimius.update_user_claim(p_user_claim_id uuid, p_reason text, p_starts_at timestamp with time zone, p_ends_at timestamp with time zone) IS 'Patches selected fields on a user_claim.';
 
--- delete_user_claim
 DROP FUNCTION IF EXISTS claimius.remove_user_claim(UUID, UUID);
 
 DROP FUNCTION IF EXISTS claimius.remove_user_claim(uuid,uuid);
@@ -2495,7 +2199,6 @@ $$ LANGUAGE plpgsql;
 
 COMMENT ON FUNCTION claimius.delete_user_claim(p_user_claim_id uuid, p_deleted_by uuid) IS 'Soft deletes a user_claim row. Returns the deleted user_claim row.';
 
--- insert_claim_object
 DROP FUNCTION IF EXISTS claimius.assign_claim_object(UUID, UUID, UUID, TEXT, UUID, UUID, UUID, INTEGER, BOOLEAN, TEXT, UUID, TEXT);
 
 DROP FUNCTION IF EXISTS claimius.assign_claim_object(uuid,uuid,uuid,uuid,uuid,uuid,text,integer,boolean,text,uuid,jsonb);
@@ -2529,7 +2232,6 @@ $$ LANGUAGE plpgsql;
 
 COMMENT ON FUNCTION claimius.insert_claim_object(p_app_id uuid, p_claim_id uuid, p_sa_owner_id uuid, p_sa_root_id uuid, p_sa_created_by uuid, p_object_id uuid, p_object_type text, p_sa_access integer, p_inherits boolean, p_reason text, p_ref_id uuid, p_scope jsonb) IS 'Binds a claim. With (object_type, object_id) p_scope keys are field names; without them p_scope keys are custom. p_sa_access is a bitwise mask.';
 
--- update_claim_object
 DROP FUNCTION IF EXISTS claimius.update_claim_object(UUID, TEXT, BOOLEAN);
 
 CREATE OR REPLACE FUNCTION claimius.update_claim_object(
@@ -2555,7 +2257,6 @@ $$ LANGUAGE plpgsql;
 
 COMMENT ON FUNCTION claimius.update_claim_object(p_claim_object_id uuid, p_reason text, p_inherits boolean, p_sa_access integer, p_scope jsonb) IS 'Patches selected fields on a claim_object.';
 
--- delete_claim_object
 DROP FUNCTION IF EXISTS claimius.remove_claim_object(UUID, UUID);
 
 DROP FUNCTION IF EXISTS claimius.remove_claim_object(uuid,uuid);
@@ -2573,17 +2274,6 @@ $$ LANGUAGE plpgsql;
 
 COMMENT ON FUNCTION claimius.delete_claim_object(p_claim_object_id uuid, p_deleted_by uuid) IS 'Soft deletes a claim_object row. Returns the deleted claim_object row.';
 
--- ============================================================================
--- merge_user
--- Reassigns all data from a source user to a target user. Operates by
--- user_id (not row PK) and unifies across apps. Hard deletes the source
--- samna_user row(s) and migrates user_claim, user_relation, user_field and
--- user_object to the target, and user_users follows the deleted pairs.
--- External tables registered through upsert_table_info can opt in by
--- passing themselves in p_external_tables; the function will UPDATE their
--- sa_created_by references where applicable.
--- ============================================================================
-
 CREATE OR REPLACE FUNCTION claimius.merge_user(
     p_target_user_id    UUID,
     p_source_user_id    UUID,
@@ -2594,7 +2284,6 @@ DECLARE
     v_target_app_user RECORD;
     v_source_app_user RECORD;
 BEGIN
-    -- Migrate per app
     FOR v_app_row IN
         SELECT DISTINCT app_id FROM claimius.samna_user
         WHERE user_id IN (p_target_user_id, p_source_user_id) AND sa_deleted_at IS NULL
@@ -2609,7 +2298,6 @@ BEGIN
             END IF;
 
             IF v_target_app_user.id IS NULL THEN
-                -- Target has no row for this app: rename the source row to target user_id
                 UPDATE claimius.samna_user
                 SET user_id = p_target_user_id, sa_updated_at = now()
                 WHERE id = v_source_app_user.id;
@@ -2620,7 +2308,6 @@ BEGIN
                 UPDATE claimius.user_field SET user_id = p_target_user_id
                 WHERE user_id = p_source_user_id AND app_id = v_app_row.app_id;
             ELSE
-                -- Target already has a row for this app. Merge claims/relations/fields.
                 UPDATE claimius.user_claim s SET sa_deleted_at = now()
                 WHERE s.user_id = p_source_user_id AND s.app_id = v_app_row.app_id AND s.sa_deleted_at IS NULL
                   AND EXISTS (
@@ -2634,12 +2321,6 @@ BEGIN
                 UPDATE claimius.user_field SET user_id = p_target_user_id
                 WHERE user_id = p_source_user_id AND app_id = v_app_row.app_id;
 
-                -- Propagate the source's profile metadata onto the target row.
-                -- Replace name, image, phone, and config unconditionally; fill
-                -- email only when the target's email is NULL or empty so an
-                -- explicitly set target address is never silently overwritten.
-                -- external_id: source value wins when set; source NULL leaves
-                -- the target's value intact.
                 UPDATE claimius.samna_user
                 SET first_name    = v_source_app_user.first_name,
                     last_name     = v_source_app_user.last_name,
@@ -2661,13 +2342,9 @@ BEGIN
                     sa_updated_at = now()
                 WHERE id = v_target_app_user.id;
 
-                -- Hard delete materialized rows for the source; calc functions will
-                -- repopulate as transactions touch the target. _count_user_users
-                -- takes the source out of user_users with its pairs.
                 DELETE FROM claimius.user_object
                 WHERE user_id = p_source_user_id AND app_id = v_app_row.app_id;
 
-                -- Hard delete the source samna_user row
                 DELETE FROM claimius.samna_user WHERE id = v_source_app_user.id;
             END IF;
 
@@ -2684,21 +2361,6 @@ END;
 $$ LANGUAGE plpgsql;
 
 COMMENT ON FUNCTION claimius.merge_user(p_target_user_id uuid, p_source_user_id uuid, p_acting_user_claim uuid) IS 'Merges the source user_id into the target in every app the source has a row in: moves user_claim, user_relation and user_field, retires a source grant of a claim the target already holds, copies the source profile onto an existing target row and removes the source row with its user_object pairs. Prophet set only; samna_auth owns the merge flow.';
-
--- ============================================================================
--- migrate_root: cross root migration. Should be called rarely since
--- calc_hierarchical_access blocks cross root reparenting in the trigger.
--- Hangs the object, with its subtree, directly under p_new_root_id, a root of
--- the same type. The subtree is walked through the object's own parent
--- column, sa_owner_id for an organization and sa_parent_id otherwise, and
--- every node in it takes the new root, the object the new root as parent, in
--- one statement the trigger lets through under claimius.migrating_root. The
--- trigger keeps the closure incrementally and raises the object area of each
--- node it moves, so every holder on either side settles. For an organization
--- the rows of registered tables it owns whose sa_root_id names the old
--- organization root, those with no parenthood of their own, take the new
--- one, and the moved organizations join the apps of the new root.
--- ============================================================================
 
 CREATE OR REPLACE FUNCTION claimius.migrate_root(
     p_object_type   TEXT,
@@ -2772,15 +2434,6 @@ $$ LANGUAGE plpgsql;
 
 COMMENT ON FUNCTION claimius.migrate_root(p_object_type text, p_object_id uuid, p_new_root_id uuid) IS 'Admin function: hangs an object with its subtree under a root of another tree, walking organizations through sa_owner_id, moving the closure incrementally, rerooting the owned rows without parenthood and raising the areas it moves. Use only when absolutely required.';
 
--- ============================================================================
--- Init functions
--- ============================================================================
-
--- upsert_table_info
--- Registers external app tables. Called by the implementing app's migration.
--- Idempotent: rebuilds registration state from the input list each call.
--- For tables that already have data, seeds materialized state in bulk
--- under replay_mode (triggers do not fire, no events emitted).
 DROP FUNCTION IF EXISTS claimius.init_claimius_tables(text[]);
 CREATE OR REPLACE FUNCTION claimius.upsert_table_info(
     VARIADIC p_object_types TEXT[]
@@ -2792,13 +2445,11 @@ DECLARE
     v_new           TEXT[];
     v_to_remove     TEXT[];
 BEGIN
-    -- Snapshot currently registered external tables
     SELECT array_agg(object_type) INTO v_existing
     FROM claimius.table_info WHERE NOT is_internal;
 
     v_new := p_object_types;
 
-    -- Tables that were registered before but not in the new list: detach
     IF v_existing IS NOT NULL THEN
         SELECT array_agg(o) INTO v_to_remove
         FROM unnest(v_existing) o
@@ -2820,7 +2471,6 @@ BEGIN
             END LOOP;
     END IF;
 
-    -- Register each new (or existing) table
     FOREACH v_object_type IN ARRAY v_new LOOP
             IF position('.' IN v_object_type) = 0 THEN
                 RAISE EXCEPTION 'object type % is not schema qualified', v_object_type;
@@ -2831,7 +2481,6 @@ BEGIN
             RAISE NOTICE 'Registered table %', v_object_type;
         END LOOP;
 
-    -- Bulk seed materialized state for any registered table with existing data
     PERFORM set_config('claimius.replay_mode', 'true', TRUE);
     BEGIN
         FOREACH v_object_type IN ARRAY v_new LOOP
@@ -2848,17 +2497,6 @@ $$ LANGUAGE plpgsql;
 
 COMMENT ON FUNCTION claimius.upsert_table_info(VARIADIC p_object_types text[]) IS 'Registers external tables. Idempotent. Called by implementer migrations.';
 
--- _bulk_seed_user_object
--- For a registered table with existing rows, writes the object_info row of
--- every row, populates user_object for every (user, object) pair where
--- access exists, then rebuilds user_users for
--- the users it holds pairs for, since no count moves under replay_mode.
--- Inherits the caller's replay_mode setting; callers run this with
--- replay_mode = true so emit_sync_event short circuits and the bulk seed
--- produces no sync events. The pairs are collected in one statement and grouped by
--- user, and each user's objects are recomputed in chunks of 1000 per call,
--- so the fixed cost of a recompute is paid once per user and chunk, not once
--- per pair.
 CREATE OR REPLACE FUNCTION claimius._bulk_seed_user_object(p_object_type TEXT)
     RETURNS VOID AS $$
 DECLARE
@@ -2885,30 +2523,11 @@ BEGIN
             PERFORM claimius.recompute_user_object(v_user.app_id, v_user.user_id, p_object_type, VARIADIC v_user.object_ids[v_at : v_at + 999]);
         END LOOP;
     END LOOP;
-
-    PERFORM claimius._refresh_user_users(s.app_id, s.user_id)
-    FROM (
-        SELECT DISTINCT app_id, user_id
-        FROM claimius.user_object
-        WHERE object_type = p_object_type
-    ) s;
 END;
 $$ LANGUAGE plpgsql;
 
 COMMENT ON FUNCTION claimius._bulk_seed_user_object(p_object_type text) IS 'Seeds object_info and user_object for an existing table at registration time.';
 
--- ----------------------------------------------------------------------------
--- recompute_state
--- Rebuilds inheritance_info trees and user_object materialization for every
--- registered table from live data. Idempotent. Use after a bulk write that
--- ran with claimius.replay_mode = 'true', or any time materialization needs
--- to be reconciled with current rows.
---
--- Self contained: reads the registry from claimius.table_info; takes no
--- arguments; assumes upsert_internal_table_info() and upsert_table_info(...)
--- have already registered the relevant tables. If table_info is empty the
--- function is a no-op.
--- ----------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION claimius.recompute_state()
     RETURNS VOID AS $$
 DECLARE
@@ -2971,12 +2590,6 @@ $$ LANGUAGE plpgsql;
 
 COMMENT ON FUNCTION claimius.recompute_state() IS 'Rebuilds inheritance_info and user_object for every registered table from live data. Idempotent. Run after bulk writes that bypassed calc triggers.';
 
--- ----------------------------------------------------------------------------
--- upsert_internal_table_info
--- Registers all claimius.* tables in table_info. Called once at the end of
--- claimius schema bootstrap (VX.0__init.sql). Not callable by implementers.
--- ----------------------------------------------------------------------------
-
 DROP FUNCTION IF EXISTS claimius.init_claimius_internal();
 CREATE OR REPLACE FUNCTION claimius.upsert_internal_table_info()
     RETURNS VOID AS $$
@@ -3007,20 +2620,6 @@ $$ LANGUAGE plpgsql;
 
 COMMENT ON FUNCTION claimius.upsert_internal_table_info() IS 'Registers internal claimius.* tables in table_info. Called once at schema bootstrap.';
 
--- ----------------------------------------------------------------------------
--- _restamp_created_by
--- Rewrites a sa_created_by an older set wrote as a user id to the
--- user_claim.id it stands for, wherever that is unambiguous: the stamp is the
--- user_id of a samna_user of the row's app that holds exactly one live
--- user_claim in that app. The row's app is its app_id, the app itself for a
--- samna_app, and the apps an organization or location is linked to. Every
--- other stamp is left as it is, one that already names a user_claim.id
--- included, so a second run rewrites nothing. The rows are written under
--- replay_mode: a recompute finds the same user as the creator either way, so
--- no pair moves, and no event is emitted, since every set replays its own.
--- audit is an append only record and keeps what it holds. Run by the base
--- set on every replay. Returns the rows rewritten.
--- ----------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION claimius._restamp_created_by()
     RETURNS INTEGER AS $$
 DECLARE
@@ -3080,17 +2679,6 @@ $$ LANGUAGE plpgsql;
 
 COMMENT ON FUNCTION claimius._restamp_created_by() IS 'Rewrites each sa_created_by that is the user_id of a samna_user holding exactly one live user_claim in the row''s app to that user_claim.id, under replay_mode, and leaves every other stamp. audit keeps its own. Idempotent. Run by the base set. Returns the rows rewritten.';
 
--- ----------------------------------------------------------------------------
--- upsert_root_organization
--- Creates a new root organization (one with no parent in the ownership
--- tree). Two phase self reference is handled internally so callers do not
--- need to know the convention.
---
--- Returns the inserted row as jsonb keyed by table name. Idempotent on
--- (app_id, name): if a non deleted org with the same name already exists in
--- the app, returns that row instead of creating a new one.
--- ----------------------------------------------------------------------------
-
 DROP FUNCTION IF EXISTS claimius.create_root_organization(uuid,text,uuid,text,text,uuid,text);
 CREATE OR REPLACE FUNCTION claimius.upsert_root_organization(
     p_app_id            UUID,
@@ -3106,7 +2694,6 @@ DECLARE
 BEGIN
     p_id := claimius.ensure_uuid_null(p_id);
 
-    -- Idempotency: existing root org with same name linked to this app?
     SELECT * INTO v_row
     FROM claimius.organization
     WHERE name = p_name
@@ -3135,14 +2722,6 @@ END;
 $$ LANGUAGE plpgsql;
 
 COMMENT ON FUNCTION claimius.upsert_root_organization(UUID, TEXT, UUID, TEXT, TEXT, UUID, TEXT) IS 'Creates a new root organization with self referencing sa_owner_id and sa_root_id, linked to the app through app_object. Idempotent on (app, name).';
-
--- ----------------------------------------------------------------------------
--- upsert_app_organization
--- Links an app to an existing organization through app_object. With
--- p_cascade the link extends to every organization and location in the
--- org's ownership tree, read from inheritance_info. Additive and
--- idempotent: existing links stay untouched, nothing is ever unlinked.
--- ----------------------------------------------------------------------------
 
 DROP FUNCTION IF EXISTS claimius.link_app_organization(uuid,uuid,boolean,uuid);
 CREATE OR REPLACE FUNCTION claimius.upsert_app_organization(
@@ -3191,26 +2770,6 @@ $$ LANGUAGE plpgsql;
 
 COMMENT ON FUNCTION claimius.upsert_app_organization(UUID, UUID, BOOLEAN, UUID) IS 'Links an app to an existing organization, cascading over its ownership tree to organizations and locations. Additive and idempotent.';
 
--- ----------------------------------------------------------------------------
--- init
--- Bootstrap a fresh claimius deployment as a prophet. Creates the system
--- app, system organization (self rooted), system user, system claim, and
--- wires up the bootstrap user_claim and claim_object. Idempotent.
---
--- The system user's user_claim is the actor of every row init writes. Its id
--- is settled first, the live one on a rerun or a fresh one the user_claim row
--- takes once its claim exists, and every sa_created_by carries it. The
--- user_claim lands before the bindings, so each binding is judged against the
--- access the system user holds as creator of the org and the app.
---
--- Per app cryptographic material is generated externally in Go and passed
--- in. Claimius does not generate keys.
---
--- App and org reference each other via sa_owner_id (app->org) and app_id
--- (org->app). We resolve the chicken-and-egg by inserting both with
--- generated placeholder uuids and then reconciling with UPDATEs.
--- ----------------------------------------------------------------------------
-
 DROP FUNCTION IF EXISTS claimius.init(text,text,text,text,uuid,text,text,text,text,uuid[],jsonb,text,text,text,uuid,jsonb);
 CREATE OR REPLACE FUNCTION claimius.upsert_system_app(
     p_system_app_slug       TEXT,
@@ -3256,9 +2815,6 @@ BEGIN
     LIMIT 1;
     v_user_claim_id := coalesce(v_user_claim_id, gen_random_uuid());
 
-    -- Validate the required default claim metadata. The system claim is
-    -- created with hardcoded properties; the default claim (granted to every
-    -- regular user on first login via upsert_app_user) is implementer defined.
     IF p_default_claim IS NULL THEN
         RAISE EXCEPTION 'init: p_default_claim is required and must contain name and description.';
     END IF;
@@ -3272,17 +2828,9 @@ BEGIN
         RAISE EXCEPTION 'init: p_default_claim.description is required.';
     END IF;
 
-    -- Pre-generate the ids so app and org can reference each other in their
-    -- INSERTs even though they create circular references.
     v_pre_app_id := gen_random_uuid();
     v_pre_org_id := gen_random_uuid();
 
-    -- 1. system app, with sa_owner_id pointing at the future system org.
-    -- app_secret is intentionally NOT set here. It's the API key that
-    -- disciples (or other consumers) authenticate with against this prophet's
-    -- sync endpoints, generated externally by the implementing service and
-    -- written to samna_app.app_secret on demand. secret_version uses its
-    -- schema default until the first secret is issued.
     INSERT INTO claimius.samna_app (
         id, slug, name, description, contact_email, app_image,
         redirect_uris, sync_uri, provider_ids, status,
@@ -3304,9 +2852,6 @@ BEGIN
                                      sa_updated_at = now()
     RETURNING id INTO v_app_id;
 
-    -- 2. system samna_user
-    -- Partial unique index (user_id, app_id) WHERE sa_deleted_at IS NULL means
-    -- ON CONFLICT can't infer an arbiter cleanly, so SELECT-then-INSERT.
     IF NOT EXISTS (
         SELECT 1 FROM claimius.samna_user
         WHERE user_id = p_system_user_id AND app_id = v_app_id AND sa_deleted_at IS NULL
@@ -3315,7 +2860,6 @@ BEGIN
         VALUES (p_system_user_id, v_app_id, 'active', 'system', 'System', 'User');
     END IF;
 
-    -- 3. system organization, self rooted, owned by the system app
     SELECT id INTO v_org_id FROM claimius.organization
     WHERE type = 'system'
       AND sa_deleted_at IS NULL
@@ -3334,11 +2878,8 @@ BEGIN
 
     PERFORM claimius.upsert_app_object(v_app_id, 'claimius.organization', v_org_id, v_user_claim_id);
 
-    -- 4. reconcile: app's sa_owner_id should match the actual system org id
     UPDATE claimius.samna_app SET sa_owner_id = v_org_id WHERE id = v_app_id AND sa_owner_id <> v_org_id;
 
-    -- 5. ensure ownership tree closure self-edge for the system org, and
-    --    attach the app written before the org that owns it
     INSERT INTO claimius.inheritance_info (
         tree_type, root_id, ancestor_type, ancestor_id, descendant_type, descendant_id, depth
     ) VALUES (
@@ -3348,7 +2889,6 @@ BEGIN
     FROM claimius.samna_app a
     WHERE a.id = v_app_id;
 
-    -- 6. system claim (sidelined: granted only to the system user)
     SELECT id INTO v_claim_id FROM claimius.claim
     WHERE app_id = v_app_id AND name = p_system_claim_name AND sa_deleted_at IS NULL;
 
@@ -3364,10 +2904,6 @@ BEGIN
         RETURNING id INTO v_claim_id;
     END IF;
 
-    -- 6b. default claim (granted to every regular user on first login via
-    -- upsert_app_user). No claim_object binding, no inheritance: it is a
-    -- "you have an account" marker by default. Implementer defines name,
-    -- description, and level via p_default_claim.
     SELECT id INTO v_default_claim_id FROM claimius.claim
     WHERE app_id = v_app_id AND name = v_default_name AND sa_deleted_at IS NULL;
 
@@ -3383,14 +2919,9 @@ BEGIN
         RETURNING id INTO v_default_claim_id;
     END IF;
 
-    -- 7. attach default claim_id to the system app. This is the claim every
-    -- regular user receives via upsert_app_user. The system claim stays
-    -- sidelined and is granted only to the system user below.
     UPDATE claimius.samna_app SET claim_id = v_default_claim_id
     WHERE id = v_app_id AND (claim_id IS NULL OR claim_id <> v_default_claim_id);
 
-    -- 8. grant claim to system user, under the id every row above carries
-    -- Partial unique index on (claim_id, user_id, app_id) WHERE sa_deleted_at IS NULL.
     IF NOT EXISTS (
         SELECT 1 FROM claimius.user_claim
         WHERE app_id = v_app_id
@@ -3407,8 +2938,6 @@ BEGIN
     PERFORM claimius.recompute_user_object(v_app_id, p_system_user_id, 'claimius.organization', v_org_id);
     PERFORM claimius.recompute_user_object(v_app_id, p_system_user_id, 'claimius.samna_app', v_app_id);
 
-    -- 9. bind claim to system org
-    -- claim_object has no unique constraint, so SELECT-then-INSERT.
     IF NOT EXISTS (
         SELECT 1 FROM claimius.claim_object
         WHERE app_id = v_app_id
@@ -3426,11 +2955,6 @@ BEGIN
                  );
     END IF;
 
-    -- 9b. bind claim to system app directly. Every resource (except users
-    -- and the claim itself) carries at least one direct claim_object grant
-    -- so that access never depends solely on cascade. inherits = FALSE
-    -- because the org binding above already cascades to the app via the
-    -- ownership tree; this is an owner anchor, not a cascade source.
     IF NOT EXISTS (
         SELECT 1 FROM claimius.claim_object
         WHERE app_id = v_app_id
@@ -3448,19 +2972,12 @@ BEGIN
                  );
     END IF;
 
-    -- 10. prophet_state row for this app, marked as the system app via
-    -- system_app_slug. Partial unique index enforces at most one system row.
     INSERT INTO claimius.prophet_state (app_id, last_applied_seq, system_app_slug)
     VALUES (v_app_id, 0, p_system_app_slug)
     ON CONFLICT (app_id) DO UPDATE SET system_app_slug = EXCLUDED.system_app_slug;
 
-    -- 11. role grants for prophet runtime
     PERFORM claimius._grant_prophet_roles();
 
-    -- Build the result: 6 keys, each named after the table the row lives in.
-    -- prophet_state and inheritance_info are internal bookkeeping and are
-    -- not returned. Re-running init is idempotent and returns the
-    -- current state of these rows.
     DECLARE
         v_result JSONB;
     BEGIN
@@ -3495,17 +3012,6 @@ $$ LANGUAGE plpgsql;
 
 COMMENT ON FUNCTION claimius.upsert_system_app(p_system_app_slug text, p_system_app_name text, p_system_app_private_key text, p_system_app_private_seed text, p_system_user_id uuid, p_system_app_redirect_uri text, p_system_app_sync_uri text, p_system_app_contact_email text, p_system_app_image text, p_system_app_provider_ids uuid[], p_system_app_style jsonb, p_system_app_description text, p_system_org_name text, p_system_claim_name text, p_system_claim_id uuid, p_default_claim jsonb) IS 'Bootstrap function. Sets up system app, org, user, and claim, every row stamped with the system user''s user_claim.id. Idempotent.';
 
--- ----------------------------------------------------------------------------
--- upsert_disciple_state
--- Bootstrap a fresh claimius deployment as a disciple. Records that this
--- instance is a disciple, sets up disciple_state with the slug of the
--- upstream prophet app this disciple mirrors, and grants the
--- disciple_client role. Pass p_disciple_app_slug from an environment
--- variable (e.g. CLAIMIUS_DISCIPLE_APP_SLUG) so the same migration
--- artefact can be deployed against any prophet. The actual data arrives
--- via sync from the prophet.
--- ----------------------------------------------------------------------------
-
 DROP FUNCTION IF EXISTS claimius.init_disciple(text);
 CREATE OR REPLACE FUNCTION claimius.upsert_disciple_state(
     p_disciple_app_slug TEXT
@@ -3516,9 +3022,6 @@ BEGIN
         RAISE EXCEPTION 'upsert_disciple_state: p_disciple_app_slug is required.';
     END IF;
 
-    -- Singleton row in disciple_state. SELECT-then-INSERT, then UPDATE the
-    -- slug so re-running upsert_disciple_state with a different slug is allowed
-    -- (idempotent for the same value, corrective for a wrong one).
     IF NOT EXISTS (SELECT 1 FROM claimius.disciple_state) THEN
         INSERT INTO claimius.disciple_state (last_applied_seq, disciple_app_slug)
         VALUES (0, p_disciple_app_slug);
@@ -3529,27 +3032,15 @@ BEGIN
         WHERE disciple_app_slug <> p_disciple_app_slug;
     END IF;
 
-    -- Roles: disciple gets reader plus disciple_client
     PERFORM claimius._grant_disciple_roles();
 
     RAISE NOTICE 'Disciple initialized for app slug %. Sync layer must populate samna_app and other tables from prophet.', p_disciple_app_slug;
 
-    -- Disciples have nothing user meaningful to return: state arrives via
-    -- sync. We return an empty jsonb so the function has the same return
-    -- type as init and upsert_prophet_peer.
     RETURN '{}'::JSONB;
 END;
 $$ LANGUAGE plpgsql;
 
 COMMENT ON FUNCTION claimius.upsert_disciple_state(p_disciple_app_slug text) IS 'Bootstrap as a disciple. Requires the upstream prophet app slug. State arrives from prophet via sync.';
-
--- ----------------------------------------------------------------------------
--- upsert_prophet_peer
--- Hybrid: a prophet that is home for its own system app and mirrors one app
--- of an upstream prophet as its peer, the way prophets federate. Runs init,
--- then registers the upstream in prophet_peer, from where the peer pull
--- consumes the upstream's feed of that app under replay_mode.
--- ----------------------------------------------------------------------------
 
 DROP FUNCTION IF EXISTS claimius.init_hybrid(TEXT, TEXT, TEXT, TEXT, TEXT, UUID, TEXT, TEXT, TEXT, TEXT, UUID[], JSONB, TEXT, TEXT, TEXT, UUID, JSONB);
 
@@ -3616,22 +3107,6 @@ END;
 $$ LANGUAGE plpgsql;
 
 COMMENT ON FUNCTION claimius.upsert_prophet_peer(p_system_app_slug text, p_system_app_name text, p_system_app_private_key text, p_system_app_private_seed text, p_upstream_prophet text, p_upstream_endpoint text, p_upstream_app_slug text, p_upstream_app_secret text, p_upstream_peer_secret text, p_system_user_id uuid, p_system_app_redirect_uri text, p_system_app_sync_uri text, p_system_app_contact_email text, p_system_app_image text, p_system_app_provider_ids uuid[], p_system_app_style jsonb, p_system_app_description text, p_system_org_name text, p_system_claim_name text, p_system_claim_id uuid, p_default_claim jsonb) IS 'Bootstrap as a hybrid: a prophet mirroring one app of an upstream prophet registered as its peer.';
-
--- ----------------------------------------------------------------------------
--- upsert_app
--- Registers a new app on an existing prophet, owned by an existing
--- organization, under the authority of an actor of another app: the
--- user_claim.id the actor acts under, stamped into every sa_created_by. The
--- actor must hold owner on the owning organization in its own app, the rule
--- the first binding of an app is judged by. Links the organization and its
--- tree to the app, creates the owner claim bound on the organization and on
--- the app and grants it to the actor's user in the app, whose samna_user row
--- is copied from the actor's app, and creates the default claim, read by
--- default, bound on the app and on the organization and set as the app's
--- claim_id. Idempotent on slug and on each claim's name. Returns jsonb keyed
--- by table: samna_app, organization, samna_user, claim, default_claim,
--- user_claim, claim_object.
--- ----------------------------------------------------------------------------
 
 DROP FUNCTION IF EXISTS claimius.create_app(uuid,text,text,uuid,text,text,text[],text,text,text,integer,jsonb,uuid);
 CREATE OR REPLACE FUNCTION claimius.upsert_app(
@@ -3868,17 +3343,6 @@ $$ LANGUAGE plpgsql;
 
 COMMENT ON FUNCTION claimius.upsert_app(UUID, TEXT, TEXT, UUID, TEXT, TEXT, TEXT[], TEXT, TEXT, TEXT, INTEGER, JSONB, UUID) IS 'Registers a new app on an existing prophet, owned by an existing organization the actor holds owner on in its own app. Every row is stamped with the actor''s user_claim.id. Links the organization tree, creates and binds the owner claim and grants it to the actor''s user in the app, and creates and binds the default claim. Idempotent on slug. Returns jsonb keyed by table.';
 
--- ----------------------------------------------------------------------------
--- upsert_app_user
--- Helper for prophet apps. When a user logs into an app for the first time,
--- creates the per app samna_user row keyed by (user_id, app_id). If the app
--- has a default claim configured (samna_app.claim_id), grants it to the user
--- as part of the same call. The user_claim is stamped with p_sa_created_by,
--- the acting user_claim.id when a caller grants it, or else with its own id:
--- a first login is the assignment acting on its own authority. Idempotent:
--- re-running returns the existing row and existing user_claim.
--- ----------------------------------------------------------------------------
-
 DROP FUNCTION IF EXISTS claimius.ensure_app_user(UUID, UUID, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT);
 DROP FUNCTION IF EXISTS claimius.ensure_app_user(UUID, UUID, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT);
 DROP FUNCTION IF EXISTS claimius.ensure_app_user(uuid,uuid,text,text,text,text,text,text,text,uuid);
@@ -3903,7 +3367,6 @@ DECLARE
 BEGIN
     p_user_id := claimius.ensure_uuid_null(p_user_id);
 
-    -- Find or insert the samna_user row
     SELECT * INTO v_user_row FROM claimius.samna_user
     WHERE user_id = p_user_id AND app_id = p_app_id AND sa_deleted_at IS NULL;
 
@@ -3920,15 +3383,12 @@ BEGIN
         RETURNING * INTO v_user_row;
     END IF;
 
-    -- Look up the app's default claim
     SELECT a.claim_id, c.sa_owner_id
     INTO v_default_claim_id, v_default_claim_owner
     FROM claimius.samna_app a
              LEFT JOIN claimius.claim c ON c.id = a.claim_id AND c.sa_deleted_at IS NULL
     WHERE a.id = p_app_id;
 
-    -- Grant the default claim if one is configured. Idempotent: if the user
-    -- already has a live user_claim for this claim, return the existing one.
     IF v_default_claim_id IS NOT NULL THEN
         SELECT * INTO v_uc_row FROM claimius.user_claim
         WHERE user_id = v_user_row.user_id
@@ -3954,7 +3414,6 @@ BEGIN
                );
     END IF;
 
-    -- App has no default claim configured: just return the samna_user row.
     RETURN jsonb_build_object('samna_user', to_jsonb(v_user_row));
 END;
 $$ LANGUAGE plpgsql;
@@ -3979,7 +3438,6 @@ END;
 $$ LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = claimius, pg_temp;
 
 COMMENT ON FUNCTION claimius.get_owner_descendants(p_object_type text, p_object_id uuid) IS 'Ownership tree descendants of an object, hop 0 = self.';
-
 
 CREATE OR REPLACE FUNCTION claimius.get_location_descendants(
     p_object_type TEXT,
@@ -4009,7 +3467,6 @@ $$ LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = claimius, pg_temp;
 
 COMMENT ON FUNCTION claimius.get_location_descendants(p_object_type text, p_object_id uuid) IS 'Location tree descendants of an object across every registered table located in the subtree.';
 
-
 CREATE OR REPLACE FUNCTION claimius.get_parenthood_descendants(
     p_object_type TEXT,
     p_object_id   UUID
@@ -4037,7 +3494,6 @@ $$ LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = claimius, pg_temp;
 
 COMMENT ON FUNCTION claimius.get_parenthood_descendants(p_object_type text, p_object_id uuid) IS 'Parenthood tree descendants via sa_parent_id, hop 0 = self.';
 
-
 CREATE OR REPLACE FUNCTION claimius.get_descendants(
     p_object_type TEXT,
     p_object_id   UUID
@@ -4059,12 +3515,10 @@ $$ LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = claimius, pg_temp;
 
 COMMENT ON FUNCTION claimius.get_descendants(p_object_type text, p_object_id uuid) IS 'Combined descendant walk across owner, location, and parenthood trees.';
 
-
 GRANT EXECUTE ON FUNCTION claimius.get_owner_descendants(TEXT, UUID)       TO claimius_reader;
 GRANT EXECUTE ON FUNCTION claimius.get_location_descendants(TEXT, UUID)    TO claimius_reader;
 GRANT EXECUTE ON FUNCTION claimius.get_parenthood_descendants(TEXT, UUID)  TO claimius_reader;
 GRANT EXECUTE ON FUNCTION claimius.get_descendants(TEXT, UUID)             TO claimius_reader;
-
 
 CREATE OR REPLACE FUNCTION claimius.get_claim_for_user(
     p_user_claim_id UUID
@@ -4080,6 +3534,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = claimius, pg_temp;
 
+COMMENT ON FUNCTION claimius.get_claim_for_user(UUID) IS 'The claim a user_claim grants, when both are live.';
 
 CREATE OR REPLACE FUNCTION claimius.normalize_object_type(p_object_type TEXT)
 RETURNS TEXT AS $$
@@ -4089,6 +3544,8 @@ RETURNS TEXT AS $$
         ELSE split_part(p_object_type, '.', 2)
     END;
 $$ LANGUAGE sql IMMUTABLE;
+
+COMMENT ON FUNCTION claimius.normalize_object_type(TEXT) IS 'The wire form of an object type: the claimius schema prefix stripped, any other kept.';
 
 GRANT EXECUTE ON FUNCTION claimius.normalize_object_type(TEXT) TO claimius_reader, claimius_writer, claimius_admin;
 
@@ -4113,6 +3570,8 @@ BEGIN
     RETURN TRUE;
 END;
 $$ LANGUAGE plpgsql IMMUTABLE;
+
+COMMENT ON FUNCTION claimius.graph_type_passes(TEXT, TEXT[], TEXT[]) IS 'True when an object type passes the include and exclude filters of a graph call.';
 
 GRANT EXECUTE ON FUNCTION claimius.graph_type_passes(TEXT, TEXT[], TEXT[]) TO claimius_reader, claimius_writer, claimius_admin;
 
@@ -4145,6 +3604,8 @@ BEGIN
     RETURN jsonb_build_object('objects', v_objs, 'links', v_links);
 END;
 $$ LANGUAGE plpgsql IMMUTABLE;
+
+COMMENT ON FUNCTION claimius.merge_graphs(JSONB, JSONB) IS 'Merges two graph documents: the objects maps per type, and the union of the two link lists.';
 
 GRANT EXECUTE ON FUNCTION claimius.merge_graphs(JSONB, JSONB) TO claimius_reader, claimius_writer, claimius_admin;
 
@@ -4180,15 +3641,7 @@ BEGIN
         RETURN jsonb_build_object('links', '[]'::jsonb);
     END IF;
 
-    WITH ancestor_pool AS (
-        SELECT uo.object_id, uo.object_type
-        FROM claimius.user_object uo
-        WHERE uo.user_id = p_user_id
-          AND uo.app_id = p_app_id
-          AND (p_required_access = 0 OR (uo.sa_access & p_required_access) = p_required_access)
-          AND uo.object_type = ANY(v_allowed)
-    ),
-    descendants AS (
+    WITH descendants AS (
         SELECT uo.object_id, uo.object_type
         FROM claimius.user_object uo
         WHERE uo.user_id = p_user_id
@@ -4232,9 +3685,16 @@ BEGIN
                ii.descendant_type AS target_type,
                ii.descendant_id   AS target_id
         FROM claimius.inheritance_info ii
-        JOIN ancestor_pool ap ON ap.object_id = ii.ancestor_id   AND ap.object_type = ii.ancestor_type
         JOIN in_scope      vt ON vt.object_id = ii.descendant_id AND vt.object_type = ii.descendant_type
         WHERE ii.depth = 1
+          AND ii.ancestor_type = ANY(v_allowed)
+          AND EXISTS (
+              SELECT 1 FROM claimius.user_object ap
+              WHERE ap.user_id = p_user_id
+              AND ap.app_id = p_app_id
+                AND ap.object_type = ii.ancestor_type
+                AND ap.object_id = ii.ancestor_id
+                AND (p_required_access = 0 OR (ap.sa_access & p_required_access) = p_required_access))
     ),
     fallback_edges AS (
         SELECT DISTINCT ON (ii.tree_type, ii.descendant_type, ii.descendant_id)
@@ -4244,9 +3704,16 @@ BEGIN
                ii.descendant_type AS target_type,
                ii.descendant_id   AS target_id
         FROM claimius.inheritance_info ii
-        JOIN ancestor_pool ap ON ap.object_id = ii.ancestor_id   AND ap.object_type = ii.ancestor_type
         JOIN in_scope      vt ON vt.object_id = ii.descendant_id AND vt.object_type = ii.descendant_type
         WHERE ii.depth > 1
+          AND ii.ancestor_type = ANY(v_allowed)
+          AND EXISTS (
+              SELECT 1 FROM claimius.user_object ap
+              WHERE ap.user_id = p_user_id
+              AND ap.app_id = p_app_id
+                AND ap.object_type = ii.ancestor_type
+                AND ap.object_id = ii.ancestor_id
+                AND (p_required_access = 0 OR (ap.sa_access & p_required_access) = p_required_access))
           AND NOT EXISTS (
               SELECT 1 FROM direct_edges de
               WHERE de.tree_type   = ii.tree_type
@@ -4284,6 +3751,8 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = claimius, pg_temp;
 
+COMMENT ON FUNCTION claimius.get_graph_links_owner(UUID, UUID, INTEGER, TEXT[], TEXT[], UUID, INTEGER, INTEGER, TEXT, UUID) IS 'The ownership graph of the objects the user reaches as links: for every object in scope its closest ancestor the user also reaches, each a probe of the user''s own pair, with an optional window of p_width children per parent. Settles nothing.';
+
 GRANT EXECUTE ON FUNCTION claimius.get_graph_links_owner(UUID, UUID, INTEGER, TEXT[], TEXT[], UUID, INTEGER, INTEGER, TEXT, UUID) TO claimius_reader, claimius_writer, claimius_admin;
 
 DROP FUNCTION IF EXISTS claimius.get_graph_links_claim(UUID, UUID, INTEGER, TEXT[], TEXT[], UUID, INTEGER);
@@ -4312,6 +3781,7 @@ BEGIN
     END IF;
 
     PERFORM claimius.reconcile_if_pending(p_app_id, p_user_id);
+    PERFORM claimius._settle_user_users_diff(p_app_id, p_user_id);
 
     IF NOT claimius.check_user_active(p_app_id, p_user_id) THEN
         RETURN jsonb_build_object('links', '[]'::jsonb);
@@ -4428,7 +3898,7 @@ BEGIN
             'relation',    'visibility'
         )
         FROM claimius.samna_user u
-        JOIN claimius.user_users uu ON uu.viewer_id = p_user_id AND uu.app_id = p_app_id AND uu.target_user_id = u.user_id
+        JOIN claimius._user_users_for_viewer(p_app_id, p_user_id) uu ON uu.target_user_id = u.user_id
         WHERE v_user_row_id IS NOT NULL
           AND p_start_id IS NULL
           AND u.app_id = p_app_id
@@ -4473,6 +3943,8 @@ BEGIN
     RETURN jsonb_build_object('links', v_links);
 END;
 $$ LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = claimius, pg_temp;
+
+COMMENT ON FUNCTION claimius.get_graph_links_claim(UUID, UUID, INTEGER, TEXT[], TEXT[], UUID, INTEGER, INTEGER, TEXT, UUID) IS 'The claim graph as links: the user''s grants, the bindings of the claims, the cascades of inheriting bindings, the users the user sees through _user_users_for_viewer after folding its user_users_diff rows, and the user''s relations, with an optional window of p_width children per parent.';
 
 GRANT EXECUTE ON FUNCTION claimius.get_graph_links_claim(UUID, UUID, INTEGER, TEXT[], TEXT[], UUID, INTEGER, INTEGER, TEXT, UUID) TO claimius_reader, claimius_writer, claimius_admin;
 
@@ -4766,10 +4238,6 @@ GRANT EXECUTE ON FUNCTION claimius.insert_organization_user(UUID, UUID, UUID, JS
 ALTER TABLE claimius.user_token ALTER COLUMN app_id SET DEFAULT claimius.get_app_id();
 ALTER TABLE claimius.audit ALTER COLUMN app_id SET DEFAULT claimius.get_app_id();
 
--- ----------------------------------------------------------------------------
--- Notification writers
--- ----------------------------------------------------------------------------
-
 CREATE OR REPLACE FUNCTION claimius.notify_notification() RETURNS trigger AS $$
 BEGIN
     PERFORM pg_notify('claimius_notification',
@@ -4839,13 +4307,6 @@ COMMENT ON FUNCTION claimius.notify_user(UUID, TEXT, TEXT, JSONB, TEXT, TEXT, TE
 GRANT EXECUTE ON FUNCTION claimius.notify_user(UUID, TEXT, TEXT, JSONB, TEXT, TEXT, TEXT, UUID, UUID, UUID, INTERVAL, UUID[])
     TO claimius_writer, claimius_admin;
 
--- ----------------------------------------------------------------------------
--- count_sync_source_rows
--- The source rows of one app the snapshot ships: the rows of the mirrored
--- tables carrying the app id and the organizations and locations linked to
--- it. With p_limit the count stops there, so a caller comparing it against a
--- smaller number pays for that number of rows and not for the app.
--- ----------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION claimius.count_sync_source_rows(
     p_app_id    UUID,
     p_limit     BIGINT DEFAULT NULL
@@ -4879,13 +4340,6 @@ $$ LANGUAGE plpgsql STABLE;
 
 COMMENT ON FUNCTION claimius.count_sync_source_rows(UUID, BIGINT) IS 'Source rows of one app the sync snapshot ships, counted up to p_limit when given.';
 
--- ----------------------------------------------------------------------------
--- update_sync_cursor
--- Records that one consumer of an app applied everything up to the position
--- (p_txid, p_seq), which it proves by asking for what comes after it. The
--- app's prophet_state row carries the lowest cursor among its consumers in
--- contact and the contact itself.
--- ----------------------------------------------------------------------------
 DROP FUNCTION IF EXISTS claimius.update_sync_cursor(UUID, UUID, BIGINT);
 
 CREATE OR REPLACE FUNCTION claimius.update_sync_cursor(
@@ -4918,20 +4372,6 @@ $$ LANGUAGE sql;
 
 COMMENT ON FUNCTION claimius.update_sync_cursor(UUID, UUID, BIGINT, BIGINT) IS 'Moves one consumer''s (txid, seq) cursor for an app and records the contact on the app''s prophet_state row.';
 
--- ----------------------------------------------------------------------------
--- trim_sync_event
--- Removes outbox rows every consumer has already applied, and caps each app's
--- outbox at its source rows. sync_consumer holds one (txid, seq) cursor per
--- consumer, advanced when it asks for what comes after it, so a row at or
--- below the lowest cursor across the consumers still in contact is owed to
--- nobody. A consumer whose last contact is older than p_stale_after is
--- treated as gone rather than allowed to pin the watermark forever. Past
--- that, an app's events beyond as many as it has source rows are removed: a
--- consumer further behind is cheaper served by the snapshot. The highest
--- position removed per app is kept in prophet_state (trimmed_txid,
--- trimmed_seq), and check_sync_cursor sends a consumer below it to the
--- snapshot. Returns the number of rows deleted.
--- ----------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION claimius.trim_sync_event(
     p_stale_after   INTERVAL DEFAULT INTERVAL '7 days'
 ) RETURNS BIGINT AS $$
@@ -4988,15 +4428,6 @@ $$ LANGUAGE plpgsql;
 
 COMMENT ON FUNCTION claimius.trim_sync_event(INTERVAL) IS 'Deletes sync_event rows at or below the lowest (txid, seq) cursor among consumers still in contact, then each app''s events beyond as many as its source rows, recording the highest position removed per app in prophet_state (trimmed_txid, trimmed_seq). Run on a schedule.';
 
--- ----------------------------------------------------------------------------
--- insert_app_handover
--- The home of an app offers it to a peer prophet. From the offer on this
--- prophet decides none of the app's writes, so the peer, which mirrors the
--- app and receives the offer on its feed, holds every row the app will have
--- when it accepts. An offer is not withdrawn: a withdrawal racing the
--- acceptance would leave the app two homes.
--- ----------------------------------------------------------------------------
-
 DROP FUNCTION IF EXISTS claimius.offer_handover(uuid,text,uuid);
 CREATE OR REPLACE FUNCTION claimius.insert_app_handover(
     p_app_id        UUID,
@@ -5036,15 +4467,6 @@ END;
 $$ LANGUAGE plpgsql;
 
 COMMENT ON FUNCTION claimius.insert_app_handover(UUID, TEXT, UUID) IS 'Offers an app this prophet is home for to an active peer. The app''s writes are refused here from the offer on. Returns {"app_handover": {...}}.';
-
--- ----------------------------------------------------------------------------
--- update_app_handover
--- The peer an app was offered to takes it. The offer reached this prophet
--- on the app's feed from its home, so the acceptance is only possible here
--- for an app this prophet mirrors from the prophet that offered it. The
--- acceptance makes this prophet the home and travels back on the app's feed
--- from here, where the old home learns it.
--- ----------------------------------------------------------------------------
 
 DROP FUNCTION IF EXISTS claimius.accept_handover(uuid,uuid);
 CREATE OR REPLACE FUNCTION claimius.update_app_handover(
@@ -5086,14 +4508,6 @@ END;
 $$ LANGUAGE plpgsql;
 
 COMMENT ON FUNCTION claimius.update_app_handover(UUID, UUID) IS 'Accepts a handover offered to this prophet by the home of an app it mirrors, and makes this prophet the app''s home. Returns {"app_handover": {...}}.';
-
--- ----------------------------------------------------------------------------
--- _check_peer_row
--- Whether a row a peer's feed carries may apply here. Ids are random, so a
--- row id held here by another app, or by an app another prophet decides, is
--- a collision: the row is refused rather than merged. NULL when the row may
--- apply, otherwise the reason.
--- ----------------------------------------------------------------------------
 
 CREATE OR REPLACE FUNCTION claimius._check_peer_row(
     p_prophet       TEXT,
@@ -5157,17 +4571,6 @@ END;
 $$ LANGUAGE plpgsql STABLE;
 
 COMMENT ON FUNCTION claimius._check_peer_row(TEXT, TEXT, TEXT, JSONB) IS 'Reason a row from a peer''s feed of an app is refused, or NULL when it may apply: the app must be decided by that peer, and the row id must not be held here by another app or by an app another prophet decides.';
-
--- ----------------------------------------------------------------------------
--- apply_peer_event
--- Applies one row of a peer's feed of an app this prophet mirrors, under
--- replay_mode, in the shape the feed carries it. A colliding row is refused
--- and recorded in peer_collision. An organization or location is linked to
--- the mirrored app; its delete is the app's unlink. The app row keeps the
--- peer as its home. A handover this prophet offered comes back accepted on
--- the new home's feed, and moves the app's home there. Returns false when
--- the row was refused.
--- ----------------------------------------------------------------------------
 
 CREATE OR REPLACE FUNCTION claimius.apply_peer_event(
     p_prophet       TEXT,

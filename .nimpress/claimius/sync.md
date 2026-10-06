@@ -20,13 +20,13 @@ An `organization` or `location` has no `app_id`. Its change is written once per 
 
 ## Events per write
 
-The feed carries source rows and nothing derived from them. `user_object`, `user_users`, `object_info`, `inheritance_info`, `access_diff` and `audit` never publish, `get_sync_events` excludes `claimius.user_object`, `claimius.user_users` and `claimius.audit` by event type, and the base files delete any such row left in the outbox.
+The feed carries source rows and nothing derived from them. `user_object`, `user_users`, `user_users_diff`, `object_info`, `inheritance_info`, `access_diff` and `audit` never publish, `get_sync_events` excludes `claimius.user_object`, `claimius.user_users` and `claimius.audit` by event type, and the base files delete any such row left in the outbox.
 
 ```
 events(write) = Σ_{source rows r written} n_apps(r)
 ```
 
-with `n_apps(r) = 1` for a row carrying `app_id` and the number of live links for an organization or location. A settle writes pairs and counts, never source rows, so it emits nothing. For the request of [Writes](./writes.md), a claim bound to a node and granted to `k` users, `events = 2 + k`, independent of `|T_c|` and `|H_c|`.
+with `n_apps(r) = 1` for a row carrying `app_id` and the number of live links for an organization or location. A settle writes pairs, `user_users_diff` rows and counts, never source rows, so it emits nothing; each database folds the rows of its own pairs. For the request of [Writes](./writes.md), a claim bound to a node and granted to `k` users, `events = 2 + k`, independent of `|T_c|` and `|H_c|`.
 
 Measured on a prophet with one root, 200 organizations under it and 50 users, granting a claim bound to the root to the 50 users and letting each list its organizations: the feed took 50 `user_claim` events. Publishing the derived rows as well took 12,651 `user_object` and 227,850 `user_users` events more, 240,551 events against 50. The fan out of a grant to the pairs it reaches, `|T_c|` per holder, and of each pair to the users who share its object, `U_x − 1` per pair and direction, is exactly what a consumer derives locally instead of reading.
 

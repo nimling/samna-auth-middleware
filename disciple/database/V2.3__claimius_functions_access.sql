@@ -1,28 +1,3 @@
--- ============================================================================
--- Claimius V2.3 Access Functions
--- ----------------------------------------------------------------------------
--- The trigger functions that maintain the materialized access state. Three
--- families:
---   calc_object_access        Fires on regular registered tables
---   calc_hierarchical_access  Fires on hierarchical tables (org, location,
---                             parenthood enabled tables)
---   calc_claim_access         Fires on claim, claim_object, user_claim
---   emit_sync_event           Fires on the source tables
---                             to publish into sync_event
---   audit_trigger             Fires on core auditable tables to write audit
---   tg_update_timestamp       Generic sa_updated_at maintenance
--- ============================================================================
-
--- ----------------------------------------------------------------------------
--- calc_object_access
--- Trigger function for regular registered tables (no self referencing
--- hierarchy). Splices the row into ownership and (optionally) location trees,
--- materializes user_object for the acting user so a writer reads its own work
--- back, and records one access_cause row. A synced row under replay keeps
--- the closure and raises its area but settles no actor. Every other user
--- resolves its own slice on its next read through reconcile_if_pending.
--- ----------------------------------------------------------------------------
-
 CREATE OR REPLACE FUNCTION claimius.calc_object_access()
     RETURNS TRIGGER AS $$
 DECLARE
@@ -48,19 +23,11 @@ BEGIN
         v_obj_id := NEW.id;
     END IF;
 
-    -- Pull useful fields from the row using JSON conversion (works for any
-    -- registered shape).
     IF v_op <> 'DELETE' THEN
         v_owner_id  := (to_jsonb(NEW) ->> 'sa_owner_id')::UUID;
         v_location_id := (to_jsonb(NEW) ->> 'sa_location_id')::UUID;
     END IF;
 
-    -- Tree maintenance: detach on delete or hard delete; attach on insert
-    -- or undelete; reattach on owner/location change. The object's own fields
-    -- go to object_info, the one row every reader's listing reads them from,
-    -- so a write that moves nothing access can follow, a rename included,
-    -- refreshes what the acting user sees and leaves every other user
-    -- untouched.
     v_structural := claimius._retree_object(v_object_type, v_obj_id, to_jsonb(OLD), to_jsonb(NEW));
     IF v_op <> 'UPDATE' OR EXISTS (
         SELECT 1 FROM unnest(ARRAY['name', 'description', 'sa_owner_id', 'sa_location_id', 'sa_root_id', 'sa_deleted_at']) AS k
@@ -69,8 +36,6 @@ BEGIN
         PERFORM claimius._write_object_info(v_object_type, ARRAY[v_obj_id]);
     END IF;
 
-    -- The acting user materializes immediately so a writer reads its own work
-    -- back within the same request.
     IF NOT v_replay THEN
         v_actor := claimius._actor_user_for_row(v_object_type, coalesce(NEW, OLD));
         IF v_actor IS NOT NULL THEN
@@ -96,12 +61,6 @@ $$ LANGUAGE plpgsql;
 
 COMMENT ON FUNCTION claimius.calc_object_access() IS 'Trigger on regular registered tables. Maintains tree memberships and user_object.';
 
--- _attach_object_to_trees
--- Splices a non hierarchical row into its ownership and (optionally)
--- location trees by inserting closure edges: a self-edge for the row plus
--- one edge per ancestor of the parent at depth + 1. A parent outside the
--- closure leaves the row out, as a rebuild would. An organization is a node
--- of its own ownership tree, so only its location pin attaches here.
 DROP FUNCTION IF EXISTS claimius._attach_object_to_trees(TEXT, UUID, RECORD);
 CREATE OR REPLACE FUNCTION claimius._attach_object_to_trees(
     p_object_type TEXT,
@@ -169,11 +128,8 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- _detach_object_from_trees
--- Removes a non hierarchical row from its ownership and location trees by
--- deleting every closure edge where this row appears as descendant. Since
--- the row is non hierarchical it has no descendants of its own. For an
--- organization only its location pin detaches.
+COMMENT ON FUNCTION claimius._attach_object_to_trees(TEXT, UUID, JSONB) IS 'Splices a row that is not a node of its own tree into its ownership tree and, when it carries one, its location tree: the self edge and the parent''s ancestor rows copied with depth + 1. A parent outside the closure leaves the row out. An organization attaches only its location pin.';
+
 DROP FUNCTION IF EXISTS claimius._detach_object_from_trees(TEXT, UUID, RECORD);
 CREATE OR REPLACE FUNCTION claimius._detach_object_from_trees(
     p_object_type TEXT,
@@ -188,11 +144,8 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- _retree_object
--- Keeps the ownership and location closure rows of one non hierarchical row,
--- or of the pins of a hierarchical one, in step with a write: detach on
--- delete, attach on insert or restore, both on an owner or location change.
--- Returns whether the write moved anything access can follow.
+COMMENT ON FUNCTION claimius._detach_object_from_trees(TEXT, UUID) IS 'Removes every closure row where a row that is not a node of its own tree is the descendant. An organization detaches only its location pin.';
+
 CREATE OR REPLACE FUNCTION claimius._retree_object(
     p_object_type TEXT,
     p_object_id   UUID,
@@ -217,13 +170,6 @@ $$ LANGUAGE plpgsql;
 
 COMMENT ON FUNCTION claimius._retree_object(TEXT, UUID, JSONB, JSONB) IS 'Moves one row''s ownership and location closure rows with a write. True when the write is structural.';
 
--- ----------------------------------------------------------------------------
--- calc_object_trees
--- Trigger for tables whose rows sit in the ownership closure but are not
--- access targets of their own: user_claim and claim_object. Keeps
--- their closure rows and nothing else.
--- ----------------------------------------------------------------------------
-
 CREATE OR REPLACE FUNCTION claimius.calc_object_trees()
     RETURNS TRIGGER AS $$
 BEGIN
@@ -234,16 +180,6 @@ END;
 $$ LANGUAGE plpgsql;
 
 COMMENT ON FUNCTION claimius.calc_object_trees() IS 'Trigger on owned tables outside the access targets. Maintains their closure rows.';
-
--- ----------------------------------------------------------------------------
--- calc_hierarchical_access
--- Trigger for hierarchical tables (organization, location, parenthood
--- enabled tables). Maintains the table's own tree incrementally plus its
--- membership in ownership and location trees. An insert writes the node's
--- d + 1 rows, a reparent splices its subtree, a delete drops its subtree, and
--- a restore rebuilds only the restored subtree. Disallows cross root
--- reparenting outside migrate_root.
--- ----------------------------------------------------------------------------
 
 CREATE OR REPLACE FUNCTION claimius.calc_hierarchical_access()
     RETURNS TRIGGER AS $$
@@ -292,7 +228,6 @@ BEGIN
         v_was_active := (to_jsonb(OLD) ->> 'sa_deleted_at') IS NULL;
     END IF;
 
-    -- Cross root reparenting is not allowed
     IF v_op = 'UPDATE' AND v_old_root_id IS DISTINCT FROM v_root_id AND NOT v_replay
         AND current_setting('claimius.migrating_root', TRUE) IS DISTINCT FROM 'on' THEN
         RAISE EXCEPTION 'Cross root reparenting is not allowed. Use migrate_root() if absolutely required.';
@@ -330,19 +265,11 @@ BEGIN
     END IF;
 
     IF v_object_type = 'claimius.location' THEN
-        -- a location's owner can also place it under an ownership tree
         PERFORM claimius._reattach_location_in_ownership(v_obj_id, NEW, OLD, v_op);
     ELSE
-        -- Organizations pin into the location tree, and external parenthood
-        -- tables that also carry sa_owner_id / sa_location_id enter the
-        -- ownership and location closures on attach so cascade through
-        -- location and owner trees reaches them.
         PERFORM claimius._retree_object(v_object_type, v_obj_id, to_jsonb(OLD), to_jsonb(NEW));
     END IF;
 
-    -- The object's own fields go to object_info. A write that moves nothing
-    -- but the name and description is a rename: every reader's listing reads
-    -- it there, so it raises no area.
     IF v_op <> 'UPDATE' OR EXISTS (
         SELECT 1 FROM unnest(ARRAY['name', 'description', 'sa_owner_id', 'sa_location_id', 'sa_root_id', 'sa_deleted_at']) AS k
         WHERE (to_jsonb(OLD) ->> k) IS DISTINCT FROM (to_jsonb(NEW) ->> k)
@@ -352,9 +279,6 @@ BEGIN
     v_renamed := v_op = 'UPDATE'
                  AND to_jsonb(OLD) - ARRAY['name', 'description', 'sa_updated_at'] = to_jsonb(NEW) - ARRAY['name', 'description', 'sa_updated_at'];
 
-    -- The acting user materializes immediately so a writer reads its own work
-    -- back within the same request. A synced row under replay has no local
-    -- actor, so only its area is raised, one diff for the row and its subtree.
     IF NOT v_replay THEN
         v_actor := claimius._actor_user_for_row(v_object_type, coalesce(NEW, OLD));
         IF v_actor IS NOT NULL THEN
@@ -380,11 +304,6 @@ $$ LANGUAGE plpgsql;
 
 COMMENT ON FUNCTION claimius.calc_hierarchical_access() IS 'Trigger on hierarchical tables. Maintains the closure incrementally and reconciles users.';
 
--- _reattach_location_in_ownership
--- A location is also a node in the ownership tree of its sa_owner_id
--- organization. When the owner changes, or the location is deleted or
--- restored, drop the location's edges from the ownership tree and insert
--- fresh edges under the live owner. Closure operations only.
 CREATE OR REPLACE FUNCTION claimius._reattach_location_in_ownership(
     p_obj_id UUID, p_new RECORD, p_old RECORD, p_op TEXT
 ) RETURNS VOID AS $$
@@ -439,12 +358,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- ----------------------------------------------------------------------------
--- calc_claim_access
--- Trigger for claim, claim_object, user_claim. When any of these change,
--- find the affected (user, object) pairs and recompute user_object for
--- each.
--- ----------------------------------------------------------------------------
+COMMENT ON FUNCTION claimius._reattach_location_in_ownership(UUID, RECORD, RECORD, TEXT) IS 'A location is also a node of its owner''s ownership tree: when the owner changes or the location is deleted or restored, drops its ownership rows and inserts its self edge and its live owner''s chain.';
 
 CREATE OR REPLACE FUNCTION claimius.calc_claim_access()
     RETURNS TRIGGER AS $$
@@ -459,10 +373,6 @@ BEGIN
 
     v_table := TG_TABLE_NAME;
 
-    -- Every shape resolves to the claim whose area moved. claim_object carries
-    -- it directly, user_claim carries the assignment and moves the area of
-    -- its one user only, and a composition link moves the linked claim as
-    -- well as its own.
     IF v_table = 'claim' THEN
         v_claim_id := coalesce(NEW.id, OLD.id);
         PERFORM claimius._raise_claim_diff(v_claim_id);
@@ -477,9 +387,6 @@ BEGIN
         END IF;
     END IF;
 
-    -- The acting user settles its pairs on the objects the row names, the
-    -- claim and a binding's object, so the request reads them back. Every
-    -- other pair, the assignee's included, settles when its user reads.
     v_actor := claimius._actor_user_for_row('claimius.' || v_table, coalesce(NEW, OLD));
     IF v_actor IS NOT NULL THEN
         PERFORM claimius.recompute_user_object(v_actor, 'claimius.claim', v_claim_id);
@@ -495,17 +402,6 @@ $$ LANGUAGE plpgsql;
 
 COMMENT ON FUNCTION claimius.calc_claim_access() IS 'Trigger on claim, claim_object, user_claim. Reconciles affected users including composition link fan out.';
 
--- ----------------------------------------------------------------------------
--- _check_claim_composition
--- BEFORE INSERT/UPDATE trigger on claim_object. Enforces composition link
--- invariants: no self loop, no reverse link cycle, caller has read on
--- target claim. Bypassed during disciple replay.
--- The first binding on a samna_user that a claim of the binding's owning
--- organization is assigned to may come from an actor holding owner on that
--- organization. That is how insert_organization_user binds a new user's
--- virtual claim.
--- ----------------------------------------------------------------------------
-
 CREATE OR REPLACE FUNCTION claimius._check_claim_composition()
     RETURNS TRIGGER AS $$
 DECLARE
@@ -520,15 +416,6 @@ BEGIN
         RETURN NEW;
     END IF;
 
-    -- A binding may never hand out more than the actor already holds on the
-    -- object. What it hands out is its effective mask, the claim mask narrowed
-    -- by the binding mask, so a NULL binding mask is judged as the full claim
-    -- mask. Denies are exempt from the mask, and so is a removal, but a binding
-    -- of a claim above level 0, deny or grant, needs the actor to hold that
-    -- level on the object.
-    -- No computed access counts as none held, so an actor who cannot reach an
-    -- object cannot grant it away. Creating an object records the creator,
-    -- which computes their access before any binding is written.
     SELECT claimius._effective_access(c.sa_access, NEW.sa_access), c.level INTO v_effective, v_level
     FROM claimius.claim c
     WHERE c.id = NEW.claim_id;
@@ -761,6 +648,8 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+COMMENT ON FUNCTION claimius._check_claim_grant() IS 'Trigger on user_claim, and on claim when its level rises: runs _check_claim_level for the actor in sa_created_by, so granting a claim above level 0 or raising its level is refused with SQLSTATE P0403 unless the actor may.';
+
 DROP TRIGGER IF EXISTS tg_check_claim_grant ON claimius.user_claim;
 CREATE TRIGGER tg_check_claim_grant
     BEFORE INSERT OR UPDATE OF claim_id, user_id ON claimius.user_claim
@@ -771,10 +660,6 @@ CREATE TRIGGER tg_check_claim_level
     BEFORE UPDATE OF level ON claimius.claim
     FOR EACH ROW WHEN (NEW.level > OLD.level) EXECUTE FUNCTION claimius._check_claim_grant();
 
--- _cascade_recompute
--- For an inheritable binding to (object_type, object_id), recomputes
--- user_object for every descendant of that node in every tree it appears
--- in, for the given user.
 CREATE OR REPLACE FUNCTION claimius._cascade_recompute(
     p_user_id       UUID,
     p_object_type   TEXT,
@@ -794,12 +679,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- ----------------------------------------------------------------------------
--- emit_sync_event
--- Trigger function that publishes changes to the source tables into
--- sync_event. Disciples consume from sync_event by seq and derive user_object
--- and user_users themselves, so the derived tables never publish.
--- ----------------------------------------------------------------------------
+COMMENT ON FUNCTION claimius._cascade_recompute(UUID, TEXT, UUID) IS 'Recomputes one user''s pairs on every descendant of an object in every tree it heads.';
 
 CREATE OR REPLACE FUNCTION claimius.emit_sync_event()
     RETURNS TRIGGER AS $$
@@ -812,9 +692,6 @@ BEGIN
         RETURN coalesce(NEW, OLD);
     END IF;
 
-    -- sync_event is an outbox. A deployment with no registered consumer in
-    -- prophet_state publishes to nobody, so the row would never be read and
-    -- never be trimmed. A pure disciple is exactly that case.
     IF NOT EXISTS (SELECT 1 FROM claimius.prophet_state) THEN
         RETURN coalesce(NEW, OLD);
     END IF;
@@ -838,51 +715,6 @@ $$ LANGUAGE plpgsql;
 
 COMMENT ON FUNCTION claimius.emit_sync_event() IS 'Trigger on the source tables. Publishes into sync_event.';
 
--- ----------------------------------------------------------------------------
--- Read time self heal
--- ----------------------------------------------------------------------------
-
--- reconcile_if_pending
--- Settles outstanding access areas inline, at the top of every get_* function.
--- Two independent sources feed it.
---
--- The diff. access_diff holds the areas a write marked instead of recomputing,
--- and each user settles its own part of them when it reads.
---
--- Called with a target, p_object_type and p_object_id, the read is a check
--- and settles the one pair it asks about: once, when an area still open for
--- the reader covers it. The areas that cover a pair are the object areas of
--- the object and, with cascade, of its ancestors, and the claim areas of the
--- claims the reader holds, links to or was assigned, that are bound on the
--- object or an ancestor or that the pair's grants name. No area is marked
--- settled, since the rest of the reader's share is still open.
---
--- Called without one, the read is a listing and settles the reader's share of
--- the areas it needs: the object areas of the type it lists, with
--- p_object_type, or that cascade over that type, every object area without
--- one, and the claim areas of the reader's claims. It takes every one of
--- them, oldest first, however many are open, so a listing never reads a pair
--- an open area still covers while the pairs it moves fit the per object
--- lock budget. Each share is set based, one recompute per
--- object type, and is recorded in access_diff_user at the area's
--- raise_count, so the reader never settles the same raise twice. The area row
--- is cleared once every holder has settled it. A reader locks the areas it
--- takes FOR KEY SHARE SKIP LOCKED, which writers raising the area again do
--- not wait on, and its whole share with one transaction advisory lock, so two
--- reads of one user never settle it at once; a read that finds it held
--- settles nothing. A settle locks only the objects whose pair it moves and
--- never takes every object at once: once the pairs it moves reach the
--- budget it moves the leaving ones first, records nothing more and leaves
--- the rest open for the next read, so however many areas are open the read
--- holds at most the budget and never the lock every writer shares
--- exclusive, and a writer waits on a read only for an object whose pair the
--- read moved.
--- Every lock the settle waits for is bounded by _settle_lock_timeout: a
--- unit that waits longer is given up, stays open, and the read takes its
--- pairs as they stand, so a read never holds a writer into a deadlock.
---
--- The retry queue. reconcile_queue holds sync event applications that failed.
--- A check drains the pair it asks about, a listing every pair of the reader.
 CREATE OR REPLACE FUNCTION claimius.reconcile_if_pending(
     p_user_id       UUID,
     p_object_type   TEXT DEFAULT NULL,
@@ -891,18 +723,16 @@ CREATE OR REPLACE FUNCTION claimius.reconcile_if_pending(
     RETURNS VOID AS $$
 DECLARE
     v_lock_timeout TEXT := current_setting('lock_timeout');
-    v_settling  TEXT := current_setting('claimius.settling', TRUE);
     v_row       RECORD;
     v_open      BOOLEAN;
     v_areas     UUID[];
     v_at        INTEGER;
-    v_batch     INTEGER := claimius._object_lock_budget() / 4;
+    v_batch     INTEGER := 128;
 BEGIN
     IF p_user_id IS NULL THEN
         RETURN;
     END IF;
     PERFORM set_config('lock_timeout', claimius._settle_lock_timeout(), TRUE);
-    PERFORM set_config('claimius.settling', 'true', TRUE);
 
     IF p_object_type IS NOT NULL AND p_object_id IS NOT NULL THEN
         BEGIN
@@ -998,7 +828,6 @@ BEGIN
                 PERFORM claimius.recompute_user_object(p_user_id, p_object_type, p_object_id);
             END IF;
         EXCEPTION WHEN OTHERS THEN
-            -- leave the pair outstanding for the next reader
             NULL;
         END;
     ELSIF pg_try_advisory_xact_lock(hashtextextended('claimius.share:' || p_user_id::TEXT, 0)) THEN
@@ -1054,43 +883,28 @@ BEGIN
                     PERFORM claimius.recompute_user_object(p_user_id, v_row.object_type, v_row.object_id);
                     DELETE FROM claimius.reconcile_queue WHERE id = v_row.id;
                 EXCEPTION WHEN OTHERS THEN
-                    -- leave it queued for the next attempt
                     NULL;
                 END;
             END LOOP;
+
+        PERFORM claimius._settle_usage_diff(p_user_id);
     END IF;
     PERFORM set_config('lock_timeout', v_lock_timeout, TRUE);
-    PERFORM set_config('claimius.settling', coalesce(v_settling, ''), TRUE);
 END;
 $$ LANGUAGE plpgsql;
 
 COMMENT ON FUNCTION claimius.reconcile_if_pending(UUID, TEXT, UUID) IS 'Settles what a read meets and drains reconcile_queue. With a target it recomputes the one pair when an open area covers it; without one it settles the reader''s share of every open area it needs, of p_object_type when given, set based, under one share lock and a bounded number of object locks, and records it in access_diff_user. Called at read entry points.';
 
--- drain_access_diff
--- Settles, outside any request, the shares of open areas whose holders are
--- likelier to read before the area is raised again than after. A holder j
--- reads at the rate 1 / (now - last_used_at) of its user_activity row, an
--- area a is raised at raise_count / (now - sa_created_at), and the share is
--- worth settling ahead when the first is at least the second. A share that
--- fails the test, or whose holder has never used the app, waits for the
--- holder's own read. Shares are taken most recent user first, at most
--- p_limit_pairs of them, each through _settle_diff_share, so a share a read is
--- settling at the same moment is skipped. A drain holds the share locks of at
--- most 64 users and stops once its per object locks near _object_lock_budget,
--- leaving the rest to the next drain. The sync loop calls it between
--- pulls, on the one process holding the sync lock. Returns the shares settled.
 CREATE OR REPLACE FUNCTION claimius.drain_access_diff(
     p_limit_pairs   INTEGER DEFAULT 1000
 ) RETURNS INTEGER AS $$
 DECLARE
     v_lock_timeout TEXT := current_setting('lock_timeout');
-    v_settling  TEXT := current_setting('claimius.settling', TRUE);
     v_share     RECORD;
     v_settled   INTEGER := 0;
     v_users     UUID[] := '{}';
 BEGIN
     PERFORM set_config('lock_timeout', claimius._settle_lock_timeout(), TRUE);
-    PERFORM set_config('claimius.settling', 'true', TRUE);
     BEGIN
         FOR v_share IN
             SELECT s.user_id, s.diff_id
@@ -1107,7 +921,6 @@ BEGIN
             ORDER BY s.last_used_at DESC, s.diff_id, s.user_id
             LIMIT greatest(p_limit_pairs, 0)
         LOOP
-            EXIT WHEN coalesce(nullif(current_setting('claimius.object_locks', TRUE), ''), '0')::INTEGER * 2 >= claimius._object_lock_budget();
             IF NOT v_share.user_id = ANY(v_users) THEN
                 CONTINUE WHEN cardinality(v_users) >= 64;
                 v_users := v_users || v_share.user_id;
@@ -1121,16 +934,14 @@ BEGIN
     END;
 
     PERFORM set_config('lock_timeout', v_lock_timeout, TRUE);
-    PERFORM set_config('claimius.settling', coalesce(v_settling, ''), TRUE);
+    PERFORM claimius._settle_usage_diff(NULL, greatest(p_limit_pairs, 0));
+    PERFORM claimius._settle_user_users_diff(NULL, greatest(p_limit_pairs, 0));
     RETURN v_settled;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = claimius, pg_temp;
 
 COMMENT ON FUNCTION claimius.drain_access_diff(INTEGER) IS 'Settles up to p_limit_pairs holder shares of open access_diff areas off the request path, only where 1 / (now - user_activity.last_used_at) >= raise_count / (now - sa_created_at), most recent user first. Returns the shares settled.';
 
--- cascade_user_soft_delete
--- When read functions detect a soft deleted user, propagate the soft delete
--- to their user_claim, user_relation, and user_field rows.
 CREATE OR REPLACE FUNCTION claimius.cascade_user_soft_delete(p_user_id UUID)
     RETURNS VOID AS $$
 BEGIN
@@ -1150,12 +961,6 @@ $$ LANGUAGE plpgsql;
 
 COMMENT ON FUNCTION claimius.cascade_user_soft_delete(p_user_id uuid) IS 'Propagates soft delete from samna_user to dependent rows.';
 
--- check_user_active
--- Pure predicate. Returns true when the user row exists, has status=active,
--- and is not soft deleted. Called at the top of get_* functions; must not
--- perform writes because every read would trigger them under load. Cascade of
--- soft delete to user_claim / user_relation / user_field is owned by the
--- trigger tg_cascade_user_soft_delete attached in V3.0__triggers.sql.
 CREATE OR REPLACE FUNCTION claimius.check_user_active(p_user_id UUID)
     RETURNS BOOLEAN AS $$
 DECLARE
@@ -1180,12 +985,6 @@ $$ LANGUAGE plpgsql STABLE;
 
 COMMENT ON FUNCTION claimius.check_user_active(p_user_id uuid) IS 'Predicate: returns true when the user row exists, has status=active, and is not soft deleted.';
 
--- _cascade_user_soft_delete_trg
--- Trigger wrapper that fires cascade_user_soft_delete exactly once on the
--- transition where samna_user.sa_deleted_at flips from NULL to NOT NULL.
--- Attached as tg_cascade_user_soft_delete on claimius.samna_user in
--- V3.0__triggers.sql. Cascade out of the write path keeps read functions free
--- of side effects.
 CREATE OR REPLACE FUNCTION claimius._cascade_user_soft_delete_trg()
     RETURNS TRIGGER AS $$
 BEGIN
@@ -1198,20 +997,6 @@ $$ LANGUAGE plpgsql;
 
 COMMENT ON FUNCTION claimius._cascade_user_soft_delete_trg() IS 'Trigger wrapper: fires cascade_user_soft_delete once on samna_user soft delete transition.';
 
--- ----------------------------------------------------------------------------
--- Self root triggers
--- BEFORE INSERT triggers that fill self referencing parent and root columns.
---   Root row (parent column NULL or = NEW.id): set parent column and
---   sa_root_id to NEW.id.
---   Child row (parent column set, sa_root_id NULL): copy sa_root_id from
---   the parent row.
--- Three variants by hierarchy: organization (sa_owner_id), location
--- (sa_parent_id, lookup in same table), parenthood (sa_parent_id, lookup in
--- the firing table via TG_TABLE_*).
--- ----------------------------------------------------------------------------
-
--- For organizations. Parent column is sa_owner_id; lookup target is
--- claimius.organization.
 CREATE OR REPLACE FUNCTION claimius._set_self_owner_on_insert()
     RETURNS TRIGGER AS $$
 DECLARE
@@ -1230,19 +1015,16 @@ BEGIN
         ), '');
     END IF;
 
-    -- Caller already provided sa_root_id: trust it.
     IF NEW.sa_root_id IS NOT NULL THEN
         RETURN NEW;
     END IF;
 
-    -- New root: self reference both columns.
     IF NEW.sa_owner_id IS NULL OR NEW.sa_owner_id = NEW.id THEN
         NEW.sa_owner_id := NEW.id;
         NEW.sa_root_id  := NEW.id;
         RETURN NEW;
     END IF;
 
-    -- Child: copy parent org's sa_root_id.
     SELECT sa_root_id INTO v_root
     FROM claimius.organization
     WHERE id = NEW.sa_owner_id;
@@ -1254,10 +1036,6 @@ $$ LANGUAGE plpgsql;
 
 COMMENT ON FUNCTION claimius._set_self_owner_on_insert() IS 'BEFORE INSERT for organizations. Self references on root creation; copies parent org sa_root_id otherwise.';
 
--- For locations.
--- Parent column is sa_parent_id (locations belong to a location tree).
--- Lookup target is claimius.location (parent is in the same table).
--- sa_owner_id is required and not auto filled.
 CREATE OR REPLACE FUNCTION claimius._set_self_root_on_insert()
     RETURNS TRIGGER AS $$
 DECLARE
@@ -1271,14 +1049,12 @@ BEGIN
         RETURN NEW;
     END IF;
 
-    -- New root: parent self references, sa_root_id self references.
     IF NEW.sa_parent_id IS NULL OR NEW.sa_parent_id = NEW.id THEN
         NEW.sa_parent_id := NEW.id;
         NEW.sa_root_id   := NEW.id;
         RETURN NEW;
     END IF;
 
-    -- Child: copy parent location's sa_root_id.
     SELECT sa_root_id INTO v_root
     FROM claimius.location
     WHERE id = NEW.sa_parent_id;
@@ -1290,8 +1066,6 @@ $$ LANGUAGE plpgsql;
 
 COMMENT ON FUNCTION claimius._set_self_root_on_insert() IS 'BEFORE INSERT for locations. Self references on root creation; copies parent location sa_root_id otherwise.';
 
--- For parenthood tables. Parent column is sa_parent_id; lookup target is
--- the same table the trigger fires on (TG_TABLE_*).
 CREATE OR REPLACE FUNCTION claimius._set_self_parent_on_insert()
     RETURNS TRIGGER AS $$
 DECLARE
@@ -1306,14 +1080,12 @@ BEGIN
         RETURN NEW;
     END IF;
 
-    -- New root.
     IF NEW.sa_parent_id IS NULL OR NEW.sa_parent_id = NEW.id THEN
         NEW.sa_parent_id := NEW.id;
         NEW.sa_root_id   := NEW.id;
         RETURN NEW;
     END IF;
 
-    -- Child: dynamic lookup against the same table.
     v_sql := format('SELECT sa_root_id FROM %I.%I WHERE id = $1', TG_TABLE_SCHEMA, TG_TABLE_NAME);
     EXECUTE v_sql INTO v_root USING NEW.sa_parent_id;
 
@@ -1323,13 +1095,6 @@ END;
 $$ LANGUAGE plpgsql;
 
 COMMENT ON FUNCTION claimius._set_self_parent_on_insert() IS 'BEFORE INSERT for parenthood tables. Self references on root creation; copies parent sa_root_id from the same table otherwise.';
--- recompute_external_access
--- Materializes user_object for one user across every registered external
--- table. The prophet cannot compute these rows because the tables exist only
--- on the disciple, so sync calls this after applying a claim, claim_object or
--- user_claim payload. One set based recompute per table over its live rows
--- and the pairs the user already holds on it, so a pair whose row went is
--- purged in the same call; user_users follows through _count_user_users.
 CREATE OR REPLACE FUNCTION claimius.recompute_external_access(
     p_user_id UUID
 ) RETURNS INTEGER AS $$

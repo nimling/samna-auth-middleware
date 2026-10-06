@@ -1,8 +1,15 @@
 BEGIN;
-SELECT plan(14);
+SELECT plan(15);
 
 CREATE FUNCTION pg_temp.app() RETURNS UUID AS $$
     SELECT id FROM claimius.samna_app WHERE slug = 'sqltest_pairs'
+$$ LANGUAGE sql;
+
+CREATE FUNCTION pg_temp.viewed() RETURNS TABLE (viewer_id UUID, target_user_id UUID, sharing BIGINT) AS $$
+    SELECT s.user_id, v.target_user_id, v.sharing_object_count::BIGINT
+    FROM claimius.samna_user s
+        CROSS JOIN LATERAL claimius._user_users_for_viewer(pg_temp.app(), s.user_id) v
+    WHERE s.app_id = pg_temp.app()
 $$ LANGUAGE sql;
 
 CREATE FUNCTION pg_temp.stored() RETURNS TABLE (viewer_id UUID, target_user_id UUID, sharing BIGINT) AS $$
@@ -12,7 +19,7 @@ CREATE FUNCTION pg_temp.stored() RETURNS TABLE (viewer_id UUID, target_user_id U
 $$ LANGUAGE sql;
 
 CREATE FUNCTION pg_temp.rebuilt() RETURNS TABLE (viewer_id UUID, target_user_id UUID, sharing BIGINT) AS $$
-    SELECT mine.user_id, other.user_id, count(*)
+    SELECT mine.user_id AS viewer_id, other.user_id AS target_user_id, count(*) AS sharing
     FROM claimius.user_object mine
         JOIN claimius.user_object other
             ON other.app_id = mine.app_id
@@ -31,7 +38,7 @@ CREATE FUNCTION pg_temp.list_all() RETURNS BIGINT AS $$
 $$ LANGUAGE sql;
 
 CREATE FUNCTION pg_temp.sharing(p_viewer UUID, p_target UUID) RETURNS BIGINT AS $$
-    SELECT coalesce((SELECT s.sharing FROM pg_temp.stored() s WHERE s.viewer_id = p_viewer AND s.target_user_id = p_target), 0)
+    SELECT coalesce((SELECT s.sharing FROM pg_temp.viewed() s WHERE s.viewer_id = p_viewer AND s.target_user_id = p_target), 0)
 $$ LANGUAGE sql;
 
 CREATE FUNCTION pg_temp.user_users_writes() RETURNS BIGINT AS $$
@@ -97,8 +104,8 @@ END $$;
 
 SELECT is(pg_temp.list_all(), 13::BIGINT, 'three crew holders list the node and its three children, the desk holder lists one child');
 
-SELECT set_eq('SELECT * FROM pg_temp.stored()', 'SELECT * FROM pg_temp.rebuilt()',
-    'after the grants settle the counted user_users equal a full rebuild from user_object');
+SELECT set_eq('SELECT * FROM pg_temp.viewed()', 'SELECT * FROM pg_temp.rebuilt()',
+    'after the grants settle the user_users every user reads equal a full rebuild from user_object');
 
 SELECT ok(
     pg_temp.sharing('a0000000-0000-4000-8000-0000000000e1', 'a0000000-0000-4000-8000-0000000000e2') >= 4
@@ -116,8 +123,8 @@ BEGIN
 END $$;
 SELECT pg_temp.list_all();
 
-SELECT set_eq('SELECT * FROM pg_temp.stored()', 'SELECT * FROM pg_temp.rebuilt()',
-    'after a revoke settles the counted user_users equal a full rebuild');
+SELECT set_eq('SELECT * FROM pg_temp.viewed()', 'SELECT * FROM pg_temp.rebuilt()',
+    'after a revoke settles the user_users every user reads equal a full rebuild');
 
 DO $$
 DECLARE
@@ -138,14 +145,14 @@ BEGIN
 END $$;
 SELECT pg_temp.list_all();
 
-SELECT set_eq('SELECT * FROM pg_temp.stored()', 'SELECT * FROM pg_temp.rebuilt()',
-    'after a deny settles the counted user_users equal a full rebuild');
+SELECT set_eq('SELECT * FROM pg_temp.viewed()', 'SELECT * FROM pg_temp.rebuilt()',
+    'after a deny settles the user_users every user reads equal a full rebuild');
 
 UPDATE claimius.organization SET sa_deleted_at = now() WHERE id = '10000000-0000-4000-8000-0000000000e2';
 SELECT pg_temp.list_all();
 
-SELECT set_eq('SELECT * FROM pg_temp.stored()', 'SELECT * FROM pg_temp.rebuilt()',
-    'after a soft delete settles the counted user_users equal a full rebuild');
+SELECT set_eq('SELECT * FROM pg_temp.viewed()', 'SELECT * FROM pg_temp.rebuilt()',
+    'after a soft delete settles the user_users every user reads equal a full rebuild');
 
 SELECT is(
     pg_temp.sharing('a0000000-0000-4000-8000-0000000000e1', 'a0000000-0000-4000-8000-0000000000e4')
@@ -154,25 +161,34 @@ SELECT is(
     'the pair of users whose one shared object went has no user_users row left in either direction'
 );
 
+SELECT claimius._settle_user_users_diff(pg_temp.app());
 INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
 VALUES ('10000000-0000-4000-8000-0000000000e5', 'Pairs late', 'company', '10000000-0000-4000-8000-0000000000e1',
         '10000000-0000-4000-8000-0000000000e0', 2, '00000000-0000-4000-8000-0000000000e0');
 SELECT count(*) FROM claimius.get_objects('a0000000-0000-4000-8000-0000000000e1', pg_temp.app(), 'claimius.organization');
-CREATE TEMP TABLE writes AS SELECT pg_temp.user_users_writes() AS n;
+SELECT claimius._settle_user_users_diff(pg_temp.app());
+CREATE TEMP TABLE writes AS
+SELECT pg_temp.user_users_writes() AS n, (SELECT coalesce(max(id), 0) FROM claimius.user_users_diff) AS diff_id;
 SELECT count(*) FROM claimius.get_objects('a0000000-0000-4000-8000-0000000000e2', pg_temp.app(), 'claimius.organization');
 
+SELECT is(
+    (SELECT pg_temp.user_users_writes() - n FROM writes) || ' ' ||
+    (SELECT count(*) FROM claimius.user_users_diff d WHERE d.id > (SELECT diff_id FROM writes) AND d.object_id = '10000000-0000-4000-8000-0000000000e5'),
+    '0 1',
+    'a pair entering on an object one other user holds writes one user_users_diff row and no user_users row');
+
+SELECT claimius._settle_user_users_diff(pg_temp.app(), 'a0000000-0000-4000-8000-0000000000e2');
+
 SELECT is(pg_temp.user_users_writes() - (SELECT n FROM writes), 2::BIGINT,
-    'a pair entering on an object one other user holds writes two user_users rows, one each direction');
+    'its fold writes two user_users rows, one each direction');
+
+SELECT set_eq('SELECT * FROM pg_temp.viewed()', 'SELECT * FROM pg_temp.rebuilt()',
+    'after a pair enters the user_users every user reads equal a full rebuild');
+
+SELECT claimius._settle_user_users_diff(pg_temp.app());
 
 SELECT set_eq('SELECT * FROM pg_temp.stored()', 'SELECT * FROM pg_temp.rebuilt()',
-    'after a pair enters the counted user_users equal a full rebuild');
-
-CREATE TEMP TABLE counted AS SELECT * FROM pg_temp.stored();
-SELECT claimius._refresh_user_users(pg_temp.app(), u.user_id)
-FROM (SELECT DISTINCT user_id FROM claimius.user_object WHERE app_id = pg_temp.app()) u;
-
-SELECT set_eq('SELECT * FROM pg_temp.stored()', 'SELECT * FROM counted',
-    'the bulk rebuild leaves every counted row as it was');
+    'once every row is folded the stored user_users equal a full rebuild and no user_users_diff row is needed');
 
 SELECT set_eq(
     $$SELECT user_id FROM claimius.user_object

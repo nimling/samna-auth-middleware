@@ -1,18 +1,3 @@
--- ============================================================================
--- Claimius V4.0 Init
--- ----------------------------------------------------------------------------
--- Final step in claimius's own migration set. Registers the internal
--- claimius.* tables in table_info, completing schema setup, and rewrites the
--- sa_created_by an older set stamped with a user id where it is unambiguous.
---
--- After this file runs, the schema is "ready" for the implementing app to:
---   1. Run upsert_system_app, upsert_disciple_state, or upsert_prophet_peer (as appropriate)
---   2. Run upsert_table_info(...) with their app's table list
---
--- The implementer's migration tooling is responsible for those calls. They
--- are NOT included in claimius's own migrations.
--- ============================================================================
-
 DO $$
     BEGIN
         PERFORM claimius.upsert_internal_table_info();

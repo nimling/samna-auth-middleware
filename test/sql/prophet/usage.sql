@@ -6,6 +6,7 @@ CREATE FUNCTION pg_temp.app() RETURNS UUID AS $$
 $$ LANGUAGE sql;
 
 CREATE FUNCTION pg_temp.pair(p_user UUID, p_object UUID) RETURNS TABLE (used_count BIGINT, last_used_at TIMESTAMPTZ, sa_access INTEGER) AS $$
+    SELECT claimius._settle_usage_diff(pg_temp.app(), p_user);
     SELECT uo.used_count, uo.last_used_at, uo.sa_access FROM claimius.user_object uo
     WHERE uo.user_id = p_user AND uo.object_type = 'claimius.organization' AND uo.object_id = p_object
 $$ LANGUAGE sql;

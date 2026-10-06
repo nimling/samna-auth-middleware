@@ -59,7 +59,7 @@ The table is `?TableAlias` when the query has a model; a query built with `Table
 
 Every granted single object lookup adds one use of `(actor, object_type, object_id)` to an in process counter on the handle, `DB.Usage`: `MutationAccess`, `GetAccess`, `UserAccess` on the resolved target, and each granted entry of `MutationAccessMany`. `Usage.Add(appID *uuid.UUID, userID uuid.UUID, objectType string, objectID uuid.UUID)` keys the use per app; the lookups pass a nil `appID`, the deployment's own app, and a prophet service that checks for another app passes that app, so the use lands on that app's pair. The counter flushes through `claimius.touch_object_usage` every 10 s, when it holds 1,000 distinct keys, and on `Stop`:
 
-1. The keys go sorted by user, app, type and object, the order the pairs are locked in, the own app keys through the form without apps and the others through the form with `app_ids[]`, in one statement.
+1. The keys go sorted by user, app, type and object, the own app keys through the form without apps and the others through the form with `app_ids[]`, in one statement. The flush records `usage_diff` rows and locks no pair, so it never waits on a read; the user's next listing folds them into the pairs.
 
 2. A flush refused with SQLSTATE `40P01` or `40001` is sent again, up to three attempts.
 

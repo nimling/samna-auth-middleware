@@ -1,25 +1,3 @@
--- ============================================================================
--- Claimius V5.6 Analytics
--- ----------------------------------------------------------------------------
--- Consent and interaction capture. The prophet is the only writer: every app
--- forwards its consent decisions and capture batches here on its own app key,
--- nim.io and nimployer alike. Disciples carry the replica in V5.1 and receive
--- these rows through the sync feed like every other claimius table, so an app
--- granted a claim over another app's capture reads it from its own replica.
---
--- claimius.consent carries one live decision per app and identity. A known
--- user resolves across every app on the prophet, so one decision follows the
--- person through every samna_auth app. An anonymous visitor resolves on the
--- durable anonymous_id the browser holds, with ip and user agent recorded as
--- evidence of the decision rather than as part of its key.
---
--- claimius.analytics_session holds the durable context of one visit.
--- claimius.analytics_event is append only and holds one row per captured
--- signal, pointer samples included. insert_analytics_events refuses to write a
--- row when the analytics category is not granted, so consent is enforced in
--- the schema and not only in the caller.
--- ============================================================================
-
 CREATE TABLE IF NOT EXISTS claimius.consent (
     id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     app_id         UUID NOT NULL REFERENCES claimius.samna_app(id),
@@ -107,10 +85,6 @@ CREATE INDEX IF NOT EXISTS idx_analytics_event_received ON claimius.analytics_ev
 GRANT SELECT, INSERT ON claimius.analytics_event TO claimius_writer;
 GRANT SELECT ON claimius.analytics_event TO claimius_reader;
 
--- ----------------------------------------------------------------------------
--- Consent resolution and write
--- ----------------------------------------------------------------------------
-
 CREATE OR REPLACE FUNCTION claimius.get_consent(
     p_app_id       UUID,
     p_user_id      UUID DEFAULT NULL,
@@ -178,10 +152,6 @@ CREATE OR REPLACE FUNCTION claimius.consent_allows(
 $$ LANGUAGE sql STABLE;
 
 COMMENT ON FUNCTION claimius.consent_allows(UUID, TEXT, UUID, TEXT) IS 'True when the identity granted one category. Absent consent is a denial.';
-
--- ----------------------------------------------------------------------------
--- Capture
--- ----------------------------------------------------------------------------
 
 DROP FUNCTION IF EXISTS claimius.post_analytics_session(uuid,text,text,jsonb,uuid,inet,text);
 CREATE OR REPLACE FUNCTION claimius.upsert_analytics_session(
@@ -273,10 +243,6 @@ END;
 $$ LANGUAGE plpgsql;
 
 COMMENT ON FUNCTION claimius.insert_analytics_events(UUID, TEXT, JSONB) IS 'Writes a batch against an open session. Returns 0 and writes nothing when consent is absent or the session is unknown.';
-
--- ----------------------------------------------------------------------------
--- Reach
--- ----------------------------------------------------------------------------
 
 DROP FUNCTION IF EXISTS claimius.capture_app_access(UUID, UUID);
 DROP FUNCTION IF EXISTS claimius.capture_app_ids(UUID);

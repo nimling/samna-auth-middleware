@@ -34,6 +34,10 @@ Any other `p_sort`, or a negative `p_width`, is refused with SQLSTATE `22023`. W
 
 The link graphs take the same three arguments after `p_depth`, `p_width INTEGER DEFAULT 0`, `p_sort TEXT DEFAULT 'name'` and `p_next_id UUID DEFAULT NULL`, refused the same way, and `_window_links` windows the links as `_window_graph` windows the nodes: every link target is a node whose parent is the link source, a source no link targets is a top node, and a link is kept when its target is kept under its source. Each type is matched back to the registered type it normalizes from, and labels come from `object_info`, the claim or the `samna_user` row, so a node graph and a link graph drawn with one window show the same nodes in the same order. The graph's own nodes join too, the objects in scope of the owner links and the reader's claims and `samna_user` row of the claim links, and one no link targets is a top node, so a root or a start that keeps no child is windowed like any other. A windowed link graph returns `node_ids` beside `links`, the ids of every kept node: a kept node that keeps no child has no link, so a consumer builds the window's object set from `node_ids`, not from the link endpoints. Without a window the link graph returns `links` alone.
 
+## The owner links
+
+`get_graph_links_owner` reads, for every object of the reader in scope, its closure range in `idx_inheritance_info_descendant`, `a_x + t_x` entries, and keeps the nearest ancestor the reader also reaches, one probe of the reader's primary key per ancestor: `Σ_x (a_x + t_x)` closure entries and as many pair probes, all index descents, whatever the planner thinks the reader holds. It settles nothing. It first joined the closure to the reader's whole pair set held as a common table expression; PostgreSQL estimates such a scan from the expression and not from the pairs, so on a reader of 48,014 pairs with stale statistics it chose a nested loop over both, 2.3 billion comparisons and 66 seconds, where the probes take 0.47 seconds for the same 48,009 links. In a mixed run of three readers, three writers and a usage flush on one user, its time per call fell from 223 ms to 28 ms.
+
 ## The owner graph
 
 1. The roots: the app's root organizations, `app_object_ids`, or the one given as `start_id`, kept when the reader reaches them through `get_objects` over organizations.
@@ -55,7 +59,7 @@ The walk reads the subtree, not the reader's reach: an organization the reader c
 
 ## The claim graph
 
-For the default shape, no `start_id`, `depth = 0` and `required = 0`, the graph is built from the reader's pairs: every derivation in the `grants` of the reader's `V_u` pairs that names one of the reader's claims, `Σ_{x ∈ V_u} G_x` elements, each joined to the binding it came through and to its `object_info` row; the `S_u` users the reader sees through `user_users`, each with its `samna_user` row and the reader's pair on it; the reader's `C` grants and claims; and the bindings of those claims, `Σ_c n_c`, each with the reader's pair and `object_info` row on its object.
+For the default shape, no `start_id`, `depth = 0` and `required = 0`, the graph is built from the reader's pairs: every derivation in the `grants` of the reader's `V_u` pairs that names one of the reader's claims, `Σ_{x ∈ V_u} G_x` elements, each joined to the binding it came through and to its `object_info` row; the users the reader sees, `_user_users_for_viewer` after the fold of the reader's `user_users_diff` rows, `S_u` stored rows and the pending moves of `T_u`, each with its `samna_user` row and the reader's pair on it; the reader's `C` grants and claims; and the bindings of those claims, `Σ_c n_c`, each with the reader's pair and `object_info` row on its object.
 
 With `start_id` the graph reads that claim's bindings and, through `idx_inheritance_info_ancestor`, the objects each reaches to `depth`, where the claim and the binding both inherit: `|T_c|` closure entries, each with the reader's pair and its `object_info` row. `depth = 1` keeps the directly bound objects only.
 
@@ -68,7 +72,7 @@ The default shape is stored per user in `claim_graph_cache (app_id, user_id, gra
 | Write | Drops |
 |---|---|
 | A pair of the user inserted, deleted, or updated in `sa_access`, `grants`, `scope` or `direct_grant` | That user's entry, one probe |
-| A `user_users` row of the user as viewer, or the user's `samna_user` row | That user's entry, one probe |
+| A `user_users` row of the user as viewer, moved by a fold, or the user's `samna_user` row | That user's entry, one probe |
 | An `object_info` row updated, a rename or a move | The entry of every user holding a pair on the object, one range of `idx_user_object_object_user` |
 
 A usage flush moves only `used_count` and `last_used_at`, which the trigger does not watch, so it drops nothing.
@@ -81,7 +85,7 @@ A claim or binding change drops nothing: the entry is validated on read. `snapsh
 entries(validate) = 1 + C' + C' + Σ_{c} n_c
 ```
 
-for the `C'` grant rows of the user, soft deleted ones included, and the `n_c` bindings of each. A write that began before the build and committed after it is invisible to the snapshot and makes the entry stale, which a timestamp taken at the start of that write could not show. A stale entry is rebuilt and stored with a new snapshot.
+for the `C'` grant rows of the user, soft deleted ones included, and the `n_c` bindings of each. A write that began before the build and committed after it is invisible to the snapshot and makes the entry stale, which a timestamp taken at the start of that write could not show. A stale entry is rebuilt and stored with a new snapshot. The entry is served only when the fold before it left none of the user's `user_users_diff` rows pending: a pending row changes the users the graph shows without moving a `user_users` row, so it drops nothing, and the graph is built again until a fold takes it.
 
 ### The hit ratio
 

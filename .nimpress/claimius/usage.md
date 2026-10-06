@@ -2,7 +2,7 @@
 layout: doc
 title: Usage
 description: What claimius records about how its objects and apps are used, the per pair count of checks with its decay and where it is read, the per user relations, and the prophet's consent gated capture of sessions and events folded into a heat grid, with the rows each step reads and writes.
-tags: usage, used_count, last_used_at, touch_object_usage, _decayed_usage, user_activity, user_relation, consent, analytics_session, analytics_event, analytics_heat, analytics_capture, capture_user_apps
+tags: usage, used_count, last_used_at, touch_object_usage, usage_diff, _settle_usage_diff, _decayed_usage, user_activity, user_relation, consent, analytics_session, analytics_event, analytics_heat, analytics_capture, capture_user_apps
 lastUpdated: true
 ---
 
@@ -12,7 +12,7 @@ Claimius records use in three places: a count on each pair of how often its user
 
 ## The count on the pair
 
-`user_object` carries `used_count` and `last_used_at`: how many successful single object checks of the pair were counted, and when the latest flush that counted one ran. A settle never writes them, so they survive every recompute of the pair, and they leave with the pair. The v1.1.9 table `object_usage` held them apart from the pair; the base set retires it on replay, adding its `used_count` into the pair and taking the later `last_used_at` for every pair that exists, then dropping it, so a consumer carries no migration for it.
+`user_object` carries `used_count` and `last_used_at`: how many successful single object checks of the pair were counted, and when the latest flush that counted one ran. A flush does not write them; it records `usage_diff` rows, and the user's next listing folds them into the pair, the same way every other derived count of claimius is kept. A settle never writes them, so they survive every recompute of the pair, and they leave with the pair. The v1.1.9 table `object_usage` held them apart from the pair; the base set retires it on replay, adding its `used_count` into the pair and taking the later `last_used_at` for every pair that exists, then dropping it, so a consumer carries no migration for it.
 
 ### Recording
 
@@ -24,7 +24,7 @@ touch_object_usage(user_ids[], app_ids[], object_types[], object_ids[], counts[]
 
 1. The arrays are grouped per pair and summed, so repeats of a pair in one call add up.
 
-2. The pairs that exist are locked `FOR NO KEY UPDATE` in key order and each updated once: `used_count = used_count + n`, `last_used_at = now()`. A pair that is not settled, that has no `user_object` row, is skipped, so usage never creates a pair and never outlives one. Key order makes two replicas flushing the same pairs wait on each other instead of deadlocking.
+2. One `usage_diff` row `(app, user, object, n, now())` is inserted per pair that exists, read with one probe of its primary key and locked not at all. A pair that is not settled, that has no `user_object` row, is skipped, so usage never creates a pair. A flush therefore never waits on a read that is rewriting the pair, nor on another flush.
 
 3. Every user and app counted moves its `user_activity` row to now, one upsert per distinct `(user, app)`.
 
@@ -33,12 +33,14 @@ touch_object_usage(user_ids[], app_ids[], object_types[], object_ids[], counts[]
 For a flush of `K` distinct pairs of `J` distinct users:
 
 ```
-entries read = K          rows written ≤ K + J          outbox rows = 0          statements = 1
+entries read = K          rows written ≤ K + J          outbox rows = 0          statements = 1          locks waited on = J user_activity rows at most
 ```
 
-An update of `used_count` and `last_used_at` touches no indexed column, so on a page with room, which `fillfactor = 90` leaves, it is a heap only update and writes no index entry. On a prophet the overload `touch_object_usage(user_ids[], object_types[], object_ids[], counts[])` fills the app with `get_app_id()`; a disciple mirrors one app and carries only that form.
+### Folding
 
-The middleware keys its count per app, `(app, user, type, object)`. A key with no app is the deployment's own and flushes through the form without apps; a key with an app flushes through the form with `app_ids[]`, so a prophet that checks an object for another app counts the use on that app's pair. When a flush holds both, the two calls go as one statement. The keys are sent sorted by user, app, type and object, the order of the `user_object` primary key in which the pairs are locked. A flush that fails on a deadlock, SQLSTATE `40P01`, or a serialization failure, `40001`, is sent again, up to three attempts in all; a batch that still fails is added back to the counter and reported, so its counts go out with the next flush instead of being lost.
+`_settle_usage_diff(app, u)` runs in every listing of `u`, inside `reconcile_if_pending` under the reader's share lock, and `drain_access_diff` runs it over the oldest rows of every user. It takes the rows `FOR UPDATE SKIP LOCKED`, deletes them, sums them per pair and updates each pair once: `used_count = used_count + n`, `last_used_at` the later of the stored one and the newest row's. The sums commute, so two folds that take different rows of one pair both count them, and a fold waits on nothing but the pair rows it updates, for at most `_settle_lock_timeout()`; past that it is given up and the rows stay. A row of a pair that left `user_object` is dropped. The update touches no indexed column, so on a page with room, which `fillfactor = 90` leaves, it is a heap only update and writes no index entry. Every reader of usage reads its own pairs after its listing folded them, so `search` and the usage windows of the graphs see every flush committed before the read. On a prophet the overload `touch_object_usage(user_ids[], object_types[], object_ids[], counts[])` fills the app with `get_app_id()`; a disciple mirrors one app and carries only that form.
+
+The middleware keys its count per app, `(app, user, type, object)`. A key with no app is the deployment's own and flushes through the form without apps; a key with an app flushes through the form with `app_ids[]`, so a prophet that checks an object for another app counts the use on that app's pair. When a flush holds both, the two calls go as one statement. A flush that fails on a deadlock, SQLSTATE `40P01`, or a serialization failure, `40001`, is sent again, up to three attempts in all; a batch that still fails is added back to the counter and reported, so its counts go out with the next flush instead of being lost.
 
 ### Decay
 

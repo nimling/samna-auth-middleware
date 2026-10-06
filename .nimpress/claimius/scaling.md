@@ -290,7 +290,7 @@ Each row names the dominant term, the mechanism, the formula before and after, a
 | Search candidates | `object_info.search_vector` under a GIN index, driving the reader's probe when the query is selective | `V_u` rows of 606 B | `min(V_u, M_q)` | `V_u / M_q` for a selective query |
 | Children of a wide node in a name ordered graph window | `object_info (sa_owner_id, sa_name, object_id)` and its location twin read in order | all `F` children | `W / v` | `F v / W`; see [Graphs](./graphs.md) |
 | Catch up after a long absence | A snapshot once the backlog exceeds the app's source rows | `n_b a_e` | `N_src a_e` | `n_b / N_src`; see [Sync](./sync.md) |
-| `user_users` writes per settle | Increments aggregated per `(viewer, target)` in the settle statement | `Σ U_o` over the settled pairs | the distinct pairs | `Σ U_o / distinct`, about 300 for 50 holders of a 300 object node reached by 20 others each |
+| `user_users` writes per settle | A pair raises one `user_users_diff` row; the fold aggregates the moves of every row of its objects per `(viewer, target)` | `Σ U_o` over the settled pairs | the distinct pairs, in the fold | `Σ U_o / distinct`, about 300 for 50 holders of a 300 object node reached by 20 others each |
 | Database ceiling of one service | A read that finds no area runs on a hot standby ([Hot Standby](https://www.postgresql.org/docs/17/hot-standby.html)) | `ρ K / c_r` | `(1 + R) ρ K / c_r` | `1 + R` |
 | Feed wait | A held pull woken by `NOTIFY` | up to 15 s after an idle period | `r_net / 2` | up to 1,400 at 22 ms |
 | Staleness on a disciple in region | The page applied with `synchronous_commit = off`, the cursor lost with it on a crash | `r_net / 2 + a_e / σ + L_c`, 2.6 ms on Azure | `r_net / 2 + a_e / σ`, 0.65 ms | 4 on Azure |

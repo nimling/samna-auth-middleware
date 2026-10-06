@@ -2,7 +2,7 @@
 layout: doc
 title: Reads
 description: The claimius read surface and what each read function reads and writes in index entries and rows as a function of the data, why a check and a page of a listing are independent of tree depth and of the number of users, and which reads may run on a replica.
-tags: get_access, get_direct_access, mutation_access, resolve_access, get_user_access, get_objects, get_organizations, get_locations, get_secrets, get_users, get_claims, get_audit, _best_grant, reconcile_if_pending, key paging, security definer
+tags: get_access, get_direct_access, mutation_access, resolve_access, get_user_access, get_objects, get_organizations, get_locations, get_secrets, get_users, get_claims, get_audit, _best_grant, reconcile_if_pending, _settle_user_users_diff, _user_users_for_viewer, key paging, security definer
 lastUpdated: true
 ---
 
@@ -116,7 +116,7 @@ So `user_object` is the listing index. `get_objects`, `search` and the graphs re
 |---|---|
 | `get_organizations`, `get_locations` | One `get_objects` page, each row joined to its table row by primary key and kept when live and linked to the app, one probe of `idx_app_object_unique`: `p` more rows and `p` probes. A disciple has no `app_object`, and keeps every live row |
 | `get_secrets` | One `get_objects` page joined to `samna_secret`, kept when live and of the app |
-| `get_users` | The reader itself, one range of `idx_user_users_viewer`, `S_u` rows, and the reader's grants with their bindings on `claimius.samna_user`, then one `samna_user` probe per target: `1 + S_u + 2C + b + |targets|` |
+| `get_users` | The fold of the reader's `user_users_diff` rows, then the reader itself, one range of `idx_user_users_viewer`, `S_u` rows, with the rows still pending on the reader's `T_u` objects, and the reader's grants with their bindings on `claimius.samna_user`, then one `samna_user` probe per target: `1 + S_u + Σ_{x ∈ T_u} (m_x + U_x) + 2C + b + |targets|` |
 | `get_claims(user, app, required)` | Every live claim row, each tested with a probe of the reader's grant and a probe of the reader's pair on it: `3` entries per live claim |
 | `get_claims(user, app, object_id, object_type)` | The reader's pair on the object and, per derivation of its `grants`, the live grant and the claim: `1 + 2 G_x` |
 | `get_audit` | The reader's `V_{u,organization}` pairs, then the app's rows newest first until `limit + offset` are kept |
@@ -125,11 +125,11 @@ A listing carries no authority to act on a row in it: `get_objects` returns a `u
 
 ## Which reads write
 
-A read writes only its settle: the pairs it recomputes, the `access_diff_user` records of the shares it settles, the areas it clears and the `claim_graph_cache` row a graph read stores. Nothing else in a read path writes.
+A read writes only its settle: the pairs it recomputes, the `user_users_diff` rows those raise, the `access_diff_user` records of the shares it settles, the areas it clears, the `user_users_diff` rows it folds into `user_users`, the reader's `usage_diff` rows it folds into its pairs and the `claim_graph_cache` row a graph read stores. Nothing else in a read path writes.
 
 1. No cascade runs in a read. The soft delete of a user cascades to its grants, relations and field values through `tg_cascade_user_soft_delete`, once, in the write that deleted the user. `check_user_active` is a predicate.
 
-2. A settle locks the areas it takes `FOR KEY SHARE SKIP LOCKED`, the reader's whole share with one advisory lock, and the objects whose pair it moves with sorted advisory locks, at most 512 of them, past which it leaves the rest open for the next read and never takes the covering lock; see [Materialization](./materialization.md#the-lock-budget). A read that meets an area another read is settling skips it and reads the pairs as they stand. Every lock a settle waits for is bounded by `_settle_lock_timeout()`, a twentieth of `deadlock_timeout`, or the caller's `lock_timeout` when shorter; a settle that waits longer gives up its area, pair or queue row, and the read takes the pairs as they stand. A read therefore leaves any wait it closes into a cycle before the deadlock check of the writer it blocks runs, and a write is never aborted for a read. Choosing the areas is bounded the same way: a read that cannot take them within the timeout settles none and reads its pairs as they stand.
+2. A settle locks the areas it takes `FOR KEY SHARE SKIP LOCKED`, the reader's whole share with one advisory lock, its own pairs and records, and the `user_users_diff` and `user_users` rows of the objects it folds, and never anything per object, so it settles everything it needs in one read whatever that moves; see [Materialization](./materialization.md#locks-a-settle-takes). A read that meets an area another read is settling skips it and reads the pairs as they stand. Every lock a settle waits for is bounded by `_settle_lock_timeout()`, a twentieth of `deadlock_timeout`, or the caller's `lock_timeout` when shorter; a settle that waits longer gives up its area, pair or queue row, and the read takes the pairs as they stand. A read therefore leaves any wait it closes into a cycle before the deadlock check of the writer it blocks runs, and a write is never aborted for a read. Choosing the areas is bounded the same way: a read that cannot take them within the timeout settles none and reads its pairs as they stand.
 
 3. `get_scope_access` reads no pair and no area and is `STABLE`, so it answers on a hot standby. Every function that runs `reconcile_if_pending` may write, so it runs on the primary; the middleware routes a pure read to a replica and repeats a read the standby refuses with SQLSTATE `25006` on the primary; see [Access in Go](./middleware/access.md).
 

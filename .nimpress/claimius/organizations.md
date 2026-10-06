@@ -94,9 +94,9 @@ With `n_S` the moved subtree, the move writes `n_S` rows, the closure rows the s
 
 An organization has no `app_id`. It is shared structure, and an app reaches it through a live `claimius.app_object` row.
 
-1. `upsert_app_object(app_id, object_type, object_id, created_by)` probes `idx_app_object_unique` for a live link and returns it, or inserts one and, outside replay, recomputes the pair of every user of `_affected_users_for_object`: the creator, the pair holders of the object and the holders of claims bound on it or, inheriting, on an ancestor. One link row with its four index entries, and `|affected(o)|` pair recomputes.
+1. `upsert_app_object(app_id, object_type, object_id, created_by)` probes `idx_app_object_unique` for a live link and returns it, or inserts one and, outside replay, raises the object area of the object in the app: the creator, the pair holders of the object and the holders of claims bound on it or, inheriting, on an ancestor settle it when they read. One link row with its four index entries and one area row, whatever the number of users the object reaches. Before, the link recomputed the pair of every one of them, `|affected(o)|` recomputes inside the write, and `upsert_app_organization` over a subtree of `n` nodes paid `n` times that.
 
-2. `delete_app_object` soft deletes the live link and deletes every `user_object` row of the app on the object; `user_users` counts those pairs down.
+2. `delete_app_object` soft deletes the live link and deletes every `user_object` row of the app on the object; each pair deleted raises its `user_users_diff` row.
 
 3. `upsert_app_organization(app_id, org_id, cascade)` links an existing organization and, with `cascade`, every organization and location under it in the ownership closure: one `upsert_app_object` per node, additive and idempotent.
 

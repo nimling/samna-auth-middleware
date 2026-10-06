@@ -19,7 +19,7 @@ CREATE OR REPLACE FUNCTION claimius.get_sync_events(
     WHERE e.app_id = p_app_id
       AND (e.txid, e.seq) > (p_txid::TEXT::XID8, p_seq)
       AND (e.txid < pg_snapshot_xmin(pg_current_snapshot()) OR e.txid = pg_current_xact_id_if_assigned())
-      AND e.event_type NOT IN ('claimius.user_object', 'claimius.user_users', 'claimius.audit')
+      AND e.event_type NOT IN ('claimius.user_object', 'claimius.user_users', 'claimius.user_users_diff', 'claimius.audit')
       AND (p_peer OR e.event_type <> 'claimius.app_handover')
     ORDER BY e.txid ASC, e.seq ASC
     LIMIT p_limit;

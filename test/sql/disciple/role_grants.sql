@@ -10,7 +10,7 @@ $$, 'claimius_disciple_client reads every claimius table');
 SELECT is_empty($$
     SELECT t FROM unnest(ARRAY['user_object', 'object_info', 'user_users', 'disciple_state', 'samna_user', 'samna_client',
                                'samna_secret', 'organization', 'location', 'claim', 'user_claim', 'claim_object',
-                               'object_field', 'user_field', 'user_relation', 'audit', 'inheritance_info', 'table_info',
+                               'object_field', 'user_field', 'user_relation', 'audit', 'inheritance_info', 'table_info', 'user_users_diff',
                                'notification', 'claim_graph_cache']) AS t
     WHERE NOT has_table_privilege('claimius_disciple_client', 'claimius.' || t, 'INSERT, UPDATE, DELETE')
 $$, 'claimius_disciple_client writes every table the sync layer applies');

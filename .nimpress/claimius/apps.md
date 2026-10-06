@@ -32,8 +32,8 @@ An app is one product that claimius governs: Samna Auth itself, Bookable, Nimplo
 | `app_object_ids(app_id, object_type)` | The object ids of one type linked to an app, the filter in place of `app_id = ?` | one range of `idx_app_object_unique` |
 | `app_has_object(app_id, object_type, object_id)` | The boolean guard | one probe |
 | `apps_for_object(object_type, object_id)` | The apps linked to one object | one range of `idx_app_object_object` |
-| `upsert_app_object(app_id, object_type, object_id, created_by)` | Links, idempotent | one probe; on a new link one row with four index entries and, outside replay, `|affected(x)|` pair recomputes |
-| `delete_app_object(app_id, object_type, object_id)` | Soft deletes the link | one update, and a delete of the app's `U_x` pairs on the object, counted out of `user_users` |
+| `upsert_app_object(app_id, object_type, object_id, created_by)` | Links, idempotent | one probe; on a new link one row with four index entries and, outside replay, one object area raised |
+| `delete_app_object(app_id, object_type, object_id)` | Soft deletes the link | one update, and a delete of the app's `U_x` pairs on the object, one `user_users_diff` row each |
 | `upsert_root_organization(app_id, name, actor, ...)` | Creates a root and links it, idempotent on app and name | see [Organizations](./organizations.md) |
 | `upsert_app_organization(app_id, org_id, cascade)` | Links an organization and, with `cascade`, every organization and location under it | one `upsert_app_object` per node |
 

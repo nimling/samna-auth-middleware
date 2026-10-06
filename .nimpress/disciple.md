@@ -60,7 +60,7 @@ The disciple pulls. There is no inbound sync endpoint on a disciple and none on 
 4. A `409` from the prophet, or ten failed pulls in a row, trigger a fresh snapshot and an audit row naming the stalled cursor.
 5. Between pulls it drains open access areas whose holders read often enough to be settled ahead.
 
-The feed is scoped by the prophet: organizations and locations through `app_object_ids`, every other table through `app_id`. It carries source rows only, never `user_object`, `user_users` or `audit`. The disciple strips `app_id` from each payload and skips `samna_app`.
+The feed is scoped by the prophet: organizations and locations through `app_object_ids`, every other table through `app_id`. It carries source rows only, never `user_object`, `user_users`, `user_users_diff` or `audit`. The disciple strips `app_id` from each payload and skips `samna_app`.
 
 A snapshot upserts; it never deletes a row the prophet did not send.
 

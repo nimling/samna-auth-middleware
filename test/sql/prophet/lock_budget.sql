@@ -1,5 +1,5 @@
 BEGIN;
-SELECT plan(11);
+SELECT plan(12);
 
 CREATE EXTENSION IF NOT EXISTS dblink;
 
@@ -99,20 +99,28 @@ BEGIN
     WHERE co.app_id = pg_temp.app() AND co.object_id = '10000000-0000-4000-8000-000000000b9f' AND co.sa_deleted_at IS NULL;
 END $$;
 
+INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
+SELECT gen_random_uuid(), 'Budget child ' || g, 'company', '10000000-0000-4000-8000-000000000b90', '10000000-0000-4000-8000-000000000b90', 1,
+       '00000000-0000-4000-8000-000000000b90'
+FROM generate_series(1, 700) AS g;
+
 SELECT cmp_ok((SELECT count(*) FROM claimius.access_diff WHERE app_id = pg_temp.app()),
     '>', (SELECT current_setting('max_locks_per_transaction')::BIGINT * current_setting('max_connections')::BIGINT),
     'more areas are open than the lock table holds on default settings, the revoke the newest of them');
 
 SELECT lives_ok($$CREATE TEMP TABLE listed AS
         SELECT object_id FROM claimius.get_objects('a0000000-0000-4000-8000-000000000b91', pg_temp.app(), 'claimius.organization')$$,
-    'the reader lists with every area open and no out of shared memory');
+    'the reader lists with every area open and 700 new pairs to move, and no out of shared memory');
 
 SELECT cmp_ok((SELECT count(*) FROM pg_locks WHERE pid = pg_backend_pid() AND locktype = 'advisory'),
-    '<=', (claimius._object_lock_budget() + 16)::BIGINT,
-    'the reader holds no more advisory locks than the budget');
+    '<=', 16::BIGINT,
+    'the reader holds its share lock and the root locks of the writes before it, no lock per object');
 
 SELECT is_empty($$SELECT 1 FROM listed WHERE object_id = '10000000-0000-4000-8000-000000000b9f'$$,
     'the listing never returns the vault the revoke behind thousands of open areas took away');
+
+SELECT is((SELECT count(*) FROM listed l JOIN claimius.organization o ON o.id = l.object_id WHERE o.name LIKE 'Budget child %'), 700::BIGINT,
+    'the one listing returns every one of the 700 organizations it gained, past what a budget of 512 would move');
 
 SELECT is(pg_temp.unsettled('a0000000-0000-4000-8000-000000000b91'), 0::BIGINT,
     'one listing settles the reader''s share of every open area of the type it lists');
@@ -140,20 +148,23 @@ SELECT pg_temp.list('a0000000-0000-4000-8000-000000000b92');
 SELECT is(pg_temp.unsettled('a0000000-0000-4000-8000-000000000b92'), 0::BIGINT,
     'once the other session lets go the share settles, all of it');
 
-SELECT is_empty($$
-    SELECT a.user_id, b.user_id, count(DISTINCT a.object_id)
+SELECT set_eq($$
+    SELECT a.user_id AS viewer_id, b.user_id AS target_user_id, count(DISTINCT a.object_id) AS sharing
     FROM claimius.user_object a
         JOIN claimius.user_object b
             ON b.app_id = a.app_id AND b.object_type = a.object_type AND b.object_id = a.object_id AND b.user_id <> a.user_id
     WHERE a.app_id = pg_temp.app() AND a.object_type <> 'claimius.claim'
     GROUP BY a.user_id, b.user_id
-    EXCEPT
-    SELECT viewer_id, target_user_id, sharing_object_count::BIGINT FROM claimius.user_users WHERE app_id = pg_temp.app()
-$$, 'the shared object counts of the two readers match their pairs');
+$$, $$
+    SELECT s.user_id, v.target_user_id, v.sharing_object_count::BIGINT
+    FROM claimius.samna_user s
+        CROSS JOIN LATERAL claimius._user_users_for_viewer(pg_temp.app(), s.user_id) v
+    WHERE s.app_id = pg_temp.app()
+$$, 'the shared object counts the two readers read match their pairs');
 
 SELECT cmp_ok((SELECT count(*) FROM pg_locks WHERE pid = pg_backend_pid() AND locktype = 'advisory'),
-    '<=', (claimius._object_lock_budget() + 16)::BIGINT,
-    'every listing over thousands of open areas still holds no more than the budget');
+    '<=', 16::BIGINT,
+    'every listing over thousands of open areas still holds no lock per object');
 
 SELECT * FROM finish();
 ROLLBACK;

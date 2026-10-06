@@ -1,14 +1,16 @@
 ---
 layout: doc
 title: Materialization
-description: The per pair access index user_object, the recompute every settle is made of with its read and write counts, how a write raises an area in access_diff, how a check settles one pair and a listing the reader's own share under a bounded number of locks, when an area clears, and the drain rule that settles shares ahead of reads.
-tags: user_object, object_info, access_diff, access_diff_user, user_activity, recompute_user_object, reconcile_if_pending, _object_lock_budget, _lock_objects, _settle_diff_share, _settle_object_diff, _settle_claim_diff, _diff_holders, _clear_diff, drain_access_diff, raise_count, reconcile_queue
+description: The per pair access index user_object, the recompute every settle is made of with its read and write counts, how a write raises an area in access_diff, how a check settles one pair and a listing the reader's whole share under one lock, how a pair entering or leaving raises a user_users_diff row that the reads of user_users fold, when an area clears, and the drain rule that settles shares ahead of reads.
+tags: user_object, object_info, access_diff, access_diff_user, user_users_diff, user_activity, recompute_user_object, reconcile_if_pending, _settle_diff_share, _settle_object_diff, _settle_claim_diff, _settle_user_users_diff, _diff_holders, _clear_diff, drain_access_diff, raise_count, reconcile_queue
 lastUpdated: true
 ---
 
 # Materialization
 
 Claimius stores the access relation `A` of [the model](./index.md#the-access-of-a-pair) per pair in `user_object`, so a check reads one pair and a listing one index range. A write does not settle the users it affects. It settles its own actor on the rows it names and records what changed as one area row; each user then settles its own part of the area when it reads, a check the one pair it asks about, a listing its share of the areas it needs. Why recomputing an area is exact is shown in [the model](./index.md#why-the-view-is-maintained-exactly), and why settling per pair and per reader returns current pairs in [Why a settle returns current pairs](#why-a-settle-returns-current-pairs).
+
+The same holds one level up. A pair that enters or leaves `user_object` does not count itself into `user_users`; it raises one `user_users_diff` row, and the reads that show who sees whom fold the rows they need when they read; see [The user_users fold](#the-user-users-fold). So every derived table claimius keeps is maintained the same way: a write records what changed with no lock and no fan out, and a read pays for the part it needs.
 
 ## The tables
 
@@ -18,6 +20,8 @@ Claimius stores the access relation `A` of [the model](./index.md#the-access-of-
 | `object_info` | live registered object | owner, location, root, `sa_name`, `sa_description`, `sa_link`, and `search_vector` generated from name and description | primary key `(object_type, object_id)`; `(sa_owner_id, sa_name, object_id)`; `(sa_location_id, sa_name, object_id)`; GIN on `search_vector` |
 | `access_diff` | open area | `kind` (`object` or `claim`), the object or the claim, `user_id` for an assignment, `cascade`, `raise_count`, `sa_created_at` | primary key; `(app_id, object_type, object_id) WHERE kind = 'object'`; `(app_id, claim_id) WHERE kind = 'claim'`; `(app_id, user_id) WHERE kind = 'claim' AND user_id IS NOT NULL` |
 | `access_diff_user` | area and user that settled its share | the `raise_count` settled at | primary key `(diff_id, user_id)`, removed with its area |
+| `user_users_diff` | pair that entered or left `user_object` on an object that is not a claim, not yet folded into `user_users` | `user_id`, the object, `delta` of `+1` or `−1` | primary key `(app_id, object_type, object_id, id)`; `(app_id, user_id)` |
+| `usage_diff` | counted use a flush recorded on a pair, not yet folded into the pair | `used_count`, `used_at` | primary key `(app_id, user_id, id)` |
 | `user_activity` | user and app that used it | `last_used_at` | primary key `(user_id, app_id)` |
 | `reconcile_queue` | app, user and object | a pair waiting for its user's next read | primary key; `(app_id, user_id)` |
 
@@ -25,11 +29,11 @@ A disciple carries the same tables without `app_id`, keyed `(user_id, object_typ
 
 `grants` is the array of the surviving derivations of the pair, each `{claim_id, access, scope, cascaded_from, composed_from, tree_type}`, the pair's why provenance from which a read picks its actor token. `scope` holds the field masks of [Redaction](./redaction.md). The per object fields live once in `object_info`, so a pair holds only what is per user. None of these tables is written by application code: access changes by changing grants and bindings.
 
-`user_object` is stored with `fillfactor = 90`, which leaves room on each page for an update that changes only `grants`, `scope` or `direct_grant` to stay on its page as a heap only tuple and write no index entry; an update of `sa_access`, which the primary key includes, writes both entries again ([PostgreSQL, Heap Only Tuples](https://www.postgresql.org/docs/17/storage-hot.html)). `user_object` and `access_diff` run autovacuum at a scale factor of 0.02 instead of 0.2, because both turn over a small part of their rows on every settle.
+`user_object` is stored with `fillfactor = 90`, which leaves room on each page for an update that changes only `grants`, `scope` or `direct_grant` to stay on its page as a heap only tuple and write no index entry; an update of `sa_access`, which the primary key includes, writes both entries again ([PostgreSQL, Heap Only Tuples](https://www.postgresql.org/docs/17/storage-hot.html)). `user_object`, `access_diff` and `user_users_diff` run autovacuum at a scale factor of 0.02 instead of 0.2, because all three turn over a small part of their rows on every settle.
 
 ## Recomputing a share
 
-`recompute_user_object(app, u, τ, S)` recomputes the pairs of one user on a set `S` of objects of one type in one pass of set based statements. Every settle is made of calls to it, one per type of a share. It takes the per object advisory locks of `S` sorted by key, `_lock_objects`, unless the caller already holds them, then:
+`recompute_user_object(app, u, τ, S)` recomputes the pairs of one user on a set `S` of objects of one type in one pass of set based statements. Every settle is made of calls to it, one per type of a share. It takes no lock of its own beyond the rows it writes, which are the user's own pairs:
 
 | Step | Reads | Entries |
 |---|---|---|
@@ -50,7 +54,7 @@ with `t_x ≤ 3` the trees holding `x`. The descents that find nothing are count
 
 ### What a changed pair writes
 
-The pairs of `S` that no derivation and no creation reaches, or whose object is gone, are deleted; the others are upserted with `ON CONFLICT ... DO UPDATE ... WHERE ... IS DISTINCT FROM`, so a pair whose every column is unchanged writes nothing and fires no trigger.
+The pairs of `S` that no derivation and no creation reaches, or whose object is gone, are deleted; the others are compared with the stored pair first and only the ones that differ are upserted, so a pair whose every column is unchanged writes nothing, fires no trigger and takes no lock. An `ON CONFLICT ... DO UPDATE ... WHERE` alone would lock every pair it meets even where the `WHERE` leaves it as it is ([PostgreSQL, INSERT, ON CONFLICT](https://www.postgresql.org/docs/17/sql-insert.html#SQL-ON-CONFLICT)), so a check that re-settled an unchanged pair, or a listing over thousands of them, held every one of those rows until it committed.
 
 | Change | Rows | Index entries |
 |---|---|---|
@@ -58,10 +62,10 @@ The pairs of `S` that no derivation and no creation reaches, or whose object is 
 | A pair updated in `sa_access` | 1 row version | 2 |
 | A pair updated in `grants`, `scope` or `direct_grant` only | 1 row version | 0 when it stays on its page |
 | A pair on an object with no `object_info` row yet | 1 `object_info` row, `ON CONFLICT DO NOTHING` | 3 btree entries and one GIN entry per lexeme |
-| A pair inserted or deleted on `x`, not a claim | up to `2 (U_x − 1)` `user_users` rows, from `U_x` entries read | 3 per row written |
+| A pair inserted or deleted on `x`, not a claim | 1 `user_users_diff` row, nothing read | 2 |
 | Any pair written | one delete probe of `claim_graph_cache` for its user | 0 or 1 row |
 
-The `user_users` counting is a statement trigger over the pairs of the statement; see [Users](./users.md#why-the-count-is-exact). Before `d4c71ff` a settled pair wrote 19 index entries, one per index of the per object columns and the GIN postings of `grants` and the search vector; it now writes 2.
+The `user_users_diff` row is written by a statement trigger over the pairs of the statement, one row per pair, with no lock and no read of the other users of `x`; see [Users](./users.md#why-the-count-is-exact). Before it, the trigger counted `user_users` in place, read the `U_x` users of every object and held a per object advisory lock until commit. Before `d4c71ff` a settled pair wrote 19 index entries, one per index of the per object columns and the GIN postings of `grants` and the search vector; it now writes 2.
 
 ## Writes raise areas
 
@@ -94,48 +98,47 @@ Nothing is recorded in `access_diff_user`: the rest of the reader's share is sti
 
 ## A listing settles the reader's share
 
-Every listing, search and graph begins with `reconcile_if_pending(app, u)`, and `get_objects`, `get_organizations` and `get_locations` pass the type they list, `reconcile_if_pending(app, u, τ)`. It first takes the transaction advisory lock of the reader's whole share, one key per app and user, with `pg_try_advisory_xact_lock`; a read that finds it held by another read of the same user settles nothing and reads the pairs as they stand. Holding it, it reads the app's open areas `Δ_a` the read needs: with `τ` the `object` areas on an object of type `τ` or with `cascade` on an ancestor of an object of type `τ`, one closure probe per such area, and without `τ` every `object` area; then every `claim` area with `user_id = u`, and every other `claim` area of a claim `u` holds or links to. Each is tested against `access_diff_user` at its `raise_count`, and every one open is taken, oldest first by `sa_created_at`, `FOR KEY SHARE SKIP LOCKED`, however many there are. It hands them to `_settle_diff_share` in batches of `_object_lock_budget() / 4 = 128` and settles them until the pairs it moves reach the lock budget; the areas past it stay open for the next read, see [The lock budget](#the-lock-budget):
+Every listing, search and graph begins with `reconcile_if_pending(app, u)`, and `get_objects`, `get_organizations` and `get_locations` pass the type they list, `reconcile_if_pending(app, u, τ)`. It first takes the transaction advisory lock of the reader's whole share, one key per app and user, with `pg_try_advisory_xact_lock`; a read that finds it held by another read of the same user settles nothing and reads the pairs as they stand. Holding it, it reads the app's open areas `Δ_a` the read needs: with `τ` the `object` areas on an object of type `τ` or with `cascade` on an ancestor of an object of type `τ`, one closure probe per such area, and without `τ` every `object` area; then every `claim` area with `user_id = u`, and every other `claim` area of a claim `u` holds or links to. Each is tested against `access_diff_user` at its `raise_count`, and every one open is taken, oldest first by `sa_created_at`, `FOR KEY SHARE SKIP LOCKED`, however many there are, and handed to `_settle_diff_share` in batches of 128, every batch settled:
 
 1. It takes the areas of the batch `FOR KEY SHARE SKIP LOCKED`, which a writer raising an area again does not wait on, and the share lock of the reader, which the read already holds, so two reads of one user never settle at once and a share lock is one lock however many areas are settled under it; an area held by another settle is skipped and read as it stands.
 
-2. It settles every object area of the batch in one `_settle_object_diff`, set based: one `recompute_user_object` per object type for the batch, which locks only the objects whose pair leaves or enters. Each claim area settles in its own `_settle_claim_diff`.
+2. It settles every object area of the batch in one `_settle_object_diff`, set based: one `recompute_user_object` per object type for the batch. Each claim area settles in its own `_settle_claim_diff`.
 
 3. It records `(area, u, raise_count)` in `access_diff_user` for every area of the batch in one statement.
 
 4. It calls `_clear_diff` once for the batch, which deletes the areas every user of `_diff_holders` has a record for at the current `raise_count`, under `FOR UPDATE SKIP LOCKED`, the raise count compared on the row it locks, so a raise between the test and the delete keeps the row. `_diff_holders` takes the batch and reads the creators of its objects once per object type.
 
-5. A batch that waits on a lock past `_settle_lock_timeout()` or fails otherwise is settled again one area at a time, so an area that cannot settle leaves the others settled; that area stays open and the read goes on. A batch whose recompute stopped at the lock budget keeps the pairs it moved and records none of its areas, which stay open, and the read settles nothing more.
+5. A batch that waits on a lock past `_settle_lock_timeout()` or fails otherwise is settled again one area at a time, so an area that cannot settle leaves the others settled; that area stays open and the read goes on.
 
-The fixed cost of a recompute, its plan and its walk of the reader's claims, is paid once per object type and batch instead of once per area, and the walk to inherited grants starts at the objects recomputed and reaches their ancestors through the descendant index, so it costs the objects of the batch and not the size of the tree above them. Measured on one reader with one claim bound on a root over 16,000 new child organizations, 16,003 open areas: the first listing took about 2 minutes settling one area at a time, and 3.8 seconds in 126 batches while a read could still take the covering lock; each listing now moves at most 512 of those 16,000 pairs and leaves the rest open for the reads after it.
+The fixed cost of a recompute, its plan and its walk of the reader's claims, is paid once per object type and batch instead of once per area, and the walk to inherited grants starts at the objects recomputed and reaches their ancestors through the descendant index, so it costs the objects of the batch and not the size of the tree above them. Measured on one reader with one claim bound on a root over 16,000 new child organizations, 16,007 open areas: the first listing took about 2 minutes settling one area at a time, and 3.8 seconds in 126 batches while one read could still take every object at once. At `v2.0.0-alpha0023`, where a read stopped at 512 moved pairs, it took 32 listings, 14.5 seconds in all, the first returning 513 of the 16,001 organizations the reader reaches; one listing now returns all 16,001 in 8.1 seconds right after the inserts and in 1.9 seconds once autovacuum has analyzed the tables, against 32 listings and 7.0 seconds at `v2.0.0-alpha0023` on the same warm tables.
 
 It then recomputes every `reconcile_queue` row of the reader. Nothing in the current sets writes to `reconcile_queue`; rows it holds drain on their user's next read.
 
-### The lock budget
+### Locks a settle takes
 
-Every advisory lock a transaction holds is an entry in the server's shared lock table, which holds `max_locks_per_transaction × max_connections` entries for every transaction together. A read whose open areas reach thousands of objects would take thousands of entries from one connection if it locked every object of its share, and a table that runs out fails every transaction on the server, not only that one. `_object_lock_budget()`, 512, bounds it, and no read ever holds the lock every writer shares exclusive:
+A settle takes one advisory lock, the reader's share lock, and row locks on rows of its own, and never a lock per object. Every advisory lock a transaction holds is an entry in the server's shared lock table of `max_locks_per_transaction × max_connections` entries, which a transaction that ran out of it would fail for every session on the server; a row lock is a mark in the row's own header and takes no entry, however many rows one transaction locks ([PostgreSQL, Row-Level Locks](https://www.postgresql.org/docs/17/explicit-locking.html#LOCKING-ROWS)).
 
-1. A read holds one share lock, whatever number of areas it settles.
+| A settle | Takes | Held until | A writer waits on it |
+|---|---|---|---|
+| The reader's share | one advisory lock per app and user, tried, never waited for | the read's commit | never: no write takes it |
+| The areas it settles | `FOR KEY SHARE SKIP LOCKED` on each | the read's commit | never: a raise takes `FOR NO KEY UPDATE`, which does not conflict |
+| The pairs it writes | the row locks of the reader's own pairs that changed, none for a pair it leaves as it was | the read's commit | only a write acting as the same user on a pair the read changed |
+| Its `access_diff_user` records | row locks on the reader's own records | the read's commit | never: no write touches them |
+| An area it clears | the delete of the area row | the read's commit | a raise of that same area waits for the read to end |
+| The `user_users_diff` rows it folds | `FOR UPDATE SKIP LOCKED` and their delete | the read's commit | never: a write only inserts new ones |
+| The `user_users` rows it moves | the row locks of those rows | the read's commit | never: no write touches `user_users` |
+| The `usage_diff` rows of the reader | `FOR UPDATE SKIP LOCKED` and their delete, and the reader's pairs they move | the read's commit | never: a flush only inserts new ones |
 
-2. A settle locks only the objects whose pair it moves. `recompute_user_object` reads the pairs that leave and the pairs that enter before its first write; a pair whose access changes in place moves no count and takes no lock, and an area whose share moves no pair takes none. So an area on an object the reader holds nothing on, or on an object that is gone, costs no lock however many such areas are open: the 7,000 open areas of the `lock_budget` suite settle in one listing with one object lock, for the one pair the revoke among them takes away.
+So the shared lock table holds one entry per reading transaction and at most 64 per drain, whatever the size of the share; a writer meets a read only on a pair of its own user or on an area the read just cleared; and nothing a read does depends on how many pairs it moves. The per object advisory locks, the 512 lock budget, the lock every object shared and the read that stopped at the budget existed only so that `user_users` could be counted inside the write that moved a pair, which needed every other holder of the object at that moment; with the count folded on read nothing needs them, and they are gone. Every row lock a settle waits for is bounded by `_settle_lock_timeout()`, a twentieth of `deadlock_timeout`: a unit that waits longer is given up and stays open.
 
-3. `_lock_objects` counts the per object locks the transaction holds in `claimius.object_locks`. The first call of a transaction takes the covering lock every per object locker holds shared, `hashtext('claimius._lock_objects')`. A writer whose call would carry the count past 512 takes the covering lock exclusive instead, one lock standing for every object, and every later call in the transaction returns at once. A writer holding no per object lock waits for it; one holding some only tries, item 5.
-
-4. A read's settle runs under `claimius.settling`, which `reconcile_if_pending` and `drain_access_diff` set for their own span, and never takes the covering lock exclusive. Inside it `recompute_user_object` takes no lock itself and the counting trigger takes the locks of the pairs each statement moves, sorted. When the pairs a recompute would move carry the count past 512, it moves the leaving pairs first and the entering ones after up to the budget, leaves the rest as they stand and marks the budget spent. The batch then records none of its areas, so they stay open, and the read settles nothing more. The next read moves the next 512, since a pair already moved is no longer a change, so an area too large for one read is settled over several. A call of `_lock_objects` that would still cross inside a settle is refused with `program_limit_exceeded` and the unit is given up like a lock past the timeout. A writer therefore waits on a read only for an object whose pair the read moved, never for the read as a whole.
-
-5. Taking the covering lock exclusive while holding it shared is an upgrade, and waiting for it deadlocks with a writer that holds it shared and waits on one of the per object locks held: each waits on the other. So a writer that already holds per object locks never waits for it. It tries, `pg_try_advisory_xact_lock`, which succeeds when no other transaction holds the covering lock, since a transaction never conflicts with its own locks; when another does, it goes on one lock per object past 512. The overshoot is the objects of the write that crossed and those after it, paid only when a crossing meets a concurrent locker.
-
-6. Exclusion is kept past the budget. A writer over it holds the covering lock exclusive, which conflicts with the shared one every per object locker holds, so it excludes every settle at once where it would have excluded its objects one by one. A read never goes over it: a pair it leaves as it stands is moved by a later transaction under that transaction's own locks, so the count of `user_users` stays exact.
-
-Until the next read, a listing that stopped at the budget reads the pairs it did not move as they stand, the same yield as a settle that gives up a lock past `_settle_lock_timeout()`: an object the reader just gained can be missing, and a pair it lost can still be listed when more than 512 pairs leave in one read. The leaving pairs of each recompute go before its entering ones, so a revoke among any number of open areas that move few pairs is settled before the listing reads. A check settles its one pair and is exact.
-
-Measured in the `listing_writer` suite, a writer beside a reader still in its transaction, one with 600 open areas that move nothing and one with 700 new pairs, waited behind the covering lock until its `lock_timeout` ran out before, so for the whole of the reader's transaction, and completes in under 100 ms now; the reader of 700 pairs moves them over two reads.
+Measured in the `listing_writer` suite, a writer beside a reader still in its transaction, one with 600 open areas that move nothing and one with 700 new pairs: the writer waited for the whole of the reader's transaction behind the lock every object shared at `v2.0.0-alpha0022`, completed in 2 to 3 ms at `v2.0.0-alpha0023`, while the reader of 700 pairs needed two reads, and completes in 2 to 3 ms now, while the reader settles all 700 in its one read. A usage flush on a pair the reader holds waited 3,005 ms for the reader at `v2.0.0-alpha0023` and takes 3 ms now; see [Usage](./usage.md).
 
 With `A_u` the reader's open areas that a read needs and `M_u` the pairs they move:
 
 ```
-share locks     = 1
-areas settled   = A_u, oldest first, until the pairs moved reach 512
-object locks    = min(M_u, 512), leaving pairs first within each recompute; never the covering lock
+advisory locks  = 1
+areas settled   = A_u, every one, oldest first, in ⌈A_u / 128⌉ batches
+row locks       = the M_u pairs of the reader, its records, and the user_users_diff and user_users rows of the objects it folds
 ```
 
 ### The share of an area
@@ -180,7 +183,7 @@ A check that settles only the pair it asks about, when an open area covers that 
 
 2. A listing of type `τ` settles, through `_settle_diff_share`, the reader's share of every open object area that can hold a pair of type `τ`, one on an object of type `τ` or one with `cascade` over a descendant of type `τ`, a listing without a type every open object area, and every claim area of a claim the reader holds, links to or was assigned, and records it at `raise_count`. An object area of another type without such a descendant has a support with no pair of type `τ`, so leaving it open leaves no pair the listing returns stale. A later raise increments `raise_count`, which makes the record stale and the share open again.
 
-3. A listing settles every area it needs, however many are open, so a revoke among thousands of open areas is settled before the listing reads its pairs and the listing never returns an object the reader no longer reaches. The one exception is a read that finds the reader's share lock held by another read of the same user: it settles none and reads the pairs as they stand, which the other read is bringing current. The other is a settle that waits on a lock longer than `_settle_lock_timeout()`, a twentieth of `deadlock_timeout`: it gives up that area, which stays open, and the listing reads its pairs as they stand. A writer holding one of the area's objects commits within its own transaction, and the next read settles the area.
+3. A listing settles every area it needs, however many are open and however many pairs they move, in one read, so a revoke among thousands of open areas is settled before the listing reads its pairs and the listing never returns an object the reader no longer reaches. Nothing in a settle depends on the number of pairs it moves: it takes no lock per object, and the row locks it takes are marks in the rows themselves, see [Locks a settle takes](#locks-a-settle-takes). The one exception is a read that finds the reader's share lock held by another read of the same user: it settles none and reads the pairs as they stand, which the other read is bringing current. The other is a settle that waits on a row longer than `_settle_lock_timeout()`, a twentieth of `deadlock_timeout`, which only a transaction writing one of the reader's own pairs can make it do: it gives up that area, which stays open, and the listing reads its pairs as they stand. That transaction commits within its own span, and the next read settles the area.
 
 4. The share of an area is the slice of the change's support that can hold a pair of `u`, as defined above, with bindings changed since the area opened counted too, so settling it leaves every pair of `u` in the area current.
 
@@ -190,6 +193,28 @@ A check that settles only the pair it asks about, when an open area covers that 
 
 **Sources.** Deferred, per query maintenance of materialized views: R. Chirkova and J. Yang, [Materialized Views](https://dsf.berkeley.edu/cs286/papers/mv-fntdb2012.pdf), Foundations and Trends in Databases 2012, on lazy and deferred maintenance.
 
+## The user_users fold
+
+`user_users` counts, for two users of one app, the objects that are not claims they both hold a pair on; see [Users](./users.md#who-can-see-whom). It is derived from `user_object` the way `user_object` is derived from the grants, and it is kept the same way: the write records what changed, and the read that needs the count settles it.
+
+1. A pair that enters or leaves `user_object` on an object that is not a claim raises one `user_users_diff` row, `(app, object, user, +1)` or `−1`. `tg_raise_user_users_diff_insert` and `tg_raise_user_users_diff_delete` are statement triggers that write the rows of the whole statement in one insert, from the transition table of the pairs it inserted or deleted. Nothing else is read and nothing is locked, under `replay_mode` as everywhere, so the bulk seed and a rebuild raise their rows like any write.
+
+2. `_settle_user_users_diff(app, u)` folds the rows a read of `u` needs: those of every object `u` holds a pair on or has a row of its own on. It reads every row of those objects in one statement, takes them `FOR UPDATE SKIP LOCKED`, and folds an object only when it took every row of it the statement sees; an object with a row held by another fold stays for the next read. For each object folded it reads the users holding a pair on it, the users holding it before the rows are those less the rows' sum, and every ordered pair of users of which at least one moved changes by `now(a) now(b) − before(a) before(b)`, summed over the objects of the statement. The same statement deletes the rows it folded; the next adds the sums to `user_users` in key order and the last deletes the rows that reached zero. It waits on no writer: a write never touches a row it takes or a `user_users` row. A `user_users` row held by another fold is waited on for at most `_settle_lock_timeout()`, past which the whole fold is given up and its rows stay.
+
+3. `_user_users_for_viewer(app, u)` answers the count of every user `u` sees as the statement's snapshot holds it: the stored `user_users` range of `u`, plus, for every object with a row still pending that `u` holds or moved on, the same `now(a) now(b) − before(a) before(b)` read from the pending rows. A fold that was given up, a row of a running transaction or of the reader's own, all count, so the answer equals a count taken with every pair committed at that snapshot whatever the folds do.
+
+4. `get_users`, `get_user_access`, `get_claim_graph` and `get_graph_links_claim`, after `reconcile_if_pending`, fold the reader's rows and read through `_user_users_for_viewer`. `get_claim_graph` serves its cache only when the fold left none of the reader's rows pending, since a pending row changes the users the graph shows without a `user_users` row moving.
+
+5. `drain_access_diff` folds the oldest objects of every app after its shares, at most `p_limit_pairs` of them. On a prophet it folds every app's rows, since derived rows never travel and no other database holds them; a disciple folds the rows of its own pairs, which it derives from the feed like any of its pairs.
+
+| Step | Reads | Writes |
+|---|---|---|
+| A pair entering or leaving | nothing | 1 `user_users_diff` row, 2 entries |
+| A fold of object `x` with `m_x` rows | the `m_x` rows and the `U_x` users of `x` | at most `2 m_x (U_x − 1)` `user_users` rows, 3 entries each, and `m_x` deletes |
+| A read of `u` with `T_u` objects pending | the `S_u` stored rows and `Σ_{x ∈ T_u} (m_x + U_x)` | nothing |
+
+The work of a pair is the same `U_x` it was when the trigger counted it, paid once by the first read or drain that folds it instead of inside the write, and a pair that enters and leaves before anyone folds it costs two rows and no count. The fold and the read aggregate per object and pair the users of an object from one array per object, never by joining two derived sets, because PostgreSQL estimates a scan of a common table expression from the expression and a join of two of them then runs as a nested loop: written that way, folding the 48,012 rows of one reader over 48,000 organizations took 274 seconds, and it takes 0.67 seconds as it stands, the read of the same rows pending 0.28 seconds. Why the fold is exact under any number of concurrent writers and folds, with no lock per object, is shown in [Users](./users.md#why-the-count-is-exact).
+
 ## The drain
 
 `drain_access_diff(p_limit_pairs)` settles shares ahead of their reads, outside any request, under the drain rule: holder `j` of area `a` is taken when its read rate is at least the area's raise rate,
@@ -198,7 +223,7 @@ A check that settles only the pair it asks about, when an open area covers that 
 r̂_j = 1 / (now − user_activity.last_used_at)      λ̂_a = raise_count / (now − access_diff.sa_created_at)      take when r̂_j ≥ λ̂_a
 ```
 
-tested as `now − sa_created_at ≥ raise_count × (now − last_used_at)`. A holder with no `user_activity` row is never drained. Shares are taken most recently active user first, at most `p_limit_pairs` of them, each through `_settle_diff_share`, so a share a read is settling at the same moment is skipped. A drain holds the share locks of at most 64 users, and once it holds 64 it takes only further shares of those users. It stops once its per object locks reach half of `_object_lock_budget()`, 256, which leaves the next share half the budget before a crossing; the rest waits for the next drain. So one drain holds at most 64 share locks and, like a read, at most 512 per object locks. On a prophet it drains only the areas of its own system app and of apps with no consumer in `sync_consumer` in contact for 7 days; the areas of an app a disciple serves are drained on that disciple, so each settle is paid once. A disciple drains every area it holds. It returns the shares settled.
+tested as `now − sa_created_at ≥ raise_count × (now − last_used_at)`. A holder with no `user_activity` row is never drained. Shares are taken most recently active user first, at most `p_limit_pairs` of them, each through `_settle_diff_share`, so a share a read is settling at the same moment is skipped. A drain holds the share locks of at most 64 users, and once it holds 64 it takes only further shares of those users, so one drain holds at most 64 entries of the shared lock table, whatever the shares move. On a prophet it drains only the areas of its own system app and of apps with no consumer in `sync_consumer` in contact for 7 days; the areas of an app a disciple serves are drained on that disciple, so each settle is paid once. A disciple drains every area it holds. It then folds the `user_users_diff` rows of the oldest `p_limit_pairs` objects, of every app; see [The user_users fold](#the-user-users-fold). It returns the shares settled.
 
 ### Why the drain rule
 
@@ -214,4 +239,4 @@ Below that most of the drain's work is thrown away, and the holder pays the same
 
 ## Rebuilding
 
-`recompute_user_object` can be called to force a set of pairs. `rebuild_user_object` empties `user_object`, recomputes the pair of every holder on every object a live binding names directly, one recompute per distinct `(app, user, bound object)`, and rebuilds every user's `user_users` rows with `_refresh_user_users`. Descendants reached only through a cascade fill on the next settle that covers them.
+`recompute_user_object` can be called to force a set of pairs. `rebuild_user_object` empties `user_object`, `user_users_diff` and `user_users` together, so whatever drift `user_users` carried is gone and the empty pairs, rows and counts agree, recomputes the pair of every holder on every object a live binding names directly, one recompute per distinct `(app, user, bound object)`, each raising its `user_users_diff` row, and folds every row. Descendants reached only through a cascade fill on the next settle that covers them.

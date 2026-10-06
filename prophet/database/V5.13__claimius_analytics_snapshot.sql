@@ -1,23 +1,15 @@
--- ============================================================================
--- Claimius V5.13 Analytics snapshot
--- ----------------------------------------------------------------------------
--- The picture a heat map is drawn over is a serialised copy of the document,
--- not a raster. The browser walks its own DOM once, masks the text and the
--- inputs, and posts the tree as JSON; the reader rebuilds it in a sandboxed
--- frame at whatever width the heat was captured at. A raster had to be taken
--- once per viewport width and cost the visitor a canvas render of the whole
--- page, so the table loses its width and the rows it held are gone with it.
---
--- One row per app and path. A later snapshot replaces the one it matches.
--- ============================================================================
-
-DELETE FROM claimius.analytics_capture;
-
-ALTER TABLE claimius.analytics_capture DROP CONSTRAINT IF EXISTS analytics_capture_app_id_path_viewport_width_key;
-ALTER TABLE claimius.analytics_capture DROP COLUMN IF EXISTS viewport_width;
-ALTER TABLE claimius.analytics_capture DROP COLUMN IF EXISTS page_height;
-ALTER TABLE claimius.analytics_capture RENAME COLUMN image TO body;
-ALTER TABLE claimius.analytics_capture ADD CONSTRAINT analytics_capture_app_id_path_key UNIQUE (app_id, path);
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM information_schema.columns
+               WHERE table_schema = 'claimius' AND table_name = 'analytics_capture' AND column_name = 'image') THEN
+        DELETE FROM claimius.analytics_capture;
+        ALTER TABLE claimius.analytics_capture DROP CONSTRAINT IF EXISTS analytics_capture_app_id_path_viewport_width_key;
+        ALTER TABLE claimius.analytics_capture DROP COLUMN IF EXISTS viewport_width;
+        ALTER TABLE claimius.analytics_capture DROP COLUMN IF EXISTS page_height;
+        ALTER TABLE claimius.analytics_capture RENAME COLUMN image TO body;
+        ALTER TABLE claimius.analytics_capture ADD CONSTRAINT analytics_capture_app_id_path_key UNIQUE (app_id, path);
+    END IF;
+END $$;
 
 COMMENT ON TABLE claimius.analytics_capture IS 'A serialised copy of a page as the browser held it, one per app and path.';
 COMMENT ON COLUMN claimius.analytics_capture.body IS 'The document tree as posted, masked. content_type says what it is.';
@@ -25,23 +17,6 @@ COMMENT ON COLUMN claimius.analytics_capture.body IS 'The document tree as poste
 DROP FUNCTION IF EXISTS claimius.post_analytics_capture(UUID, TEXT, INTEGER, INTEGER, TEXT, BYTEA);
 DROP FUNCTION IF EXISTS claimius.get_analytics_capture(UUID, TEXT, INTEGER);
 DROP FUNCTION IF EXISTS claimius.analytics_capture_due(UUID, TEXT, INTEGER, INTERVAL);
-
-CREATE OR REPLACE FUNCTION claimius.post_analytics_capture(
-    p_app_id       UUID,
-    p_path         TEXT,
-    p_content_type TEXT,
-    p_body         BYTEA
-) RETURNS claimius.analytics_capture AS $$
-    INSERT INTO claimius.analytics_capture (app_id, path, content_type, body)
-    VALUES (p_app_id, p_path, p_content_type, p_body)
-    ON CONFLICT (app_id, path) DO UPDATE SET
-        content_type = EXCLUDED.content_type,
-        body         = EXCLUDED.body,
-        captured_at  = now()
-    RETURNING *;
-$$ LANGUAGE sql;
-
-COMMENT ON FUNCTION claimius.post_analytics_capture(UUID, TEXT, TEXT, BYTEA) IS 'Stores the snapshot of a page, replacing the one held for the same app and path.';
 
 CREATE OR REPLACE FUNCTION claimius.get_analytics_capture(
     p_app_id UUID,
@@ -67,14 +42,6 @@ CREATE OR REPLACE FUNCTION claimius.get_analytics_captured(
 $$ LANGUAGE sql STABLE;
 
 COMMENT ON FUNCTION claimius.get_analytics_captured(UUID, INTERVAL) IS 'The paths an app holds a fresh snapshot for. The consent answer carries the list so a browser knows which pages need no capture without asking per view.';
-
--- ----------------------------------------------------------------------------
--- Summary
--- ----------------------------------------------------------------------------
--- What a reader needs before choosing a page: who visited, which paths were
--- touched and at what width, and which signal kinds exist. Folded heat rows
--- are the pointer field and are not interactions, so they are left out.
--- ----------------------------------------------------------------------------
 
 CREATE OR REPLACE FUNCTION claimius.get_analytics_summary(
     p_user_id      UUID,
@@ -167,7 +134,6 @@ $$ LANGUAGE sql STABLE;
 
 COMMENT ON FUNCTION claimius.get_analytics_summary(UUID, UUID, TIMESTAMPTZ, TIMESTAMPTZ) IS 'Who visited a producer app, which paths they touched and at what width, and which signal kinds exist, for one reader, scoped exactly like get_analytics_events.';
 
-GRANT EXECUTE ON FUNCTION claimius.post_analytics_capture(UUID, TEXT, TEXT, BYTEA) TO claimius_writer;
 GRANT EXECUTE ON FUNCTION claimius.get_analytics_capture(UUID, TEXT) TO claimius_writer;
 GRANT EXECUTE ON FUNCTION claimius.get_analytics_capture(UUID, TEXT) TO claimius_reader;
 GRANT EXECUTE ON FUNCTION claimius.get_analytics_captured(UUID, INTERVAL) TO claimius_writer;

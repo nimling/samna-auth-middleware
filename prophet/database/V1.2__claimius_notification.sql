@@ -1,13 +1,3 @@
--- ============================================================================
--- Claimius V1.2 Notification
--- ----------------------------------------------------------------------------
--- Per user notification records. One row per recipient. notify_object fans a
--- notification out to every user with access to an object through the
--- user_object pairs read by object. notify_user writes straight to named users.
--- An insert wakes the live layer through pg_notify on the claimius_notification
--- channel. The functions and triggers live in V2.4 and V3.0.
--- ============================================================================
-
 CREATE TABLE IF NOT EXISTS claimius.notification (
                                                      id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
                                                      app_id          UUID NOT NULL REFERENCES claimius.samna_app(id),

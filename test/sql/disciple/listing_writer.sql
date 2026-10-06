@@ -1,5 +1,5 @@
 CREATE EXTENSION IF NOT EXISTS dblink;
-SELECT plan(12);
+SELECT plan(11);
 CREATE TEMP TABLE started AS SELECT pg_current_xact_id()::TEXT::BIGINT AS txid;
 SELECT dblink_connect('listing_writer', 'dbname=' || current_database() || ' user=' || current_user);
 
@@ -22,7 +22,6 @@ BEGIN
     IF dblink_exec('listing_writer', $w$
         BEGIN;
         SET LOCAL lock_timeout = '5s';
-        SELECT claimius._lock_objects(ARRAY['public.writer:' || gen_random_uuid()]);
         INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
         VALUES (gen_random_uuid(), 'Writer child', 'company',
                 '10000000-0000-4000-8000-000000000fa0', '10000000-0000-4000-8000-000000000fa0', 1,
@@ -36,10 +35,24 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-CREATE FUNCTION pg_temp.covering() RETURNS BIGINT AS $$
-    SELECT count(*) FROM pg_locks
-    WHERE pid = pg_backend_pid() AND locktype = 'advisory' AND objsubid = 2 AND mode = 'ExclusiveLock'
-$$ LANGUAGE sql;
+CREATE FUNCTION pg_temp.flush() RETURNS INTERVAL AS $$
+DECLARE
+    v_from TIMESTAMPTZ := clock_timestamp();
+BEGIN
+    IF dblink_exec('listing_writer', $w$
+        BEGIN;
+        SET LOCAL lock_timeout = '5s';
+        DO $d$ BEGIN PERFORM claimius.touch_object_usage(
+            ARRAY['a0000000-0000-4000-8000-000000000fa1']::UUID[],
+            ARRAY['claimius.organization'], ARRAY['10000000-0000-4000-8000-000000000fa0']::UUID[], ARRAY[1]::BIGINT[]); END $d$;
+        COMMIT;
+    $w$, FALSE) = 'ERROR' THEN
+        PERFORM dblink_exec('listing_writer', 'ROLLBACK', FALSE);
+        RETURN NULL;
+    END IF;
+    RETURN clock_timestamp() - v_from;
+END;
+$$ LANGUAGE plpgsql;
 
 DO $$
 DECLARE
@@ -68,7 +81,7 @@ COMMIT;
 SELECT pg_temp.write();
 
 BEGIN;
-SELECT cmp_ok(pg_temp.unsettled(), '>', (claimius._object_lock_budget() / 4)::BIGINT,
+SELECT cmp_ok(pg_temp.unsettled(), '>', 128::BIGINT,
     'more areas are open for the reader than one batch settles');
 
 SELECT lives_ok($$SELECT pg_temp.list()$$, 'the reader lists over every open area');
@@ -82,7 +95,8 @@ SELECT diag('writer beside the reader of 600 open areas took ' || coalesce((SELE
 SELECT cmp_ok((SELECT took FROM timed WHERE step = 'areas'), '<', INTERVAL '2 seconds',
     'a writer completes while the reader that settled them is still in its transaction');
 
-SELECT is(pg_temp.covering(), 0::BIGINT, 'the reader never holds the lock every writer shares exclusive');
+SELECT cmp_ok((SELECT count(*) FROM pg_locks WHERE pid = pg_backend_pid() AND locktype = 'advisory'), '<=', 1::BIGINT,
+    'the reader holds its share lock and no lock per object');
 COMMIT;
 
 BEGIN;
@@ -94,45 +108,46 @@ FROM generate_series(1, 700) AS g;
 COMMIT;
 
 BEGIN;
-SELECT lives_ok($$SELECT pg_temp.list()$$, 'the reader lists with 700 new pairs to settle');
+SELECT is(pg_temp.list(),
+    (SELECT count(*) FROM claimius.organization WHERE sa_root_id = '10000000-0000-4000-8000-000000000fa0' AND sa_deleted_at IS NULL),
+    'one read with 700 new pairs to settle lists every organization the reader reaches');
+
+SELECT is(pg_temp.unsettled(), 0::BIGINT, 'the one read leaves no area open, past what a budget of 512 would move');
 
 INSERT INTO timed SELECT 'pairs', pg_temp.write();
 SELECT diag('writer beside the reader of 700 new pairs took ' || coalesce((SELECT took FROM timed WHERE step = 'pairs')::TEXT, 'over the 5s lock_timeout'));
 
 SELECT cmp_ok((SELECT took FROM timed WHERE step = 'pairs'), '<', INTERVAL '2 seconds',
-    'a writer completes while the reader past the lock budget is still in its transaction');
+    'a writer completes while the reader that moved 700 pairs is still in its transaction');
 
-SELECT is(pg_temp.covering(), 0::BIGINT, 'past the budget the reader still never holds the shared lock exclusive');
+SELECT cmp_ok((SELECT count(*) FROM pg_locks WHERE pid = pg_backend_pid() AND locktype = 'advisory'), '<=', 1::BIGINT,
+    'moving 700 pairs the reader still holds its share lock and no lock per object');
 
-SELECT cmp_ok((SELECT count(*) FROM pg_locks WHERE pid = pg_backend_pid() AND locktype = 'advisory'),
-    '<=', (claimius._object_lock_budget() + 16)::BIGINT,
-    'the reader holds no more advisory locks than the budget');
+CREATE TEMP TABLE held AS
+SELECT uo.object_id FROM claimius.user_object uo
+WHERE uo.user_id = 'a0000000-0000-4000-8000-000000000fa1' AND uo.object_type = 'claimius.organization'
+  AND uo.object_id = '10000000-0000-4000-8000-000000000fa0'
+FOR NO KEY UPDATE;
 
-SELECT cmp_ok(pg_temp.unsettled(), '>', 0::BIGINT, 'the areas past the budget stay open for the next read');
+INSERT INTO timed SELECT 'usage', pg_temp.flush();
+SELECT diag('usage flush beside the reader holding its pair took ' || coalesce((SELECT took FROM timed WHERE step = 'usage')::TEXT, 'over the 5s lock_timeout'));
+
+SELECT cmp_ok((SELECT took FROM timed WHERE step = 'usage'), '<', INTERVAL '2 seconds',
+    'a usage flush on a pair the reader holds completes while the reader is still in its transaction');
 COMMIT;
 
-BEGIN; SELECT pg_temp.list() WHERE pg_temp.unsettled() > 0; COMMIT;
-BEGIN; SELECT pg_temp.list() WHERE pg_temp.unsettled() > 0; COMMIT;
-BEGIN; SELECT pg_temp.list() WHERE pg_temp.unsettled() > 0; COMMIT;
-BEGIN; SELECT pg_temp.list() WHERE pg_temp.unsettled() > 0; COMMIT;
-BEGIN; SELECT pg_temp.list() WHERE pg_temp.unsettled() > 0; COMMIT;
-BEGIN; SELECT pg_temp.list() WHERE pg_temp.unsettled() > 0; COMMIT;
-BEGIN; SELECT pg_temp.list() WHERE pg_temp.unsettled() > 0; COMMIT;
-BEGIN; SELECT pg_temp.list() WHERE pg_temp.unsettled() > 0; COMMIT;
-SELECT is(pg_temp.list(),
-    (SELECT count(*) FROM claimius.organization WHERE sa_root_id = '10000000-0000-4000-8000-000000000fa0' AND sa_deleted_at IS NULL),
-    'later reads settle the rest and the reader lists every organization it reaches');
-
-SELECT is_empty($$
-    SELECT a.user_id, b.user_id, count(DISTINCT a.object_id)
+SELECT set_eq($$
+    SELECT a.user_id AS viewer_id, b.user_id AS target_user_id, count(DISTINCT a.object_id) AS sharing
     FROM claimius.user_object a
         JOIN claimius.user_object b
             ON b.object_type = a.object_type AND b.object_id = a.object_id AND b.user_id <> a.user_id
     WHERE a.object_type <> 'claimius.claim'
     GROUP BY a.user_id, b.user_id
-    EXCEPT
-    SELECT viewer_id, target_user_id, sharing_object_count::BIGINT FROM claimius.user_users
-$$, 'the shared object counts match the pairs');
+$$, $$
+    SELECT s.user_id, v.target_user_id, v.sharing_object_count::BIGINT
+    FROM claimius.samna_user s
+        CROSS JOIN LATERAL claimius._user_users_for_viewer(s.user_id) v
+$$, 'the shared object counts users read match the pairs');
 COMMIT;
 
 SELECT dblink_disconnect('listing_writer');

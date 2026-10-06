@@ -6,6 +6,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"net/http/httptest"
 	"os"
 	"testing"
@@ -113,6 +114,81 @@ func getScenarioAccess(t *testing.T, prophet, disciple *shared.DB, appID, child 
 	}
 }
 
+func getScenarioListing(t *testing.T, prophet, disciple *shared.DB, appID uuid.UUID, user scenarioUser, step string) {
+	t.Helper()
+	ctx := context.Background()
+	var onProphet, onDisciple []uuid.UUID
+	if err := prophet.NewRaw(`SELECT object_id FROM claimius.get_objects(?, ?, 'claimius.organization', 4) ORDER BY object_id`, user.id, appID).
+		Scan(ctx, &onProphet); err != nil && !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("%s: list on the prophet: %v", user.name, err)
+	}
+	if err := disciple.NewRaw(`SELECT object_id FROM claimius.get_objects(?, 'claimius.organization', 4) ORDER BY object_id`, user.id).
+		Scan(ctx, &onDisciple); err != nil && !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("%s: list on the disciple: %v", user.name, err)
+	}
+	if fmt.Sprint(onProphet) != fmt.Sprint(onDisciple) {
+		t.Errorf("%s %s: the prophet lists %v and the disciple %v", user.name, step, onProphet, onDisciple)
+	}
+}
+
+func getScenarioUsers(t *testing.T, prophet, disciple *shared.DB, appID uuid.UUID, user scenarioUser, step string) {
+	t.Helper()
+	ctx := context.Background()
+	var seenProphet, seenDisciple []uuid.UUID
+	if err := prophet.NewRaw(`SELECT user_id FROM claimius.get_users(?, ?) ORDER BY user_id`, user.id, appID).
+		Scan(ctx, &seenProphet); err != nil && !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("%s: users on the prophet: %v", user.name, err)
+	}
+	if err := disciple.NewRaw(`SELECT user_id FROM claimius.get_users(?) ORDER BY user_id`, user.id).
+		Scan(ctx, &seenDisciple); err != nil && !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("%s: users on the disciple: %v", user.name, err)
+	}
+	if fmt.Sprint(seenProphet) != fmt.Sprint(seenDisciple) {
+		t.Errorf("%s %s: the prophet sees users %v and the disciple %v", user.name, step, seenProphet, seenDisciple)
+	}
+}
+
+func getDisciplePairCounts(t *testing.T, disciple *shared.DB, step string) {
+	t.Helper()
+	ctx := context.Background()
+	if _, err := disciple.ExecContext(ctx, `SELECT claimius.drain_access_diff(1000)`); err != nil {
+		t.Fatalf("drain on the disciple %s: %v", step, err)
+	}
+	var left, drift int
+	if err := disciple.NewRaw(`SELECT count(*) FROM claimius.user_users_diff`).Scan(ctx, &left); err != nil {
+		t.Fatalf("user_users_diff on the disciple: %v", err)
+	}
+	if left != 0 {
+		t.Errorf("%s: the drain on the disciple left %d user_users_diff rows", step, left)
+	}
+	if err := disciple.NewRaw(`
+		SELECT count(*) FROM (
+			(SELECT a.user_id, b.user_id, count(*)::INTEGER
+			 FROM claimius.user_object a
+			     JOIN claimius.user_object b
+			         ON b.object_type = a.object_type AND b.object_id = a.object_id AND b.user_id <> a.user_id
+			 WHERE a.object_type <> 'claimius.claim'
+			 GROUP BY a.user_id, b.user_id
+			 EXCEPT
+			 SELECT viewer_id, target_user_id, sharing_object_count FROM claimius.user_users)
+			UNION ALL
+			(SELECT viewer_id, target_user_id, sharing_object_count FROM claimius.user_users
+			 EXCEPT
+			 SELECT a.user_id, b.user_id, count(*)::INTEGER
+			 FROM claimius.user_object a
+			     JOIN claimius.user_object b
+			         ON b.object_type = a.object_type AND b.object_id = a.object_id AND b.user_id <> a.user_id
+			 WHERE a.object_type <> 'claimius.claim'
+			 GROUP BY a.user_id, b.user_id)
+		) d
+	`).Scan(ctx, &drift); err != nil {
+		t.Fatalf("user_users on the disciple: %v", err)
+	}
+	if drift != 0 {
+		t.Errorf("%s: %d user_users rows on the disciple differ from a count over its pairs", step, drift)
+	}
+}
+
 func TestEveryScenarioResolvesTheSameOnTheProphetAndItsDisciple(t *testing.T) {
 	getGrantFixture(t)
 	ctx := context.Background()
@@ -209,6 +285,13 @@ func TestEveryScenarioResolvesTheSameOnTheProphetAndItsDisciple(t *testing.T) {
 	for _, u := range users {
 		getScenarioAccess(t, prophet, disciple, app.ID, child, u)
 	}
+	for _, u := range users {
+		getScenarioListing(t, prophet, disciple, app.ID, u, "after the snapshot")
+	}
+	for _, u := range users {
+		getScenarioUsers(t, prophet, disciple, app.ID, u, "after the snapshot")
+	}
+	getDisciplePairCounts(t, disciple, "after the snapshot")
 
 	if _, err := prophet.ExecContext(ctx, `
 		SELECT claimius.insert_claim_object(p_app_id => ?, p_claim_id => ?, p_sa_owner_id => ?, p_sa_root_id => ?,
@@ -230,4 +313,11 @@ func TestEveryScenarioResolvesTheSameOnTheProphetAndItsDisciple(t *testing.T) {
 	for _, u := range users {
 		getScenarioAccess(t, prophet, disciple, app.ID, child, u)
 	}
+	for _, u := range users {
+		getScenarioListing(t, prophet, disciple, app.ID, u, "after the feed")
+	}
+	for _, u := range users {
+		getScenarioUsers(t, prophet, disciple, app.ID, u, "after the feed")
+	}
+	getDisciplePairCounts(t, disciple, "after the feed")
 }

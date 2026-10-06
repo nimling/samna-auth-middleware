@@ -48,8 +48,8 @@ END $$;
 SELECT is_empty(
     $$SELECT 1 FROM pg_trigger
        WHERE tgname = 'tg_emit_sync_event'
-         AND tgrelid IN ('claimius.user_object'::regclass, 'claimius.user_users'::regclass)$$,
-    'user_object and user_users carry no sync publisher'
+         AND tgrelid IN ('claimius.user_object'::regclass, 'claimius.user_users'::regclass, 'claimius.user_users_diff'::regclass)$$,
+    'user_object, user_users and user_users_diff carry no sync publisher'
 );
 
 SELECT is(
@@ -72,10 +72,10 @@ SELECT ok(
       WHERE object_type = 'claimius.organization'
         AND user_id IN ('a0000000-0000-4000-8000-0000000000f1', 'a0000000-0000-4000-8000-0000000000f2',
                         'a0000000-0000-4000-8000-0000000000f3')) = 9
-    AND (SELECT count(*) FROM claimius.user_users
-          WHERE viewer_id IN ('a0000000-0000-4000-8000-0000000000f1', 'a0000000-0000-4000-8000-0000000000f2',
+    AND (SELECT count(*) FROM claimius.samna_user s CROSS JOIN LATERAL claimius._user_users_for_viewer(s.user_id) v
+          WHERE s.user_id IN ('a0000000-0000-4000-8000-0000000000f1', 'a0000000-0000-4000-8000-0000000000f2',
                               'a0000000-0000-4000-8000-0000000000f3')
-            AND target_user_id IN ('a0000000-0000-4000-8000-0000000000f1', 'a0000000-0000-4000-8000-0000000000f2',
+            AND v.target_user_id IN ('a0000000-0000-4000-8000-0000000000f1', 'a0000000-0000-4000-8000-0000000000f2',
                                    'a0000000-0000-4000-8000-0000000000f3')) = 6,
     'the reads settled every holder''s pairs and counted every holder pair'
 );
@@ -83,8 +83,8 @@ SELECT ok(
 SELECT is_empty(
     $$SELECT 1 FROM claimius.sync_event
        WHERE seq > (SELECT seq FROM before_settle)
-         AND event_type IN ('claimius.user_object', 'claimius.user_users')$$,
-    'a settle writes no sync_event row for user_object or user_users'
+         AND event_type IN ('claimius.user_object', 'claimius.user_users', 'claimius.user_users_diff')$$,
+    'a settle writes no sync_event row for user_object, user_users or user_users_diff'
 );
 
 SELECT * FROM finish();

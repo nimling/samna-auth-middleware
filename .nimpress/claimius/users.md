@@ -1,8 +1,8 @@
 ---
 layout: doc
 title: Users
-description: One person or machine, one stable user_id, one samna_user row per app, machine clients, delegation through get_user_access, and user_users with the count it holds, what counting it reads and writes, and why the count is exact.
-tags: samna_user, user_id, upsert_app_user, check_user_active, merge_user, samna_client, get_user_access, get_users, user_users, _count_user_users, _lock_objects, delegation
+description: One person or machine, one stable user_id, one samna_user row per app, machine clients, delegation through get_user_access, and user_users with the count it holds, the user_users_diff rows a write raises and a read folds, what each reads and writes, and why the count is exact.
+tags: samna_user, user_id, upsert_app_user, check_user_active, merge_user, samna_client, get_user_access, get_users, user_users, user_users_diff, _settle_user_users_diff, _user_users_for_viewer, delegation
 lastUpdated: true
 ---
 
@@ -47,21 +47,21 @@ A guest is the holder of one claim without an account: a `samna_user` of type `g
 
 ## Acting for another user
 
-An actor acts for a target without becoming the target. `get_user_access(actor, app, target, required)` settles what the actor's listing would, checks the actor active, resolves the target named as `external_id`, `user_id` or `samna_user.id`, in that order, among the app's live active users, and then ORs three branches:
+An actor acts for a target without becoming the target. `get_user_access(actor, app, target, required)` settles what the actor's listing would and folds the actor's `user_users_diff` rows, checks the actor active, resolves the target named as `external_id`, `user_id` or `samna_user.id`, in that order, among the app's live active users, and then ORs three branches:
 
 | Branch | Mask | Reads |
 |---|---|---|
 | Self, the actor is the target | 47: owner, write, read, execute, member | nothing |
-| Shared visibility, a `user_users` row from actor to target | 36: read, member | one range of `idx_user_users_viewer`, at most `S_u` entries |
+| Shared visibility, a positive count from actor to target in `_user_users_for_viewer` | 36: read, member | one range of `idx_user_users_viewer`, at most `S_u` entries, and the pending rows of `T_u`, `Σ_{x ∈ T_u} (m_x + U_x)` |
 | A claim bound to the target's `samna_user` row | `eff(c, b) & 15` of each non deny binding, inside the grant's window | `_user_claim_grants`: the actor's `C` grants, their claims and `C` probes of `idx_claim_object_lookup` |
 
 ```
-entries(get_user_access) = resolution + 1 + S_u + 1 + 2C
+entries(get_user_access) = resolution + 1 + S_u + Σ_{x ∈ T_u} (m_x + U_x) + 1 + 2C
 ```
 
 `external_id` carries no index, so the resolution reads the app's `U` user rows through `idx_samna_user_app_id`. The row the actor writes carries the actor's `user_claim.id` in `sa_created_by` and the target's `user_id` as its subject. This is delegation in the sense of [RFC 8693, section 1.1](https://www.rfc-editor.org/rfc/rfc8693#section-1.1): the acting party stays visible. The verdict is a live grant, so revoking it revokes the delegation on the next read.
 
-`get_users(user, app, required)` lists the targets of the same three branches that are live and active in the app: the reader, the `S_u` users of the reader's `user_users` range and the targets of the reader's bindings on `claimius.samna_user`, then one `samna_user` probe per target.
+`get_users(user, app, required)` lists the targets of the same three branches that are live and active in the app: the reader, the users `_user_users_for_viewer` counts above zero, the stored `S_u` and the moves of the pending rows, and the targets of the reader's bindings on `claimius.samna_user`, then one `samna_user` probe per target.
 
 ## Who can see whom
 
@@ -74,37 +74,47 @@ rows = Σ_u S_u ≤ U (U − 1)
 
 A pair on a claim moves no count: holding a claim reads the claim, and a claim is a template, not an object two users share. Two holders of one claim therefore do not see each other through it.
 
-The table is kept by counting. `tg_count_user_users_insert` and `tg_count_user_users_delete` are statement triggers on `user_object` that call `_count_user_users` with the transition table `changed` of the pairs the statement inserted or deleted:
+The table is kept by folding, the way `user_object` is kept by settling; see [Materialization](./materialization.md#the-user-users-fold):
 
-1. `_lock_objects` takes the transaction advisory lock of every object of the statement, one key per `object_type:object_id`, in sorted key order.
+1. A statement that inserts or deletes pairs raises one `user_users_diff` row per pair on an object that is not a claim, `+1` for a pair entering and `−1` for one leaving, through `tg_raise_user_users_diff_insert` and `tg_raise_user_users_diff_delete`. It reads nothing else and locks nothing.
 
-2. For each pair `(u, x)` of `changed`, one range of `idx_user_object_object_user` on `(app, type, x)` returns the other users of `x`.
+2. A read that shows who sees whom folds, through `_settle_user_users_diff(app, u)`, the rows of every object the reader holds or moved on: per object it takes every row or none, and moves `(a, b)` by `now(a) now(b) − before(a) before(b)` for every ordered pair of users of the object of which one moved, where `now` reads the pairs and `before` is the pairs less the rows' sum.
 
-3. Every other user `v` of `x` moves `(u, v)` and `(v, u)` by one, the moves summed per `(viewer, target)` over the statement, so each row is written once: an upsert that adds on insert, an update that subtracts on delete, and a delete when the count reaches zero.
+3. It then reads `_user_users_for_viewer(app, u)`: the stored range of `u` plus the same moves for the objects whose rows are still pending in its snapshot.
 
 ```
-advisory locks  = distinct objects of the statement, up to 512 a transaction, then one covering lock for a writer
-entries read    = Σ_{pairs entering or leaving} U_x
-rows written    ≤ Σ_{pairs entering or leaving} 2 (U_x − 1)
+write              = 1 row, 2 entries, per pair entering or leaving; nothing read, nothing locked
+fold of x          = m_x + U_x entries read, at most 2 m_x (U_x − 1) user_users rows written
+read of u          = S_u + Σ_{x ∈ T_u} (m_x + U_x) entries
 ```
 
-A pair entering on an object one other user holds writes two rows, one in each direction, as the pgTAP suite `pair_storage` checks. A settle that changes one pair of `u` touches the users of that one object, not the `V_u` objects of `u` and every other user on each of them.
-
-The counts stay quiet under `replay_mode`. The bulk seed of `upsert_table_info`, whose pairs are written under it, and `rebuild_user_object`, which repairs any drift, rebuild them with `_refresh_user_users(app, u)`, which reads `u`'s pairs and every other user on each of their objects, `V_u + Σ_{x ∈ V_u} U_x` entries, and rewrites only the counts that changed.
+with `m_x` the rows pending on `x` and `T_u` the objects with rows pending that `u` holds or moved on. A pair entering on an object one other user holds raises one row, and its fold writes two `user_users` rows, one in each direction, as the pgTAP suite `pair_storage` checks.
 
 ### Why the count is exact
 
-`sharing_object_count` is a count over the self join `P ⋈_x P` of the pair relation, restricted to objects that are not claims, a nonrecursive view. A pair `(u, x)` entering or leaving `P` changes exactly the tuples `(u, v)` and `(v, u)` for the other users `v` of `x`, each by one. Gupta, Mumick and Subrahmanian show that for nonrecursive views the counting algorithm computes exactly the tuples inserted or deleted ([Maintaining Views Incrementally](https://dl.acm.org/doi/10.1145/170035.170066), SIGMOD 1993). Two pairs on one object entering or leaving in the same statement are counted once per ordered pair of users, so the delta is exact within a statement.
+Write `C(Q)(u, v) = Σ_x m_u(x) m_v(x)` over the objects that are not claims, with `m_u(x)` the multiplicity of `(u, x)` in a bag of pairs `Q`, so that `sharing_object_count = C(P)` for the pairs `P`. Write `D` for the `user_users_diff` rows and `P ⊖ D` for the pairs less the rows' sum per pair. The fold keeps one invariant: in every snapshot, `user_users = C(P ⊖ D)`.
 
-Across transactions it is exact because they serialize per object. Without a lock, two transactions adding pairs on one object each read the other users without the other's uncommitted pair, and the tuple between the two users is never counted. `_count_user_users` holds the advisory lock of every object of its statement before it reads the other users, so the second reads after the first commits and counts the tuple once. A writer took those locks before its first write: `recompute_user_object` reads the pairs that leave and enter and locks those objects, sorted, so the trigger takes the keys again without waiting. Inside a read's settle the trigger takes them, sorted per statement; a settle that would wait on one past `_settle_lock_timeout()` gives the unit up before any deadlock check, so a cycle with a writer always ends on the read. A writer past `_object_lock_budget()` holds the covering lock exclusive in place of its per object keys, and every per object locker holds that lock shared, so it still excludes every transaction that touches its objects and the count stays exact. A read never goes past it: it moves no more pairs than its budget leaves, and a pair it leaves is moved later under the locks of the transaction that moves it; see [Materialization](./materialization.md#the-lock-budget).
+1. A row and the pair change it records are written by one statement of one transaction, so every snapshot sees both or neither. At the start no row exists and the counted table is `C(P)`, which is how every database stood before the rows existed.
 
-Holding a claim reads the claim, but a claim is a template, not an object two users share, so its pairs move no count.
+2. A fold of `x` sees `P_x` and the rows `D_x` in the one snapshot of its statement and moves `user_users` by `C(P_x) − C(P_x ⊖ D_x)`, which is the counting algorithm on the self join `P ⋈_x P`: a pair `(u, x)` entering or leaving changes exactly `(u, v)` and `(v, u)` for the other users `v` of `x`, each by one, and several moving at once change `(u, v)` by the product difference ([Gupta, Mumick and Subrahmanian](https://dl.acm.org/doi/10.1145/170035.170066)). It deletes `D_x` in the same transaction, so when it commits the invariant holds again for `x`.
 
-**Sources.** A. Gupta, I. S. Mumick, V. S. Subrahmanian, [Maintaining Views Incrementally](https://dl.acm.org/doi/10.1145/170035.170066), SIGMOD 1993. [PostgreSQL, Advisory Locks](https://www.postgresql.org/docs/17/explicit-locking.html#ADVISORY-LOCKS).
+3. A fold moves `x` only after locking every row of `D_x` its statement sees. Two folds that overlap in time on `x` see nested sets of rows, since a later snapshot sees every transaction an earlier one sees; rows a committed fold deleted are gone from the later view and their change is in its `P_x`. Both cannot lock all of their rows, because the smaller set lies inside the larger and a row is locked by one of them, so at most one moves `x` and the other leaves it, with no wait, `SKIP LOCKED` ([PostgreSQL, The Locking Clause](https://www.postgresql.org/docs/17/sql-select.html#SQL-FOR-UPDATE-SHARE)). The folds of `x` that commit therefore form a chain, each starting from the `P_x ⊖ D_x` the one before it ended at, and their moves telescope to `C(P_x)` less the start.
+
+4. Moves of different objects commute. Each fold adds its integers to the rows it moves; an upsert or update under `READ COMMITTED` reapplies to the newest committed version of a row it waited on ([PostgreSQL, Read Committed Isolation Level](https://www.postgresql.org/docs/17/transaction-iso.html#XACT-READ-COMMITTED)), so two folds that move one row sum, in whichever order they commit. A row is deleted at zero.
+
+5. A write never reads another user's pairs and never locks anything the fold needs: the write that inserts or deletes a pair inserts its row and is done. So two writers adding pairs on one object at the same moment, which an eager count without a lock would have counted once too few, raise two rows, and the fold that takes both counts the pair of them once.
+
+6. A pair is inserted and deleted under its own row lock, so the changes of one pair are serial, and a snapshot that sees a later change sees the earlier one. A fold that takes the later row takes the earlier with it, so `P ⊖ D` holds every pair zero or one times and no count is ever negative.
+
+By 1 to 4 the invariant holds in every snapshot. `_user_users_for_viewer` adds `C(P_x) − C(P_x ⊖ D_x)` for the objects of `u` still pending in its own snapshot to the stored range, so it returns `C(P)(u, ·)` exactly as that snapshot holds the pairs, whether the fold before it moved everything, was skipped by another fold, or was given up at the lock timeout. The count is exact by snapshot, and no lock per object is needed to make it so. The eager count before it had to hold the advisory lock of every object until commit, because a count taken inside the write had to read the other holders of the object as they would stand when it committed.
+
+Holding a claim reads the claim, but a claim is a template, not an object two users share, so its pairs raise no row.
+
+**Sources.** A. Gupta, I. S. Mumick, V. S. Subrahmanian, [Maintaining Views Incrementally](https://dl.acm.org/doi/10.1145/170035.170066), SIGMOD 1993. [PostgreSQL, Transaction Isolation](https://www.postgresql.org/docs/17/transaction-iso.html). [PostgreSQL, The Locking Clause](https://www.postgresql.org/docs/17/sql-select.html#SQL-FOR-UPDATE-SHARE).
 
 ### Why the table exists
 
-`get_users` must answer from one index range. Without `user_users` the list of users visible to `u` is the self join, `Σ_{x ∈ V_u} U_x` entries per call. With it, the list is one range of `S_u` rows, and the join is paid once per pair that enters or leaves, not once per read.
+`get_users` must answer from one index range. Without `user_users` the list of users visible to `u` is the self join, `Σ_{x ∈ V_u} U_x` entries per call. With it, the list is one range of `S_u` rows, and the join is paid once per pair that enters or leaves, by the first read or drain that folds it, not once per read.
 
 ## Per user state on objects
 

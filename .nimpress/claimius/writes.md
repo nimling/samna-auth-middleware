@@ -2,7 +2,7 @@
 layout: doc
 title: Writes
 description: The claimius write surface, which tables take a direct insert, what every trigger does inside the write's own transaction, the rows each write stores as a function of the data, one request worked through, and the locks a write takes.
-tags: insert_claim, insert_user_claim, insert_claim_object, delete_claim, calc_object_access, calc_hierarchical_access, calc_claim_access, calc_object_trees, emit_sync_event, enforce_app_home, _check_claim_composition, _lock_objects, _object_lock_budget, upsert_app, write cost
+tags: insert_claim, insert_user_claim, insert_claim_object, delete_claim, calc_object_access, calc_hierarchical_access, calc_claim_access, calc_object_trees, emit_sync_event, enforce_app_home, _check_claim_composition, _raise_user_users_diff, upsert_app, write cost
 lastUpdated: true
 ---
 
@@ -26,7 +26,7 @@ A write changes a source row: a registered row, an organization, a location, a c
 | The implementing side's registered tables | Direct insert and update, by the implementing side |
 | Cross root moves | `migrate_root`, reviewed by a person on every call |
 
-`claim`, `user_claim` and `claim_object` also take a direct insert, because their triggers do the same work whatever the path in; the functions are the form for SQL callers and return one jsonb object keyed by the table they wrote. Never written by hand: `user_object`, `object_info`, `user_users`, `inheritance_info`, `table_info`, `sync_event`, `access_diff`, `access_diff_user`, `reconcile_queue`, `claim_graph_cache`.
+`claim`, `user_claim` and `claim_object` also take a direct insert, because their triggers do the same work whatever the path in; the functions are the form for SQL callers and return one jsonb object keyed by the table they wrote. Never written by hand: `user_object`, `object_info`, `user_users`, `user_users_diff`, `inheritance_info`, `table_info`, `sync_event`, `access_diff`, `access_diff_user`, `reconcile_queue`, `claim_graph_cache`.
 
 ## The triggers
 
@@ -41,7 +41,7 @@ A write changes a source row: a registered row, an organization, a location, a c
 | `tg_calc_trees`, `calc_object_trees` | `samna_app`, `user_claim`, `claim_object` | Their ownership closure rows and nothing else |
 | `tg_calc_claim_access`, `calc_claim_access` | `claim`, `claim_object`, `user_claim` | Raises the claim area and settles the actor's pairs on the claim and on a binding's object |
 | `tg_emit_sync_event`, `emit_sync_event` | the source tables | One outbox row per row written; see [Sync](./sync.md) |
-| `tg_count_user_users_*` | `user_object`, per statement | The `user_users` counting of [Users](./users.md) |
+| `tg_raise_user_users_diff_insert`, `tg_raise_user_users_diff_delete` | `user_object`, per statement | One `user_users_diff` row per pair entering or leaving on an object that is not a claim, nothing read and nothing locked; see [Users](./users.md#who-can-see-whom) |
 | `tg_invalidate_claim_graph_cache` | `user_object`, `object_info`, `user_users`, `samna_user` | Drops the affected users' cached claim graph; see [Graphs](./graphs.md) |
 | `tg_cascade_user_soft_delete` | `samna_user`, on the transition of `sa_deleted_at` | Soft deletes the user's grants, relations and field values in the app, once |
 
@@ -69,7 +69,7 @@ A write changes a source row: a registered row, an organization, a location, a c
 
 A location is also a node of its owner's ownership tree: `_reattach_location_in_ownership` drops its ownership rows and inserts its self edge and its owner's chain, `d(owner) + 2` rows, when its owner changes or it is deleted or restored. An organization's own location pin, and a parenthood row's owner and pin, move through `_retree_object`. An update that changes `sa_root_id` outside replay is refused; `migrate_root` is the only path across roots.
 
-A new organization or location inherits the app links of its owner: per app the owner is linked to, `upsert_app_object` inserts the link and recomputes the pair of every user of `_affected_users_for_object`. Then `object_info` as above, the actor's pair per app, and one object area with `cascade` unless the update is a rename, `name` and `description` alone, which every reader sees through `object_info` without a settle.
+A new organization or location inherits the app links of its owner: per app the owner is linked to, `upsert_app_object` inserts the link and raises the object area. Then `object_info` as above, the actor's pair per app, and one object area with `cascade` unless the update is a rename, `name` and `description` alone, which every reader sees through `object_info` without a settle.
 
 ### A claim, a binding or a grant
 
@@ -95,14 +95,14 @@ The assignee is not settled in the write. A grant changes one user's access and 
 
 ## What each write stores
 
-`F` is the `user_users` counting of a pair entering or leaving, `U_x` entries read and at most `2 (U_x − 1)` rows written; `R` the recompute of [Materialization](./materialization.md#recomputing-a-share).
+A pair entering or leaving writes one `user_users_diff` row and reads nothing; the count it moves is folded by the next read that needs it. `R` is the recompute of [Materialization](./materialization.md#recomputing-a-share).
 
 | Write | Closure rows | `object_info` | Pairs recomputed | Areas | Outbox rows |
 |---|---|---|---|---|---|
 | Registered row insert | `d_o + d_l + 2` | 1 | the actor's pair | 1 object | 0 |
 | Registered row rename | 0 | 1 | the actor's pair | 0 | 0 |
 | Registered row move or soft delete | `rows(x)` deleted, `d_o + d_l + 2` inserted on a move | 1 | the actor's pair | 1 object | 0 |
-| Organization or location insert at depth `d` | `d + 1`, and `d(owner) + 2` for a location | 1 | the actor's pair, and every affected user per inherited app link | 1 object with `cascade` | 1 per linked app |
+| Organization or location insert at depth `d` | `d + 1`, and `d(owner) + 2` for a location | 1 | the actor's pair, once per app | 1 object with `cascade` | 1 per linked app |
 | Organization or location reparent of `n_S` nodes | `n_S (D_old + D_p + 1)` | 1 when a field moved | the actor's pair | 1 object with `cascade` | 1 per linked app |
 | Organization or location rename | 0 | 1 | the actor's pair | 0 | 1 per linked app |
 | `claim` insert | `d_o + 1` for the claim itself | 1 | the actor's pair on the claim, twice | 1 claim, 1 object | 1 |
@@ -142,13 +142,13 @@ A writer reads its own write back in the same request: a handler creates a row a
 
 1. A hierarchy write takes the transaction advisory lock of its root, `pg_advisory_xact_lock(hashtext(root))`.
 
-2. An area raise takes the area row's lock until commit, so two writers of one claim, or of one object, serialize on that row and on nothing else. A reader settling the area holds it `FOR KEY SHARE`, which a raise does not wait on.
+2. An area raise takes the area row's lock until commit, so two writers of one claim, or of one object, serialize on that row and on nothing else. A reader settling the area holds it `FOR KEY SHARE`, which a raise does not wait on; a reader that cleared the area holds its delete until it commits, and a raise of that same area waits for it.
 
-3. A pair recompute takes the per object advisory keys of its objects, `_lock_objects`, sorted by key; a settle takes the keys of its whole share sorted before its first recompute, and the `user_users` trigger takes them again, which waits on nothing. So two settles over overlapping objects acquire their common keys in one order and cannot deadlock.
+3. A pair recompute takes the row locks of the pairs it writes and nothing else, and raises one `user_users_diff` row per pair entering or leaving, a new row no other transaction waits on. No write reads or locks another user's pairs, so two writers adding pairs on one object never meet.
 
-4. Every per object locker holds the covering lock shared, and a writer whose per object locks would pass `_object_lock_budget()`, 512, takes the covering lock exclusive in their place; a read never does, and stops moving pairs at the budget instead. So no transaction holds more than 512 per object entries of the server's shared lock table, and no read holds every object; see [Materialization](./materialization.md#the-lock-budget).
+4. A write takes no lock per object and no lock that grows with the pairs it moves; the shared lock table holds the root locks of its hierarchy writes and nothing more. Row locks are marks in the rows and take no entry there ([PostgreSQL, Row-Level Locks](https://www.postgresql.org/docs/17/explicit-locking.html#LOCKING-ROWS)).
 
-5. A read takes one transaction advisory lock for the reader's whole share, per app and user, with `pg_try_advisory_xact_lock`, so two reads of one user never settle at once and neither waits on the other.
+5. A read takes one transaction advisory lock for the reader's whole share, per app and user, with `pg_try_advisory_xact_lock`, so two reads of one user never settle at once and neither waits on the other. What a read locks and who waits on it is in [Materialization](./materialization.md#locks-a-settle-takes).
 
 ## Routed writes
 

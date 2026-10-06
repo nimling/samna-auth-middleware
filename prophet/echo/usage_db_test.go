@@ -61,6 +61,9 @@ func TestUsageFlushCountsTheAppChecked(t *testing.T) {
 	db.Usage.Add(&app, grantUser, "claimius.organization", grantRoot)
 	db.Usage.Add(&app, grantUser, "claimius.organization", grantRoot)
 	db.Usage.Stop()
+	if _, err := db.ExecContext(ctx, `SELECT count(*) FROM claimius.get_objects(?, ?, 'claimius.organization')`, grantUser, otherApp); err != nil {
+		t.Fatalf("list: %v", err)
+	}
 	if got := pair() - before; got != 2 {
 		t.Fatalf("expected two uses counted on the pair in the app checked, got %d", got)
 	}

@@ -47,13 +47,13 @@ END $$;
 COMMIT;
 
 SELECT dblink_exec('yield_writer', 'BEGIN');
-SELECT dblink_exec('yield_writer', 'DO $d$ BEGIN PERFORM claimius._lock_objects(ARRAY[''claimius.organization:10000000-0000-4000-8000-000000000e90'']); END $d$');
+SELECT dblink_exec('yield_writer', format($w$INSERT INTO claimius.user_object (app_id, user_id, object_type, object_id, sa_access) VALUES (%L, 'a0000000-0000-4000-8000-000000000e91', 'claimius.organization', '10000000-0000-4000-8000-000000000e90', 4)$w$, pg_temp.app()));
 BEGIN;
 SET LOCAL lock_timeout = '10s';
 CREATE TEMP TABLE waited_from AS SELECT clock_timestamp() AS at;
 
 SELECT lives_ok($$SELECT count(*) FROM claimius.get_objects('a0000000-0000-4000-8000-000000000e91', pg_temp.app(), 'claimius.organization')$$,
-    'the reader lists while a writer holds the lock of an object its share covers');
+    'the reader lists while a writer acting as the reader holds the pair its share would write');
 
 SELECT cmp_ok(clock_timestamp() - (SELECT at FROM waited_from), '<', INTERVAL '2 seconds',
     'the reader gives the wait up well before deadlock_timeout instead of waiting for the writer');
@@ -63,10 +63,10 @@ SELECT is(pg_temp.unsettled(), 1::BIGINT, 'the area stays open for the reader');
 SELECT is(current_setting('lock_timeout'), '10s', 'the caller''s lock_timeout is back after the read');
 COMMIT;
 
-SELECT dblink_exec('yield_writer', 'COMMIT');
+SELECT dblink_exec('yield_writer', 'ROLLBACK');
 
 SELECT lives_ok($$SELECT count(*) FROM claimius.get_objects('a0000000-0000-4000-8000-000000000e91', pg_temp.app(), 'claimius.organization')$$,
-    'the reader lists again once the writer is done');
+    'the reader lists again once the writer let the pair go');
 
 SELECT is(pg_temp.unsettled(), 0::BIGINT, 'and settles its share of the area');
 COMMIT;

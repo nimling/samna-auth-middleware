@@ -2,7 +2,7 @@
 layout: doc
 title: Storage
 description: The rows and bytes each claimius table holds as functions of the data, the indexes each carries and the index entries each row written costs, the shape of the B-trees a read descends, and the dead rows each maintenance step leaves.
-tags: storage, index, btree, gin, brin, heap only tuple, fillfactor, autovacuum, user_object, object_info, inheritance_info, user_users, sync_event, access_diff, audit
+tags: storage, index, btree, gin, brin, heap only tuple, fillfactor, autovacuum, user_object, object_info, inheritance_info, user_users, user_users_diff, sync_event, access_diff, audit
 lastUpdated: true
 ---
 
@@ -19,6 +19,8 @@ lastUpdated: true
 | `claim`, `claim_object`, `user_claim` | claims, bindings, grants | the model, never its product |
 | `access_diff` | open areas: at most one per claim, one per claim and assignee, one per object raised and not yet cleared | writes between the reads of their holders |
 | `access_diff_user` | one per open area and holder that settled it | reads between raises |
+| `user_users_diff` | one per pair that entered or left on an object that is not a claim and is not yet folded | pair changes between the reads and drains that fold them |
+| `usage_diff` | one per pair and flush not yet folded | flushes between the listings of the pair's user |
 | `user_activity` | one per user and app that used it | users |
 | `sync_event` | per app at most as many as its source rows, and none at or below the lowest cursor of the consumers in contact | source rows written; see [Sync](./sync.md) |
 | `audit` | audited events, one partition per month | writes |
@@ -50,6 +52,8 @@ A closure row is two object pairs, a root, a depth and two timestamps: about 140
 | `inheritance_info` | primary key; descendant covering; ancestor covering | 3 |
 | `access_diff` | primary key; one partial index by kind; `(app_id, user_id)` for an assignment's area | 2, or 3 for an assignment |
 | `access_diff_user` | primary key `(diff_id, user_id)` | 1 |
+| `user_users_diff` | primary key `(app_id, object_type, object_id, id)`; `(app_id, user_id)` | 2 |
+| `usage_diff` | primary key `(app_id, user_id, id)` | 1 |
 | `user_activity` | primary key `(user_id, app_id)` | 1 |
 | `sync_event` | primary key `seq`; `(app_id, txid, seq)`; BRIN on `written_at` | 2, and a BRIN summary per range of pages |
 | `claim` | primary key; `app_id`; `sa_owner_id`; `sa_root_id`; `(sa_access & 16)` partial for denies | 4, or 5 for a deny |
@@ -59,7 +63,7 @@ A closure row is two object pairs, a root, a depth and two timestamps: about 140
 
 The GIN index takes its entries through the pending list and merges them in bulk ([PostgreSQL, GIN Fast Update Technique](https://www.postgresql.org/docs/17/gin.html#GIN-FAST-UPDATE)). A soft delete sets `sa_deleted_at`, which the partial indexes of `user_claim` and `claim_object` name, so it is never a heap only update there and writes an entry in every index of the row ([PostgreSQL, Heap Only Tuples](https://www.postgresql.org/docs/17/storage-hot.html)). The indexes on `sa_deleted_at` alone that no read used, on `claim`, `user_claim` and `claim_object`, and `(event_type, seq)` on `sync_event`, are dropped by the base files.
 
-Per pair that enters or leaves, the materialization writes one `user_object` row with 2 entries and, for an object that is not a claim, up to `2 (U_x − 1)` `user_users` rows with 3 entries each.
+Per pair that enters or leaves, the materialization writes one `user_object` row with 2 entries and, for an object that is not a claim, one `user_users_diff` row with 2 entries. The fold that takes the row later writes up to `2 (U_x − 1)` `user_users` rows with 3 entries each, once for every row of the object it folds together.
 
 ## The shape of a B-tree
 
@@ -94,12 +98,12 @@ The closure, `object_info` and the model's own tables grow with objects and gran
 
 2. A pair updated leaves one dead version, which a later update on the same page can prune, since `fillfactor = 90` keeps room on the page.
 
-3. A pair entering or leaving updates up to `2 (U_x − 1)` `user_users` rows, one dead version each; `_refresh_user_users` rewrites only the counts that changed.
+3. A pair entering or leaving leaves one `user_users_diff` row, dead once folded; the fold updates up to `2 (U_x − 1)` `user_users` rows, one dead version each, summed over the rows of the object it folds, so a pair that entered and left before a fold moves no count at all.
 
 4. An area raise leaves one dead version per raise after the first; a settle leaves one `access_diff_user` version per share; a clear deletes the area and, by cascade, its records.
 
-5. A usage flush leaves one dead version per pair counted and per `user_activity` row moved.
+5. A usage flush leaves one `usage_diff` row per pair counted, dead once folded, and one dead version per `user_activity` row moved; the fold leaves one dead version per pair it moves.
 
 6. `trim_sync_event` deletes the outbox rows owed to nobody in one statement per pass; a month of audit is retired by detaching its partition, not by deleting rows.
 
-Autovacuum starts on a table when its dead rows exceed `autovacuum_vacuum_threshold + autovacuum_vacuum_scale_factor × rows`, 50 plus a fifth of the table by default ([PostgreSQL, Automatic Vacuuming](https://www.postgresql.org/docs/17/runtime-config-autovacuum.html)). `user_object` and `access_diff` set the scale factor, and the analyze scale factor, to 0.02: both turn over a small share of their rows on every settle, and at the default a large `user_object` would carry a fifth of its size in dead versions before a vacuum ran.
+Autovacuum starts on a table when its dead rows exceed `autovacuum_vacuum_threshold + autovacuum_vacuum_scale_factor × rows`, 50 plus a fifth of the table by default ([PostgreSQL, Automatic Vacuuming](https://www.postgresql.org/docs/17/runtime-config-autovacuum.html)). `user_object`, `access_diff` and `user_users_diff` set the scale factor, and the analyze scale factor, to 0.02: each turns over a small share of its rows on every settle, and at the default a large `user_object` would carry a fifth of its size in dead versions before a vacuum ran.

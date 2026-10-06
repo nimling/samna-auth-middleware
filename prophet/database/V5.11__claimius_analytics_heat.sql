@@ -1,22 +1,3 @@
--- ============================================================================
--- Claimius V5.11 Analytics heat buckets
--- ----------------------------------------------------------------------------
--- claimius.analytics_event holds one row per signal, and a pointer is sampled
--- every 100ms while a scroll is sampled every 250ms. One small site reached
--- 34204 rows in days. Reading a heat field out of that table means scanning
--- every sample a visitor ever produced, and the field it draws is identical to
--- the one a coarse grid produces, because the overlay blurs at a radius far
--- wider than a single pixel.
---
--- So the field is stored as a grid. One row per app, path, viewport width,
--- kind, cell and day, carrying how much weight landed in that cell. Reading a
--- heat map is then a range scan over days rather than a scan over samples.
---
--- The raw tier is kept, the way GA4 and Clarity both keep one, so the bucket
--- size can change later and be rebuilt. It is expired on its own schedule by
--- claimius.delete_analytics_event, which is deliberately a separate call.
--- ============================================================================
-
 CREATE TABLE IF NOT EXISTS claimius.analytics_heat (
     app_id         UUID NOT NULL REFERENCES claimius.samna_app(id),
     path           TEXT NOT NULL,
@@ -41,10 +22,6 @@ CREATE INDEX IF NOT EXISTS idx_analytics_heat_read ON claimius.analytics_heat (a
 GRANT SELECT, INSERT, UPDATE, DELETE ON claimius.analytics_heat TO claimius_writer;
 GRANT SELECT ON claimius.analytics_heat TO claimius_reader;
 
--- ----------------------------------------------------------------------------
--- The grid
--- ----------------------------------------------------------------------------
-
 CREATE OR REPLACE FUNCTION claimius.analytics_bucket_size() RETURNS INTEGER AS $$
     SELECT 16;
 $$ LANGUAGE sql IMMUTABLE;
@@ -56,10 +33,6 @@ CREATE OR REPLACE FUNCTION claimius.analytics_event_weight(p_type TEXT) RETURNS 
 $$ LANGUAGE sql IMMUTABLE;
 
 COMMENT ON FUNCTION claimius.analytics_event_weight(TEXT) IS 'What one signal contributes to a cell. Matches the weight the capture script and the overlay already agree on.';
-
--- ----------------------------------------------------------------------------
--- Fold
--- ----------------------------------------------------------------------------
 
 DROP FUNCTION IF EXISTS claimius.post_analytics_heat(date,date,uuid);
 CREATE OR REPLACE FUNCTION claimius.upsert_analytics_heat(
@@ -104,10 +77,6 @@ $$ LANGUAGE plpgsql;
 
 COMMENT ON FUNCTION claimius.upsert_analytics_heat(DATE, DATE, UUID) IS 'Folds every positioned signal on a range of whole days into its cell and returns the cells written. A day is the unit because a cell is replaced rather than added to: re folding a whole day is always correct, and folding half a day would throw the other half away.';
 
--- ----------------------------------------------------------------------------
--- Read
--- ----------------------------------------------------------------------------
-
 CREATE OR REPLACE FUNCTION claimius.get_analytics_heat(
     p_app_id         UUID,
     p_path           TEXT,
@@ -132,10 +101,6 @@ CREATE OR REPLACE FUNCTION claimius.get_analytics_heat(
 $$ LANGUAGE sql STABLE;
 
 COMMENT ON FUNCTION claimius.get_analytics_heat(UUID, TEXT, INTEGER, TEXT, DATE, DATE) IS 'The heat field for a page, already in page coordinates at capture scale, so the caller passes the rows straight to the overlay.';
-
--- ----------------------------------------------------------------------------
--- Expire
--- ----------------------------------------------------------------------------
 
 CREATE OR REPLACE FUNCTION claimius.delete_analytics_event(p_before DATE) RETURNS BIGINT AS $$
 DECLARE

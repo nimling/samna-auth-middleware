@@ -1,5 +1,5 @@
 BEGIN;
-SELECT plan(12);
+SELECT plan(15);
 
 CREATE FUNCTION pg_temp.app() RETURNS UUID AS $$
     SELECT id FROM claimius.samna_app WHERE slug = 'sqltest_drain'
@@ -117,6 +117,31 @@ SELECT is(
     (SELECT count(*) FROM claimius.get_objects('a0000000-0000-4000-8000-0000000000f2', pg_temp.app(), 'claimius.organization')),
     2::BIGINT,
     'a holder the drain left settles its own share on its read');
+
+SELECT cmp_ok((SELECT count(*) FROM claimius.user_users_diff WHERE app_id = pg_temp.app()), '>', 0::BIGINT,
+    'the pairs a listing settled left user_users_diff rows, which a listing does not fold');
+
+SELECT claimius.drain_access_diff();
+
+SELECT is_empty($$SELECT 1 FROM claimius.user_users_diff WHERE app_id = pg_temp.app()$$,
+    'the drain folds the user_users_diff rows');
+
+SELECT set_eq($$
+    SELECT mine.user_id AS viewer_id, other.user_id AS target_user_id, count(*) AS sharing
+    FROM claimius.user_object mine
+        JOIN claimius.user_object other
+            ON other.app_id = mine.app_id
+           AND other.object_type = mine.object_type
+           AND other.object_id = mine.object_id
+           AND other.user_id <> mine.user_id
+    WHERE mine.app_id = pg_temp.app()
+      AND mine.object_type <> 'claimius.claim'
+    GROUP BY mine.user_id, other.user_id
+$$, $$
+    SELECT uu.viewer_id, uu.target_user_id, uu.sharing_object_count::BIGINT
+    FROM claimius.user_users uu
+    WHERE uu.app_id = pg_temp.app()
+$$, 'and the stored user_users equal a count over the pairs');
 
 SELECT * FROM finish();
 ROLLBACK;
