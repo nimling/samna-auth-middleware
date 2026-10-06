@@ -1186,7 +1186,7 @@ CREATE OR REPLACE FUNCTION claimius._build_grants_for_objects(
                d.path, d.tree_type, d.from_type, d.from_id, d.claim_id,
                jsonb_strip_nulls(jsonb_build_object(
                    'claim_id', d.claim_id,
-                   'access', d.sa_access & 15,
+                   'access', d.sa_access & CASE WHEN (d.sa_access & 16) <> 0 THEN 15 ELSE ~16 END,
                    'cascaded_from', jsonb_build_object('type', d.from_type, 'id', d.from_id),
                    'composed_from', d.composed_from,
                    'tree_type', d.tree_type,

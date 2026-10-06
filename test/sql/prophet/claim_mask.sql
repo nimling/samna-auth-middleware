@@ -1,5 +1,5 @@
 BEGIN;
-SELECT plan(12);
+SELECT plan(13);
 
 DO $$
 DECLARE
@@ -11,6 +11,8 @@ DECLARE
     v_child  UUID := '10000000-0000-4000-8000-000000000c02';
     v_narrow UUID;
     v_reader UUID;
+    v_mia    UUID := 'a0000000-0000-4000-8000-0000000000c3';
+    v_member UUID;
 BEGIN
     v_app := (claimius.upsert_system_app(
         p_system_app_slug         => 'sqltest_mask',
@@ -50,6 +52,16 @@ BEGIN
     PERFORM claimius.insert_claim(
         p_app_id => v_app, p_name => 'Editor', p_description => NULL, p_sa_access => 2,
         p_sa_owner_id => v_root, p_sa_root_id => v_root, p_sa_created_by => v_sys);
+
+    PERFORM claimius.upsert_app_user(p_user_id => v_mia, p_app_id => v_app, p_first_name => 'Mia');
+    v_member := (claimius.insert_claim(
+        p_app_id => v_app, p_name => 'Member owner', p_description => NULL, p_sa_access => 33,
+        p_sa_owner_id => v_root, p_sa_root_id => v_root, p_sa_created_by => v_sys
+    ) -> 'claim' ->> 'id')::UUID;
+    PERFORM claimius.insert_claim_object(
+        p_app_id => v_app, p_claim_id => v_member, p_sa_owner_id => v_root, p_sa_root_id => v_root, p_sa_created_by => v_sys,
+        p_object_id => v_child, p_object_type => 'claimius.organization', p_inherits => TRUE);
+    PERFORM claimius.insert_user_claim(p_app_id => v_app, p_claim_id => v_member, p_user_id => v_mia, p_sa_owner_id => v_root, p_sa_created_by => v_sys);
 END $$;
 
 SELECT throws_ok(
@@ -150,6 +162,13 @@ SELECT lives_ok(
                              WHERE c.name = 'Reader' AND uc.user_id = 'a0000000-0000-4000-8000-0000000000c1'),
         p_object_id => '10000000-0000-4000-8000-000000000c02', p_object_type => 'claimius.organization', p_sa_access => 4)$$,
     'a binding narrowed to what the writer holds is accepted'
+);
+
+SELECT is(
+    (SELECT g.sa_access FROM claimius.get_objects('a0000000-0000-4000-8000-0000000000c3', (SELECT id FROM claimius.samna_app WHERE slug = 'sqltest_mask'), 'claimius.organization') g
+      WHERE g.object_id = '10000000-0000-4000-8000-000000000c02'),
+    47,
+    'a grant of owner and member settles both, the member bit standing beside the rest'
 );
 
 SELECT * FROM finish();
