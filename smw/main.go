@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
+	"path"
 	"strings"
 
 	"github.com/MicahParks/keyfunc/v3"
@@ -119,11 +121,17 @@ func UserAuthMiddleware(opts *UserAuthOptions) echo.MiddlewareFunc {
 	}
 }
 
-const loginRedirectPath = "/api/sauth/login"
+func getLoginPath() string {
+	redirect, err := url.Parse(utils.Cfg().RedirectURI)
+	if err != nil || redirect.Path == "" {
+		return ""
+	}
+	return path.Join(path.Dir(redirect.Path), "login")
+}
 
 func respondUnauthenticated(ctx echo.Context) error {
-	if isNavigation(ctx) {
-		return ctx.Redirect(http.StatusFound, loginRedirectPath)
+	if login := getLoginPath(); login != "" && isNavigation(ctx) {
+		return ctx.Redirect(http.StatusFound, login)
 	}
 	return ctx.String(http.StatusUnauthorized, "Unauthorized")
 }

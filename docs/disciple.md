@@ -68,7 +68,7 @@ Interaction capture records clicks, pointer samples, scroll depth, inputs and pa
 The handlers are the same shape as every other one in `disciple/echo`, so a consumer mounts them itself:
 
 ```go
-sauth := e.Group("/api/sauth")
+sauth := e.Group("/api/auth")
 sauth.GET("/consent", saecho.GetConsent)
 sauth.POST("/consent", saecho.PostConsent)
 sauth.POST("/analytics", saecho.PostAnalytics)
@@ -78,7 +78,7 @@ sauth.POST("/analytics", saecho.PostAnalytics)
 
 `sam.RegisterCaptureRead(group)` mounts `GET /event` and `GET /session`. Those read across visitors, so they belong behind a session and behind whatever page grant gates the consumer's admin surface.
 
-The browser half is one call, `configureConsent({ endpoint: '/api/sauth' })`, which reads consent, starts capture only once the analytics category is granted, and raises the banner when the visitor has not decided under the current policy. The policy link and version arrive in the consent response, resolved on the prophet from its endpoint and its `/legal/cookie-policy` page.
+The browser half is one call, `configureConsent({ endpoint: '/api/auth' })`, which reads consent, starts capture only once the analytics category is granted, and raises the banner when the visitor has not decided under the current policy. The policy link and version arrive in the consent response, resolved on the prophet from its endpoint and its `/legal/cookie-policy` page.
 
 ## Uptime
 

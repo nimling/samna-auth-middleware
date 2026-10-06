@@ -31,7 +31,7 @@ func TestGetAnalyticsEventsForwardsTheTargetAppAndRange(t *testing.T) {
 	captureReadStub(t, &path, &query)
 
 	e := echo.New()
-	req := httptest.NewRequest(http.MethodGet, "/api/sauth/analytics/event?app=6f1d4d1e-6a1a-4a53-9a9e-9b0f0a2f6a11&from=2026-08-01T00:00:00Z&to=2026-08-14T00:00:00Z&type=click&nope=1", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/auth/analytics/event?app=6f1d4d1e-6a1a-4a53-9a9e-9b0f0a2f6a11&from=2026-08-01T00:00:00Z&to=2026-08-14T00:00:00Z&type=click&nope=1", nil)
 	rec := httptest.NewRecorder()
 	ctx := e.NewContext(req, rec)
 
@@ -55,7 +55,7 @@ func TestGetAnalyticsAppsForwardsWithoutQuery(t *testing.T) {
 	captureReadStub(t, &path, &query)
 
 	e := echo.New()
-	req := httptest.NewRequest(http.MethodGet, "/api/sauth/analytics/app?app=6f1d4d1e-6a1a-4a53-9a9e-9b0f0a2f6a11", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/auth/analytics/app?app=6f1d4d1e-6a1a-4a53-9a9e-9b0f0a2f6a11", nil)
 	rec := httptest.NewRecorder()
 	ctx := e.NewContext(req, rec)
 
@@ -78,7 +78,7 @@ func TestGetAnalyticsSessionsForwardsTheTargetApp(t *testing.T) {
 	captureReadStub(t, &path, &query)
 
 	e := echo.New()
-	req := httptest.NewRequest(http.MethodGet, "/api/sauth/analytics/session?app=6f1d4d1e-6a1a-4a53-9a9e-9b0f0a2f6a11&limit=50", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/auth/analytics/session?app=6f1d4d1e-6a1a-4a53-9a9e-9b0f0a2f6a11&limit=50", nil)
 	rec := httptest.NewRecorder()
 	ctx := e.NewContext(req, rec)
 

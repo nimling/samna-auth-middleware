@@ -51,7 +51,7 @@ export function getEdgeMode(): EdgeMode {
 }
 
 export function getBffPath(): string {
-  return (edgeConfig.bffPath ?? '/api/sauth').replace(/\/$/, '')
+  return (edgeConfig.bffPath ?? '/api/auth').replace(/\/$/, '')
 }
 
 function withNext(base: string, returnTo?: string): string {

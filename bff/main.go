@@ -32,7 +32,7 @@ func ConfigFromEnv() Config {
 		config.Port = "4300"
 	}
 	if config.BasePath == "" {
-		config.BasePath = "/api/sauth"
+		config.BasePath = "/api/auth"
 	}
 	return config
 }

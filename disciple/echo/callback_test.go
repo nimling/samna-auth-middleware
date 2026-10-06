@@ -26,11 +26,11 @@ func TestGetCallbackSetsTokenAndCSRFCookies(t *testing.T) {
 	t.Setenv("SAUTH_ENDPOINT", tokenServer.URL)
 	t.Setenv("SAUTH_APP_SLUG", "testapp")
 	t.Setenv("SAUTH_APP_SECRET", "secret")
-	t.Setenv("SAUTH_REDIRECT_URI", "http://localhost:4200/api/sauth/callback")
+	t.Setenv("SAUTH_REDIRECT_URI", "http://localhost:4200/api/auth/callback")
 	t.Setenv("SAUTH_PAGE_REDIRECT", "http://localhost:4200/")
 
 	e := echo.New()
-	req := httptest.NewRequest(http.MethodGet, "/api/sauth/callback?code=abc&state=st1", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/auth/callback?code=abc&state=st1", nil)
 	req.AddCookie(&http.Cookie{Name: "sauth_oauth_state", Value: "st1"})
 	req.AddCookie(&http.Cookie{Name: "sauth_pkce_verifier", Value: "ver1"})
 	rec := httptest.NewRecorder()
@@ -63,7 +63,7 @@ func TestGetCallbackRejectsStateMismatch(t *testing.T) {
 	t.Setenv("SAUTH_PAGE_REDIRECT", "http://localhost:4200/")
 
 	e := echo.New()
-	req := httptest.NewRequest(http.MethodGet, "/api/sauth/callback?code=abc&state=other", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/auth/callback?code=abc&state=other", nil)
 	req.AddCookie(&http.Cookie{Name: "sauth_oauth_state", Value: "st1"})
 	req.AddCookie(&http.Cookie{Name: "sauth_pkce_verifier", Value: "ver1"})
 	rec := httptest.NewRecorder()
@@ -108,7 +108,7 @@ func TestGetLogoutForwardsTokenAndClearsCookies(t *testing.T) {
 	t.Setenv("SAUTH_PAGE_REDIRECT", "http://localhost:4200/")
 
 	e := echo.New()
-	req := httptest.NewRequest(http.MethodGet, "/api/sauth/logout", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/auth/logout", nil)
 	req.AddCookie(&http.Cookie{Name: "sauth_access_token", Value: "tok123"})
 	rec := httptest.NewRecorder()
 	ctx := e.NewContext(req, rec)
@@ -163,7 +163,7 @@ func TestGetLogoutWithoutTokenRedirectsToEndSession(t *testing.T) {
 	t.Setenv("SAUTH_PAGE_REDIRECT", "http://localhost:4200/")
 
 	e := echo.New()
-	req := httptest.NewRequest(http.MethodGet, "/api/sauth/logout", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/auth/logout", nil)
 	rec := httptest.NewRecorder()
 	ctx := e.NewContext(req, rec)
 

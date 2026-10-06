@@ -128,7 +128,7 @@ outside any group that requires a session, because an anonymous visitor reaches
 consent before they have one:
 
 ```go
-sauth := e.Group("/api/sauth")
+sauth := e.Group("/api/auth")
 sauth.GET("/consent", saecho.GetConsent)
 sauth.POST("/consent", saecho.PostConsent)
 sauth.POST("/analytics", saecho.PostAnalytics)

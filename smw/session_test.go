@@ -30,6 +30,7 @@ func userAuthHandlerAgainst(t *testing.T, server *httptest.Server, opts *smw.Use
 	t.Setenv("SAUTH_DEBUG_CLIENTS", "")
 	t.Setenv("SAUTH_APP_SLUG", "testapp")
 	t.Setenv("SAUTH_APP_SECRET", "secret")
+	t.Setenv("SAUTH_REDIRECT_URI", "http://localhost:4200/api/auth/callback")
 
 	tokenURL, err := url.Parse(server.URL + "/api/app/testapp/oauth/token")
 	if err != nil {
@@ -85,8 +86,8 @@ func TestRefreshAuthServerErrorRedirectsToLoginOnNavigation(t *testing.T) {
 	if rec.Code != http.StatusFound {
 		t.Fatalf("status = %d, want 302", rec.Code)
 	}
-	if loc := rec.Header().Get("Location"); loc != "/api/sauth/login" {
-		t.Fatalf("location = %q, want /api/sauth/login", loc)
+	if loc := rec.Header().Get("Location"); loc != "/api/auth/login" {
+		t.Fatalf("location = %q, want /api/auth/login", loc)
 	}
 }
 
@@ -149,5 +150,26 @@ func TestWithoutOptionalARequestCarryingNoCredentialIsRefused(t *testing.T) {
 
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("status = %d, want 401", rec.Code)
+	}
+}
+
+func TestNavigationRedirectsToTheLoginBesideTheRedirectURI(t *testing.T) {
+	server := newAuthServerWithFailingRefresh(t)
+	defer server.Close()
+
+	handler := userAuthHandlerAgainst(t, server, nil)
+	t.Setenv("SAUTH_REDIRECT_URI", "https://sign.example.test/auth/callback")
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/screens", nil)
+	req.Header.Set("Accept", "text/html")
+	req.AddCookie(&http.Cookie{Name: "sauth_refresh_token", Value: "ref"})
+	rec := httptest.NewRecorder()
+
+	if err := handler(e.NewContext(req, rec)); err != nil {
+		t.Fatalf("middleware handler: %v", err)
+	}
+	if loc := rec.Header().Get("Location"); rec.Code != http.StatusFound || loc != "/auth/login" {
+		t.Fatalf("status %d location %q, want 302 /auth/login", rec.Code, loc)
 	}
 }
