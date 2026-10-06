@@ -2756,8 +2756,6 @@ BEGIN
 
         PERFORM claimius._clear_diff(p_app_id, ARRAY(SELECT x.id FROM unnest(v_diffs) x));
     EXCEPTION
-        WHEN lock_not_available THEN
-            RETURN 0;
         WHEN OTHERS THEN
             IF cardinality(v_diffs) = 1 THEN
                 RETURN 0;
@@ -2768,4 +2766,4 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius._settle_diff_share(UUID, UUID, UUID[]) IS 'Settles and records one user''s share of a batch of access_diff areas, then clears the areas no holder is left on. A batch past the lock timeout stays open; one failing otherwise is settled one area at a time. Returns the areas settled.';
+COMMENT ON FUNCTION claimius._settle_diff_share(UUID, UUID, UUID[]) IS 'Settles and records one user''s share of a batch of access_diff areas, then clears the areas no holder is left on. A batch that meets a lock past the timeout or fails otherwise is settled one area at a time, so one locked area never holds back the rest; a single area past the lock timeout stays open. Returns the areas settled.';
