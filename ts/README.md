@@ -128,10 +128,10 @@ outside any group that requires a session, because an anonymous visitor reaches
 consent before they have one:
 
 ```go
-sauth := e.Group("/api/sauth")
-sauth.GET("/consent", saecho.GetConsent)
-sauth.POST("/consent", saecho.PostConsent)
-sauth.POST("/analytics", saecho.PostAnalytics)
+auth := e.Group("/api/auth")
+auth.GET("/consent", saecho.GetConsent)
+auth.POST("/consent", saecho.PostConsent)
+auth.POST("/analytics", saecho.PostAnalytics)
 ```
 
 The read routes answer with what was recorded about other people, so they belong

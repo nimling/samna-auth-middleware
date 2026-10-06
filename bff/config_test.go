@@ -15,8 +15,8 @@ func TestConfigDefaultsThePortAndBasePath(t *testing.T) {
 	if config.Port != "4300" {
 		t.Fatalf("port = %q, want 4300", config.Port)
 	}
-	if config.BasePath != "/api/sauth" {
-		t.Fatalf("base path = %q, want /api/sauth", config.BasePath)
+	if config.BasePath != "/api/auth" {
+		t.Fatalf("base path = %q, want /api/auth", config.BasePath)
 	}
 }
 

@@ -104,8 +104,17 @@ func PutClaim(ctx echo.Context) error {
 		Where("sa_deleted_at IS NULL").
 		Where("id = ?", claimID).
 		Where("app_id = ?", appID).
-		OmitZero().
+		Set("sa_updated_at = now()").
 		Returning("*")
+	if patch.HasKey("name") {
+		query = query.Set("name = ?", patch.Name)
+	}
+	if patch.HasKey("description") {
+		query = query.Set("description = ?", patch.Description)
+	}
+	if patch.HasKey("type") {
+		query = query.Set("type = ?", patch.Type)
+	}
 	if patch.HasKey("access") {
 		query = query.Set("sa_access = ?", int(patch.Access))
 	}

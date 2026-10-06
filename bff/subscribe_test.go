@@ -44,7 +44,7 @@ func subscribeContext(t *testing.T, method string, body string) (echo.Context, *
 	t.Helper()
 	t.Setenv("SAUTH_APP_SLUG", "docs")
 	e := echo.New()
-	req := httptest.NewRequest(method, "/api/sauth/app/docs/subscription/subscribe", strings.NewReader(body))
+	req := httptest.NewRequest(method, "/api/auth/app/docs/subscription/subscribe", strings.NewReader(body))
 	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
 	rec := httptest.NewRecorder()
 	ctx := e.NewContext(req, rec)

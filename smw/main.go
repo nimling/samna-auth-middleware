@@ -119,7 +119,7 @@ func UserAuthMiddleware(opts *UserAuthOptions) echo.MiddlewareFunc {
 	}
 }
 
-const loginRedirectPath = "/api/sauth/login"
+const loginRedirectPath = "/api/auth/login"
 
 func respondUnauthenticated(ctx echo.Context) error {
 	if isNavigation(ctx) {

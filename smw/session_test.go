@@ -85,8 +85,8 @@ func TestRefreshAuthServerErrorRedirectsToLoginOnNavigation(t *testing.T) {
 	if rec.Code != http.StatusFound {
 		t.Fatalf("status = %d, want 302", rec.Code)
 	}
-	if loc := rec.Header().Get("Location"); loc != "/api/sauth/login" {
-		t.Fatalf("location = %q, want /api/sauth/login", loc)
+	if loc := rec.Header().Get("Location"); loc != "/api/auth/login" {
+		t.Fatalf("location = %q, want /api/auth/login", loc)
 	}
 }
 

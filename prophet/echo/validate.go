@@ -149,6 +149,15 @@ func (c *Claim) ValidatePatch() error {
 	if c.HasKey("name") && c.Name == "" {
 		return errors.New("name cannot be empty")
 	}
+	if c.HasKey("type") {
+		switch c.Type {
+		case CLAIM_TYPE_USER, CLAIM_TYPE_SERVICE, CLAIM_TYPE_VIRTUAL:
+		case CLAIM_TYPE_SYSTEM:
+			return errors.New("type system not allowed")
+		default:
+			return errors.New("type invalid")
+		}
+	}
 	return nil
 }
 

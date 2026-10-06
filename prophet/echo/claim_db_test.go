@@ -119,3 +119,36 @@ func TestPatchGrant_RefusesAnotherAppsGrant(t *testing.T) {
 		t.Fatalf("object grant patch from another app: want 404, got %d", code)
 	}
 }
+
+func TestPutClaimKeepsEveryFieldSentWithTheMask(t *testing.T) {
+	appID, claimID := getGrantFixture(t)
+	ctx := context.Background()
+	var original struct {
+		Description *string `bun:"description"`
+		Type        string  `bun:"type"`
+		Access      int     `bun:"sa_access"`
+	}
+	if err := psdb.Instance().NewRaw(`SELECT description, type, sa_access FROM claimius.claim WHERE id = ?`, claimID).Scan(ctx, &original); err != nil {
+		t.Fatalf("read original: %v", err)
+	}
+	name := "Grant writer " + uuid.NewString()
+	code, body := getPatchStatus(pecho.PutClaim, appID, claimID, claimID, `{"access":15,"name":"`+name+`","description":"renamed with the mask","type":"user"}`)
+	if code != http.StatusOK {
+		t.Fatalf("put claim: want 200, got %d %s", code, body)
+	}
+	var stored struct {
+		Name        string `bun:"name"`
+		Description string `bun:"description"`
+		Type        string `bun:"type"`
+		Access      int    `bun:"sa_access"`
+	}
+	if err := psdb.Instance().NewRaw(`SELECT name, description, type, sa_access FROM claimius.claim WHERE id = ?`, claimID).Scan(ctx, &stored); err != nil {
+		t.Fatalf("read claim: %v", err)
+	}
+	if stored.Name != name || stored.Description != "renamed with the mask" || stored.Type != "user" || stored.Access != 15 {
+		t.Fatalf("put claim: want every field sent stored, got %+v", stored)
+	}
+	if _, err := psdb.Instance().NewRaw(`UPDATE claimius.claim SET name = 'Grant writer', description = ?, type = ?, sa_access = ? WHERE id = ?`, original.Description, original.Type, original.Access, claimID).Exec(ctx); err != nil {
+		t.Fatalf("restore claim: %v", err)
+	}
+}

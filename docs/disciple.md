@@ -68,18 +68,18 @@ Interaction capture records clicks, pointer samples, scroll depth, inputs and pa
 The handlers are the same shape as every other one in `disciple/echo`, so a consumer mounts them itself:
 
 ```go
-sauth := e.Group("/api/sauth")
-sauth.GET("/analytics/consent", saecho.GetConsent)
-sauth.POST("/analytics/consent", saecho.PostConsent)
-sauth.POST("/analytics", saecho.PostAnalytics)
-sauth.POST("/analytics/capture", saecho.PostAnalyticsCapture)
+auth := e.Group("/api/auth")
+auth.GET("/analytics/consent", saecho.GetConsent)
+auth.POST("/analytics/consent", saecho.PostConsent)
+auth.POST("/analytics", saecho.PostAnalytics)
+auth.POST("/analytics/capture", saecho.PostAnalyticsCapture)
 ```
 
 `sam.RegisterCapture(group)` mounts those four in one call, and `sam.RegisterEndpoints` already includes it. Mount either on a group with no session requirement: a visitor answers the banner before they have a session, and capture has to reach anonymous visitors too.
 
 `sam.RegisterCaptureRead(group)` mounts `GET /analytics/app`, `/analytics/event`, `/analytics/session`, `/analytics/capture`, `/analytics/heat` and `/analytics/summary`. Those read across visitors, so they belong behind a session and behind whatever page grant gates the consumer's admin surface.
 
-The browser half is one call, `configureConsent({ endpoint: '/api/sauth' })`, which reads consent, starts capture only once the analytics category is granted, and raises the banner when the visitor has not decided under the current policy. The policy link and version arrive in the consent response, resolved on the prophet from its endpoint and its `/legal/cookie-policy` page.
+The browser half is one call, `configureConsent({ endpoint: '/api/auth' })`, which reads consent, starts capture only once the analytics category is granted, and raises the banner when the visitor has not decided under the current policy. The policy link and version arrive in the consent response, resolved on the prophet from its endpoint and its `/legal/cookie-policy` page.
 
 ## Uptime
 
