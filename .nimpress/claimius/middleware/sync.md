@@ -35,7 +35,7 @@ Both routes take `consumer`, the replica's state id, and `prophet`, the slug the
 
 4. It pulls again as soon as a page is applied, with `wait` 25, so an idle app costs one held request per hold.
 
-5. A failed pull doubles the delay up to 30 s. A `409` answer to a pull, or ten failed pulls in a row, trigger a fresh snapshot, and the snapshot's transaction writes an audit row naming the stalled cursor through `sdb.Write`: neither recovers by retrying. The `409` is the prophet's judgement that the snapshot serves the replica better than the feed: its cursor is above anything the prophet issued, below what it trimmed, or behind by more events than the app has source rows. An empty pull is the normal answer of an idle app and triggers nothing.
+5. A failed pull doubles the delay up to 30 s. A `409` answer to a pull, or ten failed pulls in a row, trigger a fresh snapshot, and a snapshot that fails to apply waits out the same doubling delay before the next pull: the delay and the failure count reset only once a pull or a snapshot applies, and the snapshot's transaction writes an audit row naming the stalled cursor through `sdb.Write`: neither recovers by retrying. The `409` is the prophet's judgement that the snapshot serves the replica better than the feed: its cursor is above anything the prophet issued, below what it trimmed, or behind by more events than the app has source rows. An empty pull is the normal answer of an idle app and triggers nothing.
 
 ## One prophet per replica
 

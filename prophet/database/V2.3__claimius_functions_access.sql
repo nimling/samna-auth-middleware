@@ -57,14 +57,6 @@ BEGIN
     END LOOP;
 
     RETURN coalesce(NEW, OLD);
-EXCEPTION WHEN OTHERS THEN
-    PERFORM claimius.insert_audit(
-            v_app_id, v_op, 'error', v_object_type, v_obj_id,
-            coalesce(v_owner_id, '00000000-0000-0000-0000-000000000000'::UUID),
-            coalesce((to_jsonb(coalesce(NEW, OLD)) ->> 'sa_created_by')::UUID, '00000000-0000-0000-0000-000000000000'::UUID),
-            SQLERRM
-            );
-    RAISE;
 END;
 $$ LANGUAGE plpgsql;
 
@@ -312,16 +304,6 @@ BEGIN
     END LOOP;
 
     RETURN coalesce(NEW, OLD);
-EXCEPTION WHEN OTHERS THEN
-    IF coalesce(v_app_id, v_app_ids[1]) IS NOT NULL THEN
-        PERFORM claimius.insert_audit(
-                coalesce(v_app_id, v_app_ids[1]), v_op, 'error', v_object_type, v_obj_id,
-                coalesce((to_jsonb(coalesce(NEW, OLD)) ->> 'sa_owner_id')::UUID, '00000000-0000-0000-0000-000000000000'::UUID),
-                coalesce((to_jsonb(coalesce(NEW, OLD)) ->> 'sa_created_by')::UUID, '00000000-0000-0000-0000-000000000000'::UUID),
-                SQLERRM
-                );
-    END IF;
-    RAISE;
 END;
 $$ LANGUAGE plpgsql;
 
@@ -479,6 +461,24 @@ BEGIN
               AND uo.object_type = NEW.object_type
               AND uo.object_id = NEW.object_id;
 
+            IF v_actor_access IS NULL
+                AND NEW.object_type NOT LIKE 'claimius.%'
+                AND NOT EXISTS (
+                    SELECT 1 FROM claimius.object_info oi
+                    WHERE oi.object_type = NEW.object_type
+                      AND oi.object_id = NEW.object_id)
+            THEN
+                PERFORM claimius.reconcile_if_pending(NEW.app_id, v_user_id, 'claimius.organization', NEW.sa_owner_id);
+
+                SELECT uo.sa_access, coalesce((SELECT max(coalesce((g ->> 'level')::INTEGER, 0)) FROM jsonb_array_elements(uo.grants) g), 0)
+                INTO v_actor_access, v_actor_level
+                FROM claimius.user_object uo
+                WHERE uo.user_id = v_user_id
+                  AND uo.app_id = NEW.app_id
+                  AND uo.object_type = 'claimius.organization'
+                  AND uo.object_id = NEW.sa_owner_id;
+            END IF;
+
             IF (coalesce(v_effective, 0) & ~coalesce(v_actor_access, 0) & 15) <> 0
                 AND v_actor_app_id IS DISTINCT FROM NEW.app_id
                 AND NOT EXISTS (
@@ -615,7 +615,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius._check_claim_composition() IS 'BEFORE INSERT/UPDATE trigger on claim_object. Rejects a grant whose effective mask hands out more access than the actor holds on the object, denies and removals exempt. The first binding of an app may come from an actor of another app holding owner on the organization that owns the app, judged in the actor''s own app. The first binding on a samna_user holding a claim assigned under the binding''s owning organization may come from an actor holding owner on that organization. Enforces composition link invariants: no self loop, no reverse link cycle, caller has read on target claim. Bypassed during disciple replay.';
+COMMENT ON FUNCTION claimius._check_claim_composition() IS 'BEFORE INSERT/UPDATE trigger on claim_object. Rejects a grant whose effective mask hands out more access than the actor holds on the object, denies and removals exempt. An object outside the claimius schema that this database holds no object_info row for, a disciple''s own row, is judged by the actor''s hold on the binding''s owning organization, which _check_app_scope keeps linked to the app; its type is never resolved. The first binding of an app may come from an actor of another app holding owner on the organization that owns the app, judged in the actor''s own app. The first binding on a samna_user holding a claim assigned under the binding''s owning organization may come from an actor holding owner on that organization. Enforces composition link invariants: no self loop, no reverse link cycle, caller has read on target claim. Bypassed during disciple replay.';
 
 DROP TRIGGER IF EXISTS tg_check_claim_composition ON claimius.claim_object;
 CREATE TRIGGER tg_check_claim_composition
@@ -1075,7 +1075,7 @@ BEGIN
             IF v_open THEN
                 PERFORM claimius.recompute_user_object(p_app_id, p_user_id, p_object_type, p_object_id);
             END IF;
-        EXCEPTION WHEN OTHERS THEN
+        EXCEPTION WHEN lock_not_available OR deadlock_detected THEN
             NULL;
         END;
     ELSIF pg_try_advisory_xact_lock(hashtextextended('claimius.share:' || p_app_id::TEXT || ':' || p_user_id::TEXT, 0)) THEN
@@ -1133,7 +1133,7 @@ BEGIN
                 BEGIN
                     PERFORM claimius.recompute_user_object(p_app_id, p_user_id, v_row.object_type, v_row.object_id);
                     DELETE FROM claimius.reconcile_queue WHERE id = v_row.id;
-                EXCEPTION WHEN OTHERS THEN
+                EXCEPTION WHEN lock_not_available OR deadlock_detected THEN
                     NULL;
                 END;
             END LOOP;

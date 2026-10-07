@@ -47,7 +47,7 @@ A disciple carries the same tables without `app_id`, keyed `(user_id, object_typ
 | The composed branch: the object and its ancestors again, the bindings on each, the bound claim and the links into it | a closure range, a binding probe per node, a claim probe and a link probe per binding | `Σ_x (a_x + t_x + 1 + 3 B_x)` |
 
 ```
-R(u, S) = 3 + 2C + Σ_{x ∈ S} R_x          R_x = 6 + 4 a_x + 2 t_x + 4 B_x
+R(u, S) = 3 + 2C + Σ_{x ∈ S} R_x          R_x = 6 + 2 a_x + 2 t_x + 4 B_x
 ```
 
 with `t_x ≤ 3` the trees holding `x`. The descents that find nothing are counted as one entry. Nothing in `R` grows with `U`, `O` or the number of claims in the app; it grows with the reader's grants, the depth of `x` and the bindings on its chain, which keeps the model [below the reachability bound](./types.md#why-the-model-stays-below-the-reachability-bound). The derivations are then settled in memory by `_apply_denies`, `G × X` mask operations for `G` grants and `X` denies on the pair.
@@ -92,7 +92,7 @@ An area is the smallest description of what a write changed, keyed on what chang
 
 3. Otherwise it tests whether an open area covers the pair, not yet settled by `u` at its current `raise_count`: an object area on `x`, or on an ancestor of `x` with `cascade`; a claim area of a claim `u` holds or links to, or one raised by an assignment to `u`, whose bindings, live or removed, sit on `x` or an ancestor, directly or through a claim it links to, or which the pair's `grants` name as `claim_id` or `composed_from`, or which is `x` itself. The test reads the `a_x + t_x` closure rows of `x`, the reader's `C` grants and their `L` links, one `access_diff` probe per node and per held claim, and the bindings of the claims found open on the nodes.
 
-4. When covered, it recomputes the one pair, `R(u, {x})`.
+4. When covered, it recomputes the one pair, `R(u, {x})`. A recompute that waits on a lock past `_settle_lock_timeout()` or is chosen as a deadlock victim leaves the pair as it stands for the next read; every other error raises from the check.
 
 Nothing is recorded in `access_diff_user`: the rest of the reader's share is still open, and the next check of another pair tests again. On the `settle_granularity` test, a claim bound over a node with three descendants and granted to three holders, the first read settled 12 pairs, every holder on every object, before `e1ad529`; a check now settles 1 pair, a listing settles the reader's 4, and the other holders stay untouched until they read.
 
@@ -108,7 +108,7 @@ Every listing, search and graph begins with `reconcile_if_pending(app, u)`, and 
 
 4. It calls `_clear_diff` once for the batch, which deletes the areas every user of `_diff_holders` has a record for at the current `raise_count`, under `FOR UPDATE SKIP LOCKED`, the raise count compared on the row it locks, so a raise between the test and the delete keeps the row. `_diff_holders` takes the batch and reads the creators of its objects once per object type.
 
-5. A batch that waits on a lock past `_settle_lock_timeout()` or fails otherwise is settled again one area at a time, so an area that cannot settle leaves the others settled; that area stays open and the read goes on.
+5. A batch that waits on a lock past `_settle_lock_timeout()` or is chosen as a deadlock victim, SQLSTATE `55P03` or `40P01`, is settled again one area at a time, so an area that cannot settle leaves the others settled; that area stays open and the read goes on. Every other error raises to the caller: a settle that fails is never read as pairs that stand.
 
 The fixed cost of a recompute, its plan and its walk of the reader's claims, is paid once per object type and batch instead of once per area, and the walk to inherited grants starts at the objects recomputed and reaches their ancestors through the descendant index, so it costs the objects of the batch and not the size of the tree above them. Measured on one reader with one claim bound on a root over 16,000 new child organizations, 16,007 open areas: the first listing took about 2 minutes settling one area at a time, and 3.8 seconds in 126 batches while one read could still take every object at once. At `v2.0.0-alpha0023`, where a read stopped at 512 moved pairs, it took 32 listings, 14.5 seconds in all, the first returning 513 of the 16,001 organizations the reader reaches; one listing now returns all 16,001 in 8.1 seconds right after the inserts and in 1.9 seconds once autovacuum has analyzed the tables, against 32 listings and 7.0 seconds at `v2.0.0-alpha0023` on the same warm tables.
 
@@ -203,7 +203,7 @@ A check that settles only the pair it asks about, when an open area covers that 
 
 3. `_user_users_for_viewer(app, u)` answers the count of every user `u` sees as the statement's snapshot holds it: the stored `user_users` range of `u`, plus, for every object with a row still pending that `u` holds or moved on, the same `now(a) now(b) − before(a) before(b)` read from the pending rows. A fold that was given up, a row of a running transaction or of the reader's own, all count, so the answer equals a count taken with every pair committed at that snapshot whatever the folds do.
 
-4. `get_users`, `get_user_access`, `get_claim_graph` and `get_graph_links_claim`, after `reconcile_if_pending`, fold the reader's rows and read through `_user_users_for_viewer`. `get_claim_graph` serves its cache only when the fold left none of the reader's rows pending, since a pending row changes the users the graph shows without a `user_users` row moving.
+4. `get_users`, `get_claim_graph` and `get_graph_links_claim`, after `reconcile_if_pending`, fold the reader's rows and read through `_user_users_for_viewer`. `get_user_access` folds nothing: it reads the one `user_users` row of the actor and the target by key and adds the same move for the objects whose pending rows belong to one of the two, the only objects that can change that one count; see [Users](./users.md#acting-for-another-user). `get_claim_graph` serves its cache only when the fold left none of the reader's rows pending, since a pending row changes the users the graph shows without a `user_users` row moving.
 
 5. `drain_access_diff` folds the oldest objects of every app after its shares, at most `p_limit_pairs` of them. On a prophet it folds every app's rows, since derived rows never travel and no other database holds them; a disciple folds the rows of its own pairs, which it derives from the feed like any of its pairs.
 

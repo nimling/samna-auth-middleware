@@ -40,7 +40,7 @@ The claimius count is fixed by the pair: one probe of the reconcile queue, two o
 
 ## First check after a grant
 
-A grant raises one area keyed on the claim and the one user it names. The grantee's next check finds the area open over its pair and settles that one pair before it answers: the covering test reads the object's `a_x` ancestors, the reader's `C` grants and their links, and the areas on them, about `4 (C + a_x) + 2 ≈ 38` entries, and the recompute of one pair reads `3 + C + 8 + 4 a_x + 4 B_x = 52` entries and writes the pair, two index entries, and the `user_users` counts against the `U_x − 1 = 49` other users of the object, 50 entries read and at most 98 rows written. In all about 100 entries read and one pair written, once; the check after it is the plain check. The measured reduction: a first check over an area of four objects held by three users settled 12 pairs before and 1 after; see [Materialization](./materialization.md#why-a-settle-returns-current-pairs).
+A grant raises one area keyed on the claim and the one user it names. The grantee's next check finds the area open over its pair and settles that one pair before it answers: the covering test reads the object's `a_x` ancestors, the reader's `C` grants and their links, and the areas on them, about `4 (C + a_x) + 2 ≈ 38` entries, and the recompute of one pair reads `R = 3 + 2C + 6 + 2 a_x + 2 t_x + 4 B_x = 49` entries with `t_x = 1`, and writes the pair, two index entries, and one `user_users_diff` row, two more, reading no other user. The count against the `U_x − 1 = 49` other users of the object is folded later, once, by the first read that shows who sees whom or by the drain, `U_x = 50` entries. In all about 87 entries read and 4 written in the check, once; the check after it is the plain check. The measured reduction: a first check over an area of four objects held by three users settled 12 pairs before and 1 after; see [Materialization](./materialization.md#why-a-settle-returns-current-pairs).
 
 A tuple store pays nothing extra: the check after a grant is the same check, given a token at least as fresh as the write.
 
@@ -83,6 +83,8 @@ A new object under a node at depth 4:
 | Entra ID | No listing: the application stores and filters its own objects |
 
 **Claimius wins** at every `V`, and by more as `V` grows: a page is linear in its own size and joins the implementing side's table in the same query. Its one extra cost is the settle of a share the first time the reader lists after a change, paid once.
+
+**Claimius loses** that first listing after a broad change, and by more than the formula says. Measured on one prophet: one claim on a root over 16,000 new organizations, the first listing reads 1.46 to 1.75 million index entries, about 100 per pair it settles, in 3.2 to 5.2 seconds, and while the writer of those organizations never reads, every later listing still tests its 16,000 open areas, 80,034 descents and about 650 ms for a listing that changes nothing. A grant on a node over 10,000 organizations costs the grantee's first listing 200,503 entries and 0.9 seconds. A tuple store pays no such settle and enumerates on every listing instead. The cost is in the area bookkeeping, one `access_diff_user` row and one holder enumeration per area and reader, not in the pairs.
 
 ## Sync per grant
 
@@ -149,7 +151,7 @@ Entra ID decides at token issuance, not per object:
 | Dimension | Claimius | Tuple store service | Entra ID | Claimius wins when |
 |---|---|---|---|---|
 | Check | 9 descents, 0 messages | 1 round trip, `D + 1` reads | 0 reads | the request reads its database anyway |
-| First check after a grant | about 100 entries, 1 pair written, once | as any check | a new token | the pair is checked more than once |
+| First check after a grant | about 87 entries read, 4 written, once | as any check | a new token | the pair is checked more than once |
 | Grant on a node | 1 row, 1 area, 2 pairs | 1 tuple | next token | always for the write; the reach is paid per holder that lists |
 | Tree insert | `d + 1 = 5` closure rows, 1 `object_info` row | 1 tuple | nothing | never on the write; it buys depth independent reads |
 | Listing page of 50 | 50 pair entries, no sort | an enumeration, capped at 1,000 by default in OpenFGA | none | always, more as `V` grows |

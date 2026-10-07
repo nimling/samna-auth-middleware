@@ -47,19 +47,19 @@ A guest is the holder of one claim without an account: a `samna_user` of type `g
 
 ## Acting for another user
 
-An actor acts for a target without becoming the target. `get_user_access(actor, app, target, required)` settles what the actor's listing would and folds the actor's `user_users_diff` rows, checks the actor active, resolves the target named as `external_id`, `user_id` or `samna_user.id`, in that order, among the app's live active users, and then ORs three branches:
+An actor acts for a target without becoming the target. `get_user_access(actor, app, target, required)` settles what the actor's listing would, checks the actor active, resolves the target named as `external_id`, `user_id` or `samna_user.id`, in that order, among the app's live active users, one probe each of `idx_samna_user_app_external`, `idx_samna_user_user_app` and the primary key, and then ORs three branches. It folds nothing:
 
 | Branch | Mask | Reads |
 |---|---|---|
 | Self, the actor is the target | 47: owner, write, read, execute, member | nothing |
-| Shared visibility, a positive count from actor to target in `_user_users_for_viewer` | 36: read, member | one range of `idx_user_users_viewer`, at most `S_u` entries, and the pending rows of `T_u`, `Σ_{x ∈ T_u} (m_x + U_x)` |
+| Shared visibility, a positive count from actor to target | 36: read, member | the one `user_users` row of the pair by its key, and the pending `user_users_diff` rows of the actor and of the target, `m_a + m_t` entries of `idx_user_users_diff_user`, with two pair probes for each object they name: only an object one of the two moved on can change their count |
 | A claim bound to the target's `samna_user` row | `eff(c, b) & 15` of each non deny binding, inside the grant's window | `_user_claim_grants`: the actor's `C` grants, their claims and `C` probes of `idx_claim_object_lookup` |
 
 ```
-entries(get_user_access) = resolution + 1 + S_u + Σ_{x ∈ T_u} (m_x + U_x) + 1 + 2C
+entries(get_user_access) = 3 + 1 + 1 + (m_a + m_t) + 2 |objects of those rows| + 1 + 2C
 ```
 
-`external_id` carries no index, so the resolution reads the app's `U` user rows through `idx_samna_user_app_id`. The row the actor writes carries the actor's `user_claim.id` in `sa_created_by` and the target's `user_id` as its subject. This is delegation in the sense of [RFC 8693, section 1.1](https://www.rfc-editor.org/rfc/rfc8693#section-1.1): the acting party stays visible. The verdict is a live grant, so revoking it revokes the delegation on the next read.
+The count of one pair is read by its key and not out of the viewer's whole range: at alpha0024 the branch read `_user_users_for_viewer`, the viewer's `S_u` rows and the pending rows of every object it holds, and the resolution read the app's `U` user rows, so bookable's user listing, one call per row, read 437,835,068 index entries for 200 users; it reads 88,082,283 now, nearly all of them the settle of the actor's open areas that `reconcile_if_pending` runs first. The row the actor writes carries the actor's `user_claim.id` in `sa_created_by` and the target's `user_id` as its subject. This is delegation in the sense of [RFC 8693, section 1.1](https://www.rfc-editor.org/rfc/rfc8693#section-1.1): the acting party stays visible. The verdict is a live grant, so revoking it revokes the delegation on the next read.
 
 `get_users(user, app, required)` lists the targets of the same three branches that are live and active in the app: the reader, the users `_user_users_for_viewer` counts above zero, the stored `S_u` and the moves of the pending rows, and the targets of the reader's bindings on `claimius.samna_user`, then one `samna_user` probe per target.
 

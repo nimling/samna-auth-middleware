@@ -1462,12 +1462,8 @@ BEGIN
 
         IF v_has_creator IS TRUE THEN
             v_parts := claimius.split_object_type(p_object_type);
-            BEGIN
-                EXECUTE format('SELECT sa_created_by FROM %I.%I WHERE id = $1', v_parts[1], v_parts[2])
-                    INTO v_creator_uc_id USING p_object_id;
-            EXCEPTION WHEN OTHERS THEN
-                v_creator_uc_id := NULL;
-            END;
+            EXECUTE format('SELECT sa_created_by FROM %I.%I WHERE id = $1', v_parts[1], v_parts[2])
+                INTO v_creator_uc_id USING p_object_id;
 
             IF v_creator_uc_id IS NOT NULL THEN
                 SELECT uc.user_id INTO v_creator_user
@@ -1927,8 +1923,6 @@ BEGIN
       AND uc.sa_deleted_at IS NULL;
 
     RETURN v_user_id;
-EXCEPTION WHEN OTHERS THEN
-    RETURN NULL;
 END;
 $$ LANGUAGE plpgsql STABLE;
 
@@ -2325,7 +2319,7 @@ BEGIN
 
         PERFORM claimius._clear_diff(ARRAY(SELECT x.id FROM unnest(v_diffs) x));
     EXCEPTION
-        WHEN OTHERS THEN
+        WHEN lock_not_available OR deadlock_detected THEN
             IF cardinality(v_diffs) = 1 THEN
                 RETURN 0;
             END IF;

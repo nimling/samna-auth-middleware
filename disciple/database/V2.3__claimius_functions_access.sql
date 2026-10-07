@@ -48,14 +48,6 @@ BEGIN
     END IF;
 
     RETURN coalesce(NEW, OLD);
-EXCEPTION WHEN OTHERS THEN
-    PERFORM claimius.insert_audit(
-            v_op, 'error', v_object_type, v_obj_id,
-            coalesce(v_owner_id, '00000000-0000-0000-0000-000000000000'::UUID),
-            coalesce((to_jsonb(coalesce(NEW, OLD)) ->> 'sa_created_by')::UUID, '00000000-0000-0000-0000-000000000000'::UUID),
-            SQLERRM
-            );
-    RAISE;
 END;
 $$ LANGUAGE plpgsql;
 
@@ -291,14 +283,6 @@ BEGIN
     END IF;
 
     RETURN coalesce(NEW, OLD);
-EXCEPTION WHEN OTHERS THEN
-    PERFORM claimius.insert_audit(
-            v_op, 'error', v_object_type, v_obj_id,
-            coalesce((to_jsonb(coalesce(NEW, OLD)) ->> 'sa_owner_id')::UUID, '00000000-0000-0000-0000-000000000000'::UUID),
-            coalesce((to_jsonb(coalesce(NEW, OLD)) ->> 'sa_created_by')::UUID, '00000000-0000-0000-0000-000000000000'::UUID),
-            SQLERRM
-            );
-    RAISE;
 END;
 $$ LANGUAGE plpgsql;
 
@@ -827,7 +811,7 @@ BEGIN
             IF v_open THEN
                 PERFORM claimius.recompute_user_object(p_user_id, p_object_type, p_object_id);
             END IF;
-        EXCEPTION WHEN OTHERS THEN
+        EXCEPTION WHEN lock_not_available OR deadlock_detected THEN
             NULL;
         END;
     ELSIF pg_try_advisory_xact_lock(hashtextextended('claimius.share:' || p_user_id::TEXT, 0)) THEN
@@ -882,7 +866,7 @@ BEGIN
                 BEGIN
                     PERFORM claimius.recompute_user_object(p_user_id, v_row.object_type, v_row.object_id);
                     DELETE FROM claimius.reconcile_queue WHERE id = v_row.id;
-                EXCEPTION WHEN OTHERS THEN
+                EXCEPTION WHEN lock_not_available OR deadlock_detected THEN
                     NULL;
                 END;
             END LOOP;

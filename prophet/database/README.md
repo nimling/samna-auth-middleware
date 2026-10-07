@@ -42,7 +42,7 @@ Implementers don't need to know about `sa_root_id`. Just set the parent (`sa_own
 
 **access_diff**: the open areas of changes not yet settled, one row per changed object, claim or assignment, with `raise_count` counting the writes that raised it. `access_diff_user` records which holder settled which raise; an area clears once every holder has settled it. `drain_access_diff` settles, off the request path, the shares of holders who read more often than the area is raised.
 
-**user_users_diff**: one row per `user_object` pair that entered or left on an object that is not a claim, `+1` or `−1`, not yet folded into `user_users`. A statement trigger on `user_object` writes them and locks nothing; `get_users`, `get_user_access` and the claim graphs fold the rows of the reader's objects with `_settle_user_users_diff` and read the count through `_user_users_for_viewer`, and `drain_access_diff` folds the oldest.
+**user_users_diff**: one row per `user_object` pair that entered or left on an object that is not a claim, `+1` or `−1`, not yet folded into `user_users`. A statement trigger on `user_object` writes them and locks nothing; `get_users` and the claim graphs fold the rows of the reader's objects with `_settle_user_users_diff` and read the count through `_user_users_for_viewer`, `get_user_access` reads the one pair's row by key with the pending rows of its two users, and `drain_access_diff` folds the oldest.
 
 **sync_event**: append only outbox of changes to the source tables, one event per source row written, keyed for a consumer by `(txid, seq)`. Derived tables, `user_object`, `user_users`, `user_users_diff` and `audit`, never publish. Prophets write; disciples and peer prophets pull.
 

@@ -218,9 +218,14 @@ func (r *Replica) Pull(ctx context.Context) {
 				wait = backoff
 				backoff = min(backoff*2, maxBackoff)
 			case errors.Is(err, ErrSnapshotRequired):
-				backoff = time.Second
-				failed = 0
-				report(r.PullSnapshot(ctx, "", r.reportStalledCursor(ctx, "was refused by the prophet feed")))
+				if err := r.PullSnapshot(ctx, "", r.reportStalledCursor(ctx, "was refused by the prophet feed")); err != nil {
+					report(err)
+					wait = backoff
+					backoff = min(backoff*2, maxBackoff)
+				} else {
+					backoff = time.Second
+					failed = 0
+				}
 			case err != nil:
 				report(err)
 				wait = backoff
@@ -228,9 +233,12 @@ func (r *Replica) Pull(ctx context.Context) {
 				failed++
 				if failed >= failedPullsBeforeReconcile {
 					failed = 0
-					backoff = time.Second
 					reason := fmt.Sprintf("failed to apply %d consecutive pulls, last error %v", failedPullsBeforeReconcile, err)
-					report(r.PullSnapshot(ctx, "", r.reportStalledCursor(ctx, reason)))
+					if err := r.PullSnapshot(ctx, "", r.reportStalledCursor(ctx, reason)); err != nil {
+						report(err)
+					} else {
+						backoff = time.Second
+					}
 				}
 			default:
 				backoff = time.Second

@@ -337,3 +337,30 @@ func TestApplyPageStoresTheUserProfileFields(t *testing.T) {
 		}
 	}
 }
+
+func TestPullBacksOffWhileTheSnapshotFailsToApply(t *testing.T) {
+	db := database(t)
+	ctx := context.Background()
+	var snapshots atomic.Int32
+	prophet := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/sync/snapshot") {
+			snapshots.Add(1)
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusConflict)
+	}))
+	defer prophet.Close()
+	t.Setenv("SAUTH_ENDPOINT", prophet.URL)
+	if _, err := db.ExecContext(ctx, `UPDATE claimius.disciple_state SET prophet = NULL, endpoint = ?, last_applied_seq = greatest(last_applied_seq, 1)`, prophet.URL); err != nil {
+		t.Fatalf("bind: %v", err)
+	}
+
+	run, stop := context.WithTimeout(ctx, 3500*time.Millisecond)
+	defer stop()
+	sam.Disciple().Pull(run)
+
+	if n := snapshots.Load(); n == 0 || n > 3 {
+		t.Fatalf("a snapshot that fails to apply must be pulled again only after the backoff, 1 s then 2 s, got %d snapshots in 3.5 s", n)
+	}
+}

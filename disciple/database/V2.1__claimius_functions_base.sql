@@ -109,8 +109,6 @@ CREATE OR REPLACE FUNCTION claimius.in_replay_mode()
     RETURNS BOOLEAN AS $$
 BEGIN
     RETURN coalesce(current_setting('claimius.replay_mode', TRUE), 'false') = 'true';
-EXCEPTION WHEN OTHERS THEN
-    RETURN FALSE;
 END;
 $$ LANGUAGE plpgsql STABLE;
 

@@ -107,6 +107,7 @@ CREATE INDEX IF NOT EXISTS idx_samna_user_app_id ON claimius.samna_user (app_id)
 CREATE INDEX IF NOT EXISTS idx_samna_user_email ON claimius.samna_user (email);
 CREATE INDEX IF NOT EXISTS idx_samna_user_sa_deleted_at ON claimius.samna_user (sa_deleted_at);
 CREATE INDEX IF NOT EXISTS idx_samna_user_status ON claimius.samna_user (status);
+CREATE INDEX IF NOT EXISTS idx_samna_user_app_external ON claimius.samna_user (app_id, external_id) WHERE sa_deleted_at IS NULL;
 
 CREATE TABLE IF NOT EXISTS claimius.samna_client (
                                                      id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),

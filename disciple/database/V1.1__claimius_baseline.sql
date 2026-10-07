@@ -51,6 +51,7 @@ CREATE INDEX IF NOT EXISTS idx_samna_user_user_id ON claimius.samna_user (user_i
 CREATE INDEX IF NOT EXISTS idx_samna_user_email ON claimius.samna_user (email);
 CREATE INDEX IF NOT EXISTS idx_samna_user_sa_deleted_at ON claimius.samna_user (sa_deleted_at);
 CREATE INDEX IF NOT EXISTS idx_samna_user_status ON claimius.samna_user (status);
+CREATE INDEX IF NOT EXISTS idx_samna_user_external ON claimius.samna_user (external_id) WHERE sa_deleted_at IS NULL;
 
 CREATE TABLE IF NOT EXISTS claimius.samna_client (
                                                      id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -164,7 +165,7 @@ CREATE TABLE IF NOT EXISTS claimius.claim (
                                               inherits        BOOLEAN NOT NULL DEFAULT TRUE,
                                               type            claimius.claim_type NOT NULL DEFAULT 'user',
                                               sa_owner_id     UUID NOT NULL REFERENCES claimius.organization(id),
-                                              sa_root_id      UUID NOT NULL REFERENCES claimius.organization(id),
+                                              sa_root_id      UUID NOT NULL,
                                               sa_created_by   UUID,
                                               sa_deleted_at   TIMESTAMPTZ,
                                               sa_created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -178,6 +179,8 @@ COMMENT ON COLUMN claimius.claim.inherits IS 'When true, claim_object bindings c
 
 CREATE INDEX IF NOT EXISTS idx_claim_sa_owner_id ON claimius.claim (sa_owner_id);
 CREATE INDEX IF NOT EXISTS idx_claim_sa_root_id ON claimius.claim (sa_root_id);
+ALTER TABLE claimius.claim DROP CONSTRAINT IF EXISTS claim_sa_root_id_fkey;
+COMMENT ON COLUMN claimius.claim.sa_root_id IS 'Root of the owning organization''s tree. A root outside the app is not held here, so the id is kept as sent, with no foreign key.';
 CREATE INDEX IF NOT EXISTS idx_claim_deny_bit ON claimius.claim ((sa_access & 16)) WHERE (sa_access & 16) <> 0;
 
 ALTER TABLE claimius.claim ADD COLUMN IF NOT EXISTS level INTEGER NOT NULL DEFAULT 0;
@@ -228,7 +231,7 @@ CREATE TABLE IF NOT EXISTS claimius.claim_object (
                                                      inherits        BOOLEAN NOT NULL DEFAULT TRUE,
                                                      ref_id          UUID,
                                                      sa_owner_id     UUID NOT NULL REFERENCES claimius.organization(id),
-                                                     sa_root_id      UUID NOT NULL REFERENCES claimius.organization(id),
+                                                     sa_root_id      UUID NOT NULL,
                                                      sa_created_by   UUID,
                                                      sa_deleted_at   TIMESTAMPTZ,
                                                      sa_created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -248,6 +251,8 @@ CREATE INDEX IF NOT EXISTS idx_claim_object_claim_id ON claimius.claim_object (c
 CREATE INDEX IF NOT EXISTS idx_claim_object_object ON claimius.claim_object (object_type, object_id) WHERE object_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_claim_object_no_object ON claimius.claim_object (claim_id) WHERE object_id IS NULL AND sa_deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_claim_object_sa_owner_id ON claimius.claim_object (sa_owner_id);
+ALTER TABLE claimius.claim_object DROP CONSTRAINT IF EXISTS claim_object_sa_root_id_fkey;
+COMMENT ON COLUMN claimius.claim_object.sa_root_id IS 'Root of the owning organization''s tree. A root outside the app is not held here, so the id is kept as sent, with no foreign key.';
 DROP INDEX IF EXISTS claimius.idx_claim_object_sa_deleted_at;
 ALTER TABLE claimius.claim_object ADD COLUMN IF NOT EXISTS txid XID8 NOT NULL DEFAULT pg_current_xact_id();
 COMMENT ON COLUMN claimius.claim_object.txid IS 'Local transaction that last wrote the row, stamped by tg_update_txid on every insert and update, a replayed one included. get_claim_graph compares it to the snapshot a cached graph was built under.';

@@ -412,7 +412,6 @@ DECLARE
     v_uuid           UUID;
 BEGIN
     PERFORM claimius.reconcile_if_pending(p_actor_id);
-    PERFORM claimius._settle_user_users_diff(p_actor_id);
 
     IF NOT claimius.check_user_active(p_actor_id) THEN
         RETURN;
@@ -422,17 +421,18 @@ BEGIN
         v_uuid := p_target::UUID;
     END IF;
 
-    SELECT su.user_id INTO v_target_user_id
-    FROM claimius.samna_user su
-    WHERE TRUE
-      AND su.sa_deleted_at IS NULL
-      AND su.status = 'active'
-      AND (su.external_id = p_target OR su.user_id = v_uuid OR su.id = v_uuid)
-    ORDER BY CASE
-                 WHEN su.external_id = p_target THEN 0
-                 WHEN su.user_id = v_uuid THEN 1
-                 ELSE 2
-             END
+    SELECT r.user_id INTO v_target_user_id
+    FROM (
+        SELECT su.user_id, 0 AS rank FROM claimius.samna_user su
+        WHERE su.external_id = p_target AND su.sa_deleted_at IS NULL AND su.status = 'active'
+        UNION ALL
+        SELECT su.user_id, 1 FROM claimius.samna_user su
+        WHERE su.user_id = v_uuid AND su.sa_deleted_at IS NULL AND su.status = 'active'
+        UNION ALL
+        SELECT su.user_id, 2 FROM claimius.samna_user su
+        WHERE su.id = v_uuid AND su.sa_deleted_at IS NULL AND su.status = 'active'
+    ) r
+    ORDER BY r.rank
     LIMIT 1;
 
     IF v_target_user_id IS NULL THEN
@@ -463,8 +463,28 @@ BEGIN
                 NULL::UUID,
                 NULL::UUID,
                 FALSE
-            FROM claimius._user_users_for_viewer(p_actor_id) uu
-            WHERE uu.target_user_id = v_target_user_id
+            FROM (
+                SELECT coalesce((
+                           SELECT uu.sharing_object_count FROM claimius.user_users uu
+                           WHERE uu.id = claimius.composite_id(p_actor_id::TEXT, v_target_user_id::TEXT)), 0)
+                     + coalesce((
+                           SELECT sum(m.a_now * m.t_now - (m.a_now - m.a_shift) * (m.t_now - m.t_shift))
+                           FROM (
+                               SELECT coalesce(sum(d.delta) FILTER (WHERE d.user_id = p_actor_id), 0) AS a_shift,
+                                      coalesce(sum(d.delta) FILTER (WHERE d.user_id = v_target_user_id), 0) AS t_shift,
+                                      EXISTS (SELECT 1 FROM claimius.user_object uo
+                                              WHERE uo.user_id = p_actor_id
+                                                AND uo.object_type = d.object_type AND uo.object_id = d.object_id)::INTEGER AS a_now,
+                                      EXISTS (SELECT 1 FROM claimius.user_object uo
+                                              WHERE uo.user_id = v_target_user_id
+                                                AND uo.object_type = d.object_type AND uo.object_id = d.object_id)::INTEGER AS t_now
+                               FROM claimius.user_users_diff d
+                               WHERE d.user_id IN (p_actor_id, v_target_user_id)
+                               GROUP BY d.object_type, d.object_id
+                           ) m), 0) AS n
+            ) shared
+            WHERE shared.n > 0
+              AND p_actor_id <> v_target_user_id
 
             UNION ALL
 
@@ -952,7 +972,7 @@ CREATE OR REPLACE FUNCTION claimius._window_graph(
                ) AS pos
         FROM node n
             CROSS JOIN LATERAL (
-                SELECT CASE WHEN EXISTS (SELECT 1 FROM node x WHERE x.object_id = n.parent_id) THEN n.parent_id END AS parent_key
+                SELECT CASE WHEN n.parent_id IN (SELECT x.object_id FROM node x) THEN n.parent_id END AS parent_key
             ) p
             LEFT JOIN claimius.user_object uo
                 ON p_sort = 'usage'
@@ -1016,13 +1036,11 @@ CREATE OR REPLACE FUNCTION claimius._window_links(
         SELECT DISTINCT target_type AS short_type, target_id AS object_id, source_id AS parent_id FROM link
         UNION
         SELECT DISTINCT s.source_type, s.source_id, NULL::UUID FROM link s
-        WHERE NOT EXISTS (SELECT 1 FROM link t WHERE t.target_id = s.source_id AND t.target_type = s.source_type)
+        WHERE (s.source_id, s.source_type) NOT IN (SELECT t.target_id, t.target_type FROM link t)
         UNION
         SELECT DISTINCT n.value ->> 'object_type', (n.value ->> 'object_id')::UUID, NULL::UUID
         FROM jsonb_array_elements(coalesce(p_nodes, '[]'::JSONB)) AS n
-        WHERE NOT EXISTS (
-            SELECT 1 FROM link t
-            WHERE t.target_id = (n.value ->> 'object_id')::UUID AND t.target_type = n.value ->> 'object_type')
+        WHERE ((n.value ->> 'object_id')::UUID, n.value ->> 'object_type') NOT IN (SELECT t.target_id, t.target_type FROM link t)
     ),
     typed AS (
         SELECT n.short_type, n.object_id, n.parent_id,
@@ -2295,9 +2313,6 @@ BEGIN
                 PERFORM claimius._bulk_seed_user_object(v_object_type);
                 RAISE NOTICE 'Seeded user_object for %', v_object_type;
             END LOOP;
-    EXCEPTION WHEN OTHERS THEN
-        PERFORM set_config('claimius.replay_mode', 'false', TRUE);
-        RAISE;
     END;
     PERFORM set_config('claimius.replay_mode', 'false', TRUE);
 END;
@@ -2388,9 +2403,6 @@ BEGIN
             LOOP
                 PERFORM claimius._bulk_seed_user_object(v_table.object_type);
             END LOOP;
-    EXCEPTION WHEN OTHERS THEN
-        PERFORM set_config('claimius.replay_mode', 'false', TRUE);
-        RAISE;
     END;
     PERFORM set_config('claimius.replay_mode', 'false', TRUE);
 END;
@@ -2463,9 +2475,6 @@ BEGIN
             GET DIAGNOSTICS v_count = ROW_COUNT;
             v_total := v_total + v_count;
         END LOOP;
-    EXCEPTION WHEN OTHERS THEN
-        PERFORM set_config('claimius.replay_mode', v_replay, TRUE);
-        RAISE;
     END;
     PERFORM set_config('claimius.replay_mode', v_replay, TRUE);
     RETURN v_total;
@@ -2819,68 +2828,43 @@ BEGIN
                 AND uc.sa_deleted_at IS NULL
           )
     ),
-    in_scope AS (
+    in_scope AS MATERIALIZED (
         SELECT d.object_id, d.object_type
         FROM descendants d
         WHERE p_start_id IS NULL
            OR d.object_id = p_start_id
-           OR EXISTS (
-               SELECT 1 FROM claimius.inheritance_info ii
-               WHERE ii.ancestor_id = p_start_id
-                 AND ii.descendant_id = d.object_id
-                 AND ii.descendant_type = d.object_type
+           OR (d.object_type, d.object_id) IN (
+               SELECT ii.descendant_type, ii.descendant_id
+               FROM claimius.inheritance_info ii
+               WHERE ii.ancestor_type = ANY(v_allowed)
+                 AND ii.ancestor_id = p_start_id
                  AND ii.depth >= 1
-                 AND (p_depth = 0 OR ii.depth <= p_depth)
-           )
-    ),
-    direct_edges AS (
-        SELECT ii.tree_type,
-               ii.ancestor_type   AS source_type,
-               ii.ancestor_id     AS source_id,
-               ii.descendant_type AS target_type,
-               ii.descendant_id   AS target_id
-        FROM claimius.inheritance_info ii
-        JOIN in_scope      vt ON vt.object_id = ii.descendant_id AND vt.object_type = ii.descendant_type
-        WHERE ii.depth = 1
-          AND ii.ancestor_type = ANY(v_allowed)
-          AND EXISTS (
-              SELECT 1 FROM claimius.user_object ap
-              WHERE ap.user_id = p_user_id
-                AND ap.object_type = ii.ancestor_type
-                AND ap.object_id = ii.ancestor_id
-                AND (p_required_access = 0 OR (ap.sa_access & p_required_access) = p_required_access))
-    ),
-    fallback_edges AS (
-        SELECT DISTINCT ON (ii.tree_type, ii.descendant_type, ii.descendant_id)
-               ii.tree_type,
-               ii.ancestor_type   AS source_type,
-               ii.ancestor_id     AS source_id,
-               ii.descendant_type AS target_type,
-               ii.descendant_id   AS target_id
-        FROM claimius.inheritance_info ii
-        JOIN in_scope      vt ON vt.object_id = ii.descendant_id AND vt.object_type = ii.descendant_type
-        WHERE ii.depth > 1
-          AND ii.ancestor_type = ANY(v_allowed)
-          AND EXISTS (
-              SELECT 1 FROM claimius.user_object ap
-              WHERE ap.user_id = p_user_id
-                AND ap.object_type = ii.ancestor_type
-                AND ap.object_id = ii.ancestor_id
-                AND (p_required_access = 0 OR (ap.sa_access & p_required_access) = p_required_access))
-          AND NOT EXISTS (
-              SELECT 1 FROM direct_edges de
-              WHERE de.tree_type   = ii.tree_type
-                AND de.target_type = ii.descendant_type
-                AND de.target_id   = ii.descendant_id
-          )
-        ORDER BY ii.tree_type, ii.descendant_type, ii.descendant_id, ii.depth ASC
+                 AND (p_depth = 0 OR ii.depth <= p_depth))
     ),
     edges AS (
-        SELECT source_type, source_id, target_type, target_id, tree_type::TEXT AS relation_raw
-        FROM direct_edges
-        UNION ALL
-        SELECT source_type, source_id, target_type, target_id, tree_type::TEXT AS relation_raw
-        FROM fallback_edges
+        SELECT r.source_type, r.source_id, r.target_type, r.target_id, r.tree_type::TEXT AS relation_raw
+        FROM (
+            SELECT ii.tree_type,
+                   ii.ancestor_type   AS source_type,
+                   ii.ancestor_id     AS source_id,
+                   ii.descendant_type AS target_type,
+                   ii.descendant_id   AS target_id,
+                   ii.depth,
+                   row_number() OVER (PARTITION BY ii.tree_type, ii.descendant_type, ii.descendant_id ORDER BY ii.depth) AS rank
+            FROM in_scope vt
+                JOIN claimius.inheritance_info ii
+                    ON ii.descendant_type = vt.object_type
+                   AND ii.descendant_id = vt.object_id
+                   AND ii.depth >= 1
+            WHERE ii.ancestor_type = ANY(v_allowed)
+              AND EXISTS (
+                  SELECT 1 FROM claimius.user_object ap
+                  WHERE ap.user_id = p_user_id
+                    AND ap.object_type = ii.ancestor_type
+                    AND ap.object_id = ii.ancestor_id
+                    AND (p_required_access = 0 OR (ap.sa_access & p_required_access) = p_required_access))
+        ) r
+        WHERE r.depth = 1 OR r.rank = 1
     )
     SELECT COALESCE(jsonb_agg(jsonb_build_object(
         'source_type', claimius.normalize_object_type(source_type),

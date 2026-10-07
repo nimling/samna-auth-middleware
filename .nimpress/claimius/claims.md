@@ -61,6 +61,8 @@ Two first bindings are judged on the writer's owner bit on an organization inste
 
 2. The first live binding on a `samna_user` who holds a claim assigned under the binding's owning organization, when the writer holds owner on that organization in the binding's app. This is how `insert_organization_user` binds a new member's claim.
 
+A binding on an object outside the `claimius` schema that the database holds no `object_info` row for, a row of a disciple's own table bound on the prophet, is judged on the writer's pair on the binding's owning organization, `A(writer, sa_owner_id)`, when the writer holds no pair on the object. Claimius never resolves such a type: the prophet knows the organization, `_check_app_scope` keeps it linked to the app, and the disciple, which holds the row, computes access on it when the binding arrives by sync. One extra probe of `object_info` and the settle of one pair.
+
 Each costs one pair settle and one probe of the writer's pair on the organization, and is tested only when the plain rule would refuse.
 
 ## Cascade
