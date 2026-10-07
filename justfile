@@ -102,7 +102,7 @@ bench:
         name=$(echo "$out" | grep -o 'smig-test-[0-9]*' | head -1)
         [ -n "$name" ] || exit 1
         eval "$(echo "$out" | grep '^ *PG[A-Z]*=' | sed 's/^ *//; s/^/export /')"
-        psql -q -c "ALTER DATABASE postgres SET claimius.bench = 'on'"
+        psql -q -c "ALTER DATABASE \"$PGDATABASE\" SET claimius.bench = 'on'"
         psql -q -v ON_ERROR_STOP=0 -f bench/$role/bench.sql 2>&1 | grep '^ *# \|not ok' || true
         docker rm -f "$name" >/dev/null
     done
