@@ -91,3 +91,18 @@ test-hurl:
         --variable wing=40000000-0000-4000-8000-000000000002 \
         --variable missing=99999999-0000-4000-8000-000000000999 \
         test/hurl/*.hurl
+
+bench:
+    #!/usr/bin/env bash
+    set -e
+    export PGSSLMODE=disable
+    for role in prophet disciple; do
+        out=$(smig test --schema=bench/$role/migrate.yml --db-dir=$role/database --keep 2>&1 | sed 's/\x1b\[[0-9;]*m//g')
+        echo "$out" | grep -v '^ *PG[A-Z]*='
+        name=$(echo "$out" | grep -o 'smig-test-[0-9]*' | head -1)
+        [ -n "$name" ] || exit 1
+        eval "$(echo "$out" | grep '^ *PG[A-Z]*=' | sed 's/^ *//; s/^/export /')"
+        psql -q -c "ALTER DATABASE postgres SET claimius.bench = 'on'"
+        psql -q -v ON_ERROR_STOP=0 -f bench/$role/bench.sql 2>&1 | grep '^ *# \|not ok' || true
+        docker rm -f "$name" >/dev/null
+    done

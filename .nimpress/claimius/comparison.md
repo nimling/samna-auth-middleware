@@ -8,7 +8,7 @@ lastUpdated: true
 
 # Comparison
 
-Five systems stand where claimius stands. Zanzibar is Google's; SpiceDB, OpenFGA with Auth0 FGA, and Ory Keto implement its model of relation tuples and userset rewrites as a service beside the application. Entra ID carries groups and roles in a token and decides nothing per object. Every claimius figure below was measured on this release, as index entries counted by `pg_stat_get_xact_tuples_returned` over the claimius indexes inside the transaction of the operation, in the pgTAP suites of `test/sql` on a fresh database and in the bench `test/sql/prophet/bench.sql` on a prophet with analyzed tables; where the two plans differ the text says which one a figure comes from. Every other figure is published by its vendor or its authors and says where.
+Five systems stand where claimius stands. Zanzibar is Google's; SpiceDB, OpenFGA with Auth0 FGA, and Ory Keto implement its model of relation tuples and userset rewrites as a service beside the application. Entra ID carries groups and roles in a token and decides nothing per object. Every claimius figure below was measured on this release, as index entries counted by `pg_stat_get_xact_tuples_returned` over the claimius indexes inside the transaction of the operation, in the pgTAP suites of `test/sql` on a fresh database and in the bench `bench/prophet/bench.sql`, run by `just bench` on a prophet with analyzed tables; where the two plans differ the text says which one a figure comes from. Every other figure is published by its vendor or its authors and says where.
 
 ## The data set and the workload
 

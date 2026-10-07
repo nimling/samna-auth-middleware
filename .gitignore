@@ -34,3 +34,6 @@ go.work.sum
 /sqlsync
 
 .playwright-mcp/
+
+# bench suites, run by just bench
+/bench/

@@ -178,7 +178,7 @@ just test
 just test-hurl
 ```
 
-`just test` runs `go test ./...`, then for each role runs `smig test` on `<role>/database/migrate.yml` fresh and `--from` the last tag, then the `dbtest` tagged Go suites against the container that run keeps. The SQL tests are pgTAP files under `test/sql/<role>/`. `just test-hurl` builds the example disciple against a kept disciple database and runs the hurl files under `test/hurl/` against it.
+`just test` runs `go test ./...`, then for each role runs `smig test` on `<role>/database/migrate.yml` fresh and `--from` the last tag, then the `dbtest` tagged Go suites against the container that run keeps. The SQL tests are pgTAP files under `test/sql/<role>/`. The bench suites, `bench.sql` and `settle_share.sql` per role, live untracked under `bench/<role>/` with a schema file pointing at the role's database, and run on demand with `just bench`, which keeps a container per role, sets `claimius.bench` on and prints the measured steps. `just test-hurl` builds the example disciple against a kept disciple database and runs the hurl files under `test/hurl/` against it.
 
 ## License
 
