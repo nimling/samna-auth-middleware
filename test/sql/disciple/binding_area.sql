@@ -1,8 +1,6 @@
 BEGIN;
 SELECT plan(14);
 
-SET track_functions = 'pl';
-
 CREATE FUNCTION pg_temp.org(p_n INTEGER) RETURNS UUID AS $$
     SELECT ('10000000-0000-4000-8000-' || lpad(to_hex(3840 + p_n), 12, '0'))::UUID
 $$ LANGUAGE sql;
@@ -12,8 +10,11 @@ CREATE FUNCTION pg_temp.fresh() RETURNS UUID[] AS $$
 $$ LANGUAGE sql;
 
 CREATE FUNCTION pg_temp.recomputed() RETURNS BIGINT AS $$
-    SELECT coalesce((SELECT calls FROM pg_stat_xact_user_functions
-                      WHERE schemaname = 'claimius' AND funcname = '_apply_denies'), 0)
+    SELECT pg_stat_get_xact_tuples_inserted('claimius.user_object'::REGCLASS)
+$$ LANGUAGE sql;
+
+CREATE FUNCTION pg_temp.cursor_of(p_user UUID) RETURNS XID8 AS $$
+    SELECT coalesce((SELECT a.settled_txid FROM claimius.user_activity a WHERE a.user_id = p_user), '0'::XID8)
 $$ LANGUAGE sql;
 
 CREATE FUNCTION pg_temp.listed(p_user UUID) RETURNS BIGINT AS $$
@@ -98,21 +99,19 @@ SELECT is(pg_temp.listed('a0000000-0000-4000-8000-000000000f01'), 45::BIGINT,
     'the holder lists the forty objects bound before and the five bound since');
 
 SELECT is(pg_temp.recomputed() - (SELECT n FROM work), 5::BIGINT,
-    'the holder''s listing recomputes the five newly bound objects and none of the forty');
+    'the holder''s listing writes the five newly bound pairs and none of the forty');
 
 SELECT is(
     (SELECT count(*) FROM claimius.access_diff WHERE kind = 'object' AND object_id = ANY(pg_temp.fresh())),
     5::BIGINT,
-    'the areas stay open while a holder through a link has not settled them'
+    'the areas stay stored for the holders who have not read since, until the drain trims them'
 );
 
 SELECT is(pg_temp.listed('a0000000-0000-4000-8000-000000000f02'), 45::BIGINT,
     'a holder of a claim linking to the bound claim lists the five new objects too');
 
-SELECT is_empty(
-    $$SELECT 1 FROM claimius.access_diff WHERE kind = 'object' AND object_id = ANY(pg_temp.fresh())$$,
-    'the areas clear once the holder and the link holder have settled them'
-);
+SELECT is(pg_temp.cursor_of('a0000000-0000-4000-8000-000000000f02'), pg_snapshot_xmin(pg_current_snapshot()),
+    'the link holder''s listing moves its cursor past the areas');
 
 SELECT is(pg_temp.listed('a0000000-0000-4000-8000-000000000f03'), 0::BIGINT,
     'a user holding neither claim lists nothing');

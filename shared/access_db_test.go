@@ -481,3 +481,39 @@ func TestASystemUserReadsItselfAndStaysHiddenFromOthers(t *testing.T) {
 		t.Fatalf("a system user must stay hidden from other users, got %v", err)
 	}
 }
+
+func TestGetAccessReadsThePairAfterItsMark(t *testing.T) {
+	db := database(t)
+	ctx := context.Background()
+	if _, err := db.GetAccess(ctx, userA, orgGrand, sdb.OBJECT_TYPE_ORGANIZATION, sdb.ACCESS_WRITE); err != nil {
+		t.Fatalf("first check: %v", err)
+	}
+	const entries = `SELECT sum(pg_stat_get_xact_tuples_returned(i.indexrelid))
+		FROM pg_index i JOIN pg_class c ON c.oid = i.indrelid JOIN pg_namespace n ON n.oid = c.relnamespace
+		WHERE n.nspname = 'claimius'`
+	var read int64
+	err := db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
+		var before, after int64
+		if err := tx.NewRaw(entries).Scan(ctx, &before); err != nil {
+			return err
+		}
+		claims := make([]sdb.AccessClaim, 0)
+		if err := tx.NewRaw("SELECT * FROM claimius.get_access(?, ?, ?, ?)", userA, orgGrand, sdb.OBJECT_TYPE_ORGANIZATION, int(sdb.ACCESS_WRITE)).Scan(ctx, &claims); err != nil {
+			return err
+		}
+		if len(claims) != 1 || claims[0].ClaimName == nil || *claims[0].ClaimName != "Root writer" {
+			t.Fatalf("expected the Root writer grant, got %+v", claims)
+		}
+		if err := tx.NewRaw(entries).Scan(ctx, &after); err != nil {
+			return err
+		}
+		read = after - before
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("counted check: %v", err)
+	}
+	if read > 5 {
+		t.Fatalf("a check with nothing raised since the pair's mark read %d index entries, expected at most 5", read)
+	}
+}

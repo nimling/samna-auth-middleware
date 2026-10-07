@@ -56,3 +56,35 @@ HTTP 200
 [Asserts]
 jsonpath "$[?(@.object_type=='claimius.claim')].label" contains "Root writer"
 jsonpath "$[?(@.object_type=='claimius.claim')].label" contains "Alpha reader"
+
+GET {{base}}/api/organizations?limit=2
+HTTP 200
+[Asserts]
+jsonpath "$" count == 2
+jsonpath "$[0].id" < "{{bravo}}"
+
+GET {{base}}/api/organizations?cursor={{alpha}}&limit=10
+HTTP 200
+[Asserts]
+jsonpath "$" count == 3
+jsonpath "$[*].id" contains "{{bravo}}"
+jsonpath "$[*].id" contains "{{charlie}}"
+jsonpath "$[*].id" contains "{{grand}}"
+jsonpath "$[*].id" not contains "{{root}}"
+
+GET {{base}}/api/organizations
+HTTP 200
+[Asserts]
+jsonpath "$" count == 5
+
+GET {{base}}/api/locations?limit=1
+HTTP 200
+[Asserts]
+jsonpath "$" count == 1
+jsonpath "$[0].id" == "{{hall}}"
+
+GET {{base}}/api/locations?cursor={{hall}}&limit=5
+HTTP 200
+[Asserts]
+jsonpath "$" count == 1
+jsonpath "$[0].id" == "{{wing}}"

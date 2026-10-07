@@ -1,5 +1,5 @@
 BEGIN;
-SELECT plan(1);
+SELECT plan(3);
 
 CREATE TEMP TABLE superseded (signature TEXT PRIMARY KEY);
 INSERT INTO superseded VALUES
@@ -85,7 +85,16 @@ INSERT INTO superseded VALUES
         ('claimius.resolve_access(uuid,uuid,text,integer)'),
         ('claimius.resolve_access(uuid,uuid,uuid,text,integer)'),
         ('claimius.search(uuid,uuid,text,text[],integer,uuid[],uuid[],uuid[],uuid,text,uuid[],integer,integer)'),
-        ('claimius.touch_object_usage(uuid,uuid,text,uuid)');
+        ('claimius.touch_object_usage(uuid,uuid,text,uuid)'),
+        ('claimius._settle_object_diff(uuid,uuid,text[],uuid[],boolean[])'),
+        ('claimius._settle_claim_diff(uuid,uuid,uuid,timestamp with time zone)'),
+        ('claimius._diff_holders(uuid,uuid[])'),
+        ('claimius._clear_diff(uuid,uuid[])'),
+        ('claimius._settle_diff_share(uuid,uuid,uuid[])'),
+        ('claimius._cascade_recompute(uuid,uuid,text,uuid)'),
+        ('claimius.recompute_user_object(uuid,uuid,text,uuid[])'),
+        ('claimius._build_grants_for_objects(uuid,uuid,text,uuid[],uuid[])'),
+        ('claimius._best_grant(jsonb,uuid,uuid,integer)');
 
 SELECT is_empty($$
     SELECT s.signature FROM superseded s
@@ -93,6 +102,9 @@ SELECT is_empty($$
         SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
         WHERE n.nspname = 'claimius' AND p.oid::REGPROCEDURE::TEXT = s.signature)
 $$, 'no function v1.1.0-alpha0078, v1.1.9 or an earlier form of this set carried that a fresh build lacks survives the replay');
+
+SELECT hasnt_table('claimius', 'access_diff_user', 'the per user settle record is gone: the cursor and the mark replace it');
+SELECT hasnt_table('claimius', 'reconcile_queue', 'the reconcile queue is gone: nothing parks a pair');
 
 SELECT * FROM finish();
 ROLLBACK;

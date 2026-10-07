@@ -9,6 +9,8 @@ DECLARE
     v_bravo   UUID := '10000000-0000-4000-8000-000000000012';
     v_charlie UUID := '10000000-0000-4000-8000-000000000013';
     v_grand   UUID := '10000000-0000-4000-8000-000000000111';
+    v_hall    UUID := '40000000-0000-4000-8000-000000000001';
+    v_wing    UUID := '40000000-0000-4000-8000-000000000002';
     v_claim   UUID;
 BEGIN
     PERFORM claimius.upsert_app_user(p_user_id => v_a, p_first_name => 'Ada', p_external_id => 'ext-a');
@@ -22,6 +24,10 @@ BEGIN
            (v_charlie, 'Charlie', 'company', v_root, v_root, 1, v_a);
     INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
     VALUES (v_grand, 'Grand', 'company', v_alpha, v_root, 2, v_a);
+    INSERT INTO claimius.location (id, name, sa_owner_id, sa_parent_id, sa_root_id, sa_created_by)
+    VALUES (v_hall, 'Hall', v_root, v_hall, v_hall, v_a);
+    INSERT INTO claimius.location (id, name, sa_owner_id, sa_parent_id, sa_root_id, sa_created_by)
+    VALUES (v_wing, 'Wing', v_root, v_hall, v_hall, v_a);
 
     v_claim := (claimius.insert_claim(p_name => 'Root writer', p_description => NULL, p_sa_access => 6,
         p_sa_owner_id => v_root, p_sa_root_id => v_root, p_sa_created_by => v_a) -> 'claim' ->> 'id')::UUID;

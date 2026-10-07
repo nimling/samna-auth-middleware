@@ -72,6 +72,10 @@ BEGIN
             p_sa_owner_id => v_root, p_sa_created_by => v_sys);
     END LOOP;
     PERFORM count(*) FROM claimius.get_objects('a0000000-0000-4000-8000-000000000c93', v_app, 'claimius.organization');
+    FOREACH v_user IN ARRAY ARRAY['a0000000-0000-4000-8000-000000000c91', 'a0000000-0000-4000-8000-000000000c92',
+                                  'a0000000-0000-4000-8000-000000000c93']::UUID[] LOOP
+        PERFORM count(*) FROM claimius.get_users(v_user, v_app);
+    END LOOP;
     PERFORM claimius._settle_user_users_diff(v_app);
 END $$;
 COMMIT;
@@ -82,10 +86,10 @@ FROM claimius.user_users_diff;
 COMMIT;
 
 SELECT dblink_exec('fold_a', 'BEGIN');
-SELECT * FROM dblink('fold_a', format($w$SELECT claimius.recompute_user_object(%L, 'a0000000-0000-4000-8000-000000000c91', 'claimius.organization', '10000000-0000-4000-8000-000000000c91')$w$, pg_temp.app())) AS t(result TEXT);
+SELECT * FROM dblink('fold_a', format($w$SELECT claimius.recompute_user_object(%L, 'a0000000-0000-4000-8000-000000000c91', ARRAY['claimius.organization'], ARRAY['10000000-0000-4000-8000-000000000c91']::UUID[])$w$, pg_temp.app())) AS t(result TEXT);
 SELECT dblink_exec('fold_b', 'BEGIN');
 SELECT dblink_exec('fold_b', 'SET LOCAL lock_timeout = ''5s''');
-SELECT dblink_send_query('fold_b', format($w$SELECT claimius.recompute_user_object(%L, 'a0000000-0000-4000-8000-000000000c92', 'claimius.organization', '10000000-0000-4000-8000-000000000c91')$w$, pg_temp.app()));
+SELECT dblink_send_query('fold_b', format($w$SELECT claimius.recompute_user_object(%L, 'a0000000-0000-4000-8000-000000000c92', ARRAY['claimius.organization'], ARRAY['10000000-0000-4000-8000-000000000c91']::UUID[])$w$, pg_temp.app()));
 SELECT pg_sleep(1);
 
 SELECT is(dblink_is_busy('fold_b'), 0,

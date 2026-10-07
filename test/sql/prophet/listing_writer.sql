@@ -10,9 +10,8 @@ $$ LANGUAGE sql;
 CREATE FUNCTION pg_temp.unsettled() RETURNS BIGINT AS $$
     SELECT count(*) FROM claimius.access_diff d
     WHERE d.app_id = pg_temp.app() AND d.kind = 'object' AND d.object_type = 'claimius.organization'
-      AND NOT EXISTS (
-          SELECT 1 FROM claimius.access_diff_user du
-          WHERE du.diff_id = d.id AND du.user_id = 'a0000000-0000-4000-8000-000000000fa1' AND du.raise_count = d.raise_count)
+      AND d.txid >= coalesce((SELECT a.settled_txid FROM claimius.user_activity a
+                              WHERE a.user_id = 'a0000000-0000-4000-8000-000000000fa1' AND a.app_id = pg_temp.app()), '0'::XID8)
 $$ LANGUAGE sql;
 
 CREATE FUNCTION pg_temp.list() RETURNS BIGINT AS $$
@@ -86,7 +85,8 @@ BEGIN
     PERFORM claimius.insert_user_claim(p_app_id => v_app, p_claim_id => v_crew, p_user_id => 'a0000000-0000-4000-8000-000000000fa1',
         p_sa_owner_id => v_root, p_sa_created_by => v_sys);
     PERFORM pg_temp.list();
-    PERFORM claimius._raise_object_diff(v_app, 'claimius.organization', gen_random_uuid(), TRUE)
+    PERFORM count(*) FROM claimius.get_users('a0000000-0000-4000-8000-000000000fa1', v_app);
+    PERFORM claimius._raise_object_diff(v_app, 'claimius.organization', gen_random_uuid(), TRUE, v_root)
     FROM generate_series(1, 600);
 END $$;
 COMMIT;

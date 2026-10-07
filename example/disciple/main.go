@@ -43,6 +43,8 @@ func main() {
 	api.GET("/api/root", GetRootAccess)
 	api.GET("/api/graph/owner", GetOwnerGraph)
 	api.GET("/api/graph/claim", GetClaimGraph)
+	api.GET("/api/organizations", GetOrganizations)
+	api.GET("/api/locations", GetLocations)
 
 	sam.SyncStart(context.Background())
 
@@ -157,4 +159,37 @@ func GetClaimGraph(ctx echo.Context) error {
 		return accessError(ctx, err)
 	}
 	return ctx.JSON(http.StatusOK, nodes)
+}
+
+func GetOrganizations(ctx echo.Context) error {
+	after, limit, err := shared.QueryPage(ctx)
+	if err != nil {
+		return ctx.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
+	}
+	orgs := make([]shared.Organization, 0)
+	if err := sdb.Instance().NewRaw("SELECT * FROM claimius.get_organizations(?, ?, ?, ?)", actor(ctx),
+		int(shared.ClaimAccess(intQuery(ctx, "required", int(shared.ACCESS_READ)))), after, nullableLimit(limit)).Scan(ctx.Request().Context(), &orgs); err != nil {
+		return accessError(ctx, err)
+	}
+	return ctx.JSON(http.StatusOK, orgs)
+}
+
+func GetLocations(ctx echo.Context) error {
+	after, limit, err := shared.QueryPage(ctx)
+	if err != nil {
+		return ctx.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
+	}
+	locs := make([]shared.Location, 0)
+	if err := sdb.Instance().NewRaw("SELECT * FROM claimius.get_locations(?, ?, ?, ?)", actor(ctx),
+		int(shared.ClaimAccess(intQuery(ctx, "required", int(shared.ACCESS_READ)))), after, nullableLimit(limit)).Scan(ctx.Request().Context(), &locs); err != nil {
+		return accessError(ctx, err)
+	}
+	return ctx.JSON(http.StatusOK, locs)
+}
+
+func nullableLimit(limit int) *int {
+	if limit <= 0 {
+		return nil
+	}
+	return &limit
 }

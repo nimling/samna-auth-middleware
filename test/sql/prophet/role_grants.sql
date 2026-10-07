@@ -8,7 +8,7 @@ SELECT is_empty($$
 $$, 'claimius_writer reads every claimius table');
 
 SELECT is_empty($$
-    SELECT t FROM unnest(ARRAY['access_diff_user', 'app_handover', 'object_info', 'peer_collision',
+    SELECT t FROM unnest(ARRAY['app_handover', 'object_info', 'peer_collision',
                                'prophet_peer', 'sync_consumer', 'user_activity']) AS t
     WHERE NOT has_table_privilege('claimius_writer', 'claimius.' || t, 'SELECT')
 $$, 'claimius_writer reads the tables added since init last ran');

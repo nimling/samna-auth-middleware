@@ -1,5 +1,5 @@
 BEGIN;
-SELECT plan(14);
+SELECT plan(12);
 
 CREATE FUNCTION pg_temp.pairs(p_user UUID) RETURNS BIGINT AS $$
     SELECT count(*) FROM claimius.user_object
@@ -77,9 +77,9 @@ SELECT is(pg_temp.pairs('a0000000-0000-4000-8000-0000000000d1'), 1::BIGINT,
     'the check settles the one pair it asks about and none of the other three objects of the area');
 
 SELECT is(
-    (SELECT count(*) FROM claimius.access_diff_user WHERE user_id = 'a0000000-0000-4000-8000-0000000000d1'),
-    0::BIGINT,
-    'a check records no share as settled'
+    (SELECT coalesce((SELECT a.settled_txid FROM claimius.user_activity a WHERE a.user_id = 'a0000000-0000-4000-8000-0000000000d1'), '0'::XID8)),
+    '0'::XID8,
+    'a check moves no cursor: the rest of the share stays for the listing'
 );
 
 SELECT set_eq(
@@ -96,11 +96,6 @@ SELECT is(pg_temp.pairs('a0000000-0000-4000-8000-0000000000d1'), 4::BIGINT,
 SELECT is(pg_temp.pairs('a0000000-0000-4000-8000-0000000000d2') + pg_temp.pairs('a0000000-0000-4000-8000-0000000000d3'), 0::BIGINT,
     'the other holders stay untouched until they read');
 
-SELECT ok(
-    EXISTS (SELECT 1 FROM claimius.access_diff WHERE kind = 'claim' AND claim_id = (SELECT id FROM claimius.claim WHERE name = 'Settle crew')),
-    'the claim area stays open while holders have not settled it'
-);
-
 SELECT is(
     (SELECT sa_access FROM claimius.get_access('a0000000-0000-4000-8000-0000000000d2',
         '10000000-0000-4000-8000-0000000000d4', 'claimius.organization', 4)),
@@ -113,11 +108,6 @@ SELECT is(
         + (SELECT count(*) FROM claimius.get_objects('a0000000-0000-4000-8000-0000000000d3', 'claimius.organization')),
     8::BIGINT,
     'the other holders list the four objects each'
-);
-
-SELECT is_empty(
-    $$SELECT 1 FROM claimius.access_diff WHERE kind = 'claim' AND claim_id = (SELECT id FROM claimius.claim WHERE name = 'Settle crew')$$,
-    'the claim area clears once every holder has settled it'
 );
 
 CREATE TEMP TABLE ada_before AS

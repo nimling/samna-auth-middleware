@@ -1,9 +1,13 @@
 BEGIN;
-SELECT plan(13);
+SELECT plan(12);
 
 CREATE FUNCTION pg_temp.pairs(p_user UUID) RETURNS BIGINT AS $$
     SELECT count(*) FROM claimius.user_object
     WHERE user_id = p_user AND object_type = 'claimius.organization'
+$$ LANGUAGE sql;
+
+CREATE FUNCTION pg_temp.cursor_of(p_user UUID) RETURNS XID8 AS $$
+    SELECT coalesce((SELECT a.settled_txid FROM claimius.user_activity a WHERE a.user_id = p_user), '0'::XID8)
 $$ LANGUAGE sql;
 
 DO $$
@@ -38,18 +42,9 @@ BEGIN
     END LOOP;
 END $$;
 
-CREATE TEMP TABLE raised AS
-SELECT raise_count FROM claimius.access_diff WHERE kind = 'claim' AND user_id IS NULL
-    AND claim_id = (SELECT id FROM claimius.claim WHERE name = 'Drain crew');
-SELECT is((SELECT count(*) FROM raised), 1::BIGINT, 'the claim and its binding open one area however often they raise it');
-SELECT claimius._raise_claim_diff((SELECT id FROM claimius.claim WHERE name = 'Drain crew'));
-SELECT claimius._raise_claim_diff((SELECT id FROM claimius.claim WHERE name = 'Drain crew'));
 SELECT is(
-    (SELECT raise_count FROM claimius.access_diff WHERE kind = 'claim' AND user_id IS NULL
-        AND claim_id = (SELECT id FROM claimius.claim WHERE name = 'Drain crew')),
-    (SELECT raise_count + 2 FROM raised),
-    'every raise of an open area counts'
-);
+    (SELECT count(*) FROM claimius.access_diff WHERE kind = 'assignment'),
+    3::BIGINT, 'three grants raise three assignment areas, one per assignee');
 
 UPDATE claimius.access_diff SET sa_created_at = now() - INTERVAL '1 hour';
 INSERT INTO claimius.user_activity (user_id, last_used_at) VALUES
@@ -62,14 +57,16 @@ SELECT is(pg_temp.pairs('a0000000-0000-4000-8000-0000000000f1'), 0::BIGINT, 'no 
 SELECT cmp_ok(claimius.drain_access_diff(), '>', 0, 'the drain settles shares');
 
 SELECT is(pg_temp.pairs('a0000000-0000-4000-8000-0000000000f1'), 2::BIGINT,
-    'a holder who reads more often than the area is raised is settled ahead of the read');
+    'a holder who reads more often than areas are raised is settled ahead of the read');
 SELECT is(pg_temp.pairs('a0000000-0000-4000-8000-0000000000f2'), 0::BIGINT,
-    'a holder who reads less often than the area is raised waits for the read');
+    'a holder who reads less often than areas are raised waits for the read');
 SELECT is(pg_temp.pairs('a0000000-0000-4000-8000-0000000000f3'), 0::BIGINT,
     'a holder with no activity waits for the read');
-SELECT is_empty(
-    $$SELECT 1 FROM claimius.access_diff_user WHERE user_id IN ('a0000000-0000-4000-8000-0000000000f2', 'a0000000-0000-4000-8000-0000000000f3')$$,
-    'the shares left behind are not recorded as settled');
+SELECT ok(pg_temp.cursor_of('a0000000-0000-4000-8000-0000000000f1') > '0'::XID8
+       AND pg_temp.cursor_of('a0000000-0000-4000-8000-0000000000f2') = '0'::XID8,
+    'the share settled moves its holder''s cursor and leaves the cursors of the shares left behind');
+
+SELECT count(*) FROM claimius.get_users('a0000000-0000-4000-8000-0000000000f1');
 
 SELECT is(
     (SELECT count(*) FROM claimius.get_objects('a0000000-0000-4000-8000-0000000000f2', 'claimius.organization')),
@@ -85,18 +82,20 @@ SELECT is_empty($$SELECT 1 FROM claimius.user_users_diff$$,
     'the drain folds the user_users_diff rows');
 
 SELECT set_eq($$
-    SELECT mine.user_id AS viewer_id, other.user_id AS target_user_id, count(*) AS sharing
+    SELECT other.user_id AS target_user_id, count(*) AS sharing
     FROM claimius.user_object mine
         JOIN claimius.user_object other
             ON other.object_type = mine.object_type
            AND other.object_id = mine.object_id
            AND other.user_id <> mine.user_id
-    WHERE mine.object_type <> 'claimius.claim'
-    GROUP BY mine.user_id, other.user_id
+    WHERE mine.user_id = 'a0000000-0000-4000-8000-0000000000f1'
+      AND mine.object_type <> 'claimius.claim'
+    GROUP BY other.user_id
 $$, $$
-    SELECT uu.viewer_id, uu.target_user_id, uu.sharing_object_count::BIGINT
+    SELECT uu.target_user_id, uu.sharing_object_count::BIGINT
     FROM claimius.user_users uu
-$$, 'and the stored user_users equal a count over the pairs');
+    WHERE uu.viewer_id = 'a0000000-0000-4000-8000-0000000000f1'
+$$, 'and the stored user_users of the viewer equal a count over the pairs');
 
 SELECT * FROM finish();
 ROLLBACK;

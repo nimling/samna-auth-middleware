@@ -1,5 +1,5 @@
 BEGIN;
-SELECT plan(13);
+SELECT plan(16);
 
 CREATE FUNCTION pg_temp.app() RETURNS UUID AS $$
     SELECT id FROM claimius.samna_app WHERE slug = 'sqltest_pages'
@@ -134,6 +134,30 @@ SELECT is(
     (SELECT count(*) FROM claimius.get_objects('a0000000-0000-4000-8000-0000000005a1', pg_temp.app(), 'claimius.organization', 8, NULL, 5)),
     0::BIGINT,
     'the mask test applies inside the page'
+);
+
+DO $$
+BEGIN
+    PERFORM claimius.delete_app_object(pg_temp.app(), 'claimius.organization', md5('pages ' || n)::UUID) FROM generate_series(1, 2) n;
+    PERFORM claimius._raise_object_diff(pg_temp.app(), 'claimius.organization', md5('pages ' || n)::UUID, FALSE, md5('pages root')::UUID) FROM generate_series(1, 2) n;
+END $$;
+
+SELECT is(
+    (SELECT count(*) FROM claimius.get_objects('a0000000-0000-4000-8000-0000000005a1', pg_temp.app(), 'claimius.organization')),
+    12::BIGINT,
+    'the reader''s range holds the two organizations unlinked from the app once their areas settle again'
+);
+
+SELECT is(
+    (SELECT count(*) FROM claimius.get_organizations('a0000000-0000-4000-8000-0000000005a1', pg_temp.app(), 0, NULL, 5)),
+    5::BIGINT,
+    'get_organizations returns limit rows when the reader''s range holds unlinked organizations'
+);
+
+SELECT is_empty(
+    $$SELECT 1 FROM claimius.get_organizations('a0000000-0000-4000-8000-0000000005a1', pg_temp.app())
+       WHERE id IN (md5('pages 1')::UUID, md5('pages 2')::UUID)$$,
+    'and never an organization the app is not linked to'
 );
 
 SELECT * FROM finish();
