@@ -403,9 +403,11 @@ COMMENT ON COLUMN claimius.user_object.scope IS 'Effective merged scope: union o
 
 ALTER TABLE claimius.user_object ADD COLUMN IF NOT EXISTS used_count BIGINT NOT NULL DEFAULT 0;
 ALTER TABLE claimius.user_object ADD COLUMN IF NOT EXISTS last_used_at TIMESTAMPTZ;
+ALTER TABLE claimius.user_object ADD COLUMN IF NOT EXISTS settled_txid XID8 NOT NULL DEFAULT '0';
 
 COMMENT ON COLUMN claimius.user_object.used_count IS 'Successful single object checks of the pair, added by touch_object_usage. Kept by every settle, gone with the pair.';
 COMMENT ON COLUMN claimius.user_object.last_used_at IS 'Time of the latest flush that counted a check of the pair. Usage ranks by used_count * 2^(-age / 14 days).';
+COMMENT ON COLUMN claimius.user_object.settled_txid IS 'The pair''s mark: the snapshot xmin of the settle that last computed or confirmed it. A check tests only the areas of the object''s root and the user''s assignments raised at or after it, and moves it as a heap only update. Not indexed.';
 
 CREATE TABLE IF NOT EXISTS claimius.object_info (
                                                     object_type         TEXT NOT NULL,
@@ -430,6 +432,42 @@ COMMENT ON COLUMN claimius.object_info.search_vector IS 'Generated from sa_name 
 CREATE INDEX IF NOT EXISTS idx_object_info_search ON claimius.object_info USING GIN (search_vector);
 CREATE INDEX IF NOT EXISTS idx_object_info_owner_name ON claimius.object_info (sa_owner_id, sa_name, object_id);
 CREATE INDEX IF NOT EXISTS idx_object_info_location_name ON claimius.object_info (sa_location_id, sa_name, object_id);
+
+DO $$
+DECLARE
+    v_new   BOOLEAN;
+    v_table RECORD;
+BEGIN
+    v_new := NOT EXISTS (SELECT 1 FROM information_schema.columns
+                         WHERE table_schema = 'claimius' AND table_name = 'object_info' AND column_name = 'sa_owner_root_id');
+    ALTER TABLE claimius.object_info
+        ADD COLUMN IF NOT EXISTS sa_created_by UUID,
+        ADD COLUMN IF NOT EXISTS sa_owner_root_id UUID;
+    IF NOT v_new OR to_regclass('claimius.table_info') IS NULL THEN
+        RETURN;
+    END IF;
+    FOR v_table IN SELECT * FROM claimius.table_info LOOP
+        EXECUTE format(
+            'UPDATE claimius.object_info oi
+             SET sa_created_by = %s, sa_owner_root_id = %s
+             FROM %I.%I r
+                 LEFT JOIN claimius.organization o ON o.id = %s
+                 LEFT JOIN claimius.location l ON l.id = %s
+                 LEFT JOIN claimius.organization lo ON lo.id = l.sa_owner_id
+             WHERE oi.object_type = %L AND oi.object_id = r.id',
+            CASE WHEN v_table.has_sa_created_by THEN 'r.sa_created_by' ELSE 'NULL::UUID' END,
+            CASE WHEN v_table.object_type = 'claimius.organization' THEN 'r.sa_root_id' ELSE 'coalesce(o.sa_root_id, lo.sa_root_id)' END,
+            v_table.schema_name, v_table.table_name,
+            CASE WHEN v_table.has_sa_owner_id THEN 'r.sa_owner_id' ELSE 'NULL::UUID' END,
+            CASE WHEN v_table.has_sa_location_id THEN 'r.sa_location_id' ELSE 'NULL::UUID' END,
+            v_table.object_type);
+    END LOOP;
+END $$;
+
+COMMENT ON COLUMN claimius.object_info.sa_created_by IS 'The grant the row was created under, copied from the row, so a settle reads the creator here and nothing from the implementing side''s table.';
+COMMENT ON COLUMN claimius.object_info.sa_owner_root_id IS 'The root of the owning organization: the organization''s own root, or the root of the owner of the row or of its location. The root an area on the object is keyed by.';
+
+CREATE INDEX IF NOT EXISTS idx_object_info_created_by ON claimius.object_info (sa_created_by, sa_owner_root_id);
 
 DO $$
 BEGIN
@@ -581,21 +619,13 @@ COMMENT ON TABLE claimius.disciple_state IS 'Singleton consumption cursor for th
 
 ALTER TABLE claimius.disciple_state ADD COLUMN IF NOT EXISTS prophet TEXT;
 ALTER TABLE claimius.disciple_state ADD COLUMN IF NOT EXISTS endpoint TEXT;
+ALTER TABLE claimius.disciple_state ADD COLUMN IF NOT EXISTS access_trimmed_txid XID8 NOT NULL DEFAULT '0';
 
 COMMENT ON COLUMN claimius.disciple_state.prophet IS 'Slug of the one prophet the disciple is bound to, as that prophet names itself on its feed. The cursor is a position on its feed alone. NULL until the first answer.';
 COMMENT ON COLUMN claimius.disciple_state.endpoint IS 'Where the bound prophet answers. The disciple keeps pulling and routing writes there until another prophet serves it under an agreed handover.';
+COMMENT ON COLUMN claimius.disciple_state.access_trimmed_txid IS 'The lowest cursor among the users used within 7 days at the last trim of access_diff: every area below it is gone, and a reader whose cursor is below it resettles its whole reach.';
 
-CREATE TABLE IF NOT EXISTS claimius.reconcile_queue (
-                                                        id              UUID PRIMARY KEY,
-                                                        user_id         UUID NOT NULL,
-                                                        object_id       UUID NOT NULL,
-                                                        object_type     TEXT NOT NULL,
-                                                        sa_created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-
-COMMENT ON TABLE claimius.reconcile_queue IS 'Pairs left to recompute, drained by reconcile_if_pending on the next read of the pair or of the user. Nothing in the base set writes it: the sync applies each page in one transaction and parks nothing.';
-
-CREATE INDEX IF NOT EXISTS idx_reconcile_queue_user ON claimius.reconcile_queue (user_id);
+DROP TABLE IF EXISTS claimius.reconcile_queue;
 
 CREATE TABLE IF NOT EXISTS claimius.access_diff (
                                                     id              UUID PRIMARY KEY,
@@ -609,50 +639,78 @@ CREATE TABLE IF NOT EXISTS claimius.access_diff (
 );
 
 ALTER TABLE claimius.access_diff ADD COLUMN IF NOT EXISTS user_id UUID;
+ALTER TABLE claimius.access_diff ADD COLUMN IF NOT EXISTS txid XID8 NOT NULL DEFAULT pg_current_xact_id();
+ALTER TABLE claimius.access_diff ADD COLUMN IF NOT EXISTS root_id UUID;
+ALTER TABLE claimius.access_diff DROP COLUMN IF EXISTS generation, DROP COLUMN IF EXISTS raise_count;
+DROP TABLE IF EXISTS claimius.access_diff_user;
+DROP INDEX IF EXISTS claimius.idx_access_diff_claim;
+DROP INDEX IF EXISTS claimius.idx_access_diff_user;
 
 DO $$
 BEGIN
-    IF EXISTS (SELECT 1 FROM information_schema.columns
-               WHERE table_schema = 'claimius' AND table_name = 'access_diff' AND column_name = 'generation') THEN
-        ALTER TABLE claimius.access_diff RENAME COLUMN generation TO raise_count;
+    IF to_regprocedure('claimius.composite_id(text[])') IS NULL
+        OR NOT EXISTS (SELECT 1 FROM claimius.access_diff WHERE kind = 'claim') THEN
+        RETURN;
     END IF;
-    IF EXISTS (SELECT 1 FROM information_schema.columns
-               WHERE table_schema = 'claimius' AND table_name = 'access_diff_user' AND column_name = 'generation') THEN
-        ALTER TABLE claimius.access_diff_user RENAME COLUMN generation TO raise_count;
-    END IF;
+    INSERT INTO claimius.access_diff (id, kind, object_type, object_id, cascade)
+    SELECT claimius.composite_id('object', co.object_type, co.object_id::TEXT),
+           'object', co.object_type, co.object_id, bool_or(co.inherits AND c.inherits)
+    FROM claimius.access_diff d
+        JOIN claimius.claim c ON c.id = d.claim_id
+        JOIN claimius.claim_object co
+            ON co.claim_id = d.claim_id
+           AND co.sa_deleted_at IS NULL
+           AND co.object_id IS NOT NULL
+           AND co.object_type <> 'claimius.claim'
+    WHERE d.kind = 'claim' AND d.user_id IS NULL
+    GROUP BY co.object_type, co.object_id
+    ON CONFLICT (id) DO UPDATE SET
+        cascade = claimius.access_diff.cascade OR EXCLUDED.cascade,
+        txid = pg_current_xact_id();
+    INSERT INTO claimius.access_diff (id, kind, object_type, object_id, cascade)
+    SELECT claimius.composite_id('object', 'claimius.claim', d.claim_id::TEXT),
+           'object', 'claimius.claim', d.claim_id, FALSE
+    FROM claimius.access_diff d
+    WHERE d.kind = 'claim' AND d.user_id IS NULL
+    ON CONFLICT (id) DO UPDATE SET txid = pg_current_xact_id();
+    UPDATE claimius.access_diff
+    SET id = claimius.composite_id('assignment', claim_id::TEXT, user_id::TEXT),
+        kind = 'assignment'
+    WHERE kind = 'claim' AND user_id IS NOT NULL;
+    DELETE FROM claimius.access_diff WHERE kind = 'claim';
 END $$;
-
-ALTER TABLE claimius.access_diff ADD COLUMN IF NOT EXISTS raise_count BIGINT NOT NULL DEFAULT 1;
 
 ALTER TABLE claimius.access_diff SET (
     autovacuum_vacuum_scale_factor = 0.02,
     autovacuum_analyze_scale_factor = 0.02
 );
 
-COMMENT ON TABLE claimius.access_diff IS 'Outstanding access areas awaiting recalculation. Written by calc triggers, settled per user by the reads that meet the area and by drain_access_diff, cleared once every holder has settled the current raise.';
-COMMENT ON COLUMN claimius.access_diff.user_id IS 'Set on a claim area raised by an assignment: the one user whose access the assignment changed. NULL means every holder of the claim.';
-COMMENT ON COLUMN claimius.access_diff.raise_count IS 'Raises of the area since it opened, one per write that raised it. A share settled at a lower count is superseded; raise_count / (now - sa_created_at) is the raise rate the drain compares a holder''s read rate against.';
+COMMENT ON TABLE claimius.access_diff IS 'The open areas since the oldest active cursor. Written by the calc triggers and the sync apply, keyed on what changed and never on the users it reaches; read by a listing from the reader''s cursor and by a check from the pair''s mark; trimmed by drain_access_diff below the oldest cursor among the users used within 7 days.';
+COMMENT ON COLUMN claimius.access_diff.kind IS 'object: a change on the object named, with cascade when its descendants are in the area. assignment: a change to one user''s grant of claim_id.';
+COMMENT ON COLUMN claimius.access_diff.user_id IS 'The assignee of an assignment area. NULL on an object area.';
+COMMENT ON COLUMN claimius.access_diff.txid IS 'The transaction of the latest raise, set again on every raise. An area is settled by a cursor or a mark taken from a snapshot whose xmin is above it.';
+COMMENT ON COLUMN claimius.access_diff.root_id IS 'The owner root of the object of an object area, from the row or its object_info row, so a reader ranges the areas of its own roots and a check those of the object''s root. NULL on an assignment area and on an object with no root.';
 
 CREATE INDEX IF NOT EXISTS idx_access_diff_object ON claimius.access_diff (object_type, object_id) WHERE kind = 'object';
-CREATE INDEX IF NOT EXISTS idx_access_diff_claim ON claimius.access_diff (claim_id) WHERE kind = 'claim';
-CREATE INDEX IF NOT EXISTS idx_access_diff_user ON claimius.access_diff (user_id) WHERE kind = 'claim' AND user_id IS NOT NULL;
-
-CREATE TABLE IF NOT EXISTS claimius.access_diff_user (
-                                                         diff_id         UUID NOT NULL REFERENCES claimius.access_diff (id) ON DELETE CASCADE,
-                                                         user_id         UUID NOT NULL,
-                                                         raise_count     BIGINT NOT NULL,
-                                                         sa_created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
-                                                         PRIMARY KEY (diff_id, user_id)
-);
-
-COMMENT ON TABLE claimius.access_diff_user IS 'Per user done record of an access_diff area. Written by the read or the drain that settles the user share, removed with the area.';
+CREATE INDEX IF NOT EXISTS idx_access_diff_root_txid ON claimius.access_diff (root_id, txid);
+CREATE INDEX IF NOT EXISTS idx_access_diff_app_txid ON claimius.access_diff (txid);
+CREATE INDEX IF NOT EXISTS idx_access_diff_user ON claimius.access_diff (user_id, txid) WHERE kind = 'assignment';
 
 CREATE TABLE IF NOT EXISTS claimius.user_activity (
                                                       user_id         UUID PRIMARY KEY,
                                                       last_used_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-COMMENT ON TABLE claimius.user_activity IS 'Latest use of the app per user, written by touch_object_usage, read by drain_access_diff to order and gate the settle ahead of a read.';
+ALTER TABLE claimius.user_activity ADD COLUMN IF NOT EXISTS settled_txid XID8 NOT NULL DEFAULT '0';
+ALTER TABLE claimius.user_activity ADD COLUMN IF NOT EXISTS settled_at TIMESTAMPTZ;
+ALTER TABLE claimius.user_activity ADD COLUMN IF NOT EXISTS directory_at TIMESTAMPTZ;
+
+COMMENT ON TABLE claimius.user_activity IS 'The reader''s cursor: the snapshot xmin of its last share settle, when it ran, when it last viewed the directory, and when it last used the app. The cursor and settled_at are written by the share settle, directory_at by the directory reads, last_used_at by touch_object_usage.';
+COMMENT ON COLUMN claimius.user_activity.settled_txid IS 'The cursor: every area with txid below it was settled for this user, or found not to reach its pairs.';
+COMMENT ON COLUMN claimius.user_activity.settled_at IS 'When the cursor last moved; with the areas raised since, the raise rate the drain compares the read rate against.';
+COMMENT ON COLUMN claimius.user_activity.directory_at IS 'When the user last read who sees whom. Set, the user is a viewer whose user_users rows the fold keeps; older than 30 days, the rows are rebuilt on the next directory read.';
+
+CREATE INDEX IF NOT EXISTS idx_user_activity_directory ON claimius.user_activity (directory_at) WHERE directory_at IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS claimius.usage_diff (
                                                    id              BIGINT GENERATED ALWAYS AS IDENTITY,

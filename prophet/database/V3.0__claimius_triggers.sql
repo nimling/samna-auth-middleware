@@ -286,9 +286,20 @@ CREATE TRIGGER tg_self_root BEFORE INSERT ON claimius.location
     FOR EACH ROW EXECUTE FUNCTION claimius._set_self_root_on_insert();
 
 DROP TRIGGER IF EXISTS tg_invalidate_claim_graph_cache ON claimius.user_object;
-CREATE TRIGGER tg_invalidate_claim_graph_cache
-    AFTER INSERT OR DELETE OR UPDATE OF sa_access, grants, scope, direct_grant ON claimius.user_object
-    FOR EACH ROW EXECUTE FUNCTION claimius._invalidate_claim_graph_cache();
+DROP TRIGGER IF EXISTS tg_invalidate_claim_graph_cache_insert ON claimius.user_object;
+CREATE TRIGGER tg_invalidate_claim_graph_cache_insert AFTER INSERT ON claimius.user_object
+    REFERENCING NEW TABLE AS changed
+    FOR EACH STATEMENT EXECUTE FUNCTION claimius._invalidate_claim_graph_cache();
+
+DROP TRIGGER IF EXISTS tg_invalidate_claim_graph_cache_update ON claimius.user_object;
+CREATE TRIGGER tg_invalidate_claim_graph_cache_update AFTER UPDATE ON claimius.user_object
+    REFERENCING OLD TABLE AS before NEW TABLE AS changed
+    FOR EACH STATEMENT EXECUTE FUNCTION claimius._invalidate_claim_graph_cache();
+
+DROP TRIGGER IF EXISTS tg_invalidate_claim_graph_cache_delete ON claimius.user_object;
+CREATE TRIGGER tg_invalidate_claim_graph_cache_delete AFTER DELETE ON claimius.user_object
+    REFERENCING OLD TABLE AS changed
+    FOR EACH STATEMENT EXECUTE FUNCTION claimius._invalidate_claim_graph_cache();
 
 DROP TRIGGER IF EXISTS tg_invalidate_claim_graph_cache ON claimius.object_info;
 CREATE TRIGGER tg_invalidate_claim_graph_cache
@@ -296,9 +307,20 @@ CREATE TRIGGER tg_invalidate_claim_graph_cache
     FOR EACH ROW EXECUTE FUNCTION claimius._invalidate_claim_graph_cache();
 
 DROP TRIGGER IF EXISTS tg_invalidate_claim_graph_cache ON claimius.user_users;
-CREATE TRIGGER tg_invalidate_claim_graph_cache
-    AFTER INSERT OR UPDATE OR DELETE ON claimius.user_users
-    FOR EACH ROW EXECUTE FUNCTION claimius._invalidate_claim_graph_cache();
+DROP TRIGGER IF EXISTS tg_invalidate_claim_graph_cache_insert ON claimius.user_users;
+CREATE TRIGGER tg_invalidate_claim_graph_cache_insert AFTER INSERT ON claimius.user_users
+    REFERENCING NEW TABLE AS changed
+    FOR EACH STATEMENT EXECUTE FUNCTION claimius._invalidate_claim_graph_cache();
+
+DROP TRIGGER IF EXISTS tg_invalidate_claim_graph_cache_update ON claimius.user_users;
+CREATE TRIGGER tg_invalidate_claim_graph_cache_update AFTER UPDATE ON claimius.user_users
+    REFERENCING NEW TABLE AS changed
+    FOR EACH STATEMENT EXECUTE FUNCTION claimius._invalidate_claim_graph_cache();
+
+DROP TRIGGER IF EXISTS tg_invalidate_claim_graph_cache_delete ON claimius.user_users;
+CREATE TRIGGER tg_invalidate_claim_graph_cache_delete AFTER DELETE ON claimius.user_users
+    REFERENCING OLD TABLE AS changed
+    FOR EACH STATEMENT EXECUTE FUNCTION claimius._invalidate_claim_graph_cache();
 
 DROP TRIGGER IF EXISTS tg_invalidate_claim_graph_cache ON claimius.samna_user;
 CREATE TRIGGER tg_invalidate_claim_graph_cache

@@ -19,41 +19,43 @@ CREATE OR REPLACE FUNCTION claimius.get_access(
                     direct_grant        BOOLEAN,
                     level          INTEGER
                 ) AS $$
+DECLARE
+    v_pair RECORD;
 BEGIN
-    PERFORM claimius.reconcile_if_pending(p_user_id, p_object_type, p_object_id);
-
     IF NOT claimius.check_user_active(p_user_id) THEN
         RETURN;
     END IF;
 
-    RETURN QUERY
-        WITH uo AS (
-            SELECT u.*, oi.sa_owner_id, oi.sa_location_id
-            FROM claimius.user_object u
-                LEFT JOIN claimius.object_info oi ON oi.object_type = u.object_type AND oi.object_id = u.object_id
-            WHERE u.user_id = p_user_id
-              AND u.object_type = p_object_type
-              AND u.object_id = p_object_id
-              AND (u.sa_access & p_required_access) = p_required_access
-        )
-        SELECT
-            claimius.composite_id(p_user_id::TEXT, p_object_type, p_object_id::TEXT),
-            best.user_claim_id,
-            best.claim_id,
-            best.claim_name,
-            best.access_bits,
-            uo.scope,
-            uo.sa_owner_id,
-            (SELECT o.sa_root_id FROM claimius.organization o WHERE o.id = uo.sa_owner_id),
-            uo.sa_location_id,
-            FALSE,
-            best.grant_level
-        FROM uo
-                 CROSS JOIN LATERAL claimius._best_grant(uo.grants, p_user_id, p_required_access) best;
+    SELECT s.* INTO v_pair FROM claimius._settle_pair(p_user_id, p_object_type, p_object_id) s;
+
+    IF v_pair.grants IS NOT NULL AND (v_pair.sa_access & p_required_access) = p_required_access THEN
+        RETURN QUERY
+            SELECT
+                claimius.composite_id(p_user_id::TEXT, p_object_type, p_object_id::TEXT),
+                best.user_claim_id,
+                best.claim_id,
+                best.claim_name,
+                best.access_bits,
+                v_pair.scope,
+                v_pair.sa_owner_id,
+                v_pair.sa_owner_root_id,
+                v_pair.sa_location_id,
+                FALSE,
+                best.grant_level
+            FROM claimius._best_grant(v_pair.grants, p_required_access) best;
+        IF FOUND THEN
+            RETURN;
+        END IF;
+    END IF;
+
+    IF NOT v_pair.settled THEN
+        RETURN QUERY
+            SELECT * FROM claimius.get_direct_access(p_user_id, p_object_id, p_object_type, p_required_access, FALSE, FALSE);
+    END IF;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = claimius, pg_temp;
 
-COMMENT ON FUNCTION claimius.get_access(UUID, UUID, TEXT, INTEGER) IS 'Strongest active claim based grant for one (user, app, object) whose mask covers p_required_access. user_claim_id is the actor token for follow-on writes. sa_root_id is the owning organization root, suitable for FK to claimius.organization on follow-on claim and claim_object writes.';
+COMMENT ON FUNCTION claimius.get_access(UUID, UUID, TEXT, INTEGER) IS 'Strongest active claim based grant for one (user, object) whose mask covers p_required_access: the user row, then the point settle and the read of the pair with its object_info row in one pass through _settle_pair, and the grant chosen from the pair. Only when the settle was skipped on a lock and the pair gives nothing does it walk the ancestors through get_direct_access. user_claim_id is the actor token for follow-on writes. sa_root_id is the owning organization root, suitable for FK to claimius.organization on follow-on claim and claim_object writes.';
 
 DROP FUNCTION IF EXISTS claimius.get_direct_access(UUID, UUID, UUID, TEXT);
 
@@ -64,7 +66,8 @@ CREATE OR REPLACE FUNCTION claimius.get_direct_access(
     p_object_id     UUID,
     p_object_type   TEXT,
     p_required      INTEGER DEFAULT 0,
-    p_raise         BOOLEAN DEFAULT FALSE
+    p_raise         BOOLEAN DEFAULT FALSE,
+    p_settle        BOOLEAN DEFAULT TRUE
 ) RETURNS TABLE (
                     user_object_id      UUID,
                     user_claim_id       UUID,
@@ -82,7 +85,9 @@ DECLARE
     v_exists   BOOLEAN;
     v_has_soft BOOLEAN;
 BEGIN
-    PERFORM claimius.reconcile_if_pending(p_user_id, p_object_type, p_object_id);
+    IF p_settle THEN
+        PERFORM claimius.reconcile_if_pending(p_user_id, p_object_type, p_object_id);
+    END IF;
 
     IF NOT claimius.check_user_active(p_user_id) THEN
         RETURN;
@@ -254,7 +259,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path = claimius, pg_temp;
 
-COMMENT ON FUNCTION claimius.get_direct_access(UUID, UUID, TEXT, INTEGER, BOOLEAN) IS 'Locates the closest, strongest user_claim the user holds related to the given object via ancestor walk, directly or through composition, with the binding narrowing its claim and the user''s denies subtracted by class. VOLATILE: it settles through reconcile_if_pending.';
+COMMENT ON FUNCTION claimius.get_direct_access(UUID, UUID, TEXT, INTEGER, BOOLEAN, BOOLEAN) IS 'Locates the closest, strongest user_claim the user holds related to the given object via ancestor walk, directly or through composition, with the binding narrowing its claim and the user''s denies subtracted by class. The walk of the gate when the point settle was skipped on a lock. VOLATILE: with p_settle it settles through reconcile_if_pending.';
 
 DROP FUNCTION IF EXISTS claimius.get_objects(UUID, UUID, TEXT, INTEGER);
 DROP FUNCTION IF EXISTS claimius.get_objects(UUID, TEXT, INTEGER);
@@ -281,7 +286,7 @@ CREATE OR REPLACE FUNCTION claimius.get_objects(
                    direct_grant        BOOLEAN
                ) AS $$
 BEGIN
-    PERFORM claimius.reconcile_if_pending(p_user_id, p_object_type);
+    PERFORM claimius.reconcile_if_pending(p_user_id);
 
     IF NOT claimius.check_user_active(p_user_id) THEN
         RETURN;
@@ -297,13 +302,13 @@ BEGIN
             claimius.user_object.scope,
             oi.sa_owner_id,
             oi.sa_location_id,
-            (SELECT o.sa_root_id FROM claimius.organization o WHERE o.id = oi.sa_owner_id),
+            oi.sa_owner_root_id,
             oi.sa_name,
             oi.sa_description,
             oi.sa_link,
             (claimius.user_object.direct_grant AND best.user_claim_id IS NULL)
         FROM claimius.user_object
-                 LEFT JOIN LATERAL claimius._best_grant(claimius.user_object.grants, p_user_id, p_required_access) best ON TRUE
+                 LEFT JOIN LATERAL claimius._best_grant(claimius.user_object.grants, p_required_access) best ON TRUE
                  LEFT JOIN claimius.object_info oi
                            ON oi.object_type = claimius.user_object.object_type
                           AND oi.object_id = claimius.user_object.object_id
@@ -328,26 +333,45 @@ CREATE OR REPLACE FUNCTION claimius.get_organizations(
     p_after            UUID DEFAULT NULL,
     p_limit            INTEGER DEFAULT NULL
 ) RETURNS SETOF claimius.organization AS $$
+DECLARE
+    v_after UUID := p_after;
+    v_left  INTEGER := p_limit;
+    v_ids   UUID[];
+    v_n     INTEGER;
 BEGIN
-    PERFORM claimius.reconcile_if_pending(p_user_id, 'claimius.organization');
-
-    IF NOT claimius.check_user_active(p_user_id) THEN
+    IF p_limit IS NULL THEN
+        RETURN QUERY
+            SELECT o.*
+            FROM claimius.get_objects(p_user_id, 'claimius.organization', p_required_access, p_after, NULL) g
+                JOIN claimius.organization o ON o.id = g.object_id
+            WHERE o.sa_deleted_at IS NULL
+            ORDER BY o.id;
         RETURN;
     END IF;
 
-    RETURN QUERY
-        SELECT o.*
-        FROM claimius.get_objects(p_user_id, 'claimius.organization', p_required_access, p_after, p_limit) g
-            JOIN claimius.organization o ON o.id = g.object_id
-        WHERE o.sa_deleted_at IS NULL
-        ORDER BY o.id;
+    LOOP
+        SELECT array_agg(g.object_id ORDER BY g.object_id) INTO v_ids
+        FROM claimius.get_objects(p_user_id, 'claimius.organization', p_required_access, v_after, p_limit) g;
+        EXIT WHEN v_ids IS NULL;
+
+        RETURN QUERY
+            SELECT o.*
+            FROM claimius.organization o
+            WHERE o.id = ANY(v_ids)
+              AND o.sa_deleted_at IS NULL
+            ORDER BY o.id
+            LIMIT v_left;
+        GET DIAGNOSTICS v_n = ROW_COUNT;
+        v_left := v_left - v_n;
+        EXIT WHEN v_left <= 0 OR cardinality(v_ids) < p_limit;
+        v_after := v_ids[cardinality(v_ids)];
+    END LOOP;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = claimius, pg_temp;
 
-COMMENT ON FUNCTION claimius.get_organizations(p_user_id uuid, p_required_access integer, p_after uuid, p_limit integer) IS 'Organizations whose effective mask covers p_required_access, one get_objects page in id order.';
+COMMENT ON FUNCTION claimius.get_organizations(p_user_id uuid, p_required_access integer, p_after uuid, p_limit integer) IS 'Organizations whose effective mask covers p_required_access, in id order after p_after, at most p_limit of them: the reader''s range from get_objects, which settles once, each row kept when live and before the page is cut.';
 
 DROP FUNCTION IF EXISTS claimius.get_locations(UUID, UUID, INTEGER);
-DROP FUNCTION IF EXISTS claimius.get_locations(UUID, INTEGER);
 
 CREATE OR REPLACE FUNCTION claimius.get_locations(
     p_user_id          UUID,
@@ -355,23 +379,43 @@ CREATE OR REPLACE FUNCTION claimius.get_locations(
     p_after            UUID DEFAULT NULL,
     p_limit            INTEGER DEFAULT NULL
 ) RETURNS SETOF claimius.location AS $$
+DECLARE
+    v_after UUID := p_after;
+    v_left  INTEGER := p_limit;
+    v_ids   UUID[];
+    v_n     INTEGER;
 BEGIN
-    PERFORM claimius.reconcile_if_pending(p_user_id, 'claimius.location');
-
-    IF NOT claimius.check_user_active(p_user_id) THEN
+    IF p_limit IS NULL THEN
+        RETURN QUERY
+            SELECT l.*
+            FROM claimius.get_objects(p_user_id, 'claimius.location', p_required_access, p_after, NULL) g
+                JOIN claimius.location l ON l.id = g.object_id
+            WHERE l.sa_deleted_at IS NULL
+            ORDER BY l.id;
         RETURN;
     END IF;
 
-    RETURN QUERY
-        SELECT l.*
-        FROM claimius.get_objects(p_user_id, 'claimius.location', p_required_access, p_after, p_limit) g
-            JOIN claimius.location l ON l.id = g.object_id
-        WHERE l.sa_deleted_at IS NULL
-        ORDER BY l.id;
+    LOOP
+        SELECT array_agg(g.object_id ORDER BY g.object_id) INTO v_ids
+        FROM claimius.get_objects(p_user_id, 'claimius.location', p_required_access, v_after, p_limit) g;
+        EXIT WHEN v_ids IS NULL;
+
+        RETURN QUERY
+            SELECT l.*
+            FROM claimius.location l
+            WHERE l.id = ANY(v_ids)
+              AND l.sa_deleted_at IS NULL
+            ORDER BY l.id
+            LIMIT v_left;
+        GET DIAGNOSTICS v_n = ROW_COUNT;
+        v_left := v_left - v_n;
+        EXIT WHEN v_left <= 0 OR cardinality(v_ids) < p_limit;
+        v_after := v_ids[cardinality(v_ids)];
+    END LOOP;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = claimius, pg_temp;
 
-COMMENT ON FUNCTION claimius.get_locations(p_user_id uuid, p_required_access integer, p_after uuid, p_limit integer) IS 'Locations whose effective mask covers p_required_access, one get_objects page in id order.';
+COMMENT ON FUNCTION claimius.get_locations(p_user_id uuid, p_required_access integer, p_after uuid, p_limit integer) IS 'Locations whose effective mask covers p_required_access, in id order after p_after, at most p_limit of them: the reader''s range from get_objects, which settles once, each row kept when live and before the page is cut.';
 
 DO $$
 BEGIN
@@ -416,6 +460,8 @@ BEGIN
     IF NOT claimius.check_user_active(p_actor_id) THEN
         RETURN;
     END IF;
+
+    PERFORM claimius._settle_directory(p_actor_id);
 
     IF p_target ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN
         v_uuid := p_target::UUID;
@@ -534,6 +580,7 @@ CREATE OR REPLACE FUNCTION claimius.get_users(
 ) RETURNS SETOF claimius.samna_user AS $$
 BEGIN
     PERFORM claimius.reconcile_if_pending(p_user_id);
+    PERFORM claimius._settle_directory(p_user_id);
     PERFORM claimius._settle_user_users_diff(p_user_id);
 
     IF NOT claimius.check_user_active(p_user_id) THEN
@@ -575,7 +622,7 @@ COMMENT ON FUNCTION claimius.get_users(UUID, INTEGER) IS
 GRANT EXECUTE ON FUNCTION claimius.get_access(UUID, UUID, TEXT, INTEGER)
     TO claimius_disciple_client, claimius_writer, claimius_admin, claimius_reader;
 
-GRANT EXECUTE ON FUNCTION claimius.get_direct_access(UUID, UUID, TEXT, INTEGER, BOOLEAN)
+GRANT EXECUTE ON FUNCTION claimius.get_direct_access(UUID, UUID, TEXT, INTEGER, BOOLEAN, BOOLEAN)
     TO claimius_disciple_client, claimius_writer, claimius_admin, claimius_reader;
 
 GRANT EXECUTE ON FUNCTION claimius.get_objects(UUID, TEXT, INTEGER, UUID, INTEGER)
@@ -647,18 +694,10 @@ BEGIN
 
     RETURN QUERY
         SELECT * FROM claimius.get_access(p_user_id, p_object_id::UUID, p_object_type, p_required);
-    IF FOUND THEN
-        RETURN;
-    END IF;
-
-    RETURN QUERY
-        SELECT g.user_object_id, g.user_claim_id, g.claim_id, g.claim_name, g.sa_access,
-               g.scope, g.sa_owner_id, g.sa_root_id, g.sa_location_id, g.direct_grant, g.level
-        FROM claimius.get_direct_access(p_user_id, p_object_id::UUID, p_object_type, p_required) g;
 END;
 $$ LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path = claimius, pg_temp;
 
-COMMENT ON FUNCTION claimius.resolve_access(UUID, TEXT, TEXT, INTEGER) IS 'The access verdict on one object of any type: audit, relation and samna_user rows through their own lookups, every other type through get_access and then get_direct_access. No row for a malformed id, so a batch never aborts on one.';
+COMMENT ON FUNCTION claimius.resolve_access(UUID, TEXT, TEXT, INTEGER) IS 'The access verdict on one object of any type: audit, relation and samna_user rows through their own lookups, every other type through get_access, which settles and reads the pair in one pass and walks the ancestors only when the settle was skipped on a lock. No row for a malformed id, so a batch never aborts on one.';
 
 GRANT EXECUTE ON FUNCTION claimius.resolve_access(UUID, TEXT, TEXT, INTEGER)
     TO claimius_disciple_client, claimius_writer, claimius_admin, claimius_reader;
@@ -684,7 +723,9 @@ CREATE OR REPLACE FUNCTION claimius.mutation_access(
                     level          INTEGER
                 ) AS $$
 DECLARE
-    v_uuid   UUID;
+    v_uuid     UUID;
+    v_exists   BOOLEAN;
+    v_has_soft BOOLEAN;
 BEGIN
     IF p_object_type <> 'claimius.samna_user' AND (
         p_object_id !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
@@ -694,21 +735,20 @@ BEGIN
         RAISE EXCEPTION 'not found' USING ERRCODE = 'P0404';
     END IF;
 
+    IF p_object_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN
+        v_uuid := p_object_id::UUID;
+    END IF;
+
     RETURN QUERY
         SELECT * FROM claimius.resolve_access(p_user_id, p_object_id, p_object_type, p_required);
     IF FOUND THEN
         RETURN;
     END IF;
 
-    IF p_object_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN
-        v_uuid := p_object_id::UUID;
-    END IF;
-
     IF p_object_type = 'claimius.samna_user' THEN
         IF EXISTS (
             SELECT 1 FROM claimius.samna_user su
-            WHERE TRUE
-              AND su.sa_deleted_at IS NULL
+            WHERE su.sa_deleted_at IS NULL
               AND (su.external_id = p_object_id OR su.user_id = v_uuid OR su.id = v_uuid)
         ) THEN
             RAISE EXCEPTION 'no access' USING ERRCODE = 'P0403';
@@ -717,12 +757,33 @@ BEGIN
         END IF;
     END IF;
 
-    RETURN QUERY
-        SELECT * FROM claimius.get_direct_access(p_user_id, v_uuid, p_object_type, p_required, TRUE);
+    SELECT has_sa_deleted_at INTO v_has_soft
+    FROM claimius.table_info
+    WHERE object_type = p_object_type;
+
+    IF v_has_soft IS NULL THEN
+        v_exists := FALSE;
+    ELSIF v_has_soft THEN
+        EXECUTE format(
+            'SELECT EXISTS (SELECT 1 FROM %I.%I WHERE id = $1 AND sa_deleted_at IS NULL)',
+            split_part(p_object_type, '.', 1), split_part(p_object_type, '.', 2)
+        ) USING v_uuid INTO v_exists;
+    ELSE
+        EXECUTE format(
+            'SELECT EXISTS (SELECT 1 FROM %I.%I WHERE id = $1)',
+            split_part(p_object_type, '.', 1), split_part(p_object_type, '.', 2)
+        ) USING v_uuid INTO v_exists;
+    END IF;
+
+    IF v_exists THEN
+        RAISE EXCEPTION 'no access' USING ERRCODE = 'P0403';
+    ELSE
+        RAISE EXCEPTION 'not found' USING ERRCODE = 'P0404';
+    END IF;
 END;
 $$ LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path = claimius, pg_temp;
 
-COMMENT ON FUNCTION claimius.mutation_access(UUID, TEXT, TEXT, INTEGER) IS 'Single object access gate. Resolves access through get_access then get_direct_access, returns the strongest AccessClaim row, and RAISEs SQLSTATE P0403 when the object exists but the caller lacks the required access, P0404 when the object is absent or soft deleted, the id is malformed or the type is not registered. SQL embodiment of the Go MutationAccess resolution in one round trip. VOLATILE: it settles through reconcile_if_pending.';
+COMMENT ON FUNCTION claimius.mutation_access(UUID, TEXT, TEXT, INTEGER) IS 'Single object access gate. Resolves through resolve_access, one point settle and one read of the pair, and on a miss answers from one existence probe: SQLSTATE P0403 when the object exists but the caller lacks the required access, P0404 when the object is absent or soft deleted, the id is malformed or the type is not registered. Only when the settle was skipped on a lock does get_access walk the ancestors. SQL embodiment of the Go MutationAccess resolution in one round trip. VOLATILE: it settles through _settle_pair.';
 
 GRANT EXECUTE ON FUNCTION claimius.mutation_access(UUID, TEXT, TEXT, INTEGER)
     TO claimius_disciple_client, claimius_writer, claimius_admin, claimius_reader;
@@ -779,19 +840,15 @@ BEGIN
         FROM claimius.claim c
         WHERE c.sa_deleted_at IS NULL
           AND c.id IN (
-              SELECT uc.claim_id
+              SELECT (g ->> 'claim_id')::UUID
               FROM claimius.user_object uo
                        CROSS JOIN LATERAL jsonb_array_elements(uo.grants) g
-                       JOIN claimius.user_claim uc ON uc.claim_id = (g ->> 'claim_id')::UUID
-                  AND uc.user_id = p_user_id
-                  AND TRUE
-                  AND uc.sa_deleted_at IS NULL
-                  AND (uc.starts_at IS NULL OR uc.starts_at <= now())
-                  AND (uc.ends_at IS NULL OR uc.ends_at > now())
               WHERE uo.user_id = p_user_id
-                AND TRUE
                 AND uo.object_id = p_object_id
                 AND uo.object_type = p_object_type
+                AND (g ->> 'user_claim_id') IS NOT NULL
+                AND ((g ->> 'starts_at') IS NULL OR (g ->> 'starts_at')::TIMESTAMPTZ <= now())
+                AND ((g ->> 'ends_at') IS NULL OR (g ->> 'ends_at')::TIMESTAMPTZ > now())
           )
         ORDER BY claimius._popcount(c.sa_access) DESC;
 END;
@@ -1322,6 +1379,7 @@ BEGIN
     END IF;
 
     PERFORM claimius.reconcile_if_pending(p_user_id);
+    PERFORM claimius._settle_directory(p_user_id);
     v_pending := claimius._settle_user_users_diff(p_user_id);
 
     IF NOT claimius.check_user_active(p_user_id) THEN
@@ -1638,14 +1696,24 @@ CREATE OR REPLACE FUNCTION claimius._invalidate_claim_graph_cache()
 DECLARE
     v_user_id   UUID;
 BEGIN
-    IF TG_TABLE_NAME = 'user_object' THEN
-        v_user_id := COALESCE(NEW.user_id, OLD.user_id);
-        DELETE FROM claimius.claim_graph_cache
-        WHERE TRUE AND user_id = v_user_id;
+    IF TG_TABLE_NAME = 'user_object' AND TG_OP = 'UPDATE' THEN
+        DELETE FROM claimius.claim_graph_cache c
+        USING (SELECT DISTINCT n.user_id
+               FROM changed n
+                   JOIN before o ON o.user_id = n.user_id AND o.object_type = n.object_type AND o.object_id = n.object_id
+               WHERE (n.sa_access, n.grants, n.scope, n.direct_grant) IS DISTINCT FROM (o.sa_access, o.grants, o.scope, o.direct_grant)) u
+        WHERE c.user_id = u.user_id;
+        RETURN NULL;
+    ELSIF TG_TABLE_NAME = 'user_object' THEN
+        DELETE FROM claimius.claim_graph_cache c
+        USING (SELECT DISTINCT x.user_id FROM changed x) u
+        WHERE c.user_id = u.user_id;
+        RETURN NULL;
     ELSIF TG_TABLE_NAME = 'user_users' THEN
-        v_user_id := COALESCE(NEW.viewer_id, OLD.viewer_id);
-        DELETE FROM claimius.claim_graph_cache
-        WHERE TRUE AND user_id = v_user_id;
+        DELETE FROM claimius.claim_graph_cache c
+        USING (SELECT DISTINCT x.viewer_id FROM changed x) u
+        WHERE c.user_id = u.viewer_id;
+        RETURN NULL;
     ELSIF TG_TABLE_NAME = 'samna_user' THEN
         v_user_id := COALESCE(NEW.user_id, OLD.user_id);
         DELETE FROM claimius.claim_graph_cache
@@ -1662,7 +1730,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius._invalidate_claim_graph_cache() IS 'Trigger function. Drops claim_graph_cache rows affected by writes to user_object, object_info, user_users, samna_user. A claim or binding change is caught on read by get_claim_graph.';
+COMMENT ON FUNCTION claimius._invalidate_claim_graph_cache() IS 'Trigger function. Drops claim_graph_cache rows affected by writes to user_object and user_users, once per statement over its transition table, and by writes to object_info and samna_user, per row. A claim or binding change is caught on read by get_claim_graph.';
 
 DROP FUNCTION IF EXISTS claimius.search_objects(UUID, UUID, TEXT, TEXT[], INTEGER, INTEGER, INTEGER);
 DROP FUNCTION IF EXISTS claimius.search(UUID, UUID, TEXT, TEXT[], INTEGER, UUID[], UUID[], INTEGER, INTEGER);
@@ -1715,7 +1783,7 @@ BEGIN
             (claimius.user_object.direct_grant AND best.user_claim_id IS NULL),
             (ts_rank(oi.search_vector, v_tsquery) + claimius._decayed_usage(claimius.user_object.used_count, claimius.user_object.last_used_at))::REAL
         FROM claimius.user_object
-                 LEFT JOIN LATERAL claimius._best_grant(claimius.user_object.grants, p_user_id, p_required_access) best ON TRUE
+                 LEFT JOIN LATERAL claimius._best_grant(claimius.user_object.grants, p_required_access) best ON TRUE
                  JOIN claimius.object_info oi
                       ON oi.object_type = claimius.user_object.object_type
                      AND oi.object_id = claimius.user_object.object_id
@@ -1800,7 +1868,7 @@ BEGIN
             (claimius.user_object.direct_grant AND best.user_claim_id IS NULL) AS is_direct_grant,
             (ts_rank(oi.search_vector, v_tsquery) + claimius._decayed_usage(claimius.user_object.used_count, claimius.user_object.last_used_at))::REAL AS rank
         FROM claimius.user_object
-                 LEFT JOIN LATERAL claimius._best_grant(claimius.user_object.grants, p_user_id, p_required_access) best ON TRUE
+                 LEFT JOIN LATERAL claimius._best_grant(claimius.user_object.grants, p_required_access) best ON TRUE
                  JOIN claimius.object_info oi
                       ON oi.object_type = claimius.user_object.object_type
                      AND oi.object_id = claimius.user_object.object_id
@@ -1913,13 +1981,25 @@ BEGIN
               AND uo.object_id = used.object_id)
         RETURNING user_id
     ),
+    moved AS (
+        UPDATE claimius.user_activity a
+        SET last_used_at = now()
+        WHERE a.user_id IN (
+            SELECT x.user_id
+            FROM claimius.user_activity x
+            WHERE x.user_id IN (SELECT DISTINCT used.user_id FROM used)
+            FOR NO KEY UPDATE SKIP LOCKED)
+        RETURNING a.user_id
+    ),
     active AS (
         INSERT INTO claimius.user_activity (user_id, last_used_at)
         SELECT DISTINCT used.user_id, now()
         FROM used
+        WHERE NOT EXISTS (
+            SELECT 1 FROM claimius.user_activity x
+            WHERE x.user_id = used.user_id)
         ORDER BY used.user_id
-        ON CONFLICT (user_id) DO UPDATE
-            SET last_used_at = EXCLUDED.last_used_at
+        ON CONFLICT (user_id) DO NOTHING
         RETURNING user_id
     )
     SELECT count(*) INTO v_touched FROM touched;
@@ -1928,7 +2008,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = claimius, pg_temp;
 
-COMMENT ON FUNCTION claimius.touch_object_usage(UUID[], TEXT[], UUID[], BIGINT[]) IS 'Records counted checks as usage_diff rows, folded into user_object.used_count and last_used_at by the user''s next listing, per (user, type, object) row of the arrays, skipping pairs not settled and locking no pair, and moves each counted user''s user_activity. Local, never synced. Returns the pairs touched.';
+COMMENT ON FUNCTION claimius.touch_object_usage(UUID[], TEXT[], UUID[], BIGINT[]) IS 'Records counted checks as usage_diff rows, folded into user_object.used_count and last_used_at by the user''s next listing, per (user, type, object) row of the arrays, skipping pairs not settled and locking no pair, and moves each counted user''s user_activity, skipping a row a read holds for its cursor so the flush never waits. Local, never synced. Returns the pairs touched.';
 
 GRANT EXECUTE ON FUNCTION claimius.touch_object_usage(UUID[], TEXT[], UUID[], BIGINT[]) TO claimius_disciple_client, claimius_writer, claimius_admin, claimius_reader;
 
@@ -2292,7 +2372,6 @@ BEGIN
                     OR descendant_type = v_old_object_type;
                 DELETE FROM claimius.user_object WHERE object_type = v_old_object_type;
                 DELETE FROM claimius.object_info WHERE object_type = v_old_object_type;
-                DELETE FROM claimius.reconcile_queue WHERE object_type = v_old_object_type;
                 RAISE NOTICE 'Deregistered table %', v_old_object_type;
             END LOOP;
     END IF;
@@ -2343,7 +2422,7 @@ BEGIN
             v_schema, v_table, p_object_type);
     FOR v_user IN EXECUTE v_sql LOOP
         FOR v_at IN 1 .. cardinality(v_user.object_ids) BY 1000 LOOP
-            PERFORM claimius.recompute_user_object(v_user.user_id, p_object_type, VARIADIC v_user.object_ids[v_at : v_at + 999]);
+            PERFORM claimius.recompute_user_object(v_user.user_id, array_fill(p_object_type, ARRAY[cardinality(v_user.object_ids[v_at : v_at + 999])]), v_user.object_ids[v_at : v_at + 999]);
         END LOOP;
     END LOOP;
 END;
@@ -2918,6 +2997,7 @@ BEGIN
     END IF;
 
     PERFORM claimius.reconcile_if_pending(p_user_id);
+    PERFORM claimius._settle_directory(p_user_id);
     PERFORM claimius._settle_user_users_diff(p_user_id);
 
     IF NOT claimius.check_user_active(p_user_id) THEN
