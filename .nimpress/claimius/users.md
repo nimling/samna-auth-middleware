@@ -29,7 +29,7 @@ A user is who acts. A person and a machine client are both users, and both hold 
 
 4. `check_user_active(app_id, user_id)` runs in every read, one probe on `(user_id, app_id)`. A user who is not active, or whose row is soft deleted, resolves to no access whatever grants they hold, so suspending a user is one column write.
 
-5. Soft deleting a `samna_user` fires `tg_cascade_user_soft_delete` on the transition of `sa_deleted_at` from NULL, which runs `cascade_user_soft_delete`: three updates, over the user's live grants, relations and field values in the app. Each grant update raises the claim area of that grant for that user; see [Materialization](./materialization.md). The cascade lives in the write, so every read stays a pure predicate.
+5. Soft deleting a `samna_user` fires `tg_cascade_user_soft_delete` on the transition of `sa_deleted_at` from NULL, which runs `cascade_user_soft_delete`: three updates, over the user's live grants, relations and field values in the app. Each grant update raises the assignment area of that user for that claim; see [Materialization](./materialization.md). The cascade lives in the write, so every read stays a pure predicate.
 
 ## Machine clients
 
@@ -47,7 +47,7 @@ A guest is the holder of one claim without an account: a `samna_user` of type `g
 
 ## Acting for another user
 
-An actor acts for a target without becoming the target. `get_user_access(actor, app, target, required)` settles what the actor's listing would, checks the actor active, resolves the target named as `external_id`, `user_id` or `samna_user.id`, in that order, among the app's live active users, one probe each of `idx_samna_user_app_external`, `idx_samna_user_user_app` and the primary key, and then ORs three branches. It folds nothing:
+An actor acts for a target without becoming the target. `get_user_access(actor, app, target, required)` settles what the actor's listing would, checks the actor active, makes the actor a viewer, which builds its `user_users` rows from its pairs on its first view and refreshes a stamp after, resolves the target named as `external_id`, `user_id` or `samna_user.id`, in that order, among the app's live active users, one probe each of `idx_samna_user_app_external`, `idx_samna_user_user_app` and the primary key, and then ORs three branches. It folds nothing:
 
 | Branch | Mask | Reads |
 |---|---|---|
@@ -59,36 +59,39 @@ An actor acts for a target without becoming the target. `get_user_access(actor, 
 entries(get_user_access) = 3 + 1 + 1 + (m_a + m_t) + 2 |objects of those rows| + 1 + 2C
 ```
 
-The count of one pair is read by its key and not out of the viewer's whole range: at alpha0024 the branch read `_user_users_for_viewer`, the viewer's `S_u` rows and the pending rows of every object it holds, and the resolution read the app's `U` user rows, so bookable's user listing, one call per row, read 437,835,068 index entries for 200 users; it reads 88,082,283 now, nearly all of them the settle of the actor's open areas that `reconcile_if_pending` runs first. The row the actor writes carries the actor's `user_claim.id` in `sa_created_by` and the target's `user_id` as its subject. This is delegation in the sense of [RFC 8693, section 1.1](https://www.rfc-editor.org/rfc/rfc8693#section-1.1): the acting party stays visible. The verdict is a live grant, so revoking it revokes the delegation on the next read.
+The count of one pair is read by its key and not out of the viewer's whole range: at alpha0024 the branch read `_user_users_for_viewer`, the viewer's `S_u` rows and the pending rows of every object it holds, and the resolution read the app's `U` user rows, so bookable's user listing, one call per row, read 437,835,068 index entries for 200 users; in the bench, the same 200 calls over the directory of one of 200 holders of 2,000 organizations read 5,008 entries in 71 ms, about 23 per row, of which 20 resolve the target through the three `samna_user` probes. The row the actor writes carries the actor's `user_claim.id` in `sa_created_by` and the target's `user_id` as its subject. This is delegation in the sense of [RFC 8693, section 1.1](https://www.rfc-editor.org/rfc/rfc8693#section-1.1): the acting party stays visible. The verdict is a live grant, so revoking it revokes the delegation on the next read.
 
-`get_users(user, app, required)` lists the targets of the same three branches that are live and active in the app: the reader, the users `_user_users_for_viewer` counts above zero, the stored `S_u` and the moves of the pending rows, and the targets of the reader's bindings on `claimius.samna_user`, then one `samna_user` probe per target.
+`get_users(user, app, required)` makes the reader a viewer and lists the targets of the same three branches that are live and active in the app: the reader, the users `_user_users_for_viewer` counts above zero, the stored `S_u` and the moves of the pending rows, and the targets of the reader's bindings on `claimius.samna_user`, then one `samna_user` probe per target. Measured in the bench for one of 200 holders over 2,000 organizations: the first view builds the viewer's rows, 400,000 holder pairs through a hash join, 6,212 index entries and 2.0 seconds, and every later view reads 7 entries in 10 ms.
 
 ## Who can see whom
 
-`user_users` holds, for every viewer `u` and target `v` of one app who reach a common object that is not a claim, the count of those objects:
+`user_users` holds, for every viewer `u` of one app, a user who has read the directory, and every target `v` who reaches a common object that is not a claim, the count of those objects:
 
 ```
 sharing_object_count(u, v) = |{x ∈ V_u ∩ V_v : type(x) ≠ claimius.claim}|
-rows = Σ_u S_u ≤ U (U − 1)
+rows = Σ_{u viewing} S_u ≤ U (U − 1)
 ```
 
 A pair on a claim moves no count: holding a claim reads the claim, and a claim is a template, not an object two users share. Two holders of one claim therefore do not see each other through it.
 
-The table is kept by folding, the way `user_object` is kept by settling; see [Materialization](./materialization.md#the-user-users-fold):
+The table is kept by folding, the way `user_object` is kept by settling, for the viewers only; see [Materialization](./materialization.md#the-user-users-fold):
 
-1. A statement that inserts or deletes pairs raises one `user_users_diff` row per pair on an object that is not a claim, `+1` for a pair entering and `−1` for one leaving, through `tg_raise_user_users_diff_insert` and `tg_raise_user_users_diff_delete`. It reads nothing else and locks nothing.
+1. A user becomes a viewer on its first `get_users`, `get_user_access` as the actor or `get_claim_graph`, or the first after 30 days away: `_settle_directory(app, u)` builds its rows from its pairs as `C(P ⊖ D)` over its objects, holding the pending rows on them `FOR KEY SHARE`, and stamps `user_activity.directory_at`. A user who never views the directory has no rows and costs nothing.
 
-2. A read that shows who sees whom folds, through `_settle_user_users_diff(app, u)`, the rows of every object the reader holds or moved on: per object it takes every row or none, and moves `(a, b)` by `now(a) now(b) − before(a) before(b)` for every ordered pair of users of the object of which one moved, where `now` reads the pairs and `before` is the pairs less the rows' sum.
+2. A statement that inserts or deletes pairs raises one `user_users_diff` row per pair on an object that is not a claim, `+1` for a pair entering and `−1` for one leaving, through `tg_raise_user_users_diff_insert` and `tg_raise_user_users_diff_delete`, while the app has a viewer who read the directory within 30 days, one range of the viewer index per statement. It reads nothing else and locks nothing.
 
-3. It then reads `_user_users_for_viewer(app, u)`: the stored range of `u` plus the same moves for the objects whose rows are still pending in its snapshot.
+3. A read that shows who sees whom folds, through `_settle_user_users_diff(app, u)`, the rows of every object the reader holds or moved on: per object it takes every row or none, and moves `(a, b)` by `now(a) now(b) − before(a) before(b)` for every ordered pair of users of the object of which one moved, where `now` reads the pairs and `before` is the pairs less the rows' sum, writing the rows of the viewers among them.
+
+4. It then reads `_user_users_for_viewer(app, u)`: the stored range of `u` plus the same moves for the objects whose rows are still pending in its snapshot.
 
 ```
-write              = 1 row, 2 entries, per pair entering or leaving; nothing read, nothing locked
-fold of x          = m_x + U_x entries read, at most 2 m_x (U_x − 1) user_users rows written
+first view of u    = Σ_{x ∈ V_u} U_x holder pairs read, S_u rows written
+write              = 1 row, 2 entries, per pair entering or leaving with a viewer in the app; nothing else read, nothing locked
+fold of x          = m_x + U_x entries read, at most 2 m_x (U_x − 1) user_users rows written, for viewers
 read of u          = S_u + Σ_{x ∈ T_u} (m_x + U_x) entries
 ```
 
-with `m_x` the rows pending on `x` and `T_u` the objects with rows pending that `u` holds or moved on. A pair entering on an object one other user holds raises one row, and its fold writes two `user_users` rows, one in each direction, as the pgTAP suite `pair_storage` checks.
+with `m_x` the rows pending on `x` and `T_u` the objects with rows pending that `u` holds or moved on. A pair entering on an object one other user holds raises one row, and its fold writes two `user_users` rows, one in each direction, when both are viewers, as the pgTAP suite `pair_storage` checks; `user_access_point` checks that the pairs settled in an app with no viewer raise no row, and that the point check makes the actor a viewer and builds its row toward the one user it shares objects with.
 
 ### Why the count is exact
 
@@ -114,7 +117,7 @@ Holding a claim reads the claim, but a claim is a template, not an object two us
 
 ### Why the table exists
 
-`get_users` must answer from one index range. Without `user_users` the list of users visible to `u` is the self join, `Σ_{x ∈ V_u} U_x` entries per call. With it, the list is one range of `S_u` rows, and the join is paid once per pair that enters or leaves, by the first read or drain that folds it, not once per read.
+`get_users` must answer from one index range. Without `user_users` the list of users visible to `u` is the self join, `Σ_{x ∈ V_u} U_x` entries per call. With it, the list is one range of `S_u` rows: the join is paid once on the user's first view, and from then on once per pair that enters or leaves, by the first read or drain that folds it, not once per read; a user who never views the directory pays nothing, and an app with no viewer raises no row.
 
 ## Per user state on objects
 

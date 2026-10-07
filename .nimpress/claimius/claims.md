@@ -47,13 +47,13 @@ eff(c, b) = m_c & X(coalesce(b, m_c))
 
 A binding mask narrows its claim and never widens it: an owner claim, 15, bound with mask 4 gives 4, and a read claim, 4, bound with mask 2 gives `4 & X(2) = 4 & 14 = 4`. The grant bits are `eff & 15`, and `eff & 16` makes the derivation a deny.
 
-`_check_claim_composition`, a before trigger on `claim_object`, bounds what a writer may hand out. On an insert, or an update of the mask, claim or object, of a live binding on an object that is not a claim and not a deny, it resolves the writer from `sa_created_by`, settles the writer's pair on the object with `reconcile_if_pending(app, writer, type, id)`, and refuses the binding when
+`_check_claim_composition`, a before trigger on `claim_object`, bounds what a writer may hand out. On an insert, or an update of the mask, claim or object, of a live binding on an object that is not a claim and not a deny, it resolves the writer from `sa_created_by`, settles the writer's pair on the object with `reconcile_if_pending(app, writer, type, id)`, the one pair by its mark, and refuses the binding when
 
 ```
 eff(c, b) & ~A(writer, y) & 15 ≠ 0
 ```
 
-with `A(writer, y) = 0` when the writer holds no pair. It reads the writer's grant, the settle test of one pair and one range of the writer's pairs on the object. An actor who cannot reach an object cannot grant it away, and one who reads it cannot grant write on it.
+with `A(writer, y) = 0` when the writer holds no pair. It reads the writer's grant, the point settle of one pair and one range of the writer's pairs on the object. An actor who cannot reach an object cannot grant it away, and one who reads it cannot grant write on it.
 
 Two first bindings are judged on the writer's owner bit on an organization instead, `A = 15` when it holds owner there, because no one can hold a pair on what has no binding yet:
 
@@ -106,11 +106,11 @@ Single hop is what keeps the access relation nonrecursive: the claims that can r
 
 `user_claim.starts_at` and `ends_at` bound a grant. The derivations stored in `user_object` ignore the window; the reads apply it:
 
-1. `_best_grant` joins every derivation in a pair's `grants` to its live `user_claim` inside its window, so a pair whose only grants are outside their window returns no grant from `get_access`, and `get_objects` and `search` drop it unless the reader created the object.
+1. `_best_grant` tests the window stored on every derivation in a pair's `grants`, `starts_at` and `ends_at` copied from the grant when the pair settled, so a pair whose only grants are outside their window returns no grant from `get_access`, and `get_objects` and `search` drop it unless the reader created the object. A change to the window raises the assignee's assignment area, so the pair is recomputed on its next read; the `grant_fields` suite closes a window on a stored pair and sees the check answer nothing and the listing nothing, with no row written and no probe of the grant or the claim.
 
 2. `get_direct_access`, `get_scope_access`, `get_user_access` and `get_claims` filter the window in their own joins.
 
-Nothing is revoked and no job runs, the way an [RFC 5280](https://www.rfc-editor.org/rfc/rfc5280) validity period works; the cost is two probes per derivation per read, `2 G_x`.
+Nothing is revoked and no job runs, the way an [RFC 5280](https://www.rfc-editor.org/rfc/rfc5280) validity period works, and the window costs no read: it is on the pair.
 
 ## Actor tokens
 
@@ -126,11 +126,11 @@ Nothing is revoked and no job runs, the way an [RFC 5280](https://www.rfc-editor
 
 ## Choosing the grant
 
-`_best_grant(grants, user, app, required)` returns, among the derivations of a pair whose mask covers `required` and whose grant is live and in its window, the one with the most bits set, then the highest mask, then the highest level, then the oldest claim. Every access row carries the level of the grant it chose. It reads per derivation one probe of `idx_user_claim_unique` and one `claim` primary key probe, `2 G_x`. `get_direct_access` orders its candidates by the fewest hops from the object, then the most bits, then the grant id.
+`_best_grant(grants, required)` returns, among the derivations of a pair whose mask covers `required` and whose stored window holds at `now()`, the one with the most bits set, then the highest mask, then the highest level, then the oldest claim by its stored `claim_created_at`. Every access row carries the level and the claim name of the grant it chose. It reads nothing: the grant id, the window, the claim name and its creation time are on the derivation, and every write that can change them raises an area covering the pair. `get_direct_access` orders its candidates by the fewest hops from the object, then the most bits, then the grant id.
 
 ## The single object gate
 
-`mutation_access(user, object_id, object_type, required)` is the gate every write and every read of one object passes. It takes the object id as text, refuses with `P0404` a malformed id or a type absent from `table_info`, and resolves through `resolve_access`: `claimius.audit`, `claimius.user_relation` and `claimius.samna_user` go to their own lookups, every other type to `get_access` and then `get_direct_access`.
+`mutation_access(user, object_id, object_type, required)` is the gate every write and every read of one object passes. It takes the object id as text, refuses with `P0404` a malformed id or a type absent from `table_info`, and resolves through `resolve_access`: `claimius.audit`, `claimius.user_relation` and `claimius.samna_user` go to their own lookups, every other type to `get_access`, which settles and reads the pair in one pass and walks the ancestors through `get_direct_access` only when the settle was skipped on a lock.
 
 | Outcome | Answer |
 |---|---|
@@ -140,21 +140,21 @@ Nothing is revoked and no job runs, the way an [RFC 5280](https://www.rfc-editor
 
 ### What it reads
 
-`get_access` settles the one pair it asks about when an open area covers it, and reads the pair; see [Reads](./reads.md). With no open area in the app:
+`get_access` settles the one pair it asks about by its mark and reads it in the same pass; see [Reads](./reads.md). With nothing raised in the object's root since the mark:
 
 ```
-entries(get_access) = 3 + 1 + 1 + 1 + 2 G_x + 1 = 7 + 2 G_x
+entries(get_access) = 1 + 1 + 1 + 1 + 2 + 0 = 7
 ```
 
-three probes for the settle test, one `check_user_active`, one pair on the `user_object` primary key, one `object_info` row, the grant choice, and the owner's root.
+one `check_user_active`, one pair on the `user_object` primary key with its mark, one `object_info` row with the owner, location and owner root, the trimmed position, the two empty ranges of the areas of the root and of the reader's assignments since the mark, and the grant chosen from the pair with no probe; 7 measured on the prophet and 4 on a disciple in the `check_mark` suite. With something raised in the root since the mark the check reads the areas and the object's closure range, 15 and 10 measured, and moves the mark; only an area on the object, with cascade on an ancestor, or an assignment of the reader recomputes the pair.
 
-`get_direct_access` answers without `user_object`, for an object whose pair gives no grant. It walks `get_ancestors`, the ownership, location and parenthood chains and, for each location on the chain, its owner's ownership chain, `a'_x` ancestors; reads the reader's `C` live grants in their window; finds the bindings on each ancestor held directly, where a binding above hop 0 counts only when claim and binding both inherit, and through one link; subtracts the unscoped denies, those on the object from every candidate and all of them from candidates found on an ancestor; closes the remainder; and takes the first candidate by hops, bits and grant id. With `B'_x` bindings on those ancestors:
+`get_direct_access` answers without `user_object`, for an object whose pair gives no grant after a settle that could not run. It walks `get_ancestors`, the ownership, location and parenthood chains and, for each location on the chain, its owner's ownership chain, `a'_x` ancestors; reads the reader's `C` live grants in their window; finds the bindings on each ancestor held directly, where a binding above hop 0 counts only when claim and binding both inherit, and through one link; subtracts the unscoped denies, those on the object from every candidate and all of them from candidates found on an ancestor; closes the remainder; and takes the first candidate by hops, bits and grant id. With `B'_x` bindings on those ancestors:
 
 ```
 entries(get_direct_access) ≈ 1 + 2C + 3 a'_x + 3 B'_x + O(1)
 ```
 
-A hit of the gate is one check. A miss is one check, two walks, the second with `p_raise` set, and one probe of the object's live row that decides between `P0403` and `P0404`. One round trip answers 200, 403 or 404.
+A hit of the gate is one check. A miss is one check and one probe of the object's live row that decides between `P0403` and `P0404`, the walk added only when the settle was skipped. One round trip answers 200, 403 or 404.
 
 ## Scope grants
 
@@ -162,4 +162,4 @@ A `claim_object` with no object pair and a `scope` payload is a capability: a pa
 
 ## Removing a claim
 
-`delete_claim(claim, actor)` soft deletes the links pointing at the claim, then its grants, then its bindings, then the claim: four updates. Each soft delete fires the triggers of its table, which raise the claim area of each row, once per claim and once per assignment, and settle the actor's pairs on the claim and on each binding's object. The holders settle on their own next reads; see [Materialization](./materialization.md).
+`delete_claim(claim, actor)` soft deletes the links pointing at the claim, then its grants, then its bindings, then the claim: four updates. Each soft delete fires the triggers of its table, which raise the object area of each binding's object, the assignment area of each grant's user and, for the claim itself, one object area per binding and one on the claim object, and settle the actor's pairs on the claim and on each binding's object. The holders settle on their own next reads; see [Materialization](./materialization.md).

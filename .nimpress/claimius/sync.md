@@ -64,7 +64,7 @@ A consumer applies one page in one transaction under `replay_mode`:
 
 2. It upserts or deletes every payload by primary key. On a disciple `app_id` is stripped, `samna_app` events are skipped, and an upsert writes only when a column differs, so an unchanged row costs one probe and moves nothing.
 
-3. For each `claim`, `claim_object` or `user_claim` payload that changed a row, it raises the claim areas the payload moves in its own `access_diff`: the claim itself, the linked claim for a composition link, and for an assignment the area of its one user. One or two rows, whatever the claim reaches. Hierarchy rows keep the closure through their calc triggers, which raise the object area under replay without settling any actor.
+3. For each `claim`, `claim_object` or `user_claim` payload that changed a row, it raises the areas the payload moves in its own `access_diff`, through the same functions a local write uses, stamped with the applying transaction: a claim payload one object area per live binding of the claim and one on the claim object, `n_c + 1` rows, a link the same on both claims, a binding on an object that object's area with `cascade`, and an assignment the area of its one user. Hierarchy rows keep the closure through their calc triggers, which raise the object area under replay without settling any actor. A disciple's readers then settle from their own cursors and marks: nothing derived travels.
 
 4. One commit. A page that fails anywhere rolls back whole, cursor included, and is pulled again from the same position.
 

@@ -29,7 +29,7 @@ lastUpdated: true
 
 Every read function of the external surface, the `get_*` access, listing, scope, audit, secret and graph functions, `search`, `resolve_access`, `mutation_access`, `touch_object_usage`, `drain_access_diff`, the identity helpers, the ancestor and subtree walks and `upsert_audit_partition`, is `SECURITY DEFINER` with `SET search_path = claimius, pg_temp` ([CREATE FUNCTION, Writing SECURITY DEFINER Functions Safely](https://www.postgresql.org/docs/17/sql-createfunction.html#SQL-CREATEFUNCTION-SECURITY)).
 
-1. A read settles what it meets: it writes `user_object`, `user_users_diff`, `user_users`, `usage_diff`, `access_diff_user`, `claim_graph_cache` and clears `access_diff` rows. Running as the owner lets a reader that holds no table privilege pay that settle, and nothing else: the only writes it can cause are those the function body performs.
+1. A read settles what it meets: it writes `user_object`, its cursor in `user_activity`, `user_users_diff`, `user_users`, `usage_diff` and `claim_graph_cache`, and never an `access_diff` row. Running as the owner lets a reader that holds no table privilege pay that settle, and nothing else: the only writes it can cause are those the function body performs.
 
 2. The pinned `search_path` resolves every unqualified name in the body to `claimius` and then the session's temporary schema, so a caller cannot shadow a claimius table or operator with an object of its own. `pg_temp` is named last, which is where the owner graph keeps its transaction temporary tables.
 

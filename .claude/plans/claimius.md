@@ -161,26 +161,28 @@ At `a_x = t_x = b_x = B_x = 1`, organizations one level under a bound root, `R_x
 
 ### Per operation, in entries
 
-33. The counts of B are derived in section 5 where each function is shaped; `n_new` is the areas raised in the reader's root since its last read.
+33. The counts of B are derived in section 5 where each function is shaped and, where a row says measured, replaced by the figure measured on the release in the pgTAP suites and the bench; `n_new` is the areas raised in the reader's root since its last read.
 
 | Operation | A, alpha0026 | B, chosen | C, direct pairs | Zanzibar | SpiceDB | OpenFGA | Entra ID |
 |---|---|---|---|---|---|---|---|
-| Check, nothing raised since the pair's mark | 9 | 4 | 28 | 9 + 1 round trip | 9 + 1 round trip | 9 + 1 round trip | 0, no object |
-| Check, `n_new = 6` raised since | 38 | `4 + min(n_new + 6, 2a_x + 3) = 15`, one heap only write | 28 | 9 | 9 | 9 | 0 |
-| First check after a grant on the pair | 87, again on every check until a listing | 41, once: 36 read, 5 written | 28 | 9 | 9 | 9 | a new token |
-| Page of `p = 50` ids, nothing raised | `253 + 6 Δ_a = 6,253` | 55 | `n_u + p + D = 79` | no listing | 85 | 1,000, the cap, every call | none |
+| Check, nothing raised since the pair's mark | 9 | 7 on the prophet and 4 on a disciple, measured | 28 | 9 + 1 round trip | 9 + 1 round trip | 9 + 1 round trip | 0, no object |
+| Check, `n_new = 6` raised since | 38 | 15 on the prophet and 10 on a disciple after an unrelated raise in the root, measured, one heap only write | 28 | 9 | 9 | 9 | 0 |
+| First check after a grant on the pair | 87, again on every check until a listing | the one pair recomputed once, measured in `check_mark` | 28 | 9 | 9 | 9 | a new token |
+| Page of `p = 50` ids, nothing raised | `253 + 6 Δ_a = 6,253` | 101 with `object_info`, measured in the bench | `n_u + p + D = 79` | no listing | 85 | 1,000, the cap, every call | none |
 | Page of 50, `n_new = 6` | 6,253 | `55 + 7 n_new = 97` | 79 | | 85 | 1,000 | |
-| Page of 50 with name, owner and root | `+ 0` | `+ p = 105` and `147` | `+ p` | | `+ p` application rows | `+ p` | |
-| First listing after a grant over `|T| = 10⁴` | `2.0·10⁵` measured, `5.8·10⁵` at depth 4 | `2|T| + V_u + 20 = 2.5·10⁴` read, `2|T|` written, `4|T|` with a directory: `4.5·10⁴` to `6.5·10⁴`, once | `1.1 (V_u + |T|) = 1.65·10⁴` on that listing and every later full listing | the client's index | 85 per page, `1.1 V_u` unpaged | 1,000 | none |
+| Page of 50 with name, owner and root | `+ 0` | included above: `2p + 1` | `+ p` | | `+ p` application rows | `+ p` | |
+| First listing after a grant over `|T| = 10⁴` | `2.0·10⁵` measured, `5.8·10⁵` at depth 4 | 40,035 read, `4|T|` with the page, `2|T|` written, measured in the bench; 64,048 over 16,000 | `1.1 (V_u + |T|) = 1.65·10⁴` on that listing and every later full listing | the client's index | 85 per page, `1.1 V_u` unpaged | 1,000 | none |
 | Grant | 30 | 31 | 7 | 3 | 5 | 5 | 1 write |
 | Binding on a node | 120 | 90 | 36 | 3 | 5 | 5 | |
-| Revoke | 30, then the holder's next listing settles `|T|` | 31, then `4.5·10⁴` to `6.5·10⁴` at the holder's next listing | 7 | 3 | 5 | 5 | up to 90 minutes |
+| Revoke | 30, then the holder's next listing settles `|T|` | 31, then `4|T|` at the holder's next listing, 64,038 over 16,000 measured | 7 | 3 | 5 | 5 | up to 90 minutes |
 | Tree insert at depth 4 | 70 | 51 | 23 | 3 | 5 | 5 | none |
-| `get_users` | `6 Δ_a + 2 S_u = 7,000` | `2 + 2 S_u + 11 = 1,013` | `Σ_{x ∈ V_u} (a_x + 1 + U_x) = 2.75·10⁵` | none | none | none | `g · n` Graph reads |
-| `get_user_access` per row | `6 Δ_a + 20 = 6,020` | 19 | `V_u + V_v = 10⁴` | none | none | none | none |
+| `get_users` | `6 Δ_a + 2 S_u = 7,000` | 6,212 and the build of the viewer's rows once, then 7, measured in the bench | `Σ_{x ∈ V_u} (a_x + 1 + U_x) = 2.75·10⁵` | none | none | none | `g · n` Graph reads |
+| `get_user_access` per row | `6 Δ_a + 20 = 6,020` | 23, of which 20 the resolution of the target, measured in the bench | `V_u + V_v = 10⁴` | none | none | none | none |
 | `user_users` per pair change | 150 to 350, every app | `U_x + 1 + U_x^r ≈ 56` at a tenth of the users viewing, 0 in an app with no viewer | 0 | | | | |
 | Sync per change per consumer | 11 | 13 | 6 | one tuple per replica | one row per replica | the same | none |
 | Storage | `P = 5·10⁷` pairs, `Σ_u S_u`, closure `5·10⁶`, `object_info 10⁶` | the same with `Σ_{u viewing} S_u` | closure and `object_info` only | `1.05·10⁶` tuples | `1.05·10⁶` rows | the same | groups |
+
+The measured check reads 7 where the derivation said 4: the extra entries are the cursor and trim probes the mark rule needs, the trimmed position and the two area ranges of the root and of the reader's assignments, which are what make a stale mark safe.
 
 34. Where each figure of B comes from: a check reads the pair, one range of `idx_access_diff_root_txid` from the pair's mark, the object's `object_info` row and `samna_user`; when the range finds areas it adds the object's closure range and either the areas themselves, when fewer than `2a_x + 3`, or one `access_diff` probe per node and one for the reader's assignments; a page reads one index entry per row from the reader's primary key range and one `object_info` row when rendering; a first listing reads the cursor, the areas, the bindings of the raised claim, the node's ancestors, one closure entry per object of the subtree, one `object_info` row per object and the reader's own range once for the comparison, and writes two index entries per pair; a revoke's settle reads the same share and deletes the pairs. Zanzibar and the stores pay nothing on a change and the full walk on every read; claimius pays the walk once per holder who reads and then two entries per row.
 

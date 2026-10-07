@@ -16,7 +16,7 @@ Two functions render what a user can reach as a graph of flat nodes. Every node 
 | `get_claim_graph(user, app, start_id, depth, required, width, sort, next_id)` | The user, the users the user sees, the user's grants, the claims, their bindings, and the objects each binding reaches |
 | `get_graph_links_owner`, `get_graph_links_claim` | The edges between the reader's nodes as one jsonb array, filtered by included and excluded types, read from the pairs as they stand, and windowed by the same `width`, `sort` and `next_id` |
 
-The registered types a graph covers are read from `table_info`, so an implementing side's tables appear the moment they are registered and nothing about them is written into a graph function. Both graphs begin with `reconcile_if_pending(app, u)` and `check_user_active`, as a listing does.
+The registered types a graph covers are read from `table_info`, so an implementing side's tables appear the moment they are registered and nothing about them is written into a graph function. Both graphs begin with `reconcile_if_pending(app, u)`, the reader's share settled from its cursor, and `check_user_active`, as a listing does; the claim graph and its link graph then make the reader a viewer and fold its `user_users_diff` rows, since they show who the reader sees.
 
 ## The window
 
@@ -71,8 +71,8 @@ The default shape is stored per user in `claim_graph_cache (app_id, user_id, gra
 
 | Write | Drops |
 |---|---|
-| A pair of the user inserted, deleted, or updated in `sa_access`, `grants`, `scope` or `direct_grant` | That user's entry, one probe |
-| A `user_users` row of the user as viewer, moved by a fold, or the user's `samna_user` row | That user's entry, one probe |
+| Pairs inserted, deleted, or updated in `sa_access`, `grants`, `scope` or `direct_grant`, a mark that moves alone excepted | The entry of each user of the statement, one delete per statement over its transition tables |
+| `user_users` rows inserted, moved by a fold or deleted, or the user's `samna_user` row | The entry of each viewer of the statement, one delete per statement |
 | An `object_info` row updated, a rename or a move | The entry of every user holding a pair on the object, one range of `idx_user_object_object_user` |
 
 A usage flush moves only `used_count` and `last_used_at`, which the trigger does not watch, so it drops nothing.

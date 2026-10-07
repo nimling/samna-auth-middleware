@@ -32,7 +32,7 @@ Claimius owns and validates its own types. It reads no more of the implementing 
 | [Redaction](./redaction.md) | Scopes on object bindings as field masks |
 | [Capabilities](./capabilities.md) | Scope grants with no object and `get_scope_access` |
 | [Apps](./apps.md) | `samna_app`, the two scoping mechanisms, the identity helpers |
-| [Materialization](./materialization.md) | `user_object`, the per pair and per reader settle, `access_diff`, the `user_users` fold, the locks a settle takes, the drain rule |
+| [Materialization](./materialization.md) | `user_object` and the pair's mark, the reader's cursor, `access_diff` keyed by transaction and root, the set based share settle, the `user_users` fold for viewers, the locks a settle takes, the drain rule and the trim |
 | [Reads](./reads.md) | Every read function and what it reads and writes |
 | [Writes](./writes.md) | Every write and what it does inside its transaction |
 | [Search](./search.md) | Full text search ranked by text and decayed usage |
@@ -148,7 +148,7 @@ With `anc_t` stored in `inheritance_info`, the access relation `A` is a nonrecur
 
 4. Gupta, Mumick and Subrahmanian prove that for nonrecursive views, with negation and aggregation, the counting algorithm computes exactly the view tuples inserted or deleted, where DRed, needed for recursive views, first deletes a superset and rederives it. By 1 to 3 the first case applies.
 
-5. The support of a change is an area. A change to claim `c`, to one of its bindings or to a link into or out of it changes `reach` only for holders of `c` or of a claim linking to `c`, on objects of `T_c` and on the pairs whose `grants` name `c`: the claim area. A change to a grant of `c` changes only the assignee's slice of it: the claim area with `user_id`. A change to an object `x` changes `reach` only on `x` and, when `x` is a node, on `desc(x)`: the object area, with `cascade`. So recomputing the pairs of an area touches every pair the change can affect.
+5. The support of a change is an area. A change to claim `c`, to one of its bindings or to a link into or out of it changes `reach` only on the objects `c` and the claims it links to are bound on, and below them where the bindings cascade, and on the claim object itself: one object area per binding and one on the claim. A change to a grant of `c` changes only the assignee's slice of it: the assignment area of that user. A change to an object `x` changes `reach` only on `x` and, when `x` is a node, on `desc(x)`: the object area, with `cascade`. So recomputing the pairs of an area touches every pair the change can affect, and every area is named by an object or an assignment.
 
 Single hop composition keeps the program nonrecursive, and a nonrecursive program needs only first order deltas, each found by key. The `grants` array of a pair is its why provenance, `user_users.sharing_object_count` the derivation count of the counting algorithm on `A ⋈_x A` (see [Users](./users.md#why-the-count-is-exact)), a `user_users_diff` row one first order delta of that count, and an `access_diff` row the key of a change's support. A transitive link would make `reach` recursive and every settle a DRed step with overdeletion.
 
@@ -161,11 +161,11 @@ Single hop composition keeps the program nonrecursive, and a nonrecursive progra
 | `inheritance_info` | `anc_t` for every tree, self edges included | `Σ_x Σ_{t ∋ x} (d_t(x) + 1)` |
 | `object_info` | each live registered object's owner, location, root, name, description, link and search vector, once | one per live registered object |
 | `user_object` | `A(u, x) ≠ 0` with its derivations, field masks and usage count | `P = Σ_u V_u` |
-| `user_users` | `|V_u ∩ V_v|` over objects that are not claims, for users sharing one | `Σ_u S_u` |
-| `access_diff`, `access_diff_user` | the open areas of changes and the shares settled of each | at most one area per claim, per assignment and per object raised |
-| `user_users_diff` | the pairs that entered or left `user_object` on an object that is not a claim, not yet folded into `user_users` | one per pair change between folds |
+| `user_users` | `|V_u ∩ V_v|` over objects that are not claims, for the viewers `u` who read the directory | `Σ_{u viewing} S_u` |
+| `access_diff` | the areas of changes since the oldest active cursor, each stamped with its transaction and its owner root | at most one per object raised and one per assignment |
+| `user_users_diff` | the pairs that entered or left `user_object` on an object that is not a claim while the app had a viewer, not yet folded into `user_users` | one per pair change between folds |
 | `usage_diff` | counted uses of pairs not yet folded into `used_count` | one per pair and flush between the listings of its user |
-| `user_activity` | when each user last used each app | one per user and app that used it |
+| `user_activity` | each user's cursor per app, the snapshot `xmin` of its last share settle, when it last viewed the directory and when it last used the app | one per user and app that used it |
 | `claim_graph_cache` | the default claim graph of a user with the snapshot it was built under | one per user who opened it |
 
 These are exactly the relations without which a query of the model reads more than its own answer. For each, the cheapest plan without it:
@@ -176,11 +176,11 @@ These are exactly the relations without which a query of the model reads more th
 
 3. Without `object_info`, the name, owner, location and search vector of an object are either read from the implementing side's table per row, one dynamic statement per type, or copied onto each of its `U_x` pairs; a rename would then rewrite `U_x` rows and raise an area for every holder. With it, a rename writes one row and raises nothing.
 
-4. Without `user_users`, `get_users` for `u` is the self join `Σ_{x ∈ V_u} U_x` per call, where the stored relation is one range of `S_u` rows.
+4. Without `user_users`, `get_users` for `u` is the self join `Σ_{x ∈ V_u} U_x` per call, where the stored relation is one range of `S_u` rows; it is paid once, on the user's first view, and never for a user who does not view the directory.
 
-5. `access_diff` and `access_diff_user` are the state of lazy maintenance of `user_object`, `user_users_diff` that of `user_users`, `usage_diff` that of the usage count on the pair, `user_activity` the estimator of the drain rule; see [Materialization](./materialization.md).
+5. `access_diff` with the cursors and marks is the state of lazy maintenance of `user_object`, `user_users_diff` that of `user_users`, `usage_diff` that of the usage count on the pair, `user_activity` the cursor and the estimators of the drain rule; see [Materialization](./materialization.md).
 
-6. `claim_graph_cache` stores a rendering, not a relation of the model, validated on read; see [Graphs](./graphs.md). `reconcile_queue` holds recomputes that failed.
+6. `claim_graph_cache` stores a rendering, not a relation of the model, validated on read; see [Graphs](./graphs.md).
 
 Nothing else is materialized. The member listing of an object is the reverse index `idx_user_object_object_user` on the same rows, not a second table.
 
@@ -188,7 +188,7 @@ Nothing else is materialized. The member listing of an object is the reverse ind
 
 | Query | Relational algebra | Served by |
 |---|---|---|
-| Check `(u, x, r)` | `σ_{u, x, A & r = r} A` | one pair of `user_object`, after the pair is settled |
+| Check `(u, x, r)` | `σ_{u, x, A & r = r} A` | one pair of `user_object`, read after its mark proves it current against the areas of its root |
 | Listing `(u, τ, r)` | `π_x σ_{u, type = τ, A & r = r} A` | the reader's range of the `user_object` primary key, in `object_id` order |
 | Search | the listing restricted by `search_vector @@ q` | `user_object` joined to `object_info` |
 | Members of `x` | `π_u σ_x A` | `idx_user_object_object_user` |
@@ -227,7 +227,7 @@ Every formula in these files uses these symbols.
 
 2. The only recursion is the up edge of three trees, stored as a closure. Composition is one hop. The access relation is therefore a nonrecursive view over stored relations, maintained exactly by recomputing the pairs a change can affect; see [Why the view is maintained exactly](#why-the-view-is-maintained-exactly).
 
-3. A write settles only its actor's pairs on the rows it names, and records the rest as one area row keyed on what changed. A check settles the one pair it asks about; a listing settles the reader's own share of each area it meets, all of it in one read. An area clears when every holder has settled it, and a share no one reads is never computed. One level up the same: a pair entering or leaving raises one `user_users_diff` row, and the read that shows who sees whom folds the rows it needs. No write fans out, and no settle takes a lock per object.
+3. A write settles only its actor's pairs on the rows it names, and records the rest as one area row keyed on what changed and stamped with its transaction. A listing settles the reader's share of every area raised since its cursor, in one pass; a check settles the one pair it asks about when an area on its nodes is newer than the pair's mark; and an area leaves when every active cursor has passed it. A share no one reads is never computed. One level up the same: a pair entering or leaving raises one `user_users_diff` row while anyone views the directory, and the read that shows who sees whom folds the rows it needs. No write fans out, and no settle takes a lock per object or per area.
 
 4. Every read answers from stored pairs, and neither a check nor a listing walks a tree. Only `get_direct_access`, the fallback of the gate, walks the ancestors of one object.
 

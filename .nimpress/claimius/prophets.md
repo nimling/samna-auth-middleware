@@ -77,7 +77,7 @@ Prophets federate by mirroring each other's apps. A prophet that serves users of
 
 ### Collisions are refused
 
-`_check_peer_row` refuses a row a peer's feed carries when the app is not decided by that peer, when the feed of one app carries another app's row, or when the row's id is held here by another app, or, for an organization or location, by an app of another home. `apply_peer_event` writes the refused row with its reason and payload to `peer_collision`, returns false, and the page goes on. With the bound above, a refused row is a seeding mistake, not chance. An applied row that changed raises the claim areas it moves, as a disciple's apply does, and an organization or location upsert links it to the mirrored app, its delete unlinks it.
+`_check_peer_row` refuses a row a peer's feed carries when the app is not decided by that peer, when the feed of one app carries another app's row, or when the row's id is held here by another app, or, for an organization or location, by an app of another home. `apply_peer_event` writes the refused row with its reason and payload to `peer_collision`, returns false, and the page goes on. With the bound above, a refused row is a seeding mistake, not chance. An applied row that changed raises the object areas and the assignment area it moves, as a disciple's apply does, and an organization or location upsert links it to the mirrored app, its delete unlinks it.
 
 ### Handovers
 

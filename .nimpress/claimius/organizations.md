@@ -106,4 +106,4 @@ One organization serves several apps without being copied. With `n_a` apps reach
 
 ## Reading organizations
 
-`get_organizations(user, app, required, after, limit)` returns the organizations linked to the app that one `get_objects` page returns for the user, in `id` order: at most `limit` of the user's `V_{u,organization}` pairs past `after`, each joined to its row by key and kept when live and linked, one `app_has_object` probe per row. `get_owner_graph` renders the tree; see [Graphs](./graphs.md).
+`get_organizations(user, app, required, after, limit)` returns one page of the organizations linked to the app that the user reaches, in `id` order: the user's `V_{u,organization}` pairs past `after`, each joined to its row by key and kept when live and linked, one `app_has_object` probe per row, inside the `WHERE` before `LIMIT`, so the page holds `limit` organizations of the app and an organization linked to another app takes no slot; the settle of the reader's share runs once for the page. `get_owner_graph` renders the tree; see [Graphs](./graphs.md).

@@ -14,14 +14,13 @@ lastUpdated: true
 |---|---|---|
 | `user_object` | `P = Σ_u V_u = Σ_x U_x` | users times reach |
 | `object_info` | one per live registered object, `O` | objects |
-| `user_users` | `Σ_u S_u ≤ U (U − 1)` | ordered pairs of users sharing an object that is not a claim |
+| `user_users` | `Σ_{u viewing} S_u ≤ U (U − 1)` | ordered pairs of users sharing an object that is not a claim, for the viewers who read the directory |
 | `inheritance_info` | `Σ_x Σ_{t ∋ x} (d_t(x) + 1)` | objects times depth |
 | `claim`, `claim_object`, `user_claim` | claims, bindings, grants | the model, never its product |
-| `access_diff` | open areas: at most one per claim, one per claim and assignee, one per object raised and not yet cleared | writes between the reads of their holders |
-| `access_diff_user` | one per open area and holder that settled it | reads between raises |
-| `user_users_diff` | one per pair that entered or left on an object that is not a claim and is not yet folded | pair changes between the reads and drains that fold them |
+| `access_diff` | areas since the oldest cursor among the users used within 7 days: at most one per object raised and one per claim and assignee | writes between the trims |
+| `user_users_diff` | one per pair that entered or left on an object that is not a claim while the app had a viewer, not yet folded | pair changes between the reads and drains that fold them |
 | `usage_diff` | one per pair and flush not yet folded | flushes between the listings of the pair's user |
-| `user_activity` | one per user and app that used it | users |
+| `user_activity` | one per user and app that used it, the cursor | users |
 | `sync_event` | per app at most as many as its source rows, and none at or below the lowest cursor of the consumers in contact | source rows written; see [Sync](./sync.md) |
 | `audit` | audited events, one partition per month | writes |
 
@@ -46,15 +45,14 @@ A closure row is two object pairs, a root, a depth and two timestamps: about 140
 
 | Table | Indexes | Entries per row written |
 |---|---|---|
-| `user_object` | primary key `(user_id, app_id, object_type, object_id) INCLUDE (sa_access)`; `idx_user_object_object_user (app_id, object_type, object_id, user_id)` | 2; 0 for a heap only update of `grants`, `scope`, `direct_grant` or the usage count |
-| `object_info` | primary key `(object_type, object_id)`; `(sa_owner_id, sa_name, object_id)`; `(sa_location_id, sa_name, object_id)`; GIN on `search_vector` | 3 btree and one GIN entry per distinct lexeme, per object written, never per pair |
+| `user_object` | primary key `(user_id, app_id, object_type, object_id) INCLUDE (sa_access)`; `idx_user_object_object_user (app_id, object_type, object_id, user_id)` | 2; 0 for a heap only update of `grants`, `scope`, `direct_grant`, the mark or the usage count |
+| `object_info` | primary key `(object_type, object_id)`; `(sa_owner_id, sa_name, object_id)`; `(sa_location_id, sa_name, object_id)`; `(sa_created_by, sa_owner_root_id)`; GIN on `search_vector` | 4 btree and one GIN entry per distinct lexeme, per object written, never per pair |
 | `user_users` | primary key; `(app_id, viewer_id)`; `(app_id, target_user_id)` | 3 |
 | `inheritance_info` | primary key; descendant covering; ancestor covering | 3 |
-| `access_diff` | primary key; one partial index by kind; `(app_id, user_id)` for an assignment's area | 2, or 3 for an assignment |
-| `access_diff_user` | primary key `(diff_id, user_id)` | 1 |
+| `access_diff` | primary key; `(app_id, object_type, object_id)` partial for object areas; `(app_id, root_id, txid)`; `(app_id, txid)`; `(app_id, user_id, txid)` partial for assignments | 4; a raise of an existing area is a row version with 4 entries again, since `txid` is indexed |
 | `user_users_diff` | primary key `(app_id, object_type, object_id, id)`; `(app_id, user_id)` | 2 |
 | `usage_diff` | primary key `(app_id, user_id, id)` | 1 |
-| `user_activity` | primary key `(user_id, app_id)` | 1 |
+| `user_activity` | primary key `(user_id, app_id)`; `(app_id, directory_at)` partial for viewers | 1, 2 for a viewer; a cursor move is a heap only update |
 | `sync_event` | primary key `seq`; `(app_id, txid, seq)`; BRIN on `written_at` | 2, and a BRIN summary per range of pages |
 | `claim` | primary key; `app_id`; `sa_owner_id`; `sa_root_id`; `(sa_access & 16)` partial for denies | 4, or 5 for a deny |
 | `user_claim` | primary key; live unique `(claim_id, user_id, app_id)`; `(user_id, app_id)`; `claim_id`; `sa_owner_id` | 5 |
@@ -98,11 +96,11 @@ The closure, `object_info` and the model's own tables grow with objects and gran
 
 2. A pair updated leaves one dead version, which a later update on the same page can prune, since `fillfactor = 90` keeps room on the page.
 
-3. A pair entering or leaving leaves one `user_users_diff` row, dead once folded; the fold updates up to `2 (U_x − 1)` `user_users` rows, one dead version each, summed over the rows of the object it folds, so a pair that entered and left before a fold moves no count at all.
+3. A pair entering or leaving while the app has a viewer leaves one `user_users_diff` row, dead once folded; the fold updates up to `2 (U_x − 1)` `user_users` rows of viewers, one dead version each, summed over the rows of the object it folds, so a pair that entered and left before a fold moves no count at all. A settle that only moves marks leaves one heap only version per pair.
 
-4. An area raise leaves one dead version per raise after the first; a settle leaves one `access_diff_user` version per share; a clear deletes the area and, by cascade, its records.
+4. An area raise leaves one dead version per raise after the first, with its index entries since `txid` is indexed; a settle writes nothing to an area; the trim deletes the areas below the lowest active cursor in one statement per app.
 
-5. A usage flush leaves one `usage_diff` row per pair counted, dead once folded, and one dead version per `user_activity` row moved; the fold leaves one dead version per pair it moves.
+5. A usage flush leaves one `usage_diff` row per pair counted, dead once folded, and one dead version per `user_activity` row moved; a share settle leaves one heap only version of the cursor; the fold leaves one dead version per pair it moves.
 
 6. `trim_sync_event` deletes the outbox rows owed to nobody in one statement per pass; a month of audit is retired by detaching its partition, not by deleting rows.
 

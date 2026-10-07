@@ -14,7 +14,7 @@ To claimius an object is an `object_type` and `object_id` pair that a `claim_obj
 
 1. An `object_type` is schema qualified at every boundary: `claimius.organization`, `public.bookable`, never `bookable`. `upsert_table_info` refuses a type without a schema.
 
-2. A composite id is built with `claimius.composite_id(parts...)`, the MD5 of the parts joined by `:` read as a UUID. The primary keys of `user_users`, `access_diff` and `reconcile_queue` are composite ids of their key columns, so every copy of the schema derives the same id for the same row, and a repeated write of one area collapses onto one row. `user_object` is keyed on its columns themselves, `(user_id, app_id, object_type, object_id)`.
+2. A composite id is built with `claimius.composite_id(parts...)`, the MD5 of the parts joined by `:` read as a UUID. The primary keys of `user_users` and `access_diff` are composite ids of their key columns, so every copy of the schema derives the same id for the same row, and a repeated write of one area collapses onto one row. `user_object` is keyed on its columns themselves, `(user_id, app_id, object_type, object_id)`.
 
 ## Registration
 
@@ -34,7 +34,7 @@ The implementing side makes a table participate by carrying the `sa_*` columns a
 
 1. For each it records the column shape in `table_info`, one row with one `has_*` flag per column, read from `information_schema` once, and attaches the calc trigger `tg_calc_access`: `calc_hierarchical_access` when the table has both `sa_parent_id` and `sa_root_id`, `calc_object_access` otherwise, plus the before insert self root trigger.
 
-2. A table registered before and absent from the list is deregistered: its triggers detached, and its `table_info` row, its `inheritance_info` rows, its `user_object`, `object_info` and `reconcile_queue` rows deleted. The `user_object` delete is counted out of `user_users` like any other.
+2. A table registered before and absent from the list is deregistered: its triggers detached, and its `table_info` row, its `inheritance_info` rows, its `user_object` and `object_info` rows deleted. The `user_object` delete is counted out of `user_users` like any other.
 
 3. Under `replay_mode` it seeds the rows already present with `_bulk_seed_user_object`: `object_info` for every row, then the pairs `(u, x)` with `u` in `_affected_users_for_object(x)` for every live row `x` and every app of it, collected in one statement and grouped by user, and one `recompute_user_object` per user and 1,000 of its objects, each pair raising its `user_users_diff` row like any other, for the reads and the drain to fold. The seed recomputes the same `Σ_x |affected(x)|` pairs in `Σ_u ⌈n_u / 1000⌉` calls, where `n_u` is the objects of the type user `u` is affected on, instead of one call per pair, and emits no sync event. On bookable's dev data, 23 tables, 46,063 objects and 210 users, that is 253 calls instead of 57,082, and its registration with `recompute_state` after it takes 92 seconds instead of 865.
 
@@ -87,16 +87,17 @@ insert: rows(x)        move: n_S (d + d')        delete or restore: Σ_{x ∈ S}
 
 ## object_info
 
-`object_info` holds, once per live registered object, what is the same for every user who reaches it: `sa_owner_id`, `sa_location_id`, `sa_root_id`, `sa_name`, `sa_description`, `sa_link`, and `search_vector`, generated as `setweight(to_tsvector('simple', name), 'A') || setweight(to_tsvector('simple', description), 'B')`.
+`object_info` holds, once per live registered object, what is the same for every user who reaches it: `sa_owner_id`, `sa_location_id`, `sa_root_id`, `sa_created_by`, `sa_owner_root_id`, `sa_name`, `sa_description`, `sa_link`, and `search_vector`, generated as `setweight(to_tsvector('simple', name), 'A') || setweight(to_tsvector('simple', description), 'B')`. `sa_created_by` is the grant the row was created under, so a settle reads the creator here and nothing from the implementing side's table; `sa_owner_root_id` is the root of the owning organization, the organization's own root or the root of the owner of the row or of its location, the root an area of the object is keyed under and a check ranges the areas of.
 
 | Index | Serves |
 |---|---|
 | primary key `(object_type, object_id)` | the join from a pair to its object, one probe |
 | `idx_object_info_owner_name (sa_owner_id, sa_name, object_id)` | the children of one owner in name order, for the graphs |
 | `idx_object_info_location_name (sa_location_id, sa_name, object_id)` | the rows of one location in name order |
+| `idx_object_info_created_by (sa_created_by, sa_owner_root_id)` | the objects a grant created, for the roots of a reader's share and for the full build of its reach |
 | `idx_object_info_search` GIN on `search_vector` | search; see [Search](./search.md) |
 
-`_write_object_info(type, ids)` brings the rows of a set of objects in step with the objects themselves: it reads them with `_denormalize_objects`, one `table_info` probe and per object its row and its owner and location for the root, upserts a live one only where a field differs, and deletes the row of one gone or soft deleted. The calc triggers call it on every insert and delete and on an update that changes the name, description, owner, location, root or deletion; the bulk paths call it for the whole table. `recompute_user_object` inserts a missing row with `ON CONFLICT DO NOTHING`, so no pair is ever without its object's fields.
+`_write_object_info(type, ids)` brings the rows of a set of objects in step with the objects themselves: it reads them with `_denormalize_objects`, one `table_info` probe and per object its row and its owner and location for the roots, upserts a live one only where a field differs, and deletes the row of one gone or soft deleted. The calc triggers call it on every insert and delete and on an update that changes the name, description, owner, location, root, creator or deletion; the bulk paths call it for the whole table, and the baseline backfilled the two columns once over every registered table. `recompute_user_object` reads `object_info` and inserts nothing: an object with no row is not live to it, and the pair goes.
 
 ```
 object_info rows          = live registered objects, independent of users
