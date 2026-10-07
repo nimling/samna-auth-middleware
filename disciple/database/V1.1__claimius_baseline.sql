@@ -620,6 +620,7 @@ COMMENT ON TABLE claimius.disciple_state IS 'Singleton consumption cursor for th
 ALTER TABLE claimius.disciple_state ADD COLUMN IF NOT EXISTS prophet TEXT;
 ALTER TABLE claimius.disciple_state ADD COLUMN IF NOT EXISTS endpoint TEXT;
 ALTER TABLE claimius.disciple_state ADD COLUMN IF NOT EXISTS access_trimmed_txid XID8 NOT NULL DEFAULT '0';
+UPDATE claimius.disciple_state SET access_trimmed_txid = pg_current_xact_id() WHERE access_trimmed_txid = '0'::XID8;
 
 COMMENT ON COLUMN claimius.disciple_state.prophet IS 'Slug of the one prophet the disciple is bound to, as that prophet names itself on its feed. The cursor is a position on its feed alone. NULL until the first answer.';
 COMMENT ON COLUMN claimius.disciple_state.endpoint IS 'Where the bound prophet answers. The disciple keeps pulling and routing writes there until another prophet serves it under an agreed handover.';

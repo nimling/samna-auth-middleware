@@ -662,6 +662,7 @@ ALTER TABLE claimius.prophet_state ADD COLUMN IF NOT EXISTS trimmed_seq BIGINT N
 ALTER TABLE claimius.prophet_state ADD COLUMN IF NOT EXISTS last_applied_txid XID8 NOT NULL DEFAULT '0';
 ALTER TABLE claimius.prophet_state ADD COLUMN IF NOT EXISTS trimmed_txid XID8 NOT NULL DEFAULT '0';
 ALTER TABLE claimius.prophet_state ADD COLUMN IF NOT EXISTS access_trimmed_txid XID8 NOT NULL DEFAULT '0';
+UPDATE claimius.prophet_state SET access_trimmed_txid = pg_current_xact_id() WHERE access_trimmed_txid = '0'::XID8;
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_prophet_state_system_singleton
     ON claimius.prophet_state (system_app_slug)
