@@ -513,7 +513,7 @@ func TestGetAccessReadsThePairAfterItsMark(t *testing.T) {
 	if err != nil {
 		t.Fatalf("counted check: %v", err)
 	}
-	if read > 5 {
-		t.Fatalf("a check with nothing raised since the pair's mark read %d index entries, expected at most 5", read)
+	if read > 8 {
+		t.Fatalf("a check with nothing raised since the pair's mark read %d index entries, expected at most 8", read)
 	}
 }

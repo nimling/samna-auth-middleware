@@ -145,8 +145,8 @@ func TestLeadSyncRunsOneConsumer(t *testing.T) {
 	defer stopB()
 	doneA := make(chan struct{})
 	doneB := make(chan struct{})
-	go func() { defer close(doneA); sam.LeadSync(ctxA, db, key, interval, loop("a")) }()
-	go func() { defer close(doneB); sam.LeadSync(ctxB, db, key, interval, loop("b")) }()
+	go func() { defer close(doneA); shared.LeadSync(ctxA, db, key, interval, loop("a")) }()
+	go func() { defer close(doneB); shared.LeadSync(ctxB, db, key, interval, loop("b")) }()
 
 	time.Sleep(10 * interval)
 	a, b := counts()

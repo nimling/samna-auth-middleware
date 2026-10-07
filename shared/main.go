@@ -3,6 +3,7 @@ package shared
 import (
 	"context"
 	"database/sql"
+	"database/sql/driver"
 	"errors"
 	"fmt"
 	"net/url"
@@ -255,4 +256,72 @@ func GetDebugMode() DebugMode {
 
 func ModelType[T any]() reflect.Type {
 	return reflect.TypeOf((*T)(nil)).Elem()
+}
+
+func LeadSync(ctx context.Context, db *DB, key string, interval time.Duration, work func(context.Context)) {
+	for {
+		conn, err := takeSyncLock(ctx, db, key)
+		if err != nil && ctx.Err() == nil {
+			db.Logger.Errorf("disciple sync: take sync lock: %v", err)
+		}
+		if conn != nil {
+			holdSyncLock(ctx, conn, interval, work)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(interval):
+		}
+	}
+}
+
+func takeSyncLock(ctx context.Context, db *DB, key string) (*bun.Conn, error) {
+	conn, err := db.Conn(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var held bool
+	if err := conn.QueryRowContext(ctx, "SELECT pg_try_advisory_lock(hashtextextended(?, 0))", key).Scan(&held); err != nil {
+		discardConn(&conn)
+		return nil, err
+	}
+	if !held {
+		discardConn(&conn)
+		return nil, nil
+	}
+	return &conn, nil
+}
+
+func holdSyncLock(ctx context.Context, conn *bun.Conn, interval time.Duration, work func(context.Context)) {
+	workCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		work(workCtx)
+	}()
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-done:
+			discardConn(conn)
+			return
+		case <-ticker.C:
+			checkCtx, stop := context.WithTimeout(ctx, interval)
+			_, err := conn.ExecContext(checkCtx, "SELECT 1")
+			stop()
+			if err != nil {
+				cancel()
+				<-done
+				discardConn(conn)
+				return
+			}
+		}
+	}
+}
+
+func discardConn(conn *bun.Conn) {
+	_ = conn.Raw(func(any) error { return driver.ErrBadConn })
+	_ = conn.Close()
 }
