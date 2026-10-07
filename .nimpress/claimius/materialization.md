@@ -77,7 +77,8 @@ An area is the smallest description of what a write changed, keyed on what chang
 | Any write of an organization, a location or a parenthood row that is not a rename | the actor's pair on the row | `object` with `cascade` on the row |
 | A rename, `name` or `description` only | the actor's pair on the row, and the one `object_info` row | nothing |
 | `claim` | the actor's pair on the claim | `claim` on the claim |
-| `claim_object` | the actor's pairs on the claim and on the bound object | `claim` on the claim, and on the linked claim for a link |
+| `claim_object` on an object | the actor's pairs on the claim and on the bound object | `object` on the bound object, with `cascade` when the binding inherits before or after |
+| `claim_object` link or scope binding | the actor's pairs on the claim and on the bound object | `claim` on the claim, and on the linked claim for a link |
 | `user_claim` | the actor's pair on the claim | `claim` on the claim with `user_id` the assignee |
 
 `_raise_object_diff` and `_raise_claim_diff` insert with a deterministic id, `composite_id('object', app, type, id)`, `composite_id('claim', app, claim)` or `composite_id('claim', app, claim, user)`, `ON CONFLICT (id) DO UPDATE SET raise_count = raise_count + 1`. So `m` raises of one area before it clears leave one row with `raise_count = m`: one probe and one row version per raise, whatever the area reaches. The actor is `_actor_user_for_row`, the user behind `sa_created_by`, one probe; claimius is always entered in the context of a user or a client, so it is known. Under `replay_mode` no actor is settled and only the areas are raised, which is how a disciple and a mirroring prophet apply a page.
@@ -166,14 +167,14 @@ The share is then recomputed at `Σ_τ R(u, share_τ)`.
 ```
 holders(claim area c, user v) = {v}
 holders(claim area c)         = H_c
-holders(object area x)        = creator(x) ∪ U_x ∪ [cascade] ⋃_{y ∈ desc(x)} U_y ∪ { holders of bindings on x and its ancestors }
+holders(object area x)        = creator(x) ∪ U_x ∪ [cascade] ⋃_{y ∈ desc(x)} U_y ∪ { holders of bindings on x and its ancestors, directly or through a link }
 ```
 
 An area clears after each of its holders has read once, or the drain settled them; `_clear_diff` probes `access_diff_user` for holders until the first one unsettled, at most `|holders|` probes per call.
 
 ### What an area costs over its life
 
-A binding change on a claim `c` costs the writer its own row, its actor's two pairs and one area row. Each holder `j` that reads pays its share, about `|T_c|` pairs, once per raise it reads after; a holder that never reads pays nothing. So the total is `Σ_{j reads} R(j, share_j)`, never `|H_c| × |T_c|` inside one transaction, and never more than the holders that read.
+A binding change on an object `y` costs the writer its own row, its actor's two pairs and one area row. Each holder `j` that reads pays its share, `y` and, when the binding cascades, the descendants of `y` it reaches, once per raise it reads after; a change to a claim `c` itself costs each reading holder about `|T_c|` pairs; a holder that never reads pays nothing. So the total is `Σ_{j reads} R(j, share_j)`, never `|H_c| × |T_c|` inside one transaction, and never more than the holders that read.
 
 ### Why a settle returns current pairs
 

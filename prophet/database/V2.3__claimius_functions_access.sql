@@ -386,11 +386,19 @@ BEGIN
     ELSIF v_table = 'user_claim' THEN
         v_claim_id := coalesce(NEW.claim_id, OLD.claim_id);
         PERFORM claimius._raise_claim_diff(v_app_id, v_claim_id, coalesce(NEW.user_id, OLD.user_id));
-    ELSE
+    ELSIF coalesce(NEW.object_type, OLD.object_type) = 'claimius.claim' OR coalesce(NEW.object_id, OLD.object_id) IS NULL THEN
         v_claim_id := coalesce(NEW.claim_id, OLD.claim_id);
         PERFORM claimius._raise_claim_diff(v_app_id, v_claim_id);
         IF coalesce(NEW.object_type, OLD.object_type) = 'claimius.claim' THEN
             PERFORM claimius._raise_claim_diff(v_app_id, coalesce(NEW.object_id, OLD.object_id));
+        END IF;
+    ELSE
+        v_claim_id := coalesce(NEW.claim_id, OLD.claim_id);
+        IF TG_OP <> 'INSERT' THEN
+            PERFORM claimius._raise_object_diff(v_app_id, OLD.object_type, OLD.object_id, OLD.inherits OR coalesce(NEW.inherits, FALSE));
+        END IF;
+        IF TG_OP = 'INSERT' OR (TG_OP = 'UPDATE' AND (NEW.object_type, NEW.object_id) IS DISTINCT FROM (OLD.object_type, OLD.object_id)) THEN
+            PERFORM claimius._raise_object_diff(v_app_id, NEW.object_type, NEW.object_id, NEW.inherits);
         END IF;
     END IF;
 

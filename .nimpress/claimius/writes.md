@@ -39,7 +39,7 @@ A write changes a source row: a registered row, an organization, a location, a c
 | `tg_calc_access`, `calc_object_access` | registered tables without their own tree, `samna_user`, `samna_client`, `samna_secret`, `claim`, `user_relation`, `object_field`, `user_field`, `user_token` | Keeps the row's ownership and location closure rows, its `object_info` row, the actor's pair, and raises the object area when the write is structural |
 | `tg_calc_access`, `calc_hierarchical_access` | `organization`, `location`, registered tables with their own tree | The same, with the table's own tree kept incrementally and the object area raised with `cascade` |
 | `tg_calc_trees`, `calc_object_trees` | `samna_app`, `user_claim`, `claim_object` | Their ownership closure rows and nothing else |
-| `tg_calc_claim_access`, `calc_claim_access` | `claim`, `claim_object`, `user_claim` | Raises the claim area and settles the actor's pairs on the claim and on a binding's object |
+| `tg_calc_claim_access`, `calc_claim_access` | `claim`, `claim_object`, `user_claim` | Raises the claim area, or the object area of a binding's object, and settles the actor's pairs on the claim and on a binding's object |
 | `tg_emit_sync_event`, `emit_sync_event` | the source tables | One outbox row per row written; see [Sync](./sync.md) |
 | `tg_raise_user_users_diff_insert`, `tg_raise_user_users_diff_delete` | `user_object`, per statement | One `user_users_diff` row per pair entering or leaving on an object that is not a claim, nothing read and nothing locked; see [Users](./users.md#who-can-see-whom) |
 | `tg_invalidate_claim_graph_cache` | `user_object`, `object_info`, `user_users`, `samna_user` | Drops the affected users' cached claim graph; see [Graphs](./graphs.md) |
@@ -78,8 +78,11 @@ A new organization or location inherits the app links of its owner: per app the 
 | Write | Raises | Actor's pairs recomputed |
 |---|---|---|
 | `claim` | `claim` area of the claim | the claim |
-| `claim_object` | `claim` area of its claim, and of the linked claim for a link | the claim and the bound object |
+| `claim_object` on an object | `object` area on the bound object, with `cascade` when the binding inherits before or after; on an update that moves it, on the old object as well | the claim and the bound object |
+| `claim_object` link or scope binding | `claim` area of its claim, and of the linked claim for a link | the claim and the bound object |
 | `user_claim` | `claim` area of the claim with `user_id` the assignee | the claim |
+
+A binding changes only the pairs on its object, and on the object's descendants when it cascades, so its area is the object area of that object and not the area of its claim: a holder's next listing settles the objects bound since its last read, not every live binding of the claim. `_diff_holders` names the holders of the claims bound on the object and its ancestors and the holders of the claims linking to those, so the area stays open until each has settled it, and a holder that lost the binding still holds its pair on the object. A claim's own change, its mask, `inherits`, level or removal, still raises the claim area. A replayed binding raises the object area with `cascade`, since the page does not carry the row it replaced. Measured in the `binding_area` suite: forty bindings of one claim settled, five more bound, the holder's next listing recomputes 5 objects instead of 46.
 
 The assignee is not settled in the write. A grant changes one user's access and its area names that user, so the assignee's next check settles the pair it asks about and its next listing its share. The other holders of a claim are an unbounded set, `|H_c|`, and none of them is settled in the writer's transaction.
 
@@ -108,7 +111,7 @@ A pair entering or leaving writes one `user_users_diff` row and reads nothing; t
 | Organization or location reparent of `n_S` nodes | `n_S (D_old + D_p + 1)` | 1 when a field moved | the actor's pair | 1 object with `cascade` | 1 per linked app |
 | Organization or location rename | 0 | 1 | the actor's pair | 0 | 1 per linked app |
 | `claim` insert | `d_o + 1` for the claim itself | 1 | the actor's pair on the claim, twice | 1 claim, 1 object | 1 |
-| `claim_object` insert | `d_o + 1` | 0 | the actor's pairs on the claim and the object | 1 claim, 2 for a link | 1 |
+| `claim_object` insert | `d_o + 1` | 0 | the actor's pairs on the claim and the object | 1 object, 2 claim for a link | 1 |
 | `user_claim` insert | `d_o + 1` | 0 | the actor's pair on the claim | 1 claim | 1 |
 | `samna_user` soft delete | 0 | 0 | none beyond the cascade | 1 object, and 1 claim per grant of the user | `1 + C` and the relations and fields |
 
@@ -121,13 +124,13 @@ The write a person makes through the API: create a claim, bind it to a node `y` 
 | Step | Source rows | Pairs recomputed | Areas |
 |---|---|---|---|
 | `claim` | 1, and `d_o + 1` closure rows | the actor's pair on the claim, twice | the claim area, and an object area on the claim |
-| `claim_object` on `y` | 1, and `d_o + 1` closure rows | the actor's pairs on the claim and on `y` | the claim area raised again |
+| `claim_object` on `y` | 1, and `d_o + 1` closure rows | the actor's pairs on the claim and on `y` | the object area on `y` with `cascade` |
 | `user_claim` × `k` | `k`, and `k (d_o + 1)` closure rows | the actor's pair on the claim, `k` times | `k` claim areas, one per assignee |
 
 ```
 source rows  = 2 + k                     outbox rows = 2 + k
 recomputes   = 4 + k, each of one pair   pairs written ≤ 2
-area rows    = 2 + k: the claim area raised twice, the object area, one per assignee
+area rows    = 3 + k: the claim area, the object area on the claim, the object area on y, one per assignee
 ```
 
 The request is linear in the users it names and independent of the reach `|T_c| = 1 + |desc(y)|` of the node and of every other user of the app. Each assignee settles its share, about `|T_c|` pairs, on its next listing, and a single pair on its next check. The measured consequence for the feed, 50 events against 240,551 when derived rows travelled, is in [Sync](./sync.md).

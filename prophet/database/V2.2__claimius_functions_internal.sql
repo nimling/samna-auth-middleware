@@ -2432,8 +2432,18 @@ CREATE OR REPLACE FUNCTION claimius._diff_holders(
            AND co.object_id = n.object_id
            AND co.app_id = p_app_id
            AND co.sa_deleted_at IS NULL
+        CROSS JOIN LATERAL (
+            SELECT co.claim_id
+            UNION ALL
+            SELECT link.claim_id
+            FROM claimius.claim_object link
+            WHERE link.object_type = 'claimius.claim'
+              AND link.object_id = co.claim_id
+              AND link.app_id = p_app_id
+              AND link.sa_deleted_at IS NULL
+        ) h
         JOIN claimius.user_claim uc
-            ON uc.claim_id = co.claim_id
+            ON uc.claim_id = h.claim_id
            AND uc.app_id = p_app_id
            AND uc.sa_deleted_at IS NULL
     WHERE d.id = ANY(p_diff_ids) AND d.kind = 'object'

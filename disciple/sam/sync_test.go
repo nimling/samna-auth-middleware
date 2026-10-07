@@ -73,14 +73,25 @@ func TestClaimAreas_ClaimCompositionMovesBoth(t *testing.T) {
 	}
 }
 
-func TestClaimAreas_ObjectBindingMovesOnlyTheClaim(t *testing.T) {
+func TestClaimAreas_ObjectBindingMovesNoClaimArea(t *testing.T) {
 	raw := json.RawMessage(`{"claim_id":"20000000-0000-4000-8000-000000000006","object_type":"public.article","object_id":"50000000-0000-4000-8000-000000000007"}`)
 	areas, err := sam.ClaimAreas("claimius.claim_object", raw)
 	if err != nil {
 		t.Fatalf("resolve object binding area: %v", err)
 	}
-	if len(areas) != 1 || areas[0].String() != "20000000-0000-4000-8000-000000000006" {
-		t.Fatalf("a claim bound to an ordinary object moves one area, got %v", areas)
+	if len(areas) != 0 {
+		t.Fatalf("a claim bound to an ordinary object raises the object area, not the claim area, got %v", areas)
+	}
+}
+
+func TestClaimAreas_ScopeBindingMovesTheClaim(t *testing.T) {
+	raw := json.RawMessage(`{"claim_id":"20000000-0000-4000-8000-000000000009","scope":{"page":true}}`)
+	areas, err := sam.ClaimAreas("claimius.claim_object", raw)
+	if err != nil {
+		t.Fatalf("resolve scope binding area: %v", err)
+	}
+	if len(areas) != 1 || areas[0].String() != "20000000-0000-4000-8000-000000000009" {
+		t.Fatalf("a scope binding moves the claim it binds, got %v", areas)
 	}
 }
 

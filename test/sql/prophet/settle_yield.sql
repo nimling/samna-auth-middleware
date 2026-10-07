@@ -9,7 +9,9 @@ $$ LANGUAGE sql;
 
 CREATE FUNCTION pg_temp.unsettled() RETURNS BIGINT AS $$
     SELECT count(*) FROM claimius.access_diff d
-    WHERE d.app_id = pg_temp.app() AND d.kind = 'claim' AND d.claim_id IN (SELECT c.id FROM claimius.claim c WHERE c.sa_owner_id = '10000000-0000-4000-8000-000000000e90')
+    WHERE d.app_id = pg_temp.app()
+      AND ((d.kind = 'claim' AND d.claim_id IN (SELECT c.id FROM claimius.claim c WHERE c.sa_owner_id = '10000000-0000-4000-8000-000000000e90'))
+           OR (d.kind = 'object' AND d.object_id = '10000000-0000-4000-8000-000000000e90'))
       AND NOT EXISTS (
           SELECT 1 FROM claimius.access_diff_user du
           WHERE du.diff_id = d.id AND du.user_id = 'a0000000-0000-4000-8000-000000000e91' AND du.raise_count = d.raise_count)

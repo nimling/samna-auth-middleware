@@ -4667,11 +4667,13 @@ BEGIN
         PERFORM claimius._raise_claim_diff(v_app_id, v_id);
     ELSIF v_table = 'user_claim' THEN
         PERFORM claimius._raise_claim_diff(v_app_id, (v_row ->> 'claim_id')::UUID, (v_row ->> 'user_id')::UUID);
-    ELSIF v_table = 'claim_object' THEN
+    ELSIF v_table = 'claim_object' AND (v_row ->> 'object_type' = 'claimius.claim' OR v_row ->> 'object_id' IS NULL) THEN
         PERFORM claimius._raise_claim_diff(v_app_id, (v_row ->> 'claim_id')::UUID);
         IF v_row ->> 'object_type' = 'claimius.claim' THEN
             PERFORM claimius._raise_claim_diff(v_app_id, (v_row ->> 'object_id')::UUID);
         END IF;
+    ELSIF v_table = 'claim_object' THEN
+        PERFORM claimius._raise_object_diff(v_app_id, v_row ->> 'object_type', (v_row ->> 'object_id')::UUID, TRUE);
     END IF;
 
     RETURN TRUE;

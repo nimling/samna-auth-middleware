@@ -416,6 +416,10 @@ func ClaimAreas(eventType string, raw json.RawMessage) ([]uuid.UUID, error) {
 	}
 
 	areas := make([]uuid.UUID, 0, 2)
+	if eventType == "claimius.claim_object" && envelope.ObjectID != nil &&
+		envelope.ObjectType != nil && *envelope.ObjectType != "claimius.claim" {
+		return areas, nil
+	}
 	if envelope.ClaimID != nil {
 		areas = append(areas, *envelope.ClaimID)
 	}
@@ -433,12 +437,18 @@ func recomputeExternal(ctx context.Context, tx bun.Tx, eventType string, raw jso
 		return err
 	}
 	var assignee *uuid.UUID
-	if eventType == "claimius.user_claim" {
+	if eventType == "claimius.user_claim" || eventType == "claimius.claim_object" {
 		var envelope claimBindingEnvelope
 		if err := json.Unmarshal(raw, &envelope); err != nil {
-			return fmt.Errorf("unmarshal assignment envelope: %w", err)
+			return fmt.Errorf("unmarshal binding envelope: %w", err)
 		}
-		assignee = envelope.UserID
+		if eventType == "claimius.user_claim" {
+			assignee = envelope.UserID
+		} else if envelope.ObjectID != nil && envelope.ObjectType != nil && *envelope.ObjectType != "claimius.claim" {
+			if _, err := tx.ExecContext(ctx, "SELECT claimius._raise_object_diff(?, ?, TRUE)", *envelope.ObjectType, *envelope.ObjectID); err != nil {
+				return fmt.Errorf("raise object diff for %s: %w", *envelope.ObjectID, err)
+			}
+		}
 	}
 	for _, claimID := range areas {
 		if _, err := tx.ExecContext(ctx, "SELECT claimius._raise_claim_diff(?, ?)", claimID, assignee); err != nil {

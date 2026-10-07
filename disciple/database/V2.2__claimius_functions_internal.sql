@@ -546,6 +546,18 @@ $$ LANGUAGE plpgsql;
 
 COMMENT ON FUNCTION claimius._detach_self_root_trigger(TEXT) IS 'Removes self root trigger from a deregistered table.';
 
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM pg_proc p
+        WHERE p.pronamespace = to_regnamespace('claimius')
+          AND p.proname = '_user_id_for_user_claim'
+          AND pg_get_function_result(p.oid) LIKE '%app_id%'
+    ) THEN
+        DROP FUNCTION claimius._user_id_for_user_claim(UUID);
+    END IF;
+END $$;
+
 CREATE OR REPLACE FUNCTION claimius._user_id_for_user_claim(p_user_claim_id UUID)
     RETURNS TABLE(user_id UUID) AS $$
 BEGIN
@@ -2232,8 +2244,17 @@ CREATE OR REPLACE FUNCTION claimius._diff_holders(
             ON co.object_type = n.object_type
            AND co.object_id = n.object_id
            AND co.sa_deleted_at IS NULL
+        CROSS JOIN LATERAL (
+            SELECT co.claim_id
+            UNION ALL
+            SELECT link.claim_id
+            FROM claimius.claim_object link
+            WHERE link.object_type = 'claimius.claim'
+              AND link.object_id = co.claim_id
+              AND link.sa_deleted_at IS NULL
+        ) h
         JOIN claimius.user_claim uc
-            ON uc.claim_id = co.claim_id
+            ON uc.claim_id = h.claim_id
            AND uc.sa_deleted_at IS NULL
     WHERE d.id = ANY(p_diff_ids) AND d.kind = 'object'
 $$ LANGUAGE sql STABLE;

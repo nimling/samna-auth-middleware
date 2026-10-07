@@ -20,6 +20,48 @@ DO $$
         END IF;
     END $$;
 
+DO $$
+DECLARE
+    v_table TEXT;
+BEGIN
+    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'claimius' AND table_name = 'user_object' AND column_name = 'app_id') THEN
+        TRUNCATE claimius.user_object, claimius.user_users;
+    END IF;
+    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'claimius' AND table_name = 'claim_graph_cache' AND column_name = 'app_id') THEN
+        TRUNCATE claimius.claim_graph_cache;
+    END IF;
+
+    FOR v_table IN
+        SELECT c.table_name
+        FROM information_schema.columns c
+            JOIN information_schema.tables t
+                ON t.table_schema = c.table_schema
+               AND t.table_name = c.table_name
+               AND t.table_type = 'BASE TABLE'
+        WHERE c.table_schema = 'claimius'
+          AND c.column_name = 'app_id'
+          AND c.table_name <> 'samna_app'
+        ORDER BY c.table_name
+    LOOP
+        EXECUTE format('ALTER TABLE claimius.%I DROP COLUMN app_id', v_table);
+    END LOOP;
+
+    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'claimius' AND table_name = 'table_info' AND column_name = 'has_app_id') THEN
+        ALTER TABLE claimius.table_info DROP COLUMN has_app_id;
+    END IF;
+    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'claimius' AND table_name = 'disciple_state' AND column_name = 'disciple_app_slug') THEN
+        ALTER TABLE claimius.disciple_state DROP COLUMN disciple_app_slug;
+    END IF;
+    IF to_regclass('claimius.table_info') IS NOT NULL THEN
+        DELETE FROM claimius.table_info WHERE object_type = 'claimius.samna_app';
+    END IF;
+    IF to_regclass('claimius.inheritance_info') IS NOT NULL THEN
+        DELETE FROM claimius.inheritance_info
+        WHERE ancestor_type = 'claimius.samna_app'
+           OR descendant_type = 'claimius.samna_app';
+    END IF;
+END $$;
+
 CREATE TABLE IF NOT EXISTS claimius.samna_user (
                                                    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
                                                    user_id         UUID NOT NULL DEFAULT gen_random_uuid(),
@@ -110,6 +152,8 @@ CREATE TABLE IF NOT EXISTS claimius.organization (
                                                      sa_created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
                                                      sa_updated_at   TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+ALTER TABLE claimius.organization ADD COLUMN IF NOT EXISTS private_seed TEXT NOT NULL DEFAULT '';
 
 COMMENT ON TABLE claimius.organization IS 'Organization tree. Root iff sa_owner_id == sa_root_id == id.';
 COMMENT ON COLUMN claimius.organization.private_seed IS 'Hex encoded HMAC seed. Synced from the prophet. Keys app_secret hashing for apps owned in this tree.';
