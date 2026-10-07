@@ -78,8 +78,6 @@ BEGIN
         p_object_id => v_vault, p_object_type => 'claimius.organization', p_inherits => TRUE);
     PERFORM claimius.insert_user_claim(p_app_id => v_app, p_claim_id => v_secret, p_user_id => 'a0000000-0000-4000-8000-000000000b91',
         p_sa_owner_id => v_vault, p_sa_created_by => v_sys);
-    PERFORM count(*) FROM claimius.get_users('a0000000-0000-4000-8000-000000000b91', v_app);
-    PERFORM count(*) FROM claimius.get_users('a0000000-0000-4000-8000-000000000b92', v_app);
 END $$;
 
 SELECT ok(EXISTS (SELECT 1 FROM claimius.get_objects('a0000000-0000-4000-8000-000000000b91', pg_temp.app(), 'claimius.organization')
@@ -142,6 +140,9 @@ SELECT pg_temp.raise(600);
 SELECT pg_temp.list('a0000000-0000-4000-8000-000000000b92');
 SELECT is(pg_temp.cursor_of('a0000000-0000-4000-8000-000000000b92'), pg_snapshot_xmin(pg_current_snapshot()),
     'once the other session lets go the share settles, all of it');
+
+SELECT count(*) FROM claimius.get_users('a0000000-0000-4000-8000-000000000b91', pg_temp.app());
+SELECT count(*) FROM claimius.get_users('a0000000-0000-4000-8000-000000000b92', pg_temp.app());
 
 SELECT set_eq($$
     SELECT a.user_id AS viewer_id, b.user_id AS target_user_id, count(DISTINCT a.object_id) AS sharing

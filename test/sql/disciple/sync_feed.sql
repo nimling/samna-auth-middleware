@@ -42,6 +42,7 @@ BEGIN
     FOREACH v_user IN ARRAY ARRAY['a0000000-0000-4000-8000-0000000000f1', 'a0000000-0000-4000-8000-0000000000f2',
                                   'a0000000-0000-4000-8000-0000000000f3']::UUID[] LOOP
         PERFORM count(*) FROM claimius.get_objects(v_user, 'claimius.organization', 4);
+        PERFORM count(*) FROM claimius.get_users(v_user);
     END LOOP;
 END $$;
 

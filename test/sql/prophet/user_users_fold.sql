@@ -68,14 +68,14 @@ BEGIN
         p_object_id => v_desk, p_object_type => 'claimius.organization', p_inherits => FALSE);
     FOREACH v_user IN ARRAY ARRAY['a0000000-0000-4000-8000-000000000c91', 'a0000000-0000-4000-8000-000000000c92',
                                   'a0000000-0000-4000-8000-000000000c93']::UUID[] LOOP
+        PERFORM count(*) FROM claimius.get_users(v_user, v_app);
+    END LOOP;
+    FOREACH v_user IN ARRAY ARRAY['a0000000-0000-4000-8000-000000000c91', 'a0000000-0000-4000-8000-000000000c92',
+                                  'a0000000-0000-4000-8000-000000000c93']::UUID[] LOOP
         PERFORM claimius.insert_user_claim(p_app_id => v_app, p_claim_id => v_crew, p_user_id => v_user,
             p_sa_owner_id => v_root, p_sa_created_by => v_sys);
     END LOOP;
     PERFORM count(*) FROM claimius.get_objects('a0000000-0000-4000-8000-000000000c93', v_app, 'claimius.organization');
-    FOREACH v_user IN ARRAY ARRAY['a0000000-0000-4000-8000-000000000c91', 'a0000000-0000-4000-8000-000000000c92',
-                                  'a0000000-0000-4000-8000-000000000c93']::UUID[] LOOP
-        PERFORM count(*) FROM claimius.get_users(v_user, v_app);
-    END LOOP;
     PERFORM claimius._settle_user_users_diff(v_app);
 END $$;
 COMMIT;

@@ -85,6 +85,7 @@ BEGIN
     PERFORM pg_temp.listed(v_hal);
     PERFORM pg_temp.listed(v_lin);
     PERFORM pg_temp.listed(v_oto);
+    DELETE FROM claimius.access_diff;
 
     FOR v_n IN 41 .. 45 LOOP
         PERFORM claimius.insert_claim_object(p_app_id => v_app,

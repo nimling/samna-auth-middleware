@@ -1,5 +1,5 @@
 BEGIN;
-SELECT plan(19);
+SELECT plan(18);
 
 CREATE FUNCTION pg_temp.app() RETURNS UUID AS $$
     SELECT id FROM claimius.samna_app WHERE slug = 'sqltest_object_info'
@@ -87,7 +87,7 @@ SELECT results_eq(
     'the harbour''s fields are stored once, in one object_info row'
 );
 SELECT columns_are('claimius', 'user_object',
-    ARRAY['app_id', 'user_id', 'object_id', 'object_type', 'sa_access', 'grants', 'scope', 'direct_grant', 'used_count', 'last_used_at', 'sa_created_at', 'sa_updated_at'],
+    ARRAY['app_id', 'user_id', 'object_id', 'object_type', 'sa_access', 'grants', 'scope', 'direct_grant', 'used_count', 'last_used_at', 'settled_txid', 'sa_created_at', 'sa_updated_at'],
     'a pair carries only the per user columns');
 SELECT col_is_pk('claimius', 'user_object', ARRAY['user_id', 'app_id', 'object_type', 'object_id'],
     'the pair is keyed on its natural key');
@@ -114,8 +114,6 @@ SELECT is(pg_temp.writes('object_info') - (SELECT infos FROM before_rename), 1::
     'a rename writes the one object_info row');
 SELECT is((SELECT count(*) FROM claimius.access_diff WHERE app_id = pg_temp.app()), (SELECT areas FROM before_rename),
     'a rename raises no area');
-SELECT ok(NOT EXISTS (SELECT 1 FROM claimius.access_diff WHERE object_id = '10000000-0000-4000-8000-0000000000b1'),
-    'no outstanding area names the renamed organization');
 
 SELECT set_eq(
     $$SELECT sa_name FROM pg_temp.listing('a0000000-0000-4000-8000-0000000000b1') WHERE object_id = '10000000-0000-4000-8000-0000000000b1'

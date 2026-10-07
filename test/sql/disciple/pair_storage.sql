@@ -86,6 +86,9 @@ BEGIN
         p_sa_owner_id => v_root, p_sa_created_by => v_sys);
 END $$;
 
+SELECT claimius._settle_directory(u) FROM unnest(ARRAY['a0000000-0000-4000-8000-0000000000e1', 'a0000000-0000-4000-8000-0000000000e2',
+    'a0000000-0000-4000-8000-0000000000e3', 'a0000000-0000-4000-8000-0000000000e4']::UUID[]) AS u;
+
 SELECT is(pg_temp.list_all(), 13::BIGINT, 'three crew holders list the node and its three children, the desk holder lists one child');
 
 SELECT set_eq('SELECT * FROM pg_temp.viewed()', 'SELECT * FROM pg_temp.rebuilt()',

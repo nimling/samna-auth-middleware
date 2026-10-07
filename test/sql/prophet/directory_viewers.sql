@@ -74,7 +74,8 @@ BEGIN
     PERFORM claimius._settle_user_users_diff(v_app);
 END $$;
 
-SELECT is((SELECT count(*) FROM claimius.user_object WHERE app_id = pg_temp.app() AND object_type = 'claimius.organization'), 6::BIGINT,
+SELECT is((SELECT count(*) FROM claimius.user_object WHERE app_id = pg_temp.app() AND object_type = 'claimius.organization'
+           AND user_id IN ('a0000000-0000-4000-8000-000000d6a001', 'a0000000-0000-4000-8000-000000d6a002', 'a0000000-0000-4000-8000-000000d6a003')), 6::BIGINT,
     'three holders hold a pair on the root and the desk each');
 SELECT is_empty($$SELECT 1 FROM claimius.user_users WHERE app_id = pg_temp.app()$$,
     'a user who never lists users causes no user_users row, however many pairs are folded');

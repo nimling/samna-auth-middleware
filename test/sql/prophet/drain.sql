@@ -77,7 +77,9 @@ END $$;
 SELECT claimius.update_sync_cursor(pg_temp.served(), '70000000-0000-4000-8000-0000000000f1', 0, 0);
 
 SELECT is(
-    (SELECT count(*) FROM claimius.access_diff WHERE app_id = pg_temp.app() AND kind = 'assignment'),
+    (SELECT count(*) FROM claimius.access_diff WHERE app_id = pg_temp.app() AND kind = 'assignment'
+       AND user_id IN ('a0000000-0000-4000-8000-0000000000f1', 'a0000000-0000-4000-8000-0000000000f2', 'a0000000-0000-4000-8000-0000000000f3')
+       AND claim_id = (SELECT id FROM claimius.claim WHERE name = 'Drain crew')),
     3::BIGINT, 'three grants raise three assignment areas, one per assignee');
 
 UPDATE claimius.access_diff SET sa_created_at = now() - INTERVAL '1 hour';

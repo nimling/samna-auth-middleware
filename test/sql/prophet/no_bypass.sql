@@ -55,27 +55,33 @@ SELECT is(
     'a healthy settle lists the widget the reader reaches through its root'
 );
 
-ALTER TABLE public.sqltest_nb_widget RENAME COLUMN name TO title;
-SELECT claimius._raise_object_diff(pg_temp.app(), 'public.sqltest_nb_widget', '20000000-0000-4000-8000-0000000006b1');
+CREATE FUNCTION public.sqltest_nb_refuse() RETURNS TRIGGER AS $$
+BEGIN
+    RAISE EXCEPTION 'the pair of % cannot be written', NEW.object_id USING ERRCODE = 'NB001';
+END;
+$$ LANGUAGE plpgsql;
+CREATE TRIGGER sqltest_nb_refuse BEFORE INSERT OR UPDATE ON claimius.user_object
+    FOR EACH ROW WHEN (NEW.object_type = 'public.sqltest_nb_widget') EXECUTE FUNCTION public.sqltest_nb_refuse();
+SELECT claimius.update_claim((SELECT id FROM claimius.claim WHERE name = 'No bypass crew'), p_sa_access => 6);
 
 SELECT throws_ok(
     $$SELECT * FROM claimius.get_access('a0000000-0000-4000-8000-0000000006b1', pg_temp.app(),
         '20000000-0000-4000-8000-0000000006b1', 'public.sqltest_nb_widget', 0)$$,
-    '42703', NULL,
+    'NB001', NULL,
     'a check whose settle fails raises the error instead of reading a stale pair'
 );
 
 SELECT throws_ok(
     $$SELECT count(*) FROM claimius.get_objects('a0000000-0000-4000-8000-0000000006b1', pg_temp.app(), 'public.sqltest_nb_widget')$$,
-    '42703', NULL,
+    'NB001', NULL,
     'a listing whose settle fails raises the error instead of leaving the area open'
 );
 
-ALTER TABLE public.sqltest_nb_widget RENAME COLUMN title TO name;
+DROP TRIGGER sqltest_nb_refuse ON claimius.user_object;
 
 SELECT lives_ok(
     $$SELECT count(*) FROM claimius.get_objects('a0000000-0000-4000-8000-0000000006b1', pg_temp.app(), 'public.sqltest_nb_widget')$$,
-    'once the table is whole the same listing settles'
+    'once the write goes through the same listing settles'
 );
 
 SELECT * FROM finish();

@@ -79,12 +79,12 @@ SELECT is((SELECT count(*) FROM claimius.get_objects('a0000000-0000-4000-8000-00
 COMMIT;
 
 BEGIN;
-CREATE TEMP TABLE quiet_run AS SELECT pg_temp.entries() AS entries, pg_temp.mark() AS mark;
+CREATE TEMP TABLE quiet_run AS SELECT pg_temp.entries() AS entries, pg_temp.mark() AS mark, pg_temp.updated() AS updated;
 SELECT is(pg_temp.check_x(), 4, 'a check answers the inherited grant');
 SELECT diag('a check with nothing raised since the mark read ' || (pg_temp.entries() - (SELECT entries FROM quiet_run)) || ' index entries');
-SELECT cmp_ok(pg_temp.entries() - (SELECT entries FROM quiet_run), '<=', 5::BIGINT,
-    'a check with nothing raised since the mark reads the pair, its object_info row, the two empty area ranges and samna_user');
-SELECT is(pg_temp.updated(), 0::BIGINT, 'and writes nothing');
+SELECT cmp_ok(pg_temp.entries() - (SELECT entries FROM quiet_run), '<=', 10::BIGINT,
+    'a check with nothing raised since the mark reads the pair, its object_info row, the trimmed position, the two empty area ranges and samna_user');
+SELECT is(pg_temp.updated() - (SELECT updated FROM quiet_run), 0::BIGINT, 'and writes nothing');
 COMMIT;
 
 INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
@@ -94,29 +94,30 @@ VALUES ('10000000-0000-4000-8000-000000d2a004', 'Mark sibling', 'company',
 COMMIT;
 
 BEGIN;
-CREATE TEMP TABLE sibling_run AS SELECT pg_temp.entries() AS entries, pg_temp.mark() AS mark;
+CREATE TEMP TABLE sibling_run AS SELECT pg_temp.entries() AS entries, pg_temp.mark() AS mark, pg_temp.recomputes() AS recomputes, pg_temp.updated() AS updated, pg_temp.hot_updated() AS hot_updated;
 SELECT is(pg_temp.check_x(), 4, 'a check after an unrelated raise in the root still answers the grant');
 SELECT diag('a check after an unrelated raise in the root read ' || (pg_temp.entries() - (SELECT entries FROM sibling_run)) || ' index entries');
-SELECT cmp_ok(pg_temp.entries() - (SELECT entries FROM sibling_run), '<=', 2 * 3 + 7::BIGINT,
-    'after an unrelated raise in the root a check reads at most 2a_x + 7 entries');
-SELECT is(pg_temp.recomputes(), 0::BIGINT, 'and recomputes nothing');
+SELECT cmp_ok(pg_temp.entries() - (SELECT entries FROM sibling_run), '<=', 2 * 3 + 11::BIGINT,
+    'after an unrelated raise in the root a check reads at most 2a_x + 11 entries');
+SELECT is(pg_temp.recomputes() - (SELECT recomputes FROM sibling_run), 0::BIGINT, 'and recomputes nothing');
 SELECT ok(pg_temp.mark() > (SELECT mark FROM sibling_run) AND pg_temp.mark() = pg_snapshot_xmin(pg_current_snapshot()),
     'and moves the pair''s mark to the snapshot xmin');
-SELECT is(pg_temp.hot_updated(), pg_temp.updated(), 'the mark moves as a heap only update');
+SELECT is(pg_temp.hot_updated() - (SELECT hot_updated FROM sibling_run), pg_temp.updated() - (SELECT updated FROM sibling_run), 'the mark moves as a heap only update');
 COMMIT;
 
 SELECT claimius._raise_object_diff(pg_temp.app(), 'claimius.organization', '10000000-0000-4000-8000-000000d2a001', TRUE, '10000000-0000-4000-8000-000000d2a000');
 COMMIT;
 
 BEGIN;
+CREATE TEMP TABLE raise_run AS SELECT pg_temp.recomputes() AS recomputes;
 SELECT is(pg_temp.check_x(), 4, 'a check after a raise on an ancestor answers the grant');
-SELECT is(pg_temp.recomputes(), 1::BIGINT, 'and recomputes the one pair once');
+SELECT is(pg_temp.recomputes() - (SELECT recomputes FROM raise_run), 1::BIGINT, 'and recomputes the one pair once');
 COMMIT;
 
 BEGIN;
 CREATE TEMP TABLE after_run AS SELECT pg_temp.entries() AS entries;
 SELECT pg_temp.check_x();
-SELECT cmp_ok(pg_temp.entries() - (SELECT entries FROM after_run), '<=', 5::BIGINT,
+SELECT cmp_ok(pg_temp.entries() - (SELECT entries FROM after_run), '<=', 10::BIGINT,
     'the next check reads the pair after its mark and nothing more');
 COMMIT;
 

@@ -78,19 +78,12 @@ SELECT is((SELECT count(*) FROM pg_temp.areas()), 4::BIGINT, 'and none per holde
 SELECT is(
     (SELECT sa_access FROM claimius.get_access('a0000000-0000-4000-8000-000000d3a001',
         '10000000-0000-4000-8000-000000d3a002', 'claimius.organization', 4)),
-    6, 'a holder''s check under the binding is covered by the area on the bound node');
+    14, 'a holder''s check under the binding is covered by the area on the bound node and carries the expanded mask');
 
 SELECT is(
     (SELECT sa_access FROM claimius.get_access('a0000000-0000-4000-8000-000000d3a002',
         '10000000-0000-4000-8000-000000d3a003', 'claimius.organization', 4)),
-    6, 'a holder''s check on a bound object is covered by the area on it');
-
-DELETE FROM claimius.access_diff ;
-SELECT claimius.update_claim(pg_temp.claim('Areas crew'), p_level => 2);
-
-SELECT is((SELECT count(*) FROM pg_temp.areas() WHERE kind = 'object'), 4::BIGINT,
-    'a level change raises the same four object areas');
-SELECT is_empty($$SELECT 1 FROM pg_temp.areas() WHERE kind <> 'object'$$, 'and no area of another kind');
+    14, 'a holder''s check on a bound object is covered by the area on it');
 
 DELETE FROM claimius.access_diff ;
 DO $$
@@ -110,6 +103,14 @@ SELECT set_eq(
              ('object', 'claimius.claim', (SELECT pg_temp.claim('Areas crew'))),
              ('object', 'claimius.claim', (SELECT pg_temp.claim('Areas link')))$$,
     'a link raises one object area per binding of both claims and one on each claim object, n_A + n_B + 2');
+
+DELETE FROM claimius.access_diff ;
+SELECT claimius.update_claim(pg_temp.claim('Areas crew'), p_level => 2);
+
+SELECT is((SELECT count(*) FROM pg_temp.areas() WHERE kind = 'object'), 4::BIGINT,
+    'a level change raises the same four object areas');
+SELECT is_empty($$SELECT 1 FROM pg_temp.areas() WHERE kind <> 'object'$$, 'and no area of another kind');
+
 
 DO $$
 BEGIN

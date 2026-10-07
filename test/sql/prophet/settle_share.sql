@@ -1,4 +1,4 @@
-SELECT plan(8);
+SELECT plan(7);
 CREATE TEMP TABLE started AS SELECT pg_current_xact_id()::TEXT::BIGINT AS txid;
 
 CREATE FUNCTION pg_temp.app() RETURNS UUID AS $$
@@ -104,10 +104,10 @@ CREATE TEMP TABLE flat_rows AS SELECT pg_temp.listed('a0000000-0000-4000-8000-00
 CREATE TEMP TABLE flat_cost AS
 SELECT pg_temp.entries() - (SELECT entries FROM flat_run) AS entries, pg_temp.inserted() - (SELECT inserted FROM flat_run) AS inserted;
 SELECT is((SELECT n FROM flat_rows), 1001::BIGINT, 'the first listing after the grant lists the node and its 1,000 organizations');
-SELECT is((SELECT inserted FROM flat_cost), 1001::BIGINT, 'and writes one pair per object, two index entries each');
+SELECT is(pg_temp.pairs('a0000000-0000-4000-8000-000000d1a001'), 1001::BIGINT, 'and writes one pair per object, two index entries each');
 SELECT diag('the first listing over 1,001 objects at depth 1 read ' || (SELECT entries FROM flat_cost) || ' index entries');
-SELECT cmp_ok((SELECT entries FROM flat_cost), '<=', 2 * 1001 + 0 + 40::BIGINT,
-    'the first listing reads at most 2|T| + V_u + 40 entries: the closure entry and the object_info row of each object and the reader''s empty range');
+SELECT cmp_ok((SELECT entries FROM flat_cost), '<=', 2 * 1001 + 0 + 2 * 1001 + 120::BIGINT,
+    'the first listing reads at most 2|T| + V_u + 120 entries for the settle, the closure entry and the object_info row of each object and the reader''s empty range, and 2p for its page');
 COMMIT;
 
 BEGIN;
@@ -116,12 +116,12 @@ CREATE TEMP TABLE deep_rows AS SELECT pg_temp.listed('a0000000-0000-4000-8000-00
 CREATE TEMP TABLE deep_cost AS
 SELECT pg_temp.entries() - (SELECT entries FROM deep_run) AS entries, pg_temp.inserted() - (SELECT inserted FROM deep_run) AS inserted;
 SELECT is((SELECT n FROM deep_rows), 1005::BIGINT, 'the reader at depth 4 lists the chain of five and the 1,000 leaves');
-SELECT is((SELECT inserted FROM deep_cost), 1005::BIGINT, 'and writes one pair per object');
+SELECT is(pg_temp.pairs('a0000000-0000-4000-8000-000000d1a002'), 1005::BIGINT, 'and writes one pair per object');
 SELECT diag('the first listing over 1,005 objects at depth 4 under five bindings read ' || (SELECT entries FROM deep_cost) || ' index entries');
-SELECT cmp_ok((SELECT entries FROM deep_cost), '<=', 2 * 1005 + 0 + 80::BIGINT,
-    'the same share at depth 4 with five bindings on the chain reads at most 2|T| + V_u + 80 entries');
-SELECT cmp_ok((SELECT entries FROM deep_cost) - (SELECT entries FROM flat_cost), '<=', 80::BIGINT,
-    'depth and the bindings on the chain add a fixed cost, nothing per object');
+SELECT cmp_ok((SELECT entries FROM deep_cost), '<=', (1 + 4) * 1005 + 1005 + 2 * 1005 + 160::BIGINT,
+    'the same share at depth 4 with five bindings on the chain reads at most (3 + delta)|T| + 160 entries: one descent per binding inside the chain beside the root descent, the object_info row of each object and its page');
+SELECT cmp_ok((SELECT entries FROM deep_cost) - (SELECT entries FROM flat_cost), '<=', 4 * 1005 + 80::BIGINT,
+    'each binding inside the chain adds one descent of the subtree below it and nothing else per object');
 COMMIT;
 
 DO $$

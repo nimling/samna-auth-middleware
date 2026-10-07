@@ -45,7 +45,7 @@ $$ LANGUAGE sql;
 
 CREATE TEMP TABLE pending AS SELECT count(*) AS n, (SELECT count(*) FROM claimius.user_users WHERE app_id = pg_temp.app()) AS folded FROM claimius.user_users_diff WHERE app_id = pg_temp.app();
 
-SELECT cmp_ok((SELECT n FROM pending), '>', 0::BIGINT, 'the settled pairs left their user_users_diff rows unfolded');
+SELECT is((SELECT n FROM pending), 0::BIGINT, 'with no viewer the settled pairs raise no user_users_diff row');
 
 SELECT is(
     (SELECT access FROM claimius.get_user_access('a0000000-0000-4000-8000-0000000009e1', pg_temp.app(), 'ext-bo', 0)),
@@ -54,9 +54,9 @@ SELECT is(
 );
 
 SELECT is(
-    (SELECT count(*) FROM claimius.user_users WHERE app_id = pg_temp.app()),
-    (SELECT folded FROM pending),
-    'the point check folds nothing into user_users'
+    (SELECT count(*) FROM claimius.user_users WHERE viewer_id = 'a0000000-0000-4000-8000-0000000009e1'),
+    1::BIGINT,
+    'the point check makes the actor a viewer and builds its row toward the one user it shares objects with'
 );
 
 SELECT is_empty(

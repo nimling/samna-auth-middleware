@@ -110,8 +110,9 @@ SELECT ok(
 );
 
 SELECT ok(
-    EXISTS (SELECT 1 FROM claimius.access_diff WHERE app_id = pg_temp.mirror_app() AND claim_id = '20000000-0000-4000-8000-0000000000f4'),
-    'an applied claim raises its area on the mirror'
+    EXISTS (SELECT 1 FROM claimius.access_diff WHERE app_id = pg_temp.mirror_app() AND kind = 'object'
+              AND object_type = 'claimius.claim' AND object_id = '20000000-0000-4000-8000-0000000000f4'),
+    'an applied claim raises the area of its claim object on the mirror'
 );
 
 SELECT ok(

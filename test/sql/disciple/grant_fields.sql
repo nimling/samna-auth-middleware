@@ -37,7 +37,7 @@ BEGIN
         p_claim_id => v_crew, p_sa_owner_id => v_root, p_sa_root_id => v_root, p_sa_created_by => v_sys,
         p_object_id => v_root, p_object_type => 'claimius.organization', p_inherits => TRUE);
     PERFORM claimius.insert_user_claim(p_claim_id => v_crew, p_user_id => v_timed, p_sa_owner_id => v_root,
-        p_sa_created_by => v_sys, p_ends_at => clock_timestamp() + INTERVAL '2 seconds');
+        p_sa_created_by => v_sys, p_ends_at => now() + INTERVAL '1 hour');
     v_name := (claimius.insert_claim(
         p_name => 'Fields name', p_description => NULL, p_sa_access => 4,
         p_sa_owner_id => v_root, p_sa_root_id => v_root, p_sa_created_by => v_sys
@@ -65,7 +65,10 @@ SELECT is((SELECT count(*) FROM claimius.get_objects('a0000000-0000-4000-8000-00
     'the named holder lists x');
 COMMIT;
 
-SELECT pg_sleep(2.5);
+UPDATE claimius.user_object uo
+SET grants = (SELECT jsonb_agg(jsonb_set(g, '{ends_at}', to_jsonb(now() - INTERVAL '1 second'))) FROM jsonb_array_elements(uo.grants) g)
+WHERE uo.user_id = 'a0000000-0000-4000-8000-000000d7a001';
+COMMIT;
 
 BEGIN;
 CREATE TEMP TABLE closed AS SELECT pg_temp.writes() AS writes, pg_temp.grant_reads() AS reads;

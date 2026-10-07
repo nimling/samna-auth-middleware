@@ -3,7 +3,7 @@ CREATE TEMP TABLE started AS SELECT pg_current_xact_id()::TEXT::BIGINT AS txid;
 CREATE TEMP TABLE bench (step TEXT PRIMARY KEY, rows_out BIGINT, entries BIGINT, took INTERVAL);
 
 CREATE FUNCTION pg_temp.on() RETURNS BOOLEAN AS $$
-    SELECT current_setting('claimius.bench', TRUE) = 'on'
+    SELECT coalesce(current_setting('claimius.bench', TRUE), '') = 'on'
 $$ LANGUAGE sql;
 
 CREATE FUNCTION pg_temp.app() RETURNS UUID AS $$

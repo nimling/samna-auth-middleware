@@ -79,12 +79,13 @@ SELECT dblink_exec('cursor_writer', $w$
 $w$);
 
 BEGIN;
-CREATE TEMP TABLE second_run AS SELECT pg_temp.entries() AS entries;
+CREATE TEMP TABLE second_run AS SELECT pg_temp.entries() AS entries, pg_stat_get_xact_tuples_inserted('claimius.user_object'::REGCLASS) AS inserted, pg_stat_get_xact_tuples_updated('claimius.user_object'::REGCLASS) AS updated;
 CREATE TEMP TABLE second_rows AS SELECT pg_temp.listed('a0000000-0000-4000-8000-000000d0a001') AS n;
 SELECT is((SELECT n FROM second_rows), 1001::BIGINT, 'the organization of a transaction still open is not listed');
 SELECT diag('the second listing read ' || (pg_temp.entries() - (SELECT entries FROM second_run)) || ' index entries for ' || (SELECT n FROM second_rows) || ' rows');
-SELECT cmp_ok(pg_temp.entries() - (SELECT entries FROM second_run), '<=', (SELECT 2 * n + 8 FROM second_rows),
-    'a second listing with nothing raised since the cursor reads at most 3 entries beyond its page');
+SELECT is(pg_stat_get_xact_tuples_inserted('claimius.user_object'::REGCLASS) - (SELECT inserted FROM second_run)
+       + pg_stat_get_xact_tuples_updated('claimius.user_object'::REGCLASS) - (SELECT updated FROM second_run), 0::BIGINT,
+    'a second listing with nothing committed since the cursor writes no pair and moves no mark');
 COMMIT;
 
 SELECT dblink_exec('cursor_writer', 'COMMIT');

@@ -168,6 +168,7 @@ func getDisciplePairCounts(t *testing.T, disciple *shared.DB, step string) {
 			     JOIN claimius.user_object b
 			         ON b.object_type = a.object_type AND b.object_id = a.object_id AND b.user_id <> a.user_id
 			 WHERE a.object_type <> 'claimius.claim'
+			   AND a.user_id IN (SELECT v.user_id FROM claimius.user_activity v WHERE v.directory_at IS NOT NULL)
 			 GROUP BY a.user_id, b.user_id
 			 EXCEPT
 			 SELECT viewer_id, target_user_id, sharing_object_count FROM claimius.user_users)
