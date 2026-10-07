@@ -2875,6 +2875,11 @@ DECLARE
     v_links   JSONB;
     v_nodes   JSONB;
     v_allowed TEXT[] := (SELECT coalesce(array_agg(object_type ORDER BY object_type), ARRAY[]::TEXT[]) FROM claimius.table_info);
+    v_reach   UUID[] := ARRAY(
+        SELECT claimius.composite_id(uo.object_type, uo.object_id::TEXT)
+        FROM claimius.user_object uo
+        WHERE uo.user_id = p_user_id
+          AND (p_required_access = 0 OR (uo.sa_access & p_required_access) = p_required_access));
 BEGIN
     IF p_sort IS NULL OR p_sort NOT IN ('name', 'usage') OR p_width IS NULL OR p_width < 0 THEN
         RAISE EXCEPTION 'graph window: p_sort is name or usage and p_width at least 0' USING ERRCODE = '22023';
@@ -2936,12 +2941,7 @@ BEGIN
                    AND ii.descendant_id = vt.object_id
                    AND ii.depth >= 1
             WHERE ii.ancestor_type = ANY(v_allowed)
-              AND EXISTS (
-                  SELECT 1 FROM claimius.user_object ap
-                  WHERE ap.user_id = p_user_id
-                    AND ap.object_type = ii.ancestor_type
-                    AND ap.object_id = ii.ancestor_id
-                    AND (p_required_access = 0 OR (ap.sa_access & p_required_access) = p_required_access))
+              AND claimius.composite_id(ii.ancestor_type, ii.ancestor_id::TEXT) = ANY(v_reach)
         ) r
         WHERE r.depth = 1 OR r.rank = 1
     )
@@ -2967,7 +2967,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = claimius, pg_temp;
 
-COMMENT ON FUNCTION claimius.get_graph_links_owner(UUID, INTEGER, TEXT[], TEXT[], UUID, INTEGER, INTEGER, TEXT, UUID) IS 'The ownership graph of the objects the user reaches as links: for every object in scope its closest ancestor the user also reaches, each a probe of the user''s own pair, with an optional window of p_width children per parent. Settles nothing.';
+COMMENT ON FUNCTION claimius.get_graph_links_owner(UUID, INTEGER, TEXT[], TEXT[], UUID, INTEGER, INTEGER, TEXT, UUID) IS 'The ownership graph of the objects the user reaches as links: for every object in scope its closest ancestor the user also reaches, tested against the user''s pairs read once into a hashed set, with an optional window of p_width children per parent. Settles nothing.';
 
 GRANT EXECUTE ON FUNCTION claimius.get_graph_links_owner(UUID, INTEGER, TEXT[], TEXT[], UUID, INTEGER, INTEGER, TEXT, UUID) TO claimius_reader, claimius_writer, claimius_admin;
 

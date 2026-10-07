@@ -91,7 +91,7 @@ A new object under a node at depth 4:
 
 | System | Per directory view |
 |---|---|
-| Claimius | `get_users` of one of 200 holders over 2,000 organizations builds the viewer's rows on its first use, the directory build `Σ_{x ∈ V_u} U_x` of [Users](./users.md#who-can-see-whom), 400,000 holder pairs through a hash join, 6,212 index entries and 2.0 seconds in the bench, and reads 7 entries in 10 ms on every later view, the fold keeping its rows from then on; `get_user_access` over the 200 rows of that directory reads 5,008 entries in 71 ms, about 23 per row of which 20 resolve the target through `samna_user` by external id, user id and row id, against 437,835,068 at alpha0024. A user who never views the directory costs nothing |
+| Claimius | `get_users` of one of 200 holders over 2,000 organizations builds the viewer's rows on its first use, the directory build `Σ_{x ∈ V_u} U_x` of [Users](./users.md#who-can-see-whom), 400,000 holder pairs aggregated per object, 406,412 index entries and 0.63 seconds in the bench, and reads 7 entries in 10 ms on every later view, the fold keeping its rows from then on; `get_user_access` over the 200 rows of that directory reads 5,008 entries in 71 ms, about 23 per row of which 20 resolve the target through `samna_user` by external id, user id and row id, against 437,835,068 at alpha0024. A user who never views the directory costs nothing |
 | Zanzibar and descendants | none: `Expand` and `LookupSubjects` list the subjects of one object |
 | Entra ID | `memberOf` then `members` per group through Microsoft Graph, `g · n` reads per view |
 

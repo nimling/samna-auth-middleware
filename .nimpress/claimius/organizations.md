@@ -54,7 +54,7 @@ Every insert, update or delete of an organization runs `calc_hierarchical_access
 | Restore, or a node missing from the closure | `Σ_{x ∈ S} (d(x) + 1)` inserted | `build_ownership_tree(root, node)`, the subtree only, hung under the stored ancestors of its parent |
 | Rename, or any write that moves no owner, root or deletion | none | |
 
-`_splice_subtree` deletes the rows linking `S` to its former ancestors and inserts the rows linking it to the new parent's ancestors, `n_S (D + 1)` rows for a parent at depth `D`. When the new parent is outside the closure or inside `S` itself, it drops every row of `S`, as a rebuild of the root would drop a subtree its root no longer reaches. Each closure row carries three index entries, the primary key and the two covering indexes.
+`_splice_subtree` deletes the rows linking `S` to its former ancestors and inserts the rows linking it to the new parent's ancestors, `n_S (D + 1)` rows for a parent at depth `D`. When the new parent is outside the closure or inside `S` itself, it drops every row of `S`, as a rebuild of the root would drop a subtree its root no longer reaches. Each closure row carries three index entries, the primary key and the two covering indexes. It reads `S` and the former ancestors once each into materialized sets and joins the closure rows to those, never `inheritance_info` to itself: a plan cached by a session while the table filled one page ran the self join as a nested loop of two sequential scans, rescanned once per closure row, 1.9 s per inserted organization at 2,000 rows and 20 minutes for 1,000 inserts, where the bounded shape inserts 1,000 organizations in 2.2 s on tables analyzed at one page, measured in the `closure_plan` suite.
 
 Beside the closure, the same trigger:
 

@@ -228,44 +228,64 @@ BEGIN
               AND s.descendant_type = p_node_type
               AND s.descendant_id = p_parent_id
         ) THEN
+        WITH s AS MATERIALIZED (
+            SELECT s.descendant_type, s.descendant_id
+            FROM claimius.inheritance_info s
+            WHERE s.tree_type = p_tree_type
+              AND s.ancestor_type = p_node_type
+              AND s.ancestor_id = p_node_id
+        ),
+        a AS MATERIALIZED (
+            SELECT a.ancestor_type, a.ancestor_id
+            FROM claimius.inheritance_info a
+            WHERE a.tree_type = p_tree_type
+              AND a.descendant_type = p_node_type
+              AND a.descendant_id = p_node_id
+              AND a.depth > 0
+        )
         DELETE FROM claimius.inheritance_info d
-            USING claimius.inheritance_info s, claimius.inheritance_info a
-        WHERE s.tree_type = p_tree_type
-          AND s.ancestor_type = p_node_type
-          AND s.ancestor_id = p_node_id
-          AND a.tree_type = p_tree_type
-          AND a.descendant_type = p_node_type
-          AND a.descendant_id = p_node_id
-          AND a.depth > 0
-          AND d.tree_type = p_tree_type
+            USING s, a
+        WHERE d.tree_type = p_tree_type
           AND d.ancestor_type = a.ancestor_type
           AND d.ancestor_id = a.ancestor_id
           AND d.descendant_type = s.descendant_type
           AND d.descendant_id = s.descendant_id;
 
+        WITH s AS MATERIALIZED (
+            SELECT s.descendant_type, s.descendant_id, s.depth
+            FROM claimius.inheritance_info s
+            WHERE s.tree_type = p_tree_type
+              AND s.ancestor_type = p_node_type
+              AND s.ancestor_id = p_node_id
+        ),
+        a AS MATERIALIZED (
+            SELECT a.ancestor_type, a.ancestor_id, a.depth
+            FROM claimius.inheritance_info a
+            WHERE a.tree_type = p_tree_type
+              AND a.descendant_type = p_node_type
+              AND a.descendant_id = p_parent_id
+        )
         INSERT INTO claimius.inheritance_info (
             tree_type, root_id, ancestor_type, ancestor_id, descendant_type, descendant_id, depth
         )
         SELECT p_tree_type, p_root_id, a.ancestor_type, a.ancestor_id, s.descendant_type, s.descendant_id, a.depth + s.depth + 1
-        FROM claimius.inheritance_info a
-                 JOIN claimius.inheritance_info s
-                      ON s.tree_type = p_tree_type
-                          AND s.ancestor_type = p_node_type
-                          AND s.ancestor_id = p_node_id
-        WHERE a.tree_type = p_tree_type
-          AND a.descendant_type = p_node_type
-          AND a.descendant_id = p_parent_id;
+        FROM a
+            CROSS JOIN s;
         RETURN;
     END IF;
 
     RETURN QUERY
-    WITH dropped AS (
-        DELETE FROM claimius.inheritance_info d
-            USING claimius.inheritance_info s
+    WITH s AS MATERIALIZED (
+        SELECT s.descendant_type, s.descendant_id
+        FROM claimius.inheritance_info s
         WHERE s.tree_type = p_tree_type
           AND s.ancestor_type = p_node_type
           AND s.ancestor_id = p_node_id
-          AND d.tree_type = p_tree_type
+    ),
+    dropped AS (
+        DELETE FROM claimius.inheritance_info d
+            USING s
+        WHERE d.tree_type = p_tree_type
           AND d.descendant_type = s.descendant_type
           AND d.descendant_id = s.descendant_id
         RETURNING d.descendant_type, d.descendant_id, d.depth
@@ -1572,13 +1592,21 @@ BEGIN
         ) h
         GROUP BY h.object_type, h.object_id, h.user_id
     ),
+    per_object AS (
+        SELECT h.object_type, h.object_id,
+               array_agg(h.user_id) AS users, array_agg(h.held) AS helds,
+               max(h.held) FILTER (WHERE h.user_id = p_user_id) AS viewer_held
+        FROM holder h
+        GROUP BY h.object_type, h.object_id
+    ),
     counted AS (
-        SELECT b.user_id AS target_user_id, sum(a.held * b.held)::INTEGER AS n
-        FROM holder a
-            JOIN holder b ON b.object_type = a.object_type AND b.object_id = a.object_id AND b.user_id <> p_user_id
-        WHERE a.user_id = p_user_id
+        SELECT b.user_id AS target_user_id, sum(p.viewer_held * b.held)::INTEGER AS n
+        FROM per_object p
+            CROSS JOIN LATERAL unnest(p.users, p.helds) AS b(user_id, held)
+        WHERE p.viewer_held IS NOT NULL
+          AND b.user_id <> p_user_id
         GROUP BY b.user_id
-        HAVING sum(a.held * b.held) > 0
+        HAVING sum(p.viewer_held * b.held) > 0
     )
     INSERT INTO claimius.user_users (id, viewer_id, target_user_id, sharing_object_count)
     SELECT claimius.composite_id(p_user_id::TEXT, c.target_user_id::TEXT), p_user_id, c.target_user_id, c.n
