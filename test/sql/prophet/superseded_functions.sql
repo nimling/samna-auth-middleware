@@ -81,7 +81,6 @@ INSERT INTO superseded VALUES
         ('claimius.init_hybrid(text,text,text,text,text,uuid,text,text,text,text,uuid[],jsonb,text,text,text,uuid,jsonb)'),
         ('claimius.mutation_access(uuid,uuid,text,integer)'),
         ('claimius.post_analytics_capture(uuid,text,integer,integer,text,bytea)'),
-        ('claimius.recompute_user_object(uuid,uuid,text,uuid)'),
         ('claimius.resolve_access(uuid,uuid,text,integer)'),
         ('claimius.resolve_access(uuid,uuid,uuid,text,integer)'),
         ('claimius.search(uuid,uuid,text,text[],integer,uuid[],uuid[],uuid[],uuid,text,uuid[],integer,integer)'),

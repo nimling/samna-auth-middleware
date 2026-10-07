@@ -60,7 +60,6 @@ INSERT INTO superseded VALUES
         ('claimius.get_user_access(uuid,uuid,integer)'),
         ('claimius.graph_object_types()'),
         ('claimius.mutation_access(uuid,uuid,text,integer)'),
-        ('claimius.recompute_user_object(uuid,text,uuid)'),
         ('claimius.resolve_access(uuid,uuid,text,integer)'),
         ('claimius.search(uuid,text,text[],integer,uuid[],uuid[],uuid[],uuid,text,uuid[],integer,integer)'),
         ('claimius.touch_object_usage(uuid,text,uuid)'),

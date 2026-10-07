@@ -1277,6 +1277,16 @@ $$ LANGUAGE plpgsql;
 
 COMMENT ON FUNCTION claimius.recompute_user_object(UUID, TEXT[], UUID[], BOOLEAN[], XID8) IS 'Recomputes user_object for one user on a set of roots and, where a root cascades, every descendant reached from it, all types in one pass over object_info. Deletes the pairs of the area that no derivation reaches or whose object is gone, writes the pairs that differ, and moves the mark of every pair of the area to p_settled_txid, the snapshot xmin of the settle that proved it. Locks only the user''s own pairs it writes; a pair entering or leaving raises its user_users_diff row. Returns whether the user''s pair set changed.';
 
+CREATE OR REPLACE FUNCTION claimius.recompute_user_object(
+    p_user_id       UUID,
+    p_object_type   TEXT,
+    p_object_id     UUID
+) RETURNS BOOLEAN AS $$
+    SELECT claimius.recompute_user_object(p_user_id, ARRAY[p_object_type], ARRAY[p_object_id])
+$$ LANGUAGE sql;
+
+COMMENT ON FUNCTION claimius.recompute_user_object(UUID, TEXT, UUID) IS 'The single object form of recompute_user_object: one root without cascade, the point settle of one pair, the call a consumer seed makes.';
+
 CREATE OR REPLACE FUNCTION claimius._raise_user_users_diff()
     RETURNS TRIGGER AS $$
 BEGIN
