@@ -24,8 +24,12 @@ jobs:
             echo "changed=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          prev=$(git tag -l 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | grep -v "^${GITHUB_REF_NAME}$" | head -1)
-          if [ -z "$prev" ] || git diff --name-only "$prev" "${GITHUB_REF_NAME}" -- "$EXPORT_DIR" | grep -q .; then
+          prev=$(git tag -l 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | awk -v ref="$GITHUB_REF_NAME" '$0 != ref && !found { print; found = 1 }')
+          changed=""
+          if [ -n "$prev" ]; then
+            changed=$(git diff --name-only "$prev" "${GITHUB_REF_NAME}" -- "$EXPORT_DIR")
+          fi
+          if [ -z "$prev" ] || [ -n "$changed" ]; then
             echo "changed=true" >> "$GITHUB_OUTPUT"
           else
             echo "changed=false" >> "$GITHUB_OUTPUT"
