@@ -32,7 +32,7 @@ Every auth route sits under `SAUTH_BFF_BASE_PATH`. The status route sits beside 
 |---|---|---|
 | `GET <base>/login?next=<path>` | none | Starts the PKCE flow against the prophet and remembers `next` for the return |
 | `GET <base>/callback` | none | Exchanges the code for tokens, writes the session cookies and redirects to `next` |
-| `GET <base>/session?handoff=<value>` | none | Proxies the handoff to the prophet as the browser host, so the prophet writes the session cookies for the site's own domain; see below |
+| `GET <base>/session?handoff=<value>` | none | Proxies the handoff to the prophet with the browser's host in `X-Forwarded-Host`, so the prophet writes the session cookies for the site's own domain; see below |
 | `GET <base>/logout` | none | Clears the cookies, revokes the token on the prophet and redirects to the end session page |
 | `GET <base>/me` | session | The signed in user |
 | `GET <base>/me/claim` | session | The claims the user holds |
@@ -56,7 +56,7 @@ With `code` the token exchange is server to server and the cookies are the disci
 
 `bff` has one wrinkle: a cookie the prophet writes while answering on `auth.example.com` is a cookie for `auth.example.com`, and the site on `docs.example.com` never sees it. So when the app's primary origin is on another host than the prophet, the provider callback does not write cookies. It stores a `session_handoff` row that lives two minutes, and redirects the browser to `<app origin><base>/session?handoff=<value>`.
 
-The bff's `GET <base>/session` reverse proxies that request to the prophet at the same path and query, with the browser's `Host` kept on the proxied request and `X-Forwarded-Host` and `X-Forwarded-Proto` set from it. The prophet redeems the value once, derives the cookie domain from the request host against the app's redirect URIs, writes `sauth_access_token`, `sauth_refresh_token`, `sauth_csrf_token` and `sauth_app_slug`, and answers a `307` to the stored `next` path. The bff passes the `Set-Cookie` headers and the redirect back to the browser untouched, so the cookies land on the site's own domain and the next request carries a session.
+The bff's `GET <base>/session` reverse proxies that request to the prophet at the same path and query, addressed to the prophet's own host so an ingress that routes by host still matches, with the browser's host and scheme in `X-Forwarded-Host` and `X-Forwarded-Proto`. The prophet redeems the value once, derives the cookie domain from the forwarded host against the app's redirect URIs, writes `sauth_access_token`, `sauth_refresh_token`, `sauth_csrf_token` and `sauth_app_slug`, and answers a `307` to the stored `next` path. The bff passes the `Set-Cookie` headers and the redirect back to the browser untouched, so the cookies land on the site's own domain and the next request carries a session.
 
 On the same host there is no handoff; the prophet sets the cookies in the callback and the site reads them. The handoff only happens when the hosts differ, and only for a `bff` app.
 

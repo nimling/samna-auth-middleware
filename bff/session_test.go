@@ -10,6 +10,7 @@ import (
 )
 
 type handoffCapture struct {
+	prophetHost    string
 	host           string
 	forwardedHost  string
 	forwardedProto string
@@ -32,13 +33,14 @@ func handoffProphet(t *testing.T) *handoffCapture {
 		w.WriteHeader(http.StatusTemporaryRedirect)
 	}))
 	t.Cleanup(srv.Close)
+	capture.prophetHost = srv.Listener.Addr().String()
 	t.Setenv("SAUTH_ENDPOINT", srv.URL)
 	t.Setenv("SAUTH_APP_SLUG", "docs")
 	t.Setenv("SAUTH_APP_SECRET", "secret")
 	return capture
 }
 
-func TestGetSessionProxiesTheHandoffToTheProphetAsTheBrowserHost(t *testing.T) {
+func TestGetSessionProxiesTheHandoffToTheProphetWithTheBrowserHostForwarded(t *testing.T) {
 	capture := handoffProphet(t)
 	e := echo.New()
 	req := httptest.NewRequest(http.MethodGet, "/api/auth/session?handoff=abc123&next=%2Fguarded%2Fpage", nil)
@@ -51,8 +53,8 @@ func TestGetSessionProxiesTheHandoffToTheProphetAsTheBrowserHost(t *testing.T) {
 		t.Fatalf("handler: %v", err)
 	}
 
-	if capture.host != "docs.example:4300" {
-		t.Fatalf("forwarded host = %q, want the browser host", capture.host)
+	if capture.host != capture.prophetHost {
+		t.Fatalf("proxied host = %q, want the prophet host %q", capture.host, capture.prophetHost)
 	}
 	if capture.forwardedHost != "docs.example:4300" {
 		t.Fatalf("x-forwarded-host = %q, want the browser host", capture.forwardedHost)

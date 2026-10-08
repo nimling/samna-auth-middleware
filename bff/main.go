@@ -100,7 +100,6 @@ func GetSession(ctx echo.Context) error {
 		Rewrite: func(r *httputil.ProxyRequest) {
 			r.SetURL(target)
 			r.SetXForwarded()
-			r.Out.Host = r.In.Host
 			r.Out.Header.Set(echo.HeaderXForwardedProto, scheme)
 		},
 	}
