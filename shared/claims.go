@@ -7,6 +7,7 @@ import (
 	"errors"
 
 	"github.com/google/uuid"
+	"github.com/nimling/nimtel"
 	"github.com/uptrace/bun"
 )
 
@@ -26,6 +27,7 @@ func (d *DB) GetAccess(ctx context.Context, userID, objectID uuid.UUID, objectTy
 		return nil, ErrNoAccess
 	}
 	d.Usage.Add(nil, userID, objectType, objectID)
+	nimtel.Organization(ctx, claims[0].RootID, claims[0].OwnerID)
 	return &claims[0], nil
 }
 
@@ -44,6 +46,7 @@ func (d *DB) GetDirectAccess(ctx context.Context, userID, objectID uuid.UUID, ob
 	if len(claims) == 0 {
 		return nil, ErrNoAccess
 	}
+	nimtel.Organization(ctx, claims[0].RootID, claims[0].OwnerID)
 	return &claims[0], nil
 }
 

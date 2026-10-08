@@ -23,7 +23,7 @@ func UserAuthMiddleware(opts *UserAuthOptions) echo.MiddlewareFunc {
 	case shared.DebugModeUser:
 		return func(next echo.HandlerFunc) echo.HandlerFunc {
 			return func(ctx echo.Context) error {
-				proceed := stamped(next)
+				proceed := next
 				ctx.Set(UserIDKey, *config.DebugUserID)
 				if forwardErr := forwardUserToken(ctx); forwardErr != nil {
 					return respondAuthError(ctx, forwardErr)
@@ -37,7 +37,7 @@ func UserAuthMiddleware(opts *UserAuthOptions) echo.MiddlewareFunc {
 	case shared.DebugModeClients:
 		return func(next echo.HandlerFunc) echo.HandlerFunc {
 			return func(ctx echo.Context) error {
-				proceed := stamped(next)
+				proceed := next
 				clientErr := authenticateClient(ctx, config.DebugClients)
 				if errors.Is(clientErr, ErrorCredentialMissing) {
 					if config.Optional {
@@ -77,7 +77,7 @@ func UserAuthMiddleware(opts *UserAuthOptions) echo.MiddlewareFunc {
 
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(ctx echo.Context) error {
-			proceed := stamped(next)
+			proceed := next
 			if bearerErr := authenticateBearer(ctx, config, jwksClient.Keyfunc); !errors.Is(bearerErr, ErrorCredentialMissing) {
 				if bearerErr != nil {
 					return respondAuthError(ctx, bearerErr)

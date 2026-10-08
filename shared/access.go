@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/lib/pq"
+	"github.com/nimling/nimtel"
 	"github.com/uptrace/bun"
 	"github.com/uptrace/bun/driver/pgdriver"
 )
@@ -57,6 +58,7 @@ func (d *DB) MutationAccess(ctx context.Context, userID, objectID uuid.UUID, obj
 		return nil, ErrNoAccess
 	}
 	d.Usage.Add(nil, userID, objectType, objectID)
+	nimtel.Organization(ctx, claims[0].RootID, claims[0].OwnerID)
 	return &claims[0], nil
 }
 
@@ -275,6 +277,7 @@ func (d *DB) RootAccess(ctx context.Context, userID uuid.UUID, requiredAccess Cl
 	if len(claims) == 0 {
 		return nil, ErrNoAccess
 	}
+	nimtel.Organization(ctx, claims[0].RootID, claims[0].OwnerID)
 	return &claims[0], nil
 }
 
