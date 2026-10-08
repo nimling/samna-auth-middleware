@@ -2,9 +2,17 @@ import { getJWKS, getOpenIDConfiguration, getLogin } from './client'
 import { validateToken } from './token'
 import { readAccessTokenFromDocument } from './cookies'
 import { ACCESS_TOKEN_COOKIE } from './types'
-import type { ClaimUser, OpenIDConfiguration } from './types'
+import type { ClaimUser, OpenIDConfiguration, UserType } from './types'
 
-export type EdgeMode = 'edge' | 'bff'
+export type EdgeMode = 'edge' | 'bff' | 'static'
+
+export const EDGE_MODE_EDGE: EdgeMode = 'edge'
+export const EDGE_MODE_BFF: EdgeMode = 'bff'
+export const EDGE_MODE_STATIC: EdgeMode = 'static'
+
+export const PROPHET_ME_PATH = '/api/me/user'
+export const PROPHET_CLAIM_PATH = '/api/me/claim'
+export const PROPHET_LOGOUT_PATH = '/api/auth/logout'
 
 export interface EdgeCallbacks {
   onSession?: (user: ClaimUser) => void | Promise<void>
@@ -47,7 +55,7 @@ export function getAuthEndpoint(): string {
 }
 
 export function getEdgeMode(): EdgeMode {
-  return edgeConfig.mode ?? 'edge'
+  return edgeConfig.mode ?? EDGE_MODE_EDGE
 }
 
 export function getBffPath(): string {
@@ -78,6 +86,37 @@ async function readSessionFromBff(): Promise<ClaimUser | null> {
   }
 }
 
+type ProphetUser = {
+  user_id: string
+  first_name?: string
+  last_name?: string
+  user_name?: string
+  phone?: string
+  email?: string
+  type?: UserType
+}
+
+async function readSessionFromProphet(): Promise<ClaimUser | null> {
+  if (!edgeConfig.endpoint) return null
+  try {
+    const res = await fetch(`${getAuthEndpoint()}${PROPHET_ME_PATH}`, { credentials: 'include' })
+    if (!res.ok) return null
+    const body = (await res.json()) as { data?: ProphetUser }
+    if (!body.data) return null
+    return {
+      id: body.data.user_id,
+      firstName: body.data.first_name,
+      lastName: body.data.last_name,
+      userName: body.data.user_name,
+      phone: body.data.phone,
+      email: body.data.email,
+      type: body.data.type
+    }
+  } catch {
+    return null
+  }
+}
+
 export type ViewerClaim = {
   id: string
   name: string
@@ -87,9 +126,14 @@ export type ViewerClaim = {
 
 export const CLAIM_OBJECT_WITH = 'claim_object'
 
-export async function readClaimsFromBff(): Promise<ViewerClaim[]> {
+function claimsUrl(): string {
+  if (getEdgeMode() === EDGE_MODE_BFF) return `${getBffPath()}/me/claim?with=${CLAIM_OBJECT_WITH}`
+  return `${getAuthEndpoint()}${PROPHET_CLAIM_PATH}`
+}
+
+export async function readClaims(): Promise<ViewerClaim[]> {
   try {
-    const res = await fetch(`${getBffPath()}/me/claim?with=${CLAIM_OBJECT_WITH}`, { credentials: 'include' })
+    const res = await fetch(claimsUrl(), { credentials: 'include' })
     if (!res.ok) return []
     const body = (await res.json()) as { data?: ViewerClaim[] }
     return body.data ?? []
@@ -112,8 +156,19 @@ async function readSessionFromCookie(): Promise<ClaimUser | null> {
   }
 }
 
+async function readSession(): Promise<ClaimUser | null> {
+  switch (getEdgeMode()) {
+    case EDGE_MODE_BFF:
+      return readSessionFromBff()
+    case EDGE_MODE_STATIC:
+      return readSessionFromProphet()
+    default:
+      return readSessionFromCookie()
+  }
+}
+
 export async function readSessionFromDocument(): Promise<ClaimUser | null> {
-  const user = getEdgeMode() === 'bff' ? await readSessionFromBff() : await readSessionFromCookie()
+  const user = await readSession()
   if (user && edgeConfig.callbacks?.onSession) {
     await edgeConfig.callbacks.onSession(user)
   }
@@ -121,28 +176,28 @@ export async function readSessionFromDocument(): Promise<ClaimUser | null> {
 }
 
 export function getLoginUrl(provider?: string, returnTo?: string): string {
-  if (getEdgeMode() === 'bff') {
+  if (getEdgeMode() === EDGE_MODE_BFF) {
     return withNext(`${getBffPath()}/login`, returnTo)
   }
   const base = getLogin(getAuthEndpoint(), edgeConfig.clientSlug, provider)
   if (!returnTo) return base
   const url = new URL(base)
-  url.searchParams.set('next', returnTo)
+  url.searchParams.set('next', getEdgeMode() === EDGE_MODE_STATIC ? new URL(returnTo, window.location.origin).toString() : returnTo)
   return url.toString()
 }
 
 export function getLogoutUrl(returnTo?: string): string {
-  if (getEdgeMode() === 'bff') {
+  if (getEdgeMode() === EDGE_MODE_BFF) {
     return withNext(`${getBffPath()}/logout`, returnTo)
   }
-  const url = new URL(`${getAuthEndpoint()}/api/auth/logout`)
+  const url = new URL(`${getAuthEndpoint()}${PROPHET_LOGOUT_PATH}`)
   url.searchParams.set('client_slug', edgeConfig.clientSlug)
   if (returnTo) url.searchParams.set('next', returnTo)
   return url.toString()
 }
 
 export function startLogin(provider?: string, returnTo?: string): void {
-  if (getEdgeMode() === 'edge' && !edgeConfig.endpoint) return
+  if (getEdgeMode() !== EDGE_MODE_BFF && !edgeConfig.endpoint) return
   const url = getLoginUrl(provider, returnTo)
   if (edgeConfig.callbacks?.onLogin) {
     edgeConfig.callbacks.onLogin(url, returnTo)
@@ -160,16 +215,16 @@ export function handleUnauthenticated(returnTo?: string): void {
 }
 
 export async function endSession(returnTo?: string): Promise<void> {
-  if (getEdgeMode() === 'edge' && !edgeConfig.endpoint) return
+  if (getEdgeMode() !== EDGE_MODE_BFF && !edgeConfig.endpoint) return
   const url = getLogoutUrl(returnTo)
   try {
-    if (getEdgeMode() === 'bff') {
-      await fetch(url, { credentials: 'include' })
-    } else {
+    if (getEdgeMode() === EDGE_MODE_EDGE) {
       await fetch(url, {
         method: 'POST',
         credentials: 'include'
       })
+    } else {
+      await fetch(url, { credentials: 'include' })
     }
   } catch {}
   if (edgeConfig.callbacks?.onLogout) {

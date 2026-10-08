@@ -23,9 +23,18 @@ export {
   startLogin,
   handleUnauthenticated,
   endSession,
-  readClaimsFromBff
+  readClaims,
+  EDGE_MODE_EDGE,
+  EDGE_MODE_BFF,
+  EDGE_MODE_STATIC,
+  PROPHET_ME_PATH,
+  PROPHET_CLAIM_PATH,
+  PROPHET_LOGOUT_PATH,
+  CLAIM_OBJECT_WITH
 } from './session'
 export type { EdgeConfig, EdgeCallbacks, EdgeMode, ViewerClaim } from './session'
+export { nimpressAuth, scopePages, PAGE_SCOPE_KEY } from './nimpress'
+export type { NimpressAuthConfig, NimpressAuthFunctions, NimpressViewer, NimpressAccessRequirement } from './nimpress'
 export { createAuthFetch, guardedFetch } from './fetch'
 export { createServiceClient } from './service'
 export type { ServiceClient } from './service'

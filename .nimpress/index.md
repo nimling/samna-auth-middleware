@@ -38,7 +38,7 @@ The prophet is the authority, and each app has one home prophet that decides its
 
 `shared` carries the implementation both roles use. A consumer never imports it; each role package reexports what it needs.
 
-`cmd/bff` builds `sauth-bff`, a disciple with no tables that fronts a static site with the login and the session; see [BFF](./bff.md). Every disciple mounts the dependency free `GET /api/status/health` the status probe reads through `sam.RegisterStatus`; see [Health](./health.md).
+`cmd/bff` builds `sauth-bff`, a disciple with no tables that fronts a static site with the login and the session; see [BFF](./bff.md). A site with no server of its own logs in against the prophet directly; see [Static sites](./static.md). Every disciple mounts the dependency free `GET /api/status/health` the status probe reads through `sam.RegisterStatus`; see [Health](./health.md).
 
 ## Authentication
 

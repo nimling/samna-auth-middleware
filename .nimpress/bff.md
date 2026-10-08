@@ -41,7 +41,7 @@ Every auth route sits under `SAUTH_BFF_BASE_PATH`. The status route sits beside 
 | `GET /api/status/health` | none | The health answer the status probe reads; see [Health](./health.md) |
 | `GET /*` | optional | The site, from `SAUTH_BFF_STATIC_DIR` or `SAUTH_BFF_PROXY_TARGET`; a session on the request lands the viewer in the context, nothing is refused here |
 
-## The two login shapes
+## The login shapes
 
 An app on the prophet carries `connection`, and the value decides what the prophet does once the provider has signed the user in.
 
@@ -49,6 +49,7 @@ An app on the prophet carries `connection`, and the value decides what the proph
 |---|---|---|
 | `code` | Mints an auth code and redirects to the app's redirect URI with it; the app's `GET <base>/callback` exchanges it with the app secret | In cookies the app writes itself, for its own host |
 | `bff` | Writes the session cookies itself and redirects the browser to `next` | In cookies the prophet writes, for the host the request came in on |
+| `static` | Writes the session cookies on its own host and redirects the browser to the page the login started from | In cookies on the prophet host; the site reads them through the prophet, see [Static sites](./static.md) |
 
 With `code` the token exchange is server to server and the cookies are the disciple's own; this is the shape every product service uses. With `bff` the prophet is the one holding the session, so the site and the prophet share a cookie domain and the site carries no secret in the exchange.
 
@@ -62,8 +63,8 @@ On the same host there is no handoff; the prophet sets the cookies in the callba
 
 ## The docs site
 
-[developer.samna.io](https://developer.samna.io) is a nimpress build served by this binary. The site marks a page guarded with `gate:` in its front matter, `nimpress build` moves those pages under `_guarded/` and writes `access.json`, and `nimpress guard map` records every guarded file with its gates. The deploy uploads the guarded bundle to the asset host, feeds the returned mapping to `nimpress guard apply`, which writes the base url and the published list back into `access.json` and removes the guarded folder from the public build. The public build is what `SAUTH_BFF_STATIC_DIR` serves.
+[developer.samna.io](https://developer.samna.io) is a nimpress build on GitHub Pages, which logs in through the prophet in the [static](./static.md) mode. Locally it runs behind this binary. The site marks a page guarded with `gate:` in its front matter, `nimpress build` moves those pages under `_guarded/` and writes `access.json`, and `nimpress guard map` records every guarded file with its gates. The deploy uploads the guarded bundle to the asset host, feeds the returned mapping to `nimpress guard apply`, which writes the base url and the published list back into `access.json` and removes the guarded folder from the public build. Locally the public build is what `SAUTH_BFF_STATIC_DIR` serves.
 
-In the browser the `@nimling/samna-auth-middleware` session runs in `bff` mode against `<base>`: it reads `<base>/me` and `<base>/me/claim?with=claim_object`, and takes the page gates from `claim_objects[].scope` for the viewer, and sends the viewer to `<base>/login?next=<page>` when a gated page needs one. The nimpress runtime checks the viewer's claims against the gate and reads the gated page from where `access.json` says it was published. The binary never reads the guarded files; it only decides who is signed in.
+Behind the binary the `@nimling/samna-auth-middleware` session runs in `bff` mode against `<base>`: it reads `<base>/me` and `<base>/me/claim?with=claim_object`, and takes the page gates from `claim_objects[].scope` for the viewer, and sends the viewer to `<base>/login?next=<page>` when a gated page needs one. The nimpress runtime checks the viewer's claims against the gate and reads the gated page from where `access.json` says it was published. The binary never reads the guarded files; it only decides who is signed in.
 
-Locally, `just bff` in the docs repository downloads the pinned release and runs it with `SAUTH_BFF_PROXY_TARGET` pointed at the dev server, so the login shape is the one production uses.
+Locally, `just bff` in the docs repository downloads the pinned release and runs it with `SAUTH_BFF_PROXY_TARGET` pointed at the dev server, with `SAUTH_EDGE_MODE=bff` in the docs `.env` so `nimpressAuth` runs in `bff` mode.
