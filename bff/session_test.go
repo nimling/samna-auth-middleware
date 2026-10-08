@@ -7,6 +7,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 	"github.com/nimling/samna-auth-middleware/v2/bff"
+	"github.com/nimling/samna-auth-middleware/v2/client"
 )
 
 type handoffCapture struct {
@@ -98,5 +99,54 @@ func TestGetSessionAnswersBadGatewayWithoutAProphetEndpoint(t *testing.T) {
 	}
 	if rec.Code != http.StatusBadGateway {
 		t.Fatalf("status = %d, want 502", rec.Code)
+	}
+}
+
+func TestGetSessionSendsTheVisitorToThePageTheLoginStartedFrom(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set(echo.HeaderLocation, "/")
+		w.WriteHeader(http.StatusTemporaryRedirect)
+	}))
+	t.Cleanup(srv.Close)
+	t.Setenv("SAUTH_ENDPOINT", srv.URL)
+	t.Setenv("SAUTH_APP_SLUG", "docs")
+	t.Setenv("SAUTH_APP_SECRET", "secret")
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/api/auth/session?handoff=abc123", nil)
+	req.AddCookie(&http.Cookie{Name: client.LoginNextCookie, Value: "/test"})
+	rec := httptest.NewRecorder()
+	ctx := e.NewContext(req, rec)
+
+	if err := bff.GetSession(ctx); err != nil {
+		t.Fatalf("handler: %v", err)
+	}
+	if location := rec.Header().Get(echo.HeaderLocation); location != "/test" {
+		t.Fatalf("location = %q, want /test", location)
+	}
+	cleared := false
+	for _, c := range rec.Result().Cookies() {
+		if c.Name == client.LoginNextCookie && c.MaxAge < 0 {
+			cleared = true
+		}
+	}
+	if !cleared {
+		t.Fatalf("the login next cookie was not cleared")
+	}
+}
+
+func TestGetSessionKeepsTheProphetRedirectForAnOffSiteLoginNext(t *testing.T) {
+	handoffProphet(t)
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/api/auth/session?handoff=abc123", nil)
+	req.AddCookie(&http.Cookie{Name: client.LoginNextCookie, Value: "//evil.example"})
+	rec := httptest.NewRecorder()
+	ctx := e.NewContext(req, rec)
+
+	if err := bff.GetSession(ctx); err != nil {
+		t.Fatalf("handler: %v", err)
+	}
+	if location := rec.Header().Get(echo.HeaderLocation); location != "/guarded/page" {
+		t.Fatalf("location = %q, want the prophet's /guarded/page", location)
 	}
 }

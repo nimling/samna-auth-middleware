@@ -7,9 +7,11 @@ import (
 	"net/url"
 	"os"
 	"path"
+	"strings"
 	"time"
 
 	"github.com/labstack/echo/v4"
+	"github.com/nimling/samna-auth-middleware/v2/client"
 	h "github.com/nimling/samna-auth-middleware/v2/disciple/echo"
 	sam "github.com/nimling/samna-auth-middleware/v2/disciple/sam"
 	sdb "github.com/nimling/samna-auth-middleware/v2/disciple/sdb"
@@ -102,11 +104,22 @@ func GetSession(ctx echo.Context) error {
 		return ctx.String(http.StatusBadGateway, "session handoff failed")
 	}
 	scheme := ctx.Scheme()
+	next := ""
+	if nextCookie, nextErr := ctx.Cookie(client.LoginNextCookie); nextErr == nil && strings.HasPrefix(nextCookie.Value, "/") && !strings.HasPrefix(nextCookie.Value, "//") {
+		next = nextCookie.Value
+		utils.ClearCookie(ctx, client.LoginNextCookie)
+	}
 	proxy := &httputil.ReverseProxy{
 		Rewrite: func(r *httputil.ProxyRequest) {
 			r.SetURL(target)
 			r.SetXForwarded()
 			r.Out.Header.Set(echo.HeaderXForwardedProto, scheme)
+		},
+		ModifyResponse: func(res *http.Response) error {
+			if next != "" && res.StatusCode >= http.StatusMultipleChoices && res.StatusCode < http.StatusBadRequest && res.Header.Get(echo.HeaderLocation) == "/" {
+				res.Header.Set(echo.HeaderLocation, next)
+			}
+			return nil
 		},
 	}
 	proxy.ServeHTTP(ctx.Response(), ctx.Request())
