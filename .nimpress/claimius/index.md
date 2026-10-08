@@ -22,6 +22,7 @@ Claimius owns and validates its own types. It reads no more of the implementing 
 
 | File | Covers |
 |---|---|
+| [In plain words](./plain.md) | What claimius is, how a check is answered, what a change costs, and what it takes to run it in your own PostgreSQL, without the formulas |
 | [Types](./types.md) | The four types, the access relation, how the common models reduce to them, the reachability bound |
 | [Organizations](./organizations.md) | Roots, children, the ownership closure and what each write costs it |
 | [Locations](./locations.md) | The location closure, pins, a location in two trees |
