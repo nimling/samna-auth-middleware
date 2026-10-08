@@ -1,4 +1,5 @@
 ---
+visibility: hidden
 layout: doc
 title: Writes in Go
 description: The write builders NewInsert, NewUpdate and NewDelete, how a write to a shared type is routed to the prophet and upserted locally, how the actor is stamped, the feed position a routed write answers with, audit in the write's transaction, and debug mode.

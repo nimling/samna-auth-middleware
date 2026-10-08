@@ -1,4 +1,5 @@
 ---
+visibility: hidden
 layout: doc
 title: Reads
 description: The claimius read surface and what each read function reads and writes in index entries and rows as a function of the data, why a check and a page of a listing are independent of tree depth and of the number of users, and which reads may run on a replica.

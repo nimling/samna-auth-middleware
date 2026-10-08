@@ -1,4 +1,5 @@
 ---
+visibility: hidden
 layout: doc
 title: The extension, future work
 description: Future work. Where claimius is going once it matures and hosting allows it, a PostgreSQL extension that scopes every table to the connected user, which choices of today lead there, which extensions already exist for parts of it, and why hosting is the blocker.

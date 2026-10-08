@@ -1,4 +1,5 @@
 ---
+visibility: hidden
 layout: doc
 title: Comparison
 description: Claimius against Google Zanzibar and its descendants SpiceDB, OpenFGA with Auth0 FGA and Ory Keto, and against Microsoft Entra ID, operation by operation in index entries, rows, events and round trips on one stated data set and one stated workload, with every claimius figure measured on this release, the condition under which claimius wins each operation, and the operations it loses.

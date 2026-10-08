@@ -1,4 +1,5 @@
 ---
+visibility: hidden
 layout: doc
 title: Organizations
 description: Root and child organizations, the ownership closure, the closure rows each organization write inserts and deletes, upsert_root_organization, migrate_root, and how an organization reaches an app through app_object.

@@ -1,4 +1,5 @@
 ---
+visibility: hidden
 layout: doc
 title: Claims
 description: Claims, grants and bindings, the access bits and their expansion, the effective mask of a binding, cascade, composition and its checks, time windows, actor tokens, choosing a grant and the single object gate, with what each stores and reads.

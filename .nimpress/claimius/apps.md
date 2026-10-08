@@ -1,4 +1,5 @@
 ---
+visibility: hidden
 layout: doc
 title: Apps
 description: samna_app, how upsert_system_app and upsert_app create an app, the two scoping mechanisms, app scoped tables and app_object links, what each costs a query, scoping per role, and the identity helpers that tell SQL which app it runs as.

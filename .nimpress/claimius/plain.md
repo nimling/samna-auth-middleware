@@ -1,4 +1,5 @@
 ---
+visibility: hidden
 layout: doc
 title: Claimius in plain words
 description: What claimius is, how it decides who may do what, why it is fast, and what it takes to run it inside your own PostgreSQL, without the formulas.

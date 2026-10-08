@@ -1,4 +1,5 @@
 ---
+visibility: hidden
 layout: doc
 title: Audit
 description: The append only trail in the claimius schema, written in the transaction of the change it records, partitioned by month, what one row costs in index entries, how a read of it is gated, and why it lives in the database of the service that did the work.
