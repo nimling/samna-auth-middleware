@@ -82,12 +82,14 @@ export type ViewerClaim = {
   id: string
   name: string
   access: number
-  objects?: Array<{ scope?: Record<string, unknown> }>
+  claim_objects?: Array<{ scope?: Record<string, unknown> }>
 }
+
+export const CLAIM_OBJECT_WITH = 'claim_object'
 
 export async function readClaimsFromBff(): Promise<ViewerClaim[]> {
   try {
-    const res = await fetch(`${getBffPath()}/me/claim`, { credentials: 'include' })
+    const res = await fetch(`${getBffPath()}/me/claim?with=${CLAIM_OBJECT_WITH}`, { credentials: 'include' })
     if (!res.ok) return []
     const body = (await res.json()) as { data?: ViewerClaim[] }
     return body.data ?? []

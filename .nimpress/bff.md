@@ -35,7 +35,7 @@ Every auth route sits under `SAUTH_BFF_BASE_PATH`. The status route sits beside 
 | `GET <base>/session?handoff=<value>` | none | Proxies the handoff to the prophet with the browser's host in `X-Forwarded-Host`, so the prophet writes the session cookies for the site's own domain; see below |
 | `GET <base>/logout` | none | Clears the cookies, revokes the token on the prophet and redirects to the end session page |
 | `GET <base>/me` | session | The signed in user |
-| `GET <base>/me/claim` | session | The claims the user holds |
+| `GET <base>/me/claim?with=claim_object` | session | The claims the user holds; `with=claim_object` adds each claim's bindings as `claim_objects`, whose `scope` carries the page gates |
 | `POST <base>/app/:app_slug/subscription/subscribe` | none, 5 per hour per address | Forwards an email subscription to the prophet with the feed the site serves |
 | `DELETE <base>/app/:app_slug/subscription/subscribe` | none, 5 per hour per address | Removes it |
 | `GET /api/status/health` | none | The health answer the status probe reads; see [Health](./health.md) |
@@ -64,6 +64,6 @@ On the same host there is no handoff; the prophet sets the cookies in the callba
 
 [developer.samna.io](https://developer.samna.io) is a nimpress build served by this binary. The site marks a page guarded with `gate:` in its front matter, `nimpress build` moves those pages under `_guarded/` and writes `access.json`, and `nimpress guard map` records every guarded file with its gates. The deploy uploads the guarded bundle to the asset host, feeds the returned mapping to `nimpress guard apply`, which writes the base url and the published list back into `access.json` and removes the guarded folder from the public build. The public build is what `SAUTH_BFF_STATIC_DIR` serves.
 
-In the browser the `@nimling/samna-auth-middleware` session runs in `bff` mode against `<base>`: it reads `<base>/me` and `<base>/me/claim` for the viewer, and sends the viewer to `<base>/login?next=<page>` when a gated page needs one. The nimpress runtime checks the viewer's claims against the gate and reads the gated page from where `access.json` says it was published. The binary never reads the guarded files; it only decides who is signed in.
+In the browser the `@nimling/samna-auth-middleware` session runs in `bff` mode against `<base>`: it reads `<base>/me` and `<base>/me/claim?with=claim_object`, and takes the page gates from `claim_objects[].scope` for the viewer, and sends the viewer to `<base>/login?next=<page>` when a gated page needs one. The nimpress runtime checks the viewer's claims against the gate and reads the gated page from where `access.json` says it was published. The binary never reads the guarded files; it only decides who is signed in.
 
 Locally, `just bff` in the docs repository downloads the pinned release and runs it with `SAUTH_BFF_PROXY_TARGET` pointed at the dev server, so the login shape is the one production uses.
