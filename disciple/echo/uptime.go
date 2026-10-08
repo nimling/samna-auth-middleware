@@ -3,6 +3,7 @@ package echo
 import (
 	"fmt"
 	"net/http"
+	"os"
 
 	"github.com/labstack/echo/v4"
 
@@ -13,6 +14,11 @@ import (
 
 func statusTarget() string {
 	return fmt.Sprintf("/api/app/%s/status", utils.Cfg().AppSlug)
+}
+
+func GetHealth(ctx echo.Context) error {
+	health := uptime.Health{Status: "ok", App: utils.Cfg().AppSlug, Version: os.Getenv("APP_VERSION")}
+	return respondJSON(ctx, http.StatusOK, health, 1)
 }
 
 func GetUptime(ctx echo.Context) error {

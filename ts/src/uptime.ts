@@ -94,6 +94,24 @@ export interface Heartbeat extends Beat {
   reported: boolean
 }
 
+export interface Health {
+  status: string
+  app: string
+  version?: string
+}
+
+export function healthUrl(origin: string): string {
+  return `${origin.replace(/\/$/, '')}/api/status/health`
+}
+
+export async function getHealth(origin: string): Promise<Health> {
+  const res = await fetch(healthUrl(origin), { headers: { Accept: 'application/json' } })
+  if (!res.ok) throw new Error(`health returned ${res.status}`)
+  const body = (await res.json()) as { data?: Health }
+  if (!body.data) throw new Error('health returned no data')
+  return body.data
+}
+
 export function appStatusUrl(endpoint: string, slug: string): string {
   return `${endpoint.replace(/\/$/, '')}/api/app/${encodeURIComponent(slug)}/status`
 }

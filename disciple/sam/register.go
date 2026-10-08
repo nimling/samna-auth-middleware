@@ -30,6 +30,10 @@ func RegisterEndpoints(g *echo.Group) {
 	RegisterCapture(g)
 }
 
+func RegisterStatus(g *echo.Group) {
+	g.GET("/health", h.GetHealth)
+}
+
 func RegisterCapture(g *echo.Group) {
 	analytics := g.Group("/analytics")
 	analytics.GET("/consent", h.GetConsent)

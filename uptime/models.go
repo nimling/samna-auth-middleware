@@ -106,3 +106,9 @@ type Heartbeat struct {
 	Reported  bool      `json:"reported"`
 	Beat
 }
+
+type Health struct {
+	Status  string `json:"status"`
+	App     string `json:"app"`
+	Version string `json:"version,omitempty"`
+}

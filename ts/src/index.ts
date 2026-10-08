@@ -46,7 +46,7 @@ export type {
 } from './analytics'
 export { configureConsent, openConsentSheet, closeConsentSheet } from './consent'
 export type { ConsentSheetConfig, ConsentCategoryDefaults, ConsentCopy } from './consent'
-export { getAppStatus, appStatusUrl } from './uptime'
+export { getAppStatus, appStatusUrl, getHealth, healthUrl } from './uptime'
 export type {
   MonitorKind,
   Monitor,
@@ -56,5 +56,6 @@ export type {
   MonitorStatus,
   BeatCheck,
   Beat,
-  Heartbeat
+  Heartbeat,
+  Health
 } from './uptime'

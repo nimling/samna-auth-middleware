@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { appStatusUrl, getAppStatus } from './uptime'
+import { appStatusUrl, getAppStatus, getHealth, healthUrl } from './uptime'
 import { ErrNotFound } from './types'
 
 type Call = { url: unknown; init: RequestInit | undefined }
@@ -69,5 +69,28 @@ describe('getAppStatus', () => {
   it('throws on a server error', async () => {
     stubFetch(500, { error: { message: 'status query failed' } })
     await expect(getAppStatus('https://auth.example.com', 'nimployer')).rejects.toThrow('status returned 500')
+  })
+})
+
+describe('healthUrl', () => {
+  it('joins the app origin and the health route', () => {
+    expect(healthUrl('https://docs.example.com/')).toBe('https://docs.example.com/api/status/health')
+  })
+})
+
+describe('getHealth', () => {
+  it('fetches the health route and unwraps the envelope', async () => {
+    const calls = stubFetch(200, { data: { status: 'ok', app: 'docs', version: 'v2.0.0' }, count: 1 })
+    const got = await getHealth('https://docs.example.com')
+    expect(calls).toHaveLength(1)
+    expect(String(calls[0].url)).toBe('https://docs.example.com/api/status/health')
+    expect(got.status).toBe('ok')
+    expect(got.app).toBe('docs')
+    expect(got.version).toBe('v2.0.0')
+  })
+
+  it('throws on a server error', async () => {
+    stubFetch(503, { error: { message: 'down' } })
+    await expect(getHealth('https://docs.example.com')).rejects.toThrow('health returned 503')
   })
 })

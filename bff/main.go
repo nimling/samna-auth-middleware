@@ -2,9 +2,11 @@ package bff
 
 import (
 	"context"
+	"net/http"
 	"net/http/httputil"
 	"net/url"
 	"os"
+	"path"
 	"time"
 
 	"github.com/labstack/echo/v4"
@@ -12,6 +14,7 @@ import (
 	sam "github.com/nimling/samna-auth-middleware/v2/disciple/sam"
 	sdb "github.com/nimling/samna-auth-middleware/v2/disciple/sdb"
 	"github.com/nimling/samna-auth-middleware/v2/smw"
+	"github.com/nimling/samna-auth-middleware/v2/utils"
 )
 
 type Config struct {
@@ -47,7 +50,10 @@ func Serve(ctx context.Context, config Config) error {
 	auth := e.Group(config.BasePath)
 	auth.GET("/login", h.GetLogin)
 	auth.GET("/callback", h.GetCallback)
+	auth.GET("/session", GetSession)
 	auth.GET("/logout", h.GetLogout)
+
+	sam.RegisterStatus(e.Group(path.Join(path.Dir(config.BasePath), "status")))
 
 	gate := smw.UserAuthMiddleware(nil)
 	siteGate := smw.UserAuthMiddleware(&smw.UserAuthOptions{Optional: true})
@@ -81,4 +87,23 @@ func Serve(ctx context.Context, config Config) error {
 	sam.SyncStart(ctx)
 
 	return e.Start(":" + config.Port)
+}
+
+func GetSession(ctx echo.Context) error {
+	target, err := url.Parse(utils.Cfg().Endpoint)
+	if err != nil || target.Host == "" {
+		ctx.Logger().Errorf("session handoff: SAUTH_ENDPOINT is not a url: %v", err)
+		return ctx.String(http.StatusBadGateway, "session handoff failed")
+	}
+	scheme := ctx.Scheme()
+	proxy := &httputil.ReverseProxy{
+		Rewrite: func(r *httputil.ProxyRequest) {
+			r.SetURL(target)
+			r.SetXForwarded()
+			r.Out.Host = r.In.Host
+			r.Out.Header.Set(echo.HeaderXForwardedProto, scheme)
+		},
+	}
+	proxy.ServeHTTP(ctx.Response(), ctx.Request())
+	return nil
 }
