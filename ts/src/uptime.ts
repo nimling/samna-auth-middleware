@@ -7,6 +7,9 @@ export const MONITOR_KIND_TCP: MonitorKind = 'tcp'
 export const MONITOR_KIND_DISCIPLE: MonitorKind = 'disciple'
 export const MONITOR_KIND_HEARTBEAT: MonitorKind = 'heartbeat'
 export const MONITOR_NAME_HEARTBEAT = 'heartbeat'
+export const STATUS_BASE_PATH = '/api/status'
+export const HEALTH_PATH = '/health'
+export const HEALTH_STATUS_OK = 'ok'
 
 export interface MonitorCheckDay {
   monitor_id: string
@@ -101,7 +104,7 @@ export interface Health {
 }
 
 export function healthUrl(origin: string): string {
-  return `${origin.replace(/\/$/, '')}/api/status/health`
+  return `${origin.replace(/\/$/, '')}${STATUS_BASE_PATH}${HEALTH_PATH}`
 }
 
 export async function getHealth(origin: string): Promise<Health> {

@@ -17,7 +17,7 @@ func statusTarget() string {
 }
 
 func GetHealth(ctx echo.Context) error {
-	health := uptime.Health{Status: "ok", App: utils.Cfg().AppSlug, Version: os.Getenv("APP_VERSION")}
+	health := uptime.Health{Status: uptime.HealthStatusOK, App: utils.Cfg().AppSlug, Version: os.Getenv(uptime.VersionEnv)}
 	return respondJSON(ctx, http.StatusOK, health, 1)
 }
 

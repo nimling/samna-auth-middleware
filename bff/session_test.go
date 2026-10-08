@@ -23,13 +23,13 @@ func handoffProphet(t *testing.T) *handoffCapture {
 	capture := &handoffCapture{}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		capture.host = r.Host
-		capture.forwardedHost = r.Header.Get("X-Forwarded-Host")
-		capture.forwardedProto = r.Header.Get("X-Forwarded-Proto")
+		capture.forwardedHost = r.Header.Get(bff.HeaderXForwardedHost)
+		capture.forwardedProto = r.Header.Get(echo.HeaderXForwardedProto)
 		capture.path = r.URL.Path
 		capture.query = r.URL.RawQuery
-		w.Header().Add("Set-Cookie", "sauth_access_token=access; Path=/; Domain=docs.example; HttpOnly")
-		w.Header().Add("Set-Cookie", "sauth_app_slug=docs; Path=/; Domain=docs.example")
-		w.Header().Set("Location", "/guarded/page")
+		w.Header().Add(echo.HeaderSetCookie, "sauth_access_token=access; Path=/; Domain=docs.example; HttpOnly")
+		w.Header().Add(echo.HeaderSetCookie, "sauth_app_slug=docs; Path=/; Domain=docs.example")
+		w.Header().Set(echo.HeaderLocation, "/guarded/page")
 		w.WriteHeader(http.StatusTemporaryRedirect)
 	}))
 	t.Cleanup(srv.Close)
@@ -45,7 +45,7 @@ func TestGetSessionProxiesTheHandoffToTheProphetWithTheBrowserHostForwarded(t *t
 	e := echo.New()
 	req := httptest.NewRequest(http.MethodGet, "/api/auth/session?handoff=abc123&next=%2Fguarded%2Fpage", nil)
 	req.Host = "docs.example:4300"
-	req.Header.Set("X-Forwarded-Proto", "https")
+	req.Header.Set(echo.HeaderXForwardedProto, "https")
 	rec := httptest.NewRecorder()
 	ctx := e.NewContext(req, rec)
 
@@ -71,10 +71,10 @@ func TestGetSessionProxiesTheHandoffToTheProphetWithTheBrowserHostForwarded(t *t
 	if rec.Code != http.StatusTemporaryRedirect {
 		t.Fatalf("status = %d, want 307", rec.Code)
 	}
-	if location := rec.Header().Get("Location"); location != "/guarded/page" {
+	if location := rec.Header().Get(echo.HeaderLocation); location != "/guarded/page" {
 		t.Fatalf("location = %q, want /guarded/page", location)
 	}
-	cookies := rec.Header().Values("Set-Cookie")
+	cookies := rec.Header().Values(echo.HeaderSetCookie)
 	if len(cookies) != 2 {
 		t.Fatalf("set-cookie count = %d, want 2", len(cookies))
 	}

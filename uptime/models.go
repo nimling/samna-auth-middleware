@@ -12,6 +12,10 @@ const (
 	MonitorKindDisciple  = "disciple"
 	MonitorKindHeartbeat = "heartbeat"
 	MonitorName          = "heartbeat"
+	StatusBasePath       = "/api/status"
+	HealthPath           = "/health"
+	HealthStatusOK       = "ok"
+	VersionEnv           = "APP_VERSION"
 )
 
 type Monitor struct {

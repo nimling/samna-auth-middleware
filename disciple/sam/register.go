@@ -3,6 +3,7 @@ package sam
 import (
 	"github.com/labstack/echo/v4"
 	h "github.com/nimling/samna-auth-middleware/v2/disciple/echo"
+	"github.com/nimling/samna-auth-middleware/v2/uptime"
 )
 
 func RegisterEndpoints(g *echo.Group) {
@@ -31,7 +32,7 @@ func RegisterEndpoints(g *echo.Group) {
 }
 
 func RegisterStatus(g *echo.Group) {
-	g.GET("/health", h.GetHealth)
+	g.GET(uptime.HealthPath, h.GetHealth)
 }
 
 func RegisterCapture(g *echo.Group) {

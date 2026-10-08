@@ -13,6 +13,7 @@ import (
 	sdb "github.com/nimling/samna-auth-middleware/v2/disciple/sdb"
 	"github.com/nimling/samna-auth-middleware/v2/shared"
 	smw "github.com/nimling/samna-auth-middleware/v2/smw"
+	"github.com/nimling/samna-auth-middleware/v2/uptime"
 )
 
 type accessCheck struct {
@@ -34,7 +35,7 @@ func main() {
 		e.Logger.Fatal(err)
 	}
 
-	sam.RegisterStatus(e.Group("/api/status"))
+	sam.RegisterStatus(e.Group(uptime.StatusBasePath))
 
 	api := e.Group("", smw.UserAuthMiddleware(nil))
 	sam.RegisterEndpoints(api)

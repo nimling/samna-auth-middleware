@@ -14,7 +14,13 @@ import (
 	sam "github.com/nimling/samna-auth-middleware/v2/disciple/sam"
 	sdb "github.com/nimling/samna-auth-middleware/v2/disciple/sdb"
 	"github.com/nimling/samna-auth-middleware/v2/smw"
+	"github.com/nimling/samna-auth-middleware/v2/uptime"
 	"github.com/nimling/samna-auth-middleware/v2/utils"
+)
+
+const (
+	SessionPath          = "/session"
+	HeaderXForwardedHost = "X-Forwarded-Host"
 )
 
 type Config struct {
@@ -50,10 +56,10 @@ func Serve(ctx context.Context, config Config) error {
 	auth := e.Group(config.BasePath)
 	auth.GET("/login", h.GetLogin)
 	auth.GET("/callback", h.GetCallback)
-	auth.GET("/session", GetSession)
+	auth.GET(SessionPath, GetSession)
 	auth.GET("/logout", h.GetLogout)
 
-	sam.RegisterStatus(e.Group(path.Join(path.Dir(config.BasePath), "status")))
+	sam.RegisterStatus(e.Group(path.Join(path.Dir(config.BasePath), path.Base(uptime.StatusBasePath))))
 
 	gate := smw.UserAuthMiddleware(nil)
 	siteGate := smw.UserAuthMiddleware(&smw.UserAuthOptions{Optional: true})
