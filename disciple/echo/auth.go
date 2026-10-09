@@ -2,6 +2,7 @@ package echo
 
 import (
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/labstack/echo/v4"
@@ -34,7 +35,12 @@ func GetLogin(ctx echo.Context) error {
 	utils.WriteCookie(ctx, &http.Cookie{Name: client.OAuthStateCookie, Value: state, Path: "/", MaxAge: 600})
 
 	next := ctx.QueryParam("next")
-	if strings.HasPrefix(next, "/") {
+	if next == "" {
+		if referer, refErr := url.Parse(ctx.Request().Referer()); refErr == nil && strings.EqualFold(referer.Host, ctx.Request().Host) && referer.Path != ctx.Request().URL.Path {
+			next = referer.RequestURI()
+		}
+	}
+	if strings.HasPrefix(next, "/") && !strings.HasPrefix(next, "//") {
 		utils.WriteCookie(ctx, &http.Cookie{Name: client.LoginNextCookie, Value: next, Path: "/", MaxAge: 600})
 	}
 
@@ -96,7 +102,7 @@ func GetCallback(ctx echo.Context) error {
 	smw.WriteCSRFCookie(ctx)
 
 	pageRedirect := utils.Cfg().PageRedirect
-	if nextCookie, nextErr := ctx.Cookie(client.LoginNextCookie); nextErr == nil && strings.HasPrefix(nextCookie.Value, "/") {
+	if nextCookie, nextErr := ctx.Cookie(client.LoginNextCookie); nextErr == nil && strings.HasPrefix(nextCookie.Value, "/") && !strings.HasPrefix(nextCookie.Value, "//") {
 		pageRedirect = nextCookie.Value
 	}
 	utils.ClearCookie(ctx, client.LoginNextCookie)

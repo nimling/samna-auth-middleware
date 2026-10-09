@@ -30,7 +30,7 @@ Every auth route sits under `SAUTH_BFF_BASE_PATH`. The status route sits beside 
 
 | Route | Auth | Does |
 |---|---|---|
-| `GET <base>/login?next=<path>` | none | Starts the PKCE flow against the prophet and remembers `next` for the return |
+| `GET <base>/login?next=<path>` | none | Starts the PKCE flow against the prophet and remembers `next` for the return, or the same origin referring page when `next` is absent |
 | `GET <base>/callback` | none | Exchanges the code for tokens, writes the session cookies and redirects to `next` |
 | `GET <base>/session?handoff=<value>` | none | Proxies the handoff to the prophet with the browser's host in `X-Forwarded-Host`, so the prophet writes the session cookies for the site's own domain; see below |
 | `GET <base>/logout` | none | Clears the cookies, revokes the token on the prophet and redirects to the end session page |
