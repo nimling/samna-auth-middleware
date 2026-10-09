@@ -12,6 +12,9 @@ DO $$
         IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'claimius_disciple_client') THEN
             CREATE ROLE claimius_disciple_client;
         END IF;
+        IF NOT pg_has_role(current_user, 'claimius_admin', 'SET') THEN
+            EXECUTE format('GRANT claimius_admin TO %I', current_user);
+        END IF;
     END $$;
 
 CREATE SCHEMA IF NOT EXISTS claimius AUTHORIZATION claimius_admin;
