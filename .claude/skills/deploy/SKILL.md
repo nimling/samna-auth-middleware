@@ -21,7 +21,7 @@ The test must assert the observable contract, not the internal call graph. Hit t
 just test
 ```
 
-Runs `go test ./...`, then for each role `smig test` on `<role>/database/migrate.yml` `--from` the last tag, then a fresh `smig test --keep` whose container the `dbtest` tagged suites run against: `./shared/... ./disciple/... ./smw/...` on the disciple set, and `./prophet/...` on the prophet set with a second kept container exported as `PEER_PG*` for the federation tests. The containers are removed after each role. `just test <package>` runs `go test ./<package>/...` alone. `just test-hurl` runs the hurl files under `test/hurl/` against the example disciple; run it when the change touches a route. Failure: report the failing test names and stop. Do not commit, do not bump.
+Runs `go test ./...`, then for each role `smig test` on `<role>/database/migrate.yml` `--from` the last tag, then a fresh `smig test --keep` whose container the `dbtest` tagged suites run against: `./shared/... ./disciple/... ./smw/...` on the disciple set, and `./prophet/...` on the prophet set with a kept peer prophet exported as `PEER_PG*` and a kept disciple exported as `DISCIPLE_PG*` for the federation tests. The containers are removed after each role. `just test <package>` runs `go test ./<package>/...` alone. `just test-hurl` runs the hurl files under `test/hurl/` against the example disciple; run it when the change touches a route. Failure: report the failing test names and stop. Do not commit, do not bump.
 
 ## 3. Mirror the Go change to typescript under `ts/`
 

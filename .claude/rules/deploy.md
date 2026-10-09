@@ -1,35 +1,19 @@
-# Deploy rules
+# Testing and releasing
 
-This repo publishes two artefacts: the Go module consumed via `go get github.com/nimling/samna-auth-middleware/v2` and the typescript package under `ts/` consumed via npm. The full procedure lives at `.claude/skills/deploy/SKILL.md`. The constraints below apply outside of any single deploy run.
+Two artefacts ship in one tag: the Go module `github.com/nimling/samna-auth-middleware/v2` and the `@nimling` package in `ts/`.
 
-## Never
+## Every change
 
-1. Edit `APP_VERSION` in `.env` or `ts/package.json` `version` by hand. `sbump` owns both fields. Hand edits drift from the tag and break the cross artefact pair.
+1. A Go change with a browser facing contract is mirrored into `ts/src/` in the same change: types into `types.ts` by json tag, sentinel errors as named exports, endpoints, params, headers and statuses into `client.ts`, `fetch.ts` or `session.ts`.
+2. Go tests sit beside the package as `<package>/<name>_test.go`, with the `dbtest` tag when they need a database. SQL contracts get a pgTAP file per role under `test/sql/<role>/`. TypeScript tests sit beside the module as `ts/src/<name>.test.ts`.
+3. `just test` runs `go test ./...`, then per role `smig test` fresh and `--from` the last tag, then the `dbtest` suites on a kept container; the prophet run adds `PEER_*` and `DISCIPLE_*` containers for federation. `just test <pkg>` runs one package without a database.
+4. `just test-hurl` runs `test/hurl/` against `example/disciple`; run it when a route changes. `just verify` checks a prophet and a disciple read the same objects at the same level.
 
-2. Tag manually with `git tag` or `git push --tags`. `just deploy` writes the tag and pushes it as one operation via `sbump`.
+## Releasing
 
-3. Use `--no-verify` or `--no-gpg-sign` on commits going out as part of a release.
-
-4. Run `pnpm publish` directly. The tag pushed by `just deploy` triggers the workflow that publishes the typescript package.
-
-5. Ship a Go change with a browser facing contract without mirroring it into `ts/src/`. The Go module and the typescript package go out in the same tag or not at all.
-
-6. Skip `just test`, `just build`, or the typescript build before `just deploy`. A red Go test, a failing Go build, or a failing typescript build must block the bump.
-
-7. Commit generated files (`ts/dist/`, `node_modules/`) as part of a release.
-
-## Always
-
-1. Update or add Go tests beside the package they cover, as `<package>/<name>_test.go`, for any change that has an observable contract on the Go side. Database backed Go tests carry the `dbtest` build tag and SQL tests are pgTAP files under `test/sql/<role>/`. Measurement suites live under `bench/`, which is gitignored, and run with `just bench`, never inside `just test`. `just test` runs `go test ./...`, then per role `smig test` on `<role>/database/migrate.yml` fresh and `--from` the last tag, then the `dbtest` tagged suites against the container that run keeps. Hurl tests live in `test/hurl/` and `just test-hurl` runs them against the example disciple. `just verify` builds a prophet and a disciple from the tree, serves the prophet in process and checks that every user of one scenario reads the same objects at the same level on both, after the snapshot and after a change through the feed; `just test` runs the same check. There is no `test/run.sh`.
-
-2. Update or add typescript tests beside the module they cover as `ts/src/<name>.test.ts` for any change that has an observable contract on the typescript side.
-
-3. Match the json tag, not the Go field name, when mirroring Go types into typescript.
-
-4. Write a single sentence commit message that describes the user visible change. The release notes derive from `git log` after the tag.
-
-5. Use the existing `justfile` recipes: `just test`, `just test-hurl`, `just build`, `just deploy`. Direct `go test`, `go build`, `pnpm build`, or `sbump` invocation drifts from the contract.
-
-## Version policy
-
-`just deploy` does a patch bump by default. For minor or major, pass the explicit argument to `sbump` instead. The repo currently does not gate this; the human running the deploy picks the right bump.
+1. `just test`, `just build`, and `cd ts && pnpm install --frozen-lockfile && pnpm run build` pass first.
+2. Add `.nimpress/changelog/v<version>.md` in the release commit, commit, push.
+3. `just deploy` bumps a patch across `APP_VERSION` and `ts/package.json`, tags and pushes; the tag runs `release.yml`, `typescript-publish.yml` and `docs.yml`. Minor or major: `sbump minor|major --env APP_VERSION --json ts/package.json@.version --push-version --auto --workflow`.
+4. Consumers move `go get ...@vX.Y.Z` and the `ref` of their `Claimius Schema` include in `database/migrate.yml` together.
+5. A new major moves the module path suffix too, and every import in every consumer follows.
+6. Never hand edit either version field, never `git tag`, never `pnpm publish`, never commit `ts/dist/`.

@@ -15,7 +15,7 @@ The mistakes that historically caused damage:
 2. Treating `samna_user.id` as the user identifier when `samna_user.user_id` is.
 3. Adding `sa_parent_id` without `sa_root_id`, or vice versa.
 4. Allowing nullable `sa_owner_id` or `sa_parent_id` for the root case instead of using self references. All parent columns are NOT NULL; roots self reference.
-5. Inserting into `claim`, `user_claim`, or `claim_object` directly instead of using the write functions; OR writing to computed tables like `user_object`, `object_info`, `user_users`, `inheritance_info`, `table_info`, `sync_event`, `access_diff`, `access_diff_user`, `user_activity`, `claim_graph_cache` at all.
+5. Inserting into `claim`, `user_claim`, or `claim_object` directly instead of using the write functions; OR writing to computed tables like `user_object`, `object_info`, `user_users`, `user_users_diff`, `usage_diff`, `inheritance_info`, `table_info`, `sync_event`, `access_diff`, `user_activity`, `claim_graph_cache` at all.
 6. Modifying access calculations by editing `user_object` rows.
 7. Forgetting `app_id` in filters, leaking access across apps.
 8. Confusing `sa_created_by`, a `user_claim.id`, with a user identifier.
@@ -66,12 +66,12 @@ It depends on the table.
 - `samna_secret` creation → `insert_secret`, which stores the encrypted value and binds the secret to the actor's claim
 - Guests → `upsert_guest_user`, prophet only
 - `peer_grant` → `upsert_peer_grant`, prophet only; `get_peer_grant` checks a peer secret
-- Cross app moves → `merge_user`
+- Cross app moves → `merge_user`, prophet set only; samna_auth owns the merge flow and calls it from `MergeUser` in `internal/service/user.go`
 - Cross root moves → `migrate_root`, which hangs the object and its subtree under a live root of the same type, walking organizations through `sa_owner_id`, under `claimius.migrating_root`; flag every call for human review
 - App creation → `upsert_system_app` for the system app, every row stamped with the system user's `user_claim.id`; `upsert_app(p_actor_user_claim_id, p_slug, p_name, p_org_id, p_private_key, p_private_seed, p_redirect_uris, p_sync_uri, p_description, p_connection, p_owner_access, p_default_claim, p_app_id)` for every other app, by an actor holding owner on `p_org_id` in its own app
 - Bootstrap → `upsert_system_app` on the prophet set, taking the system app fields, and `upsert_disciple_state` on the disciple set, taking `p_disciple_app_slug`; the prophet set carries `upsert_disciple_state` and `upsert_prophet_peer` too. `upsert_prophet_peer` takes the system app fields plus `p_upstream_prophet`, `p_upstream_endpoint`, `p_upstream_app_slug` and `p_upstream_app_secret`, runs `upsert_system_app`, and registers the upstream in `prophet_peer`: a hybrid is a prophet mirroring one app of a peer prophet
 - External table registration → `upsert_table_info`
-- Self identity → `get_prophet_app()` returns the system app on prophet and hybrid, raises on disciple. `get_disciple_app()` returns the upstream app on a pure disciple and raises on a prophet and on a hybrid, which has no `disciple_state` row; `get_disciple_app_id()` raises with it. Both return `SETOF claimius.samna_app`. Scalar UUID variants `get_prophet_app_id()`, `get_disciple_app_id()`, and `get_app_id()` are available for column DEFAULTs and other places that reject subqueries. `get_app_id()` resolves to the system app id on prophet and hybrid and to the disciple app id on a pure disciple; it is the one to use on a hybrid. These helpers ship in the prophet set; the disciple set mirrors one app, carries none of them, and its read functions take no app argument. Use these instead of maintaining a local helper.
+- Self identity → `get_app()` returns the system app on prophet and hybrid, raises on disciple. `get_disciple_app()` returns the upstream app on a pure disciple and raises on a prophet and on a hybrid, which has no `disciple_state` row; `get_disciple_app_id()` raises with it. Both return `SETOF claimius.samna_app`. Scalar UUID variants `get_prophet_app_id()`, `get_disciple_app_id()`, and `get_app_id()` are available for column DEFAULTs and other places that reject subqueries. `get_app_id()` resolves to the system app id on prophet and hybrid and to the disciple app id on a pure disciple; it is the one to use on a hybrid. These helpers ship in the prophet set; the disciple set mirrors one app, carries none of them, and its read functions take no app argument. Use these instead of maintaining a local helper.
 
 **Direct INSERT/UPDATE is fine** on the prophet for:
 
@@ -87,12 +87,12 @@ The triggers attached to each table fire either way, so calc, audit, and sync em
 **NEVER write directly** to these tables; they are managed by triggers and the sync layer:
 
 - `user_object`, `object_info`, `user_users` for computed access state; the reverse lookup is the index `idx_user_object_object_user`, and `used_count` moves only through `touch_object_usage`
-- `access_diff`, `access_diff_user`, `user_activity`, `claim_graph_cache` managed by the settle, the drain and the graph
+- `access_diff`, `user_activity`, `claim_graph_cache` managed by the settle, the drain and the graph: the areas, the readers' cursors and the pairs' marks
 - `peer_collision` written by `apply_peer_event`
 - `inheritance_info`, `table_info` computed by registration and calc functions
 - `sync_event` append only, written by triggers
 - `audit`. Use `claimius.insert_audit` if you must.
-- `reconcile_queue` managed by sync layer
+- `user_users_diff` and `usage_diff`, raised by the statement triggers and the usage flush and folded by the reads; there is no `reconcile_queue` and no `access_diff_user`
 
 ### "Should I DELETE from a registered table?"
 
@@ -133,6 +133,10 @@ Other `get_*` functions, including `get_organizations`, `get_locations`, `get_us
 ### "How do I scope a query to one app?"
 
 Always filter on `app_id`. Every materialized state table — `samna_user`, `user_claim`, `user_object`, `user_users`, `user_relation`, `user_field` — carries `app_id` on a prophet. The same human can have entirely separate access in different apps.
+
+A `claim`, `user_claim` or `claim_object` stays inside its app: the prophet refuses one with `P0403` when its owning organization, or its bound organization or location, is not linked to the row's app through `app_object` (`_check_app_scope` over `app_has_scope`). Link the organization with `upsert_app_object` first.
+
+`shared.UserWhere` filters a `samna_user` listing: a user always reads its own row, and `type = 'system'` users stay hidden from every other user.
 
 ### "How do I check if a user can see something?"
 
@@ -303,8 +307,8 @@ When the AI assistant has Claimius rules loaded, it should:
 
 - Refuse to write a SELECT from any `claimius.*` table directly. Always use `get_*` functions.
 - Refuse to INSERT/UPDATE on `claim`, `user_claim`, `claim_object` without using the write functions.
-- Refuse to INSERT/UPDATE/DELETE on `user_object`, `object_info`, `user_users`, `inheritance_info`, `table_info`, `sync_event`, `audit`, `reconcile_queue`, `access_diff`, `access_diff_user`, `user_activity`, `claim_graph_cache` or `peer_collision` ever.
-- Allow direct INSERT/UPDATE on `samna_app`, `organization`, `location`, `samna_user`, `samna_client`, `samna_secret` updates, `object_field`, `user_field`, `user_relation`, `prophet_state`, `disciple_state` on the prophet side, with the required `sa_*` columns populated.
+- Refuse to INSERT/UPDATE/DELETE on `user_object`, `object_info`, `user_users`, `user_users_diff`, `usage_diff`, `inheritance_info`, `table_info`, `sync_event`, `audit`, `access_diff`, `user_activity`, `claim_graph_cache` or `peer_collision` ever.
+- Allow direct INSERT/UPDATE on `samna_app` updates, `organization`, `location`, `samna_client`, `samna_secret` updates, `object_field`, `user_field`, `user_relation`, `prophet_state`, `disciple_state` on the prophet side, with the required `sa_*` columns populated.
 - Reject any registered table missing required columns and tell the user.
 - Always include `app_id` in filters against materialized state.
 - Default to soft delete; raise hard delete as a flag for the user.
