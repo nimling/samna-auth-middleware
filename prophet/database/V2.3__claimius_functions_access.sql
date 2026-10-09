@@ -453,6 +453,8 @@ DECLARE
     v_effective    INTEGER;
     v_level        INTEGER;
     v_actor_level  INTEGER;
+    v_system_app_id UUID;
+    v_system_access INTEGER;
 BEGIN
     IF claimius.in_replay_mode() THEN
         RETURN NEW;
@@ -570,6 +572,23 @@ BEGIN
             END IF;
 
             IF (coalesce(v_effective, 0) & 16) = 0 AND (coalesce(v_effective, 0) & ~coalesce(v_actor_access, 0) & 15) <> 0 THEN
+                v_system_app_id := claimius.get_prophet_app_id();
+
+                IF v_system_app_id IS DISTINCT FROM NEW.app_id THEN
+                    PERFORM claimius.reconcile_if_pending(v_system_app_id, v_user_id, NEW.object_type, NEW.object_id);
+
+                    SELECT max(uo.sa_access) INTO v_system_access
+                    FROM claimius.user_object uo
+                    WHERE uo.user_id     = v_user_id
+                      AND uo.app_id      = v_system_app_id
+                      AND uo.object_type = NEW.object_type
+                      AND uo.object_id   = NEW.object_id;
+
+                    v_actor_access := coalesce(v_actor_access, 0) | (coalesce(v_system_access, 0) & 15);
+                END IF;
+            END IF;
+
+            IF (coalesce(v_effective, 0) & 16) = 0 AND (coalesce(v_effective, 0) & ~coalesce(v_actor_access, 0) & 15) <> 0 THEN
                 RAISE EXCEPTION 'cannot grant more access than held: user % holds % on % %, requested %',
                     v_user_id, coalesce(v_actor_access, 0), NEW.object_type, NEW.object_id, v_effective USING ERRCODE = 'P0403';
             END IF;
@@ -648,7 +667,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius._check_claim_composition() IS 'BEFORE INSERT/UPDATE trigger on claim_object. Rejects a grant whose effective mask hands out more access than the actor holds on the object, denies and removals exempt. An object outside the claimius schema that this database holds no object_info row for, a disciple''s own row, is judged by the actor''s hold on the binding''s owning organization, which _check_app_scope keeps linked to the app; its type is never resolved. The first binding of an app may come from an actor of another app holding owner on the organization that owns the app, judged in the actor''s own app. The first binding on a samna_user holding a claim assigned under the binding''s owning organization may come from an actor holding owner on that organization. Enforces composition link invariants: no self loop, no reverse link cycle, caller has read on target claim. Bypassed during disciple replay.';
+COMMENT ON FUNCTION claimius._check_claim_composition() IS 'BEFORE INSERT/UPDATE trigger on claim_object. Rejects a grant whose effective mask hands out more access than the actor holds on the object, denies and removals exempt. An object outside the claimius schema that this database holds no object_info row for, a disciple''s own row, is judged by the actor''s hold on the binding''s owning organization, which _check_app_scope keeps linked to the app; its type is never resolved. The first binding of an app may come from an actor of another app holding owner on the organization that owns the app, judged in the actor''s own app. The first binding on a samna_user holding a claim assigned under the binding''s owning organization may come from an actor holding owner on that organization. Any other binding short of the actor''s hold in its app may still pass on the access the actor holds on the object in the system app, directly or through an inheriting ancestor grant, capped at that access. Enforces composition link invariants: no self loop, no reverse link cycle, caller has read on target claim. Bypassed during disciple replay.';
 
 DROP TRIGGER IF EXISTS tg_check_claim_composition ON claimius.claim_object;
 CREATE TRIGGER tg_check_claim_composition

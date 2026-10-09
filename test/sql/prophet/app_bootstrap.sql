@@ -128,9 +128,14 @@ SELECT throws_like($$
 $$, 'cannot grant more access than held%',
     'an actor reading but not owning the owning organization is refused the first binding');
 
+INSERT INTO boot SELECT 'reader_tenant_uc', (claimius.insert_user_claim(
+    p_app_id => pg_temp.boot('tenant_app'), p_claim_id => (SELECT claim_id FROM claimius.user_claim WHERE id = pg_temp.boot('tenant_uc')),
+    p_user_id => 'a0000000-0000-4000-8000-000000000d01', p_sa_owner_id => '10000000-0000-4000-8000-000000000d01',
+    p_sa_created_by => pg_temp.boot('tenant_uc')) -> 'user_claim' ->> 'id')::UUID;
+
 SELECT throws_like($$
     SELECT claimius.upsert_app(
-        p_actor_user_claim_id => pg_temp.boot('tenant_uc'), p_slug => 'sqltest_boot_other', p_name => 'Other app',
+        p_actor_user_claim_id => pg_temp.boot('reader_tenant_uc'), p_slug => 'sqltest_boot_other', p_name => 'Other app',
         p_org_id => '10000000-0000-4000-8000-000000000d02', p_private_key => 'key', p_private_seed => 'seed')
 $$, 'cannot grant more access than held%',
     'an actor without the owning organization in its own app is refused the first binding');
