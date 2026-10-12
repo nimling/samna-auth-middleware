@@ -3,6 +3,8 @@ package echo_test
 import (
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"strings"
 	"testing"
 
 	"github.com/labstack/echo/v4"
@@ -59,5 +61,27 @@ func TestGetLoginIgnoresForeignReferer(t *testing.T) {
 func TestGetLoginIgnoresProtocolRelativeNext(t *testing.T) {
 	if got := getLoginNext(t, "/api/auth/login?next=%2F%2Fevil.example", ""); got != "" {
 		t.Errorf("sauth_login_next = %q, want empty", got)
+	}
+}
+
+func TestGetLoginCarriesNextInTheState(t *testing.T) {
+	t.Setenv("SAUTH_ENDPOINT", "http://auth.example")
+	t.Setenv("SAUTH_APP_SLUG", "testapp")
+	t.Setenv("SAUTH_REDIRECT_URI", "http://localhost:4200/api/auth/callback")
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/api/auth/login?next=%2Fcli%3Flogin%3Dabc", nil)
+	rec := httptest.NewRecorder()
+	ctx := e.NewContext(req, rec)
+
+	if err := saecho.GetLogin(ctx); err != nil {
+		t.Fatalf("GetLogin: %v", err)
+	}
+	location, err := url.Parse(rec.Header().Get("Location"))
+	if err != nil {
+		t.Fatalf("Location: %v", err)
+	}
+	if state := location.Query().Get("state"); !strings.HasSuffix(state, ".L2NsaT9sb2dpbj1hYmM") {
+		t.Errorf("state = %q, want the next path encoded after the dot", state)
 	}
 }

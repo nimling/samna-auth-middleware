@@ -221,3 +221,35 @@ func TestGetCallbackStartsOverWhenTheCodeExchangeIsRefused(t *testing.T) {
 		t.Fatalf("the flow cookies must be cleared, got %v", rec.Result().Cookies())
 	}
 }
+
+func TestGetCallbackResumesTheLoginFromTheStateInAnotherBrowser(t *testing.T) {
+	t.Setenv("SAUTH_PAGE_REDIRECT", "http://localhost:4200/")
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/api/auth/callback?code=abc&state=st1.L2NsaT9sb2dpbj1hYmM", nil)
+	rec := httptest.NewRecorder()
+	ctx := e.NewContext(req, rec)
+
+	if err := saecho.GetCallback(ctx); err != nil {
+		t.Fatalf("GetCallback: %v", err)
+	}
+	if location := rec.Header().Get("Location"); location != "/api/auth/login?next=%2Fcli%3Flogin%3Dabc" {
+		t.Fatalf("Location = %q, want the login restarted with the next path from the state", location)
+	}
+}
+
+func TestGetCallbackIgnoresAProtocolRelativeNextInTheState(t *testing.T) {
+	t.Setenv("SAUTH_PAGE_REDIRECT", "http://localhost:4200/")
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/api/auth/callback?code=abc&state=st1.Ly9ldmlsLmV4YW1wbGU", nil)
+	rec := httptest.NewRecorder()
+	ctx := e.NewContext(req, rec)
+
+	if err := saecho.GetCallback(ctx); err != nil {
+		t.Fatalf("GetCallback: %v", err)
+	}
+	if location := rec.Header().Get("Location"); location != "http://localhost:4200/" {
+		t.Fatalf("Location = %q, want the page redirect", location)
+	}
+}

@@ -1,6 +1,7 @@
 package echo
 
 import (
+	"encoding/base64"
 	"net/http"
 	"net/url"
 	"strings"
@@ -23,6 +24,17 @@ func GetLogin(ctx echo.Context) error {
 		return respondError(ctx, http.StatusInternalServerError, "Internal Server Error")
 	}
 
+	next := ctx.QueryParam("next")
+	if next == "" {
+		if referer, refErr := url.Parse(ctx.Request().Referer()); refErr == nil && strings.EqualFold(referer.Host, ctx.Request().Host) && referer.Path != ctx.Request().URL.Path {
+			next = referer.RequestURI()
+		}
+	}
+	if strings.HasPrefix(next, "/") && !strings.HasPrefix(next, "//") {
+		state += "." + base64.RawURLEncoding.EncodeToString([]byte(next))
+		utils.WriteCookie(ctx, &http.Cookie{Name: client.LoginNextCookie, Value: next, Path: "/", MaxAge: 600})
+	}
+
 	slug := utils.Cfg().AppSlug
 	redirectURI := utils.Cfg().RedirectURI
 	authURL, err := client.AuthorizeURL(slug, redirectURI, state, client.ChallengeS256(verifier))
@@ -33,16 +45,6 @@ func GetLogin(ctx echo.Context) error {
 
 	utils.WriteCookie(ctx, &http.Cookie{Name: client.PKCEVerifierCookie, Value: verifier, Path: "/", MaxAge: 600})
 	utils.WriteCookie(ctx, &http.Cookie{Name: client.OAuthStateCookie, Value: state, Path: "/", MaxAge: 600})
-
-	next := ctx.QueryParam("next")
-	if next == "" {
-		if referer, refErr := url.Parse(ctx.Request().Referer()); refErr == nil && strings.EqualFold(referer.Host, ctx.Request().Host) && referer.Path != ctx.Request().URL.Path {
-			next = referer.RequestURI()
-		}
-	}
-	if strings.HasPrefix(next, "/") && !strings.HasPrefix(next, "//") {
-		utils.WriteCookie(ctx, &http.Cookie{Name: client.LoginNextCookie, Value: next, Path: "/", MaxAge: 600})
-	}
 
 	return Redirect(ctx, http.StatusTemporaryRedirect, authURL)
 }
@@ -59,12 +61,22 @@ func GetCallback(ctx echo.Context) error {
 	}
 
 	stateParam := ctx.QueryParam("state")
+	stateNext := ""
+	if dot := strings.LastIndex(stateParam, "."); dot >= 0 {
+		if raw, decodeErr := base64.RawURLEncoding.DecodeString(stateParam[dot+1:]); decodeErr == nil && strings.HasPrefix(string(raw), "/") && !strings.HasPrefix(string(raw), "//") {
+			stateNext = string(raw)
+		}
+	}
+	resume := startOver
+	if stateNext != "" {
+		resume = strings.TrimSuffix(ctx.Request().URL.Path, "callback") + "login?next=" + url.QueryEscape(stateNext)
+	}
 	stateCookie, stateErr := ctx.Cookie(client.OAuthStateCookie)
 	if stateErr != nil || stateCookie.Value == "" || stateParam == "" || stateParam != stateCookie.Value {
 		ctx.Logger().Warnf("GetCallback invalid state, clearing the flow cookies and sending the visitor back to start over")
 		utils.ClearCookie(ctx, client.PKCEVerifierCookie)
 		utils.ClearCookie(ctx, client.OAuthStateCookie)
-		return Redirect(ctx, http.StatusFound, startOver)
+		return Redirect(ctx, http.StatusFound, resume)
 	}
 
 	verifierCookie, verifierErr := ctx.Cookie(client.PKCEVerifierCookie)
@@ -72,7 +84,7 @@ func GetCallback(ctx echo.Context) error {
 		ctx.Logger().Warnf("GetCallback missing verifier, clearing the flow cookies and sending the visitor back to start over")
 		utils.ClearCookie(ctx, client.PKCEVerifierCookie)
 		utils.ClearCookie(ctx, client.OAuthStateCookie)
-		return Redirect(ctx, http.StatusFound, startOver)
+		return Redirect(ctx, http.StatusFound, resume)
 	}
 
 	slug := utils.Cfg().AppSlug
@@ -102,6 +114,9 @@ func GetCallback(ctx echo.Context) error {
 	smw.WriteCSRFCookie(ctx)
 
 	pageRedirect := utils.Cfg().PageRedirect
+	if stateNext != "" {
+		pageRedirect = stateNext
+	}
 	if nextCookie, nextErr := ctx.Cookie(client.LoginNextCookie); nextErr == nil && strings.HasPrefix(nextCookie.Value, "/") && !strings.HasPrefix(nextCookie.Value, "//") {
 		pageRedirect = nextCookie.Value
 	}
