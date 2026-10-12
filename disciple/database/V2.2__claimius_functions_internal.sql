@@ -20,7 +20,14 @@ BEGIN
                           AND e.descendant_id = o.sa_owner_id
         WHERE o.id = v_start;
         IF v_prefix IS NULL THEN
-            RETURN;
+            IF EXISTS (
+                SELECT 1 FROM claimius.organization o
+                         JOIN claimius.organization p ON p.id = o.sa_owner_id
+                WHERE o.id = v_start
+            ) THEN
+                RETURN;
+            END IF;
+            v_prefix := '{}';
         END IF;
     END IF;
 
@@ -92,7 +99,14 @@ BEGIN
                           AND e.descendant_id = l.sa_parent_id
         WHERE l.id = v_start;
         IF v_prefix IS NULL THEN
-            RETURN;
+            IF EXISTS (
+                SELECT 1 FROM claimius.location l
+                         JOIN claimius.location p ON p.id = l.sa_parent_id
+                WHERE l.id = v_start
+            ) THEN
+                RETURN;
+            END IF;
+            v_prefix := '{}';
         END IF;
     END IF;
 
@@ -151,6 +165,7 @@ DECLARE
     v_start  UUID := coalesce(p_node_id, p_root_id);
     v_parent UUID;
     v_prefix UUID[] := '{}';
+    v_parent_present BOOLEAN;
 BEGIN
     PERFORM pg_advisory_xact_lock(hashtext(p_root_id::TEXT));
 
@@ -171,7 +186,12 @@ BEGIN
           AND e.descendant_type = p_object_type
           AND e.descendant_id = v_parent;
         IF v_prefix IS NULL THEN
-            RETURN;
+            EXECUTE format('SELECT EXISTS (SELECT 1 FROM %I.%I WHERE id = $1)', v_schema, v_table)
+                INTO v_parent_present USING v_parent;
+            IF v_parent_present THEN
+                RETURN;
+            END IF;
+            v_prefix := '{}';
         END IF;
     END IF;
 
@@ -211,7 +231,41 @@ CREATE OR REPLACE FUNCTION claimius._splice_subtree(
     p_root_id   UUID,
     p_parent_id UUID
 ) RETURNS TABLE (object_type TEXT, object_id UUID) AS $$
+DECLARE
+    v_parts          TEXT[] := claimius.split_object_type(p_node_type);
+    v_parent_present BOOLEAN := TRUE;
 BEGIN
+    IF p_parent_id IS NOT NULL AND p_parent_id <> p_node_id THEN
+        EXECUTE format('SELECT EXISTS (SELECT 1 FROM %I.%I WHERE id = $1)', v_parts[1], v_parts[2])
+            INTO v_parent_present USING p_parent_id;
+    END IF;
+
+    IF NOT v_parent_present THEN
+        WITH s AS MATERIALIZED (
+            SELECT s.descendant_type, s.descendant_id
+            FROM claimius.inheritance_info s
+            WHERE s.tree_type = p_tree_type
+              AND s.ancestor_type = p_node_type
+              AND s.ancestor_id = p_node_id
+        ),
+        a AS MATERIALIZED (
+            SELECT a.ancestor_type, a.ancestor_id
+            FROM claimius.inheritance_info a
+            WHERE a.tree_type = p_tree_type
+              AND a.descendant_type = p_node_type
+              AND a.descendant_id = p_node_id
+              AND a.depth > 0
+        )
+        DELETE FROM claimius.inheritance_info d
+            USING s, a
+        WHERE d.tree_type = p_tree_type
+          AND d.ancestor_type = a.ancestor_type
+          AND d.ancestor_id = a.ancestor_id
+          AND d.descendant_type = s.descendant_type
+          AND d.descendant_id = s.descendant_id;
+        RETURN;
+    END IF;
+
     IF p_parent_id IS NOT NULL
         AND EXISTS (
             SELECT 1 FROM claimius.inheritance_info p
@@ -297,7 +351,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius._splice_subtree(claimius.tree_type, TEXT, UUID, UUID, UUID) IS 'Moves the stored subtree of a node under a new parent, or drops it when the parent is absent and returns the descendants whose self edges it dropped, so the caller raises an area on each.';
+COMMENT ON FUNCTION claimius._splice_subtree(claimius.tree_type, TEXT, UUID, UUID, UUID) IS 'Moves the stored subtree of a node under a new parent, or drops it when the parent is held but out of the closure and returns the descendants whose self edges it dropped, so the caller raises an area on each. A parent the disciple does not hold at all lies outside the app''s slice: the node keeps its subtree as the top of the slice.';
 
 CREATE OR REPLACE FUNCTION claimius._select_owned_rows(p_object_type TEXT, p_root_id UUID)
     RETURNS TABLE(id UUID, sa_owner_id UUID) AS $$

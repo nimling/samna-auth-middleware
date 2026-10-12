@@ -24,6 +24,8 @@ sam.SyncStart(context.Background())
 
 `SyncStart` returns immediately and owns its goroutines, backoff and logging, on every pod. In debug mode it does nothing.
 
+`RegisterEndpoints` mounts `login`, `callback` and `logout` under the group. `login?next=<path>` returns the visitor to that same origin path after the callback. The path travels in the OAuth `state` as well as in a cookie, so a callback that reaches a browser without the flow cookies, a login link opened in another browser, starts the login again with the same `next` and still lands on it, a cli approval page included.
+
 ## Writes
 
 The builder is the same in both modes. `sdb.Instance().NewInsert()`, `NewUpdate()` and `NewDelete()` take a model and the `AccessClaim` the actor holds.

@@ -1,5 +1,5 @@
 BEGIN;
-SELECT plan(3);
+SELECT plan(5);
 
 SELECT claimius.upsert_disciple_state();
 SET LOCAL claimius.replay_mode = 'true';
@@ -28,6 +28,23 @@ SELECT lives_ok(
 SELECT is_empty(
     $$SELECT 1 FROM claimius.organization WHERE id = '10000000-0000-4000-8000-000000000ab0'$$,
     'the root outside the app is never held on the disciple'
+);
+
+SELECT results_eq(
+    $$SELECT object_id, hop FROM claimius.get_owner_ancestors('claimius.organization', '10000000-0000-4000-8000-000000000ab1')$$,
+    $$VALUES ('10000000-0000-4000-8000-000000000ab1'::UUID, 0)$$,
+    'an organization whose owner is outside the app is the top of its own closure'
+);
+
+INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
+VALUES ('10000000-0000-4000-8000-000000000ab2', 'Linked grandchild', 'company',
+        '10000000-0000-4000-8000-000000000ab1', '10000000-0000-4000-8000-000000000ab0', 2,
+        '00000000-0000-4000-8000-000000000ab0');
+
+SELECT results_eq(
+    $$SELECT object_id, hop FROM claimius.get_owner_ancestors('claimius.organization', '10000000-0000-4000-8000-000000000ab2')$$,
+    $$VALUES ('10000000-0000-4000-8000-000000000ab2'::UUID, 0), ('10000000-0000-4000-8000-000000000ab1'::UUID, 1)$$,
+    'a child of that organization hangs under it'
 );
 
 SELECT * FROM finish();
