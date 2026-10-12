@@ -7,4 +7,4 @@
 5. `SAUTH_DEBUG_USER_ID` and `SAUTH_DEBUG_CLIENTS` turn on debug mode, which skips the sync and acts as the debug user. Set only in a local `.env`.
 6. `SAUTH_CLIENT_ID` and `SAUTH_CLIENT_SECRET` are the consumer's machine client for service to service calls.
 7. Telemetry: the host calls `nimtel.Init` and mounts `smw.TelemetryMiddleware()` before the auth middleware; the Container Apps env supplies `OTEL_EXPORTER_OTLP_*`.
-8. Consumers on v2: samna_auth (prophet), bookable_server_test, nimployer, samna-sync, samna_connect, samna_sign, hvergel, docs. `bookable_server` and `samna.io` stay on v1. `../.claude/scripts/repos.sh` prints every pin.
+8. Consumers on v2: samna_auth (prophet), bookable_server_test, nimployer, samna-sync, samna_connect, samna_sign, hvergel, samna-developer. `bookable_server` and `samna.io` stay on v1. `../.claude/scripts/repos.sh` prints every pin.
