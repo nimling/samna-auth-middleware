@@ -1,5 +1,5 @@
 ---
-visibility: hidden
+gate: auth-middleware
 layout: doc
 title: Users
 description: One person or machine, one stable user_id, one samna_user row per app, machine clients, delegation through get_user_access, and user_users with the count it holds, the user_users_diff rows a write raises and a read folds, what each reads and writes, and why the count is exact.

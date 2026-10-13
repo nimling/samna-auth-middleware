@@ -1,5 +1,5 @@
 ---
-visibility: hidden
+gate: auth-middleware
 layout: doc
 title: Samna Auth Middleware
 description: The Go module every Samna service links to reach Samna Auth, in one of two roles, prophet or disciple, over one shared claimius schema.

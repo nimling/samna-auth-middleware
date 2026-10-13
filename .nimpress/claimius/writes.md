@@ -1,5 +1,5 @@
 ---
-visibility: hidden
+gate: auth-middleware
 layout: doc
 title: Writes
 description: The claimius write surface, which tables take a direct insert, what every trigger does inside the write's own transaction, the rows each write stores as a function of the data, one request worked through, and the locks a write takes.

@@ -1,5 +1,5 @@
 ---
-visibility: hidden
+gate: auth-middleware
 layout: doc
 title: Disciple
 description: How a disciple writes through to the prophet, what it owns itself, and how the pull loop keeps its copy current.

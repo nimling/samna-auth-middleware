@@ -1,5 +1,5 @@
 ---
-visibility: hidden
+gate: auth-middleware
 layout: doc
 title: Prophets and disciples
 description: The authority and its mirrors, the three bootstraps, why ids are random and what that costs in collision probability, how prophets federate through peers with one home per app, refused collisions and agreed handovers, what each role reads and writes per request, and what happens when any of them fails.

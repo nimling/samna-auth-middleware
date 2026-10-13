@@ -1,5 +1,5 @@
 ---
-visibility: hidden
+gate: auth-middleware
 layout: doc
 title: Access in Go
 description: The access lookups on sdb.Instance(), the claimius function each one calls, how errors map to status codes, the paged listings, the graph window, the usage counter and where each call runs.

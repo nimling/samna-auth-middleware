@@ -1,5 +1,5 @@
 ---
-visibility: hidden
+gate: auth-middleware
 layout: doc
 title: Redaction
 description: How a scope on an object binding narrows a grant to named fields, how _apply_denies settles the grants and denies of one pair into a mask per field with a star for the rest, what each read returns, and what a response withholds.

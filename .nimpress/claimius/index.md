@@ -1,5 +1,5 @@
 ---
-visibility: hidden
+gate: auth-middleware
 layout: doc
 title: Claimius
 description: The Postgres schema that governs access for every Samna service, stated as a fixed Datalog program over its tables, with the rows each part stores, reads and writes as functions of the data, and the Go middleware that carries it for Samna Auth.

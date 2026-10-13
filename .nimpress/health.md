@@ -3,7 +3,7 @@ layout: doc
 title: Health
 description: The dependency free health route every disciple can mount, and how the Samna Auth status probe reads it.
 tags: health, status, probe, monitor, uptime, heartbeat
-visibility: hidden
+gate: auth-middleware
 lastUpdated: true
 ---
 

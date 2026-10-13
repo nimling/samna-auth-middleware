@@ -3,7 +3,7 @@ layout: doc
 title: Static sites
 description: The static edge mode and the nimpress adapter, for a site with no server of its own that logs in against Samna Auth and opens gated pages from the prophet.
 tags: static, static site, nimpress, nimpressAuth, edge mode, login, session, gated pages, github pages
-visibility: hidden
+gate: auth-middleware
 lastUpdated: true
 ---
 

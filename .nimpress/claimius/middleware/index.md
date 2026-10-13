@@ -1,5 +1,5 @@
 ---
-visibility: hidden
+gate: auth-middleware
 layout: doc
 title: The middleware
 description: samna_auth_middleware is the Go implementation of claimius for Samna Auth as prophet and for its disciples. What it carries, package by package, and where claimius ends and the middleware begins.

@@ -1,5 +1,5 @@
 ---
-visibility: hidden
+gate: auth-middleware
 layout: doc
 title: Capabilities
 description: Scope grants, the claim_object bindings with no object pair that carry page and functional access, how get_scope_access matches them by jsonpath with deny subtraction and closure, what a match reads, and where claimius stops and the implementing side begins.
