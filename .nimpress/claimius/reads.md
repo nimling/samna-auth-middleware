@@ -3,7 +3,7 @@ gate: auth-middleware
 layout: doc
 title: Reads
 description: The claimius read surface and what each read function reads and writes in index entries and rows as a function of the data, why a check and a page of a listing are independent of tree depth and of the number of users, and which reads may run on a replica.
-tags: get_access, get_direct_access, mutation_access, resolve_access, get_user_access, get_objects, get_organizations, get_locations, get_secrets, get_users, get_claims, get_audit, get_grants, get_bindings, get_user_tokens, get_object_types, get_object_usage, _best_grant, reconcile_if_pending, _settle_user_users_diff, _user_users_for_viewer, key paging, security definer
+tags: get_access, get_direct_access, mutation_access, resolve_access, get_user_access, get_objects, get_organizations, get_locations, get_secrets, get_users, get_claims, get_audit, get_grants, get_bindings, get_user_tokens, get_object_types, get_object_usage, get_relations, get_descendants, get views, select tag, _best_grant, reconcile_if_pending, _settle_user_users_diff, _user_users_for_viewer, key paging, security definer
 lastUpdated: true
 ---
 
@@ -27,12 +27,15 @@ On a disciple the same functions exist without the app argument, because a disci
 | `get_organizations`, `get_locations`, `get_secrets` | `get_objects` pages joined to the table, with the same `after` and `limit` |
 | `get_users(user, app, required)` | The users the reader sees |
 | `get_claims(user, app, required)`, `get_claims(user, app, object_id, object_type)` | The claims the reader holds through a live grant; the claims behind one pair |
-| `get_audit(user, app, required, limit, offset)` | Audit rows of the organizations the reader reaches; see [Audit](./audit.md) |
+| `get_audit(user, app, required, limit, offset)` | Audit rows of the organizations the reader reaches; on a disciple a fifth argument `ids` keeps only the rows named; see [Audit](./audit.md) |
 | `get_scope_access(user, app, path, required)` | Scope grants matching a jsonpath; see [Capabilities](./capabilities.md) |
 | `search`, `get_owner_graph`, `get_claim_graph` | See [Search](./search.md) and [Graphs](./graphs.md) |
-| `get_users(user_ids, ids)`, `get_organizations(ids, owner_ids)`, `get_locations(ids, parent_ids)`, `get_claims(ids, owner_ids)` | Disciple only: the rows named by id or by parent, no reader; see [Lookups](#lookups) |
+| `get_users(user_ids, ids, emails, external_ids)`, `get_organizations(ids, owner_ids, external_ids)`, `get_locations(ids, parent_ids, external_ids)`, `get_claims(ids, owner_ids)` | Disciple only: the rows named by id, owner, parent, email or external id, no reader; see [Lookups](#lookups) |
 | `get_grants(ids, user_ids, claim_ids, owner_ids, clients)`, `get_bindings(object_type, object_ids, claim_ids)`, `get_user_tokens(user_ids)`, `get_object_types()` | Disciple only: grants, bindings, tokens and registered types by id, no reader; see [Lookups](#lookups) |
 | `get_object_usage(user, object_ids, object_types)` | Disciple only: the reader's `used_count` and the name of each object |
+| `get_relations(user, ids)` | Disciple only: the reader's live `user_relation` rows; see [Lookups](#lookups) |
+| `get_descendants(object_type, object_id)`, `get_descendants(object_id)` | The owner, location and parenthood subtrees of an object, with or without its type |
+| The views `get_users`, `get_organizations`, `get_locations`, `get_claims`, `get_grants` | Every row of the table, the read surface of the bun models; see [The get views](#the-get-views) |
 
 ## get_access
 
@@ -122,21 +125,45 @@ A listing carries no authority to act on a row in it: `get_objects` returns a `u
 
 A row a read already admitted names other rows: a booking its creator through `sa_created_by`, a bookable its organization and location, a notification the holders of a claim. On a disciple the lookups return those rows by id, with no reader and no access filter, so that a consumer shows the creator's name or the location's name of a row it may read without selecting a claimius table.
 
-1. `get_users(user_ids, ids)`, `get_organizations(ids, owner_ids)`, `get_locations(ids, parent_ids)` and `get_claims(ids, owner_ids)` return the table rows named by id and by owner or parent. A root owns itself, so it comes back for its own id among the owners or parents.
+1. `get_users(user_ids, ids, emails, external_ids)`, `get_organizations(ids, owner_ids, external_ids)`, `get_locations(ids, parent_ids, external_ids)` and `get_claims(ids, owner_ids)` return the table rows named by id, by owner or parent, and by external id; a user also by email, compared without case. A root owns itself, so it comes back for its own id among the owners or parents. An email or an external id resolves to its row this way, the soft deleted ones included, so a caller resolving a live row keeps `sa_deleted_at IS NULL`.
 
 2. `get_grants(ids, user_ids, claim_ids, owner_ids, clients)` returns `user_claim` rows: by id for the creator behind a `sa_created_by`, by user for the rows a user created, by claim for the holders of a claim, by owner for the grants under an organization. With `clients` false the grants a `samna_client` holds are left out.
 
-3. `get_bindings(object_type, object_ids, claim_ids)` returns `claim_object` rows on objects of a type, on ids of that type, or of claims. With `get_grants` on their claim ids they are the holders of the bindings on an object; `get_claims(ids, NULL)` gives the claim each binding narrows. Ids without a type give no rows.
+3. `get_bindings(object_type, object_ids, claim_ids)` returns `claim_object` rows on objects of a type, on ids of that type, or of claims. With `get_grants` on their claim ids they are the holders of the bindings on an object; `get_claims(ids, NULL)` gives the claim each binding narrows. Each row carries `effective_access`, the mask the binding gives, `claim & expand(coalesce(binding, claim))`, so a caller never computes it from the internal `_effective_access`. Ids without a type give no rows.
 
 4. `get_user_tokens(user_ids)` returns the users' `user_token` rows; `sa_created_by` on one is the grant that bound the user. `get_object_types()` returns the type of every registered table.
 
 5. Every argument given applies, and a call with none gives no rows. Soft deleted rows, grants outside their window and bindings of deleted claims are returned as they are, so a caller keeps the filter it had on `sa_deleted_at`, `starts_at` and `ends_at`.
 
-6. The two argument forms of `get_users`, `get_organizations`, `get_locations` and `get_claims` take arrays and both arguments, so a call with a user id still resolves to the reader form.
+6. The array forms of `get_users`, `get_organizations`, `get_locations` and `get_claims` take arrays and the first two arguments without a default, the email and external id lists with one, so a call with a user id still resolves to the reader form.
 
 None of them settles or writes, and none tells what the reader may do: a write still goes through `mutation_access`, and a listing of what the reader sees through the reader forms.
 
 `get_object_usage(user, object_ids, object_types)` is a reader's read. It settles the reader's share, which folds its pending usage, and returns per object its `object_info` name and the reader's `used_count`, NULL when the reader holds no pair on it. A NULL type takes the type of the reader's pair, so an id alone resolves to the pair the reader holds.
+
+`get_relations(user, ids)` returns the reader's live `user_relation` rows, with `ids` only the ones named there: a relation is its user's alone, the rule `resolve_access` applies to `claimius.user_relation`, so another user's row or a soft deleted one never comes back. A caller filters the rows further by object, pin, priority, parent, sibling or description, and selects one relation by id through the same function.
+
+`get_audit(user, required, limit, offset, ids)` on a disciple keeps only the rows named in `ids`, so one row by id is `get_audit(user, required, p_ids => ARRAY[id])`; without `ids` it is the listing. The gate `mutation_access(user, id, 'claimius.audit', required)` still tells a missing row from a hidden one.
+
+`get_descendants(object_id)` is `get_descendants(object_type, object_id)` for an object whose type the caller does not hold: it runs the typed walk for each registered type the id is an object or an ancestor of, so a graph starting at an id walks one type instead of every registered one.
+
+## The get views
+
+A bun model with a belongs-to relation, an `Owner`, a `User`, a `Location`, an `Organization` or a `Creator`, joins the related model's table in the same statement: `LEFT JOIN "claimius"."organization" AS "owner" ON ...`. A function cannot stand there without changing what the join costs: a `SECURITY DEFINER` function is never inlined, so a join through one reads every row of the table on each statement before the join condition applies.
+
+Five views carry those joins instead: `claimius.get_users` over `samna_user`, `claimius.get_organizations` over `organization`, `claimius.get_locations` over `location`, `claimius.get_claims` over `claim` and `claimius.get_grants` over `user_claim`.
+
+1. Each is `SELECT * FROM` its table and nothing else: every row, soft deleted and inactive ones included, with no reader and no access filter. They are the rows of the lookups by id, as a relation, so a join or a select through one returns exactly what it returned from the table, and a caller keeps the filters it had on `sa_deleted_at`, `starts_at` and `ends_at`.
+
+2. A view runs with its owner's rights and the planner merges it into the statement, so the join condition reaches the table's own index: a join through `get_organizations` probes `organization_pkey` as the join on the table did.
+
+3. `claimius_reader` holds `SELECT` on the five views and on no table, granted in `V6.0`. They carry the `get_` names of the lookups they mirror, so the rule holds as written: app code names a `claimius` relation only through a `get_` name.
+
+4. The bun models `SamnaUser`, `Organization`, `Location`, `Claim` and `UserClaim` in `shared` carry `select:claimius.get_<name>` beside `table:claimius.<name>` in their `bun.BaseModel` tag. bun reads a select, a belongs-to join and a has-many load from the `select` name and writes an insert, an update and a delete to the `table` name, so a model that `bun:",extend"`s one of them, and every relation pointing at one, reads through the view with no change at the call. A consumer model of its own over a claimius table, such as a compact owner, adds the same `select:` option.
+
+5. The views are created in `V6.0`, the last file of the set, which runs on every build and replay, so `SELECT *` expands after every column change of the set and a new column reaches the view.
+
+They answer what a row names, never what the reader may do: a write still goes through `mutation_access`, and what the reader sees through the reader forms.
 
 ## Which reads write
 
@@ -154,7 +181,7 @@ A read writes only its settle: the pairs it recomputes and the marks it moves, t
 
 ## Definer rights
 
-Every `get_*`, `search`, `resolve_access` and `mutation_access` is `SECURITY DEFINER` with `search_path = claimius, pg_temp`. The `claimius_reader` role holds no privilege on any table, so a connection that only reads gets answers through these functions and cannot select the pairs, the closure or the grants directly. The settle a read performs is written with the owner's privileges, and the pinned `search_path` keeps a caller from shadowing a claimius object with its own. See [Security](./security.md).
+Every `get_*`, `search`, `resolve_access` and `mutation_access` is `SECURITY DEFINER` with `search_path = claimius, pg_temp`. The `claimius_reader` role holds no privilege on any table, so a connection that only reads gets answers through these functions and the five [get views](#the-get-views), and cannot select the pairs, the closure or the grants directly. The settle a read performs is written with the owner's privileges, and the pinned `search_path` keeps a caller from shadowing a claimius object with its own. See [Security](./security.md).
 
 ## Plans
 
@@ -211,7 +238,10 @@ for a page of `p` rows, a descent of `h` levels and the settle `s` of the reader
 | `get_claims(user, app, required)` | One probe of the reader's grants per live claim of the app |
 | `get_claims(user, app, object_id, object_type)` | The point settle and one claim probe per derivation of the pair |
 | `get_audit` | The reader's `V_{u,organization}` pairs, then the app's rows newest first until `limit + offset` are kept |
-| `get_users(user_ids, ids)`, `get_organizations(ids, owner_ids)`, `get_locations(ids, parent_ids)`, `get_claims(ids, owner_ids)` | One index probe per id given, or one range of the owner or parent index per owner or parent, plus a heap tuple per row |
+| `get_users(user_ids, ids, emails, external_ids)`, `get_organizations(ids, owner_ids, external_ids)`, `get_locations(ids, parent_ids, external_ids)`, `get_claims(ids, owner_ids)` | One index probe per id given, or one range of the owner or parent index per owner or parent, plus a heap tuple per row. An external id probes the `external_id` index of `organization` or `location`. A user named only by email or external id reads `samna_user` once: the email is compared on `lower(email)` and the `external_id` index holds live rows only |
+| `get_relations` | One range of `idx_user_relation_user_id` |
+| `get_descendants(object_id)` | One `object_info` and one `idx_inheritance_info_ancestor` probe per registered type, then the typed walk for each type that holds the id |
+| The get views | What the same statement costs on the table: the view merges into it |
 | `get_grants`, `get_bindings` | One probe or range of the index on the first list given, ids, users, claims, owners for a grant and type with ids, claims, type for a binding, the other lists tested on the rows read; with `clients` false one `samna_client` probe per row |
 | `get_object_usage` | The settle of the reader's share, then per object one pair probe and one `object_info` probe; an untyped id reads the reader's range of pairs |
 
