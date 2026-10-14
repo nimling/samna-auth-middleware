@@ -226,7 +226,21 @@ func (d *DB) applyRouted(ctx context.Context, conn bun.IConn, model any, raw jso
 		if err := unmarshalWrite(result, raw); err != nil {
 			return err
 		}
-		if _, err := store.Upsert(ctx, d.DB, conn, result); err != nil {
+		apply := func(c bun.IConn) error {
+			if _, err := c.ExecContext(ctx, "SELECT set_config('claimius.replay_mode', 'true', true)"); err != nil {
+				return err
+			}
+			if _, err := store.Upsert(ctx, d.DB, c, result); err != nil {
+				return err
+			}
+			_, err := c.ExecContext(ctx, "SELECT set_config('claimius.replay_mode', 'false', true)")
+			return err
+		}
+		if conn != nil {
+			if err := apply(conn); err != nil {
+				return err
+			}
+		} else if err := d.DB.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error { return apply(tx) }); err != nil {
 			return err
 		}
 	}
