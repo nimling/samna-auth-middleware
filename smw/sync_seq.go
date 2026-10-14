@@ -2,11 +2,14 @@ package smw
 
 import (
 	"database/sql"
+	"errors"
 	"net/http"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 	"github.com/nimling/samna-auth-middleware/v2/client"
+	discipledb "github.com/nimling/samna-auth-middleware/v2/disciple/sdb"
 	"github.com/nimling/samna-auth-middleware/v2/pkg/respond"
 	sdb "github.com/nimling/samna-auth-middleware/v2/prophet/sdb"
 )
@@ -55,5 +58,36 @@ func AppHome(next echo.HandlerFunc) echo.HandlerFunc {
 			return respond.Error(ctx, http.StatusConflict, "The app's writes are decided by prophet "+home.String)
 		}
 		return next(ctx)
+	}
+}
+
+const seqTimeout = 10 * time.Second
+
+func WaitForSeq(timeout time.Duration) echo.MiddlewareFunc {
+	if timeout <= 0 {
+		timeout = seqTimeout
+	}
+	return func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(ctx echo.Context) error {
+			db := discipledb.Instance()
+			if db == nil || !db.RouteToProphet {
+				return next(ctx)
+			}
+			reqCtx, seq, fresh := client.WithRequestSeq(ctx.Request().Context())
+			if !fresh {
+				return next(ctx)
+			}
+			ctx.SetRequest(ctx.Request().WithContext(reqCtx))
+			ctx.Response().Before(func() {
+				target := seq.Get()
+				if target.IsZero() {
+					return
+				}
+				if err := db.WaitForSeq(ctx.Request().Context(), target, timeout); err != nil && !errors.Is(err, sql.ErrNoRows) {
+					ctx.Logger().Warnf("routed write %s not yet applied, answering anyway: %v", target, err)
+				}
+			})
+			return next(ctx)
+		}
 	}
 }

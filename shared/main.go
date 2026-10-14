@@ -259,6 +259,33 @@ func ModelType[T any]() reflect.Type {
 	return reflect.TypeOf((*T)(nil)).Elem()
 }
 
+func (d *DB) GetSeq(ctx context.Context) (client.SyncCursor, error) {
+	var row DiscipleState
+	if err := d.NewSelect().Model(&row).Limit(1).Scan(ctx); err != nil {
+		return client.SyncCursor{}, err
+	}
+	return row.Cursor(), nil
+}
+
+func (d *DB) WaitForSeq(ctx context.Context, target client.SyncCursor, timeout time.Duration) error {
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	for {
+		seq, err := d.GetSeq(ctx)
+		if err != nil && ctx.Err() == nil {
+			return err
+		}
+		if err == nil && !seq.Less(target) {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("timeout waiting for seq %s: %w", target, ctx.Err())
+		case <-time.After(50 * time.Millisecond):
+		}
+	}
+}
+
 func LeadSync(ctx context.Context, db *DB, key string, interval time.Duration, work func(context.Context)) {
 	for {
 		conn, err := takeSyncLock(ctx, db, key)

@@ -64,7 +64,7 @@ func step(c client.SyncCursor, n int64) client.SyncCursor {
 
 func cursor(t *testing.T) client.SyncCursor {
 	t.Helper()
-	seq, err := sam.GetSeq(context.Background())
+	seq, err := sdb.Instance().GetSeq(context.Background())
 	if err != nil {
 		t.Fatalf("read cursor: %v", err)
 	}
@@ -120,7 +120,7 @@ func TestLeadSyncRunsOneConsumer(t *testing.T) {
 	loop := func(name string) func(context.Context) {
 		return func(ctx context.Context) {
 			for ctx.Err() == nil {
-				seq, err := sam.GetSeq(ctx)
+				seq, err := sdb.Instance().GetSeq(ctx)
 				if err == nil && sam.Disciple().ApplyPage(ctx, seq, sam.State{Cursor: step(seq, 1)}, nil, "") == nil {
 					mu.Lock()
 					applied[name]++
@@ -188,14 +188,14 @@ func TestWaitForSeqReturnsOnceTheCursorReachesTheWrite(t *testing.T) {
 			t.Errorf("apply page: %v", err)
 		}
 	}()
-	if err := sam.WaitForSeq(ctx, step(from, 3), 5*time.Second); err != nil {
+	if err := sdb.Instance().WaitForSeq(ctx, step(from, 3), 5*time.Second); err != nil {
 		t.Fatalf("a wait for a sequence the cursor reaches must return, got %v", err)
 	}
-	if err := sam.WaitForSeq(ctx, step(from, 1000), 200*time.Millisecond); err == nil {
+	if err := sdb.Instance().WaitForSeq(ctx, step(from, 1000), 200*time.Millisecond); err == nil {
 		t.Fatal("a wait for a sequence the cursor never reaches must time out")
 	}
 	later := client.SyncCursor{Txid: from.Txid + 1, Seq: 1}
-	if err := sam.WaitForSeq(ctx, later, 200*time.Millisecond); err == nil {
+	if err := sdb.Instance().WaitForSeq(ctx, later, 200*time.Millisecond); err == nil {
 		t.Fatal("a write of a later transaction is waited on even when its sequence is below the cursor")
 	}
 }

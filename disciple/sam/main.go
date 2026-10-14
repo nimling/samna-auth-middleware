@@ -562,30 +562,3 @@ func (r *Replica) GetState(ctx context.Context) (State, error) {
 	}
 	return state, nil
 }
-
-func GetSeq(ctx context.Context) (client.SyncCursor, error) {
-	state, err := Disciple().GetState(ctx)
-	if err != nil {
-		return client.SyncCursor{}, err
-	}
-	return state.Cursor, nil
-}
-
-func WaitForSeq(ctx context.Context, target client.SyncCursor, timeout time.Duration) error {
-	ctx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-	for {
-		seq, err := GetSeq(ctx)
-		if err != nil && ctx.Err() == nil {
-			return err
-		}
-		if err == nil && !seq.Less(target) {
-			return nil
-		}
-		select {
-		case <-ctx.Done():
-			return fmt.Errorf("timeout waiting for seq %s: %w", target, ctx.Err())
-		case <-time.After(50 * time.Millisecond):
-		}
-	}
-}

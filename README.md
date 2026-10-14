@@ -26,7 +26,7 @@ A binary is one role. Both roles wire the same four identifiers. Each app has on
 |---------|----------------|-----------------|------|
 | `sdb` | `prophet/sdb` | `disciple/sdb` | Database layer. `sdb.Init(logger)` connects the pool and loads config once. |
 | `echo` | `prophet/echo` | `disciple/echo` | The individual HTTP handlers. |
-| `sam` | `prophet/sam` | `disciple/sam` | `sam.RegisterEndpoints(group)`; `sam.SyncStart(ctx)` on the disciple, `sam.PeerSyncStart(ctx, db)` on a prophet mirroring a peer, and `sam.WaitForSeq`. |
+| `sam` | `prophet/sam` | `disciple/sam` | `sam.RegisterEndpoints(group)`; `sam.SyncStart(ctx)` on the disciple, `sam.PeerSyncStart(ctx, db)` on a prophet mirroring a peer. |
 | `smw` | `smw` | `smw` | Middleware, shared by both roles. |
 | `client` | `client` | `client` | HTTP client for the Samna Auth API. |
 | `utils` | `utils` | `utils` | Config loader, cookies, and debug helpers. |

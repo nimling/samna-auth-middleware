@@ -75,9 +75,11 @@ func UserAuthMiddleware(opts *UserAuthOptions) echo.MiddlewareFunc {
 		panic(fmt.Sprintf("JWK client initialization failed: %v", err))
 	}
 
+	wait := WaitForSeq(config.SeqTimeout)
+
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
+		proceed := wait(next)
 		return func(ctx echo.Context) error {
-			proceed := next
 			if bearerErr := authenticateBearer(ctx, config, jwksClient.Keyfunc); !errors.Is(bearerErr, ErrorCredentialMissing) {
 				if bearerErr != nil {
 					return respondAuthError(ctx, bearerErr)
@@ -200,6 +202,7 @@ func configFromUserAuthOptions(opts *UserAuthOptions) *AuthMiddlewareConfig {
 		DebugUserID:     parseUUID(c.DebugUserID),
 		DebugClients:    parseDebugClients(),
 		Optional:        opts.Optional,
+		SeqTimeout:      opts.SeqTimeout,
 	}
 }
 

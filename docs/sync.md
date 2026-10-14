@@ -40,7 +40,7 @@ This is why a machine client created on the prophet becomes usable on a disciple
 
 ## Reading a routed write back
 
-A routed write answers with the app's feed position in `SAuth-Seq`, kept on the builder as `Seq()`. A read that must see that write calls `sam.WaitForSeq(ctx, q.Seq(), timeout)`, which returns once the disciple's cursor has reached it.
+A routed write answers with the app's feed position in `SAuth-Seq`, kept on the builder as `Seq()`. A read that must see that write calls `sdb.Instance().WaitForSeq(ctx, q.Seq(), timeout)`, which returns once the disciple's cursor has reached it.
 
 ## Consumer shape
 

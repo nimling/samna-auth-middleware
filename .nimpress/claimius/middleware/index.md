@@ -27,8 +27,8 @@ Claimius is the schema: its model, its functions and their guarantees, independe
 |---|---|---|---|
 | `sdb` | `prophet/sdb` | `disciple/sdb` | The database handle, the access lookups, the write builders, the usage counter, the audit writer `Write` |
 | `echo` | `prophet/echo` | `disciple/echo` | The HTTP handlers for the shared types |
-| `sam` | `prophet/sam` | `disciple/sam` | Route registration; the pull loop, `Replica`, `LeadSync`, `WaitForSeq` and the peer pull |
-| `smw` | `smw` | `smw` | Authentication, `AppMiddleware`, `SyncSeq`, `AppHome` |
+| `sam` | `prophet/sam` | `disciple/sam` | Route registration; the pull loop, `Replica`, `LeadSync` and the peer pull |
+| `smw` | `smw` | `smw` | Authentication, `AppMiddleware`, `SyncSeq`, `AppHome`, `WaitForSeq` |
 | `client` | `client` | `client` | The HTTP client a replica reaches a prophet with, `SyncCursor`, `Bind` |
 | `database` | `prophet/database` | `disciple/database` | The claimius role sets |
 | `shared` | both | both | The implementation both roles use; never imported by a consumer |

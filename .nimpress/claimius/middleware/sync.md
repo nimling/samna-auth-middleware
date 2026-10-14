@@ -3,7 +3,7 @@ gate: auth-middleware
 layout: doc
 title: Sync in Go
 description: The /sam/sync routes on the prophet, the pull loop SyncStart on the disciple under one leader per database, pages applied in one transaction, binding to one prophet, the peer pull, reconciling from a snapshot, and the drain between pulls.
-tags: SyncStart, PeerSyncStart, Replica, Move, LeadSync, SyncLockKey, PullSync, PullSnapshot, ApplyPage, ApplyPayload, SyncCursor, WaitForSeq, SAuth-Prophet, SAuth-Home, SAuth-Seq, advisory lock, /sam/sync, snapshot, drain
+tags: SyncStart, PeerSyncStart, Replica, Move, LeadSync, SyncLockKey, PullSync, PullSnapshot, ApplyPage, ApplyPayload, SyncCursor, WaitForSeq, read your writes, SAuth-Prophet, SAuth-Home, SAuth-Seq, advisory lock, /sam/sync, snapshot, drain
 lastUpdated: true
 ---
 
@@ -18,7 +18,17 @@ Sync is pull. The prophet serves two routes under `/sam`, behind `smw.AppMiddlew
 
 Both routes take `consumer`, the replica's state id, and `prophet`, the slug the replica is bound to. A request for the page after a cursor is the replica's proof that it applied everything up to it, so the prophet records that cursor, not the served one, per consumer in `sync_consumer` through `update_sync_cursor`, which is what `trim_sync_event` trims against. The snapshot records its own cursor the same way. `get_sync_events` serves no `user_object`, `user_users` or `audit` row, and the snapshot carries source rows only: the replica derives its own pairs. See [Sync](../sync.md).
 
-`client.SyncCursor{Txid, Seq}` is a position on a prophet's feed, ordered by `txid` and then `seq`, written `<txid>.<seq>` by `String` and read by `ParseSyncCursor`. The same form travels in the path of a pull and in `SAuth-Seq`, the header `smw.SyncSeq` stamps on every successful write answer with the app's position from `claimius.get_sync_seq`. `sam.GetSeq` reads the disciple's cursor, and `sam.WaitForSeq(ctx, cursor, timeout)` waits until it reaches a routed write's position.
+`client.SyncCursor{Txid, Seq}` is a position on a prophet's feed, ordered by `txid` and then `seq`, written `<txid>.<seq>` by `String` and read by `ParseSyncCursor`. The same form travels in the path of a pull and in `SAuth-Seq`, the header `smw.SyncSeq` stamps on every successful write answer with the app's position from `claimius.get_sync_seq`. `sdb.Instance().GetSeq(ctx)` reads the disciple's cursor, and `sdb.Instance().WaitForSeq(ctx, cursor, timeout)` waits until it reaches a routed write's position.
+
+## Read your writes
+
+A disciple answers a request that made routed writes only once its cursor has reached the highest position those writes answered with, so the client's next request, on any pod, sees them as a single local database would.
+
+1. `smw.UserAuthMiddleware` holds every request it authenticates in this way; `smw.WaitForSeq(timeout)` does the same for a route outside it, and a request held by both waits once.
+2. Every routed write of the request raises the position, `NewInsert`, `NewUpdate`, `NewDelete` and every helper that writes through them. A request that made none answers at once.
+3. The wait runs when the answer is about to be written, after the handler has returned and its transaction has committed, so it holds no lock the apply of the page needs.
+4. It lasts at most `UserAuthOptions.SeqTimeout`, 10 s when unset. When it runs out the answer still goes out, and a warning naming the position is logged.
+5. A prophet, a disciple in debug mode, and a database without a `disciple_state` row never wait.
 
 ## One leader per database
 

@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -139,6 +140,35 @@ type syncSeqKey struct{}
 
 func WithSyncSeq(ctx context.Context, seq *SyncCursor) context.Context {
 	return context.WithValue(ctx, syncSeqKey{}, seq)
+}
+
+type requestSeqKey struct{}
+
+type RequestSeq struct {
+	mu  sync.Mutex
+	seq SyncCursor
+}
+
+func WithRequestSeq(ctx context.Context) (context.Context, *RequestSeq, bool) {
+	if r, ok := ctx.Value(requestSeqKey{}).(*RequestSeq); ok {
+		return ctx, r, false
+	}
+	r := &RequestSeq{}
+	return context.WithValue(ctx, requestSeqKey{}, r), r, true
+}
+
+func (r *RequestSeq) Get() SyncCursor {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.seq
+}
+
+func (r *RequestSeq) put(v SyncCursor) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.seq.Less(v) {
+		r.seq = v
+	}
 }
 
 type statusKey struct{}
@@ -276,8 +306,13 @@ func (e *httpClient) send(ctx context.Context, hc *http.Client, method string, r
 	}
 
 	if seq, ok := ctx.Value(syncSeqKey{}).(*SyncCursor); ok && resp.StatusCode >= 200 && resp.StatusCode < 300 {
-		if v, err := ParseSyncCursor(resp.Header.Get(HeaderSyncSeq)); err == nil && seq.Less(v) {
-			*seq = v
+		if v, err := ParseSyncCursor(resp.Header.Get(HeaderSyncSeq)); err == nil {
+			if seq.Less(v) {
+				*seq = v
+			}
+			if r, ok := ctx.Value(requestSeqKey{}).(*RequestSeq); ok {
+				r.put(v)
+			}
 		}
 	}
 	if status, ok := ctx.Value(statusKey{}).(*int); ok {

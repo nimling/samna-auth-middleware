@@ -67,6 +67,7 @@ type AuthMiddlewareConfig struct {
 	DebugUserID         *uuid.UUID
 	DebugClients        map[string]DebugClient
 	Optional            bool
+	SeqTimeout          time.Duration
 }
 
 type UserAuthOptions struct {
@@ -75,6 +76,7 @@ type UserAuthOptions struct {
 	RedirectURI     string
 	PageRedirectURI string
 	Optional        bool
+	SeqTimeout      time.Duration
 }
 
 type UserDetail struct {

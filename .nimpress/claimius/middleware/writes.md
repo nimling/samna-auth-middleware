@@ -3,7 +3,7 @@ gate: auth-middleware
 layout: doc
 title: Writes in Go
 description: The write builders NewInsert, NewUpdate and NewDelete, how a write to a shared type is routed to the prophet and upserted locally, how the actor is stamped, the feed position a routed write answers with, audit in the write's transaction, and debug mode.
-tags: NewInsert, NewUpdate, NewDelete, Access, Conn, routed write, EndpointFor, Seq, WaitForSeq, WriteAudit, debug mode, sa_created_by
+tags: NewInsert, NewUpdate, NewDelete, Access, Conn, routed write, EndpointFor, Seq, WaitForSeq, read your writes, WriteAudit, debug mode, sa_created_by
 lastUpdated: true
 ---
 
@@ -41,7 +41,7 @@ The last three are one operation, `insert_organization_user`: the user, the gran
 
 3. The disciple resolved the actor's grant with `MutationAccess` before it wrote. On the prophet the write runs for the calling app only: the app comes from the app key, a shared hierarchy row must be linked to it through `app_object`, and `smw.AppHome` refuses the write with `409` and the deciding prophet in `SAuth-Home` when another prophet decides the app, which the client returns as `client.ErrNotHome`. The prophet's triggers enforce the grant invariants against the stamped actor: a binding may not hand out more than the actor holds on the object, or, on a row of the disciple's own table that the prophet does not hold, on the binding's owning organization or as the row's creator, and a composition link needs read on the linked claim. A consumer binds a claim on its own row with `NewInsert().Model(&ClaimObject{...}).Access(ac)`, never with a local `claimius.insert_claim_object`, which lands on the disciple alone: the prophet, its feed and every other disciple of the app never hold it.
 
-4. The prophet answers every successful write with the app's feed position in `SAuth-Seq`, written `<txid>.<seq>`. The builder keeps it, and `Seq()` returns it as a `client.SyncCursor`. A later read on the disciple that must see the write calls `sam.WaitForSeq(ctx, q.Seq(), timeout)`, which waits until the disciple's cursor reaches that position; see [Sync](../sync.md).
+4. The prophet answers every successful write with the app's feed position in `SAuth-Seq`, written `<txid>.<seq>`. The builder keeps it, and `Seq()` returns it as a `client.SyncCursor`. The request that made the write also keeps the highest position of every routed write it made, helpers included, and its answer is held until the disciple's cursor reaches that position, so the client's next request reads the write back: a grant the prophet created beside a routed `IssueUserToken` is on the disciple before the token's answer leaves; see [Sync in Go](./sync.md#read-your-writes). Inside one request, a read that must see the write calls `sdb.Instance().WaitForSeq(ctx, q.Seq(), timeout)`, which waits until the disciple's cursor reaches that position.
 
 5. The write settles the actor's own pairs on the prophet and, through the local upsert and the triggers, on the disciple, so the handler reads its own write back. Every other user's pairs settle on that user's next check or listing; see [Materialization](../materialization.md).
 
