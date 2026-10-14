@@ -19,29 +19,27 @@ A binding of a read claim to a user's `samna_user` row with that scope lets its 
 
 ## A mask per field
 
-Redaction is a field mask: for a pair `(u, x)` and every field `f` of the object's table, the bits `u` holds on `f`,
+For a pair, every field of the object's table carries its own access bits. The fields of a type are the columns of its table, read from `pg_attribute` in the same statement; a scope key that is not a column is ignored, so a scope naming no column grants nothing. `_apply_denies` settles each derivation of the pair:
 
-```
-M(u, x, f) = ⋁ over surviving grants and the creator of a(f)
-```
+1. An unscoped grant carries its bits, less the denies that reach it, on every field, and a lower mask on each field a scoped deny reaches.
 
-with `a_g(f)` of [the model](./index.md#the-access-of-a-pair). The fields of a type are the columns of its table, read from `pg_attribute` in the same statement; a scope key that is not a column is ignored, so a scope naming no column grants nothing. For each derivation `_apply_denies` computes:
+2. A scoped grant carries its bits, less the denies that reach it, on each field its scope names, and nothing on any other field. Its contribution to the pair's mask is the OR over its fields.
 
-1. An unscoped grant carries `close(e_g & 15 & ~D_g)` on every field, and a different mask on each field a scoped deny reaches.
+3. The creator carries every bit less the denies that reach the creator, as an unscoped grant.
 
-2. A scoped grant carries `close(e_g & 15 & ~D_g(f))` on each field `f` its scope names and nothing on any other field. Its contribution to `sa_access` is the OR over its fields.
+4. Each remainder is closed under implication, and a derivation left with no bits is dropped.
 
-3. The creator carries `close(15 & ~(X_d | F_d(f)))`, an unscoped grant.
+A deny scoped to a field lowers that field only; an unscoped deny lowers every field; see [Denials](./denials.md). A scope travels down a cascade with its binding: an inherited derivation carries the scope of the binding on the ancestor.
 
 ## What the pair stores
 
-`user_object.sa_access` is `A(u, x)`, the OR of every field mask, so a check on the object as a whole passes when any field carries the required bits. `user_object.scope` stores the field masks compactly:
+`user_object.sa_access` is the OR of every field mask, so a check on the object as a whole passes when any field carries the required bits. `user_object.scope` stores the field masks compactly:
 
-```
-M(*)  = ⋁ over unscoped cells of their mask on unnamed fields
-scope = { f : M(f) }  for every field f named by some cell with M(f) ≠ M(*),  plus  { "*" : M(*) }
-scope = NULL          when no named field differs from M(*)
-```
+1. `*` holds the mask of every field no scope names: the OR of the unscoped derivations, and of the `*` entry of the scoped ones.
+
+2. Each field some derivation names, whose mask differs from `*`, is a key with its own mask.
+
+3. When no named field differs from `*`, `scope` is NULL.
 
 | Derivations on one document | `scope` | `sa_access` |
 |---|---|---|
@@ -50,9 +48,7 @@ scope = NULL          when no named field differs from M(*)
 | Write, 14, scoped `{"name"}`, read unscoped | `{"name": 14, "*": 4}` | 14 |
 | Read unscoped, a direct deny of read scoped `{"description"}` | `{"description": 0, "*": 4}` | 4 |
 
-A deny scoped to a field lowers that field only; an unscoped deny lowers every field; see [Denials](./denials.md). A scope travels down a cascade with its binding: an inherited derivation carries the scope of the binding on the ancestor.
-
-The merge is `G_x` cells times the fields they name, per recompute of the pair, and no work on a read.
+The merge runs when the pair is recomputed, never on a read.
 
 ## What each read returns
 
@@ -70,6 +66,36 @@ The implementing side renders the object, so the implementing side redacts:
 
 2. With `scope` NULL every field carries `sa_access` and nothing is withheld.
 
-## Why the mask is stored on the pair
+## Math
 
-A listing of `n` objects renders `n` scopes, and each is a column of the row the listing already reads. Merging grants at request time would repeat the derivation per row, `O(C + a_x + B_x)` index entries each, where the stored scope costs none. Redaction by field is the object attribute decision [NIST SP 800-162](https://csrc.nist.gov/pubs/sp/800/162/upd2/final) describes; claimius keeps it to the one attribute that needs no policy language, the field name.
+For a pair `(u, x)` and every field `f` of the object's table, the bits `u` holds on `f` are
+
+```
+M(u, x, f) = ⋁ over surviving grants and the creator of a(f)
+```
+
+with `a_g(f)` of [the model](./index.md#the-access-of-a-pair). Per derivation:
+
+1. An unscoped grant carries `close(e_g & 15 & ~D_g)` on every field, and `close(e_g & 15 & ~D_g(f))` on each field a scoped deny reaches.
+
+2. A scoped grant carries `close(e_g & 15 & ~D_g(f))` on each field `f` its scope names and nothing on any other field.
+
+3. The creator carries `close(15 & ~(X_d | F_d(f)))`.
+
+The stored scope:
+
+```
+M(*)  = ⋁ over unscoped cells of their mask on unnamed fields
+scope = { f : M(f) }  for every field f named by some cell with M(f) ≠ M(*),  plus  { "*" : M(*) }
+scope = NULL          when no named field differs from M(*)
+```
+
+The merge is `G_x` cells times the fields they name, per recompute of the pair, and no work on a read.
+
+## Proofs and measurements
+
+### Why the mask is stored on the pair
+
+A listing of `n` objects renders `n` scopes, and each is a column of the row the listing already reads. Merging grants at request time would repeat the derivation per row, `O(C + a_x + B_x)` index entries each, where the stored scope costs none.
+
+**Sources.** Redaction by field is the object attribute decision [NIST SP 800-162](https://csrc.nist.gov/pubs/sp/800/162/upd2/final) describes; claimius keeps it to the one attribute that needs no policy language, the field name.
