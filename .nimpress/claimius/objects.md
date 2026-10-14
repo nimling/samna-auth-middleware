@@ -31,11 +31,11 @@ The implementing side makes a table participate by carrying the `sa_*` columns a
 | `name`, `description` | Rendering and search text, copied into `object_info` | no |
 | `app_id` | The app of the row | on a prophet that hosts apps besides its system app |
 
-`upsert_table_info` takes the complete list of the implementing side's tables:
+`upsert_table_info(VARIADIC object_types)` registers the named tables:
 
 1. For each it records the column shape in `table_info`, one row with one `has_*` flag per column, read from `information_schema` once, and attaches the calc trigger `tg_calc_access`: `calc_hierarchical_access` when the table has both `sa_parent_id` and `sa_root_id`, `calc_object_access` otherwise, plus the before insert self root trigger.
 
-2. A table registered before and absent from the list is deregistered: its triggers detached, and its `table_info` row, its `inheritance_info` rows, its `user_object` and `object_info` rows deleted. The `user_object` delete is counted out of `user_users` like any other.
+2. `delete_table_info(VARIADIC object_types)` deregisters the named tables: it detaches their triggers and deletes their `table_info`, `inheritance_info`, `user_object` and `object_info` rows, the `user_object` rows counted out of `user_users` like any other delete. A name that is not a registered table raises.
 
 3. Under `replay_mode` it seeds the rows already present with `_bulk_seed_user_object`: `object_info` for every row, then the pairs `(u, x)` with `u` in `_affected_users_for_object(x)` for every live row `x` and every app of it, collected in one statement and grouped by user, and one `recompute_user_object` per user and 1,000 of its objects, each pair raising its `user_users_diff` row like any other, for the reads and the drain to fold. The seed recomputes the same `Σ_x |affected(x)|` pairs in `Σ_u ⌈n_u / 1000⌉` calls, where `n_u` is the objects of the type user `u` is affected on, instead of one call per pair, and emits no sync event. On bookable's dev data, 23 tables, 46,063 objects and 210 users, that is 253 calls instead of 57,082, and its registration with `recompute_state` after it takes 92 seconds instead of 865.
 

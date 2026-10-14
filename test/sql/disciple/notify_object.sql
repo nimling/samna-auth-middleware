@@ -1,5 +1,5 @@
 BEGIN;
-SELECT plan(4);
+SELECT plan(5);
 
 DO $$
 DECLARE
@@ -9,6 +9,8 @@ DECLARE
     v_reader UUID := 'a0000000-0000-4000-8000-000000000f52';
     v_write  UUID;
     v_read   UUID;
+    v_link   UUID;
+    v_held   UUID;
 BEGIN
     PERFORM claimius.upsert_disciple_state();
 
@@ -38,6 +40,18 @@ BEGIN
         p_sa_owner_id => v_org, p_sa_created_by => v_sys);
     PERFORM claimius.insert_user_claim(p_claim_id => v_read, p_user_id => v_reader,
         p_sa_owner_id => v_org, p_sa_created_by => v_sys);
+
+    PERFORM claimius.upsert_app_user(p_user_id => 'a0000000-0000-4000-8000-000000000f53', p_first_name => 'Composed');
+    v_held := (SELECT uc.id FROM claimius.user_claim uc WHERE uc.user_id = v_reader AND uc.claim_id = v_read);
+    v_link := (claimius.insert_claim(
+        p_name => 'Notice link', p_description => NULL, p_sa_access => 4,
+        p_sa_owner_id => v_org, p_sa_root_id => v_org, p_sa_created_by => v_sys
+    ) -> 'claim' ->> 'id')::UUID;
+    PERFORM claimius.insert_claim_object(
+        p_claim_id => v_link, p_sa_owner_id => v_org, p_sa_root_id => v_org, p_sa_created_by => v_held,
+        p_object_id => v_read, p_object_type => 'claimius.claim', p_inherits => TRUE);
+    PERFORM claimius.insert_user_claim(p_claim_id => v_link, p_user_id => 'a0000000-0000-4000-8000-000000000f53',
+        p_sa_owner_id => v_org, p_sa_created_by => v_sys);
 END $$;
 
 SELECT is_empty($$
@@ -54,6 +68,11 @@ SELECT ok(EXISTS (
         SELECT 1 FROM claimius.notification
         WHERE user_id = 'a0000000-0000-4000-8000-000000000f52' AND title = 'Notice'),
     'the reader whose pair was never settled is notified');
+
+SELECT ok(EXISTS (
+        SELECT 1 FROM claimius.notification
+        WHERE user_id = 'a0000000-0000-4000-8000-000000000f53' AND title = 'Notice'),
+    'a holder of a claim composed with a binding claim is notified');
 
 SELECT is_empty($$
     SELECT 1 FROM claimius.notification

@@ -8,7 +8,7 @@ BEGIN
              claimius.merge_user, claimius.migrate_root,
              claimius.upsert_system_app, claimius.upsert_disciple_state, claimius.upsert_prophet_peer, claimius.upsert_app,
              claimius.insert_app_handover, claimius.update_app_handover, claimius.apply_peer_event, claimius.insert_secret, claimius.upsert_peer_grant, claimius.upsert_guest_user,
-             claimius.upsert_table_info, claimius.upsert_internal_table_info,
+             claimius.upsert_table_info, claimius.delete_table_info, claimius.upsert_internal_table_info,
              claimius.recompute_state
              FROM claimius_reader';
 
@@ -38,7 +38,7 @@ BEGIN
              claimius.merge_user, claimius.migrate_root,
              claimius.upsert_system_app, claimius.upsert_disciple_state, claimius.upsert_prophet_peer, claimius.upsert_app,
              claimius.insert_app_handover, claimius.update_app_handover, claimius.apply_peer_event, claimius.insert_secret, claimius.upsert_peer_grant, claimius.upsert_guest_user,
-             claimius.upsert_table_info, claimius.upsert_internal_table_info,
+             claimius.upsert_table_info, claimius.delete_table_info, claimius.upsert_internal_table_info,
              claimius.recompute_state
              FROM claimius_reader';
     EXECUTE 'GRANT INSERT, UPDATE, DELETE ON claimius.user_object, claimius.object_info, claimius.user_users,

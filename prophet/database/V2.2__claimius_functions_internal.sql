@@ -1713,6 +1713,14 @@ BEGIN
         RETURN;
     END IF;
 
+    PERFORM pg_advisory_xact_lock(hashtextextended('claimius.directory:' || p_app_id::TEXT || ':' || p_user_id::TEXT, 0));
+    IF EXISTS (
+        SELECT 1 FROM claimius.user_activity a
+        WHERE a.user_id = p_user_id AND a.app_id = p_app_id AND a.directory_at > now() - INTERVAL '30 days'
+    ) THEN
+        RETURN;
+    END IF;
+
     DELETE FROM claimius.user_users WHERE app_id = p_app_id AND viewer_id = p_user_id;
 
     WITH mine AS MATERIALIZED (
@@ -1766,7 +1774,8 @@ BEGIN
     INSERT INTO claimius.user_users (id, app_id, viewer_id, target_user_id, sharing_object_count)
     SELECT claimius.composite_id(p_app_id::TEXT, p_user_id::TEXT, c.target_user_id::TEXT), p_app_id, p_user_id, c.target_user_id, c.n
     FROM counted c
-    ORDER BY 1;
+    ORDER BY 1
+    ON CONFLICT (id) DO UPDATE SET sharing_object_count = EXCLUDED.sharing_object_count;
 
     INSERT INTO claimius.user_activity (user_id, app_id, directory_at)
     VALUES (p_user_id, p_app_id, now())
@@ -1774,7 +1783,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius._settle_directory(UUID, UUID) IS 'Makes a user a viewer: on the first directory read, or the first after 30 days away, deletes its user_users rows and builds them from its pairs as the count over the pairs less the user_users_diff rows still pending on its objects, which it holds FOR KEY SHARE so no fold moves them meanwhile, then stamps directory_at. Later reads refresh the stamp at most once a day. The fold keeps the rows from then on.';
+COMMENT ON FUNCTION claimius._settle_directory(UUID, UUID) IS 'Makes a user a viewer: on the first directory read, or the first after 30 days away, deletes its user_users rows and builds them from its pairs as the count over the pairs less the user_users_diff rows still pending on its objects, which it holds FOR KEY SHARE so no fold moves them meanwhile, then stamps directory_at. The rebuild holds a per viewer advisory lock and rereads the stamp under it, so concurrent first reads build the rows once. Later reads refresh the stamp at most once a day. The fold keeps the rows from then on.';
 
 CREATE OR REPLACE FUNCTION claimius._settle_usage_diff(
     p_app_id        UUID,
@@ -1897,12 +1906,47 @@ BEGIN
                          AND e.depth > 0
             WHERE uc.app_id = p_app_id
               AND uc.sa_deleted_at IS NULL
+
+            UNION
+
+            SELECT uc.user_id
+            FROM claimius.claim_object co
+                     JOIN claimius.claim_object link
+                          ON link.object_id = co.claim_id
+                         AND link.object_type = 'claimius.claim'
+                         AND link.app_id = p_app_id AND link.sa_deleted_at IS NULL
+                     JOIN claimius.user_claim uc
+                          ON uc.claim_id = link.claim_id
+                         AND uc.app_id = p_app_id AND uc.sa_deleted_at IS NULL
+            WHERE co.app_id = p_app_id AND co.sa_deleted_at IS NULL
+              AND co.object_type = p_object_type
+              AND co.object_id = p_object_id
+
+            UNION
+
+            SELECT uc.user_id
+            FROM claimius.inheritance_info e
+                     JOIN claimius.claim_object co
+                          ON co.object_type = e.ancestor_type
+                         AND co.object_id = e.ancestor_id
+                         AND co.app_id = p_app_id AND co.sa_deleted_at IS NULL
+                         AND co.inherits = TRUE
+                     JOIN claimius.claim_object link
+                          ON link.object_id = co.claim_id
+                         AND link.object_type = 'claimius.claim'
+                         AND link.app_id = p_app_id AND link.sa_deleted_at IS NULL
+                     JOIN claimius.user_claim uc
+                          ON uc.claim_id = link.claim_id
+                         AND uc.app_id = p_app_id AND uc.sa_deleted_at IS NULL
+            WHERE e.descendant_type = p_object_type
+              AND e.descendant_id = p_object_id
+              AND e.depth > 0
         )
         SELECT DISTINCT au.user_id FROM all_users au;
 END;
 $$ LANGUAGE plpgsql STABLE;
 
-COMMENT ON FUNCTION claimius._affected_users_for_object(p_app_id uuid, p_object_type text, p_object_id uuid) IS 'Users whose access to the object could change.';
+COMMENT ON FUNCTION claimius._affected_users_for_object(p_app_id uuid, p_object_type text, p_object_id uuid) IS 'Users who may hold the object: its creator, its settled pairs, and the holders of every claim bound to it or to an inheriting ancestor, directly or through a claim linked to that claim.';
 
 CREATE OR REPLACE FUNCTION claimius.get_owner_ancestors(
     p_object_type TEXT,

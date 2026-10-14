@@ -26,7 +26,7 @@ Write functions return one jsonb keyed by table: `(v -> 'claim' ->> 'id')::uuid`
 2. `samna_user`: `upsert_app_user`. Guests: `upsert_guest_user`. Secrets: `insert_secret`. Audit: `insert_audit`. Cross app: `merge_user`, prophet set only; samna_auth owns the merge flow and calls it from `internal/service/user.go` `MergeUser`.
 3. Apps: `upsert_system_app` bootstraps a prophet; `upsert_app(p_actor_user_claim_id, ...)` creates every other app with its links, owner and default claims and grant. Never INSERT `samna_app`.
 4. Disciple bootstrap: `upsert_disciple_state(p_disciple_app_slug)`. Hybrid: `upsert_prophet_peer`, a prophet mirroring one app of a peer, with no `disciple_state` row.
-5. Registration: `upsert_table_info`, idempotent. Rerun it after adding `sa_parent_id`, `sa_root_id` or `sa_location_id`, after the migration and backfill.
+5. Registration: `upsert_table_info` registers the named tables, idempotent; `delete_table_info` deregisters the named tables. Rerun `upsert_table_info` after adding `sa_parent_id`, `sa_root_id` or `sa_location_id`, after the migration and backfill.
 6. `app_object`: `upsert_app_object`, `delete_app_object`, never direct. Roots: `upsert_root_organization`, idempotent on app and name.
 7. Direct INSERT or UPDATE: `organization`, `location`, `samna_client`, `object_field`, `user_field`, `user_relation`, `prophet_state`, `disciple_state`, `samna_app` and `samna_secret` updates.
 8. Never write: `user_object`, `object_info`, `user_users`, `user_users_diff`, `inheritance_info`, `table_info`, `sync_event`, `access_diff`, `user_activity`, `claim_graph_cache`, `peer_collision`, `used_count`, `last_used_at`. There is no `object_users`, `access_diff_user` or `reconcile_queue` table.

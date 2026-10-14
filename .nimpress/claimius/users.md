@@ -77,7 +77,7 @@ A pair on a claim moves no count: holding a claim reads the claim, and a claim i
 
 The table is kept by folding, the way `user_object` is kept by settling, for the viewers only; see [Materialization](./materialization.md#the-user-users-fold):
 
-1. A user becomes a viewer on its first `get_users`, `get_user_access` as the actor or `get_claim_graph`, or the first after 30 days away: `_settle_directory(app, u)` builds its rows from its pairs as `C(P ⊖ D)` over its objects, holding the pending rows on them `FOR KEY SHARE`, and stamps `user_activity.directory_at`. A user who never views the directory has no rows and costs nothing.
+1. A user becomes a viewer on its first `get_users`, `get_user_access` as the actor or `get_claim_graph`, or the first after 30 days away: `_settle_directory(app, u)` builds its rows from its pairs as `C(P ⊖ D)` over its objects, holding the pending rows on them `FOR KEY SHARE`, and stamps `user_activity.directory_at`. The build runs under a per viewer advisory lock and rereads the stamp under it, so two first views at once build the rows once. A user who never views the directory has no rows and costs nothing.
 
 2. A statement that inserts or deletes pairs raises one `user_users_diff` row per pair on an object that is not a claim, `+1` for a pair entering and `−1` for one leaving, through `tg_raise_user_users_diff_insert` and `tg_raise_user_users_diff_delete`, while the app has a viewer who read the directory within 30 days, one range of the viewer index per statement. It reads nothing else and locks nothing.
 

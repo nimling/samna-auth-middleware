@@ -7,7 +7,7 @@ BEGIN
              claimius.insert_claim_object, claimius.update_claim_object, claimius.delete_claim_object,
              claimius.migrate_root,
              claimius.upsert_disciple_state, claimius.insert_secret,
-             claimius.upsert_table_info, claimius.upsert_internal_table_info,
+             claimius.upsert_table_info, claimius.delete_table_info, claimius.upsert_internal_table_info,
              claimius.recompute_state
              FROM claimius_reader';
     EXECUTE 'GRANT INSERT, UPDATE, DELETE ON claimius.user_object, claimius.object_info, claimius.user_users, claimius.user_users_diff,

@@ -1010,6 +1010,9 @@ COMMENT ON FUNCTION claimius.check_user_active(p_user_id uuid) IS 'Predicate: re
 CREATE OR REPLACE FUNCTION claimius._cascade_user_soft_delete_trg()
     RETURNS TRIGGER AS $$
 BEGIN
+    IF claimius.in_replay_mode() THEN
+        RETURN NEW;
+    END IF;
     IF OLD.sa_deleted_at IS NULL AND NEW.sa_deleted_at IS NOT NULL THEN
         PERFORM claimius.cascade_user_soft_delete(NEW.user_id);
     END IF;
@@ -1017,7 +1020,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius._cascade_user_soft_delete_trg() IS 'Trigger wrapper: fires cascade_user_soft_delete once on samna_user soft delete transition.';
+COMMENT ON FUNCTION claimius._cascade_user_soft_delete_trg() IS 'Trigger wrapper: fires cascade_user_soft_delete once on samna_user soft delete transition. Inert under replay_mode, where the cascaded rows arrive in the feed.';
 
 CREATE OR REPLACE FUNCTION claimius._set_self_owner_on_insert()
     RETURNS TRIGGER AS $$

@@ -1352,7 +1352,7 @@ BEGIN
     SELECT jsonb_agg(to_jsonb(r)) INTO v_rows FROM _owner_graph_rows r;
     RETURN QUERY SELECT * FROM claimius._window_graph(v_rows, p_user_id, p_width, p_sort, p_next_id);
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = claimius, pg_temp;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = claimius, pg_temp SET plan_cache_mode = force_custom_plan;
 
 COMMENT ON FUNCTION claimius.get_owner_graph(UUID, UUID, INTEGER, INTEGER, INTEGER, TEXT, UUID) IS 'Ownership graph (orgs, locations, registered tables with sa_owner_id or sa_location_id) for the user. Optional start org and depth limit, and a window of p_width children of each type per parent in name or usage order continuing after p_next_id.';
 
@@ -1687,7 +1687,7 @@ BEGIN
 
     RETURN QUERY SELECT * FROM claimius._window_graph(v_graph, p_user_id, p_width, p_sort, p_next_id);
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = claimius, pg_temp;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = claimius, pg_temp SET plan_cache_mode = force_custom_plan;
 
 COMMENT ON FUNCTION claimius.get_claim_graph(UUID, UUID, INTEGER, INTEGER, INTEGER, TEXT, UUID) IS 'Access graph: user, other users seen, claims, user_claims, claim_object bindings, reachable objects. Optional start claim and depth limit, and a window of p_width children of each type per parent in name or usage order continuing after p_next_id. Default shape served from claimius.claim_graph_cache while every grant, claim and binding of the user was written by a transaction visible in the snapshot taken before the cached graph was built.';
 
@@ -2346,37 +2346,8 @@ CREATE OR REPLACE FUNCTION claimius.upsert_table_info(
 ) RETURNS VOID AS $$
 DECLARE
     v_object_type   TEXT;
-    v_old_object_type TEXT;
-    v_existing      TEXT[];
-    v_new           TEXT[];
-    v_to_remove     TEXT[];
 BEGIN
-    SELECT array_agg(object_type) INTO v_existing
-    FROM claimius.table_info WHERE NOT is_internal;
-
-    v_new := p_object_types;
-
-    IF v_existing IS NOT NULL THEN
-        SELECT array_agg(o) INTO v_to_remove
-        FROM unnest(v_existing) o
-        WHERE NOT (o = ANY(v_new));
-    END IF;
-
-    IF v_to_remove IS NOT NULL THEN
-        FOREACH v_old_object_type IN ARRAY v_to_remove LOOP
-                PERFORM claimius._detach_calc_trigger(v_old_object_type);
-                PERFORM claimius._detach_self_root_trigger(v_old_object_type);
-                DELETE FROM claimius.table_info WHERE object_type = v_old_object_type;
-                DELETE FROM claimius.inheritance_info
-                 WHERE ancestor_type = v_old_object_type
-                    OR descendant_type = v_old_object_type;
-                DELETE FROM claimius.user_object WHERE object_type = v_old_object_type;
-                DELETE FROM claimius.object_info WHERE object_type = v_old_object_type;
-                RAISE NOTICE 'Deregistered table %', v_old_object_type;
-            END LOOP;
-    END IF;
-
-    FOREACH v_object_type IN ARRAY v_new LOOP
+    FOREACH v_object_type IN ARRAY p_object_types LOOP
             IF position('.' IN v_object_type) = 0 THEN
                 RAISE EXCEPTION 'object type % is not schema qualified', v_object_type;
             END IF;
@@ -2388,7 +2359,7 @@ BEGIN
 
     PERFORM set_config('claimius.replay_mode', 'true', TRUE);
     BEGIN
-        FOREACH v_object_type IN ARRAY v_new LOOP
+        FOREACH v_object_type IN ARRAY p_object_types LOOP
                 PERFORM claimius._bulk_seed_user_object(v_object_type);
                 RAISE NOTICE 'Seeded user_object for %', v_object_type;
             END LOOP;
@@ -2397,7 +2368,36 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius.upsert_table_info(VARIADIC p_object_types text[]) IS 'Registers external tables. Idempotent. Called by implementer migrations.';
+COMMENT ON FUNCTION claimius.upsert_table_info(VARIADIC p_object_types text[]) IS 'Registers the named external tables: validates their sa_ columns, attaches the calc and self root triggers and seeds their object_info and user_object rows. Idempotent. Called by implementer migrations.';
+
+CREATE OR REPLACE FUNCTION claimius.delete_table_info(
+    VARIADIC p_object_types TEXT[]
+) RETURNS VOID AS $$
+DECLARE
+    v_object_type   TEXT;
+BEGIN
+    FOREACH v_object_type IN ARRAY p_object_types LOOP
+            IF NOT EXISTS (
+                SELECT 1 FROM claimius.table_info
+                WHERE object_type = v_object_type AND NOT is_internal
+            ) THEN
+                RAISE EXCEPTION 'object type % is not a registered external table', v_object_type;
+            END IF;
+            PERFORM claimius._detach_calc_trigger(v_object_type);
+            PERFORM claimius._detach_self_root_trigger(v_object_type);
+            DELETE FROM claimius.table_info WHERE object_type = v_object_type;
+            DELETE FROM claimius.inheritance_info
+             WHERE ancestor_type = v_object_type
+                OR descendant_type = v_object_type;
+            DELETE FROM claimius.user_object WHERE object_type = v_object_type;
+            DELETE FROM claimius.object_info WHERE object_type = v_object_type;
+            RAISE NOTICE 'Deregistered table %', v_object_type;
+        END LOOP;
+END;
+$$ LANGUAGE plpgsql;
+
+COMMENT ON FUNCTION claimius.delete_table_info(VARIADIC p_object_types text[]) IS 'Deregisters the named external tables: detaches their triggers and deletes their table_info, inheritance_info, user_object and object_info rows. Raises on a table that is not registered. Called by implementer migrations when a table leaves claimius.';
+
 
 CREATE OR REPLACE FUNCTION claimius._bulk_seed_user_object(p_object_type TEXT)
     RETURNS VOID AS $$
@@ -2879,7 +2879,8 @@ DECLARE
         SELECT claimius.composite_id(uo.object_type, uo.object_id::TEXT)
         FROM claimius.user_object uo
         WHERE uo.user_id = p_user_id
-          AND (p_required_access = 0 OR (uo.sa_access & p_required_access) = p_required_access));
+          AND (p_required_access = 0 OR (uo.sa_access & p_required_access) = p_required_access)
+          AND (uo.direct_grant OR EXISTS (SELECT 1 FROM claimius._best_grant(uo.grants, p_required_access))));
 BEGIN
     IF p_sort IS NULL OR p_sort NOT IN ('name', 'usage') OR p_width IS NULL OR p_width < 0 THEN
         RAISE EXCEPTION 'graph window: p_sort is name or usage and p_width at least 0' USING ERRCODE = '22023';
@@ -2965,7 +2966,7 @@ BEGIN
 
     RETURN jsonb_build_object('links', v_links);
 END;
-$$ LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = claimius, pg_temp;
+$$ LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = claimius, pg_temp SET plan_cache_mode = force_custom_plan;
 
 COMMENT ON FUNCTION claimius.get_graph_links_owner(UUID, INTEGER, TEXT[], TEXT[], UUID, INTEGER, INTEGER, TEXT, UUID) IS 'The ownership graph of the objects the user reaches as links: for every object in scope its closest ancestor the user also reaches, tested against the user''s pairs read once into a hashed set, with an optional window of p_width children per parent. Settles nothing.';
 
@@ -3159,7 +3160,7 @@ BEGIN
 
     RETURN jsonb_build_object('links', v_links);
 END;
-$$ LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = claimius, pg_temp;
+$$ LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = claimius, pg_temp SET plan_cache_mode = force_custom_plan;
 
 COMMENT ON FUNCTION claimius.get_graph_links_claim(UUID, INTEGER, TEXT[], TEXT[], UUID, INTEGER, INTEGER, TEXT, UUID) IS 'The claim graph as links: the user''s grants, the bindings of the claims, the cascades of inheriting bindings, the users the user sees through _user_users_for_viewer after folding its user_users_diff rows, and the user''s relations, with an optional window of p_width children per parent.';
 

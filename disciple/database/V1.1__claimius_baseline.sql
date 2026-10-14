@@ -745,6 +745,11 @@ BEGIN
         ALTER TABLE claimius.claim_graph_cache DROP COLUMN sa_updated_at;
         ALTER TABLE claimius.claim_graph_cache ADD COLUMN snapshot PG_SNAPSHOT NOT NULL;
     END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                   WHERE conrelid = 'claimius.claim_graph_cache'::regclass AND contype = 'p') THEN
+        DELETE FROM claimius.claim_graph_cache;
+        ALTER TABLE claimius.claim_graph_cache ADD PRIMARY KEY (user_id);
+    END IF;
 END $$;
 
 COMMENT ON TABLE claimius.claim_graph_cache IS 'Per user cache of get_claim_graph default shape. Dropped by triggers on the user''s own rows, validated on read against the snapshot it was built under and the txid of the user''s grants, claims and bindings.';
