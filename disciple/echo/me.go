@@ -63,6 +63,9 @@ func GetMeClaims(ctx echo.Context) error {
 		ctx.Logger().Errorf("GetMeClaims: %v", err)
 		return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 	}
+	for i := range claims {
+		claims[i].FormatAccess(shared.AccessFormat{Slice: true, String: true})
+	}
 	return respondJSON(ctx, http.StatusOK, claims, len(claims))
 }
 
