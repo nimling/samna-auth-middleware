@@ -1,5 +1,5 @@
 BEGIN;
-SELECT plan(26);
+SELECT plan(27);
 
 CREATE TEMP TABLE crew (key TEXT PRIMARY KEY, id UUID);
 
@@ -8,8 +8,8 @@ CREATE FUNCTION pg_temp.crew(p_key TEXT) RETURNS UUID AS $$
 $$ LANGUAGE sql;
 
 CREATE FUNCTION pg_temp.link(p_object_type TEXT, p_object_id UUID, p_home UUID) RETURNS UUID AS $$
-    INSERT INTO claimius.object_asset (app_id, object_type, object_id, asset_id, kind, mime_type, sa_owner_id)
-    VALUES (p_home, p_object_type, p_object_id, gen_random_uuid(), 'file', 'image/png', p_object_id)
+    INSERT INTO claimius.object_asset (app_id, object_type, object_id, asset_id, kind, mime_type, sa_owner_id, sa_created_by)
+    VALUES (p_home, p_object_type, p_object_id, gen_random_uuid(), 'file', 'image/png', p_object_id, gen_random_uuid())
     RETURNING id
 $$ LANGUAGE sql;
 
@@ -67,13 +67,15 @@ SELECT has_table('claimius', 'object_asset', 'object_asset exists on the prophet
 
 SELECT col_not_null('claimius', 'object_asset', 'app_id', 'a prophet link names its home app');
 
+SELECT col_not_null('claimius', 'object_asset', 'sa_created_by', 'a link always names the grant it was written under');
+
 SELECT ok(EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname = 'claimius' AND indexname = 'idx_object_asset_app_asset'
                    AND indexdef LIKE '%UNIQUE%(app_id, asset_id)%sa_deleted_at IS NULL%'),
     'an asset of one home app has one live link');
 
 SELECT throws_ok(
-    $$INSERT INTO claimius.object_asset (app_id, object_type, object_id, asset_id, kind, mime_type, sa_owner_id)
-      VALUES (gen_random_uuid(), 'public.booking', gen_random_uuid(), gen_random_uuid(), 'file', 'text/plain', gen_random_uuid())$$,
+    $$INSERT INTO claimius.object_asset (app_id, object_type, object_id, asset_id, kind, mime_type, sa_owner_id, sa_created_by)
+      VALUES (gen_random_uuid(), 'public.booking', gen_random_uuid(), gen_random_uuid(), 'file', 'text/plain', gen_random_uuid(), gen_random_uuid())$$,
     '23514', NULL, 'a link to an object outside claimius is refused');
 
 SELECT ok(has_table_privilege('claimius_writer', 'claimius.object_asset', 'INSERT')

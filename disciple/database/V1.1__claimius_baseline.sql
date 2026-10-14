@@ -951,7 +951,7 @@ CREATE TABLE IF NOT EXISTS claimius.object_asset (
                                                      size            BIGINT,
                                                      "index"         INTEGER NOT NULL DEFAULT 0,
                                                      sa_owner_id     UUID NOT NULL,
-                                                     sa_created_by   UUID,
+                                                     sa_created_by   UUID NOT NULL,
                                                      sa_deleted_at   TIMESTAMPTZ,
                                                      sa_created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
                                                      sa_updated_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -970,7 +970,7 @@ COMMENT ON COLUMN claimius.object_asset.mime_type IS 'Media type of the bytes th
 COMMENT ON COLUMN claimius.object_asset.size IS 'Size of the bytes in octets, when the home knows it.';
 COMMENT ON COLUMN claimius.object_asset."index" IS 'Order among the links of one object; get_object_assets sorts by it, then by sa_created_at.';
 COMMENT ON COLUMN claimius.object_asset.sa_owner_id IS 'Owner the prophet''s access gate reported for the linked object when the link was written; the user itself for a link on the writer''s own samna_user.';
-COMMENT ON COLUMN claimius.object_asset.sa_created_by IS 'user_claim.id of the grant the writer held WRITE on the object through; NULL for a link on the writer''s own samna_user.';
+COMMENT ON COLUMN claimius.object_asset.sa_created_by IS 'user_claim.id of the grant the writer held WRITE on the object through; for a link on the writer''s own samna_user, the writer''s default claim grant in the home app.';
 COMMENT ON COLUMN claimius.object_asset.sa_deleted_at IS 'Soft delete timestamp. A deleted link is never read.';
 COMMENT ON COLUMN claimius.object_asset.sa_created_at IS 'Creation timestamp.';
 COMMENT ON COLUMN claimius.object_asset.sa_updated_at IS 'Last update timestamp.';

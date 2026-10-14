@@ -63,7 +63,23 @@ func TestADiscipleLinksAnAssetThroughTheProphetAndReadsItBack(t *testing.T) {
 	`, app.ID, owners, owner, app.Org, grantUser, owner, app.ID).Scan(ctx, &ownerGrant); err != nil {
 		t.Fatalf("grant: %v", err)
 	}
-	if _, err := prophet.ExecContext(ctx, `SELECT claimius.upsert_app_user(p_user_id => ?, p_app_id => ?, p_first_name => 'Outsider')`, outsider, app.ID); err != nil {
+	grantless := uuid.New()
+	if _, err := prophet.ExecContext(ctx, `SELECT claimius.upsert_app_user(p_user_id => ?, p_app_id => ?, p_first_name => 'Grantless')`, grantless, app.ID); err != nil {
+		t.Fatalf("grantless: %v", err)
+	}
+	var members uuid.UUID
+	if err := prophet.NewRaw(`
+		SELECT (claimius.insert_claim(p_app_id => ?, p_name => 'Asset members', p_description => NULL, p_sa_access => 4,
+		        p_sa_owner_id => ?, p_sa_root_id => ?, p_sa_created_by => ?) -> 'claim' ->> 'id')::UUID
+	`, app.ID, app.Org, app.Org, grantUser).Scan(ctx, &members); err != nil {
+		t.Fatalf("default claim: %v", err)
+	}
+	if _, err := prophet.ExecContext(ctx, `UPDATE claimius.samna_app SET claim_id = ? WHERE id = ?`, members, app.ID); err != nil {
+		t.Fatalf("set default claim: %v", err)
+	}
+	var outsiderGrant uuid.UUID
+	if err := prophet.NewRaw(`SELECT (claimius.upsert_app_user(p_user_id => ?, p_app_id => ?, p_first_name => 'Outsider') -> 'user_claim' ->> 'id')::UUID`,
+		outsider, app.ID).Scan(ctx, &outsiderGrant); err != nil {
 		t.Fatalf("outsider: %v", err)
 	}
 
@@ -130,8 +146,17 @@ func TestADiscipleLinksAnAssetThroughTheProphetAndReadsItBack(t *testing.T) {
 	if err := disciple.NewInsert().Model(profile).Access(self).Scan(ctx); err != nil {
 		t.Fatalf("a user links an asset to itself, got %v", err)
 	}
-	if profile.CreatedBy != nil || profile.OwnerID != outsider {
-		t.Fatalf("a link on the writer's own user carries no grant and the user as owner, got %+v", profile)
+	if profile.CreatedBy == nil || *profile.CreatedBy != outsiderGrant || profile.OwnerID != outsider {
+		t.Fatalf("a link on the writer's own user carries the writer's default grant and the user as owner, got %+v", profile)
+	}
+	alone, err := disciple.MutationAccess(ctx, grantless, grantless, shared.OBJECT_TYPE_USER, shared.ACCESS_WRITE)
+	if err != nil {
+		t.Fatalf("grantless self access: %v", err)
+	}
+	orphan := disciple.NewInsert().Model(&shared.ObjectAsset{ObjectType: shared.OBJECT_TYPE_USER, ObjectID: grantless,
+		AssetID: uuid.New(), Kind: "profile", MimeType: "image/png"}).Access(alone).Scan(ctx)
+	if !errors.Is(orphan, shared.ErrNoAccess) {
+		t.Fatalf("a user without a grant in the home app is refused a link on itself, got %v", orphan)
 	}
 
 	if _, err := replica.PullSync(ctx); err != nil {

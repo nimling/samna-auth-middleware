@@ -172,7 +172,7 @@ Yes. The `user_object.grants` jsonb array carries one entry per contributing cla
 
 Store the asset and its bytes in your own service, then write a `claimius.object_asset` link: `object_type` a `claimius.*` type, `object_id` the object (a user's `user_id`), `asset_id` your asset's id, `kind` such as `profile`, `banner`, `logo` or `file`, and `mime_type`. The asset never moves; only the link syncs, to every app that sees the object. It is not a registered table and takes no `claim_object` binding: access to a link is READ on its object.
 
-- On a disciple write it through the builder, `NewInsert().Model(&shared.ObjectAsset{...}).Access(ac)` with `ac` WRITE on the object (self for the actor's own user). The prophet checks that WRITE again and stamps owner and grant.
+- On a disciple write it through the builder, `NewInsert().Model(&shared.ObjectAsset{...}).Access(ac)` with `ac` WRITE on the object (self for the actor's own user). The prophet checks that WRITE again and stamps owner and grant; a link on the actor's own user takes its default claim grant in the home app and is refused without one.
 - On the prophet insert, update or soft delete it directly with `app_id` the home app.
 - Read with `get_object_assets`, in Go `GetObjectAssets(ctx, user, type, id, kind)` and `GetObjectAsset(ctx, user, linkID)`. Never SELECT the table to decide what a user may see.
 - Serve the file from your own route with `disciple/echo.GetObjectAssetData(ctx, linkID)`, which fetches through the prophet. Give the middleware your storage with `sdb.Options.AssetSource` at `sdb.Init`, and optionally an `AssetCache`. Pass `Content-Type`, `Content-Length`, `ETag`, `Last-Modified` and `Cache-Control` through untouched.

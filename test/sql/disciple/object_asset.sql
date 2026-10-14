@@ -1,5 +1,5 @@
 BEGIN;
-SELECT plan(11);
+SELECT plan(12);
 
 CREATE TEMP TABLE crew (key TEXT PRIMARY KEY, id UUID);
 
@@ -40,6 +40,8 @@ SELECT has_table('claimius', 'object_asset', 'object_asset exists on the discipl
 
 SELECT hasnt_column('claimius', 'object_asset', 'app_id', 'a disciple link carries no app_id');
 
+SELECT col_not_null('claimius', 'object_asset', 'sa_created_by', 'a link always names the grant it was written under');
+
 SELECT ok(EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname = 'claimius' AND indexname = 'idx_object_asset_asset'
                    AND indexdef LIKE '%UNIQUE%(asset_id)%sa_deleted_at IS NULL%'),
     'an asset has one live link on the disciple');
@@ -53,9 +55,9 @@ SELECT ok(has_table_privilege('claimius_disciple_client', 'claimius.object_asset
 SELECT lives_ok($q$DO $$
 BEGIN
     PERFORM set_config('claimius.replay_mode', 'true', TRUE);
-    INSERT INTO claimius.object_asset (id, object_type, object_id, asset_id, kind, mime_type, sa_owner_id)
-    VALUES (pg_temp.crew('org_link'), 'claimius.organization', pg_temp.crew('org'), gen_random_uuid(), 'logo', 'image/png', pg_temp.crew('org')),
-           (pg_temp.crew('self_link'), 'claimius.samna_user', pg_temp.crew('reader'), gen_random_uuid(), 'profile', 'image/png', pg_temp.crew('reader'))
+    INSERT INTO claimius.object_asset (id, object_type, object_id, asset_id, kind, mime_type, sa_owner_id, sa_created_by)
+    VALUES (pg_temp.crew('org_link'), 'claimius.organization', pg_temp.crew('org'), gen_random_uuid(), 'logo', 'image/png', pg_temp.crew('org'), gen_random_uuid()),
+           (pg_temp.crew('self_link'), 'claimius.samna_user', pg_temp.crew('reader'), gen_random_uuid(), 'profile', 'image/png', pg_temp.crew('reader'), gen_random_uuid())
     ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name;
     PERFORM set_config('claimius.replay_mode', 'false', TRUE);
 END $$$q$, 'the disciple applies a link upsert under replay');
