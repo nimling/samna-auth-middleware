@@ -517,3 +517,52 @@ func TestGetAccessReadsThePairAfterItsMark(t *testing.T) {
 		t.Fatalf("a check with nothing raised since the pair's mark read %d index entries, expected at most 8", read)
 	}
 }
+
+func TestClaimUnderSoftDeletedOrganizationAgreesWithItsGate(t *testing.T) {
+	db := database(t)
+	ctx := context.Background()
+	ac, err := db.MutationAccess(ctx, userA, orgRoot, sdb.OBJECT_TYPE_ORGANIZATION, sdb.ACCESS_WRITE)
+	if err != nil {
+		t.Fatalf("access: %v", err)
+	}
+	org := sdb.Organization{Name: "Composer owner", Type: sdb.ORGANIZATION_TYPE_CHILD, OwnerID: orgRoot}
+	if err := db.NewInsert().Model(&org).Access(ac).Scan(ctx, &org); err != nil {
+		t.Fatalf("insert child organization: %v", err)
+	}
+	owner, err := db.MutationAccess(ctx, userA, org.ID, sdb.OBJECT_TYPE_ORGANIZATION, sdb.ACCESS_WRITE)
+	if err != nil {
+		t.Fatalf("access on the new child: %v", err)
+	}
+	var claimID uuid.UUID
+	if err := db.NewRaw(`SELECT (claimius.insert_claim(p_name => 'Composer claim', p_description => NULL, p_sa_access => 15,
+		p_sa_owner_id => ?, p_sa_root_id => ?, p_sa_created_by => ?) -> 'claim' ->> 'id')::uuid`,
+		org.ID, orgRoot, owner.UserClaimID).Scan(ctx, &claimID); err != nil {
+		t.Fatalf("insert claim: %v", err)
+	}
+	agree := func(stage string, want bool) {
+		t.Helper()
+		claims, err := db.GetClaims(ctx, userA, sdb.ACCESS_READ)
+		if err != nil {
+			t.Fatalf("%s: list claims: %v", stage, err)
+		}
+		listed := false
+		for _, c := range claims {
+			if c.ID == claimID {
+				listed = true
+			}
+		}
+		_, gateErr := db.MutationAccess(ctx, userA, claimID, sdb.OBJECT_TYPE_CLAIM, sdb.ACCESS_READ)
+		if gateErr != nil && !errors.Is(gateErr, sdb.ErrNoAccess) {
+			t.Fatalf("%s: gate: %v", stage, gateErr)
+		}
+		if listed != want || (gateErr == nil) != want {
+			t.Fatalf("%s: listed %v, gate passed %v, want both %v", stage, listed, gateErr == nil, want)
+		}
+	}
+	agree("before the delete", true)
+	target := sdb.Organization{ID: org.ID}
+	if err := db.NewDelete().Model(&target).Access(owner).Scan(ctx, &target); err != nil {
+		t.Fatalf("soft delete the owner organization: %v", err)
+	}
+	agree("after the owner's soft delete", false)
+}

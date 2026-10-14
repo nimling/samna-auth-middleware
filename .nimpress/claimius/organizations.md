@@ -47,7 +47,7 @@ Every insert, update or delete of an organization runs `calc_hierarchical_access
 | Restore, or a node missing from the closure | the subtree's rows rebuilt, hung under the stored ancestors of its parent | `build_ownership_tree(root, node)` |
 | Rename, or any write that moves no owner, root or deletion | none | |
 
-The subtree is the organization, its descendant organizations, their locations and every row owned in them. When the new parent is outside the closure or inside the subtree itself, `_splice_subtree` drops every row of the subtree, as a rebuild of the root would drop a subtree its root no longer reaches. It reads the subtree and the former ancestors once each into materialized sets and joins the closure rows to those, never `inheritance_info` to itself.
+The subtree is the organization, its descendant organizations, their locations and every row owned in them. Its rows keep nothing by creation once it leaves the closure; see [Denials](./denials.md#what-a-creator-keeps). When the new parent is outside the closure or inside the subtree itself, `_splice_subtree` drops every row of the subtree, as a rebuild of the root would drop a subtree its root no longer reaches. It reads the subtree and the former ancestors once each into materialized sets and joins the closure rows to those, never `inheritance_info` to itself.
 
 Beside the closure, the same trigger:
 

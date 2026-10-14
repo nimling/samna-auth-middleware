@@ -96,7 +96,7 @@ The use is reusing a surface at another strength. A Bookings Admin claim binds e
 
 1. `sa_created_by` on every row is a `user_claim.id`: the grant the writer acted under, not the person. Authorship survives `merge_user`, and the record names the claim, the owning organization and the window that made the write legal.
 2. `get_access`, `get_direct_access`, `mutation_access`, `get_objects` and `search` return a `user_claim_id`, the grant chosen for the row. A follow on write stamps it into `sa_created_by`.
-3. The creator of a row reaches it through its own `sa_created_by`, `direct_grant` on the pair, even with no binding at all.
+3. The creator of a row reaches it through its own `sa_created_by`, `direct_grant` on the pair, even with no binding at all, while its owning organization is in the ownership closure. A claim owned under a soft deleted organization is then reached only by its holders and its bindings, in `get_objects`, `get_access` and `mutation_access` alike.
 4. Listings and graphs are no authority to act on a row in them. To act, call `mutation_access` for that row.
 5. There is no `sa_updated_by` or `sa_deleted_by`. Updates and deletes are attributed in `audit`.
 

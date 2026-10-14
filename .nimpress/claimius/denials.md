@@ -50,7 +50,7 @@ A deny binding with a `scope` subtracts from the fields the scope names only, an
 
 ## What a creator keeps
 
-The creator of a row, the user behind its `sa_created_by`, holds owner, write, read and execute on it through `direct_grant`, less what the denies reaching the creator subtract, ORed with whatever grants survive. The creator counts as a `direct` grant at level 0: a deny bound on the object itself reaches it, and an inherited deny reaches it only when the deny's level is above 0. So with levels unset an author always reaches what they made inside a denied subtree.
+The creator of a row, the user behind its `sa_created_by`, holds owner, write, read and execute on it through `direct_grant`, less what the denies reaching the creator subtract, ORed with whatever grants survive. This holds while the row's owning organization is in the ownership closure or not held; a row owned under a soft deleted organization keeps nothing by creation. The creator counts as a `direct` grant at level 0: a deny bound on the object itself reaches it, and an inherited deny reaches it only when the deny's level is above 0. So with levels unset an author always reaches what they made inside a denied subtree.
 
 ## Why a deny is a claim
 

@@ -941,8 +941,14 @@ CREATE OR REPLACE FUNCTION claimius._build_grants_for_objects(
                         WHERE su.id = a.object_id
                           AND su.user_id = p_user_id
                           AND su.sa_deleted_at IS NULL)
-                   ELSE oi.sa_created_by = p_user_id
-                        OR EXISTS (SELECT 1 FROM grants_held g WHERE g.user_claim_id = oi.sa_created_by)
+                   ELSE (oi.sa_created_by = p_user_id
+                         OR EXISTS (SELECT 1 FROM grants_held g WHERE g.user_claim_id = oi.sa_created_by))
+                        AND (EXISTS (SELECT 1 FROM claimius.inheritance_info e
+                                     WHERE e.descendant_type = 'claimius.organization'
+                                       AND e.descendant_id = oi.sa_owner_id
+                                       AND e.tree_type = 'ownership'
+                                       AND e.depth = 0)
+                             OR NOT EXISTS (SELECT 1 FROM claimius.organization o WHERE o.id = oi.sa_owner_id))
                END AS made
         FROM (SELECT DISTINCT x.object_type, x.object_id FROM area x) a
             LEFT JOIN claimius.object_info oi ON oi.object_type = a.object_type AND oi.object_id = a.object_id
@@ -1148,7 +1154,7 @@ CREATE OR REPLACE FUNCTION claimius._build_grants_for_objects(
         ) s ON TRUE
 $$;
 
-COMMENT ON FUNCTION claimius._build_grants_for_objects(UUID, TEXT[], UUID[], BOOLEAN[], BOOLEAN) IS 'Grants of one user on a set of roots and, where a root cascades, the descendants reached from it, in one statement over object_info: a derivation per binding on the object, on a root or an ancestor of a root in the tree the object was reached through, on a bound node inside the area descended once, a cascading root whose own descent another root covers among them, and on the object''s own chains in its other trees, held directly or through one composition link. With p_point the bindings are found by one probe per node of the chains instead of the user''s bindings. Reads the creator from object_info; an object with no object_info row is not live and comes back with mask 0, like an object no derivation reaches, so the caller deletes the pair without a second descent. A pair with no deny and no scope settles as the OR of its grants in SQL, the others through _apply_denies.';
+COMMENT ON FUNCTION claimius._build_grants_for_objects(UUID, TEXT[], UUID[], BOOLEAN[], BOOLEAN) IS 'Grants of one user on a set of roots and, where a root cascades, the descendants reached from it, in one statement over object_info: a derivation per binding on the object, on a root or an ancestor of a root in the tree the object was reached through, on a bound node inside the area descended once, a cascading root whose own descent another root covers among them, and on the object''s own chains in its other trees, held directly or through one composition link. With p_point the bindings are found by one probe per node of the chains instead of the user''s bindings. Reads the creator from object_info, and counts the creator only while the owning organization is in the ownership closure or not held, so a row under a soft deleted organization keeps nothing by creation; an object with no object_info row is not live and comes back with mask 0, like an object no derivation reaches, so the caller deletes the pair without a second descent. A pair with no deny and no scope settles as the OR of its grants in SQL, the others through _apply_denies.';
 
 DROP FUNCTION IF EXISTS claimius._denormalize_objects(TEXT, UUID[]);
 CREATE OR REPLACE FUNCTION claimius._denormalize_objects(

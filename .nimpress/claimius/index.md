@@ -69,7 +69,7 @@ Claimius owns and validates its own types. It reads no more of the implementing 
 
 5. Holding a claim, or holding a claim bound on it, lets the holder read the claim itself.
 
-6. The creator of a row, the user behind its `sa_created_by` grant, holds full access to it less what a direct deny takes away. A stamp that names a user directly reads as that user; see [Users](./users.md#one-identity-one-row-per-app).
+6. The creator of a row, the user behind its `sa_created_by` grant, holds full access to it less what a direct deny takes away. A row whose owning organization is held but out of the ownership closure, soft deleted or under a soft deleted organization, keeps nothing by creation. A stamp that names a user directly reads as that user; see [Users](./users.md#one-identity-one-row-per-app).
 
 7. A deny is a claim with bit 16 set; its other bits name what it subtracts. A deny bound directly on the object subtracts from every grant on it; a deny reached through a tree subtracts only from grants reached through a tree. Denies may be scoped to fields. What is left is closed under implication. See [Denials](./denials.md) and [Redaction](./redaction.md).
 
@@ -187,7 +187,7 @@ made(u, x)             ← creator(x, g), grant(g, u, _) ; creator(x, u)
 ```
 
 
-The creator of a row is the user behind its `sa_created_by`, a grant, or the user it names directly. The last rule but one is the claim itself as an object: holding a claim, or holding a claim bound on it, reads it. The composition rules consume a binding of the linked claim and never another link, so a link is followed once. `_build_grants_for_objects` evaluates exactly these rules, set based, for one user on a set of objects.
+The creator of a row is the user behind its `sa_created_by`, a grant, or the user it names directly. `made` holds only while the row's owning organization is in the ownership closure or not held at all, so a soft delete that takes a subtree out of the closure takes the creator's access to every row owned in it too. The last rule but one is the claim itself as an object: holding a claim, or holding a claim bound on it, reads it. The composition rules consume a binding of the linked claim and never another link, so a link is followed once. `_build_grants_for_objects` evaluates exactly these rules, set based, for one user on a set of objects.
 
 
 ### The access of a pair
