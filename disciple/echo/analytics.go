@@ -31,12 +31,7 @@ func GetConsent(ctx echo.Context) error {
 	forwarded := client.WithForward(ctx.Request().Context(), forwardContext(ctx))
 	if err := client.Get(forwarded, "consent?anonymous_id="+url.QueryEscape(id), &state); err != nil {
 		ctx.Logger().Errorf("GetConsent: %v", err)
-		return respondJSON(ctx, http.StatusOK, shared.ConsentState{
-			AnonymousID:   id,
-			PolicyVersion: analytics.PolicyVersion(),
-			PolicyURL:     analytics.PolicyURL(),
-			Categories:    shared.ConsentCategories{Necessary: true},
-		}, 1)
+		return respondError(ctx, http.StatusServiceUnavailable, "Consent service unavailable")
 	}
 	if state.AnonymousID == "" {
 		state.AnonymousID = id

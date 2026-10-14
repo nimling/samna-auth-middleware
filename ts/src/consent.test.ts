@@ -106,6 +106,31 @@ describe('a decision', () => {
       analytics: true,
       marketing: true
     })
+    await vi.waitFor(() => expect(document.getElementById('sauth-consent-sheet')).toBeNull())
+  })
+
+  it('keeps the sheet open when the decision is not saved', async () => {
+    const calls: Call[] = []
+    globalThis.fetch = vi.fn(async (url: unknown, init?: RequestInit) => {
+      calls.push({ url, init })
+      if (init?.method === 'POST') return new Response('{}', { status: 502 })
+      return new Response(JSON.stringify({ data: consentState }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' }
+      })
+    }) as unknown as typeof fetch
+    const { configureConsent } = await import('./consent')
+    await configureConsent({ endpoint: '/api' })
+    buttonNamed(sheet(), 'Accept all').click()
+    await vi.waitFor(() => expect(calls.length).toBe(2))
+    await vi.waitFor(() => expect(buttonNamed(sheet(), 'Accept all').disabled).toBe(false))
+    expect(document.getElementById('sauth-consent-sheet')).not.toBeNull()
+  })
+
+  it('shows no sheet when the consent service is unavailable', async () => {
+    globalThis.fetch = vi.fn(async () => new Response('{}', { status: 503 })) as unknown as typeof fetch
+    const { configureConsent } = await import('./consent')
+    expect(await configureConsent({ endpoint: '/api' })).toBeNull()
     expect(document.getElementById('sauth-consent-sheet')).toBeNull()
   })
 

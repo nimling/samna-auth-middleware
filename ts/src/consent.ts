@@ -298,9 +298,13 @@ function render(
   accept.className = 'primary'
   accept.textContent = copy.acceptAll
 
-  const decide = (categories: ConsentCategories) => {
-    removeSheet()
-    void postConsent(categories)
+  const decide = async (categories: ConsentCategories) => {
+    actions.querySelectorAll('button').forEach((button) => (button.disabled = true))
+    if (await postConsent(categories)) {
+      removeSheet()
+      return
+    }
+    actions.querySelectorAll('button').forEach((button) => (button.disabled = false))
   }
 
   reject.addEventListener('click', () =>
