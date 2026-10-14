@@ -4,10 +4,14 @@ package shared_test
 
 import (
 	"context"
+	"database/sql"
+	"errors"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
 	sdb "github.com/nimling/samna-auth-middleware/v2/shared"
+	"github.com/uptrace/bun"
 )
 
 func orgNames(orgs []sdb.Organization) map[uuid.UUID]string {
@@ -22,7 +26,7 @@ func TestGetOrganizationsManyNamesRowsWithoutAReader(t *testing.T) {
 	db := database(t)
 	ctx := context.Background()
 
-	orgs, err := db.GetOrganizationsMany(ctx, []uuid.UUID{orgAlpha, orgDropped}, nil)
+	orgs, err := db.GetOrganizationsMany(ctx, []uuid.UUID{orgAlpha, orgDropped}, nil, nil)
 	if err != nil {
 		t.Fatalf("by ids: %v", err)
 	}
@@ -36,7 +40,7 @@ func TestGetOrganizationsManyNamesRowsWithoutAReader(t *testing.T) {
 		}
 	}
 
-	orgs, err = db.GetOrganizationsMany(ctx, nil, []uuid.UUID{orgRoot})
+	orgs, err = db.GetOrganizationsMany(ctx, nil, []uuid.UUID{orgRoot}, nil)
 	if err != nil {
 		t.Fatalf("by owners: %v", err)
 	}
@@ -50,7 +54,7 @@ func TestGetOrganizationsManyNamesRowsWithoutAReader(t *testing.T) {
 		}
 	}
 
-	orgs, err = db.GetOrganizationsMany(ctx, []uuid.UUID{orgAlpha, orgGrand}, []uuid.UUID{orgRoot})
+	orgs, err = db.GetOrganizationsMany(ctx, []uuid.UUID{orgAlpha, orgGrand}, []uuid.UUID{orgRoot}, nil)
 	if err != nil {
 		t.Fatalf("both lists: %v", err)
 	}
@@ -58,7 +62,7 @@ func TestGetOrganizationsManyNamesRowsWithoutAReader(t *testing.T) {
 		t.Fatalf("both lists must apply, got %+v", orgNames(orgs))
 	}
 
-	orgs, err = db.GetOrganizationsMany(ctx, nil, nil)
+	orgs, err = db.GetOrganizationsMany(ctx, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("no lists: %v", err)
 	}
@@ -82,7 +86,7 @@ func TestGetLocationsManyWalksParents(t *testing.T) {
 		t.Fatalf("insert child: %v", err)
 	}
 
-	locs, err := db.GetLocationsMany(ctx, nil, []uuid.UUID{root})
+	locs, err := db.GetLocationsMany(ctx, nil, []uuid.UUID{root}, nil)
 	if err != nil {
 		t.Fatalf("by parents: %v", err)
 	}
@@ -90,7 +94,7 @@ func TestGetLocationsManyWalksParents(t *testing.T) {
 		t.Fatalf("expected the root and its soft deleted child, got %d", len(locs))
 	}
 
-	locs, err = db.GetLocationsMany(ctx, []uuid.UUID{child}, nil)
+	locs, err = db.GetLocationsMany(ctx, []uuid.UUID{child}, nil, nil)
 	if err != nil {
 		t.Fatalf("by ids: %v", err)
 	}
@@ -103,7 +107,7 @@ func TestGetUsersManyNamesUsersWithoutAReader(t *testing.T) {
 	db := database(t)
 	ctx := context.Background()
 
-	users, err := db.GetUsersMany(ctx, []uuid.UUID{userA, userB}, nil)
+	users, err := db.GetUsersMany(ctx, []uuid.UUID{userA, userB}, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("by user ids: %v", err)
 	}
@@ -117,7 +121,7 @@ func TestGetUsersManyNamesUsersWithoutAReader(t *testing.T) {
 			rowID = u.ID
 		}
 	}
-	users, err = db.GetUsersMany(ctx, nil, []uuid.UUID{rowID})
+	users, err = db.GetUsersMany(ctx, nil, []uuid.UUID{rowID}, nil, nil)
 	if err != nil {
 		t.Fatalf("by row ids: %v", err)
 	}
@@ -347,5 +351,271 @@ func TestGetObjectUsageNamesAndCountsTheReadersPairs(t *testing.T) {
 	}
 	if len(rows) != 1 || rows[0].ObjectType == nil || *rows[0].ObjectType != sdb.OBJECT_TYPE_ORGANIZATION || rows[0].UsedCount == nil {
 		t.Fatalf("an untyped id takes the type of the reader's pair, got %+v", rows)
+	}
+}
+
+func TestGetUsersManyResolvesEmailsAndExternalIDs(t *testing.T) {
+	db := database(t)
+	ctx := context.Background()
+	user := uuid.New()
+	email := "Mixed." + user.String() + "@Example.io"
+	if _, err := db.NewRaw(`SELECT claimius.upsert_app_user(p_user_id => ?, p_first_name => 'Eve', p_email => ?)`, user, email).Exec(ctx); err != nil {
+		t.Fatalf("insert user: %v", err)
+	}
+
+	users, err := db.GetUsersMany(ctx, nil, nil, []string{strings.ToLower(email)}, nil)
+	if err != nil {
+		t.Fatalf("by email: %v", err)
+	}
+	if len(users) != 1 || users[0].UserID != user {
+		t.Fatalf("an email must resolve without case, got %+v", users)
+	}
+
+	users, err = db.GetUsersMany(ctx, nil, nil, nil, []string{"ext-b"})
+	if err != nil {
+		t.Fatalf("by external id: %v", err)
+	}
+	if len(users) != 1 || users[0].UserID != userB {
+		t.Fatalf("expected Bo by external id, got %+v", users)
+	}
+
+	users, err = db.GetUsersMany(ctx, []uuid.UUID{userA}, nil, nil, []string{"ext-b"})
+	if err != nil {
+		t.Fatalf("both lists: %v", err)
+	}
+	if len(users) != 0 {
+		t.Fatalf("every given list must apply, got %+v", users)
+	}
+}
+
+func TestGetOrganizationsAndLocationsManyResolveExternalIDs(t *testing.T) {
+	db := database(t)
+	ctx := context.Background()
+	org, loc := uuid.New(), uuid.New()
+	orgExt, locExt := "org-"+org.String(), "loc-"+loc.String()
+	if _, err := db.NewRaw(`
+		INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by, external_id, sa_deleted_at)
+		VALUES (?, 'External', 'company', ?, ?, 1, ?, ?, now())`, org, orgKept, orgKept, userC, orgExt).Exec(ctx); err != nil {
+		t.Fatalf("insert organization: %v", err)
+	}
+	if _, err := db.NewRaw(`
+		INSERT INTO claimius.location (id, name, sa_owner_id, sa_parent_id, sa_root_id, sa_created_by, external_id)
+		VALUES (?, 'Lobby', ?, ?, ?, ?, ?)`, loc, orgKept, loc, loc, userC, locExt).Exec(ctx); err != nil {
+		t.Fatalf("insert location: %v", err)
+	}
+
+	orgs, err := db.GetOrganizationsMany(ctx, nil, nil, []string{orgExt})
+	if err != nil {
+		t.Fatalf("organization by external id: %v", err)
+	}
+	if len(orgs) != 1 || orgs[0].ID != org || orgs[0].DeletedAt == nil {
+		t.Fatalf("expected the soft deleted External, got %+v", orgNames(orgs))
+	}
+
+	orgs, err = db.GetOrganizationsMany(ctx, nil, []uuid.UUID{orgRoot}, []string{orgExt})
+	if err != nil {
+		t.Fatalf("organization by owner and external id: %v", err)
+	}
+	if len(orgs) != 0 {
+		t.Fatalf("every given list must apply, got %+v", orgNames(orgs))
+	}
+
+	locs, err := db.GetLocationsMany(ctx, nil, nil, []string{locExt})
+	if err != nil {
+		t.Fatalf("location by external id: %v", err)
+	}
+	if len(locs) != 1 || locs[0].ID != loc {
+		t.Fatalf("expected Lobby, got %+v", locs)
+	}
+}
+
+func TestGetRelationsReadsTheReadersLiveRows(t *testing.T) {
+	db := database(t)
+	ctx := context.Background()
+	live, dropped, other := uuid.New(), uuid.New(), uuid.New()
+	if _, err := db.NewRaw(`
+		INSERT INTO claimius.user_relation (id, user_id, object_type, object_id, pinned, sa_deleted_at) VALUES
+		    (?, ?, 'claimius.organization', ?, 1, NULL),
+		    (?, ?, 'claimius.organization', ?, 1, now()),
+		    (?, ?, 'claimius.organization', ?, 1, NULL)`,
+		live, userA, orgAlpha, dropped, userA, orgGrand, other, userB, orgAlpha).Exec(ctx); err != nil {
+		t.Fatalf("insert relations: %v", err)
+	}
+
+	relations, err := db.GetUserRelations(ctx, userA)
+	if err != nil {
+		t.Fatalf("relations: %v", err)
+	}
+	ids := map[uuid.UUID]bool{}
+	for _, r := range relations {
+		ids[r.ID] = true
+		if r.UserID != userA {
+			t.Fatalf("a relation of another user came back: %+v", r)
+		}
+	}
+	if !ids[live] || ids[dropped] || ids[other] {
+		t.Fatalf("expected only the live relation of A, got %+v", ids)
+	}
+
+	filtered := make([]sdb.UserRelation, 0)
+	if err := db.GetUserRelationsQuery(&filtered, userA, sdb.UserRelationFilters{OrgIDs: []uuid.UUID{orgGrand}}).Scan(ctx); err != nil {
+		t.Fatalf("filtered: %v", err)
+	}
+	if len(filtered) != 0 {
+		t.Fatalf("a soft deleted relation must not pass a filter, got %+v", filtered)
+	}
+
+	relation, err := db.GetRelation(ctx, userA, live)
+	if err != nil || relation.ID != live {
+		t.Fatalf("expected the live relation by id, got %+v, %v", relation, err)
+	}
+	for _, id := range []uuid.UUID{dropped, other} {
+		if _, err := db.GetRelation(ctx, userA, id); !errors.Is(err, sql.ErrNoRows) {
+			t.Fatalf("relation %s must not be read by A, got %v", id, err)
+		}
+	}
+}
+
+func TestGetAuditReadsOneRowByID(t *testing.T) {
+	db := database(t)
+	ctx := context.Background()
+	var reached, hidden uuid.UUID
+	if err := db.NewRaw(`SELECT (claimius.insert_audit('update', 'test', 'claimius.organization', ?, ?, NULL, 'reached')).id`, orgRoot, orgRoot).Scan(ctx, &reached); err != nil {
+		t.Fatalf("insert reached: %v", err)
+	}
+	if err := db.NewRaw(`SELECT (claimius.insert_audit('update', 'test', 'claimius.organization', ?, ?, NULL, 'hidden')).id`, orgKept, orgKept).Scan(ctx, &hidden); err != nil {
+		t.Fatalf("insert hidden: %v", err)
+	}
+
+	audits, err := db.GetAudit(ctx, userA, sdb.ACCESS_READ, []uuid.UUID{reached})
+	if err != nil {
+		t.Fatalf("by id: %v", err)
+	}
+	if len(audits) != 1 || audits[0].ID != reached {
+		t.Fatalf("expected the one row named, got %+v", audits)
+	}
+
+	audits, err = db.GetAudit(ctx, userA, sdb.ACCESS_READ, []uuid.UUID{hidden})
+	if err != nil {
+		t.Fatalf("hidden by id: %v", err)
+	}
+	if len(audits) != 0 {
+		t.Fatalf("a row under an organization the reader does not reach must not come back, got %+v", audits)
+	}
+
+	audits, err = db.GetAudit(ctx, userA, sdb.ACCESS_READ, nil)
+	if err != nil {
+		t.Fatalf("without ids: %v", err)
+	}
+	if len(audits) == 0 {
+		t.Fatal("without ids every reached row comes back")
+	}
+}
+
+func TestGetBindingsCarryEffectiveAccess(t *testing.T) {
+	db := database(t)
+	ctx := context.Background()
+	bindings, err := db.GetBindings(ctx, sdb.BindingFilters{ObjectType: sdb.OBJECT_TYPE_ORGANIZATION})
+	if err != nil {
+		t.Fatalf("bindings: %v", err)
+	}
+	if len(bindings) == 0 {
+		t.Fatal("expected the seeded organization bindings")
+	}
+	for _, b := range bindings {
+		var want sdb.ClaimAccess
+		if err := db.NewRaw(`SELECT claimius._effective_access(c.sa_access, b.sa_access) FROM claimius.claim_object b JOIN claimius.claim c ON c.id = b.claim_id WHERE b.id = ?`, b.ID).Scan(ctx, &want); err != nil {
+			t.Fatalf("expected mask: %v", err)
+		}
+		if b.EffectiveAccess == nil || *b.EffectiveAccess != want {
+			t.Fatalf("binding %s: expected effective access %d, got %v", b.ID, want, b.EffectiveAccess)
+		}
+	}
+}
+
+func TestGetDescendantsWalksWithoutAType(t *testing.T) {
+	db := database(t)
+	ctx := context.Background()
+	rows, err := db.GetDescendants(ctx, orgRoot)
+	if err != nil {
+		t.Fatalf("descendants: %v", err)
+	}
+	var typed []sdb.Descendant
+	if err := db.NewRaw(`SELECT * FROM claimius.get_descendants(?, ?)`, sdb.OBJECT_TYPE_ORGANIZATION, orgRoot).Scan(ctx, &typed); err != nil {
+		t.Fatalf("typed: %v", err)
+	}
+	key := func(d sdb.Descendant) string { return d.TreeType + string(d.ObjectType) + d.ObjectID.String() }
+	want := map[string]int{}
+	for _, d := range typed {
+		want[key(d)] = d.Hop
+	}
+	got := map[string]int{}
+	for _, d := range rows {
+		got[key(d)] = d.Hop
+	}
+	if len(got) != len(want) {
+		t.Fatalf("expected the typed walk, got %d rows for %d", len(got), len(want))
+	}
+	for k, hop := range want {
+		if h, ok := got[k]; !ok || h != hop {
+			t.Fatalf("expected %s at hop %d, got %d, %v", k, hop, h, ok)
+		}
+	}
+	grand := false
+	for _, d := range rows {
+		if d.ObjectID == orgGrand && d.TreeType == "ownership" && d.Hop == 2 {
+			grand = true
+		}
+	}
+	if !grand {
+		t.Fatalf("expected Grand two hops down the ownership tree, got %+v", rows)
+	}
+}
+
+func TestModelsReadThroughTheGetViews(t *testing.T) {
+	db := database(t)
+	ctx := context.Background()
+	grants := make([]sdb.UserClaim, 0)
+	q := db.NewSelect().Model(&grants).Relation("Owner").Relation("User").Where("user_claim.user_id = ?", userC)
+	query := q.String()
+	for _, name := range []string{`"claimius"."get_grants"`, `"claimius"."get_organizations"`, `"claimius"."get_users"`} {
+		if !strings.Contains(query, name) {
+			t.Fatalf("expected %s in %s", name, query)
+		}
+	}
+	for _, name := range []string{`"claimius"."user_claim"`, `"claimius"."organization"`, `"claimius"."samna_user"`} {
+		if strings.Contains(query, name) {
+			t.Fatalf("a select must not name the table %s: %s", name, query)
+		}
+	}
+	if err := q.Scan(ctx); err != nil {
+		t.Fatalf("scan: %v", err)
+	}
+	dropped := false
+	for _, g := range grants {
+		if g.User == nil || g.User.FirstName == nil || *g.User.FirstName != "Cy" {
+			t.Fatalf("expected Cy joined on every grant, got %+v", g.User)
+		}
+		if g.Owner != nil && g.Owner.ID == orgDropped {
+			dropped = g.Owner.DeletedAt != nil
+		}
+	}
+	if !dropped {
+		t.Fatal("a soft deleted owner must join as it stands")
+	}
+
+	err := db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
+		if _, err := tx.ExecContext(ctx, `SET LOCAL ROLE claimius_reader`); err != nil {
+			return err
+		}
+		for _, view := range []string{"get_users", "get_organizations", "get_locations", "get_claims", "get_grants"} {
+			if _, err := tx.ExecContext(ctx, `SELECT count(*) FROM claimius.`+view); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("claimius_reader must select the views: %v", err)
 	}
 }
