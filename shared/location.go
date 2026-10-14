@@ -77,7 +77,7 @@ func (d *DB) GetParentLocations(ctx context.Context, startID uuid.UUID) ([]uuid.
 	return ids, err
 }
 
-func (d *DB) insertLocation(ctx context.Context, ac *AccessClaim, loc *Location) (*Location, error) {
+func (d *DB) insertLocation(ctx context.Context, conn bun.IConn, ac *AccessClaim, loc *Location) (*Location, error) {
 	if ac == nil || ac.ClaimID == nil || ac.UserClaimID == nil {
 		return nil, ErrNoAccess
 	}
@@ -86,8 +86,8 @@ func (d *DB) insertLocation(ctx context.Context, ac *AccessClaim, loc *Location)
 	if bindingOwnerID == uuid.Nil {
 		bindingOwnerID = ac.OwnerID
 	}
-	err := d.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
-		if _, err := tx.NewInsert().
+	write := func(ctx context.Context, tx bun.IConn) error {
+		if _, err := d.DB.NewInsert().Conn(tx).
 			Model(loc).
 			ExcludeColumn("id", "sa_root_id", "sa_created_at", "sa_updated_at", "sa_deleted_at").
 			Returning("*").
@@ -95,10 +95,10 @@ func (d *DB) insertLocation(ctx context.Context, ac *AccessClaim, loc *Location)
 			return err
 		}
 		var bindingRootID uuid.UUID
-		if err := tx.NewRaw(`SELECT sa_root_id FROM claimius.organization WHERE id = ? AND sa_deleted_at IS NULL`, bindingOwnerID).Scan(ctx, &bindingRootID); err != nil {
+		if err := d.DB.NewRaw(`SELECT sa_root_id FROM claimius.organization WHERE id = ? AND sa_deleted_at IS NULL`, bindingOwnerID).Conn(tx).Scan(ctx, &bindingRootID); err != nil {
 			return err
 		}
-		if _, err := tx.NewRaw(`
+		if _, err := d.DB.NewRaw(`
 			SELECT claimius.insert_claim_object(
 				p_claim_id      := ?,
 				p_sa_owner_id   := ?,
@@ -109,22 +109,28 @@ func (d *DB) insertLocation(ctx context.Context, ac *AccessClaim, loc *Location)
 				p_sa_access     := ?,
 				p_inherits      := TRUE
 			)
-		`, *ac.ClaimID, bindingOwnerID, bindingRootID, *ac.UserClaimID, loc.ID, int(ACCESS_OWNER|ACCESS_WRITE|ACCESS_READ)).Exec(ctx); err != nil {
+		`, *ac.ClaimID, bindingOwnerID, bindingRootID, *ac.UserClaimID, loc.ID, int(ACCESS_OWNER|ACCESS_WRITE|ACCESS_READ)).Conn(tx).Exec(ctx); err != nil {
 			return err
 		}
 		return nil
-	})
+	}
+	var err error
+	if conn != nil {
+		err = write(ctx, conn)
+	} else {
+		err = d.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error { return write(ctx, tx) })
+	}
 	if err != nil {
 		return nil, err
 	}
 	return loc, nil
 }
 
-func (d *DB) updateLocation(ctx context.Context, ac *AccessClaim, locationID uuid.UUID, loc *Location) (*Location, error) {
+func (d *DB) updateLocation(ctx context.Context, conn bun.IConn, ac *AccessClaim, locationID uuid.UUID, loc *Location) (*Location, error) {
 	if ac == nil {
 		return nil, ErrNoAccess
 	}
-	q := d.DB.NewUpdate().
+	q := d.DB.NewUpdate().Conn(conn).
 		Model(loc).
 		Where("id = ?", locationID).
 		Where("sa_deleted_at IS NULL").
@@ -141,12 +147,12 @@ func (d *DB) updateLocation(ctx context.Context, ac *AccessClaim, locationID uui
 	return loc, nil
 }
 
-func (d *DB) deleteLocation(ctx context.Context, ac *AccessClaim, locationID uuid.UUID) (*Location, error) {
+func (d *DB) deleteLocation(ctx context.Context, conn bun.IConn, ac *AccessClaim, locationID uuid.UUID) (*Location, error) {
 	if ac == nil {
 		return nil, ErrNoAccess
 	}
 	var loc Location
-	_, err := d.DB.NewUpdate().
+	_, err := d.DB.NewUpdate().Conn(conn).
 		Model(&loc).
 		Where("id = ?", locationID).
 		Where("sa_deleted_at IS NULL").

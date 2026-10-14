@@ -143,11 +143,11 @@ func (d *DB) GetRelation(ctx context.Context, userID uuid.UUID, relationID uuid.
 	return &relation, nil
 }
 
-func (d *DB) insertRelation(ctx context.Context, ac *AccessClaim, relation *UserRelation) (*UserRelation, error) {
+func (d *DB) insertRelation(ctx context.Context, conn bun.IConn, ac *AccessClaim, relation *UserRelation) (*UserRelation, error) {
 	if ac == nil {
 		return nil, ErrNoAccess
 	}
-	_, err := d.DB.NewInsert().
+	_, err := d.DB.NewInsert().Conn(conn).
 		Model(relation).
 		ExcludeColumn("id", "sa_created_at", "sa_updated_at", "sa_deleted_at").
 		Returning("*").
@@ -158,11 +158,11 @@ func (d *DB) insertRelation(ctx context.Context, ac *AccessClaim, relation *User
 	return relation, nil
 }
 
-func (d *DB) updateRelation(ctx context.Context, ac *AccessClaim, relationID uuid.UUID, relation *UserRelation) (*UserRelation, error) {
+func (d *DB) updateRelation(ctx context.Context, conn bun.IConn, ac *AccessClaim, relationID uuid.UUID, relation *UserRelation) (*UserRelation, error) {
 	if ac == nil {
 		return nil, ErrNoAccess
 	}
-	q := d.DB.NewUpdate().
+	q := d.DB.NewUpdate().Conn(conn).
 		Model(relation).
 		Where("id = ?", relationID).
 		Where("sa_deleted_at IS NULL").
@@ -179,12 +179,12 @@ func (d *DB) updateRelation(ctx context.Context, ac *AccessClaim, relationID uui
 	return relation, nil
 }
 
-func (d *DB) deleteRelation(ctx context.Context, ac *AccessClaim, userID, relationID uuid.UUID) (*UserRelation, error) {
+func (d *DB) deleteRelation(ctx context.Context, conn bun.IConn, ac *AccessClaim, userID, relationID uuid.UUID) (*UserRelation, error) {
 	if ac == nil {
 		return nil, ErrNoAccess
 	}
 	var relation UserRelation
-	_, err := d.DB.NewUpdate().
+	_, err := d.DB.NewUpdate().Conn(conn).
 		Model(&relation).
 		Where("id = ?", relationID).
 		Where("user_id = ?", userID).
@@ -201,9 +201,9 @@ func (d *DB) deleteRelation(ctx context.Context, ac *AccessClaim, userID, relati
 	return &relation, nil
 }
 
-func (d *DB) insertUser(ctx context.Context, ac *AccessClaim, in *SamnaUser) (*SamnaUser, bool, error) {
+func (d *DB) insertUser(ctx context.Context, conn bun.IConn, ac *AccessClaim, in *SamnaUser) (*SamnaUser, bool, error) {
 	if in.OwnerID != nil && *in.OwnerID != uuid.Nil {
-		result, err := d.callCreateOrganizationUser(ctx, ac, *in.OwnerID, in, false, nil, nil)
+		result, err := d.callCreateOrganizationUser(ctx, conn, ac, *in.OwnerID, in, false, nil, nil)
 		if err != nil {
 			return nil, false, err
 		}
@@ -212,7 +212,7 @@ func (d *DB) insertUser(ctx context.Context, ac *AccessClaim, in *SamnaUser) (*S
 	var payload []byte
 	err := d.NewRaw(`
 		SELECT (claimius.upsert_app_user(?, ?, ?, ?, ?, ?, ?, ?) -> 'samna_user')::jsonb
-	`, in.UserID, in.FirstName, in.LastName, in.UserName, in.Email, in.Phone, in.ExternalID, in.UserImage).Scan(ctx, &payload)
+	`, in.UserID, in.FirstName, in.LastName, in.UserName, in.Email, in.Phone, in.ExternalID, in.UserImage).Conn(conn).Scan(ctx, &payload)
 	if err != nil {
 		return nil, false, err
 	}
@@ -223,11 +223,11 @@ func (d *DB) insertUser(ctx context.Context, ac *AccessClaim, in *SamnaUser) (*S
 	return &out, false, nil
 }
 
-func (d *DB) updateUser(ctx context.Context, ac *AccessClaim, userID uuid.UUID, user *SamnaUser) (*SamnaUser, error) {
+func (d *DB) updateUser(ctx context.Context, conn bun.IConn, ac *AccessClaim, userID uuid.UUID, user *SamnaUser) (*SamnaUser, error) {
 	if ac == nil {
 		return nil, ErrNoAccess
 	}
-	q := d.DB.NewUpdate().
+	q := d.DB.NewUpdate().Conn(conn).
 		Model(user).
 		Where("user_id = ?", userID).
 		Where("sa_deleted_at IS NULL").
@@ -267,13 +267,13 @@ func (d *DB) DeleteUser(ctx context.Context, ac *AccessClaim, userID uuid.UUID) 
 	return &user, nil
 }
 
-func (d *DB) deleteUser(ctx context.Context, ac *AccessClaim, userID uuid.UUID) (*SamnaUser, error) {
+func (d *DB) deleteUser(ctx context.Context, conn bun.IConn, ac *AccessClaim, userID uuid.UUID) (*SamnaUser, error) {
 	if ac == nil {
 		return nil, ErrNoAccess
 	}
 	var user SamnaUser
-	err := d.DB.RunInTx(ctx, &sql.TxOptions{}, func(ctx context.Context, tx bun.Tx) error {
-		if _, err := tx.NewUpdate().
+	write := func(ctx context.Context, tx bun.IConn) error {
+		if _, err := d.DB.NewUpdate().Conn(tx).
 			Model(&user).
 			Where("user_id = ?", userID).
 			Where("sa_deleted_at IS NULL").
@@ -282,17 +282,23 @@ func (d *DB) deleteUser(ctx context.Context, ac *AccessClaim, userID uuid.UUID) 
 			Exec(ctx, &user); err != nil {
 			return err
 		}
-		if _, err := tx.NewRaw(`
+		if _, err := d.DB.NewRaw(`
 			UPDATE claimius.user_token
 			SET sa_deleted_at = NOW()
 			WHERE user_id = ?
 			  AND TRUE
 			  AND sa_deleted_at IS NULL
-		`, userID).Exec(ctx); err != nil {
+		`, userID).Conn(tx).Exec(ctx); err != nil {
 			return err
 		}
 		return nil
-	})
+	}
+	var err error
+	if conn != nil {
+		err = write(ctx, conn)
+	} else {
+		err = d.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error { return write(ctx, tx) })
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -402,7 +408,7 @@ func (d *DB) CreateOrganizationUser(ctx context.Context, ac *AccessClaim, in *Sa
 	return in, nil
 }
 
-func (d *DB) callCreateOrganizationUser(ctx context.Context, ac *AccessClaim, ownerID uuid.UUID, user *SamnaUser, upsert bool, identity map[string]any, reason *string) (*OrganizationUserResult, error) {
+func (d *DB) callCreateOrganizationUser(ctx context.Context, conn bun.IConn, ac *AccessClaim, ownerID uuid.UUID, user *SamnaUser, upsert bool, identity map[string]any, reason *string) (*OrganizationUserResult, error) {
 	if ac == nil || ac.UserClaimID == nil {
 		return nil, ErrNoAccess
 	}
@@ -422,7 +428,7 @@ func (d *DB) callCreateOrganizationUser(ctx context.Context, ac *AccessClaim, ow
 	var payload []byte
 	err = d.NewRaw(`
 		SELECT claimius.insert_organization_user(?, ?, ?::jsonb, ?, ?::jsonb, ?)
-	`, *ac.UserClaimID, ownerID, string(userJSON), upsert, identityJSON, reason).Scan(ctx, &payload)
+	`, *ac.UserClaimID, ownerID, string(userJSON), upsert, identityJSON, reason).Conn(conn).Scan(ctx, &payload)
 	if err != nil {
 		var pgErr pgdriver.Error
 		if errors.As(err, &pgErr) && pgErr.Field('C') == "23505" {
@@ -550,20 +556,20 @@ func getExternalIdentity(payload SamnaUserExternal) (SamnaUser, string, error) {
 	return user, *payload.User.ExternalID, nil
 }
 
-func (d *DB) issueUserToken(ctx context.Context, ac *AccessClaim, payload SamnaUserToken) (*OrganizationUserResult, error) {
+func (d *DB) issueUserToken(ctx context.Context, conn bun.IConn, ac *AccessClaim, payload SamnaUserToken) (*OrganizationUserResult, error) {
 	user, idClaim, externalID, claimsJSON, err := getTokenIdentity(payload)
 	if err != nil {
 		return nil, err
 	}
 	identity := map[string]any{"external_id": externalID, "id_claim": idClaim, "type": "token", "data": claimsJSON}
-	return d.callCreateOrganizationUser(ctx, ac, *payload.OwnerID, &user, true, identity, payload.Reason)
+	return d.callCreateOrganizationUser(ctx, conn, ac, *payload.OwnerID, &user, true, identity, payload.Reason)
 }
 
-func (d *DB) upsertUserExternal(ctx context.Context, ac *AccessClaim, payload SamnaUserExternal) (*OrganizationUserResult, error) {
+func (d *DB) upsertUserExternal(ctx context.Context, conn bun.IConn, ac *AccessClaim, payload SamnaUserExternal) (*OrganizationUserResult, error) {
 	user, externalID, err := getExternalIdentity(payload)
 	if err != nil {
 		return nil, err
 	}
 	identity := map[string]any{"external_id": externalID, "id_claim": "external", "type": "external", "data": json.RawMessage(`{}`)}
-	return d.callCreateOrganizationUser(ctx, ac, *payload.OwnerID, &user, true, identity, payload.Reason)
+	return d.callCreateOrganizationUser(ctx, conn, ac, *payload.OwnerID, &user, true, identity, payload.Reason)
 }

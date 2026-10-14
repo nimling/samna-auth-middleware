@@ -185,7 +185,7 @@ func (d *DB) GetClaimGraphQuery(userID uuid.UUID, startID *uuid.UUID, depth int,
 		Column("graph.*")
 }
 
-func (d *DB) insertClaim(ctx context.Context, ac *AccessClaim, claim *Claim) (*Claim, error) {
+func (d *DB) insertClaim(ctx context.Context, conn bun.IConn, ac *AccessClaim, claim *Claim) (*Claim, error) {
 	if ac == nil {
 		return nil, ErrNoAccess
 	}
@@ -206,7 +206,7 @@ func (d *DB) insertClaim(ctx context.Context, ac *AccessClaim, claim *Claim) (*C
 		claim.Inherits,
 		string(claim.Type),
 		claim.Level,
-	).Scan(ctx, &payload)
+	).Conn(conn).Scan(ctx, &payload)
 	if err != nil {
 		return nil, err
 	}
@@ -216,7 +216,7 @@ func (d *DB) insertClaim(ctx context.Context, ac *AccessClaim, claim *Claim) (*C
 	return claim, nil
 }
 
-func (d *DB) updateClaim(ctx context.Context, ac *AccessClaim, claimID uuid.UUID, claim *Claim) (*Claim, error) {
+func (d *DB) updateClaim(ctx context.Context, conn bun.IConn, ac *AccessClaim, claimID uuid.UUID, claim *Claim) (*Claim, error) {
 	if ac == nil {
 		return nil, ErrNoAccess
 	}
@@ -252,7 +252,7 @@ func (d *DB) updateClaim(ctx context.Context, ac *AccessClaim, claimID uuid.UUID
 		access,
 		inherits,
 		level,
-	).Scan(ctx, &payload)
+	).Conn(conn).Scan(ctx, &payload)
 	if err != nil {
 		return nil, err
 	}
@@ -262,12 +262,12 @@ func (d *DB) updateClaim(ctx context.Context, ac *AccessClaim, claimID uuid.UUID
 	return claim, nil
 }
 
-func (d *DB) deleteClaim(ctx context.Context, ac *AccessClaim, claimID uuid.UUID) (*Claim, error) {
+func (d *DB) deleteClaim(ctx context.Context, conn bun.IConn, ac *AccessClaim, claimID uuid.UUID) (*Claim, error) {
 	if ac == nil || ac.UserClaimID == nil {
 		return nil, ErrNoAccess
 	}
 	var claim Claim
-	err := d.NewSelect().
+	err := d.NewSelect().Conn(conn).
 		Model(&claim).
 		ModelTableExpr("claimius.delete_claim(?, ?) AS claim", claimID, *ac.UserClaimID).
 		Scan(ctx)
@@ -277,7 +277,7 @@ func (d *DB) deleteClaim(ctx context.Context, ac *AccessClaim, claimID uuid.UUID
 	return &claim, nil
 }
 
-func (d *DB) insertClaimObject(ctx context.Context, ac *AccessClaim, claimID uuid.UUID, co *ClaimObject) (*ClaimObject, error) {
+func (d *DB) insertClaimObject(ctx context.Context, conn bun.IConn, ac *AccessClaim, claimID uuid.UUID, co *ClaimObject) (*ClaimObject, error) {
 	if ac == nil {
 		return nil, ErrNoAccess
 	}
@@ -311,7 +311,7 @@ func (d *DB) insertClaimObject(ctx context.Context, ac *AccessClaim, claimID uui
 		co.Reason,
 		co.RefID,
 		co.Scope,
-	).Scan(ctx, &payload)
+	).Conn(conn).Scan(ctx, &payload)
 	if err != nil {
 		return nil, err
 	}
@@ -321,12 +321,12 @@ func (d *DB) insertClaimObject(ctx context.Context, ac *AccessClaim, claimID uui
 	return co, nil
 }
 
-func (d *DB) deleteClaimObject(ctx context.Context, ac *AccessClaim, claimID, objectID uuid.UUID) (*ClaimObject, error) {
+func (d *DB) deleteClaimObject(ctx context.Context, conn bun.IConn, ac *AccessClaim, claimID, objectID uuid.UUID) (*ClaimObject, error) {
 	if ac == nil || ac.UserClaimID == nil {
 		return nil, ErrNoAccess
 	}
 	var rowID uuid.UUID
-	err := d.NewSelect().
+	err := d.NewSelect().Conn(conn).
 		ColumnExpr("id").
 		Table("claimius.claim_object").
 		Where("claim_id = ?", claimID).
@@ -337,7 +337,7 @@ func (d *DB) deleteClaimObject(ctx context.Context, ac *AccessClaim, claimID, ob
 		return nil, err
 	}
 	var co ClaimObject
-	err = d.NewSelect().
+	err = d.NewSelect().Conn(conn).
 		Model(&co).
 		ModelTableExpr("claimius.delete_claim_object(?, ?) AS claim_object", rowID, *ac.UserClaimID).
 		Scan(ctx)
@@ -347,7 +347,7 @@ func (d *DB) deleteClaimObject(ctx context.Context, ac *AccessClaim, claimID, ob
 	return &co, nil
 }
 
-func (d *DB) insertClaimUser(ctx context.Context, ac *AccessClaim, claimID uuid.UUID, uc *UserClaim) (*UserClaim, error) {
+func (d *DB) insertClaimUser(ctx context.Context, conn bun.IConn, ac *AccessClaim, claimID uuid.UUID, uc *UserClaim) (*UserClaim, error) {
 	if ac == nil || ac.UserClaimID == nil {
 		return nil, ErrNoAccess
 	}
@@ -366,7 +366,7 @@ func (d *DB) insertClaimUser(ctx context.Context, ac *AccessClaim, claimID uuid.
 		uc.Reason,
 		uc.StartsAt,
 		uc.EndsAt,
-	).Scan(ctx, &payload)
+	).Conn(conn).Scan(ctx, &payload)
 	if err != nil {
 		return nil, err
 	}
@@ -376,12 +376,12 @@ func (d *DB) insertClaimUser(ctx context.Context, ac *AccessClaim, claimID uuid.
 	return uc, nil
 }
 
-func (d *DB) deleteClaimUser(ctx context.Context, ac *AccessClaim, claimID, userID uuid.UUID) (*UserClaim, error) {
+func (d *DB) deleteClaimUser(ctx context.Context, conn bun.IConn, ac *AccessClaim, claimID, userID uuid.UUID) (*UserClaim, error) {
 	if ac == nil || ac.UserClaimID == nil {
 		return nil, ErrNoAccess
 	}
 	var rowID uuid.UUID
-	err := d.NewSelect().
+	err := d.NewSelect().Conn(conn).
 		ColumnExpr("id").
 		Table("claimius.user_claim").
 		Where("claim_id = ?", claimID).
@@ -392,7 +392,7 @@ func (d *DB) deleteClaimUser(ctx context.Context, ac *AccessClaim, claimID, user
 		return nil, err
 	}
 	var uc UserClaim
-	err = d.NewSelect().
+	err = d.NewSelect().Conn(conn).
 		Model(&uc).
 		ModelTableExpr("claimius.delete_user_claim(?, ?) AS user_claim", rowID, *ac.UserClaimID).
 		Scan(ctx)

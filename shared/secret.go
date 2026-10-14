@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/uptrace/bun"
 )
 
 type BodySecret struct {
@@ -45,7 +46,7 @@ func (d *DB) GetSecret(ctx context.Context, secretID uuid.UUID) (*SamnaSecret, e
 	return &secret, nil
 }
 
-func (d *DB) insertSecret(ctx context.Context, ac *AccessClaim, body BodySecret) (*SamnaSecret, error) {
+func (d *DB) insertSecret(ctx context.Context, conn bun.IConn, ac *AccessClaim, body BodySecret) (*SamnaSecret, error) {
 	if ac == nil || ac.UserClaimID == nil {
 		return nil, ErrNoAccess
 	}
@@ -65,17 +66,22 @@ func (d *DB) insertSecret(ctx context.Context, ac *AccessClaim, body BodySecret)
 	if err := d.NewRaw(
 		"SELECT (claimius.insert_secret(?, ?, ?, ?, ?) -> 'samna_secret' ->> 'id')::uuid",
 		*body.Key, hex.EncodeToString(encrypted), body.ExpiresAt, *body.OwnerID, *ac.UserClaimID,
-	).Scan(ctx, &secretID); err != nil {
+	).Conn(conn).Scan(ctx, &secretID); err != nil {
 		return nil, fmt.Errorf("insert_secret: %w", err)
 	}
-	return d.GetSecret(ctx, secretID)
+	var secret SamnaSecret
+	if err := d.NewSelect().Conn(conn).Model(&secret).ExcludeColumn("sa_deleted_at").Where("id = ?", secretID).Where("sa_deleted_at IS NULL").Limit(1).Scan(ctx); err != nil {
+		return nil, err
+	}
+	return &secret, nil
 }
 
-func (d *DB) updateSecret(ctx context.Context, ac *AccessClaim, secretID uuid.UUID, body BodySecret) (*SamnaSecret, error) {
+func (d *DB) updateSecret(ctx context.Context, conn bun.IConn, ac *AccessClaim, secretID uuid.UUID, body BodySecret) (*SamnaSecret, error) {
 	if ac == nil {
 		return nil, ErrNoAccess
 	}
-	secret, err := d.GetSecret(ctx, secretID)
+	secret := &SamnaSecret{}
+	err := d.NewSelect().Conn(conn).Model(secret).ExcludeColumn("sa_deleted_at").Where("id = ?", secretID).Where("sa_deleted_at IS NULL").Limit(1).Scan(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -100,7 +106,7 @@ func (d *DB) updateSecret(ctx context.Context, ac *AccessClaim, secretID uuid.UU
 	if body.ExpiresAt != nil {
 		secret.ExpiresAt = body.ExpiresAt
 	}
-	_, err = d.DB.NewUpdate().
+	_, err = d.DB.NewUpdate().Conn(conn).
 		Model(secret).
 		Where("sa_deleted_at IS NULL").
 		Where("id = ?", secretID).
@@ -113,12 +119,12 @@ func (d *DB) updateSecret(ctx context.Context, ac *AccessClaim, secretID uuid.UU
 	return secret, nil
 }
 
-func (d *DB) deleteSecret(ctx context.Context, ac *AccessClaim, secretID uuid.UUID) (*SamnaSecret, error) {
+func (d *DB) deleteSecret(ctx context.Context, conn bun.IConn, ac *AccessClaim, secretID uuid.UUID) (*SamnaSecret, error) {
 	if ac == nil {
 		return nil, ErrNoAccess
 	}
 	var secret SamnaSecret
-	_, err := d.DB.NewUpdate().
+	_, err := d.DB.NewUpdate().Conn(conn).
 		Model(&secret).
 		Where("id = ?", secretID).
 		Where("sa_deleted_at IS NULL").

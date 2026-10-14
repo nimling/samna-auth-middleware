@@ -3,7 +3,7 @@ gate: auth-middleware
 layout: doc
 title: Writes in Go
 description: The write builders NewInsert, NewUpdate and NewDelete, how a write to a shared type is routed to the prophet and upserted locally, how the actor is stamped, the feed position a routed write answers with, audit in the write's transaction, and debug mode.
-tags: NewInsert, NewUpdate, NewDelete, Access, routed write, EndpointFor, Seq, WaitForSeq, WriteAudit, debug mode, sa_created_by
+tags: NewInsert, NewUpdate, NewDelete, Access, Conn, routed write, EndpointFor, Seq, WaitForSeq, WriteAudit, debug mode, sa_created_by
 lastUpdated: true
 ---
 
@@ -44,6 +44,21 @@ The last three are one operation, `insert_organization_user`: the user, the gran
 4. The prophet answers every successful write with the app's feed position in `SAuth-Seq`, written `<txid>.<seq>`. The builder keeps it, and `Seq()` returns it as a `client.SyncCursor`. A later read on the disciple that must see the write calls `sam.WaitForSeq(ctx, q.Seq(), timeout)`, which waits until the disciple's cursor reaches that position; see [Sync](../sync.md).
 
 5. The write settles the actor's own pairs on the prophet and, through the local upsert and the triggers, on the disciple, so the handler reads its own write back. Every other user's pairs settle on that user's next check or listing; see [Materialization](../materialization.md).
+
+## Inside a caller's transaction
+
+`.Conn(tx)` on `NewInsert()`, `NewUpdate()` or `NewDelete()` names the connection the builder writes on locally, bun's `bun.IConn` convention, a `bun.Tx` in practice. Every local statement of the write runs on it: the bun query, the claimius function a typed write calls, the statements a write such as `insertOrganization` would otherwise group in a transaction of its own, and the upsert of a routed write's answer. A binding on a row the same transaction inserted therefore sees that row, and the write commits or rolls back with the caller.
+
+```go
+err := db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
+	if _, err := tx.NewInsert().Model(&booking).Exec(ctx); err != nil {
+		return err
+	}
+	return db.NewInsert().Model(&sdb.ClaimObject{ClaimID: claimID, ObjectID: &booking.ID, ObjectType: &bookingType}).Access(ac).Conn(tx).Scan(ctx)
+})
+```
+
+A routed write still goes to the prophet over HTTP, which judges a binding on a consumer's own row by the actor's hold on the binding's owning organization and needs no sight of the row; only the local copy of its answer joins the transaction. Without `.Conn` every statement runs on the pool, outside any transaction of the caller's.
 
 ## Audit in the write's transaction
 

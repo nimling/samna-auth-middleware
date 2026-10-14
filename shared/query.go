@@ -218,13 +218,13 @@ func writeResult(model any) any {
 	return model
 }
 
-func (d *DB) applyRouted(ctx context.Context, model any, raw json.RawMessage, dest ...any) error {
+func (d *DB) applyRouted(ctx context.Context, conn bun.IConn, model any, raw json.RawMessage, dest ...any) error {
 	result := writeResult(model)
 	if len(raw) > 0 {
 		if err := unmarshalWrite(result, raw); err != nil {
 			return err
 		}
-		if _, err := store.Upsert(ctx, d.DB, result); err != nil {
+		if _, err := store.Upsert(ctx, d.DB, conn, result); err != nil {
 			return err
 		}
 	}
@@ -311,6 +311,7 @@ func CopyInto(src, dst any) error {
 
 type InsertQuery struct {
 	db          *DB
+	conn        bun.IConn
 	model       any
 	accessClaim *AccessClaim
 	excludes    []string
@@ -327,6 +328,11 @@ func (d *DB) NewInsert() *InsertQuery {
 
 func (q *InsertQuery) Model(model any) *InsertQuery {
 	q.model = model
+	return q
+}
+
+func (q *InsertQuery) Conn(db bun.IConn) *InsertQuery {
+	q.conn = db
 	return q
 }
 
@@ -356,7 +362,7 @@ func (q *InsertQuery) Set(expr string, args ...any) *InsertQuery {
 }
 
 func (q *InsertQuery) buildBun() *bun.InsertQuery {
-	bq := q.db.DB.NewInsert().Model(q.model)
+	bq := q.db.DB.NewInsert().Model(q.model).Conn(q.conn)
 	if len(q.excludes) > 0 {
 		bq = bq.ExcludeColumn(q.excludes...)
 	}
@@ -417,7 +423,7 @@ func (q *InsertQuery) route(ctx context.Context, dest ...any) error {
 		return err
 	}
 	q.created = status == http.StatusCreated
-	return q.db.applyRouted(ctx, q.model, raw, dest...)
+	return q.db.applyRouted(ctx, q.conn, q.model, raw, dest...)
 }
 
 func (q *InsertQuery) Seq() client.SyncCursor { return q.seq }
@@ -435,14 +441,14 @@ func (q *InsertQuery) execClaimius(ctx context.Context, dest ...any) (handled bo
 	}()
 	switch m := q.model.(type) {
 	case *SamnaUserToken:
-		result, err := q.db.issueUserToken(ctx, q.accessClaim, *m)
+		result, err := q.db.issueUserToken(ctx, q.conn, q.accessClaim, *m)
 		if err != nil {
 			return true, err
 		}
 		q.created = result.Created
 		return true, dispatchScan(result.SamnaUser, dest...)
 	case *SamnaUserExternal:
-		result, err := q.db.upsertUserExternal(ctx, q.accessClaim, *m)
+		result, err := q.db.upsertUserExternal(ctx, q.conn, q.accessClaim, *m)
 		if err != nil {
 			return true, err
 		}
@@ -455,7 +461,7 @@ func (q *InsertQuery) execClaimius(ctx context.Context, dest ...any) (handled bo
 		if !ok {
 			return false, nil
 		}
-		result, err := q.db.insertClaim(ctx, q.accessClaim, m)
+		result, err := q.db.insertClaim(ctx, q.conn, q.accessClaim, m)
 		if err != nil {
 			return true, err
 		}
@@ -469,7 +475,7 @@ func (q *InsertQuery) execClaimius(ctx context.Context, dest ...any) (handled bo
 		if m.ClaimID == uuid.Nil {
 			return true, fmt.Errorf("insert claim_object: claim_id required on model")
 		}
-		result, err := q.db.insertClaimObject(ctx, q.accessClaim, m.ClaimID, m)
+		result, err := q.db.insertClaimObject(ctx, q.conn, q.accessClaim, m.ClaimID, m)
 		if err != nil {
 			return true, err
 		}
@@ -483,7 +489,7 @@ func (q *InsertQuery) execClaimius(ctx context.Context, dest ...any) (handled bo
 		if m.ClaimID == uuid.Nil {
 			return true, fmt.Errorf("insert user_claim: claim_id required on model")
 		}
-		result, err := q.db.insertClaimUser(ctx, q.accessClaim, m.ClaimID, m)
+		result, err := q.db.insertClaimUser(ctx, q.conn, q.accessClaim, m.ClaimID, m)
 		if err != nil {
 			return true, err
 		}
@@ -494,7 +500,7 @@ func (q *InsertQuery) execClaimius(ctx context.Context, dest ...any) (handled bo
 		if !ok {
 			return false, nil
 		}
-		result, created, err := q.db.insertUser(ctx, q.accessClaim, m)
+		result, created, err := q.db.insertUser(ctx, q.conn, q.accessClaim, m)
 		if err != nil {
 			return true, err
 		}
@@ -508,7 +514,7 @@ func (q *InsertQuery) execClaimius(ctx context.Context, dest ...any) (handled bo
 		if !ok {
 			return false, nil
 		}
-		result, err := q.db.insertOrganization(ctx, q.accessClaim, m)
+		result, err := q.db.insertOrganization(ctx, q.conn, q.accessClaim, m)
 		if err != nil {
 			return true, err
 		}
@@ -519,7 +525,7 @@ func (q *InsertQuery) execClaimius(ctx context.Context, dest ...any) (handled bo
 		if !ok {
 			return false, nil
 		}
-		result, err := q.db.insertLocation(ctx, q.accessClaim, m)
+		result, err := q.db.insertLocation(ctx, q.conn, q.accessClaim, m)
 		if err != nil {
 			return true, err
 		}
@@ -530,7 +536,7 @@ func (q *InsertQuery) execClaimius(ctx context.Context, dest ...any) (handled bo
 		if !ok {
 			return false, nil
 		}
-		result, err := q.db.insertRelation(ctx, q.accessClaim, m)
+		result, err := q.db.insertRelation(ctx, q.conn, q.accessClaim, m)
 		if err != nil {
 			return true, err
 		}
@@ -542,7 +548,7 @@ func (q *InsertQuery) execClaimius(ctx context.Context, dest ...any) (handled bo
 			return false, nil
 		}
 		body := BodySecret{Key: &m.Key, Value: &m.Value, OwnerID: &m.OwnerID, ExpiresAt: m.ExpiresAt}
-		result, err := q.db.insertSecret(ctx, q.accessClaim, body)
+		result, err := q.db.insertSecret(ctx, q.conn, q.accessClaim, body)
 		if err != nil {
 			return true, err
 		}
@@ -632,6 +638,7 @@ func setStructUUID(v reflect.Value, field string, val uuid.UUID, onlyIfZero bool
 
 type UpdateQuery struct {
 	db          *DB
+	conn        bun.IConn
 	model       any
 	accessClaim *AccessClaim
 	recordID    uuid.UUID
@@ -650,6 +657,11 @@ func (d *DB) NewUpdate() *UpdateQuery {
 
 func (q *UpdateQuery) Model(model any) *UpdateQuery {
 	q.model = model
+	return q
+}
+
+func (q *UpdateQuery) Conn(db bun.IConn) *UpdateQuery {
+	q.conn = db
 	return q
 }
 
@@ -694,7 +706,7 @@ func (q *UpdateQuery) Where(expr string, args ...any) *UpdateQuery {
 }
 
 func (q *UpdateQuery) buildBun() *bun.UpdateQuery {
-	bq := q.db.DB.NewUpdate().Model(q.model)
+	bq := q.db.DB.NewUpdate().Model(q.model).Conn(q.conn)
 	if len(q.excludes) > 0 {
 		bq = bq.ExcludeColumn(q.excludes...)
 	}
@@ -773,7 +785,7 @@ func (q *UpdateQuery) route(ctx context.Context, dest ...any) error {
 		}
 		return err
 	}
-	return q.db.applyRouted(ctx, q.model, raw, dest...)
+	return q.db.applyRouted(ctx, q.conn, q.model, raw, dest...)
 }
 
 func (q *UpdateQuery) Seq() client.SyncCursor { return q.seq }
@@ -796,7 +808,7 @@ func (q *UpdateQuery) execClaimius(ctx context.Context, dest ...any) (handled bo
 		if !ok {
 			return false, nil
 		}
-		result, err := q.db.updateClaim(ctx, q.accessClaim, q.recordID, m)
+		result, err := q.db.updateClaim(ctx, q.conn, q.accessClaim, q.recordID, m)
 		if err != nil {
 			return true, err
 		}
@@ -807,7 +819,7 @@ func (q *UpdateQuery) execClaimius(ctx context.Context, dest ...any) (handled bo
 		if !ok {
 			return false, nil
 		}
-		result, err := q.db.updateUser(ctx, q.accessClaim, q.recordID, m)
+		result, err := q.db.updateUser(ctx, q.conn, q.accessClaim, q.recordID, m)
 		if err != nil {
 			return true, err
 		}
@@ -818,7 +830,7 @@ func (q *UpdateQuery) execClaimius(ctx context.Context, dest ...any) (handled bo
 		if !ok {
 			return false, nil
 		}
-		result, err := q.db.updateOrganization(ctx, q.accessClaim, q.recordID, m)
+		result, err := q.db.updateOrganization(ctx, q.conn, q.accessClaim, q.recordID, m)
 		if err != nil {
 			return true, err
 		}
@@ -829,7 +841,7 @@ func (q *UpdateQuery) execClaimius(ctx context.Context, dest ...any) (handled bo
 		if !ok {
 			return false, nil
 		}
-		result, err := q.db.updateLocation(ctx, q.accessClaim, q.recordID, m)
+		result, err := q.db.updateLocation(ctx, q.conn, q.accessClaim, q.recordID, m)
 		if err != nil {
 			return true, err
 		}
@@ -840,7 +852,7 @@ func (q *UpdateQuery) execClaimius(ctx context.Context, dest ...any) (handled bo
 		if !ok {
 			return false, nil
 		}
-		result, err := q.db.updateRelation(ctx, q.accessClaim, q.recordID, m)
+		result, err := q.db.updateRelation(ctx, q.conn, q.accessClaim, q.recordID, m)
 		if err != nil {
 			return true, err
 		}
@@ -852,7 +864,7 @@ func (q *UpdateQuery) execClaimius(ctx context.Context, dest ...any) (handled bo
 			return false, nil
 		}
 		body := BodySecret{Key: &m.Key, Value: &m.Value, OwnerID: &m.OwnerID, ExpiresAt: m.ExpiresAt}
-		result, err := q.db.updateSecret(ctx, q.accessClaim, q.recordID, body)
+		result, err := q.db.updateSecret(ctx, q.conn, q.accessClaim, q.recordID, body)
 		if err != nil {
 			return true, err
 		}
@@ -864,6 +876,7 @@ func (q *UpdateQuery) execClaimius(ctx context.Context, dest ...any) (handled bo
 
 type DeleteQuery struct {
 	db          *DB
+	conn        bun.IConn
 	model       any
 	accessClaim *AccessClaim
 	recordID    uuid.UUID
@@ -878,6 +891,11 @@ func (d *DB) NewDelete() *DeleteQuery {
 
 func (q *DeleteQuery) Model(model any) *DeleteQuery {
 	q.model = model
+	return q
+}
+
+func (q *DeleteQuery) Conn(db bun.IConn) *DeleteQuery {
+	q.conn = db
 	return q
 }
 
@@ -902,7 +920,7 @@ func (q *DeleteQuery) Where(expr string, args ...any) *DeleteQuery {
 }
 
 func (q *DeleteQuery) buildBun() *bun.DeleteQuery {
-	bq := q.db.DB.NewDelete().Model(q.model)
+	bq := q.db.DB.NewDelete().Model(q.model).Conn(q.conn)
 	if q.returns != "" {
 		bq = bq.Returning(q.returns)
 	}
@@ -1001,7 +1019,7 @@ func (q *DeleteQuery) route(ctx context.Context, dest ...any) error {
 		}
 		return err
 	}
-	return q.db.applyRouted(ctx, q.model, raw, dest...)
+	return q.db.applyRouted(ctx, q.conn, q.model, raw, dest...)
 }
 
 func (q *DeleteQuery) Seq() client.SyncCursor { return q.seq }
@@ -1024,7 +1042,7 @@ func (q *DeleteQuery) execClaimius(ctx context.Context, dest ...any) (handled bo
 		if !ok {
 			return false, nil
 		}
-		result, err := q.db.deleteClaim(ctx, q.accessClaim, q.recordID)
+		result, err := q.db.deleteClaim(ctx, q.conn, q.accessClaim, q.recordID)
 		if err != nil {
 			return true, err
 		}
@@ -1038,7 +1056,7 @@ func (q *DeleteQuery) execClaimius(ctx context.Context, dest ...any) (handled bo
 		if m.ClaimID == uuid.Nil {
 			return true, fmt.Errorf("delete claim_object: claim_id required on model")
 		}
-		result, err := q.db.deleteClaimObject(ctx, q.accessClaim, m.ClaimID, q.recordID)
+		result, err := q.db.deleteClaimObject(ctx, q.conn, q.accessClaim, m.ClaimID, q.recordID)
 		if err != nil {
 			return true, err
 		}
@@ -1052,7 +1070,7 @@ func (q *DeleteQuery) execClaimius(ctx context.Context, dest ...any) (handled bo
 		if m.ClaimID == uuid.Nil {
 			return true, fmt.Errorf("delete user_claim: claim_id required on model")
 		}
-		result, err := q.db.deleteClaimUser(ctx, q.accessClaim, m.ClaimID, q.recordID)
+		result, err := q.db.deleteClaimUser(ctx, q.conn, q.accessClaim, m.ClaimID, q.recordID)
 		if err != nil {
 			return true, err
 		}
@@ -1063,7 +1081,7 @@ func (q *DeleteQuery) execClaimius(ctx context.Context, dest ...any) (handled bo
 		if !ok {
 			return false, nil
 		}
-		result, err := q.db.deleteUser(ctx, q.accessClaim, q.recordID)
+		result, err := q.db.deleteUser(ctx, q.conn, q.accessClaim, q.recordID)
 		if err != nil {
 			return true, err
 		}
@@ -1074,7 +1092,7 @@ func (q *DeleteQuery) execClaimius(ctx context.Context, dest ...any) (handled bo
 		if !ok {
 			return false, nil
 		}
-		result, err := q.db.deleteOrganization(ctx, q.accessClaim, q.recordID)
+		result, err := q.db.deleteOrganization(ctx, q.conn, q.accessClaim, q.recordID)
 		if err != nil {
 			return true, err
 		}
@@ -1085,7 +1103,7 @@ func (q *DeleteQuery) execClaimius(ctx context.Context, dest ...any) (handled bo
 		if !ok {
 			return false, nil
 		}
-		result, err := q.db.deleteLocation(ctx, q.accessClaim, q.recordID)
+		result, err := q.db.deleteLocation(ctx, q.conn, q.accessClaim, q.recordID)
 		if err != nil {
 			return true, err
 		}
@@ -1099,7 +1117,7 @@ func (q *DeleteQuery) execClaimius(ctx context.Context, dest ...any) (handled bo
 		if m.UserID == uuid.Nil {
 			return true, fmt.Errorf("delete user_relation: user_id required on model")
 		}
-		result, err := q.db.deleteRelation(ctx, q.accessClaim, m.UserID, q.recordID)
+		result, err := q.db.deleteRelation(ctx, q.conn, q.accessClaim, m.UserID, q.recordID)
 		if err != nil {
 			return true, err
 		}
@@ -1110,7 +1128,7 @@ func (q *DeleteQuery) execClaimius(ctx context.Context, dest ...any) (handled bo
 		if !ok {
 			return false, nil
 		}
-		result, err := q.db.deleteSecret(ctx, q.accessClaim, q.recordID)
+		result, err := q.db.deleteSecret(ctx, q.conn, q.accessClaim, q.recordID)
 		if err != nil {
 			return true, err
 		}

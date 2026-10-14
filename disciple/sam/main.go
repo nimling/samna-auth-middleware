@@ -406,7 +406,7 @@ func applyUpsert(ctx context.Context, tx bun.Tx, eventType string, raw json.RawM
 			Exec(ctx); err != nil {
 			return false, fmt.Errorf("retire superseded samna_user %s: %w", incoming.UserID, err)
 		}
-		return store.Upsert(ctx, tx, &incoming)
+		return store.Upsert(ctx, tx, nil, &incoming)
 	case "claimius.samna_client":
 		return upsertEntity[shared.SamnaClient](ctx, tx, raw)
 	case "claimius.samna_secret":
@@ -437,7 +437,7 @@ func upsertEntity[T any](ctx context.Context, tx bun.Tx, raw json.RawMessage) (b
 	if err := sauth.Unmarshal(raw, &entity); err != nil {
 		return false, fmt.Errorf("unmarshal: %w", err)
 	}
-	return store.Upsert(ctx, tx, &entity)
+	return store.Upsert(ctx, tx, nil, &entity)
 }
 
 func applyDelete(ctx context.Context, tx bun.Tx, eventType string, raw json.RawMessage) error {

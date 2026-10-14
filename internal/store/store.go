@@ -8,10 +8,13 @@ import (
 	"github.com/uptrace/bun"
 )
 
-func Upsert(ctx context.Context, idb bun.IDB, model any) (bool, error) {
+func Upsert(ctx context.Context, idb bun.IDB, conn bun.IConn, model any) (bool, error) {
 	q := idb.NewInsert().
 		Model(model).
 		On("CONFLICT (id) DO UPDATE")
+	if conn != nil {
+		q = q.Conn(conn)
+	}
 	if fields := idb.Dialect().Tables().Get(reflect.TypeOf(model)).DataFields; len(fields) > 0 {
 		current := make([]string, len(fields))
 		incoming := make([]string, len(fields))

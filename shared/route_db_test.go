@@ -330,3 +330,91 @@ func TestARoutedUpdateRefusesASetExpression(t *testing.T) {
 		t.Fatalf("a refused routed update must not reach the prophet, got %v", *calls)
 	}
 }
+
+func TestALocalBindingJoinsTheCallersTransaction(t *testing.T) {
+	db := database(t)
+	ctx := context.Background()
+	ac, err := db.MutationAccess(ctx, userA, orgRoot, sdb.OBJECT_TYPE_ORGANIZATION, sdb.ACCESS_WRITE)
+	if err != nil {
+		t.Fatalf("access: %v", err)
+	}
+	orgID := uuid.New()
+	organization := sdb.ObjectType(sdb.OBJECT_TYPE_ORGANIZATION)
+
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
+		VALUES (?, 'Uncommitted', 'company', ?, ?, 1, ?)`, orgID, orgRoot, orgRoot, *ac.UserClaimID); err != nil {
+		t.Fatalf("insert the row in the transaction: %v", err)
+	}
+
+	binding := &sdb.ClaimObject{ClaimID: *ac.ClaimID, ObjectID: &orgID, ObjectType: &organization, Inherits: true}
+	if err := db.NewInsert().Model(binding).Access(ac).Conn(tx).Scan(ctx); err != nil {
+		t.Fatalf("a binding on a row of the caller's uncommitted transaction must succeed on that transaction, got %v", err)
+	}
+	var inside int
+	if err := tx.NewRaw("SELECT count(*) FROM claimius.claim_object WHERE object_id = ? AND sa_deleted_at IS NULL", orgID).Scan(ctx, &inside); err != nil {
+		t.Fatalf("count inside: %v", err)
+	}
+	if inside != 1 {
+		t.Fatalf("the binding must be visible inside the transaction, got %d rows", inside)
+	}
+
+	if err := tx.Rollback(); err != nil {
+		t.Fatalf("rollback: %v", err)
+	}
+	var after int
+	if err := db.NewRaw("SELECT count(*) FROM claimius.claim_object WHERE object_id = ?", orgID).Scan(ctx, &after); err != nil {
+		t.Fatalf("count after: %v", err)
+	}
+	if after != 0 {
+		t.Fatalf("the binding must roll back with the caller's transaction, %d rows left", after)
+	}
+}
+
+func TestARoutedAnswerAppliesOnTheCallersTransaction(t *testing.T) {
+	db := database(t)
+	ctx := context.Background()
+	ac, err := db.MutationAccess(ctx, userA, orgRoot, sdb.OBJECT_TYPE_ORGANIZATION, sdb.ACCESS_WRITE)
+	if err != nil {
+		t.Fatalf("access: %v", err)
+	}
+	calls, stop := stubProphet(t, db)
+	defer stop()
+	db.RouteToProphet = true
+	defer func() { db.RouteToProphet = false }()
+
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	defer tx.Rollback()
+	relationID := uuid.New()
+	relation := &sdb.UserRelation{ID: relationID, UserID: userA, ObjectType: sdb.OBJECT_TYPE_ORGANIZATION, ObjectID: orgRoot}
+	if err := db.NewInsert().Model(relation).Access(ac).Conn(tx).Scan(ctx); err != nil {
+		t.Fatalf("routed insert: %v", err)
+	}
+	if len(*calls) != 1 || (*calls)[0].method != http.MethodPost {
+		t.Fatalf("the write must still go to the prophet once, got %v", *calls)
+	}
+	var inside int
+	if err := tx.NewRaw("SELECT count(*) FROM claimius.user_relation WHERE id = ?", relationID).Scan(ctx, &inside); err != nil {
+		t.Fatalf("count inside: %v", err)
+	}
+	if inside != 1 {
+		t.Fatalf("the prophet's answer must be applied on the caller's transaction, got %d rows", inside)
+	}
+	if err := tx.Rollback(); err != nil {
+		t.Fatalf("rollback: %v", err)
+	}
+	var after int
+	if err := db.NewRaw("SELECT count(*) FROM claimius.user_relation WHERE id = ?", relationID).Scan(ctx, &after); err != nil {
+		t.Fatalf("count after: %v", err)
+	}
+	if after != 0 {
+		t.Fatalf("the local copy must roll back with the caller's transaction, %d rows left", after)
+	}
+}
