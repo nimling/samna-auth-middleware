@@ -255,22 +255,19 @@ func (d *DB) UserAccess(ctx context.Context, actorID uuid.UUID, target string, r
 
 func (d *DB) RootAccess(ctx context.Context, userID uuid.UUID, requiredAccess ClaimAccess) (*AccessClaim, error) {
 	claims := make([]AccessClaim, 0)
-	err := d.prepared(ctx, d.DB, &claims, `SELECT claim.* FROM claimius.get_access(
-			$1::uuid,
-			(
-				SELECT DISTINCT c.sa_root_id
-				FROM claimius.user_claim uc
-				JOIN claimius.claim c ON c.id = uc.claim_id
-				JOIN claimius.organization o ON o.id = c.sa_root_id AND o.sa_deleted_at IS NULL
-				WHERE uc.user_id = $1::uuid
-				  AND uc.sa_deleted_at IS NULL
-				  AND c.sa_deleted_at IS NULL
-				ORDER BY c.sa_root_id
-				LIMIT 1
-			),
-			$2::text,
-			$3::int
-		) AS claim`, userID, OBJECT_TYPE_ORGANIZATION, requiredAccess)
+	err := d.prepared(ctx, d.DB, &claims, `SELECT claim.*
+		FROM (
+			SELECT DISTINCT c.sa_root_id
+			FROM claimius.user_claim uc
+			JOIN claimius.claim c ON c.id = uc.claim_id
+			JOIN claimius.organization o ON o.id = c.sa_root_id AND o.sa_deleted_at IS NULL
+			WHERE uc.user_id = $1::uuid
+			  AND uc.sa_deleted_at IS NULL
+			  AND c.sa_deleted_at IS NULL
+		) root
+		CROSS JOIN LATERAL claimius.get_access($1::uuid, root.sa_root_id, $2::text, $3::int) AS claim
+		ORDER BY root.sa_root_id
+		LIMIT 1`, userID, OBJECT_TYPE_ORGANIZATION, requiredAccess)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNoAccess

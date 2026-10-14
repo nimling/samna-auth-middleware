@@ -16,7 +16,7 @@ A handler never decides access in its own code. It asks the database through a l
 | `MutationAccess(ctx, actor, objectID, objectType, required)` | `claimius.mutation_access` | `*AccessClaim`, `ErrNoAccess`, `ErrNotFound` | Every write, and every read of one object |
 | `MutationAccessMany(ctx, requests)` | `claimius.resolve_access` per row, one statement | `AccessClaimSet`, nil entries for denied rows | Several objects in one round trip |
 | `UserAccess(ctx, actor, target, required)` | `claimius.get_user_access` | `*AccessUser` with the resolved `TargetUserID` | Acting on a user named by external id, user id or row id |
-| `RootAccess(ctx, actor, required)` | `claimius.get_access` on the actor's root organization | `*AccessClaim` | Actions on the root itself |
+| `RootAccess(ctx, actor, required)` | `claimius.get_access` on each root organization the actor holds a claim under, in id order; the first root that grants `required` answers | `*AccessClaim` | Actions on the root itself |
 | `GetAccess`, `GetDirectAccess` | `claimius.get_access`, `claimius.get_direct_access` | `*AccessClaim` | The grant on the object, the closest grant above it |
 | `ScopeAccess(ctx, actor, jsonpath, required)` | `claimius.get_scope_access` | `[]AccessClaim`, empty for no | Capabilities, page grants; see [Capabilities](../capabilities.md) |
 

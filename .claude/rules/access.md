@@ -9,7 +9,7 @@
 | `GetAccess` | `get_access` | Read only check of the strongest grant |
 | `GetDirectAccess` | `get_direct_access` | Closest ancestor grant when `GetAccess` finds none |
 | `UserAccess(actor, target, req)` | `get_user_access` | Target is a `samna_user` named by the caller, or the handler needs `*AccessUser` fields. Pass the raw string: external_id, user_id and row id all resolve. Returns the canonical `TargetUserID` |
-| `RootAccess(actor, req)` | `get_access` on the actor's root org | Only when the action targets the root org itself. Never for per user data |
+| `RootAccess(actor, req)` | `get_access` on each root org the actor holds a claim under, in id order; the first that grants answers | Only when the action targets the root org itself. Never for per user data |
 | `ScopeAccess(actor, path, req)` | `get_scope_access` | A capability with no object: page gating, a machine client's public read. Empty slice means no grant, not an error |
 
 ## Self
