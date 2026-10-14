@@ -45,19 +45,6 @@ This is the trade claimius makes: writes are cheap and local, the first read aft
 
 One database is the prophet: Samna Auth. It is where users log in and where grants are made. Every product service is a disciple: it carries the same claimius schema and pulls the prophet's changes for its own app, as plain source rows, into its own database. A disciple then answers every access question locally. If the prophet is unreachable, a disciple keeps answering from what it has. See [Sync](./sync.md) and [Prophets and disciples](./prophets.md).
 
-## How fast
-
-Measured on the suite in `test/sql`, counted as index entries touched (one entry is one row read from an index):
-
-| Operation | Entries |
-|---|---|
-| A check on a row nothing has changed under | 7 on the prophet, 4 on a disciple |
-| A page of 50 listed rows | about 100 |
-| The first listing after one user is granted a node over 1,000 organizations | about 40,000, then back to a page |
-| The first listing after a change that reaches 16,000 rows | about 64,000, then back to a page |
-
-The pages [Comparison](./comparison.md) and [Storage](./storage.md) put these beside Zanzibar style systems and Entra ID, and give the cost claimius pays for it: more stored rows per pair, and a grant or binding write that is a few times heavier than an insert.
-
 ## What it takes to run it in your PostgreSQL
 
 1. Add the schema. Your `database/migrate.yml` includes `disciple/database` from this repository at a pinned tag; `smig` applies it.
@@ -68,7 +55,7 @@ The pages [Comparison](./comparison.md) and [Storage](./storage.md) put these be
 
 4. Before you read, ask `get_objects` for the page a user may see, or `get_access` for one row. Before you write, ask `get_access` and stamp the returned grant id into `sa_created_by`.
 
-5. Never read or write the claimius tables directly. The functions are the surface; the tables change between versions, the functions do not.
+5. Never read or write the claimius tables directly. The functions are the surface; the tables are internal to claimius.
 
 In Go the middleware does steps 4 and 5 for you with `MutationAccess`, `GetAccess` and the listing helpers, and runs the pull loop for a disciple. See [The middleware](./middleware/index.md).
 
@@ -84,3 +71,16 @@ In Go the middleware does steps 4 and 5 for you with `MutationAccess`, `GetAcces
 ## Where to look next
 
 [Types](./types.md) for the four kinds of thing claimius knows, [Reads](./reads.md) and [Writes](./writes.md) for every function with what it costs, and [Security](./security.md) for roles and what a compromised disciple can and cannot do.
+
+## Proofs and measurements
+
+Measured on the suite in `test/sql`, counted as index entries touched (one entry is one row read from an index):
+
+| Operation | Entries |
+|---|---|
+| A check on a row nothing has changed under | 7 on the prophet, 4 on a disciple |
+| A page of 50 listed rows | about 100 |
+| The first listing after one user is granted a node over 10,000 organizations | about 40,000, then back to a page |
+| The first listing after a change that reaches 16,000 rows | about 64,000, then back to a page |
+
+The pages [Comparison](./comparison.md) and [Storage](./storage.md) put these beside Zanzibar style systems and Entra ID, and give the cost claimius pays for it: more stored rows per pair, and a grant or binding write that is a few times heavier than an insert.
