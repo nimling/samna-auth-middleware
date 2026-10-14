@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/google/uuid"
+	"github.com/lib/pq"
 	"github.com/uptrace/bun"
 )
 
@@ -200,4 +201,13 @@ func (d *DB) GetOrganizationAudit(ctx context.Context, actorID, orgID uuid.UUID,
 		return nil, err
 	}
 	return audits, nil
+}
+
+func (d *DB) GetOrganizationsMany(ctx context.Context, ids, ownerIDs []uuid.UUID) ([]Organization, error) {
+	orgs := make([]Organization, 0)
+	err := d.NewRaw("SELECT * FROM claimius.get_organizations(?::uuid[], ?::uuid[])", pq.Array(ids), pq.Array(ownerIDs)).Scan(ctx, &orgs)
+	if err != nil {
+		return nil, err
+	}
+	return orgs, nil
 }

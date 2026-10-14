@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/google/uuid"
+	"github.com/lib/pq"
 	"github.com/uptrace/bun"
 )
 
@@ -178,4 +179,13 @@ func (d *DB) GetLocationAudit(ctx context.Context, actorID, locationID uuid.UUID
 		return nil, err
 	}
 	return audits, nil
+}
+
+func (d *DB) GetLocationsMany(ctx context.Context, ids, parentIDs []uuid.UUID) ([]Location, error) {
+	locs := make([]Location, 0)
+	err := d.NewRaw("SELECT * FROM claimius.get_locations(?::uuid[], ?::uuid[])", pq.Array(ids), pq.Array(parentIDs)).Scan(ctx, &locs)
+	if err != nil {
+		return nil, err
+	}
+	return locs, nil
 }

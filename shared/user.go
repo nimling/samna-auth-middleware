@@ -10,6 +10,7 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
+	"github.com/lib/pq"
 	"github.com/nimling/samna-auth-middleware/v2/client"
 	"github.com/uptrace/bun"
 	"github.com/uptrace/bun/driver/pgdriver"
@@ -572,4 +573,22 @@ func (d *DB) upsertUserExternal(ctx context.Context, conn bun.IConn, ac *AccessC
 	}
 	identity := map[string]any{"external_id": externalID, "id_claim": "external", "type": "external", "data": json.RawMessage(`{}`)}
 	return d.callCreateOrganizationUser(ctx, conn, ac, *payload.OwnerID, &user, true, identity, payload.Reason)
+}
+
+func (d *DB) GetUsersMany(ctx context.Context, userIDs, ids []uuid.UUID) ([]SamnaUser, error) {
+	users := make([]SamnaUser, 0)
+	err := d.NewRaw("SELECT * FROM claimius.get_users(?::uuid[], ?::uuid[])", pq.Array(userIDs), pq.Array(ids)).Scan(ctx, &users)
+	if err != nil {
+		return nil, err
+	}
+	return users, nil
+}
+
+func (d *DB) GetUserTokens(ctx context.Context, userIDs []uuid.UUID) ([]UserToken, error) {
+	tokens := make([]UserToken, 0)
+	err := d.NewRaw("SELECT * FROM claimius.get_user_tokens(?::uuid[])", pq.Array(userIDs)).Scan(ctx, &tokens)
+	if err != nil {
+		return nil, err
+	}
+	return tokens, nil
 }

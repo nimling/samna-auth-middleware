@@ -1039,6 +1039,186 @@ COMMENT ON FUNCTION claimius.get_object_assets(UUID, TEXT, UUID, TEXT) IS 'Live 
 GRANT EXECUTE ON FUNCTION claimius.get_object_assets(UUID, TEXT, UUID, TEXT)
     TO claimius_disciple_client, claimius_writer, claimius_admin, claimius_reader;
 
+CREATE OR REPLACE FUNCTION claimius.get_users(
+    p_user_ids  UUID[],
+    p_ids       UUID[]
+) RETURNS SETOF claimius.samna_user
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = claimius, pg_temp AS $$
+    SELECT u.*
+    FROM (
+        SELECT s.* FROM claimius.samna_user s WHERE s.user_id = ANY(p_user_ids)
+        UNION ALL
+        SELECT s.* FROM claimius.samna_user s WHERE p_user_ids IS NULL AND s.id = ANY(p_ids)
+    ) u
+    WHERE p_ids IS NULL OR u.id = ANY(p_ids)
+$$;
+
+COMMENT ON FUNCTION claimius.get_users(UUID[], UUID[]) IS 'The samna_user rows named by user_id in p_user_ids and by row id in p_ids, every given list applying, soft deleted and inactive rows included, with no reader and no access filter. For showing who a row names, such as the creator behind a grant; what a reader may see is get_users(user, required).';
+
+CREATE OR REPLACE FUNCTION claimius.get_organizations(
+    p_ids        UUID[],
+    p_owner_ids  UUID[]
+) RETURNS SETOF claimius.organization
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = claimius, pg_temp AS $$
+    SELECT o.*
+    FROM (
+        SELECT x.* FROM claimius.organization x WHERE x.id = ANY(p_ids)
+        UNION ALL
+        SELECT x.* FROM claimius.organization x WHERE p_ids IS NULL AND x.sa_owner_id = ANY(p_owner_ids)
+    ) o
+    WHERE p_owner_ids IS NULL OR o.sa_owner_id = ANY(p_owner_ids)
+$$;
+
+COMMENT ON FUNCTION claimius.get_organizations(UUID[], UUID[]) IS 'The organization rows named by id in p_ids and owned by an organization in p_owner_ids, every given list applying, soft deleted rows included, with no reader and no access filter. A root owns itself, so it comes back for its own id in p_owner_ids. For names, roots and trees a caller shows or walks; what a reader may see is get_organizations(user, required).';
+
+CREATE OR REPLACE FUNCTION claimius.get_locations(
+    p_ids         UUID[],
+    p_parent_ids  UUID[]
+) RETURNS SETOF claimius.location
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = claimius, pg_temp AS $$
+    SELECT l.*
+    FROM (
+        SELECT x.* FROM claimius.location x WHERE x.id = ANY(p_ids)
+        UNION ALL
+        SELECT x.* FROM claimius.location x WHERE p_ids IS NULL AND x.sa_parent_id = ANY(p_parent_ids)
+    ) l
+    WHERE p_parent_ids IS NULL OR l.sa_parent_id = ANY(p_parent_ids)
+$$;
+
+COMMENT ON FUNCTION claimius.get_locations(UUID[], UUID[]) IS 'The location rows named by id in p_ids and whose parent is in p_parent_ids, every given list applying, soft deleted rows included, with no reader and no access filter. A root is its own parent, so it comes back for its own id in p_parent_ids. For names and trees a caller shows or walks; what a reader may see is get_locations(user, required).';
+
+CREATE OR REPLACE FUNCTION claimius.get_claims(
+    p_ids        UUID[],
+    p_owner_ids  UUID[]
+) RETURNS SETOF claimius.claim
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = claimius, pg_temp AS $$
+    SELECT c.*
+    FROM (
+        SELECT x.* FROM claimius.claim x WHERE x.id = ANY(p_ids)
+        UNION ALL
+        SELECT x.* FROM claimius.claim x WHERE p_ids IS NULL AND x.sa_owner_id = ANY(p_owner_ids)
+    ) c
+    WHERE p_owner_ids IS NULL OR c.sa_owner_id = ANY(p_owner_ids)
+$$;
+
+COMMENT ON FUNCTION claimius.get_claims(UUID[], UUID[]) IS 'The claim rows named by id in p_ids and owned by an organization in p_owner_ids, every given list applying, soft deleted rows included, with no reader and no access filter. For the claim behind a grant or a binding; the claims a reader holds are get_claims(user, required).';
+
+CREATE OR REPLACE FUNCTION claimius.get_grants(
+    p_ids        UUID[] DEFAULT NULL,
+    p_user_ids   UUID[] DEFAULT NULL,
+    p_claim_ids  UUID[] DEFAULT NULL,
+    p_owner_ids  UUID[] DEFAULT NULL,
+    p_clients    BOOLEAN DEFAULT TRUE
+) RETURNS SETOF claimius.user_claim
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = claimius, pg_temp AS $$
+    SELECT g.*
+    FROM (
+        SELECT x.* FROM claimius.user_claim x WHERE x.id = ANY(p_ids)
+        UNION ALL
+        SELECT x.* FROM claimius.user_claim x WHERE p_ids IS NULL AND x.user_id = ANY(p_user_ids)
+        UNION ALL
+        SELECT x.* FROM claimius.user_claim x
+        WHERE p_ids IS NULL AND p_user_ids IS NULL AND x.claim_id = ANY(p_claim_ids)
+        UNION ALL
+        SELECT x.* FROM claimius.user_claim x
+        WHERE p_ids IS NULL AND p_user_ids IS NULL AND p_claim_ids IS NULL AND x.sa_owner_id = ANY(p_owner_ids)
+    ) g
+    WHERE (p_user_ids IS NULL OR g.user_id = ANY(p_user_ids))
+      AND (p_claim_ids IS NULL OR g.claim_id = ANY(p_claim_ids))
+      AND (p_owner_ids IS NULL OR g.sa_owner_id = ANY(p_owner_ids))
+      AND (p_clients OR NOT EXISTS (SELECT 1 FROM claimius.samna_client sc WHERE sc.id = g.user_id))
+$$;
+
+COMMENT ON FUNCTION claimius.get_grants(UUID[], UUID[], UUID[], UUID[], BOOLEAN) IS 'The user_claim rows named by id in p_ids, held by a user in p_user_ids, granting a claim in p_claim_ids and owned by an organization in p_owner_ids, every given list applying and no list giving no rows. With p_clients false the grants a samna_client holds are left out. Soft deleted grants and grants outside their window are included, with no reader and no access filter: the caller applies sa_deleted_at, starts_at and ends_at. For the creator behind sa_created_by, the users a row was created by, and the holders of a claim or of the grants under an organization.';
+
+CREATE OR REPLACE FUNCTION claimius.get_bindings(
+    p_object_type  TEXT DEFAULT NULL,
+    p_object_ids   UUID[] DEFAULT NULL,
+    p_claim_ids    UUID[] DEFAULT NULL
+) RETURNS SETOF claimius.claim_object
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = claimius, pg_temp AS $$
+    SELECT b.*
+    FROM (
+        SELECT x.* FROM claimius.claim_object x
+        WHERE x.object_type = p_object_type AND x.object_id = ANY(p_object_ids)
+        UNION ALL
+        SELECT x.* FROM claimius.claim_object x
+        WHERE p_object_ids IS NULL AND x.claim_id = ANY(p_claim_ids)
+        UNION ALL
+        SELECT x.* FROM claimius.claim_object x
+        WHERE p_object_ids IS NULL AND p_claim_ids IS NULL AND x.object_type = p_object_type
+    ) b
+    WHERE (p_object_type IS NULL OR b.object_type = p_object_type)
+      AND (p_claim_ids IS NULL OR b.claim_id = ANY(p_claim_ids))
+$$;
+
+COMMENT ON FUNCTION claimius.get_bindings(TEXT, UUID[], UUID[]) IS 'The claim_object rows on objects of p_object_type, on the ids in p_object_ids of that type, and of the claims in p_claim_ids, every given argument applying; ids without a type and no argument at all give no rows. Soft deleted bindings are included, with no reader and no access filter: the caller applies sa_deleted_at and reads the claim through get_claims(ids, owner_ids). With get_grants on the claim ids these are the holders of the bindings on an object.';
+
+CREATE OR REPLACE FUNCTION claimius.get_user_tokens(
+    p_user_ids  UUID[]
+) RETURNS SETOF claimius.user_token
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = claimius, pg_temp AS $$
+    SELECT t.*
+    FROM claimius.user_token t
+    WHERE t.user_id = ANY(p_user_ids)
+$$;
+
+COMMENT ON FUNCTION claimius.get_user_tokens(UUID[]) IS 'The user_token rows of the users in p_user_ids, soft deleted rows included, with no reader and no access filter. Its sa_created_by is the grant that bound the user, the user''s creator.';
+
+CREATE OR REPLACE FUNCTION claimius.get_object_types()
+RETURNS TABLE(object_type TEXT)
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = claimius, pg_temp AS $$
+    SELECT ti.object_type FROM claimius.table_info ti
+$$;
+
+COMMENT ON FUNCTION claimius.get_object_types() IS 'The schema qualified type of every registered table, internal ones included.';
+
+CREATE OR REPLACE FUNCTION claimius.get_object_usage(
+    p_user_id       UUID,
+    p_object_ids    UUID[],
+    p_object_types  TEXT[] DEFAULT NULL
+) RETURNS TABLE(object_type TEXT, object_id UUID, sa_name TEXT, used_count BIGINT) AS $$
+BEGIN
+    PERFORM claimius.reconcile_if_pending(p_user_id);
+
+    IF NOT claimius.check_user_active(p_user_id) THEN
+        RETURN;
+    END IF;
+
+    RETURN QUERY
+        SELECT coalesce(t.obj_type, uo.object_type), t.obj_id, oi.sa_name, uo.used_count
+        FROM unnest(p_object_ids, p_object_types) AS t(obj_id, obj_type)
+                 LEFT JOIN claimius.user_object uo
+                           ON uo.user_id = p_user_id
+                          AND uo.object_id = t.obj_id
+                          AND (t.obj_type IS NULL OR uo.object_type = t.obj_type)
+                 LEFT JOIN claimius.object_info oi
+                           ON oi.object_type = coalesce(t.obj_type, uo.object_type)
+                          AND oi.object_id = t.obj_id;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = claimius, pg_temp;
+
+COMMENT ON FUNCTION claimius.get_object_usage(UUID, UUID[], TEXT[]) IS 'For each object of p_object_ids, typed by the same position of p_object_types or of any type when that is NULL, its object_info name and the reader''s used_count, NULL when the reader holds no pair on it. Settles the reader''s share first, which folds its pending usage. For ordering what a reader sees by its own use.';
+
+GRANT EXECUTE ON FUNCTION claimius.get_users(UUID[], UUID[])
+    TO claimius_disciple_client, claimius_writer, claimius_admin, claimius_reader;
+GRANT EXECUTE ON FUNCTION claimius.get_organizations(UUID[], UUID[])
+    TO claimius_disciple_client, claimius_writer, claimius_admin, claimius_reader;
+GRANT EXECUTE ON FUNCTION claimius.get_locations(UUID[], UUID[])
+    TO claimius_disciple_client, claimius_writer, claimius_admin, claimius_reader;
+GRANT EXECUTE ON FUNCTION claimius.get_claims(UUID[], UUID[])
+    TO claimius_disciple_client, claimius_writer, claimius_admin, claimius_reader;
+GRANT EXECUTE ON FUNCTION claimius.get_grants(UUID[], UUID[], UUID[], UUID[], BOOLEAN)
+    TO claimius_disciple_client, claimius_writer, claimius_admin, claimius_reader;
+GRANT EXECUTE ON FUNCTION claimius.get_bindings(TEXT, UUID[], UUID[])
+    TO claimius_disciple_client, claimius_writer, claimius_admin, claimius_reader;
+GRANT EXECUTE ON FUNCTION claimius.get_user_tokens(UUID[])
+    TO claimius_disciple_client, claimius_writer, claimius_admin, claimius_reader;
+GRANT EXECUTE ON FUNCTION claimius.get_object_types()
+    TO claimius_disciple_client, claimius_writer, claimius_admin, claimius_reader;
+GRANT EXECUTE ON FUNCTION claimius.get_object_usage(UUID, UUID[], TEXT[])
+    TO claimius_disciple_client, claimius_writer, claimius_admin, claimius_reader;
+
 DROP FUNCTION IF EXISTS claimius.get_owner_graph(UUID, UUID, INTEGER);
 DROP FUNCTION IF EXISTS claimius.get_claim_graph(UUID, UUID, INTEGER);
 

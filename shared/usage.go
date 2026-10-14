@@ -200,3 +200,19 @@ func (d *DB) postObjectUsage(ctx context.Context, keys []usageKey, counts []int6
 	}
 	return err
 }
+
+type ObjectUsageResult struct {
+	ObjectType *ObjectType `bun:"object_type" json:"object_type"`
+	ObjectID   uuid.UUID   `bun:"object_id" json:"object_id"`
+	Name       *string     `bun:"sa_name" json:"name"`
+	UsedCount  *int64      `bun:"used_count" json:"used_count"`
+}
+
+func (d *DB) GetObjectUsage(ctx context.Context, userID uuid.UUID, objectIDs []uuid.UUID, objectTypes []string) ([]ObjectUsageResult, error) {
+	rows := make([]ObjectUsageResult, 0)
+	err := d.NewRaw("SELECT * FROM claimius.get_object_usage(?, ?::uuid[], ?::text[])", userID, pq.Array(objectIDs), pq.Array(objectTypes)).Scan(ctx, &rows)
+	if err != nil {
+		return nil, err
+	}
+	return rows, nil
+}

@@ -7,6 +7,7 @@ import (
 	"errors"
 
 	"github.com/google/uuid"
+	"github.com/lib/pq"
 	"github.com/nimling/nimtel"
 	"github.com/uptrace/bun"
 )
@@ -454,4 +455,61 @@ func (d *DB) CreateVirtualClaim(ctx context.Context, ac *AccessClaim, p CreateVi
 		OwnerID:     claim.OwnerID,
 		RootID:      claim.RootID,
 	}, nil
+}
+
+type GrantFilters struct {
+	IDs       []uuid.UUID
+	UserIDs   []uuid.UUID
+	ClaimIDs  []uuid.UUID
+	OwnerIDs  []uuid.UUID
+	NoClients bool
+}
+
+type BindingFilters struct {
+	ObjectType ObjectType
+	ObjectIDs  []uuid.UUID
+	ClaimIDs   []uuid.UUID
+}
+
+func (d *DB) GetClaimsMany(ctx context.Context, ids, ownerIDs []uuid.UUID) ([]Claim, error) {
+	claims := make([]Claim, 0)
+	err := d.NewRaw("SELECT * FROM claimius.get_claims(?::uuid[], ?::uuid[])", pq.Array(ids), pq.Array(ownerIDs)).Scan(ctx, &claims)
+	if err != nil {
+		return nil, err
+	}
+	return claims, nil
+}
+
+func (d *DB) GetGrants(ctx context.Context, f GrantFilters) ([]UserClaim, error) {
+	grants := make([]UserClaim, 0)
+	err := d.NewRaw("SELECT * FROM claimius.get_grants(?::uuid[], ?::uuid[], ?::uuid[], ?::uuid[], ?)",
+		pq.Array(f.IDs), pq.Array(f.UserIDs), pq.Array(f.ClaimIDs), pq.Array(f.OwnerIDs), !f.NoClients).Scan(ctx, &grants)
+	if err != nil {
+		return nil, err
+	}
+	return grants, nil
+}
+
+func (d *DB) GetBindings(ctx context.Context, f BindingFilters) ([]ClaimObject, error) {
+	var objectType *string
+	if f.ObjectType != "" {
+		t := string(f.ObjectType)
+		objectType = &t
+	}
+	bindings := make([]ClaimObject, 0)
+	err := d.NewRaw("SELECT * FROM claimius.get_bindings(?::text, ?::uuid[], ?::uuid[])",
+		objectType, pq.Array(f.ObjectIDs), pq.Array(f.ClaimIDs)).Scan(ctx, &bindings)
+	if err != nil {
+		return nil, err
+	}
+	return bindings, nil
+}
+
+func (d *DB) GetObjectTypes(ctx context.Context) ([]ObjectType, error) {
+	types := make([]ObjectType, 0)
+	err := d.NewRaw("SELECT object_type FROM claimius.get_object_types()").Scan(ctx, &types)
+	if err != nil {
+		return nil, err
+	}
+	return types, nil
 }
