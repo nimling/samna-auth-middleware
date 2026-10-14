@@ -21,55 +21,40 @@ test target='':
     #!/usr/bin/env bash
     set -e
     export PGSSLMODE=disable
-    if [ -z "{{target}}" ]; then
-        go test ./...
-        from=$(git describe --tags --abbrev=0 --match 'v[0-9]*')
-        for role in prophet disciple; do
-            smig test --schema=$role/database/migrate.yml --db-dir=$role/database --from=$from
-            out=$(smig test --schema=$role/database/migrate.yml --db-dir=$role/database --keep -s 2>&1 | sed 's/\x1b\[[0-9;]*m//g')
-            name=$(echo "$out" | grep -o 'smig-test-[0-9]*' | head -1)
-            eval "$(echo "$out" | grep '^ *PG[A-Z]*=' | sed 's/^ *//; s/^/export /')"
-            pkgs="./shared/... ./disciple/... ./smw/..."; peer=""
-            if [ $role = prophet ]; then
-                pkgs=./prophet/...
-                out=$(smig test --schema=$role/database/migrate.yml --db-dir=$role/database --keep -s 2>&1 | sed 's/\x1b\[[0-9;]*m//g')
-                peer=$(echo "$out" | grep -o 'smig-test-[0-9]*' | head -1)
-                eval "$(echo "$out" | grep '^ *PG[A-Z]*=' | sed 's/^ *//; s/^/export PEER_/')"
-                out=$(smig test --schema=disciple/database/migrate.yml --db-dir=disciple/database --keep -s 2>&1 | sed 's/\x1b\[[0-9;]*m//g')
-                peer="$peer $(echo "$out" | grep -o 'smig-test-[0-9]*' | head -1)"
-                eval "$(echo "$out" | grep '^ *PG[A-Z]*=' | sed 's/^ *//; s/^/export DISCIPLE_/')"
-            fi
-            go test -tags dbtest -count=1 -p 1 $pkgs || { docker rm -f "$name" $peer >/dev/null; exit 1; }
-            docker rm -f "$name" $peer >/dev/null
-        done
-    else
+    if [ -n "{{target}}" ]; then
         go test ./{{target}}/...
+        exit
     fi
+    go test ./...
+    tmp=$(mktemp -d); names=""
+    trap 'docker rm -f $names >/dev/null 2>&1; rm -rf "$tmp"' EXIT
+    db() { bash scripts/db.sh "$1" > "$tmp/$2"; names="$names $(sed -n 's/^name=//p' "$tmp/$2")"; sed -n 's/^export //p' "$tmp/$2" | tr ' ' '\n' | sed "s/^/export $3/" > "$tmp/$2.env"; }
+    db disciple disciple ""
+    (. "$tmp/disciple.env"; go test -tags dbtest -count=1 -p 1 ./shared/... ./disciple/... ./smw/...)
+    db prophet prophet ""
+    db prophet peer PEER_
+    db disciple federated DISCIPLE_
+    (. "$tmp/prophet.env"; . "$tmp/peer.env"; . "$tmp/federated.env"; go test -tags dbtest -count=1 -p 1 ./prophet/...)
 
 verify:
     #!/usr/bin/env bash
     set -e
     export PGSSLMODE=disable
-    names=""
-    for role in prophet disciple; do
-        out=$(smig test --schema=$role/database/migrate.yml --db-dir=$role/database --keep -s 2>&1 | sed 's/\x1b\[[0-9;]*m//g')
-        names="$names $(echo "$out" | grep -o 'smig-test-[0-9]*' | head -1)"
-        prefix=""; [ $role = disciple ] && prefix=DISCIPLE_
-        eval "$(echo "$out" | grep '^ *PG[A-Z]*=' | sed "s/^ *//; s/^/export $prefix/")"
-    done
-    status=0
-    go test -tags dbtest -count=1 -run Scenario -v ./prophet/echo/ || status=$?
-    docker rm -f $names >/dev/null
-    exit $status
+    tmp=$(mktemp -d); names=""
+    trap 'docker rm -f $names >/dev/null 2>&1; rm -rf "$tmp"' EXIT
+    db() { bash scripts/db.sh "$1" > "$tmp/$2"; names="$names $(sed -n 's/^name=//p' "$tmp/$2")"; sed -n 's/^export //p' "$tmp/$2" | tr ' ' '\n' | sed "s/^/export $3/" > "$tmp/$2.env"; }
+    db prophet prophet ""
+    db disciple disciple DISCIPLE_
+    . "$tmp/prophet.env"; . "$tmp/disciple.env"
+    go test -tags dbtest -count=1 -run Scenario -v ./prophet/echo/
 
 test-hurl:
     #!/usr/bin/env bash
     set -e
     export PGSSLMODE=disable
-    out=$({ smig test --schema=disciple/database/migrate.yml --db-dir=disciple/database --keep 2>&1 || true; } | sed 's/\x1b\[[0-9;]*m//g')
-    name=$(echo "$out" | grep -o 'smig-test-[0-9]*' | head -1)
-    [ -n "$name" ] || { echo "$out"; exit 1; }
-    eval "$(echo "$out" | grep '^ *PG[A-Z]*=' | sed 's/^ *//; s/^/export /')"
+    out=$(bash scripts/db.sh disciple)
+    name=$(echo "$out" | sed -n 's/^name=//p')
+    eval "$(echo "$out" | sed -n 's/^export /export /p')"
     dir=$(mktemp -d)
     trap 'kill "$pid" 2>/dev/null; docker rm -f "$name" >/dev/null' EXIT
     psql -v ON_ERROR_STOP=1 -q -o /dev/null -f test/hurl/seed.sql
@@ -97,11 +82,9 @@ bench:
     set -e
     export PGSSLMODE=disable
     for role in prophet disciple; do
-        out=$(smig test --schema=bench/$role/migrate.yml --db-dir=$role/database --keep 2>&1 | sed 's/\x1b\[[0-9;]*m//g')
-        echo "$out" | grep -v '^ *PG[A-Z]*='
-        name=$(echo "$out" | grep -o 'smig-test-[0-9]*' | head -1)
-        [ -n "$name" ] || exit 1
-        eval "$(echo "$out" | grep '^ *PG[A-Z]*=' | sed 's/^ *//; s/^/export /')"
+        out=$(bash scripts/db.sh $role)
+        name=$(echo "$out" | sed -n 's/^name=//p')
+        eval "$(echo "$out" | sed -n 's/^export /export /p')"
         psql -q -c "ALTER DATABASE \"$PGDATABASE\" SET claimius.bench = 'on'"
         psql -q -v ON_ERROR_STOP=0 -f bench/$role/bench.sql 2>&1 | grep '^ *# \|not ok' || true
         docker rm -f "$name" >/dev/null
