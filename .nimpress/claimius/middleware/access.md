@@ -26,7 +26,7 @@ A handler never decides access in its own code. It asks the database through a l
 
 ## What a lookup reads
 
-A lookup on one object reads the settled pair of `user_object`. `get_access` first runs `reconcile_if_pending` for that one pair, which recomputes it only when an area still open for the actor covers it, then reads the pair and chooses a grant with `_best_grant`. No lookup evaluates access from the base relations; see [Reads](../reads.md) and [Materialization](../materialization.md).
+A lookup on one object reads the settled pair of `user_object`. `get_access` and `mutation_access` read the pair through `_settle_pair`, which recomputes it only when an area raised since the pair's mark covers it, and then choose a grant with `_best_grant`. Only when the settle was skipped on a lock and the pair gives nothing does `get_access` walk the ancestors through `get_direct_access`. No lookup evaluates access from the base relations; see [Reads](../reads.md) and [Materialization](../materialization.md).
 
 ## The self case
 
@@ -44,7 +44,7 @@ The table is `?TableAlias` when the query has a model; a query built with `Table
 
 1. With `objectID` set it adds `<table>.id = objectID` and `EXISTS (SELECT 1 FROM claimius.get_access(...))`, the check of that one object.
 
-2. Otherwise it adds `<table>.id IN (SELECT object_id FROM claimius.get_objects(actor, objectType, required, after, limit))`, every value a bound parameter, and orders by `<table>.id` when `after` or `limit` is set: a page is ordered on the id its cursor continues from, and an unpaged listing keeps the order the caller gave. `GetOrganizationsQuery` and `GetLocationsQuery` order an unpaged listing by id themselves. `get_objects` reads the actor's range of the `user_object` primary key in `object_id` order from the first key past `after`, so a page of `limit` rows reads `limit` entries of that range; `after` nil and `limit` 0 pass NULL and read the whole range.
+2. Otherwise it adds `<table>.id IN (SELECT object_id FROM claimius.get_objects(actor, objectType, required, after, limit))`, every value a bound parameter, and orders by `<table>.id` when `after` or `limit` is set: a page is ordered on the id its cursor continues from, and an unpaged listing keeps the order the caller gave. `GetOrganizationsQuery` and `GetLocationsQuery` order an unpaged listing by id themselves. `get_objects` reads the actor's range of the `user_object` primary key in `object_id` order from the first key past `after`; `after` nil and `limit` 0 pass NULL and read the whole range.
 
 `GetOrganizations`, `GetLocations` and `GetSecrets`, with their `Query` forms, take the same `after` and `limit`. `QueryPage(ctx)` reads them from the `cursor` and `limit` query parameters, a uuid and a positive integer, so `/me/organization?cursor=<last id>&limit=50` is the next page. `UserWhere`, `ClaimWhere` and `AuditWhere` return a predicate the implementing side puts on its own query. The implementing side's table is joined to the actor's own index range, so a listing is one query and the planner sees both sides. A listing carries no `UserClaimID`; acting on a row in it goes through `MutationAccess`. See [Reads](../reads.md).
 
@@ -72,4 +72,11 @@ A crash loses at most the uses since the last flush, a loss usage tolerates and 
 
 Every access call is one statement, sent as a named prepared statement through `DB.prepared`, parsed and planned once per connection.
 
-`SAUTH_REPLICA_DSN` opens a second pool, `DB.Replica`. `DB.Read` runs a pure read there and runs it once more on the primary when the replica refuses it with SQLSTATE `25006`. The calls that use it are `ScopeAccess`, the client credential lookup `GetClient`, `GetApp`, and the child and parent walks `GetChildOrganizations`, `GetParentOrganizations`, `GetChildLocations` and `GetParentLocations`. The lookups that can settle, `MutationAccess`, `MutationAccessMany`, `UserAccess`, `RootAccess`, `GetAccess` and `GetDirectAccess`, always run on the primary, because `reconcile_if_pending` writes when an area covers the pair. Writes, `WaitForSeq` reads and the usage flush go to the primary.
+`SAUTH_REPLICA_DSN` opens a second pool, `DB.Replica`. `DB.Read` runs a pure read there and runs it once more on the primary when the replica refuses it with SQLSTATE `25006`. The calls that use it are `ScopeAccess`, the client credential lookup `GetClient`, `GetApp`, and the child and parent walks `GetChildOrganizations`, `GetParentOrganizations`, `GetChildLocations` and `GetParentLocations`. The lookups that can settle, `MutationAccess`, `MutationAccessMany`, `UserAccess`, `RootAccess`, `GetAccess` and `GetDirectAccess`, always run on the primary, because `_settle_pair` writes when an area covers the pair. Writes, `WaitForSeq` reads and the usage flush go to the primary.
+
+## Cost
+
+1. A lookup on one object is one statement and one round trip; a pair with no area raised since its mark is read without a recompute.
+2. `MutationAccessMany` over `n` objects is one statement and one round trip.
+3. A listing page of `limit` rows past `after` reads `limit` entries of the actor's range of the `user_object` primary key.
+4. The usage counter writes one `touch_object_usage` statement per flush, whatever the number of keys it carries.

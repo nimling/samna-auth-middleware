@@ -9,7 +9,7 @@ lastUpdated: true
 
 # The middleware
 
-Claimius is the schema: its model, its functions and their guarantees, independent of any language or host. `samna_auth_middleware`, the Go module `github.com/nimling/samna-auth-middleware`, is a Samna Auth centric implementation of claimius in Go. It carries the claimius schema for Samna Auth as the prophet and for every product service as a disciple, and it adds what a schema cannot do on its own: authenticate a request, route a write to the prophet, pull the feed, count usage in process.
+Claimius is the schema: its model, its functions and their guarantees, independent of any language or host. `samna_auth_middleware`, the Go module `github.com/nimling/samna-auth-middleware/v2`, is a Samna Auth centric implementation of claimius in Go. It carries the claimius schema for Samna Auth as the prophet and for every product service as a disciple, and it adds what a schema cannot do on its own: authenticate a request, route a write to the prophet, pull the feed, count usage in process.
 
 | Claimius | The middleware |
 |---|---|

@@ -22,19 +22,19 @@ Both routes take `consumer`, the replica's state id, and `prophet`, the slug the
 
 ## One leader per database
 
-`sam.SyncStart(ctx)` returns at once and owns its goroutines. In debug mode it does nothing. On every pod it runs `LeadSync(ctx, db, SyncLockKey(app slug), 5 s, Disciple().Pull)`: the pod that takes the session level advisory lock `pg_try_advisory_lock(hashtextextended(key, 0))` on a dedicated connection runs the pull for as long as it holds it, and checks the connection every 5 s; every other pod tries the lock every 5 s and does no sync work. A holder whose work ends, or whose connection stops answering, discards the connection, which releases the lock, and the next pod to try takes over. `N` pods apply each event once. Every pod also follows the binding of the disciple, below, through `client.Bind`.
+`sam.SyncStart(ctx)` returns at once and owns its goroutines. In debug mode it does nothing. On every pod it runs `LeadSync(ctx, db, SyncLockKey(app slug), 5 s, Disciple().Pull)`: the pod that takes the session level advisory lock `pg_try_advisory_lock(hashtextextended(key, 0))` on a dedicated connection runs the pull for as long as it holds it, and checks the connection every 5 s; every other pod tries the lock every 5 s and does no sync work. A holder whose work ends, or whose connection stops answering, discards the connection, which releases the lock, and the next pod to try takes over. However many pods run, each event is applied once. Every pod also follows the binding of the disciple, below, through `client.Bind`.
 
 ## The pull loop
 
 `Replica.Pull` keeps a `sam.Replica` current, `sam.Disciple()` for the disciple database.
 
-1. With the cursor at zero it fetches the snapshot and applies it with the snapshot cursor, as a page. The snapshot is upserted only where a row differs, so rows the replica already holds cost a probe and raise no area. A snapshot upserts; it never deletes a row the prophet did not send.
+1. With the cursor at zero it fetches the snapshot and applies it with the snapshot cursor, as a page. The snapshot is upserted only where a row differs, so a row the replica already holds raises no area. A snapshot upserts; it never deletes a row the prophet did not send.
 
 2. It then fetches pages after the cursor. `ApplyPage` applies a page in one transaction under `replay_mode`: the cursor moved first, from the position the page was pulled at and nowhere else, then every payload upserted or deleted by primary key with `app_id` stripped and `samna_app` skipped, and the claim areas each claim, binding and grant moves raised in `access_diff`, all together. One commit per page, whatever its size; a page that fails rolls back whole and is pulled again, and a page pulled at a cursor that has since moved is refused.
 
-3. On the disciple, between pulls and at most once a second, the loop calls `PostAccessDiffDrain(ctx, 1000)`, `claimius.drain_access_diff`, which settles up to 1,000 holder shares of open areas that pass the drain rule, most recently active holder first, of at most 64 users, and then folds the `user_users_diff` and `usage_diff` rows of the oldest 1,000 objects and flushes; see [Materialization](../materialization.md#the-drain).
+3. On the disciple, between pulls and at most once a second, the loop calls `PostAccessDiffDrain(ctx, 1000)`, `claimius.drain_access_diff`. The drain settles the shares of at most 64 users whose reads keep pace with the areas raised since their cursor, most recently used first, trims the areas every active cursor has passed, and folds the `usage_diff` and `user_users_diff` rows of the oldest 1,000 objects; see [Materialization](../materialization.md#the-drain-and-the-trim).
 
-4. It pulls again as soon as a page is applied, with `wait` 25, so an idle app costs one held request per hold.
+4. It pulls again as soon as a page is applied, with `wait` 25, so an idle app holds one request open at a time.
 
 5. A failed pull doubles the delay up to 30 s. A `409` answer to a pull, or ten failed pulls in a row, trigger a fresh snapshot, and a snapshot that fails to apply waits out the same doubling delay before the next pull: the delay and the failure count reset only once a pull or a snapshot applies, and the snapshot's transaction writes an audit row naming the stalled cursor through `sdb.Write`: neither recovers by retrying. The `409` is the prophet's judgement that the snapshot serves the replica better than the feed: its cursor is above anything the prophet issued, below what it trimmed, or behind by more events than the app has source rows. An empty pull is the normal answer of an idle app and triggers nothing.
 
@@ -52,4 +52,6 @@ When the configured `SAUTH_ENDPOINT` differs from the bound endpoint, `Replica.M
 
 ## Cost
 
-A page of `n` events costs `n` upserts, the closure rows of its hierarchy rows, one area row per claim it moves, and one commit. With source rows only on the feed, `n` is the number of source changes of the app since the last pull, independent of how many users they reach. The held pull costs the prophet one parked request per replica and one `LISTEN` connection per process on `claimius_sync`. See [Sync](../sync.md).
+1. A page of `n` events costs `n` upserts, the closure rows of its hierarchy rows, one area row per claim it moves, and one commit. With source rows only on the feed, `n` is the number of source changes of the app since the last pull, independent of how many users they reach.
+2. A snapshot row the replica already holds costs one probe and no write.
+3. The held pull costs the prophet one parked request per replica and one `LISTEN` connection per process on `claimius_sync`. See [Sync](../sync.md).

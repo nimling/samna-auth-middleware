@@ -43,7 +43,7 @@ Where the write lands depends on the table.
 | Table | Deployed | Debug |
 |---|---|---|
 | `claim`, `claim_object`, `user_claim` | Sent to the prophet, the answer is upserted locally | Local claimius functions |
-| `organization`, `location`, `user_relation`, `samna_secret`, `samna_user` | Sent to the prophet, the answer is upserted locally | Local claimius functions |
+| `organization`, `location`, `user_relation`, `samna_secret`, `samna_client`, `samna_user`, `object_asset` | Sent to the prophet, the answer is upserted locally | Local claimius functions |
 | The service's own registered tables | Local, through bun | Local, through bun |
 | Claimius tables the prophet serves no route for, such as `notification` | Local | Local |
 
@@ -61,7 +61,7 @@ The disciple pulls. There is no inbound sync endpoint on a disciple and none on 
 2. On first start the cursor is zero, so it fetches `sync/snapshot`, upserts every source row that differs and records the snapshot's cursor, in one transaction.
 3. It then fetches `sync/<cursor>` for the next page, which the prophet holds open up to 25 s while there is nothing, and applies the page under `replay_mode` in one transaction that moves the cursor first. A failure doubles the delay up to 30 s.
 4. A `409` from the prophet, or ten failed pulls in a row, trigger a fresh snapshot and an audit row naming the stalled cursor.
-5. Between pulls it drains open access areas whose holders read often enough to be settled ahead.
+5. Between pulls, at most once a second, it drains: it settles ahead the shares of users who read at least as often as areas are raised, and trims the areas every active cursor has passed.
 
 The feed is scoped by the prophet: organizations and locations through `app_object_ids`, every other table through `app_id`. It carries source rows only, never `user_object`, `user_users`, `user_users_diff` or `audit`. The disciple strips `app_id` from each payload and skips `samna_app`.
 
@@ -71,7 +71,7 @@ The disciple binds to the prophet that first answers it, keeps its slug and endp
 
 ## Settling access
 
-The feed carries the claims, bindings and grants, and the disciple derives its own access from them. Applying a `claim`, `claim_object` or `user_claim` raises its claim area in `access_diff`, and applying an organization, a location or any registered row keeps the closure and raises its object area. A check settles the one pair it asks about; a listing settles the reader's own share of each open area it meets. An area clears once every holder has settled it, and a share nobody reads costs nothing. This is the same settle for the shared types and for the tables only the disciple carries.
+The feed carries the claims, bindings and grants, and the disciple derives its own access from them. Applying a `claim`, `claim_object` or `user_claim` raises its claim area in `access_diff`, and applying an organization, a location or any registered row keeps the closure and raises its object area. A check settles the one pair it asks about; a listing settles the reader's own share of each open area it meets. An area is trimmed once every user active within 7 days has settled past it; a user who reads after that rebuilds its reach in full. A share nobody reads is never settled. This is the same settle for the shared types and for the tables only the disciple carries.
 
 A local write settles the acting user inside the same statement, so a handler reads its own write back. Another user's `user_object` row changes on that user's next read. A read that must see a routed write waits on `sam.WaitForSeq` with the position the write answered with.
 

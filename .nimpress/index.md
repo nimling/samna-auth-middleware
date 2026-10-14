@@ -70,11 +70,11 @@ The SQL is not copied into consumers, and a consumer holds none of it on disk. T
     path: disciple/database
 ```
 
-A prophet uses `prophet/database` in the same step. Moving the ref replays the changed base files through smig's preflight. The base sets bring the claimius tables to the new shape themselves. What a consumer made of its own for the earlier line and must drop is the consumer's own migration, `V2.0.0__claimius_unified.sql` in its own `database/migrations/`; the middleware carries no `migrations/` folder under either role.
+A prophet uses `prophet/database` in the same step. Moving the ref replays the changed base files through smig's preflight, and the base sets bring the claimius tables to the shape of that ref themselves. The middleware carries no `migrations/` folder under either role.
 
 ## Configuration
 
-`sdb.Init` reads every `SAUTH_` variable once. Consumer code never reads one.
+The middleware reads every `SAUTH_` variable itself; `sdb.Init` loads the configuration once. Consumer code never reads one.
 
 | Variable | Role | Holds |
 |---|---|---|
@@ -83,11 +83,16 @@ A prophet uses `prophet/database` in the same step. Moving the ref replays the c
 | `SAUTH_APP_SECRET` | disciple | The app secret |
 | `SAUTH_REDIRECT_URI` | disciple | The OAuth redirect for the login flow |
 | `SAUTH_PAGE_REDIRECT` | disciple | Where the callback lands the browser |
+| `SAUTH_CLIENT_ID` | disciple | The service's machine client for service to service calls |
+| `SAUTH_CLIENT_SECRET` | disciple | The machine client's secret |
 | `SAUTH_CLIENT_TIMEOUT` | disciple | Seconds before a call to the prophet gives up, default 5 |
 | `SAUTH_DEBUG_USER_ID` | both | Pins one user and skips authentication |
 | `SAUTH_DEBUG_CLIENTS` | both | A static map of client credentials |
 | `SAUTH_DEBUG_PRIVATE_SEED` | disciple | The app seed a debug disciple encrypts local secrets with |
 | `SAUTH_REPLICA_DSN` | both | A standby the pure reads run on; see [Access in Go](./claimius/middleware/access.md) |
+| `SAUTH_COOKIE_DOMAIN` | disciple | The domain of the session cookies; defaults to the domain of `SAUTH_REDIRECT_URI` |
+| `SAUTH_COOKIE_SAMESITE` | disciple | `lax`, `strict` or `none`; defaults to `lax` |
+| `SAUTH_COOKIE_SECURE` | disciple | `true` or `false`; defaults to secure when a cookie domain is set, and always secure with `none` |
 
 ## Debug mode
 
