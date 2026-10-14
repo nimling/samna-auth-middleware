@@ -1000,6 +1000,45 @@ $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = claimius, pg_temp;
 
 COMMENT ON FUNCTION claimius.get_secrets(p_user_id uuid, p_required_access integer, p_after uuid, p_limit integer) IS 'Secrets whose effective mask covers p_required_access, one get_objects page in id order.';
 
+CREATE OR REPLACE FUNCTION claimius.get_object_assets(
+    p_user_id      UUID,
+    p_object_type  TEXT,
+    p_object_id    UUID,
+    p_kind         TEXT DEFAULT NULL
+) RETURNS SETOF claimius.object_asset AS $$
+BEGIN
+    PERFORM claimius.reconcile_if_pending(p_user_id);
+
+    IF NOT claimius.check_user_active(p_user_id) THEN
+        RETURN;
+    END IF;
+
+    IF p_object_type = 'claimius.samna_user' THEN
+        IF p_object_id IS DISTINCT FROM p_user_id AND NOT EXISTS (
+            SELECT 1 FROM claimius.get_user_access(p_user_id, p_object_id::TEXT, 4)
+        ) THEN
+            RETURN;
+        END IF;
+    ELSIF NOT EXISTS (SELECT 1 FROM claimius.get_access(p_user_id, p_object_id, p_object_type, 4)) THEN
+        RETURN;
+    END IF;
+
+    RETURN QUERY
+        SELECT l.*
+        FROM claimius.object_asset l
+        WHERE l.object_type = p_object_type
+          AND l.object_id = p_object_id
+          AND l.sa_deleted_at IS NULL
+          AND (p_kind IS NULL OR l.kind = p_kind)
+        ORDER BY l."index", l.sa_created_at;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = claimius, pg_temp;
+
+COMMENT ON FUNCTION claimius.get_object_assets(UUID, TEXT, UUID, TEXT) IS 'Live object_asset links on one object that the reader may read, of one kind when p_kind is given, ordered by index then sa_created_at. A samna_user is readable by the user itself and by a reader get_user_access resolves with READ, the branches get_users decides by; any other object needs READ through get_access.';
+
+GRANT EXECUTE ON FUNCTION claimius.get_object_assets(UUID, TEXT, UUID, TEXT)
+    TO claimius_disciple_client, claimius_writer, claimius_admin, claimius_reader;
+
 DROP FUNCTION IF EXISTS claimius.get_owner_graph(UUID, UUID, INTEGER);
 DROP FUNCTION IF EXISTS claimius.get_claim_graph(UUID, UUID, INTEGER);
 

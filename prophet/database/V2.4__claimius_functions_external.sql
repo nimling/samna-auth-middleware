@@ -1071,6 +1071,47 @@ $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = claimius, pg_temp;
 
 COMMENT ON FUNCTION claimius.get_secrets(p_user_id uuid, p_app_id uuid, p_required_access integer, p_after uuid, p_limit integer) IS 'Secrets whose effective mask covers p_required_access, one get_objects page in id order.';
 
+CREATE OR REPLACE FUNCTION claimius.get_object_assets(
+    p_user_id      UUID,
+    p_app_id       UUID,
+    p_object_type  TEXT,
+    p_object_id    UUID,
+    p_kind         TEXT DEFAULT NULL
+) RETURNS SETOF claimius.object_asset AS $$
+BEGIN
+    PERFORM claimius.reconcile_if_pending(p_app_id, p_user_id);
+
+    IF NOT claimius.check_user_active(p_app_id, p_user_id) THEN
+        RETURN;
+    END IF;
+
+    IF p_object_type = 'claimius.samna_user' THEN
+        IF p_object_id IS DISTINCT FROM p_user_id AND NOT EXISTS (
+            SELECT 1 FROM claimius.get_user_access(p_user_id, p_app_id, p_object_id::TEXT, 4)
+        ) THEN
+            RETURN;
+        END IF;
+    ELSIF NOT EXISTS (SELECT 1 FROM claimius.get_access(p_user_id, p_app_id, p_object_id, p_object_type, 4)) THEN
+        RETURN;
+    END IF;
+
+    RETURN QUERY
+        SELECT l.*
+        FROM claimius.object_asset l
+        WHERE l.object_type = p_object_type
+          AND l.object_id = p_object_id
+          AND l.sa_deleted_at IS NULL
+          AND (p_kind IS NULL OR l.kind = p_kind)
+          AND p_app_id IN (SELECT claimius.apps_for_object_asset(l.object_type, l.object_id, l.app_id))
+        ORDER BY l."index", l.sa_created_at;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = claimius, pg_temp;
+
+COMMENT ON FUNCTION claimius.get_object_assets(UUID, UUID, TEXT, UUID, TEXT) IS 'Live object_asset links on one object that the app sees and the reader may read, of one kind when p_kind is given, ordered by index then sa_created_at. A samna_user is readable by the user itself and by a reader get_user_access resolves with READ, the branches get_users decides by; any other object needs READ through get_access.';
+
+GRANT EXECUTE ON FUNCTION claimius.get_object_assets(UUID, UUID, TEXT, UUID, TEXT)
+    TO claimius_disciple_client, claimius_writer, claimius_admin, claimius_reader;
+
 DROP FUNCTION IF EXISTS claimius.get_owner_graph(UUID, UUID, INTEGER);
 DROP FUNCTION IF EXISTS claimius.get_claim_graph(UUID, UUID, INTEGER);
 
@@ -4399,11 +4440,19 @@ BEGIN
         v_total := v_total + v_n;
     END IF;
 
+    IF p_limit IS NULL OR v_total < p_limit THEN
+        SELECT count(*) INTO v_n
+        FROM (SELECT 1 FROM claimius.object_asset oa
+              WHERE p_app_id IN (SELECT claimius.apps_for_object_asset(oa.object_type, oa.object_id, oa.app_id))
+              LIMIT p_limit - v_total) t;
+        v_total := v_total + v_n;
+    END IF;
+
     RETURN v_total;
 END;
 $$ LANGUAGE plpgsql STABLE;
 
-COMMENT ON FUNCTION claimius.count_sync_source_rows(UUID, BIGINT) IS 'Source rows of one app the sync snapshot ships, counted up to p_limit when given.';
+COMMENT ON FUNCTION claimius.count_sync_source_rows(UUID, BIGINT) IS 'Source rows of one app the sync snapshot ships, object_asset links published to it included, counted up to p_limit when given.';
 
 DROP FUNCTION IF EXISTS claimius.update_sync_cursor(UUID, UUID, BIGINT);
 
@@ -4618,6 +4667,11 @@ BEGIN
         IF v_other IS NOT NULL THEN
             RETURN format('%s %s is held here by app %s of another home', p_event_type, v_id, v_other);
         END IF;
+    ELSIF p_event_type = 'claimius.object_asset' THEN
+        SELECT oa.app_id INTO v_other FROM claimius.object_asset oa WHERE oa.id = v_id;
+        IF v_other IS NOT NULL AND v_other IS DISTINCT FROM (p_payload ->> 'app_id')::UUID THEN
+            RETURN format('%s %s is held here with home app %s', p_event_type, v_id, v_other);
+        END IF;
     ELSIF p_event_type NOT IN ('claimius.samna_app', 'claimius.app_handover') THEN
         EXECUTE format('SELECT app_id FROM claimius.%I WHERE id = $1', split_part(p_event_type, '.', 2))
             INTO v_other USING v_id;
@@ -4635,7 +4689,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql STABLE;
 
-COMMENT ON FUNCTION claimius._check_peer_row(TEXT, TEXT, TEXT, JSONB) IS 'Reason a row from a peer''s feed of an app is refused, or NULL when it may apply: the app must be decided by that peer, and the row id must not be held here by another app or by an app another prophet decides.';
+COMMENT ON FUNCTION claimius._check_peer_row(TEXT, TEXT, TEXT, JSONB) IS 'Reason a row from a peer''s feed of an app is refused, or NULL when it may apply: the app must be decided by that peer, and the row id must not be held here by another app or by an app another prophet decides. An object_asset link names its home app, which may be one this prophet does not mirror, so it is refused only when its id is held here with another home.';
 
 CREATE OR REPLACE FUNCTION claimius.apply_peer_event(
     p_prophet       TEXT,
@@ -4664,7 +4718,7 @@ BEGIN
     IF p_event_type NOT IN ('claimius.samna_app', 'claimius.app_handover', 'claimius.organization', 'claimius.location',
                             'claimius.samna_user', 'claimius.claim', 'claimius.user_claim', 'claimius.claim_object',
                             'claimius.samna_client', 'claimius.samna_secret', 'claimius.object_field',
-                            'claimius.user_field', 'claimius.user_relation') THEN
+                            'claimius.user_field', 'claimius.user_relation', 'claimius.object_asset') THEN
         RAISE EXCEPTION 'apply_peer_event: unknown event type %', p_event_type;
     END IF;
     IF p_operation NOT IN ('upsert', 'delete') THEN

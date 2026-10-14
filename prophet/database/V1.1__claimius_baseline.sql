@@ -1197,3 +1197,45 @@ CREATE INDEX IF NOT EXISTS idx_user_relation_app_id ON claimius.user_relation (a
 CREATE INDEX IF NOT EXISTS idx_user_relation_sa_deleted_at ON claimius.user_relation (sa_deleted_at);
 CREATE INDEX IF NOT EXISTS idx_user_relation_parent_id ON claimius.user_relation (parent_id);
 CREATE INDEX IF NOT EXISTS idx_user_relation_sibling_id ON claimius.user_relation (sibling_id);
+
+CREATE TABLE IF NOT EXISTS claimius.object_asset (
+                                                     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                                                     app_id          UUID NOT NULL,
+                                                     object_type     TEXT NOT NULL CHECK (object_type LIKE 'claimius.%'),
+                                                     object_id       UUID NOT NULL,
+                                                     asset_id        UUID NOT NULL,
+                                                     kind            TEXT NOT NULL,
+                                                     name            TEXT,
+                                                     description     TEXT,
+                                                     mime_type       TEXT NOT NULL,
+                                                     size            BIGINT,
+                                                     "index"         INTEGER NOT NULL DEFAULT 0,
+                                                     sa_owner_id     UUID NOT NULL,
+                                                     sa_created_by   UUID,
+                                                     sa_deleted_at   TIMESTAMPTZ,
+                                                     sa_created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+                                                     sa_updated_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+                                                     txid            XID8 NOT NULL DEFAULT pg_current_xact_id()
+);
+
+COMMENT ON TABLE claimius.object_asset IS 'Shared link from an asset held by its home app to a claimius object. The asset row and its bytes stay in the home service; the link is published to every app that sees the object. Not a registered access table: access to a link follows its object.';
+COMMENT ON COLUMN claimius.object_asset.id IS 'Link id, the id a reader fetches the file by.';
+COMMENT ON COLUMN claimius.object_asset.app_id IS 'Home app holding the asset row and its bytes. No foreign key: a peer prophet mirroring one app holds links of homes it does not mirror.';
+COMMENT ON COLUMN claimius.object_asset.object_type IS 'Schema qualified type of the linked object, always a claimius type.';
+COMMENT ON COLUMN claimius.object_asset.object_id IS 'Id of the linked object; samna_user.user_id for a user.';
+COMMENT ON COLUMN claimius.object_asset.asset_id IS 'Id of the asset in the home app''s own storage.';
+COMMENT ON COLUMN claimius.object_asset.kind IS 'Role of the asset on the object: profile, banner, logo, file and so on.';
+COMMENT ON COLUMN claimius.object_asset.name IS 'Display name of the asset.';
+COMMENT ON COLUMN claimius.object_asset.description IS 'Free text description of the asset.';
+COMMENT ON COLUMN claimius.object_asset.mime_type IS 'Media type of the bytes the home serves.';
+COMMENT ON COLUMN claimius.object_asset.size IS 'Size of the bytes in octets, when the home knows it.';
+COMMENT ON COLUMN claimius.object_asset."index" IS 'Order among the links of one object; get_object_assets sorts by it, then by sa_created_at.';
+COMMENT ON COLUMN claimius.object_asset.sa_owner_id IS 'Owner the access gate reported for the linked object when the link was written; the user itself for a link on the writer''s own samna_user.';
+COMMENT ON COLUMN claimius.object_asset.sa_created_by IS 'user_claim.id of the grant the writer held WRITE on the object through; NULL for a link on the writer''s own samna_user.';
+COMMENT ON COLUMN claimius.object_asset.sa_deleted_at IS 'Soft delete timestamp. A deleted link is published like any other change and never read.';
+COMMENT ON COLUMN claimius.object_asset.sa_created_at IS 'Creation timestamp.';
+COMMENT ON COLUMN claimius.object_asset.sa_updated_at IS 'Last update timestamp, set by tg_update_timestamp.';
+COMMENT ON COLUMN claimius.object_asset.txid IS 'Local transaction that last wrote the row, stamped by tg_update_txid on every insert and update, a replayed one included.';
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_object_asset_app_asset ON claimius.object_asset (app_id, asset_id) WHERE sa_deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_object_asset_object ON claimius.object_asset (object_type, object_id);

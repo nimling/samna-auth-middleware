@@ -401,6 +401,33 @@ $$ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = claimius, pg_temp;
 
 COMMENT ON FUNCTION claimius.apps_for_object(TEXT, UUID) IS 'App ids holding a live app_object link to one object.';
 
+CREATE OR REPLACE FUNCTION claimius.apps_for_object_asset(p_object_type TEXT, p_object_id UUID, p_app_id UUID)
+    RETURNS SETOF UUID AS $$
+    SELECT a.app_id
+    FROM claimius.apps_for_object(p_object_type, p_object_id) AS a(app_id)
+    WHERE p_object_type IN ('claimius.organization', 'claimius.location')
+    UNION
+    SELECT u.app_id
+    FROM claimius.samna_user u
+    WHERE p_object_type = 'claimius.samna_user'
+      AND u.user_id = p_object_id
+      AND u.sa_deleted_at IS NULL
+    UNION
+    SELECT p_object_id
+    WHERE p_object_type = 'claimius.samna_app'
+    UNION
+    SELECT c.app_id
+    FROM claimius.claim c
+    WHERE p_object_type = 'claimius.claim'
+      AND c.id = p_object_id
+    UNION
+    SELECT p_app_id
+    WHERE p_object_type NOT IN ('claimius.organization', 'claimius.location', 'claimius.samna_user',
+                                'claimius.samna_app', 'claimius.claim');
+$$ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = claimius, pg_temp;
+
+COMMENT ON FUNCTION claimius.apps_for_object_asset(TEXT, UUID, UUID) IS 'App ids an object_asset link on one object is published to, the apps that see the object: the apps linked to an organization or location, every app holding a live samna_user row of a user, the app itself, the app of a claim, and for any other type the link''s home app p_app_id.';
+
 CREATE OR REPLACE FUNCTION claimius.app_has_object(p_app_id UUID, p_object_type TEXT, p_object_id UUID)
     RETURNS BOOLEAN AS $$
     SELECT EXISTS (

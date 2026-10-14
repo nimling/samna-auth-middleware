@@ -852,6 +852,8 @@ DECLARE
     v_op    claimius.sync_operation;
     v_type  TEXT;
     v_payload JSONB;
+    v_row   JSONB;
+    v_old   JSONB;
 BEGIN
     IF claimius.in_replay_mode() THEN
         RETURN coalesce(NEW, OLD);
@@ -875,16 +877,42 @@ BEGIN
         INSERT INTO claimius.sync_event (operation, event_type, payload, app_id)
         SELECT v_op, v_type, v_payload, a.app_id
         FROM claimius.apps_for_object(v_type, (v_payload ->> 'id')::UUID) AS a(app_id);
+    ELSIF v_type = 'claimius.object_asset' THEN
+        v_row := to_jsonb(coalesce(NEW, OLD));
+        INSERT INTO claimius.sync_event (operation, event_type, payload, app_id)
+        SELECT v_op, v_type, v_payload, a.app_id
+        FROM claimius.apps_for_object_asset(v_row ->> 'object_type', (v_row ->> 'object_id')::UUID, (v_row ->> 'app_id')::UUID) AS a(app_id);
+        IF TG_OP = 'UPDATE' THEN
+            v_old := to_jsonb(OLD);
+            INSERT INTO claimius.sync_event (operation, event_type, payload, app_id)
+            SELECT 'delete', v_type, jsonb_build_object('id', v_old ->> 'id', 'app_id', v_old ->> 'app_id'), o.app_id
+            FROM claimius.apps_for_object_asset(v_old ->> 'object_type', (v_old ->> 'object_id')::UUID, (v_old ->> 'app_id')::UUID) AS o(app_id)
+            WHERE o.app_id NOT IN (
+                SELECT claimius.apps_for_object_asset(v_row ->> 'object_type', (v_row ->> 'object_id')::UUID, (v_row ->> 'app_id')::UUID));
+        END IF;
     ELSE
         INSERT INTO claimius.sync_event (operation, event_type, payload, app_id)
         VALUES (v_op, v_type, v_payload, (v_payload ->> 'app_id')::uuid);
+    END IF;
+
+    IF v_type = 'claimius.samna_user' AND TG_OP <> 'DELETE'
+        AND (v_payload ->> 'sa_deleted_at') IS NULL
+        AND (TG_OP = 'INSERT' OR (to_jsonb(OLD) ->> 'sa_deleted_at') IS NOT NULL)
+    THEN
+        INSERT INTO claimius.sync_event (operation, event_type, payload, app_id)
+        SELECT 'upsert', 'claimius.object_asset', to_jsonb(l) - 'txid', (v_payload ->> 'app_id')::UUID
+        FROM claimius.object_asset l
+        WHERE l.object_type = 'claimius.samna_user'
+          AND l.object_id = (v_payload ->> 'user_id')::UUID
+          AND l.sa_deleted_at IS NULL
+        ORDER BY l.sa_created_at;
     END IF;
 
     RETURN coalesce(NEW, OLD);
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius.emit_sync_event() IS 'Trigger on the source tables. Publishes into sync_event. An organization or location change is written once per app linked to it.';
+COMMENT ON FUNCTION claimius.emit_sync_event() IS 'Trigger on the source tables. Publishes into sync_event. An organization or location change is written once per app linked to it. An object_asset change is written once per app apps_for_object_asset names for its object, and a link that moves to another object is deleted from the apps that no longer see it. A samna_user row that goes live in an app publishes the live links on that user to the app.';
 
 CREATE OR REPLACE FUNCTION claimius.emit_app_object_sync_event()
     RETURNS TRIGGER AS $$
@@ -906,6 +934,12 @@ BEGIN
 
     IF NOT v_is_live THEN
         INSERT INTO claimius.sync_event (operation, event_type, payload, app_id)
+        SELECT 'delete', 'claimius.object_asset', jsonb_build_object('id', l.id, 'app_id', l.app_id), v_link.app_id
+        FROM claimius.object_asset l
+        WHERE l.object_type = v_link.object_type
+          AND l.object_id = v_link.object_id
+        ORDER BY l.sa_created_at;
+        INSERT INTO claimius.sync_event (operation, event_type, payload, app_id)
         VALUES ('delete', v_link.object_type, jsonb_build_object('id', v_link.object_id), v_link.app_id);
         RETURN coalesce(NEW, OLD);
     END IF;
@@ -921,11 +955,19 @@ BEGIN
         VALUES ('upsert', v_link.object_type, v_payload, v_link.app_id);
     END IF;
 
+    INSERT INTO claimius.sync_event (operation, event_type, payload, app_id)
+    SELECT 'upsert', 'claimius.object_asset', to_jsonb(l) - 'txid', v_link.app_id
+    FROM claimius.object_asset l
+    WHERE l.object_type = v_link.object_type
+      AND l.object_id = v_link.object_id
+      AND l.sa_deleted_at IS NULL
+    ORDER BY l.sa_created_at;
+
     RETURN coalesce(NEW, OLD);
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius.emit_app_object_sync_event() IS 'Trigger on app_object. Publishes the linked row to the app on link and its delete on unlink.';
+COMMENT ON FUNCTION claimius.emit_app_object_sync_event() IS 'Trigger on app_object. Publishes the linked row and its live object_asset links to the app on link, and the delete of its links and of the row on unlink.';
 
 CREATE OR REPLACE FUNCTION claimius.get_app_home(p_app_id UUID)
     RETURNS TEXT AS $$
