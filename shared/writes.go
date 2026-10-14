@@ -74,6 +74,19 @@ func (d *DB) ResolveExternalUser(ctx context.Context, callerID uuid.UUID, extern
 	if externalID == "" {
 		return nil, fmt.Errorf("external_id is required")
 	}
+	if d.RouteToProphet {
+		var user SamnaUser
+		if err := client.Post(ctx, "user/token/validate", map[string]string{"external_id": externalID}, &user); err != nil {
+			if errors.Is(err, client.ErrUnauthorized) {
+				return nil, nil
+			}
+			return nil, fmt.Errorf("resolve external user: %w", err)
+		}
+		if user.OwnerID == nil || *user.OwnerID == uuid.Nil || callerID == uuid.Nil || !d.HasAccess(ctx, callerID, *user.OwnerID, OBJECT_TYPE_ORGANIZATION, ACCESS_READ) {
+			return nil, nil
+		}
+		return &user, nil
+	}
 	var userID uuid.UUID
 	var ownerID uuid.UUID
 	err := d.NewRaw(`
