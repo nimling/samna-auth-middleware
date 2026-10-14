@@ -512,6 +512,23 @@ BEGIN
                   AND uo.app_id = NEW.app_id
                   AND uo.object_type = 'claimius.organization'
                   AND uo.object_id = NEW.sa_owner_id;
+
+                IF EXISTS (
+                        SELECT 1 FROM claimius.user_claim uc
+                        WHERE uc.id = nullif(current_setting('claimius.object_created_by', TRUE), '')::UUID
+                          AND uc.user_id = v_user_id
+                          AND uc.app_id = NEW.app_id
+                          AND uc.sa_deleted_at IS NULL)
+                    AND (EXISTS (
+                            SELECT 1 FROM claimius.inheritance_info e
+                            WHERE e.descendant_type = 'claimius.organization'
+                              AND e.descendant_id = NEW.sa_owner_id
+                              AND e.tree_type = 'ownership'
+                              AND e.depth = 0)
+                         OR NOT EXISTS (SELECT 1 FROM claimius.organization o WHERE o.id = NEW.sa_owner_id))
+                THEN
+                    v_actor_access := coalesce(v_actor_access, 0) | 15;
+                END IF;
             END IF;
 
             IF (coalesce(v_effective, 0) & ~coalesce(v_actor_access, 0) & 15) <> 0
@@ -667,7 +684,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius._check_claim_composition() IS 'BEFORE INSERT/UPDATE trigger on claim_object. Rejects a grant whose effective mask hands out more access than the actor holds on the object, denies and removals exempt. An object outside the claimius schema that this database holds no object_info row for, a disciple''s own row, is judged by the actor''s hold on the binding''s owning organization, which _check_app_scope keeps linked to the app; its type is never resolved. The first binding of an app may come from an actor of another app holding owner on the organization that owns the app, judged in the actor''s own app. The first binding on a samna_user holding a claim assigned under the binding''s owning organization may come from an actor holding owner on that organization. Any other binding short of the actor''s hold in its app may still pass on the access the actor holds on the object in the system app, directly or through an inheriting ancestor grant, capped at that access. Enforces composition link invariants: no self loop, no reverse link cycle, caller has read on target claim. Bypassed during disciple replay.';
+COMMENT ON FUNCTION claimius._check_claim_composition() IS 'BEFORE INSERT/UPDATE trigger on claim_object. Rejects a grant whose effective mask hands out more access than the actor holds on the object, denies and removals exempt. An object outside the claimius schema that this database holds no object_info row for, a disciple''s own row, is judged by the actor''s hold on the binding''s owning organization, which _check_app_scope keeps linked to the app; its type is never resolved. When the transaction carries claimius.object_created_by, the grant the calling app reports the row was created under, and that grant is a live user_claim of the actor in the binding''s app, the actor is the row''s creator and holds owner, write, read and execute on it, as the disciple holding the row counts the creator, while the binding''s owning organization is live or not held. The first binding of an app may come from an actor of another app holding owner on the organization that owns the app, judged in the actor''s own app. The first binding on a samna_user holding a claim assigned under the binding''s owning organization may come from an actor holding owner on that organization. Any other binding short of the actor''s hold in its app may still pass on the access the actor holds on the object in the system app, directly or through an inheriting ancestor grant, capped at that access. Enforces composition link invariants: no self loop, no reverse link cycle, caller has read on target claim. Bypassed during disciple replay.';
 
 DROP TRIGGER IF EXISTS tg_check_claim_composition ON claimius.claim_object;
 CREATE TRIGGER tg_check_claim_composition

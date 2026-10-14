@@ -101,7 +101,7 @@ The assignee is not settled in the write. A grant changes one user's access and 
 
     2. The first live binding on a `samna_user` that holds a claim assigned under the binding's owning organization, when the actor holds owner on that organization in the binding's app. A new user has no pair anyone could hold yet; the owner of the organization the user was just made a member of may bind the user, which is how `insert_organization_user` binds the new user's claim.
 
-    3. A binding on an object outside the `claimius` schema that this database holds no `object_info` row for, a disciple's own row bound on the prophet, from an actor with no pair on it, is judged on the actor's pair on the binding's owning organization. The type passes through unresolved; the disciple computes access on the row when the binding arrives.
+    3. A binding on an object outside the `claimius` schema that this database holds no `object_info` row for, a disciple's own row bound on the prophet, from an actor with no pair on it, is judged on the actor's pair on the binding's owning organization. When the transaction carries `claimius.object_created_by`, the grant the calling app reports the row was created under, and that grant is a live `user_claim` of the actor in the binding's app, the actor also holds owner, write, read and execute as the row's creator while the owning organization is live, the verdict the disciple holding the row reaches. The type passes through unresolved; the disciple computes access on the row when the binding arrives.
 
 2. A composition link must not point at its own claim or reverse a live link, and the actor must hold read on the target claim, its settled pair on `claimius.claim`.
 

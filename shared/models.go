@@ -593,6 +593,7 @@ type ClaimObject struct {
 	OwnerID         uuid.UUID        `bun:"sa_owner_id" json:"owner_id"`
 	RootID          uuid.UUID        `bun:"sa_root_id" json:"root_id"`
 	CreatedBy       *uuid.UUID       `bun:"sa_created_by" json:"created_by"`
+	ObjectCreatedBy *uuid.UUID       `bun:"-" json:"object_created_by,omitempty"`
 	DeletedAt       *time.Time       `bun:"sa_deleted_at" json:"deleted_at,omitzero"`
 	CreatedAt       time.Time        `bun:"sa_created_at,default:now()" json:"created_at"`
 	UpdatedAt       time.Time        `bun:"sa_updated_at,default:now()" json:"updated_at"`

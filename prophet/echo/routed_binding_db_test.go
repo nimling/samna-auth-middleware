@@ -53,12 +53,12 @@ func TestADiscipleBindsOnItsOwnRowThroughTheProphet(t *testing.T) {
 		}
 	}
 	owner, viewer := uuid.New(), uuid.New()
-	var ownerGrant uuid.UUID
+	var ownerGrant, viewerGrant uuid.UUID
 	for _, g := range []struct {
 		user  uuid.UUID
 		claim uuid.UUID
 		out   *uuid.UUID
-	}{{owner, owners, &ownerGrant}, {viewer, viewers, nil}} {
+	}{{owner, owners, &ownerGrant}, {viewer, viewers, &viewerGrant}} {
 		var id uuid.UUID
 		if err := prophet.NewRaw(`
 			SELECT (claimius.insert_user_claim(p_app_id => ?, p_claim_id => ?, p_user_id => ?, p_sa_owner_id => ?, p_sa_created_by => ?)
@@ -116,8 +116,9 @@ func TestADiscipleBindsOnItsOwnRowThroughTheProphet(t *testing.T) {
 	`); err != nil {
 		t.Fatalf("register consumer table: %v", err)
 	}
-	if _, err := disciple.ExecContext(ctx, `INSERT INTO public.gotest_consumer_row (id, name, sa_owner_id, sa_created_by) VALUES (?, 'Row', ?, ?)`,
-		row, branch, ownerGrant); err != nil {
+	booked := uuid.New()
+	if _, err := disciple.ExecContext(ctx, `INSERT INTO public.gotest_consumer_row (id, name, sa_owner_id, sa_created_by) VALUES (?, 'Row', ?, ?), (?, 'Booked', ?, ?)`,
+		row, branch, ownerGrant, booked, branch, viewerGrant); err != nil {
 		t.Fatalf("consumer row: %v", err)
 	}
 
@@ -142,6 +143,37 @@ func TestADiscipleBindsOnItsOwnRowThroughTheProphet(t *testing.T) {
 		t.Fatalf("the prophet must store the binding with its type untouched, got %d %v", stored, err)
 	}
 	if err := bind(viewer, shared.ACCESS_READ); !errors.Is(err, shared.ErrNoAccess) {
-		t.Fatalf("a reader of the branch must be refused owner on the row with ErrNoAccess, got %v", err)
+		t.Fatalf("a reader of the branch must be refused owner on a row created under another user's grant with ErrNoAccess, got %v", err)
+	}
+
+	ac, err := disciple.MutationAccess(ctx, viewer, branch, string(shared.OBJECT_TYPE_ORGANIZATION), shared.ACCESS_READ)
+	if err != nil {
+		t.Fatalf("access on the branch: %v", err)
+	}
+	if _, err := disciple.CreateVirtualClaim(ctx, nil, ac, shared.CreateVirtualClaimParams{
+		Name: "Booked - owner", Access: shared.ACCESS_ALL | shared.ACCESS_MEMBER, OwnerID: branch,
+		ObjectID: booked, ObjectType: string(rowType), TargetUserID: viewer,
+	}); err != nil {
+		t.Fatalf("a reader of the branch must take ownership of the row it created through the prophet, got %v", err)
+	}
+	if err := prophet.NewRaw(`SELECT count(*) FROM claimius.claim_object WHERE object_type = ? AND object_id = ? AND sa_created_by = ?`,
+		string(rowType), booked, viewerGrant).Scan(ctx, &stored); err != nil || stored != 1 {
+		t.Fatalf("the prophet must store the creator's binding on the row, got %d %v", stored, err)
+	}
+
+	forged := uuid.New()
+	tx, err := prophet.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `SELECT set_config('claimius.object_created_by', ?, TRUE)`, ownerGrant.String()); err != nil {
+		t.Fatalf("vouch: %v", err)
+	}
+	if _, err := tx.ExecContext(ctx, `
+		SELECT claimius.insert_claim_object(p_app_id => ?, p_claim_id => ?, p_sa_owner_id => ?, p_sa_root_id => ?,
+		       p_sa_created_by => ?, p_object_id => ?, p_object_type => ?, p_inherits => TRUE)
+	`, app.ID, rowOwners, branch, outside, viewerGrant, forged, string(rowType)); err == nil {
+		t.Fatal("a creator grant that is not the actor's own must not make the actor the row's creator")
 	}
 }

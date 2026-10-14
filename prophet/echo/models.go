@@ -277,6 +277,7 @@ type ClaimObject struct {
 	RefID             *uuid.UUID       `bun:"ref_id,type:uuid" json:"ref_id,omitempty"`
 	RootID            uuid.UUID        `bun:"sa_root_id,type:uuid,notnull" json:"root_id"`
 	CreatedBy         *uuid.UUID       `bun:"sa_created_by,type:uuid" json:"created_by"`
+	ObjectCreatedBy   *uuid.UUID       `bun:"-" json:"object_created_by,omitempty"`
 	OwnerID           uuid.UUID        `bun:"sa_owner_id,type:uuid,notnull" json:"owner_id"`
 	DeletedAt         *time.Time       `bun:"sa_deleted_at" json:"deleted_at,omitzero"`
 	CreatedAt         time.Time        `bun:"sa_created_at,notnull,default:current_timestamp" json:"created_at"`

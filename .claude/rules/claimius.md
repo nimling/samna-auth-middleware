@@ -37,6 +37,7 @@ Write functions return one jsonb keyed by table: `(v -> 'claim' ->> 'id')::uuid`
 9. Bind every created resource with `insert_claim_object` before any read looks for it. Exempt: `samna_user` and claims themselves.
 10. Order inside an app: org, location, app row, then `insert_claim`, `insert_claim_object`, `insert_user_claim`.
 11. `_check_claim_composition` refuses a binding that hands out more than the actor holds. Two first bindings are judged on owner of an organization instead: an app's first binding (`upsert_app`) and a user's first binding under an org (`insert_organization_user`).
+12. A binding on a row the prophet holds no `object_info` row for, outside `claimius.*`, is judged on the actor's hold on the binding's owning organization, and by the creator rule the disciple applies: a routed binding carries the row's `sa_created_by` as `object_created_by`, `PostClaimObject` sets it as `claimius.object_created_by` for its transaction, and when that is a live `user_claim` of the actor in the binding's app and the owning organization is live, the actor holds owner, write, read and execute on the row.
 
 ## Access mask
 

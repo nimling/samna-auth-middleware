@@ -1,6 +1,7 @@
 package echo
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -189,10 +190,19 @@ func PostClaimObject(ctx echo.Context) error {
 	if !claimObject.HasKey("inherits") {
 		claimObject.Inherits = true
 	}
-	if _, err := sdb.Instance().NewInsert().
-		Model(claimObject).
-		Returning("*").
-		Exec(ctx.Request().Context()); err != nil {
+	if err := sdb.Instance().RunInTx(ctx.Request().Context(), nil, func(c context.Context, tx bun.Tx) error {
+		if claimObject.ObjectCreatedBy != nil {
+			if _, err := tx.ExecContext(c, "SELECT set_config('claimius.object_created_by', ?, TRUE)", claimObject.ObjectCreatedBy.String()); err != nil {
+				return err
+			}
+		}
+		_, err := sdb.Instance().NewInsert().
+			Conn(tx).
+			Model(claimObject).
+			Returning("*").
+			Exec(c)
+		return err
+	}); err != nil {
 		ctx.Logger().Errorf("PostClaimObject: %v", err)
 		return respond.Error(ctx, errorsx.ErrToHttpCode(err), "claim_object insert failed")
 	}

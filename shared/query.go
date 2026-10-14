@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -410,6 +411,28 @@ func (q *InsertQuery) route(ctx context.Context, dest ...any) error {
 	StampAccessClaim(q.model, q.accessClaim)
 	if err := StampRoot(ctx, q.db, q.model, q.accessClaim); err != nil {
 		return err
+	}
+	if co, ok := embeddedPtr(q.model, reflect.TypeOf(ClaimObject{})).(*ClaimObject); ok && co != nil && co.ObjectCreatedBy == nil &&
+		co.ObjectID != nil && co.ObjectType != nil && !strings.HasPrefix(string(*co.ObjectType), "claimius.") {
+		types, err := q.db.GetObjectTypes(ctx)
+		if err != nil {
+			return err
+		}
+		if slices.Contains(types, *co.ObjectType) {
+			var createdBy uuid.NullUUID
+			err := q.db.NewSelect().Conn(q.conn).
+				ColumnExpr("sa_created_by").
+				TableExpr("?", bun.Ident(string(*co.ObjectType))).
+				Where("id = ?", *co.ObjectID).
+				Where("sa_deleted_at IS NULL").
+				Scan(ctx, &createdBy)
+			if err != nil && !errors.Is(err, sql.ErrNoRows) {
+				return err
+			}
+			if createdBy.Valid {
+				co.ObjectCreatedBy = &createdBy.UUID
+			}
+		}
 	}
 	body, err := marshalWrite(q.model)
 	if err != nil {
