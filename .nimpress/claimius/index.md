@@ -41,6 +41,7 @@ Claimius owns and validates its own types. It reads no more of the implementing 
 | [Graphs](./graphs.md) | The owner and claim graphs, windows, the snapshot validated cache |
 | [Usage](./usage.md) | The per pair usage count, relations, and the prophet's capture |
 | [Sync](./sync.md) | The outbox of source rows, the `(txid, seq)` cursor, pages, trimming |
+| [Assets](./assets.md) | `object_asset`, the shared link from a home app's asset to a claimius object, which apps it reaches, and fetching the file through the prophet |
 | [Prophets and disciples](./prophets.md) | Roles, ids, federation with peers, homes, handovers, failure |
 | [Security](./security.md) | Roles, definer reads, secrets, a compromised disciple |
 | [Audit](./audit.md) | The trail, written in the change's transaction, on monthly partitions |

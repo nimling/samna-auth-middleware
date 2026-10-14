@@ -28,7 +28,7 @@ Write functions return one jsonb keyed by table: `(v -> 'claim' ->> 'id')::uuid`
 4. Disciple bootstrap: `upsert_disciple_state(p_disciple_app_slug)`. Hybrid: `upsert_prophet_peer`, a prophet mirroring one app of a peer, with no `disciple_state` row.
 5. Registration: `upsert_table_info` registers the named tables, idempotent; `delete_table_info` deregisters the named tables. Rerun `upsert_table_info` after adding `sa_parent_id`, `sa_root_id` or `sa_location_id`, after the migration and backfill.
 6. `app_object`: `upsert_app_object`, `delete_app_object`, never direct. Roots: `upsert_root_organization`, idempotent on app and name.
-7. Direct INSERT or UPDATE: `organization`, `location`, `samna_client`, `object_field`, `user_field`, `user_relation`, `prophet_state`, `disciple_state`, `samna_app` and `samna_secret` updates.
+7. Direct INSERT or UPDATE: `organization`, `location`, `samna_client`, `object_field`, `user_field`, `user_relation`, `object_asset`, `prophet_state`, `disciple_state`, `samna_app` and `samna_secret` updates.
 8. Never write: `user_object`, `object_info`, `user_users`, `user_users_diff`, `inheritance_info`, `table_info`, `sync_event`, `access_diff`, `user_activity`, `claim_graph_cache`, `peer_collision`, `used_count`, `last_used_at`. There is no `object_users`, `access_diff_user` or `reconcile_queue` table.
 9. Bind every created resource with `insert_claim_object` before any read looks for it. Exempt: `samna_user` and claims themselves.
 10. Order inside an app: org, location, app row, then `insert_claim`, `insert_claim_object`, `insert_user_claim`.
@@ -51,6 +51,15 @@ Write functions return one jsonb keyed by table: `(v -> 'claim' ->> 'id')::uuid`
 4. Disciples carry no `app_object`: a disciple mirrors one app, the sync layer strips `app_id`, and the disciple's read functions take no app argument. Write the app filter on the prophet side only.
 5. A registered table may omit `app_id`; it is inferred from `get_app_id()`. On a multi app prophet the column is required.
 6. `get_app()` returns the system app and raises on a pure disciple; `get_disciple_app()` raises on a prophet and a hybrid. On a hybrid use `get_app_id()`. These helpers ship in the prophet set only.
+
+## Asset links
+
+`object_asset` links an asset its home app stores to a `claimius.*` object; the asset row and its bytes stay in the home, only links sync. Long form: `.nimpress/claimius/assets.md`.
+
+1. Not a registered access table: access to a link is READ on its object, for a `samna_user` self or what `get_user_access` resolves. Read with `get_object_assets`, in Go `GetObjectAssets` and `GetObjectAsset`.
+2. A link reaches the apps `apps_for_object_asset` names: an organization's or location's `app_object` apps, every app holding the user, the app itself, a claim's app, else the home. A late `app_object` link or `samna_user` row publishes the object's live links; never write `sync_event` for them.
+3. Prophet: direct insert, update or soft delete with `app_id` the home. Disciple: the builder routes `shared.ObjectAsset` to `/sam/object_asset`, where the prophet checks WRITE on the object for the forwarded actor and stamps owner and grant.
+4. A file is fetched through the prophet only: the consumer route calls `disciple/echo.GetObjectAssetData`, the prophet serves or relays to the home's `/asset/:id/data`, and the home answers from the host's `sdb.Options.AssetSource`. Every hop passes `Content-Type`, `Content-Length`, `ETag`, `Last-Modified` and `Cache-Control` through; the middleware caches nothing, a host `AssetCache` is used only while fresh.
 
 ## Types and trees
 

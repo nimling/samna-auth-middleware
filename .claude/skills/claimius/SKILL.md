@@ -78,7 +78,7 @@ It depends on the table.
 - `samna_app` updates only. An app is created by `upsert_system_app` or `upsert_app`.
 - `organization`, `location`
 - `samna_client`, `samna_secret` updates
-- `object_field`, `user_field`, `user_relation`
+- `object_field`, `user_field`, `user_relation`, `object_asset`
 - `prophet_state`, `disciple_state`
 - `prophet_peer`, by the prophet's admin only. `app_handover` only through `insert_app_handover` and `update_app_handover`
 
@@ -167,6 +167,17 @@ A path is the pair `tree_type, cascaded_from`. `tree_type` is `direct` for a bin
 ### "Can I have multiple grants on the same object?"
 
 Yes. The `user_object.grants` jsonb array carries one entry per contributing claim. `sa_access` on the row is the OR of the surviving grants after denies. A binding mask narrows its claim: each grant carries `claim & expand(coalesce(binding, claim))`, a composed one the bits both the link and the target binding carry. Removing one claim's contribution shrinks the array; the row stays as long as some grant or `direct_grant` survives.
+
+### "How do I attach a file to a user, organization or other claimius object?"
+
+Store the asset and its bytes in your own service, then write a `claimius.object_asset` link: `object_type` a `claimius.*` type, `object_id` the object (a user's `user_id`), `asset_id` your asset's id, `kind` such as `profile`, `banner`, `logo` or `file`, and `mime_type`. The asset never moves; only the link syncs, to every app that sees the object. It is not a registered table and takes no `claim_object` binding: access to a link is READ on its object.
+
+- On a disciple write it through the builder, `NewInsert().Model(&shared.ObjectAsset{...}).Access(ac)` with `ac` WRITE on the object (self for the actor's own user). The prophet checks that WRITE again and stamps owner and grant.
+- On the prophet insert, update or soft delete it directly with `app_id` the home app.
+- Read with `get_object_assets`, in Go `GetObjectAssets(ctx, user, type, id, kind)` and `GetObjectAsset(ctx, user, linkID)`. Never SELECT the table to decide what a user may see.
+- Serve the file from your own route with `disciple/echo.GetObjectAssetData(ctx, linkID)`, which fetches through the prophet. Give the middleware your storage with `sdb.Options.AssetSource` at `sdb.Init`, and optionally an `AssetCache`. Pass `Content-Type`, `Content-Length`, `ETag`, `Last-Modified` and `Cache-Control` through untouched.
+
+See `.nimpress/claimius/assets.md`.
 
 ## Required columns on a registered application table
 

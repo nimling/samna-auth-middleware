@@ -25,7 +25,7 @@ err = q.Scan(ctx, &location)
 | Table | Deployed disciple | Disciple in debug mode |
 |---|---|---|
 | `claim`, `claim_object`, `user_claim` | Sent to the prophet, the answer upserted locally | The local claimius functions |
-| `organization`, `location`, `user_relation`, `samna_secret`, `samna_user` | Sent to the prophet, the answer upserted locally | Local, through the triggers |
+| `organization`, `location`, `user_relation`, `samna_secret`, `samna_user`, `object_asset` | Sent to the prophet, the answer upserted locally | Local, through the triggers |
 | The implementing side's own registered tables | Local | Local |
 | Claimius tables the prophet serves no route for, such as `notification` | Local | Local |
 
