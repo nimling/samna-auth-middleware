@@ -2498,10 +2498,14 @@ BEGIN
                     'Merged source ' || p_source_user_id::TEXT || ' into target ' || p_target_user_id::TEXT
                     );
         END LOOP;
+
+    UPDATE claimius.object_asset SET object_id = p_target_user_id
+    WHERE object_type = 'claimius.samna_user'
+      AND object_id = p_source_user_id;
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius.merge_user(p_target_user_id uuid, p_source_user_id uuid, p_acting_user_claim uuid) IS 'Merges the source user_id into the target in every app the source has a row in: moves user_claim, user_relation and user_field, retires a source grant of a claim the target already holds, copies the source profile onto an existing target row and removes the source row with its user_object pairs. Prophet set only; samna_auth owns the merge flow.';
+COMMENT ON FUNCTION claimius.merge_user(p_target_user_id uuid, p_source_user_id uuid, p_acting_user_claim uuid) IS 'Merges the source user_id into the target in every app the source has a row in: moves user_claim, user_relation and user_field, moves the object_asset links on the source user to the target, published to the apps that see the target, retires a source grant of a claim the target already holds, copies the source profile onto an existing target row and removes the source row with its user_object pairs. Prophet set only; samna_auth owns the merge flow.';
 
 CREATE OR REPLACE FUNCTION claimius.migrate_root(
     p_object_type   TEXT,

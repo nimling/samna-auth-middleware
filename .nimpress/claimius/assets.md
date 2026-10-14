@@ -37,7 +37,7 @@ A link follows its object. `apps_for_object(object_type, object_id, app_id)` nam
 
 1. A delete, hard or soft, goes to the same apps as the write it ends. A link moved to another object is deleted from the apps that no longer see it.
 
-2. When an object becomes visible to an app later, its live links follow it: an `app_object` link that goes live publishes the object's links to that app after the object itself, and a `samna_user` row inserted or revived for an app publishes the user's links to that app. An `app_object` link that ends deletes the object's links from that app before the object.
+2. A `merge_user` moves the links on the source user to the target, and the move publishes them to the apps that see the target. When an object becomes visible to an app later, its live links follow it: an `app_object` link that goes live publishes the object's links to that app after the object itself, and a `samna_user` row inserted or revived for an app publishes the user's links to that app. An `app_object` link that ends deletes the object's links from that app before the object.
 
 3. The snapshot of an app, the disciple's and a peer's, carries every link the app would have been sent, and the snapshot source count counts them, so the backlog check sees them.
 
