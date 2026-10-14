@@ -116,10 +116,10 @@ func (d *DB) Search(ctx context.Context, userID uuid.UUID, query string, objectT
 	return results, nil
 }
 
-func (d *DB) GetAudit(ctx context.Context, userID uuid.UUID, requiredAccess ClaimAccess) ([]Audit, error) {
+func (d *DB) GetAudit(ctx context.Context, userID uuid.UUID, requiredAccess ClaimAccess, ids []uuid.UUID) ([]Audit, error) {
 	audits := make([]Audit, 0)
 	err := d.NewSelect().
-		TableExpr("claimius.get_audit(?,?) AS audit", userID, requiredAccess).
+		TableExpr("claimius.get_audit(?, ?, p_ids => ?::uuid[]) AS audit", userID, requiredAccess, pq.Array(ids)).
 		Column("audit.*").
 		Scan(ctx, &audits)
 	if err != nil {
@@ -512,4 +512,20 @@ func (d *DB) GetObjectTypes(ctx context.Context) ([]ObjectType, error) {
 		return nil, err
 	}
 	return types, nil
+}
+
+type Descendant struct {
+	ObjectType ObjectType `bun:"object_type" json:"object_type"`
+	ObjectID   uuid.UUID  `bun:"object_id" json:"object_id"`
+	Hop        int        `bun:"hop" json:"hop"`
+	TreeType   string     `bun:"tree_type" json:"tree_type"`
+}
+
+func (d *DB) GetDescendants(ctx context.Context, objectID uuid.UUID) ([]Descendant, error) {
+	rows := make([]Descendant, 0)
+	err := d.NewRaw("SELECT * FROM claimius.get_descendants(?::uuid)", objectID).Scan(ctx, &rows)
+	if err != nil {
+		return nil, err
+	}
+	return rows, nil
 }

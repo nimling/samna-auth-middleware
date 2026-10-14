@@ -7,6 +7,7 @@ type (
 	AccessRequest            = shared.AccessRequest
 	AccessUser               = shared.AccessUser
 	Audit                    = shared.Audit
+	BindingFilters           = shared.BindingFilters
 	Claim                    = shared.Claim
 	ClaimAccess              = shared.ClaimAccess
 	ClaimObject              = shared.ClaimObject
@@ -14,12 +15,15 @@ type (
 	CreateClaimParams        = shared.CreateClaimParams
 	CreateVirtualClaimParams = shared.CreateVirtualClaimParams
 	Creator                  = shared.Creator
+	Descendant               = shared.Descendant
+	GrantFilters             = shared.GrantFilters
 	GraphNode                = shared.GraphNode
 	GraphWindow              = shared.GraphWindow
 	Location                 = shared.Location
 	LocationType             = shared.LocationType
 	ObjectAsset              = shared.ObjectAsset
 	ObjectType               = shared.ObjectType
+	ObjectUsageResult        = shared.ObjectUsageResult
 	Organization             = shared.Organization
 	OrganizationType         = shared.OrganizationType
 	ReCreateForOptions       = shared.ReCreateForOptions
@@ -30,6 +34,7 @@ type (
 	UserClaim                = shared.UserClaim
 	UserRelation             = shared.UserRelation
 	UserRelationFilters      = shared.UserRelationFilters
+	UserToken                = shared.UserToken
 )
 
 const (

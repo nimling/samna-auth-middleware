@@ -181,9 +181,9 @@ func (d *DB) GetLocationAudit(ctx context.Context, actorID, locationID uuid.UUID
 	return audits, nil
 }
 
-func (d *DB) GetLocationsMany(ctx context.Context, ids, parentIDs []uuid.UUID) ([]Location, error) {
+func (d *DB) GetLocationsMany(ctx context.Context, ids, parentIDs []uuid.UUID, externalIDs []string) ([]Location, error) {
 	locs := make([]Location, 0)
-	err := d.NewRaw("SELECT * FROM claimius.get_locations(?::uuid[], ?::uuid[])", pq.Array(ids), pq.Array(parentIDs)).Scan(ctx, &locs)
+	err := d.NewRaw("SELECT * FROM claimius.get_locations(?::uuid[], ?::uuid[], ?::text[])", pq.Array(ids), pq.Array(parentIDs), pq.Array(externalIDs)).Scan(ctx, &locs)
 	if err != nil {
 		return nil, err
 	}

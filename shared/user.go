@@ -92,9 +92,8 @@ func (d *DB) GetUserRelations(ctx context.Context, userID uuid.UUID) ([]UserRela
 func (d *DB) GetUserRelationsQuery(relations *[]UserRelation, userID uuid.UUID, f UserRelationFilters) *bun.SelectQuery {
 	q := d.NewSelect().
 		Model(relations).
-		ExcludeColumn("sa_deleted_at").
-		Where("user_relation.user_id = ?", userID).
-		Where("user_relation.sa_deleted_at IS NULL")
+		ModelTableExpr("claimius.get_relations(?) AS user_relation", userID).
+		ExcludeColumn("sa_deleted_at")
 	if len(f.OrgIDs) > 0 {
 		q = q.Where("user_relation.object_type = ? AND user_relation.object_id IN (?)", OBJECT_TYPE_ORGANIZATION, bun.In(f.OrgIDs))
 	}
@@ -130,18 +129,19 @@ func (d *DB) GetUserRelationsQuery(relations *[]UserRelation, userID uuid.UUID, 
 
 func (d *DB) GetRelation(ctx context.Context, userID uuid.UUID, relationID uuid.UUID) (*UserRelation, error) {
 	var relation UserRelation
-	err := d.NewSelect().
-		Model(&relation).
-		ExcludeColumn("sa_deleted_at").
-		Where("user_relation.id = ?", relationID).
-		Where("user_relation.user_id = ?", userID).
-		Where("user_relation.sa_deleted_at IS NULL").
-		Limit(1).
-		Scan(ctx)
+	err := d.GetRelationQuery(&relation, userID, relationID).Scan(ctx)
 	if err != nil {
 		return nil, err
 	}
 	return &relation, nil
+}
+
+func (d *DB) GetRelationQuery(relation *UserRelation, userID uuid.UUID, relationID uuid.UUID) *bun.SelectQuery {
+	return d.NewSelect().
+		Model(relation).
+		ModelTableExpr("claimius.get_relations(?, ?::uuid[]) AS user_relation", userID, pq.Array([]uuid.UUID{relationID})).
+		ExcludeColumn("sa_deleted_at").
+		Limit(1)
 }
 
 func (d *DB) insertRelation(ctx context.Context, conn bun.IConn, ac *AccessClaim, relation *UserRelation) (*UserRelation, error) {
@@ -575,9 +575,9 @@ func (d *DB) upsertUserExternal(ctx context.Context, conn bun.IConn, ac *AccessC
 	return d.callCreateOrganizationUser(ctx, conn, ac, *payload.OwnerID, &user, true, identity, payload.Reason)
 }
 
-func (d *DB) GetUsersMany(ctx context.Context, userIDs, ids []uuid.UUID) ([]SamnaUser, error) {
+func (d *DB) GetUsersMany(ctx context.Context, userIDs, ids []uuid.UUID, emails, externalIDs []string) ([]SamnaUser, error) {
 	users := make([]SamnaUser, 0)
-	err := d.NewRaw("SELECT * FROM claimius.get_users(?::uuid[], ?::uuid[])", pq.Array(userIDs), pq.Array(ids)).Scan(ctx, &users)
+	err := d.NewRaw("SELECT * FROM claimius.get_users(?::uuid[], ?::uuid[], ?::text[], ?::text[])", pq.Array(userIDs), pq.Array(ids), pq.Array(emails), pq.Array(externalIDs)).Scan(ctx, &users)
 	if err != nil {
 		return nil, err
 	}
