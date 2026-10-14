@@ -1148,6 +1148,17 @@ func (q *DeleteQuery) execClaimius(ctx context.Context, dest ...any) (handled bo
 		}
 		*m = *result
 		return true, dispatchScan(q.model, dest...)
+	case "claimius.object_asset":
+		m, ok := embeddedPtr(q.model, reflect.TypeOf(ObjectAsset{})).(*ObjectAsset)
+		if !ok {
+			return false, nil
+		}
+		result, err := q.db.deleteObjectAsset(ctx, q.conn, q.accessClaim, q.recordID)
+		if err != nil {
+			return true, err
+		}
+		*m = *result
+		return true, dispatchScan(q.model, dest...)
 	}
 	return false, nil
 }

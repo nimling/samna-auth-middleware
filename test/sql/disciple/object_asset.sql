@@ -42,9 +42,9 @@ SELECT hasnt_column('claimius', 'object_asset', 'app_id', 'a disciple link carri
 
 SELECT col_not_null('claimius', 'object_asset', 'sa_created_by', 'a link always names the grant it was written under');
 
-SELECT ok(EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname = 'claimius' AND indexname = 'idx_object_asset_asset'
-                   AND indexdef LIKE '%UNIQUE%(asset_id)%sa_deleted_at IS NULL%'),
-    'an asset has one live link on the disciple');
+SELECT ok(EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname = 'claimius' AND indexname = 'idx_object_asset_asset_object'
+                   AND indexdef LIKE '%UNIQUE%(asset_id, object_type, object_id)%sa_deleted_at IS NULL%'),
+    'an asset has one live link per object on the disciple');
 
 SELECT ok(has_table_privilege('claimius_disciple_client', 'claimius.object_asset', 'INSERT')
       AND has_table_privilege('claimius_disciple_client', 'claimius.object_asset', 'UPDATE')

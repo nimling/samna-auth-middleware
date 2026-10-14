@@ -1237,5 +1237,6 @@ COMMENT ON COLUMN claimius.object_asset.sa_created_at IS 'Creation timestamp.';
 COMMENT ON COLUMN claimius.object_asset.sa_updated_at IS 'Last update timestamp, set by tg_update_timestamp.';
 COMMENT ON COLUMN claimius.object_asset.txid IS 'Local transaction that last wrote the row, stamped by tg_update_txid on every insert and update, a replayed one included.';
 
-CREATE UNIQUE INDEX IF NOT EXISTS idx_object_asset_app_asset ON claimius.object_asset (app_id, asset_id) WHERE sa_deleted_at IS NULL;
+DROP INDEX IF EXISTS claimius.idx_object_asset_app_asset;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_object_asset_app_asset_object ON claimius.object_asset (app_id, asset_id, object_type, object_id) WHERE sa_deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_object_asset_object ON claimius.object_asset (object_type, object_id);

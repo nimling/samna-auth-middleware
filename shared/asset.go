@@ -133,3 +133,21 @@ func (d *DB) GetObjectAsset(ctx context.Context, userID, linkID uuid.UUID) (*Obj
 	}
 	return &links[0], nil
 }
+
+func (d *DB) deleteObjectAsset(ctx context.Context, conn bun.IConn, ac *AccessClaim, linkID uuid.UUID) (*ObjectAsset, error) {
+	if ac == nil {
+		return nil, ErrNoAccess
+	}
+	var link ObjectAsset
+	_, err := d.DB.NewUpdate().Conn(conn).
+		Model(&link).
+		Where("id = ?", linkID).
+		Where("sa_deleted_at IS NULL").
+		Set("sa_deleted_at = NOW()").
+		Returning("*").
+		Exec(ctx, &link)
+	if err != nil {
+		return nil, err
+	}
+	return &link, nil
+}

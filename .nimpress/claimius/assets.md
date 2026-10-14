@@ -21,7 +21,7 @@ An asset is a file a service stores: a profile picture, a banner, a logo, an att
 | `name`, `description`, `mime_type`, `size`, `index` | What a listing shows; `index` orders the links of one object |
 | `sa_owner_id`, `sa_created_by` | The object's owner and the grant the writer held WRITE through when it linked, never NULL |
 
-A home app holds one live link per asset: `(app_id, asset_id)` is unique among live rows on the prophet, `asset_id` on a disciple. `object_asset` is not a registered access table. A link has no grants of its own; access to it is access to its object.
+A home app holds one live link per asset and object: `(app_id, asset_id, object_type, object_id)` is unique among live rows on the prophet, `(asset_id, object_type, object_id)` on a disciple, so one asset can be shared on several claimius objects. `object_asset` is not a registered access table. A link has no grants of its own; access to it is access to its object.
 
 ## Which apps receive a link
 

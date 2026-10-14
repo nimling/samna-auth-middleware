@@ -69,9 +69,9 @@ SELECT col_not_null('claimius', 'object_asset', 'app_id', 'a prophet link names 
 
 SELECT col_not_null('claimius', 'object_asset', 'sa_created_by', 'a link always names the grant it was written under');
 
-SELECT ok(EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname = 'claimius' AND indexname = 'idx_object_asset_app_asset'
-                   AND indexdef LIKE '%UNIQUE%(app_id, asset_id)%sa_deleted_at IS NULL%'),
-    'an asset of one home app has one live link');
+SELECT ok(EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname = 'claimius' AND indexname = 'idx_object_asset_app_asset_object'
+                   AND indexdef LIKE '%UNIQUE%(app_id, asset_id, object_type, object_id)%sa_deleted_at IS NULL%'),
+    'an asset of one home app has one live link per object');
 
 SELECT throws_ok(
     $$INSERT INTO claimius.object_asset (app_id, object_type, object_id, asset_id, kind, mime_type, sa_owner_id, sa_created_by)
