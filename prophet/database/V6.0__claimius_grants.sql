@@ -1,3 +1,15 @@
+CREATE OR REPLACE VIEW claimius.get_users AS SELECT * FROM claimius.samna_user;
+CREATE OR REPLACE VIEW claimius.get_organizations AS SELECT * FROM claimius.organization;
+CREATE OR REPLACE VIEW claimius.get_locations AS SELECT * FROM claimius.location;
+CREATE OR REPLACE VIEW claimius.get_claims AS SELECT * FROM claimius.claim;
+CREATE OR REPLACE VIEW claimius.get_grants AS SELECT * FROM claimius.user_claim;
+
+COMMENT ON VIEW claimius.get_users IS 'Every samna_user row as it stands, soft deleted and inactive rows included, with no reader and no access filter, as a relation a query joins. The read surface of the SamnaUser model: bun selects and belongs-to joins read it through select:claimius.get_users, so app code reaches the table only through a get_ name. Defined here, after every column change of the set, so it carries every column.';
+COMMENT ON VIEW claimius.get_organizations IS 'Every organization row as it stands, soft deleted rows included, with no reader and no access filter, as a relation a query joins. The read surface of the Organization model for bun selects and belongs-to joins.';
+COMMENT ON VIEW claimius.get_locations IS 'Every location row as it stands, soft deleted rows included, with no reader and no access filter, as a relation a query joins. The read surface of the Location model for bun selects and belongs-to joins.';
+COMMENT ON VIEW claimius.get_claims IS 'Every claim row as it stands, soft deleted rows included, with no reader and no access filter, as a relation a query joins. The read surface of the Claim model for bun selects and belongs-to joins.';
+COMMENT ON VIEW claimius.get_grants IS 'Every user_claim row as it stands, soft deleted grants and grants outside their window included, with no reader and no access filter, as a relation a query joins. The read surface of the UserClaim model for bun selects and belongs-to joins.';
+
 CREATE OR REPLACE FUNCTION claimius._grant_prophet_roles()
     RETURNS VOID AS $$
 BEGIN
@@ -50,6 +62,9 @@ BEGIN
              claimius.notification, claimius.claim_graph_cache
              TO claimius_disciple_client';
     EXECUTE 'REVOKE INSERT, UPDATE, DELETE ON claimius.claim_graph_cache FROM claimius_reader';
+    EXECUTE 'GRANT SELECT ON claimius.get_users, claimius.get_organizations, claimius.get_locations,
+             claimius.get_claims, claimius.get_grants
+             TO claimius_reader';
     EXECUTE 'GRANT SELECT ON ALL TABLES IN SCHEMA claimius TO claimius_disciple_client';
     EXECUTE 'GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA claimius TO claimius_disciple_client';
 END;

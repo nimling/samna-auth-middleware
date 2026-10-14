@@ -103,7 +103,7 @@ func QueryPage(ctx echo.Context) (*uuid.UUID, int, error) {
 
 func UserWhere(userID uuid.UUID, requiredAccess ClaimAccess) string {
 	return fmt.Sprintf(
-		`(samna_user.user_id = '%[1]s' OR (samna_user.user_id IN (SELECT user_id FROM claimius.get_users('%[1]s', %[2]d)) AND samna_user.user_id NOT IN (SELECT user_id FROM claimius.samna_user WHERE type = 'system' AND sa_deleted_at IS NULL)))`,
+		`(samna_user.user_id = '%[1]s' OR (samna_user.user_id IN (SELECT user_id FROM claimius.get_users('%[1]s', %[2]d)) AND samna_user.user_id NOT IN (SELECT user_id FROM claimius.get_users WHERE type = 'system' AND sa_deleted_at IS NULL)))`,
 		userID, requiredAccess,
 	)
 }

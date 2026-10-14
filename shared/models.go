@@ -339,7 +339,7 @@ const (
 )
 
 type SamnaUser struct {
-	bun.BaseModel `bun:"table:claimius.samna_user"`
+	bun.BaseModel `bun:"table:claimius.samna_user,select:claimius.get_users"`
 	nimbody.Body  `bun:"-" json:"-"`
 
 	ID         uuid.UUID        `bun:"id,pk,default:gen_random_uuid()" json:"id"`
@@ -407,7 +407,7 @@ type UserToken struct {
 }
 
 type Organization struct {
-	bun.BaseModel `bun:"table:claimius.organization"`
+	bun.BaseModel `bun:"table:claimius.organization,select:claimius.get_organizations"`
 	nimbody.Body  `bun:"-" json:"-"`
 
 	ID          uuid.UUID        `bun:"id,pk,default:gen_random_uuid()" json:"id"`
@@ -429,7 +429,7 @@ type Organization struct {
 }
 
 type Location struct {
-	bun.BaseModel `bun:"table:claimius.location"`
+	bun.BaseModel `bun:"table:claimius.location,select:claimius.get_locations"`
 	nimbody.Body  `bun:"-" json:"-"`
 
 	ID          uuid.UUID     `bun:"id,pk,default:gen_random_uuid()" json:"id"`
@@ -454,7 +454,7 @@ type Location struct {
 }
 
 type Claim struct {
-	bun.BaseModel `bun:"table:claimius.claim"`
+	bun.BaseModel `bun:"table:claimius.claim,select:claimius.get_claims"`
 	nimbody.Body  `bun:"-" json:"-"`
 
 	ID           uuid.UUID     `bun:"id,pk,default:gen_random_uuid()" json:"id"`
@@ -551,7 +551,7 @@ func ModelID(model any) (uuid.UUID, error) {
 }
 
 type UserClaim struct {
-	bun.BaseModel `bun:"table:claimius.user_claim"`
+	bun.BaseModel `bun:"table:claimius.user_claim,select:claimius.get_grants"`
 	nimbody.Body  `bun:"-" json:"-"`
 
 	ID           uuid.UUID     `bun:"id,pk,default:gen_random_uuid()" json:"id"`
@@ -578,26 +578,27 @@ type ClaimObject struct {
 	bun.BaseModel `bun:"table:claimius.claim_object"`
 	nimbody.Body  `bun:"-" json:"-"`
 
-	ID           uuid.UUID        `bun:"id,pk,default:gen_random_uuid()" json:"id"`
-	ClaimID      uuid.UUID        `bun:"claim_id" json:"claim_id"`
-	ObjectID     *uuid.UUID       `bun:"object_id" json:"object_id"`
-	ObjectType   *ObjectType      `bun:"object_type" json:"object_type"`
-	Reason       *string          `bun:"reason" json:"reason"`
-	Scope        *json.RawMessage `bun:"scope,type:jsonb" json:"scope"`
-	Access       *ClaimAccess     `bun:"sa_access,nullzero" json:"access,omitempty"`
-	AccessSlice  []string         `bun:"-" json:"access_slice,omitempty"`
-	AccessString string           `bun:"-" json:"access_string,omitempty"`
-	Inherits     bool             `bun:"inherits" json:"inherits"`
-	RefID        *uuid.UUID       `bun:"ref_id" json:"ref_id"`
-	OwnerID      uuid.UUID        `bun:"sa_owner_id" json:"owner_id"`
-	RootID       uuid.UUID        `bun:"sa_root_id" json:"root_id"`
-	CreatedBy    *uuid.UUID       `bun:"sa_created_by" json:"created_by"`
-	DeletedAt    *time.Time       `bun:"sa_deleted_at" json:"deleted_at,omitzero"`
-	CreatedAt    time.Time        `bun:"sa_created_at,default:now()" json:"created_at"`
-	UpdatedAt    time.Time        `bun:"sa_updated_at,default:now()" json:"updated_at"`
-	Txid         uint64           `bun:"txid,scanonly" json:"-"`
-	Owner        *Organization    `bun:"rel:belongs-to,join:sa_owner_id=id" json:"owner,omitempty"`
-	Creator      *Creator         `bun:"embed:creator_" json:"creator,omitempty"`
+	ID              uuid.UUID        `bun:"id,pk,default:gen_random_uuid()" json:"id"`
+	ClaimID         uuid.UUID        `bun:"claim_id" json:"claim_id"`
+	ObjectID        *uuid.UUID       `bun:"object_id" json:"object_id"`
+	ObjectType      *ObjectType      `bun:"object_type" json:"object_type"`
+	Reason          *string          `bun:"reason" json:"reason"`
+	Scope           *json.RawMessage `bun:"scope,type:jsonb" json:"scope"`
+	Access          *ClaimAccess     `bun:"sa_access,nullzero" json:"access,omitempty"`
+	EffectiveAccess *ClaimAccess     `bun:"effective_access,scanonly" json:"effective_access,omitempty"`
+	AccessSlice     []string         `bun:"-" json:"access_slice,omitempty"`
+	AccessString    string           `bun:"-" json:"access_string,omitempty"`
+	Inherits        bool             `bun:"inherits" json:"inherits"`
+	RefID           *uuid.UUID       `bun:"ref_id" json:"ref_id"`
+	OwnerID         uuid.UUID        `bun:"sa_owner_id" json:"owner_id"`
+	RootID          uuid.UUID        `bun:"sa_root_id" json:"root_id"`
+	CreatedBy       *uuid.UUID       `bun:"sa_created_by" json:"created_by"`
+	DeletedAt       *time.Time       `bun:"sa_deleted_at" json:"deleted_at,omitzero"`
+	CreatedAt       time.Time        `bun:"sa_created_at,default:now()" json:"created_at"`
+	UpdatedAt       time.Time        `bun:"sa_updated_at,default:now()" json:"updated_at"`
+	Txid            uint64           `bun:"txid,scanonly" json:"-"`
+	Owner           *Organization    `bun:"rel:belongs-to,join:sa_owner_id=id" json:"owner,omitempty"`
+	Creator         *Creator         `bun:"embed:creator_" json:"creator,omitempty"`
 }
 
 type AccessClaim struct {
