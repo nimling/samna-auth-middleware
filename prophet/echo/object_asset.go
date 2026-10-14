@@ -182,9 +182,15 @@ func GetObjectAssetData(ctx echo.Context) error {
 	}
 
 	var held bool
-	if err := sdb.Instance().NewRaw(`SELECT EXISTS (SELECT 1 FROM public.asset WHERE id = ? AND app_id = ? AND sa_deleted_at IS NULL)`, home.AssetID, home.AppID).Scan(reqCtx, &held); err != nil {
-		ctx.Logger().Errorf("GetObjectAssetData held: %v", err)
+	if err := sdb.Instance().NewRaw(`SELECT to_regclass('public.asset') IS NOT NULL`).Scan(reqCtx, &held); err != nil {
+		ctx.Logger().Errorf("GetObjectAssetData asset table: %v", err)
 		return respond.Error(ctx, http.StatusInternalServerError, "")
+	}
+	if held {
+		if err := sdb.Instance().NewRaw(`SELECT EXISTS (SELECT 1 FROM public.asset WHERE id = ? AND app_id = ? AND sa_deleted_at IS NULL)`, home.AssetID, home.AppID).Scan(reqCtx, &held); err != nil {
+			ctx.Logger().Errorf("GetObjectAssetData held: %v", err)
+			return respond.Error(ctx, http.StatusInternalServerError, "")
+		}
 	}
 	if held {
 		return getProphetAssetData(ctx, home)
