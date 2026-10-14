@@ -25,57 +25,41 @@ An organization is who owns something. Every registered row carries `sa_owner_id
 
 1. A row is a root when `sa_owner_id = sa_root_id = id`. There is no nullable parent column, so a walk up the tree stops on the row that points at itself.
 
-2. The before insert trigger `tg_self_root` runs `_set_self_owner_on_insert`. A row with no owner, or with itself as owner, becomes a root and generates a `private_seed` of 32 random bytes. A child with no `sa_root_id` copies its parent's `sa_root_id` and `private_seed`, one primary key probe.
+2. The before insert trigger `tg_self_root` runs `_set_self_owner_on_insert`. A row with no owner, or with itself as owner, becomes a root and generates a `private_seed` of 32 random bytes. A child with no `sa_root_id` copies its parent's `sa_root_id` and `private_seed`.
 
-3. A root is a tenant. Every row under it resolves to it, and an update that changes `sa_root_id` outside replay and outside `migrate_root` is refused by `calc_hierarchical_access`. `migrate_root(object_type, object_id, new_root_id)` is the only path across roots, and every call is reviewed by a person.
+3. A root is a tenant. Every row under it resolves to it, and `calc_hierarchical_access` refuses an update that changes `sa_root_id` outside replay and outside `migrate_root`. `migrate_root(object_type, object_id, new_root_id)` is the only path across roots, and every call is reviewed by a person.
 
-4. `upsert_root_organization(app_id, name, actor, ...)` probes for a live root of that name linked to the app and returns it, and otherwise inserts the root and links it with `upsert_app_object`. It is idempotent on app and name, so a bootstrap may run it on every start.
+4. `upsert_root_organization(app_id, name, actor, ...)` returns the live root of that name linked to the app, and otherwise inserts the root and links it with `upsert_app_object`. It is idempotent on app and name, so a bootstrap may run it on every start.
 
 ## The ownership closure
 
 The ownership tree is the `ownership` rows of `inheritance_info`: every organization with its chain to the root, every location under its owner, and every row of a registered type with `sa_owner_id` under its owner's chain. That includes claimius's own owned tables: claims, grants, bindings, apps, users' relations and fields, clients and secrets. "Is `x` under `y`" is one probe of the primary key, "everything under `y`" one range of `idx_inheritance_info_ancestor`; see [Objects](./objects.md).
 
-For an organization `o` at depth `d(o)` and a row `x` owned by `o`:
+## What an organization write does
 
-```
-rows(o) = d(o) + 1                       its self edge and one row per ancestor
-rows(x) = d(o) + 2 = d_o(x) + 1          its self edge, its owner and the owner's ancestors
-N_r     = Σ_{o under r} (d(o) + 1) + Σ_{x owned under r} (d_o(x) + 1)
-```
+Every insert, update or delete of an organization runs `calc_hierarchical_access`. It takes the transaction advisory lock of the root, so closure writes inside one tenant serialize and writes in different tenants never meet. Then it changes only the closure rows the write moves:
 
-## What an organization write costs
-
-Every insert, update or delete of an organization runs `calc_hierarchical_access`. It takes the transaction advisory lock of the root, `hashtext(sa_root_id)`, so closure writes inside one tenant serialize and writes in different tenants never meet, and then changes only the rows the write moves. With `S` the stored ownership subtree of the organization, itself, its descendant organizations, their locations and every row owned in them, and `n_S = |S|`:
-
-| Write | Closure rows | Through |
+| Write | Closure change | Through |
 |---|---|---|
-| Insert at depth `d` | `d + 1` inserted: the self edge and one row per ancestor of the parent | a direct insert, then `_splice_subtree` with `n_S = 1` |
-| Owner change inside the root, from depth `d` to `d'` | `n_S · d` deleted, `n_S · d'` inserted | `_splice_subtree` |
-| Soft delete | `Σ_{x ∈ S} (d(x) + 1)` deleted | `_splice_subtree` with no parent |
-| Restore, or a node missing from the closure | `Σ_{x ∈ S} (d(x) + 1)` inserted | `build_ownership_tree(root, node)`, the subtree only, hung under the stored ancestors of its parent |
+| Insert | the self edge and one row per ancestor of the parent inserted | a direct insert, then `_splice_subtree` |
+| Owner change inside the root | the rows linking the subtree to its former ancestors deleted, the rows linking it to the new parent's ancestors inserted | `_splice_subtree` |
+| Soft delete | every closure row of the subtree deleted | `_splice_subtree` with no parent |
+| Restore, or a node missing from the closure | the subtree's rows rebuilt, hung under the stored ancestors of its parent | `build_ownership_tree(root, node)` |
 | Rename, or any write that moves no owner, root or deletion | none | |
 
-`_splice_subtree` deletes the rows linking `S` to its former ancestors and inserts the rows linking it to the new parent's ancestors, `n_S (D + 1)` rows for a parent at depth `D`. When the new parent is outside the closure or inside `S` itself, it drops every row of `S`, as a rebuild of the root would drop a subtree its root no longer reaches. Each closure row carries three index entries, the primary key and the two covering indexes. It reads `S` and the former ancestors once each into materialized sets and joins the closure rows to those, never `inheritance_info` to itself: a plan cached by a session while the table filled one page ran the self join as a nested loop of two sequential scans, rescanned once per closure row, 1.9 s per inserted organization at 2,000 rows and 20 minutes for 1,000 inserts, where the bounded shape inserts 1,000 organizations in 2.2 s on tables analyzed at one page, measured in the `closure_plan` suite.
+The subtree is the organization, its descendant organizations, their locations and every row owned in them. When the new parent is outside the closure or inside the subtree itself, `_splice_subtree` drops every row of the subtree, as a rebuild of the root would drop a subtree its root no longer reaches. It reads the subtree and the former ancestors once each into materialized sets and joins the closure rows to those, never `inheritance_info` to itself.
 
 Beside the closure, the same trigger:
 
-1. Keeps the organization's own location pin with `_retree_object`: on insert, restore or a pin change its `d_l + 1` location rows; see [Locations](./locations.md).
+1. Keeps the organization's own location pin with `_retree_object` on insert, restore or a pin change; see [Locations](./locations.md).
 
-2. Writes the organization's `object_info` row through `_write_object_info` when the name, description, owner, location, root or deletion changed, one row; see [Objects](./objects.md#objectinfo).
+2. Writes the organization's `object_info` row through `_write_object_info` when the name, description, owner, location, root or deletion changed; see [Objects](./objects.md#object-info).
 
 3. On insert of a child, links it to every app its owner is linked to, one `upsert_app_object` per app.
 
 4. Per app the row resolves to, recomputes the actor's pair on the organization and raises one object area with `cascade` on it, unless the write only renamed it: a rename raises no area, because no access follows a name. See [Materialization](./materialization.md).
 
 Under `replay_mode`, on a disciple and for a row a peer's feed carries, the same trigger keeps the closure and raises the area, and settles no actor, because a replayed row has no local actor.
-
-```
-closure rows written (insert)  = d + 1 (+ d_l + 1 for a pin)       index entries = 3 per row
-closure rows written (move)    = n_S (d + d')
-area rows raised               = one per app, collapsing onto the open area of the organization
-```
-
-The work of a write is linear in the subtree it moves and constant in the size of the tenant: a new leaf organization writes `d + 1` rows whatever `N_r` is.
 
 ## Crossing roots
 
@@ -85,26 +69,68 @@ The work of a write is linear in the subtree it moves and constant in the size o
 
 2. It walks the subtree through the object's own parent column, `sa_owner_id` for an organization and `sa_parent_id` for a location or a parenthood row, so the walk of an organization follows the ownership tree it is moving.
 
-3. One update gives every node of the subtree the new root and the object the new root as its parent, under the transaction setting `claimius.migrating_root`, which is the one case `calc_hierarchical_access` lets a root change through outside replay. The trigger runs as for any reparent: it splices the moved subtree into the new tree incrementally and raises the object area, with `cascade`, of every node it moves, so every holder on either side settles on its next read.
+3. One update gives every node of the subtree the new root and the object the new root as its parent, under the transaction setting `claimius.migrating_root`, which is the one case `calc_hierarchical_access` lets a root change through outside replay. The trigger runs as for any reparent: it splices the moved subtree into the new tree and raises the object area, with `cascade`, of every node it moves, so every holder on either side settles on its next read.
 
 4. For an organization, the rows of registered tables owned in the subtree that carry `sa_root_id` and no parenthood of their own, and whose `sa_root_id` names the old root, take the new one, one update per such table. On a prophet the moved organization then joins every app of the new root, `upsert_app_organization` with `cascade`.
 
-With `n_S` the moved subtree, the move writes `n_S` rows, the closure rows the splice moves and `n_S` areas, and nothing in the rest of either tenant. It still crosses the tenant boundary every other write keeps, which is why it is kept off the normal write path and every call is reviewed.
+The move touches nothing in the rest of either tenant. It still crosses the tenant boundary every other write keeps, which is why it is kept off the normal write path and every call is reviewed.
 
 ## Linking to an app
 
 An organization has no `app_id`. It is shared structure, and an app reaches it through a live `claimius.app_object` row.
 
-1. `upsert_app_object(app_id, object_type, object_id, created_by)` probes `idx_app_object_unique` for a live link and returns it, or inserts one and, outside replay, raises the object area of the object in the app: the creator, the pair holders of the object and the holders of claims bound on it or, inheriting, on an ancestor settle it when they read. One link row with its four index entries and one area row, whatever the number of users the object reaches. Before, the link recomputed the pair of every one of them, `|affected(o)|` recomputes inside the write, and `upsert_app_organization` over a subtree of `n` nodes paid `n` times that.
+1. `upsert_app_object(app_id, object_type, object_id, created_by)` returns the live link, or inserts one and, outside replay, raises the object area of the object in the app: the creator, the pair holders of the object and the holders of claims bound on it or, inheriting, on an ancestor settle it when they read. The write does not recompute any user's pair.
 
 2. `delete_app_object` soft deletes the live link and deletes every `user_object` row of the app on the object; each pair deleted raises its `user_users_diff` row.
 
 3. `upsert_app_organization(app_id, org_id, cascade)` links an existing organization and, with `cascade`, every organization and location under it in the ownership closure: one `upsert_app_object` per node, additive and idempotent.
 
-4. `app_object_ids(app_id, object_type)` is the filter a prophet query uses in place of `app_id = ?`, one range of `idx_app_object_unique`. `app_has_object` is the boolean guard, one probe. `apps_for_object` is the reverse through `idx_app_object_object`.
+4. `app_object_ids(app_id, object_type)` is the filter a prophet query uses in place of `app_id = ?`. `app_has_object` is the boolean guard. `apps_for_object` is the reverse lookup.
 
-One organization serves several apps without being copied. With `n_a` apps reaching an organization, the link stores `n_a` link rows beside one organization row, and a move changes the closure once. A disciple mirrors one app, so every organization it holds is already in scope and it carries no `app_object`; see [Apps](./apps.md).
+One organization serves several apps without being copied, and a move changes its closure once whatever the number of apps. A disciple mirrors one app, so every organization it holds is already in scope and it carries no `app_object`; see [Apps](./apps.md).
 
 ## Reading organizations
 
-`get_organizations(user, app, required, after, limit)` returns one page of the organizations linked to the app that the user reaches, in `id` order: the user's `V_{u,organization}` pairs past `after`, each joined to its row by key and kept when live and linked, one `app_has_object` probe per row, inside the `WHERE` before `LIMIT`, so the page holds `limit` organizations of the app and an organization linked to another app takes no slot; the settle of the reader's share runs once for the page. `get_owner_graph` renders the tree; see [Graphs](./graphs.md).
+`get_organizations(user, app, required, after, limit)` returns one page of the organizations linked to the app that the user reaches, in `id` order. It reads the user's organization pairs past `after` through `get_objects`, joins each to its row by key and keeps it when live and linked to the app. With a `limit`, it reads further pages of pairs until the page holds `limit` organizations of the app or the pairs run out, so an organization linked to another app takes no slot. `get_owner_graph` renders the tree; see [Graphs](./graphs.md).
+
+## Cost
+
+For an organization `o` at depth `d(o)` and a row `x` owned by `o`:
+
+```
+rows(o) = d(o) + 1                       its self edge and one row per ancestor
+rows(x) = d(o) + 2 = d_o(x) + 1          its self edge, its owner and the owner's ancestors
+N_r     = Σ_{o under r} (d(o) + 1) + Σ_{x owned under r} (d_o(x) + 1)
+```
+
+### What an organization write costs
+
+With `S` the stored ownership subtree of the organization and `n_S = |S|`:
+
+| Write | Closure rows |
+|---|---|
+| Insert at depth `d` | `d + 1` inserted, `_splice_subtree` with `n_S = 1` |
+| Owner change inside the root, from depth `d` to `d'` | `n_S · d` deleted, `n_S · d'` inserted |
+| Soft delete | `Σ_{x ∈ S} (d(x) + 1)` deleted |
+| Restore, or a node missing from the closure | `Σ_{x ∈ S} (d(x) + 1)` inserted |
+| Rename, or any write that moves no owner, root or deletion | none |
+
+`_splice_subtree` inserts `n_S (D + 1)` rows for a parent at depth `D`. Each closure row carries three index entries, the primary key and the two covering indexes. The advisory lock is `hashtext(sa_root_id)`. The root insert trigger copies the parent's root and seed with one primary key probe. A location pin adds `d_l + 1` location rows. The `object_info` write is one row.
+
+```
+closure rows written (insert)  = d + 1 (+ d_l + 1 for a pin)       index entries = 3 per row
+closure rows written (move)    = n_S (d + d')
+area rows raised               = one per app, collapsing onto the open area of the organization
+```
+
+The work of a write is linear in the subtree it moves and constant in the size of the tenant: a new leaf organization writes `d + 1` rows whatever `N_r` is.
+
+`migrate_root` over a moved subtree of `n_S` nodes writes `n_S` rows, the closure rows the splice moves and `n_S` areas.
+
+`upsert_app_object` writes one link row with its four index entries and one area row, whatever the number of users the object reaches; it reads one probe of `idx_app_object_unique`. `upsert_app_organization` over a subtree of `n` nodes is `n` such writes. `app_object_ids` is one range of `idx_app_object_unique`, `app_has_object` one probe, `apps_for_object` one range of `idx_app_object_object`. With `n_a` apps reaching an organization, the links store `n_a` rows beside one organization row.
+
+`get_organizations` reads one `app_has_object` probe per organization row, inside the `WHERE` before `LIMIT`.
+
+## Proofs and measurements
+
+`_splice_subtree` joins the closure rows to the materialized subtree and ancestor sets rather than `inheritance_info` to itself because a self join, under a plan a session cached while the table filled one page, ran as a nested loop of two sequential scans, rescanned once per closure row: 1.9 s per inserted organization at 2,000 rows and 20 minutes for 1,000 inserts. The bounded shape inserts 1,000 organizations in 2.2 s on tables analyzed at one page, measured in the `closure_plan` suite.

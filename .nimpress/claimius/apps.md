@@ -24,23 +24,23 @@ An app is one product that claimius governs: Samna Auth itself, Bookable, Nimplo
 
 ## Two scoping mechanisms
 
-1. Own column. On a prophet, `samna_user`, `claim`, `user_claim`, `claim_object`, `user_object`, `user_users`, `user_relation`, `user_field`, `object_field`, `samna_client`, `samna_secret`, `audit`, `access_diff` and `sync_event` carry `app_id`. A row belongs to one app, and every read function filters on it. `app_id` is the second column of the `user_object` primary key and of `idx_user_claim_user_app`, and the first of `idx_user_users_viewer`, so the filter narrows the same descent that finds the user.
+1. Own column. On a prophet, `samna_user`, `claim`, `user_claim`, `claim_object`, `user_object`, `user_users`, `user_relation`, `user_field`, `object_field`, `samna_client`, `samna_secret`, `audit`, `access_diff` and `sync_event` carry `app_id`. A row belongs to one app, and every read function filters on it.
 
 2. Links. `organization` and `location` carry no `app_id`. An object belongs to every app holding a live `app_object` row for it.
 
-| Function | Does | Reads and writes |
-|---|---|---|
-| `app_object_ids(app_id, object_type)` | The object ids of one type linked to an app, the filter in place of `app_id = ?` | one range of `idx_app_object_unique` |
-| `app_has_object(app_id, object_type, object_id)` | The boolean guard | one probe |
-| `apps_for_object(object_type, object_id, app_id?)` | The apps that see one object: its `app_object` links, the apps holding a user, the app itself, a claim's app, else `app_id` when given | one range of `idx_app_object_object`, plus one range of `idx_samna_user_user_app` or one primary key by type |
-| `upsert_app_object(app_id, object_type, object_id, created_by)` | Links, idempotent | one probe; on a new link one row with four index entries and, outside replay, one object area raised |
-| `delete_app_object(app_id, object_type, object_id)` | Soft deletes the link | one update, and a delete of the app's `U_x` pairs on the object, one `user_users_diff` row each |
-| `upsert_root_organization(app_id, name, actor, ...)` | Creates a root and links it, idempotent on app and name | see [Organizations](./organizations.md) |
-| `upsert_app_organization(app_id, org_id, cascade)` | Links an organization and, with `cascade`, every organization and location under it | one `upsert_app_object` per node |
+| Function | Does |
+|---|---|
+| `app_object_ids(app_id, object_type)` | The object ids of one type linked to an app, the filter in place of `app_id = ?` |
+| `app_has_object(app_id, object_type, object_id)` | The boolean guard |
+| `apps_for_object(object_type, object_id, app_id?)` | The apps that see one object: its `app_object` links, the apps holding a live `samna_user` row of a user, the app itself, a claim's app, else `app_id` when given |
+| `upsert_app_object(app_id, object_type, object_id, created_by)` | Links, idempotent, and outside replay raises the object area in the app; returns the link id |
+| `delete_app_object(app_id, object_type, object_id)` | Soft deletes the link and deletes the app's pairs on the object |
+| `upsert_root_organization(app_id, name, actor, ...)` | Creates a root and links it, idempotent on app and name; see [Organizations](./organizations.md) |
+| `upsert_app_organization(app_id, org_id, cascade, created_by)` | Links an organization and, with `cascade`, every organization and location under it |
 
 The unique index is `(app_id, object_type, object_id)` where `sa_deleted_at IS NULL`, so a live link is unique per app and object. `app_object` is never written directly.
 
-Users, grants and access are per app by nature, since the same person holds different grants in two products, so a per app row costs nothing extra. Organizations and locations are shared structure: the same company and the same building serve every product. With `n_a` apps reaching an organization, the link stores the organization once and `n_a` link rows, and a move changes the closure once.
+Users, grants and access are per app by nature, since the same person holds different grants in two products. Organizations and locations are shared structure: the same company and the same building serve every product, so they are stored once and linked to each app that uses them, and a move changes their closure once.
 
 ## Creating an app
 
@@ -86,7 +86,15 @@ It is idempotent on the slug and on each claim's name, and returns one jsonb obj
 
 ## Which apps a write belongs to
 
-`_app_ids_for_row(object_type, row)` scopes a row for its calc trigger: the row's `app_id` when its table has the column; otherwise its live `app_object` links; otherwise, for a table of the implementing side, `get_app_id()`. An internal table without `app_id`, an organization or location, resolves to no app until it is linked, and the link settles its pairs when it lands. The calc trigger runs its per app work once per app the row resolves to, so a row linked to `n_a` apps raises `n_a` areas.
+`_app_ids_for_row(object_type, row)` scopes a row for its calc trigger:
+
+1. The row's `app_id` when its table has the column.
+
+2. Otherwise the apps `apps_for_object` names for it, which for an organization or location are its live `app_object` links. A `samna_app` row resolves to no app.
+
+3. Otherwise, for a table of the implementing side, `get_app_id()`. An internal table without `app_id`, an organization or location, resolves to no app until it is linked, and the link settles its pairs when it lands.
+
+The calc trigger runs its per app work once per app the row resolves to, so a row linked to several apps raises one area in each.
 
 `upsert_table_info` refuses a table without `app_id` on a prophet that hosts apps besides its system app, because `get_app_id()` would scope every row of it to the system app.
 
@@ -100,11 +108,27 @@ It is idempotent on the slug and on each claim's name, and returns one jsonb obj
 
 The identity helpers live in the prophet set, where more than one app exists.
 
-| Function | Returns | Reads |
-|---|---|---|
-| `get_app()` | The system app, by the slug marked in `prophet_state.system_app_slug`; raises when none is marked | two probes |
-| `get_disciple_app()` | The app named in `disciple_state.disciple_app_slug`, written by `upsert_disciple_state`; raises when no `disciple_state` row exists | two probes |
-| `get_prophet_app_id()`, `get_disciple_app_id()` | The same as scalars | two probes |
-| `get_app_id()` | The system app when one is marked, otherwise the app of `disciple_state` | two probes |
+| Function | Returns |
+|---|---|
+| `get_app()` | The system app, by the slug marked in `prophet_state.system_app_slug`; raises when none is marked |
+| `get_disciple_app()` | The app named in `disciple_state.disciple_app_slug`, written by `upsert_disciple_state`; raises when no `disciple_state` row exists |
+| `get_prophet_app_id()`, `get_disciple_app_id()` | The same as scalars |
+| `get_app_id()` | The system app when one is marked, otherwise the app of `disciple_state` |
 
 A hybrid is a prophet: `upsert_prophet_peer` runs `upsert_system_app` and registers its upstream in `prophet_peer`, and writes no `disciple_state` row. So on a hybrid `get_app()` and `get_app_id()` return the system app and `get_disciple_app()` raises; the app it mirrors is found by its slug in `prophet_peer`. The scalar forms exist for `DEFAULT` expressions, which cannot hold a subquery. A system app slug is never written into SQL, because every deployment names its own.
+
+## Cost
+
+`app_id` is the second column of the `user_object` primary key and of `idx_user_claim_user_app`, and the first of `idx_user_users_viewer`, so the app filter narrows the same descent that finds the user and costs no extra read.
+
+| Function | Reads and writes |
+|---|---|
+| `app_object_ids` | one range of `idx_app_object_unique` |
+| `app_has_object` | one probe |
+| `apps_for_object` | one range of `idx_app_object_object`, plus one range of `idx_samna_user_user_id` or one primary key probe by type |
+| `upsert_app_object` | one probe; on a new link one row with four index entries and, outside replay, one object area |
+| `delete_app_object` | one update, and a delete of the app's `U_x` pairs on the object, one `user_users_diff` row each while the app has a viewer |
+| `upsert_app_organization` | one `upsert_app_object` per node of the tree |
+| `get_app`, `get_disciple_app`, `get_prophet_app_id`, `get_disciple_app_id`, `get_app_id` | two probes |
+
+With `n_a` apps reaching an organization, the link stores the organization once and `n_a` link rows, and a row linked to `n_a` apps raises `n_a` areas on a write. A per app row on the scoped tables costs nothing extra, since those rows differ per app in any case.

@@ -37,11 +37,13 @@ A link follows its object. `apps_for_object(object_type, object_id, app_id)` nam
 
 1. A delete, hard or soft, goes to the same apps as the write it ends. A link moved to another object is deleted from the apps that no longer see it.
 
-2. A `merge_user` moves the links on the source user to the target, and the move publishes them to the apps that see the target. When an object becomes visible to an app later, its live links follow it: an `app_object` link that goes live publishes the object's links to that app after the object itself, and a `samna_user` row inserted or revived for an app publishes the user's links to that app. An `app_object` link that ends deletes the object's links from that app before the object.
+2. A `merge_user` moves the links on the source user to the target, and the move publishes them to the apps that see the target.
 
-3. The snapshot of an app, the disciple's and a peer's, carries every link the app would have been sent, and the snapshot source count counts them, so the backlog check sees them.
+3. When an object becomes visible to an app later, its live links follow it: an `app_object` link that goes live publishes the object's links to that app after the object itself, and a `samna_user` row inserted or revived for an app publishes the user's links to that app. An `app_object` link that ends deletes the object's links from that app before the object.
 
-4. A disciple applies a link like any source row, upsert by `id` and delete by `id`, with `app_id` stripped. A peer prophet applies it with the home it names, which may be an app the peer does not mirror; `app_id` carries no foreign key for that reason.
+4. The snapshot of an app, the disciple's and a peer's, carries every link the app would have been sent, and the app's source row count includes them, so the backlog check sees them.
+
+5. A disciple applies a link like any source row, upsert by `id` and delete by `id`, with `app_id` stripped. A peer prophet applies it with the home it names, which may be an app the peer does not mirror; `app_id` carries no foreign key for that reason.
 
 ## Reading links
 
@@ -64,9 +66,9 @@ link, err := db.GetObjectAsset(ctx, userID, linkID)
 
 ## Writing links
 
-On the prophet a link is a direct insert, update or soft delete, with `app_id` the home app.
+On the prophet a link is a direct insert, update or soft delete, with `app_id` the home app. The delete builder sets `sa_deleted_at` on the live link.
 
-On a disciple the builder routes the write to the prophet, `POST`, `PATCH` and `DELETE` on `/sam/object_asset`, and upserts the answer locally:
+On a disciple the builder routes the write to the prophet, `POST /sam/object_asset`, `PUT` or `PATCH /sam/object_asset/:id` and `DELETE /sam/object_asset/:id`, and applies the answer locally:
 
 ```go
 ac, err := db.MutationAccess(ctx, actor, actor, shared.OBJECT_TYPE_USER, shared.ACCESS_WRITE)
@@ -78,9 +80,9 @@ err = db.NewInsert().Model(link).Access(ac).Scan(ctx)
 
 2. It authorizes with the actor's WRITE on the object through `get_access`, or the actor's own `samna_user` when the object is the actor. It stamps `sa_owner_id` and `sa_created_by` from that grant. For a link on the actor's own user the owner is the user and `sa_created_by` the actor's default claim grant in the home app, the grant `upsert_app_user` wrote; without one the write is refused with `403`. `sa_created_by` is never NULL.
 
-3. `app_id` is the calling app. An update or delete reaches only a link the calling app is home for, after the same check on the link's object. An update changes `kind`, `name`, `description`, `mime_type`, `size` and `index`; the object and the asset of a link do not move through the route.
+3. `app_id` is the calling app. An update or delete reaches only a live link the calling app is home for, after the same check on the link's object; another link answers `404`. An update changes `kind`, `name`, `description`, `mime_type`, `size` and `index`; the object and the asset of a link do not move through the route.
 
-4. A second live link on the same asset of one home is refused with `409`.
+4. A second live link of one home on the same asset and object is refused with `409`.
 
 ## Fetching a file
 
@@ -90,11 +92,11 @@ A reader fetches a file from its own app, the app asks the prophet, and the prop
 reader → app /api/asset/:id/data → prophet /sam/object_asset/:id/data → home <auth base>/asset/:asset_id/data
 ```
 
-1. **The app.** The consumer's own route calls `GetObjectAssetData(ctx, linkID)` from `disciple/echo`. It checks the reader's READ on the link's object through `GetObjectAsset`, then asks the prophet through the `client` with the app's credentials, forwarding the reader's `If-None-Match` and `If-Modified-Since`. It writes back the status, `Content-Type`, `Content-Length`, `ETag`, `Last-Modified` and `Cache-Control` unchanged, so a `304` reaches the reader as a `304`, and streams the body.
+1. **The app.** The consumer's own route calls `GetObjectAssetData(ctx, linkID)` from `disciple/echo`. It checks the reader's READ on the link's object through `GetObjectAsset`, then asks the prophet through the `client` with the app's credentials, forwarding the reader's `If-None-Match` and `If-Modified-Since`. It writes back the status, `Content-Type`, `Content-Length`, `ETag`, `Last-Modified` and `Cache-Control` unchanged, so a `304` reaches the reader as a `304`, and streams the body. A `404` or `403` from the prophet is passed on; any other failure answers `502`.
 
-2. **The prophet.** `GET /sam/object_asset/:id/data` answers only a link published to the calling app. When the link's home is the prophet's own system app it streams the prophet's own asset, the lookup and blob `GetAssetData` uses, by the link's `asset_id` and `app_id`, with the conditional headers passed to the blob store. Otherwise it relays a plain `GET` to the home at `<auth base>/asset/<asset_id>/data`, the auth base being the home app's redirect URI ending in `/callback` without `/callback`, where a disciple mounts its `/sam` group. The relay carries a JWT signed with the home app's key, `kid` the home app, issuer the prophet, audience the home app, subject the prophet's system app, `client_id` its slug, valid for a minute.
+2. **The prophet.** `GET /sam/object_asset/:id/data` answers only a live link published to the calling app, `404` otherwise. When the prophet holds the asset itself, a live row of its own `public.asset` table with the link's `asset_id` and `app_id`, it streams that asset from its blob store with the conditional headers passed on. Otherwise it relays a `GET` carrying the reader's conditional headers to the home at `<auth base>/asset/<asset_id>/data`. The auth base is the first of the home app's redirect URIs that ends in `/callback`, without `/callback`: the group the home mounts `RegisterEndpoints` on. A home with no such URI answers `502`. The relay carries a JWT signed with the home app's key, `kid` the home app's id, issuer the prophet's endpoint, audience the home app's slug, subject the prophet's system app, `client_id` the system app's slug, valid for one minute.
 
-3. **The home.** `GET /asset/:id/data` in `disciple/sam`'s `RegisterEndpoints` accepts only that token: valid against the app's JWKS, the prophet as issuer, the app in the audience, an expiry, and `client_id` the slug of the prophet the disciple is bound to. A user's token for the same app carries the app's slug there and is refused. The disciple cannot know the host's storage, so it calls the host's source, `AssetSource`, which opens the asset by id and answers status, headers and body. With no source it answers `404`. A `200` whose `ETag` matches the request's `If-None-Match`, or whose `Last-Modified` is not after its `If-Modified-Since`, is answered `304` without a body.
+3. **The home.** `GET /asset/:id/data` in `disciple/sam`'s `RegisterEndpoints` accepts only that token: valid against the app's JWKS, the expected issuer, the app in the audience, an expiry, and `client_id` the slug of the prophet the disciple is bound to. A user's token for the same app carries the app's slug there and is refused with `401`. The disciple cannot know the host's storage, so it calls the host's source, `AssetSource`, which opens the asset by id and answers status, headers and body. With no source, or no asset, it answers `404`. A `200` whose `ETag` matches the request's `If-None-Match`, or whose `Last-Modified` is not after its `If-Modified-Since`, is answered `304` without a body.
 
 The host registers both callbacks with its configuration:
 
@@ -122,12 +124,12 @@ Every hop passes `Content-Type`, `Content-Length`, `ETag`, `Last-Modified` and `
 
 A host cache that honours `no-store`, `private`, `max-age` and revalidation by `ETag` and `Last-Modified` is therefore never asked to serve what the home would not have let a cache serve.
 
-## What it costs
+## Cost
 
 With `A` the apps a link is published to and `L` the links of one object:
 
 1. A link write is one row and `A` feed events. A user row that goes live in an app adds the user's `L` live links to that app's feed, and an `app_object` link that goes live or ends adds the object's `L`.
 
-2. `get_object_assets` is the reader's share settle, one access probe on the object, `get_access` or `get_user_access`, and one range of `idx_object_asset_object` of `L` entries; on the prophet each entry also probes `apps_for_object`, one range of `idx_app_object_object` or `idx_samna_user_user_app` or one primary key.
+2. `get_object_assets` is the reader's share settle, one access probe on the object, `get_access` or `get_user_access`, and one range of `idx_object_asset_object` of `L` entries; on the prophet each entry also probes `apps_for_object`, one range of `idx_app_object_object` or `idx_samna_user_user_id` or one primary key.
 
-3. A fetch is one `GetObjectAsset`, one prophet request and, for a link homed on a disciple, one relayed request; the bytes cross each hop once and are stored by none of them.
+3. A fetch is one `GetObjectAsset`, one prophet request and, for a link the prophet does not hold, one relayed request; the bytes cross each hop once and are stored by none of them.
