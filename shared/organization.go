@@ -134,7 +134,7 @@ func (d *DB) insertOrganization(ctx context.Context, conn bun.IConn, ac *AccessC
 	return org, nil
 }
 
-func (d *DB) InsertRootOrganization(ctx context.Context, ac *AccessClaim, org *Organization) (*Organization, error) {
+func (d *DB) InsertRootOrganization(ctx context.Context, conn bun.IConn, ac *AccessClaim, org *Organization) (*Organization, error) {
 	if ac == nil || ac.UserClaimID == nil {
 		return nil, ErrNoAccess
 	}
@@ -143,7 +143,7 @@ func (d *DB) InsertRootOrganization(ctx context.Context, ac *AccessClaim, org *O
 	org.RootID = org.ID
 	org.CreatedBy = *ac.UserClaimID
 	org.Level = 0
-	if err := d.NewInsert().Model(org).Access(ac).Scan(ctx, org); err != nil {
+	if err := d.NewInsert().Conn(conn).Model(org).Access(ac).Scan(ctx, org); err != nil {
 		return nil, err
 	}
 	return org, nil

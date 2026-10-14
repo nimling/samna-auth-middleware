@@ -7,9 +7,10 @@ import (
 	"fmt"
 
 	"github.com/google/uuid"
+	"github.com/uptrace/bun"
 )
 
-func (d *DB) CreateClaim(ctx context.Context, ac *AccessClaim, p CreateClaimParams) (*Claim, error) {
+func (d *DB) CreateClaim(ctx context.Context, conn bun.IConn, ac *AccessClaim, p CreateClaimParams) (*Claim, error) {
 	if ac == nil {
 		return nil, ErrNoAccess
 	}
@@ -25,7 +26,7 @@ func (d *DB) CreateClaim(ctx context.Context, ac *AccessClaim, p CreateClaimPara
 		inherits = *p.Inherits
 	}
 	var rootID uuid.UUID
-	if err := d.NewSelect().
+	if err := d.NewSelect().Conn(conn).
 		TableExpr("claimius.organization").
 		Column("sa_root_id").
 		Where("id = ?", ac.OwnerID).
@@ -44,16 +45,21 @@ func (d *DB) CreateClaim(ctx context.Context, ac *AccessClaim, p CreateClaimPara
 		RootID:      rootID,
 		CreatedBy:   ac.UserClaimID,
 	}
-	if err := d.NewInsert().Model(claim).Access(ac).Scan(ctx, claim); err != nil {
+	if err := d.NewInsert().Conn(conn).Model(claim).Access(ac).Scan(ctx, claim); err != nil {
 		return nil, err
 	}
-	return claim.With(ctx, ac, d), nil
+	return claim.With(ctx, ac, d).Conn(conn), nil
 }
 
 func (c *Claim) With(ctx context.Context, ac *AccessClaim, d *DB) *Claim {
 	c.sessionCtx = ctx
 	c.accessClaim = ac
 	c.sessionDB = d
+	return c
+}
+
+func (c *Claim) Conn(conn bun.IConn) *Claim {
+	c.sessionConn = conn
 	return c
 }
 
@@ -99,7 +105,7 @@ func (c *Claim) AssignObject(target any) (*ClaimObject, error) {
 		co.Inherits = true
 	}
 	co.ClaimID = c.ID
-	if err := c.sessionDB.NewInsert().Model(&co).Access(c.accessClaim).Scan(c.sessionCtx, &co); err != nil {
+	if err := c.sessionDB.NewInsert().Conn(c.sessionConn).Model(&co).Access(c.accessClaim).Scan(c.sessionCtx, &co); err != nil {
 		return nil, err
 	}
 	return &co, nil
@@ -115,7 +121,7 @@ func (c *Claim) AssignUser(userIDs ...uuid.UUID) ([]UserClaim, error) {
 			continue
 		}
 		var existing UserClaim
-		err := c.sessionDB.NewSelect().
+		err := c.sessionDB.NewSelect().Conn(c.sessionConn).
 			Model(&existing).
 			Where("claim_id = ?", c.ID).
 			Where("user_id = ?", uid).
@@ -130,7 +136,7 @@ func (c *Claim) AssignUser(userIDs ...uuid.UUID) ([]UserClaim, error) {
 			return results, err
 		}
 		uc := UserClaim{ClaimID: c.ID, UserID: uid}
-		if err := c.sessionDB.NewInsert().Model(&uc).Access(c.accessClaim).Scan(c.sessionCtx, &uc); err != nil {
+		if err := c.sessionDB.NewInsert().Conn(c.sessionConn).Model(&uc).Access(c.accessClaim).Scan(c.sessionCtx, &uc); err != nil {
 			return results, err
 		}
 		results = append(results, uc)
@@ -163,7 +169,7 @@ func (c *Claim) ReCreateFor(access ClaimAccess, opts ReCreateForOptions, userIDs
 
 	bindings := c.ClaimObjects
 	if len(bindings) == 0 {
-		err := c.sessionDB.NewSelect().
+		err := c.sessionDB.NewSelect().Conn(c.sessionConn).
 			Model(&bindings).
 			Where("claim_id = ?", c.ID).
 			Where("sa_deleted_at IS NULL").
@@ -177,7 +183,7 @@ func (c *Claim) ReCreateFor(access ClaimAccess, opts ReCreateForOptions, userIDs
 	if len(bindings) > 0 {
 		primary := bindings[0]
 		existing := &Claim{}
-		err := c.sessionDB.NewSelect().
+		err := c.sessionDB.NewSelect().Conn(c.sessionConn).
 			Model(existing).
 			Where("claim.sa_deleted_at IS NULL").
 			Where("claim.type = ?", c.Type).
@@ -195,7 +201,7 @@ func (c *Claim) ReCreateFor(access ClaimAccess, opts ReCreateForOptions, userIDs
 			Limit(1).
 			Scan(c.sessionCtx)
 		if err == nil {
-			existing.With(c.sessionCtx, c.accessClaim, c.sessionDB)
+			existing.With(c.sessionCtx, c.accessClaim, c.sessionDB).Conn(c.sessionConn)
 			if len(userIDs) > 0 {
 				if _, err := existing.AssignUser(userIDs...); err != nil {
 					return nil, err
@@ -216,7 +222,7 @@ func (c *Claim) ReCreateFor(access ClaimAccess, opts ReCreateForOptions, userIDs
 		Type:        c.Type,
 		Level:       c.Level,
 	}
-	newClaim, err := c.sessionDB.CreateClaim(c.sessionCtx, c.accessClaim, params)
+	newClaim, err := c.sessionDB.CreateClaim(c.sessionCtx, c.sessionConn, c.accessClaim, params)
 	if err != nil {
 		return nil, err
 	}
@@ -239,7 +245,7 @@ func (c *Claim) ReCreateFor(access ClaimAccess, opts ReCreateForOptions, userIDs
 
 	if opts.CopyUsers {
 		existingUsers := make([]UserClaim, 0)
-		err := c.sessionDB.NewSelect().
+		err := c.sessionDB.NewSelect().Conn(c.sessionConn).
 			Model(&existingUsers).
 			Where("claim_id = ?", c.ID).
 			Where("sa_deleted_at IS NULL").

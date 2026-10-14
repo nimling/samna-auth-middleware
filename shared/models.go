@@ -481,6 +481,7 @@ type Claim struct {
 	sessionCtx  context.Context
 	accessClaim *AccessClaim
 	sessionDB   *DB
+	sessionConn bun.IConn
 }
 
 type CreateClaimParams struct {

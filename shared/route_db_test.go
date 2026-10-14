@@ -82,7 +82,7 @@ func TestEveryWriteHelperOfADiscipleGoesToTheProphetFirst(t *testing.T) {
 	db.RouteToProphet = true
 	tokensBefore := countRows(t, db, "claimius.user_token")
 
-	claim, err := db.CreateClaim(ctx, ac, sdb.CreateClaimParams{Name: "Routed claim", Access: sdb.ACCESS_READ})
+	claim, err := db.CreateClaim(ctx, nil, ac, sdb.CreateClaimParams{Name: "Routed claim", Access: sdb.ACCESS_READ})
 	if err != nil {
 		t.Fatalf("create claim: %v", err)
 	}
@@ -93,7 +93,7 @@ func TestEveryWriteHelperOfADiscipleGoesToTheProphetFirst(t *testing.T) {
 	if _, err := claim.AssignUser(userB); err != nil {
 		t.Fatalf("assign user: %v", err)
 	}
-	if _, err := db.CreateVirtualClaim(ctx, ac, sdb.CreateVirtualClaimParams{
+	if _, err := db.CreateVirtualClaim(ctx, nil, ac, sdb.CreateVirtualClaimParams{
 		Name: "Routed share", Access: sdb.ACCESS_READ, OwnerID: orgRoot,
 		ObjectID: orgAlpha, ObjectType: string(sdb.OBJECT_TYPE_ORGANIZATION), TargetUserID: userB,
 	}); err != nil {
@@ -103,17 +103,17 @@ func TestEveryWriteHelperOfADiscipleGoesToTheProphetFirst(t *testing.T) {
 	if err != nil {
 		t.Fatalf("sign: %v", err)
 	}
-	_, created, err := db.IssueUserToken(ctx, ac, sdb.SamnaUserToken{Token: token, OwnerID: &orgRoot, ClaimID: ac.ClaimID})
+	_, created, err := db.IssueUserToken(ctx, nil, ac, sdb.SamnaUserToken{Token: token, OwnerID: &orgRoot, ClaimID: ac.ClaimID})
 	if err != nil {
 		t.Fatalf("issue user token: %v", err)
 	}
 	if !created {
 		t.Fatal("a routed token write must answer created from the prophet's 201")
 	}
-	if _, err := db.CreateOrganizationUser(ctx, ac, &sdb.SamnaUser{UserID: uuid.New(), Email: "routed@example.com", OwnerID: &orgRoot, ClaimID: &claim.ID}); err != nil {
+	if _, err := db.CreateOrganizationUser(ctx, nil, ac, &sdb.SamnaUser{UserID: uuid.New(), Email: "routed@example.com", OwnerID: &orgRoot, ClaimID: &claim.ID}); err != nil {
 		t.Fatalf("create organization user: %v", err)
 	}
-	if _, err := db.DeleteUser(ctx, ac, userB); err != nil {
+	if _, err := db.DeleteUser(ctx, nil, ac, userB); err != nil {
 		t.Fatalf("delete user: %v", err)
 	}
 
@@ -157,11 +157,11 @@ func TestADiscipleInDebugModeWritesTheSameHelpersLocally(t *testing.T) {
 	defer stop()
 	db.RouteToProphet = false
 
-	claim, err := db.CreateClaim(ctx, ac, sdb.CreateClaimParams{Name: "Local claim", Access: sdb.ACCESS_READ})
+	claim, err := db.CreateClaim(ctx, nil, ac, sdb.CreateClaimParams{Name: "Local claim", Access: sdb.ACCESS_READ})
 	if err != nil {
 		t.Fatalf("create claim: %v", err)
 	}
-	leveled, err := db.CreateClaim(ctx, ac, sdb.CreateClaimParams{Name: "Leveled claim", Access: sdb.ACCESS_READ, Level: 3})
+	leveled, err := db.CreateClaim(ctx, nil, ac, sdb.CreateClaimParams{Name: "Leveled claim", Access: sdb.ACCESS_READ, Level: 3})
 	if err != nil {
 		t.Fatalf("create leveled claim: %v", err)
 	}
@@ -173,21 +173,21 @@ func TestADiscipleInDebugModeWritesTheSameHelpersLocally(t *testing.T) {
 		t.Fatalf("assign user: %v", err)
 	}
 	member := uuid.New()
-	if _, err := db.CreateOrganizationUser(ctx, ac, &sdb.SamnaUser{UserID: member, Email: "local@example.com", OwnerID: &orgRoot, ClaimID: &claim.ID}); err != nil {
+	if _, err := db.CreateOrganizationUser(ctx, nil, ac, &sdb.SamnaUser{UserID: member, Email: "local@example.com", OwnerID: &orgRoot, ClaimID: &claim.ID}); err != nil {
 		t.Fatalf("create organization user: %v", err)
 	}
-	if _, err := db.CreateOrganizationUser(ctx, ac, &sdb.SamnaUser{UserID: member, OwnerID: &orgRoot, ClaimID: &claim.ID}); !errors.Is(err, sdb.ErrUserAlreadyExists) {
+	if _, err := db.CreateOrganizationUser(ctx, nil, ac, &sdb.SamnaUser{UserID: member, OwnerID: &orgRoot, ClaimID: &claim.ID}); !errors.Is(err, sdb.ErrUserAlreadyExists) {
 		t.Fatalf("a second create of the same user must answer ErrUserAlreadyExists, got %v", err)
 	}
 	token, err := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{"sub": "local-identity"}).SignedString([]byte("test"))
 	if err != nil {
 		t.Fatalf("sign: %v", err)
 	}
-	first, created, err := db.IssueUserToken(ctx, ac, sdb.SamnaUserToken{Token: token, OwnerID: &orgRoot, ClaimID: &claim.ID})
+	first, created, err := db.IssueUserToken(ctx, nil, ac, sdb.SamnaUserToken{Token: token, OwnerID: &orgRoot, ClaimID: &claim.ID})
 	if err != nil || !created {
 		t.Fatalf("the first token write must create the user, created %v, err %v", created, err)
 	}
-	again, created, err := db.IssueUserToken(ctx, ac, sdb.SamnaUserToken{Token: token, OwnerID: &orgRoot, ClaimID: &claim.ID})
+	again, created, err := db.IssueUserToken(ctx, nil, ac, sdb.SamnaUserToken{Token: token, OwnerID: &orgRoot, ClaimID: &claim.ID})
 	if err != nil || created || again.UserID != first.UserID {
 		t.Fatalf("the second token write must find the same user, created %v, err %v", created, err)
 	}
@@ -225,7 +225,7 @@ func TestARefusedWriteIsErrNoAccessRoutedOrLocal(t *testing.T) {
 	defer refusing.Close()
 	t.Setenv("SAUTH_ENDPOINT", refusing.URL)
 	db.RouteToProphet = true
-	if _, err := db.CreateClaim(ctx, ac, sdb.CreateClaimParams{Name: "Refused routed", Access: sdb.ACCESS_READ}); !errors.Is(err, sdb.ErrNoAccess) {
+	if _, err := db.CreateClaim(ctx, nil, ac, sdb.CreateClaimParams{Name: "Refused routed", Access: sdb.ACCESS_READ}); !errors.Is(err, sdb.ErrNoAccess) {
 		t.Fatalf("a write the prophet answers 403 must be ErrNoAccess, got %v", err)
 	}
 
@@ -242,7 +242,7 @@ func TestARefusedWriteIsErrNoAccessRoutedOrLocal(t *testing.T) {
 	}
 
 	db.RouteToProphet = false
-	claim, err := db.CreateClaim(ctx, ac, sdb.CreateClaimParams{Name: "Level 5 grant", Access: sdb.ACCESS_READ, Level: 5})
+	claim, err := db.CreateClaim(ctx, nil, ac, sdb.CreateClaimParams{Name: "Level 5 grant", Access: sdb.ACCESS_READ, Level: 5})
 	if err != nil {
 		t.Fatalf("create level 5 claim: %v", err)
 	}
@@ -416,5 +416,72 @@ func TestARoutedAnswerAppliesOnTheCallersTransaction(t *testing.T) {
 	}
 	if after != 0 {
 		t.Fatalf("the local copy must roll back with the caller's transaction, %d rows left", after)
+	}
+}
+
+func TestCreateVirtualClaimCommitsAndRollsBackWithTheCallersTransaction(t *testing.T) {
+	db := database(t)
+	ctx := context.Background()
+	db.RouteToProphet = false
+	ac, err := db.MutationAccess(ctx, userA, orgRoot, sdb.OBJECT_TYPE_ORGANIZATION, sdb.ACCESS_WRITE)
+	if err != nil {
+		t.Fatalf("access: %v", err)
+	}
+	for _, commit := range []bool{false, true} {
+		name := "Tx claim " + uuid.NewString()
+		tx, err := db.BeginTx(ctx, nil)
+		if err != nil {
+			t.Fatalf("begin: %v", err)
+		}
+		granted, err := db.CreateVirtualClaim(ctx, tx, ac, sdb.CreateVirtualClaimParams{
+			Name:         name,
+			Access:       sdb.ACCESS_READ,
+			OwnerID:      orgRoot,
+			ObjectID:     orgAlpha,
+			ObjectType:   sdb.OBJECT_TYPE_ORGANIZATION,
+			TargetUserID: userB,
+		})
+		if err != nil {
+			tx.Rollback()
+			t.Fatalf("create virtual claim: %v", err)
+		}
+		var inside, outside int
+		if err := tx.NewRaw(`SELECT count(*) FROM claimius.user_claim WHERE id = ? AND sa_deleted_at IS NULL`, *granted.UserClaimID).Scan(ctx, &inside); err != nil {
+			tx.Rollback()
+			t.Fatalf("read inside: %v", err)
+		}
+		if err := db.NewRaw(`SELECT count(*) FROM claimius.claim WHERE name = ?`, name).Scan(ctx, &outside); err != nil {
+			tx.Rollback()
+			t.Fatalf("read outside: %v", err)
+		}
+		if inside != 1 || outside != 0 {
+			tx.Rollback()
+			t.Fatalf("the write must sit only in the caller's transaction, inside %d outside %d", inside, outside)
+		}
+		if commit {
+			err = tx.Commit()
+		} else {
+			err = tx.Rollback()
+		}
+		if err != nil {
+			t.Fatalf("end transaction: %v", err)
+		}
+		var claims, grants, bindings int
+		if err := db.NewRaw(`SELECT count(*) FROM claimius.claim WHERE name = ?`, name).Scan(ctx, &claims); err != nil {
+			t.Fatalf("read claim: %v", err)
+		}
+		if err := db.NewRaw(`SELECT count(*) FROM claimius.user_claim WHERE claim_id = ?`, *granted.ClaimID).Scan(ctx, &grants); err != nil {
+			t.Fatalf("read grant: %v", err)
+		}
+		if err := db.NewRaw(`SELECT count(*) FROM claimius.claim_object WHERE claim_id = ?`, *granted.ClaimID).Scan(ctx, &bindings); err != nil {
+			t.Fatalf("read binding: %v", err)
+		}
+		want := 0
+		if commit {
+			want = 1
+		}
+		if claims != want || grants != want || bindings != want {
+			t.Fatalf("commit %v: claim %d grant %d binding %d, want %d each", commit, claims, grants, bindings, want)
+		}
 	}
 }

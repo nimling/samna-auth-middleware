@@ -415,13 +415,13 @@ type CreateVirtualClaimParams struct {
 	TargetUserID uuid.UUID
 }
 
-func (d *DB) CreateVirtualClaim(ctx context.Context, ac *AccessClaim, p CreateVirtualClaimParams) (*AccessClaim, error) {
+func (d *DB) CreateVirtualClaim(ctx context.Context, conn bun.IConn, ac *AccessClaim, p CreateVirtualClaimParams) (*AccessClaim, error) {
 	if ac == nil || ac.UserClaimID == nil {
 		return nil, ErrNoAccess
 	}
 	owner := *ac
 	owner.OwnerID = p.OwnerID
-	claim, err := d.CreateClaim(ctx, &owner, CreateClaimParams{
+	claim, err := d.CreateClaim(ctx, conn, &owner, CreateClaimParams{
 		Name:        p.Name,
 		Description: p.Description,
 		Access:      p.Access,

@@ -245,12 +245,12 @@ func (d *DB) updateUser(ctx context.Context, conn bun.IConn, ac *AccessClaim, us
 	return user, nil
 }
 
-func (d *DB) DeleteUser(ctx context.Context, ac *AccessClaim, userID uuid.UUID) (*SamnaUser, error) {
+func (d *DB) DeleteUser(ctx context.Context, conn bun.IConn, ac *AccessClaim, userID uuid.UUID) (*SamnaUser, error) {
 	if ac == nil {
 		return nil, ErrNoAccess
 	}
 	var user SamnaUser
-	if err := d.NewSelect().
+	if err := d.NewSelect().Conn(conn).
 		Model(&user).
 		Where("user_id = ?", userID).
 		Where("sa_deleted_at IS NULL").
@@ -258,7 +258,7 @@ func (d *DB) DeleteUser(ctx context.Context, ac *AccessClaim, userID uuid.UUID) 
 		Scan(ctx); err != nil {
 		return nil, err
 	}
-	if err := d.NewDelete().Model(&user).Access(ac).ID(userID).Scan(ctx, &user); err != nil {
+	if err := d.NewDelete().Conn(conn).Model(&user).Access(ac).ID(userID).Scan(ctx, &user); err != nil {
 		return nil, err
 	}
 	if user.DeletedAt == nil {
@@ -319,7 +319,7 @@ func (d *DB) GetUserAudit(ctx context.Context, userID uuid.UUID, requiredAccess 
 	return audits, nil
 }
 
-func (d *DB) AssertUserSingleRoot(ctx context.Context, userID uuid.UUID, targetOwnerID uuid.UUID) error {
+func (d *DB) AssertUserSingleRoot(ctx context.Context, conn bun.IConn, userID uuid.UUID, targetOwnerID uuid.UUID) error {
 	if userID == uuid.Nil || targetOwnerID == uuid.Nil {
 		return nil
 	}
@@ -336,7 +336,7 @@ func (d *DB) AssertUserSingleRoot(ctx context.Context, userID uuid.UUID, targetO
 			  AND c.sa_deleted_at IS NULL
 			  AND c.sa_root_id <> t.sa_root_id
 		)
-	`, targetOwnerID, userID).Scan(ctx, &conflict)
+	`, targetOwnerID, userID).Conn(conn).Scan(ctx, &conflict)
 	if err != nil {
 		return err
 	}
@@ -346,7 +346,7 @@ func (d *DB) AssertUserSingleRoot(ctx context.Context, userID uuid.UUID, targetO
 	return nil
 }
 
-func (d *DB) AssertUserTokenSingleRoot(ctx context.Context, externalID string, targetOwnerID uuid.UUID) error {
+func (d *DB) AssertUserTokenSingleRoot(ctx context.Context, conn bun.IConn, externalID string, targetOwnerID uuid.UUID) error {
 	if externalID == "" || targetOwnerID == uuid.Nil {
 		return nil
 	}
@@ -362,7 +362,7 @@ func (d *DB) AssertUserTokenSingleRoot(ctx context.Context, externalID string, t
 			  AND ut.sa_deleted_at IS NULL
 			  AND existing.sa_root_id <> target.sa_root_id
 		)
-	`, targetOwnerID, externalID).Scan(ctx, &conflict)
+	`, targetOwnerID, externalID).Conn(conn).Scan(ctx, &conflict)
 	if err != nil {
 		return err
 	}
@@ -382,7 +382,7 @@ type OrganizationUserResult struct {
 	UserToken       *UserToken   `json:"user_token"`
 }
 
-func (d *DB) CreateOrganizationUser(ctx context.Context, ac *AccessClaim, in *SamnaUser) (*SamnaUser, error) {
+func (d *DB) CreateOrganizationUser(ctx context.Context, conn bun.IConn, ac *AccessClaim, in *SamnaUser) (*SamnaUser, error) {
 	if ac == nil || ac.UserClaimID == nil {
 		return nil, ErrNoAccess
 	}
@@ -396,11 +396,11 @@ func (d *DB) CreateOrganizationUser(ctx context.Context, ac *AccessClaim, in *Sa
 		return nil, fmt.Errorf("claim_id required")
 	}
 	if in.UserID != uuid.Nil {
-		if rootErr := d.AssertUserSingleRoot(ctx, in.UserID, *in.OwnerID); rootErr != nil {
+		if rootErr := d.AssertUserSingleRoot(ctx, conn, in.UserID, *in.OwnerID); rootErr != nil {
 			return nil, rootErr
 		}
 	}
-	if err := d.NewInsert().Model(in).Access(ac).Scan(ctx); err != nil {
+	if err := d.NewInsert().Conn(conn).Model(in).Access(ac).Scan(ctx); err != nil {
 		if errors.Is(err, client.ErrConflict) {
 			return nil, ErrUserAlreadyExists
 		}
@@ -447,7 +447,7 @@ func (d *DB) callCreateOrganizationUser(ctx context.Context, conn bun.IConn, ac 
 	return &result, nil
 }
 
-func (d *DB) IssueUserToken(ctx context.Context, ac *AccessClaim, payload SamnaUserToken) (*SamnaUser, bool, error) {
+func (d *DB) IssueUserToken(ctx context.Context, conn bun.IConn, ac *AccessClaim, payload SamnaUserToken) (*SamnaUser, bool, error) {
 	if ac == nil || ac.UserClaimID == nil {
 		return nil, false, ErrNoAccess
 	}
@@ -455,10 +455,10 @@ func (d *DB) IssueUserToken(ctx context.Context, ac *AccessClaim, payload SamnaU
 	if err != nil {
 		return nil, false, err
 	}
-	return d.putUserIdentity(ctx, ac, &payload, *payload.OwnerID, externalID)
+	return d.putUserIdentity(ctx, conn, ac, &payload, *payload.OwnerID, externalID)
 }
 
-func (d *DB) UpsertUserExternal(ctx context.Context, ac *AccessClaim, payload SamnaUserExternal) (*SamnaUser, bool, error) {
+func (d *DB) UpsertUserExternal(ctx context.Context, conn bun.IConn, ac *AccessClaim, payload SamnaUserExternal) (*SamnaUser, bool, error) {
 	if ac == nil || ac.UserClaimID == nil {
 		return nil, false, ErrNoAccess
 	}
@@ -466,15 +466,15 @@ func (d *DB) UpsertUserExternal(ctx context.Context, ac *AccessClaim, payload Sa
 	if err != nil {
 		return nil, false, err
 	}
-	return d.putUserIdentity(ctx, ac, &payload, *payload.OwnerID, externalID)
+	return d.putUserIdentity(ctx, conn, ac, &payload, *payload.OwnerID, externalID)
 }
 
-func (d *DB) putUserIdentity(ctx context.Context, ac *AccessClaim, payload any, ownerID uuid.UUID, externalID string) (*SamnaUser, bool, error) {
-	if rootErr := d.AssertUserTokenSingleRoot(ctx, externalID, ownerID); rootErr != nil {
+func (d *DB) putUserIdentity(ctx context.Context, conn bun.IConn, ac *AccessClaim, payload any, ownerID uuid.UUID, externalID string) (*SamnaUser, bool, error) {
+	if rootErr := d.AssertUserTokenSingleRoot(ctx, conn, externalID, ownerID); rootErr != nil {
 		return nil, false, rootErr
 	}
 	var user SamnaUser
-	q := d.NewInsert().Model(payload).Access(ac)
+	q := d.NewInsert().Conn(conn).Model(payload).Access(ac)
 	if err := q.Scan(ctx, &user); err != nil {
 		return nil, false, err
 	}

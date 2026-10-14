@@ -175,7 +175,7 @@ func TestInsertRootOrganizationKeepsItsOwnID(t *testing.T) {
 	if err != nil {
 		t.Fatalf("access: %v", err)
 	}
-	org, err := db.InsertRootOrganization(ctx, ac, &sdb.Organization{Name: "Fresh root", Type: sdb.ORGANIZATION_TYPE_COMPANY})
+	org, err := db.InsertRootOrganization(ctx, nil, ac, &sdb.Organization{Name: "Fresh root", Type: sdb.ORGANIZATION_TYPE_COMPANY})
 	if err != nil {
 		t.Fatalf("insert root organization: %v", err)
 	}
@@ -286,7 +286,7 @@ func TestInsertRootOrganizationBindsNoForeignClaim(t *testing.T) {
 	if err != nil {
 		t.Fatalf("access: %v", err)
 	}
-	org, err := db.InsertRootOrganization(ctx, ac, &sdb.Organization{Name: "Unbound root", Type: sdb.ORGANIZATION_TYPE_COMPANY})
+	org, err := db.InsertRootOrganization(ctx, nil, ac, &sdb.Organization{Name: "Unbound root", Type: sdb.ORGANIZATION_TYPE_COMPANY})
 	if err != nil {
 		t.Fatalf("insert root organization: %v", err)
 	}
