@@ -31,7 +31,7 @@ A live link is unique per `(app_id, object_type, object_id)`. One organization t
 | Function | Returns | Use |
 |----------|---------|-----|
 | `app_object_ids(app_id, object_type)` | `SETOF UUID` | The filter that stands in for `app_id = ?` on organizations and locations |
-| `apps_for_object(object_type, object_id)` | `SETOF UUID` | Which apps see this object |
+| `apps_for_object(object_type, object_id, app_id?)` | `SETOF UUID` | Which apps see this object: `app_object` links, the apps holding a user, the app itself, a claim's app, else `app_id` |
 | `app_has_object(app_id, object_type, object_id)` | `BOOLEAN` | Guard before acting on a shared object |
 | `upsert_app_object(app_id, object_type, object_id, created_by)` | `UUID` | Create the link and recompute the pair of every user who can reach the object in the app. Idempotent |
 | `delete_app_object(app_id, object_type, object_id)` | `BOOLEAN` | Soft delete the link and delete the app's `user_object` rows on the object |

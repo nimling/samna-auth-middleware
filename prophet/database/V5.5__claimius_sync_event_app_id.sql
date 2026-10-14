@@ -165,9 +165,9 @@ CREATE OR REPLACE FUNCTION claimius.get_peer_snapshot(p_app_id UUID)
         UNION ALL
         SELECT 14, 0, 'claimius.object_asset', to_jsonb(oa) - 'txid', oa.sa_created_at
         FROM claimius.object_asset oa
-        WHERE p_app_id IN (SELECT claimius.apps_for_object_asset(oa.object_type, oa.object_id, oa.app_id))
+        WHERE p_app_id IN (SELECT claimius.apps_for_object(oa.object_type, oa.object_id, oa.app_id))
     ) s
     ORDER BY s.step, s.level, s.created;
 $$ LANGUAGE sql STABLE;
 
-COMMENT ON FUNCTION claimius.get_peer_snapshot(UUID) IS 'Every source row of one app in the shape its feed events carry, for a peer prophet mirroring the app: the app row and its handovers first, parents before children, so each row applies against rows already applied. The object_asset links come last, every link apps_for_object_asset publishes to the app.';
+COMMENT ON FUNCTION claimius.get_peer_snapshot(UUID) IS 'Every source row of one app in the shape its feed events carry, for a peer prophet mirroring the app: the app row and its handovers first, parents before children, so each row applies against rows already applied. The object_asset links come last, every link apps_for_object publishes to the app.';

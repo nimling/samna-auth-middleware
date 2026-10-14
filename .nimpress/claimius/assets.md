@@ -3,7 +3,7 @@ gate: auth-middleware
 layout: doc
 title: Assets
 description: The shared link from an asset to a claimius object, object_asset, which apps it is published to, how a link is read and written, and how a file is fetched end to end through the prophet without any hop keeping or inventing freshness.
-tags: object_asset, get_object_assets, apps_for_object_asset, GetObjectAssets, GetObjectAsset, GetObjectAssetData, GetAssetData, AssetSource, AssetCache, asset link, profile, banner, logo
+tags: object_asset, get_object_assets, apps_for_object, GetObjectAssets, GetObjectAsset, GetObjectAssetData, GetAssetData, AssetSource, AssetCache, asset link, profile, banner, logo
 lastUpdated: true
 ---
 
@@ -25,7 +25,7 @@ A home app holds one live link per asset: `(app_id, asset_id)` is unique among l
 
 ## Which apps receive a link
 
-A link follows its object. `apps_for_object_asset(object_type, object_id, app_id)` names the apps a link is published to, and `emit_sync_event` writes the link once per app it names, stamped with that app:
+A link follows its object. `apps_for_object(object_type, object_id, app_id)` names the apps a link is published to, and `emit_sync_event` writes the link once per app it names, stamped with that app:
 
 | Object | Apps |
 |---|---|
@@ -128,6 +128,6 @@ With `A` the apps a link is published to and `L` the links of one object:
 
 1. A link write is one row and `A` feed events. A user row that goes live in an app adds the user's `L` live links to that app's feed, and an `app_object` link that goes live or ends adds the object's `L`.
 
-2. `get_object_assets` is the reader's share settle, one access probe on the object, `get_access` or `get_user_access`, and one range of `idx_object_asset_object` of `L` entries; on the prophet each entry also probes `apps_for_object_asset`, one range of `idx_app_object_object` or `idx_samna_user_user_app` or one primary key.
+2. `get_object_assets` is the reader's share settle, one access probe on the object, `get_access` or `get_user_access`, and one range of `idx_object_asset_object` of `L` entries; on the prophet each entry also probes `apps_for_object`, one range of `idx_app_object_object` or `idx_samna_user_user_app` or one primary key.
 
 3. A fetch is one `GetObjectAsset`, one prophet request and, for a link homed on a disciple, one relayed request; the bytes cross each hop once and are stored by none of them.

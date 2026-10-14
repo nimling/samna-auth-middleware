@@ -172,7 +172,7 @@ func GetObjectAssetData(ctx echo.Context) error {
 		FROM claimius.object_asset l
 		WHERE l.id = ?
 		  AND l.sa_deleted_at IS NULL
-		  AND ? IN (SELECT claimius.apps_for_object_asset(l.object_type, l.object_id, l.app_id))`, linkID, appID).
+		  AND ? IN (SELECT claimius.apps_for_object(l.object_type, l.object_id, l.app_id))`, linkID, appID).
 		Scan(reqCtx, &home); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return respond.Error(ctx, http.StatusNotFound, "")

@@ -1102,7 +1102,7 @@ BEGIN
           AND l.object_id = p_object_id
           AND l.sa_deleted_at IS NULL
           AND (p_kind IS NULL OR l.kind = p_kind)
-          AND p_app_id IN (SELECT claimius.apps_for_object_asset(l.object_type, l.object_id, l.app_id))
+          AND p_app_id IN (SELECT claimius.apps_for_object(l.object_type, l.object_id, l.app_id))
         ORDER BY l."index", l.sa_created_at;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = claimius, pg_temp;
@@ -4443,7 +4443,7 @@ BEGIN
     IF p_limit IS NULL OR v_total < p_limit THEN
         SELECT count(*) INTO v_n
         FROM (SELECT 1 FROM claimius.object_asset oa
-              WHERE p_app_id IN (SELECT claimius.apps_for_object_asset(oa.object_type, oa.object_id, oa.app_id))
+              WHERE p_app_id IN (SELECT claimius.apps_for_object(oa.object_type, oa.object_id, oa.app_id))
               LIMIT p_limit - v_total) t;
         v_total := v_total + v_n;
     END IF;

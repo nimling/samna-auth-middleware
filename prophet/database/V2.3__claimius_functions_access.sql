@@ -881,14 +881,14 @@ BEGIN
         v_row := to_jsonb(coalesce(NEW, OLD));
         INSERT INTO claimius.sync_event (operation, event_type, payload, app_id)
         SELECT v_op, v_type, v_payload, a.app_id
-        FROM claimius.apps_for_object_asset(v_row ->> 'object_type', (v_row ->> 'object_id')::UUID, (v_row ->> 'app_id')::UUID) AS a(app_id);
+        FROM claimius.apps_for_object(v_row ->> 'object_type', (v_row ->> 'object_id')::UUID, (v_row ->> 'app_id')::UUID) AS a(app_id);
         IF TG_OP = 'UPDATE' THEN
             v_old := to_jsonb(OLD);
             INSERT INTO claimius.sync_event (operation, event_type, payload, app_id)
             SELECT 'delete', v_type, jsonb_build_object('id', v_old ->> 'id', 'app_id', v_old ->> 'app_id'), o.app_id
-            FROM claimius.apps_for_object_asset(v_old ->> 'object_type', (v_old ->> 'object_id')::UUID, (v_old ->> 'app_id')::UUID) AS o(app_id)
+            FROM claimius.apps_for_object(v_old ->> 'object_type', (v_old ->> 'object_id')::UUID, (v_old ->> 'app_id')::UUID) AS o(app_id)
             WHERE o.app_id NOT IN (
-                SELECT claimius.apps_for_object_asset(v_row ->> 'object_type', (v_row ->> 'object_id')::UUID, (v_row ->> 'app_id')::UUID));
+                SELECT claimius.apps_for_object(v_row ->> 'object_type', (v_row ->> 'object_id')::UUID, (v_row ->> 'app_id')::UUID));
         END IF;
     ELSE
         INSERT INTO claimius.sync_event (operation, event_type, payload, app_id)
@@ -912,7 +912,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius.emit_sync_event() IS 'Trigger on the source tables. Publishes into sync_event. An organization or location change is written once per app linked to it. An object_asset change is written once per app apps_for_object_asset names for its object, and a link that moves to another object is deleted from the apps that no longer see it. A samna_user row that goes live in an app publishes the live links on that user to the app.';
+COMMENT ON FUNCTION claimius.emit_sync_event() IS 'Trigger on the source tables. Publishes into sync_event. An organization or location change is written once per app linked to it. An object_asset change is written once per app apps_for_object names for its object, and a link that moves to another object is deleted from the apps that no longer see it. A samna_user row that goes live in an app publishes the live links on that user to the app.';
 
 CREATE OR REPLACE FUNCTION claimius.emit_app_object_sync_event()
     RETURNS TRIGGER AS $$
