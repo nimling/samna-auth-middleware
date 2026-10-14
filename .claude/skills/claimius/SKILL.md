@@ -52,6 +52,7 @@ NO. Always use `get_*` functions:
 - `get_scope_access(user_id, app_id, jsonpath, min_level)` for grants with no object, such as page access
 - `get_owner_graph`, `get_claim_graph` for hierarchy and access visualizations. Both take optional `start_id` and `depth` for subgraph queries, and a window `width`, `sort` (`name` or `usage`) and `next_id` that bounds the children of each type per parent. Both cover all registered tables in the deployment. Output rows have fields `object_id`, `object_type`, `label`, `parent_id`, and `data jsonb` where `object_type` is schema qualified. `data` always carries `access` and `level` plus per type fallback fields with `sa_` prefixes stripped.
 - `search(user_id, app_id, query, types, min_level, limit, offset)` for full text search
+- On a disciple, to show what a row already admitted names, the lookups by id with no reader and no access filter, soft deleted rows included, every given list applying: `get_users(user_ids, ids)`, `get_organizations(ids, owner_ids)`, `get_locations(ids, parent_ids)`, `get_claims(ids, owner_ids)`, `get_grants(ids, user_ids, claim_ids, owner_ids, clients)` for the creator behind `sa_created_by` and the holders of a claim, `get_bindings(object_type, object_ids, claim_ids)` for the bindings on an object, `get_user_tokens(user_ids)`, `get_object_types()`. `get_object_usage(user_id, object_ids, object_types)` gives the reader's `used_count` with the object's name
 
 ### "Should I INSERT/UPDATE a claimius table directly?"
 

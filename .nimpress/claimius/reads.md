@@ -3,7 +3,7 @@ gate: auth-middleware
 layout: doc
 title: Reads
 description: The claimius read surface and what each read function reads and writes in index entries and rows as a function of the data, why a check and a page of a listing are independent of tree depth and of the number of users, and which reads may run on a replica.
-tags: get_access, get_direct_access, mutation_access, resolve_access, get_user_access, get_objects, get_organizations, get_locations, get_secrets, get_users, get_claims, get_audit, _best_grant, reconcile_if_pending, _settle_user_users_diff, _user_users_for_viewer, key paging, security definer
+tags: get_access, get_direct_access, mutation_access, resolve_access, get_user_access, get_objects, get_organizations, get_locations, get_secrets, get_users, get_claims, get_audit, get_grants, get_bindings, get_user_tokens, get_object_types, get_object_usage, _best_grant, reconcile_if_pending, _settle_user_users_diff, _user_users_for_viewer, key paging, security definer
 lastUpdated: true
 ---
 
@@ -30,6 +30,9 @@ On a disciple the same functions exist without the app argument, because a disci
 | `get_audit(user, app, required, limit, offset)` | Audit rows of the organizations the reader reaches; see [Audit](./audit.md) |
 | `get_scope_access(user, app, path, required)` | Scope grants matching a jsonpath; see [Capabilities](./capabilities.md) |
 | `search`, `get_owner_graph`, `get_claim_graph` | See [Search](./search.md) and [Graphs](./graphs.md) |
+| `get_users(user_ids, ids)`, `get_organizations(ids, owner_ids)`, `get_locations(ids, parent_ids)`, `get_claims(ids, owner_ids)` | Disciple only: the rows named by id or by parent, no reader; see [Lookups](#lookups) |
+| `get_grants(ids, user_ids, claim_ids, owner_ids, clients)`, `get_bindings(object_type, object_ids, claim_ids)`, `get_user_tokens(user_ids)`, `get_object_types()` | Disciple only: grants, bindings, tokens and registered types by id, no reader; see [Lookups](#lookups) |
+| `get_object_usage(user, object_ids, object_types)` | Disciple only: the reader's `used_count` and the name of each object |
 
 ## get_access
 
@@ -115,6 +118,26 @@ A page does not depend on the depth of the trees, the number of bindings, the nu
 
 A listing carries no authority to act on a row in it: `get_objects` returns a `user_claim_id` per row, but a write goes through `mutation_access` for its one row.
 
+## Lookups
+
+A row a read already admitted names other rows: a booking its creator through `sa_created_by`, a bookable its organization and location, a notification the holders of a claim. On a disciple the lookups return those rows by id, with no reader and no access filter, so that a consumer shows the creator's name or the location's name of a row it may read without selecting a claimius table.
+
+1. `get_users(user_ids, ids)`, `get_organizations(ids, owner_ids)`, `get_locations(ids, parent_ids)` and `get_claims(ids, owner_ids)` return the table rows named by id and by owner or parent. A root owns itself, so it comes back for its own id among the owners or parents.
+
+2. `get_grants(ids, user_ids, claim_ids, owner_ids, clients)` returns `user_claim` rows: by id for the creator behind a `sa_created_by`, by user for the rows a user created, by claim for the holders of a claim, by owner for the grants under an organization. With `clients` false the grants a `samna_client` holds are left out.
+
+3. `get_bindings(object_type, object_ids, claim_ids)` returns `claim_object` rows on objects of a type, on ids of that type, or of claims. With `get_grants` on their claim ids they are the holders of the bindings on an object; `get_claims(ids, NULL)` gives the claim each binding narrows. Ids without a type give no rows.
+
+4. `get_user_tokens(user_ids)` returns the users' `user_token` rows; `sa_created_by` on one is the grant that bound the user. `get_object_types()` returns the type of every registered table.
+
+5. Every argument given applies, and a call with none gives no rows. Soft deleted rows, grants outside their window and bindings of deleted claims are returned as they are, so a caller keeps the filter it had on `sa_deleted_at`, `starts_at` and `ends_at`.
+
+6. The two argument forms of `get_users`, `get_organizations`, `get_locations` and `get_claims` take arrays and both arguments, so a call with a user id still resolves to the reader form.
+
+None of them settles or writes, and none tells what the reader may do: a write still goes through `mutation_access`, and a listing of what the reader sees through the reader forms.
+
+`get_object_usage(user, object_ids, object_types)` is a reader's read. It settles the reader's share, which folds its pending usage, and returns per object its `object_info` name and the reader's `used_count`, NULL when the reader holds no pair on it. A NULL type takes the type of the reader's pair, so an id alone resolves to the pair the reader holds.
+
 ## Which reads write
 
 A read writes only its settle: the pairs it recomputes and the marks it moves, the `user_users_diff` rows those raise while the app has a viewer, its cursor, the `user_users` rows of a first directory view, the `user_users_diff` rows it folds into `user_users`, the reader's `usage_diff` rows it folds into its pairs and the `claim_graph_cache` row a graph read stores. Nothing else in a read path writes.
@@ -188,6 +211,9 @@ for a page of `p` rows, a descent of `h` levels and the settle `s` of the reader
 | `get_claims(user, app, required)` | One probe of the reader's grants per live claim of the app |
 | `get_claims(user, app, object_id, object_type)` | The point settle and one claim probe per derivation of the pair |
 | `get_audit` | The reader's `V_{u,organization}` pairs, then the app's rows newest first until `limit + offset` are kept |
+| `get_users(user_ids, ids)`, `get_organizations(ids, owner_ids)`, `get_locations(ids, parent_ids)`, `get_claims(ids, owner_ids)` | One index probe per id given, or one range of the owner or parent index per owner or parent, plus a heap tuple per row |
+| `get_grants`, `get_bindings` | One probe or range of the index on the first list given, ids, users, claims, owners for a grant and type with ids, claims, type for a binding, the other lists tested on the rows read; with `clients` false one `samna_client` probe per row |
+| `get_object_usage` | The settle of the reader's share, then per object one pair probe and one `object_info` probe; an untyped id reads the reader's range of pairs |
 
 ## Proofs and measurements
 

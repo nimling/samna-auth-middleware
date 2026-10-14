@@ -17,6 +17,8 @@ A write settles only the acting user on the rows it names and raises the area in
 7. `search(user, app, query, types, min, limit, offset)`: ranked by text match plus the reader's decayed usage.
 8. Listings and graphs return no `user_claim_id`; call `get_access` on the object before acting.
 9. `shared.UserWhere(user, req)` filters `samna_user` listings: a user always reads its own row, and `type = 'system'` users stay hidden from every other user.
+10. Lookups by id on a disciple, with no reader and no access filter, soft deleted rows included, for a row a read already admitted: `get_users(user_ids, ids)`, `get_organizations(ids, owner_ids)`, `get_locations(ids, parent_ids)`, `get_claims(ids, owner_ids)`, `get_grants(ids?, user_ids?, claim_ids?, owner_ids?, clients?)` over `user_claim`, `get_bindings(object_type?, object_ids?, claim_ids?)` over `claim_object`, `get_user_tokens(user_ids)`, `get_object_types()`. Every given list applies; no list gives no rows. Pass both arrays of the two argument forms, cast `?::uuid[]`, NULL for an unused one. Go: `GetUsersMany`, `GetOrganizationsMany`, `GetLocationsMany`, `GetClaimsMany`, `GetGrants(GrantFilters)`, `GetBindings(BindingFilters)`, `GetUserTokens`, `GetObjectTypes`.
+11. `get_object_usage(user, object_ids, object_types?)`: per object its `object_info` name and the reader's `used_count`, NULL without a pair; a NULL type takes the type of the reader's pair. Go: `GetObjectUsage`.
 
 ## Writes
 
