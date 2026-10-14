@@ -15,6 +15,7 @@ import (
 	"github.com/nimling/samna-auth-middleware/v2/pkg/errorsx"
 	"github.com/nimling/samna-auth-middleware/v2/pkg/respond"
 	sdb "github.com/nimling/samna-auth-middleware/v2/prophet/sdb"
+	"github.com/nimling/samna-auth-middleware/v2/shared"
 )
 
 type BodyAsset struct {
@@ -312,6 +313,18 @@ func PutAsset(ctx echo.Context) error {
 		return respond.Error(ctx, http.StatusInternalServerError, "")
 	}
 
+	if _, err := sdb.Instance().NewUpdate().
+		Model((*shared.ObjectAsset)(nil)).
+		Set("name = ?", asset.Name).
+		Set("description = ?", asset.Description).
+		Where("asset_id = ?", assetID).
+		Where("app_id = ?", appID).
+		Where("sa_deleted_at IS NULL").
+		Exec(ctx.Request().Context()); err != nil {
+		ctx.Logger().Error(err)
+		return respond.Error(ctx, http.StatusInternalServerError, "")
+	}
+
 	app, _ := ctx.Get("app").(SamnaApp)
 	asset.AssetURL = app.GetPrimaryOrigin() + "/api/asset/" + asset.ID.String() + "/data"
 
@@ -357,6 +370,17 @@ func DeleteAsset(ctx echo.Context) error {
 		Exec(ctx.Request().Context())
 
 	if err != nil {
+		ctx.Logger().Error(err)
+		return respond.Error(ctx, http.StatusInternalServerError, "")
+	}
+
+	if _, err := sdb.Instance().NewUpdate().
+		Model((*shared.ObjectAsset)(nil)).
+		Set("sa_deleted_at = now()").
+		Where("asset_id = ?", assetID).
+		Where("app_id = ?", appID).
+		Where("sa_deleted_at IS NULL").
+		Exec(ctx.Request().Context()); err != nil {
 		ctx.Logger().Error(err)
 		return respond.Error(ctx, http.StatusInternalServerError, "")
 	}
@@ -473,6 +497,29 @@ func assetPostObject(ctx echo.Context, objectType ObjectType, objectID uuid.UUID
 		_ = tx.Rollback()
 		ctx.Logger().Errorf("assetPostObject object_asset insert: %v", err)
 		return nil, errorsx.ErrDbUnexpected
+	}
+
+	if strings.HasPrefix(string(objectType), "claimius.") {
+		kind := "file"
+		if input.Type != "" {
+			kind = input.Type
+		}
+		link := shared.ObjectAsset{
+			ObjectType:  shared.ObjectType(objectType),
+			ObjectID:    objectID,
+			AssetID:     asset.ID,
+			Kind:        kind,
+			Name:        &asset.Name,
+			Description: asset.Description,
+			MimeType:    asset.MimeType,
+			OwnerID:     input.OwnerID,
+			CreatedBy:   &input.CreatedBy,
+		}
+		if _, err := tx.NewInsert().Model(&link).Value("app_id", "?", appID).Exec(ctx.Request().Context()); err != nil {
+			_ = tx.Rollback()
+			ctx.Logger().Errorf("assetPostObject object_asset link insert: %v", err)
+			return nil, errorsx.ErrDbUnexpected
+		}
 	}
 
 	if err := tx.Commit(); err != nil {
