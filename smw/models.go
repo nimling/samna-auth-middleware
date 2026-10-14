@@ -89,8 +89,9 @@ type Confirmation struct {
 
 type TokenClaims struct {
 	jwt.RegisteredClaims
-	Scope string        `json:"scope,omitempty"`
-	CNF   *Confirmation `json:"cnf,omitempty"`
+	Scope    string        `json:"scope,omitempty"`
+	ClientID string        `json:"client_id,omitempty"`
+	CNF      *Confirmation `json:"cnf,omitempty"`
 }
 
 type ClaimUser struct {

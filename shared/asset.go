@@ -105,3 +105,31 @@ func (d *DB) deleteAsset(ctx context.Context, ac *AccessClaim, assetID uuid.UUID
 	}
 	return &asset, nil
 }
+
+func (d *DB) GetObjectAssets(ctx context.Context, userID uuid.UUID, objectType string, objectID uuid.UUID, kind string) ([]ObjectAsset, error) {
+	links := make([]ObjectAsset, 0)
+	var kindArg *string
+	if kind != "" {
+		kindArg = &kind
+	}
+	if err := d.NewRaw("SELECT * FROM claimius.get_object_assets(?, ?, ?, ?)", userID, objectType, objectID, kindArg).Scan(ctx, &links); err != nil {
+		return nil, err
+	}
+	return links, nil
+}
+
+func (d *DB) GetObjectAsset(ctx context.Context, userID, linkID uuid.UUID) (*ObjectAsset, error) {
+	links := make([]ObjectAsset, 0, 1)
+	if err := d.NewRaw(`
+		SELECT a.*
+		FROM claimius.object_asset l
+		CROSS JOIN LATERAL claimius.get_object_assets(?, l.object_type, l.object_id) a
+		WHERE l.id = ?
+		  AND a.id = l.id`, userID, linkID).Scan(ctx, &links); err != nil {
+		return nil, err
+	}
+	if len(links) == 0 {
+		return nil, ErrNotFound
+	}
+	return &links[0], nil
+}

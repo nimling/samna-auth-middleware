@@ -24,6 +24,7 @@ var (
 func selfAccessClaim(userID uuid.UUID, requiredAccess ClaimAccess) *AccessClaim {
 	return &AccessClaim{
 		UserObjectID: userID,
+		UserID:       userID,
 		Access:       requiredAccess,
 		OwnerID:      userID,
 		RootID:       userID,
@@ -59,6 +60,7 @@ func (d *DB) MutationAccess(ctx context.Context, userID, objectID uuid.UUID, obj
 	}
 	d.Usage.Add(nil, userID, objectType, objectID)
 	nimtel.Organization(ctx, claims[0].RootID, claims[0].OwnerID)
+	claims[0].UserID = userID
 	return &claims[0], nil
 }
 
@@ -158,6 +160,7 @@ func (d *DB) MutationAccessMany(ctx context.Context, requests []AccessRequest) (
 			continue
 		}
 		ac := rows[i].AccessClaim
+		ac.UserID = requests[idx].UserID
 		set[idx].Claim = &ac
 		d.Usage.Add(nil, requests[idx].UserID, requests[idx].ObjectType, requests[idx].ObjectID)
 	}
@@ -278,6 +281,7 @@ func (d *DB) RootAccess(ctx context.Context, userID uuid.UUID, requiredAccess Cl
 		return nil, ErrNoAccess
 	}
 	nimtel.Organization(ctx, claims[0].RootID, claims[0].OwnerID)
+	claims[0].UserID = userID
 	return &claims[0], nil
 }
 

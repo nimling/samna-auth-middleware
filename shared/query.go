@@ -161,6 +161,7 @@ var endpointSpecs = map[ObjectType]endpointSpec{
 	OBJECT_TYPE_SAMNA_CLIENT:  {base: "samna_client"},
 	OBJECT_TYPE_SAMNA_SECRET:  {base: "secret"},
 	OBJECT_TYPE_USER_RELATION: {base: "relation"},
+	OBJECT_TYPE_OBJECT_ASSET:  {base: "object_asset"},
 }
 
 var payloadEndpoints = map[reflect.Type]string{
@@ -399,6 +400,9 @@ func (q *InsertQuery) Scan(ctx context.Context, dest ...any) error {
 }
 
 func (q *InsertQuery) route(ctx context.Context, dest ...any) error {
+	if q.accessClaim != nil && q.accessClaim.UserID != uuid.Nil {
+		ctx = client.WithForward(ctx, client.Forward{UserID: q.accessClaim.UserID.String()})
+	}
 	path, err := EndpointFor(q.model, uuid.Nil)
 	if err != nil {
 		return err
@@ -755,6 +759,9 @@ func (q *UpdateQuery) Scan(ctx context.Context, dest ...any) error {
 }
 
 func (q *UpdateQuery) route(ctx context.Context, dest ...any) error {
+	if q.accessClaim != nil && q.accessClaim.UserID != uuid.Nil {
+		ctx = client.WithForward(ctx, client.Forward{UserID: q.accessClaim.UserID.String()})
+	}
 	if q.recordID == uuid.Nil {
 		return fmt.Errorf("%w: %T", ErrRoutedNoRecord, q.model)
 	}
@@ -967,6 +974,10 @@ func recordIDFromModel(d *DB, model any) uuid.UUID {
 		if m, ok := embeddedPtr(model, reflect.TypeOf(SamnaSecret{})).(*SamnaSecret); ok {
 			return m.ID
 		}
+	case "claimius.object_asset":
+		if m, ok := embeddedPtr(model, reflect.TypeOf(ObjectAsset{})).(*ObjectAsset); ok {
+			return m.ID
+		}
 	case "claimius.samna_client":
 		if m, ok := embeddedPtr(model, reflect.TypeOf(SamnaClient{})).(*SamnaClient); ok {
 			return m.ID
@@ -1002,6 +1013,9 @@ func (q *DeleteQuery) Scan(ctx context.Context, dest ...any) error {
 }
 
 func (q *DeleteQuery) route(ctx context.Context, dest ...any) error {
+	if q.accessClaim != nil && q.accessClaim.UserID != uuid.Nil {
+		ctx = client.WithForward(ctx, client.Forward{UserID: q.accessClaim.UserID.String()})
+	}
 	if q.recordID == uuid.Nil {
 		return fmt.Errorf("%w: %T", ErrRoutedNoRecord, q.model)
 	}

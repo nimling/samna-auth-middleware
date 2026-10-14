@@ -20,6 +20,7 @@ func getRoutedModels() []any {
 		&shared.Location{},
 		&shared.SamnaSecret{},
 		&shared.UserRelation{},
+		&shared.ObjectAsset{},
 	}
 }
 

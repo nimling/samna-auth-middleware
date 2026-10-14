@@ -83,6 +83,13 @@ func RegisterEndpoints(g *echo.Group) {
 	asset.PUT("/:id", h.PutAsset)
 	asset.DELETE("/:id", h.DeleteAsset)
 
+	objectAsset := g.Group("/object_asset")
+	objectAsset.GET("/:id/data", h.GetObjectAssetData)
+	objectAsset.POST("", h.PostObjectAsset)
+	objectAsset.PUT("/:id", h.PutObjectAsset)
+	objectAsset.PATCH("/:id", h.PutObjectAsset)
+	objectAsset.DELETE("/:id", h.DeleteObjectAsset)
+
 	app := g.Group("/app")
 	app.GET("", h.GetSamApp)
 

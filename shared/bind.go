@@ -159,3 +159,7 @@ func (uc *UserClaim) Bind(ctx echo.Context) error {
 func (co *ClaimObject) Bind(ctx echo.Context) error {
 	return co.Body.Bound(ctx, co)
 }
+
+func (a *ObjectAsset) Bind(ctx echo.Context) error {
+	return a.Body.Bound(ctx, a)
+}

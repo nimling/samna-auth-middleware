@@ -206,6 +206,18 @@ func (e *httpClient) Delete(ctx context.Context, body any, url string) (io.ReadC
 }
 
 func (e *httpClient) execute(ctx context.Context, method string, reqBody any, targetURL string) (io.ReadCloser, error) {
+	hc := e.httpClient
+	if d, ok := timeoutFrom(ctx); ok {
+		hc = &http.Client{Timeout: d, Transport: hc.Transport}
+	}
+	resp, err := e.send(ctx, hc, method, reqBody, targetURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	return responseBody(resp)
+}
+
+func (e *httpClient) send(ctx context.Context, hc *http.Client, method string, reqBody any, targetURL string, header http.Header) (*http.Response, error) {
 	var body io.Reader
 	if reqBody != nil {
 		if raw, ok := reqBody.([]byte); ok {
@@ -248,13 +260,14 @@ func (e *httpClient) execute(ctx context.Context, method string, reqBody any, ta
 		}
 	}
 
-	if reqBody != nil {
-		req.Header.Set("Content-Type", contentTypeFrom(ctx))
+	for key, values := range header {
+		for _, value := range values {
+			req.Header.Add(key, value)
+		}
 	}
 
-	hc := e.httpClient
-	if d, ok := timeoutFrom(ctx); ok {
-		hc = &http.Client{Timeout: d, Transport: hc.Transport}
+	if reqBody != nil {
+		req.Header.Set("Content-Type", contentTypeFrom(ctx))
 	}
 
 	resp, err := hc.Do(req)
@@ -273,7 +286,10 @@ func (e *httpClient) execute(ctx context.Context, method string, reqBody any, ta
 	if prophet, ok := ctx.Value(prophetKey{}).(*string); ok && resp.StatusCode >= 200 && resp.StatusCode < 300 {
 		*prophet = resp.Header.Get(HeaderProphet)
 	}
+	return resp, nil
+}
 
+func responseBody(resp *http.Response) (io.ReadCloser, error) {
 	switch {
 	case resp.StatusCode >= 200 && resp.StatusCode < 300:
 		return resp.Body, nil
@@ -324,6 +340,24 @@ func Get(ctx context.Context, path string, out any) error {
 		return err
 	}
 	return decodeInto(body, out)
+}
+
+func GetStream(ctx context.Context, path string, header http.Header) (*http.Response, error) {
+	c := newClient(ctx)
+	u, err := joinURL(c.apiURL, path)
+	if err != nil {
+		return nil, fmt.Errorf("build url: %w", err)
+	}
+	resp, err := c.client.send(ctx, &http.Client{Transport: c.client.httpClient.Transport}, http.MethodGet, nil, u, header)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode == http.StatusNotModified || (resp.StatusCode >= 200 && resp.StatusCode < 300) {
+		return resp, nil
+	}
+	defer resp.Body.Close()
+	_, err = responseBody(resp)
+	return nil, err
 }
 
 func Post(ctx context.Context, path string, payload any, out any) error {
@@ -386,3 +420,7 @@ func refusal(body io.ReadCloser, sentinel error) error {
 	}
 	return fmt.Errorf("%w: %s", sentinel, envelope.Error.Message)
 }
+
+var AssetHeaders = []string{"Content-Type", "Content-Length", "ETag", "Last-Modified", "Cache-Control"}
+
+var ConditionalHeaders = []string{"If-None-Match", "If-Modified-Since"}

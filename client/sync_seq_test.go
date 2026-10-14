@@ -93,8 +93,8 @@ func TestBindPointsRequestsAtTheBoundProphet(t *testing.T) {
 	}))
 	defer bound.Close()
 	t.Setenv("SAUTH_ENDPOINT", "http://127.0.0.1:1")
-	sclient.Bind(bound.URL)
-	defer sclient.Bind("")
+	sclient.Bind(bound.URL, "")
+	defer sclient.Bind("", "")
 
 	if err := sclient.Post(context.Background(), "organization", map[string]string{}, nil); err != nil || !hit {
 		t.Fatalf("a request must go to the bound prophet, got %v hit=%v", err, hit)

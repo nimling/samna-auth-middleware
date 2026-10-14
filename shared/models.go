@@ -66,6 +66,7 @@ var claimiusObjectTypes = map[string]ObjectType{
 	StripObjectSchema(OBJECT_TYPE_OBJECT_FIELD):  OBJECT_TYPE_OBJECT_FIELD,
 	StripObjectSchema(OBJECT_TYPE_USER_FIELD):    OBJECT_TYPE_USER_FIELD,
 	StripObjectSchema(OBJECT_TYPE_USER_TOKEN):    OBJECT_TYPE_USER_TOKEN,
+	StripObjectSchema(OBJECT_TYPE_OBJECT_ASSET):  OBJECT_TYPE_OBJECT_ASSET,
 }
 
 func ResolveObjectType(s string) (ObjectType, error) {
@@ -306,6 +307,7 @@ const (
 	OBJECT_TYPE_OBJECT_FIELD  = "claimius.object_field"
 	OBJECT_TYPE_USER_FIELD    = "claimius.user_field"
 	OBJECT_TYPE_USER_TOKEN    = "claimius.user_token"
+	OBJECT_TYPE_OBJECT_ASSET  = "claimius.object_asset"
 )
 
 type OrganizationType string
@@ -599,6 +601,7 @@ type ClaimObject struct {
 
 type AccessClaim struct {
 	UserObjectID uuid.UUID        `bun:"user_object_id,scanonly" json:"user_object_id"`
+	UserID       uuid.UUID        `bun:"-" json:"-"`
 	UserClaimID  *uuid.UUID       `bun:"user_claim_id,scanonly" json:"user_claim_id"`
 	ClaimID      *uuid.UUID       `bun:"claim_id,scanonly" json:"claim_id"`
 	ClaimName    *string          `bun:"claim_name,scanonly" json:"claim_name,omitempty"`
@@ -776,6 +779,28 @@ type UserRelation struct {
 	CreatedAt   time.Time    `bun:"sa_created_at,default:now()" json:"created_at"`
 	UpdatedAt   time.Time    `bun:"sa_updated_at,default:now()" json:"updated_at"`
 	Access      *AccessClaim `bun:"embed:access_" json:"access,omitempty"`
+}
+
+type ObjectAsset struct {
+	bun.BaseModel `bun:"table:claimius.object_asset" json:"-"`
+	nimbody.Body  `bun:"-" json:"-"`
+
+	ID          uuid.UUID  `bun:"id,pk,default:gen_random_uuid()" json:"id"`
+	ObjectType  ObjectType `bun:"object_type" json:"object_type"`
+	ObjectID    uuid.UUID  `bun:"object_id" json:"object_id"`
+	AssetID     uuid.UUID  `bun:"asset_id" json:"asset_id"`
+	Kind        string     `bun:"kind" json:"kind"`
+	Name        *string    `bun:"name" json:"name"`
+	Description *string    `bun:"description" json:"description"`
+	MimeType    string     `bun:"mime_type" json:"mime_type"`
+	Size        *int64     `bun:"size" json:"size"`
+	Index       int        `bun:"index" json:"index"`
+	OwnerID     uuid.UUID  `bun:"sa_owner_id" json:"owner_id"`
+	CreatedBy   *uuid.UUID `bun:"sa_created_by" json:"created_by"`
+	DeletedAt   *time.Time `bun:"sa_deleted_at" json:"deleted_at,omitzero"`
+	CreatedAt   time.Time  `bun:"sa_created_at,default:now()" json:"created_at"`
+	UpdatedAt   time.Time  `bun:"sa_updated_at,default:now()" json:"updated_at"`
+	Txid        uint64     `bun:"txid,scanonly" json:"-"`
 }
 
 type Audit struct {

@@ -3,6 +3,7 @@ package shared
 import (
 	"errors"
 	"net/mail"
+	"strings"
 
 	"github.com/google/uuid"
 )
@@ -771,6 +772,44 @@ func (a *Asset) ValidatePatch() error {
 	}
 	if a.HasKey("name") && a.Name == "" {
 		return errors.New("name required")
+	}
+	if a.HasKey("mime_type") && a.MimeType == "" {
+		return errors.New("mime_type required")
+	}
+	return nil
+}
+
+func (a *ObjectAsset) ValidatePost() error {
+	if unknown := a.GetUnknown(); len(unknown) > 0 {
+		return errors.New(unknown[0] + " not allowed")
+	}
+	if !strings.HasPrefix(string(a.ObjectType), "claimius.") {
+		return errors.New("object_type must be a claimius type")
+	}
+	if a.ObjectID == uuid.Nil {
+		return errors.New("object_id required")
+	}
+	if a.AssetID == uuid.Nil {
+		return errors.New("asset_id required")
+	}
+	if a.Kind == "" {
+		return errors.New("kind required")
+	}
+	if a.MimeType == "" {
+		return errors.New("mime_type required")
+	}
+	return nil
+}
+
+func (a *ObjectAsset) ValidatePatch() error {
+	if a.IsEmpty() {
+		return errors.New("no fields to update")
+	}
+	if unknown := a.GetUnknown(); len(unknown) > 0 {
+		return errors.New(unknown[0] + " not allowed")
+	}
+	if a.HasKey("kind") && a.Kind == "" {
+		return errors.New("kind required")
 	}
 	if a.HasKey("mime_type") && a.MimeType == "" {
 		return errors.New("mime_type required")

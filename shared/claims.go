@@ -28,6 +28,7 @@ func (d *DB) GetAccess(ctx context.Context, userID, objectID uuid.UUID, objectTy
 	}
 	d.Usage.Add(nil, userID, objectType, objectID)
 	nimtel.Organization(ctx, claims[0].RootID, claims[0].OwnerID)
+	claims[0].UserID = userID
 	return &claims[0], nil
 }
 
@@ -47,6 +48,7 @@ func (d *DB) GetDirectAccess(ctx context.Context, userID, objectID uuid.UUID, ob
 		return nil, ErrNoAccess
 	}
 	nimtel.Organization(ctx, claims[0].RootID, claims[0].OwnerID)
+	claims[0].UserID = userID
 	return &claims[0], nil
 }
 

@@ -18,6 +18,7 @@ type (
 	GraphWindow              = shared.GraphWindow
 	Location                 = shared.Location
 	LocationType             = shared.LocationType
+	ObjectAsset              = shared.ObjectAsset
 	ObjectType               = shared.ObjectType
 	Organization             = shared.Organization
 	OrganizationType         = shared.OrganizationType
@@ -47,6 +48,7 @@ const (
 	OBJECT_TYPE_CLAIM         = shared.OBJECT_TYPE_CLAIM
 	OBJECT_TYPE_CLAIM_OBJECT  = shared.OBJECT_TYPE_CLAIM_OBJECT
 	OBJECT_TYPE_LOCATION      = shared.OBJECT_TYPE_LOCATION
+	OBJECT_TYPE_OBJECT_ASSET  = shared.OBJECT_TYPE_OBJECT_ASSET
 	OBJECT_TYPE_ORGANIZATION  = shared.OBJECT_TYPE_ORGANIZATION
 	OBJECT_TYPE_SAMNA_SECRET  = shared.OBJECT_TYPE_SAMNA_SECRET
 	OBJECT_TYPE_USER          = shared.OBJECT_TYPE_USER

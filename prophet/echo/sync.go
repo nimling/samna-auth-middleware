@@ -198,6 +198,7 @@ func GetSyncSnapshot(ctx echo.Context) error {
 		{"claimius.object_field", &[]ObjectField{}, true},
 		{"claimius.user_field", &[]UserField{}, true},
 		{"claimius.user_relation", &[]UserRelation{}, true},
+		{"claimius.object_asset", &[]shared.ObjectAsset{}, true},
 	}
 
 	var records []SyncPayload
@@ -219,6 +220,11 @@ func GetSyncSnapshot(ctx echo.Context) error {
 						q = q.Where("id IN (SELECT claimius.app_object_ids(?, ?))", appID, t.eventType)
 					}
 					q = q.Order("sa_level", "id")
+				} else if t.eventType == shared.OBJECT_TYPE_OBJECT_ASSET {
+					if appID != uuid.Nil {
+						q = q.Where("? IN (SELECT claimius.apps_for_object_asset(?TableAlias.object_type, ?TableAlias.object_id, ?TableAlias.app_id))", appID)
+					}
+					q = q.Order("sa_created_at", "id")
 				} else if t.filterApp && appID != uuid.Nil {
 					q = q.Where("app_id = ?", appID)
 				}

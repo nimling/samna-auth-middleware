@@ -3,6 +3,7 @@ module github.com/nimling/samna-auth-middleware/v2
 go 1.25.0
 
 require (
+	github.com/Azure/azure-sdk-for-go/sdk/azcore v1.22.0
 	github.com/Azure/azure-sdk-for-go/sdk/storage/azblob v1.8.0
 	github.com/MicahParks/keyfunc/v3 v3.7.0
 	github.com/golang-jwt/jwt/v5 v5.3.1
@@ -21,7 +22,6 @@ require (
 )
 
 require (
-	github.com/Azure/azure-sdk-for-go/sdk/azcore v1.22.0 // indirect
 	github.com/Azure/azure-sdk-for-go/sdk/internal v1.12.0 // indirect
 	github.com/MicahParks/jwkset v0.11.0 // indirect
 	github.com/cenkalti/backoff/v5 v5.0.3 // indirect

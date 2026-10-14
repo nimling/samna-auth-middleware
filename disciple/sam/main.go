@@ -95,7 +95,7 @@ func PeerSyncStart(ctx context.Context, db *shared.DB) {
 func bindClient(ctx context.Context, r *Replica, interval time.Duration) {
 	for {
 		if state, err := r.GetState(ctx); err == nil {
-			client.Bind(state.Endpoint)
+			client.Bind(state.Endpoint, state.Prophet)
 		}
 		select {
 		case <-ctx.Done():
@@ -427,6 +427,8 @@ func applyUpsert(ctx context.Context, tx bun.Tx, eventType string, raw json.RawM
 		return upsertEntity[shared.UserField](ctx, tx, raw)
 	case "claimius.user_relation":
 		return upsertEntity[shared.UserRelation](ctx, tx, raw)
+	case "claimius.object_asset":
+		return upsertEntity[shared.ObjectAsset](ctx, tx, raw)
 	default:
 		return false, fmt.Errorf("unknown event_type for upsert: %s", eventType)
 	}
@@ -468,6 +470,8 @@ func applyDelete(ctx context.Context, tx bun.Tx, eventType string, raw json.RawM
 		return deleteEntity[shared.UserField](ctx, tx, env.ID)
 	case "claimius.user_relation":
 		return deleteEntity[shared.UserRelation](ctx, tx, env.ID)
+	case "claimius.object_asset":
+		return deleteEntity[shared.ObjectAsset](ctx, tx, env.ID)
 	default:
 		return fmt.Errorf("delete not supported for event_type: %s", eventType)
 	}
