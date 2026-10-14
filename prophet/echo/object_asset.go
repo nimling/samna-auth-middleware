@@ -181,6 +181,15 @@ func GetObjectAssetData(ctx echo.Context) error {
 		return respond.Error(ctx, http.StatusInternalServerError, "")
 	}
 
+	var held bool
+	if err := sdb.Instance().NewRaw(`SELECT EXISTS (SELECT 1 FROM public.asset WHERE id = ? AND app_id = ? AND sa_deleted_at IS NULL)`, home.AssetID, home.AppID).Scan(reqCtx, &held); err != nil {
+		ctx.Logger().Errorf("GetObjectAssetData held: %v", err)
+		return respond.Error(ctx, http.StatusInternalServerError, "")
+	}
+	if held {
+		return getProphetAssetData(ctx, home)
+	}
+
 	var system struct {
 		ID   uuid.UUID `bun:"id"`
 		Slug string    `bun:"slug"`
@@ -188,9 +197,6 @@ func GetObjectAssetData(ctx echo.Context) error {
 	if err := sdb.Instance().NewRaw("SELECT id, slug FROM claimius.get_app()").Scan(reqCtx, &system); err != nil {
 		ctx.Logger().Errorf("GetObjectAssetData system app: %v", err)
 		return respond.Error(ctx, http.StatusInternalServerError, "")
-	}
-	if home.AppID == system.ID {
-		return getProphetAssetData(ctx, home)
 	}
 
 	var app SamnaApp
@@ -376,7 +382,7 @@ func getProphetAssetData(ctx echo.Context, home objectAssetHome) error {
 		ctx.Logger().Error(err)
 		return respond.Error(ctx, http.StatusInternalServerError, "")
 	}
-	blobClient, err := azure.GetBlobClient(ctx, asset.ID.String())
+	blobClient, err := azure.GetBlobClient(ctx, asset.AppID, asset.ID)
 	if err != nil {
 		return respond.Error(ctx, http.StatusInternalServerError, "")
 	}

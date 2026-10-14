@@ -2,6 +2,7 @@ package azure
 
 import (
 	"errors"
+	"github.com/google/uuid"
 	"os"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob"
@@ -9,7 +10,8 @@ import (
 	"github.com/labstack/echo/v4"
 )
 
-func GetBlobClient(ctx echo.Context, blobName string) (*blockblob.Client, error) {
+func GetBlobClient(ctx echo.Context, appID uuid.UUID, assetID uuid.UUID) (*blockblob.Client, error) {
+	blobName := appID.String() + "/" + assetID.String()
 	connectionString, ok := os.LookupEnv("AZURE_STORAGE_CONNECTION_STRING")
 	if !ok {
 		err := errors.New("Missing AZURE_STORAGE_CONNECTION_STRING in environment")

@@ -122,7 +122,7 @@ func GetAssetData(ctx echo.Context) error {
 		return respond.Error(ctx, http.StatusInternalServerError, "")
 	}
 
-	blobClient, err := azure.GetBlobClient(ctx, asset.ID.String())
+	blobClient, err := azure.GetBlobClient(ctx, asset.AppID, asset.ID)
 	if err != nil {
 		ctx.Logger().Error(err)
 		return respond.Error(ctx, http.StatusInternalServerError, "")
@@ -235,7 +235,7 @@ func PostAssetUpload(ctx echo.Context) error {
 	}
 	defer file.Close()
 
-	blobClient, err := azure.GetBlobClient(ctx, asset.ID.String())
+	blobClient, err := azure.GetBlobClient(ctx, asset.AppID, asset.ID)
 	if err != nil {
 		ctx.Logger().Error(err)
 		return respond.Error(ctx, http.StatusInternalServerError, "")
@@ -462,7 +462,7 @@ func assetPostObject(ctx echo.Context, objectType ObjectType, objectID uuid.UUID
 		}
 		defer file.Close()
 
-		blobClient, blobErr := azure.GetBlobClient(ctx, asset.ID.String())
+		blobClient, blobErr := azure.GetBlobClient(ctx, asset.AppID, asset.ID)
 		if blobErr != nil {
 			_ = tx.Rollback()
 			ctx.Logger().Errorf("assetPostObject blob client: %v", blobErr)
