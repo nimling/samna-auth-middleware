@@ -247,22 +247,39 @@ func (a ClaimAccess) Pipe() string {
 	return a.PipeString()
 }
 
-func accessVirtualOutput(a ClaimAccess) (slice []string, pipe string) {
-	if a == ACCESS_NONE {
-		return nil, ""
-	}
-	slice = a.Slice()
-	if len(slice) == 0 {
-		return nil, ""
-	}
-	return slice, a.PipeString()
+type AccessFormat struct {
+	Slice  bool
+	String bool
 }
 
-func accessVirtualOutputPtr(a *ClaimAccess) (slice []string, pipe string) {
-	if a == nil {
-		return nil, ""
+func ParseAccessFormat(values []string) (AccessFormat, error) {
+	var f AccessFormat
+	for _, v := range values {
+		for _, raw := range strings.Split(v, ",") {
+			switch name := strings.TrimSpace(raw); name {
+			case "":
+			case "slice":
+				f.Slice = true
+			case "string":
+				f.String = true
+			default:
+				return AccessFormat{}, fmt.Errorf("unsupported format: %s", name)
+			}
+		}
 	}
-	return accessVirtualOutput(*a)
+	return f, nil
+}
+
+func (f AccessFormat) output(a ClaimAccess) (slice []string, pipe string) {
+	if f.Slice {
+		if s := a.Slice(); len(s) > 0 {
+			slice = s
+		}
+	}
+	if f.String {
+		pipe = a.PipeString()
+	}
+	return slice, pipe
 }
 
 type ClaimType string
@@ -1027,30 +1044,24 @@ type SearchResult struct {
 	Rank        float32          `bun:"rank" json:"rank"`
 }
 
-func (c Claim) MarshalJSON() ([]byte, error) {
-	type alias Claim
-	a := alias(c)
-	a.AccessSlice = c.Access.Slice()
-	a.AccessString = c.Access.PipeString()
-	return json.Marshal(a)
+func (c *Claim) FormatAccess(f AccessFormat) {
+	c.AccessSlice, c.AccessString = f.output(c.Access)
+	for i := range c.ClaimObjects {
+		c.ClaimObjects[i].FormatAccess(f)
+	}
+	for i := range c.ClaimUsers {
+		c.ClaimUsers[i].FormatAccess(f, c.Access)
+	}
 }
 
-func (co ClaimObject) MarshalJSON() ([]byte, error) {
-	type alias ClaimObject
-	a := alias(co)
+func (co *ClaimObject) FormatAccess(f AccessFormat) {
+	var access ClaimAccess
 	if co.Access != nil {
-		a.AccessSlice = co.Access.Slice()
-		a.AccessString = co.Access.PipeString()
+		access = *co.Access
 	}
-	return json.Marshal(a)
+	co.AccessSlice, co.AccessString = f.output(access)
 }
 
-func (uc UserClaim) MarshalJSON() ([]byte, error) {
-	type alias UserClaim
-	a := alias(uc)
-	if uc.Access != nil {
-		a.AccessSlice = uc.Access.Access.Slice()
-		a.AccessString = uc.Access.Access.PipeString()
-	}
-	return json.Marshal(a)
+func (uc *UserClaim) FormatAccess(f AccessFormat, access ClaimAccess) {
+	uc.AccessSlice, uc.AccessString = f.output(access)
 }

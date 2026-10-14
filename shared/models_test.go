@@ -90,15 +90,20 @@ func TestClaimObject_NoOverlayShadowsAccessBitmask(t *testing.T) {
 	if !strings.Contains(string(raw), `"access":4`) {
 		t.Fatalf("expected access bitmask on ClaimObject, got %s", raw)
 	}
-	if !strings.Contains(string(raw), `"access_slice":["READ"]`) {
-		t.Fatalf("expected access_slice on ClaimObject, got %s", raw)
+	if strings.Contains(string(raw), `"access_slice"`) || strings.Contains(string(raw), `"access_string"`) {
+		t.Fatalf("expected no derived access fields without a format, got %s", raw)
 	}
-	if !strings.Contains(string(raw), `"access_string":"READ"`) {
-		t.Fatalf("expected access_string on ClaimObject, got %s", raw)
+	co.FormatAccess(sdb.AccessFormat{Slice: true, String: true})
+	raw, err = json.Marshal(co)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if !strings.Contains(string(raw), `"access_slice":["READ"]`) || !strings.Contains(string(raw), `"access_string":"READ"`) {
+		t.Fatalf("expected access_slice and access_string after FormatAccess, got %s", raw)
 	}
 }
 
-func TestClaim_AccessVirtualFieldsEmit(t *testing.T) {
+func TestClaim_FormatAccessFillsRequestedFields(t *testing.T) {
 	c := sdb.Claim{
 		ID:      uuid.New(),
 		Name:    "Editor",
@@ -106,6 +111,7 @@ func TestClaim_AccessVirtualFieldsEmit(t *testing.T) {
 		OwnerID: uuid.New(),
 		RootID:  uuid.New(),
 	}
+	c.FormatAccess(sdb.AccessFormat{Slice: true})
 	raw, err := json.Marshal(c)
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
@@ -113,12 +119,12 @@ func TestClaim_AccessVirtualFieldsEmit(t *testing.T) {
 	if !strings.Contains(string(raw), `"access_slice":["READ","WRITE"]`) {
 		t.Fatalf("expected access_slice on Claim, got %s", raw)
 	}
-	if !strings.Contains(string(raw), `"access_string":"READ|WRITE"`) {
-		t.Fatalf("expected access_string on Claim, got %s", raw)
+	if strings.Contains(string(raw), `"access_string"`) {
+		t.Fatalf("expected no access_string when only slice is requested, got %s", raw)
 	}
 }
 
-func TestUserClaim_AccessVirtualFieldsEmit(t *testing.T) {
+func TestUserClaim_FormatAccessUsesTheClaimMask(t *testing.T) {
 	uc := sdb.UserClaim{
 		ID:        uuid.New(),
 		ClaimID:   uuid.New(),
@@ -136,6 +142,7 @@ func TestUserClaim_AccessVirtualFieldsEmit(t *testing.T) {
 			Email:  "ada@example.com",
 		},
 	}
+	uc.FormatAccess(sdb.AccessFormat{Slice: true, String: true}, uc.Access.Access)
 	raw, err := json.Marshal(uc)
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
