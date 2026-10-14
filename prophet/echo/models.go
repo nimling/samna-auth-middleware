@@ -223,7 +223,7 @@ type Claim struct {
 	Name        string      `bun:"name,notnull" json:"name"`
 	Description *string     `bun:"description" json:"description,omitempty"`
 	Access      ClaimAccess `bun:"sa_access,notnull" json:"access"`
-	Inherits    bool        `bun:"inherits,notnull,default:true" json:"inherits"`
+	Inherits    bool        `bun:"inherits,notnull" json:"inherits"`
 	Level       int         `bun:"level,notnull,default:0" json:"level"`
 	Type        ClaimType   `bun:"type,notnull,default:'system'" json:"type"`
 	CreatedBy   *uuid.UUID  `bun:"sa_created_by,type:uuid" json:"created_by,omitempty"`
@@ -273,7 +273,7 @@ type ClaimObject struct {
 	ObjectID          *uuid.UUID       `bun:"object_id,type:uuid" json:"object_id"`
 	ObjectType        *ObjectType      `bun:"object_type" json:"object_type"`
 	Access            *int             `bun:"sa_access" json:"access"`
-	Inherits          bool             `bun:"inherits,notnull,default:true" json:"inherits"`
+	Inherits          bool             `bun:"inherits,notnull" json:"inherits"`
 	RefID             *uuid.UUID       `bun:"ref_id,type:uuid" json:"ref_id,omitempty"`
 	RootID            uuid.UUID        `bun:"sa_root_id,type:uuid,notnull" json:"root_id"`
 	CreatedBy         *uuid.UUID       `bun:"sa_created_by,type:uuid" json:"created_by"`

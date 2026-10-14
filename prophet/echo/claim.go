@@ -74,6 +74,9 @@ func PostClaim(ctx echo.Context) error {
 		return respond.Error(ctx, http.StatusBadRequest, err.Error())
 	}
 	claim.AppID = appID
+	if !claim.HasKey("inherits") {
+		claim.Inherits = true
+	}
 	if _, err := sdb.Instance().NewInsert().
 		Model(claim).
 		Returning("*").
@@ -183,6 +186,9 @@ func PostClaimObject(ctx echo.Context) error {
 	}
 	claimObject.AppID = appID
 	claimObject.ClaimID = claimID
+	if !claimObject.HasKey("inherits") {
+		claimObject.Inherits = true
+	}
 	if _, err := sdb.Instance().NewInsert().
 		Model(claimObject).
 		Returning("*").
