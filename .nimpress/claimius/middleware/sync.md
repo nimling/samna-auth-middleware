@@ -28,7 +28,8 @@ A disciple answers a request that made routed writes only once its cursor has re
 2. Every routed write of the request raises the position, `NewInsert`, `NewUpdate`, `NewDelete` and every helper that writes through them. A request that made none answers at once.
 3. The wait runs when the answer is about to be written, after the handler has returned and its transaction has committed, so it holds no lock the apply of the page needs.
 4. It lasts at most `UserAuthOptions.SeqTimeout`, 10 s when unset. When it runs out the answer still goes out, and a warning naming the position is logged.
-5. A prophet, a disciple in debug mode, and a database without a `disciple_state` row never wait.
+5. An object gate, `MutationAccess`, `MutationAccessMany`, `GetAccess`, `GetDirectAccess`, `UserAccess` and `RootAccess`, called inside the handler after a routed write waits the same way before it reads, so the handler reads its own write. It runs on the primary outside any transaction of the handler; a gate called while the handler holds a transaction that copied a routed answer locally waits out the timeout, so gate before the transaction or after its commit.
+6. A prophet, a disciple in debug mode, and a database without a `disciple_state` row never wait.
 
 ## One leader per database
 

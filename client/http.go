@@ -145,8 +145,9 @@ func WithSyncSeq(ctx context.Context, seq *SyncCursor) context.Context {
 type requestSeqKey struct{}
 
 type RequestSeq struct {
-	mu  sync.Mutex
-	seq SyncCursor
+	mu      sync.Mutex
+	seq     SyncCursor
+	Timeout time.Duration
 }
 
 func WithRequestSeq(ctx context.Context) (context.Context, *RequestSeq, bool) {

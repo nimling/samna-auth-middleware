@@ -31,7 +31,8 @@ Every `AccessClaim` carries `Level`, the level of the claim its grant came throu
 
 1. The object gates (`get_access`, `get_direct_access`, `mutation_access`, `resolve_access`) may settle a pair, so they run on the primary.
 2. Pure reads, `ScopeAccess` included, go through `DB.Read`: replica from `SAUTH_REPLICA_DSN`, repeated on the primary on SQLSTATE `25006`.
-3. Granted gates add a use to `DB.Usage` (`*ObjectUsage`), flushed through `touch_object_usage` every 10 s, at 1000 keys and on stop. Never write usage columns yourself.
+3. On a disciple, a gate inside a request that made a routed write first waits until the disciple has applied that write's `SAuth-Seq`, so the handler reads its own write; on timeout it reads anyway.
+4. Granted gates add a use to `DB.Usage` (`*ObjectUsage`), flushed through `touch_object_usage` every 10 s, at 1000 keys and on stop. Never write usage columns yourself.
 
 ## Actor stamping
 

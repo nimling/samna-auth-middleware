@@ -49,6 +49,15 @@ func (d *DB) Read(ctx context.Context, fn func(ctx context.Context, db *bun.DB) 
 }
 
 func (d *DB) prepared(ctx context.Context, db *bun.DB, dest any, query string, args ...any) error {
+	if db == d.DB && d.RouteToProphet {
+		if _, r, fresh := client.WithRequestSeq(ctx); !fresh {
+			if target := r.Get(); !target.IsZero() {
+				if err := d.WaitForSeq(ctx, target, r.Timeout); err != nil && !errors.Is(err, sql.ErrNoRows) {
+					d.Logger.Warnf("routed write %s not yet applied, reading anyway: %v", target, err)
+				}
+			}
+		}
+	}
 	key := stmtKey{db: db, query: query}
 	cached, ok := d.stmts.Load(key)
 	if !ok {

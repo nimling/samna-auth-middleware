@@ -77,6 +77,7 @@ func WaitForSeq(timeout time.Duration) echo.MiddlewareFunc {
 			if !fresh {
 				return next(ctx)
 			}
+			seq.Timeout = timeout
 			ctx.SetRequest(ctx.Request().WithContext(reqCtx))
 			ctx.Response().Before(func() {
 				target := seq.Get()
