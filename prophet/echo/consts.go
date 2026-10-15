@@ -1,6 +1,8 @@
 package echo
 
-type ClaimAccess int
+import "github.com/nimling/samna-auth-middleware/v2/shared"
+
+type ClaimAccess = shared.ClaimAccess
 type ClaimType string
 type OrganizationType string
 type LocationType string
