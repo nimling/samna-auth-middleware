@@ -161,6 +161,21 @@ func TestADiscipleBindsOnItsOwnRowThroughTheProphet(t *testing.T) {
 		t.Fatalf("the prophet must store the creator's binding on the row, got %d %v", stored, err)
 	}
 
+	if _, err := disciple.GetAccess(ctx, viewer, row, string(rowType), shared.ACCESS_READ); err != nil {
+		t.Fatalf("a reader of the branch must read the row before the grant, got %v", err)
+	}
+	ownerAC, err := disciple.MutationAccess(ctx, owner, rowOwners, string(shared.OBJECT_TYPE_CLAIM), shared.ACCESS_WRITE)
+	if err != nil {
+		t.Fatalf("access on the row owners claim: %v", err)
+	}
+	if err := disciple.NewInsert().Model(&shared.UserClaim{ClaimID: rowOwners, UserID: viewer, OwnerID: branch}).Access(ownerAC).Scan(ctx); err != nil {
+		t.Fatalf("an owner of the branch must grant the row owners claim through the prophet, got %v", err)
+	}
+	granted, err := disciple.GetAccess(ctx, viewer, row, string(rowType), shared.ACCESS_OWNER)
+	if err != nil || granted == nil || granted.UserClaimID == nil {
+		t.Fatalf("a pair settled before a routed grant must carry the grant once its answer is copied, got %+v %v", granted, err)
+	}
+
 	forged := uuid.New()
 	tx, err := prophet.BeginTx(ctx, nil)
 	if err != nil {

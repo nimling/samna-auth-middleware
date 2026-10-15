@@ -230,10 +230,16 @@ func (d *DB) applyRouted(ctx context.Context, conn bun.IConn, model any, raw jso
 			if _, err := c.ExecContext(ctx, "SELECT set_config('claimius.replay_mode', 'true', true)"); err != nil {
 				return err
 			}
-			if _, err := store.Upsert(ctx, d.DB, c, result); err != nil {
+			changed, err := store.Upsert(ctx, d.DB, c, result)
+			if err != nil {
 				return err
 			}
-			_, err := c.ExecContext(ctx, "SELECT set_config('claimius.replay_mode', 'false', true)")
+			if changed {
+				if err := RecomputeExternal(ctx, c, modelTableName(d, result), raw); err != nil {
+					return err
+				}
+			}
+			_, err = c.ExecContext(ctx, "SELECT set_config('claimius.replay_mode', 'false', true)")
 			return err
 		}
 		if conn != nil {
@@ -1214,4 +1220,71 @@ func (q *DeleteQuery) Built() (any, *AccessClaim, uuid.UUID) {
 		q.recordID = recordIDFromModel(q.db, q.model)
 	}
 	return q.model, q.accessClaim, q.recordID
+}
+
+type claimBindingEnvelope struct {
+	ID         *uuid.UUID `json:"id"`
+	ClaimID    *uuid.UUID `json:"claim_id"`
+	UserID     *uuid.UUID `json:"user_id"`
+	ObjectType *string    `json:"object_type"`
+	ObjectID   *uuid.UUID `json:"object_id"`
+}
+
+func ClaimAreas(eventType string, raw json.RawMessage) ([]uuid.UUID, error) {
+	var envelope claimBindingEnvelope
+	switch eventType {
+	case "claimius.claim":
+		if err := json.Unmarshal(raw, &envelope); err != nil {
+			return nil, fmt.Errorf("unmarshal claim envelope: %w", err)
+		}
+		envelope.ClaimID = envelope.ID
+	case "claimius.claim_object", "claimius.user_claim":
+		if err := json.Unmarshal(raw, &envelope); err != nil {
+			return nil, fmt.Errorf("unmarshal claim binding envelope: %w", err)
+		}
+	default:
+		return nil, nil
+	}
+
+	areas := make([]uuid.UUID, 0, 2)
+	if eventType == "claimius.claim_object" && envelope.ObjectID != nil &&
+		envelope.ObjectType != nil && *envelope.ObjectType != "claimius.claim" {
+		return areas, nil
+	}
+	if envelope.ClaimID != nil {
+		areas = append(areas, *envelope.ClaimID)
+	}
+	if eventType == "claimius.claim_object" &&
+		envelope.ObjectType != nil && *envelope.ObjectType == "claimius.claim" &&
+		envelope.ObjectID != nil {
+		areas = append(areas, *envelope.ObjectID)
+	}
+	return areas, nil
+}
+
+func RecomputeExternal(ctx context.Context, tx bun.IConn, eventType string, raw json.RawMessage) error {
+	areas, err := ClaimAreas(eventType, raw)
+	if err != nil {
+		return err
+	}
+	var assignee *uuid.UUID
+	if eventType == "claimius.user_claim" || eventType == "claimius.claim_object" {
+		var envelope claimBindingEnvelope
+		if err := json.Unmarshal(raw, &envelope); err != nil {
+			return fmt.Errorf("unmarshal binding envelope: %w", err)
+		}
+		if eventType == "claimius.user_claim" {
+			assignee = envelope.UserID
+		} else if envelope.ObjectID != nil && envelope.ObjectType != nil && *envelope.ObjectType != "claimius.claim" {
+			if _, err := tx.ExecContext(ctx, "SELECT claimius._raise_object_diff(?, ?, TRUE)", *envelope.ObjectType, *envelope.ObjectID); err != nil {
+				return fmt.Errorf("raise object diff for %s: %w", *envelope.ObjectID, err)
+			}
+		}
+	}
+	for _, claimID := range areas {
+		if _, err := tx.ExecContext(ctx, "SELECT claimius._raise_claim_diff(?, ?)", claimID, assignee); err != nil {
+			return fmt.Errorf("raise claim diff for %s: %w", claimID, err)
+		}
+	}
+	return nil
 }

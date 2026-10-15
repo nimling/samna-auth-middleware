@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/nimling/samna-auth-middleware/v2/client"
 	sam "github.com/nimling/samna-auth-middleware/v2/disciple/sam"
+	"github.com/nimling/samna-auth-middleware/v2/shared"
 	"github.com/uptrace/bun"
 )
 
@@ -39,7 +40,7 @@ func TestApplyPayload_SkipsSamnaAppDelete(t *testing.T) {
 }
 
 func TestClaimAreas_ClaimNamesItself(t *testing.T) {
-	areas, err := sam.ClaimAreas("claimius.claim", json.RawMessage(`{"id":"20000000-0000-4000-8000-000000000001"}`))
+	areas, err := shared.ClaimAreas("claimius.claim", json.RawMessage(`{"id":"20000000-0000-4000-8000-000000000001"}`))
 	if err != nil {
 		t.Fatalf("resolve claim area: %v", err)
 	}
@@ -50,7 +51,7 @@ func TestClaimAreas_ClaimNamesItself(t *testing.T) {
 
 func TestClaimAreas_BindingNamesItsClaim(t *testing.T) {
 	raw := json.RawMessage(`{"id":"30000000-0000-4000-8000-000000000009","claim_id":"20000000-0000-4000-8000-000000000002","user_id":"40000000-0000-4000-8000-000000000003"}`)
-	areas, err := sam.ClaimAreas("claimius.user_claim", raw)
+	areas, err := shared.ClaimAreas("claimius.user_claim", raw)
 	if err != nil {
 		t.Fatalf("resolve binding area: %v", err)
 	}
@@ -61,7 +62,7 @@ func TestClaimAreas_BindingNamesItsClaim(t *testing.T) {
 
 func TestClaimAreas_ClaimCompositionMovesBoth(t *testing.T) {
 	raw := json.RawMessage(`{"claim_id":"20000000-0000-4000-8000-000000000004","object_type":"claimius.claim","object_id":"20000000-0000-4000-8000-000000000005"}`)
-	areas, err := sam.ClaimAreas("claimius.claim_object", raw)
+	areas, err := shared.ClaimAreas("claimius.claim_object", raw)
 	if err != nil {
 		t.Fatalf("resolve composition areas: %v", err)
 	}
@@ -75,7 +76,7 @@ func TestClaimAreas_ClaimCompositionMovesBoth(t *testing.T) {
 
 func TestClaimAreas_ObjectBindingMovesNoClaimArea(t *testing.T) {
 	raw := json.RawMessage(`{"claim_id":"20000000-0000-4000-8000-000000000006","object_type":"public.article","object_id":"50000000-0000-4000-8000-000000000007"}`)
-	areas, err := sam.ClaimAreas("claimius.claim_object", raw)
+	areas, err := shared.ClaimAreas("claimius.claim_object", raw)
 	if err != nil {
 		t.Fatalf("resolve object binding area: %v", err)
 	}
@@ -86,7 +87,7 @@ func TestClaimAreas_ObjectBindingMovesNoClaimArea(t *testing.T) {
 
 func TestClaimAreas_ScopeBindingMovesTheClaim(t *testing.T) {
 	raw := json.RawMessage(`{"claim_id":"20000000-0000-4000-8000-000000000009","scope":{"page":true}}`)
-	areas, err := sam.ClaimAreas("claimius.claim_object", raw)
+	areas, err := shared.ClaimAreas("claimius.claim_object", raw)
 	if err != nil {
 		t.Fatalf("resolve scope binding area: %v", err)
 	}
@@ -96,7 +97,7 @@ func TestClaimAreas_ScopeBindingMovesTheClaim(t *testing.T) {
 }
 
 func TestClaimAreas_UnrelatedEventMovesNothing(t *testing.T) {
-	areas, err := sam.ClaimAreas("claimius.samna_user", json.RawMessage(`{"id":"60000000-0000-4000-8000-000000000008"}`))
+	areas, err := shared.ClaimAreas("claimius.samna_user", json.RawMessage(`{"id":"60000000-0000-4000-8000-000000000008"}`))
 	if err != nil {
 		t.Fatalf("resolve unrelated event: %v", err)
 	}
