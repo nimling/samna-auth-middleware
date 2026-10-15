@@ -824,6 +824,23 @@ func (q *UpdateQuery) route(ctx context.Context, dest ...any) error {
 			return err
 		}
 		payload = json.RawMessage(body)
+		if len(q.excludes) > 0 || len(q.columns) > 0 || q.omitZero {
+			fields := map[string]json.RawMessage{}
+			if err := json.Unmarshal(body, &fields); err != nil {
+				return err
+			}
+			strct := reflect.Indirect(reflect.ValueOf(q.model))
+			for _, f := range q.db.Dialect().Tables().Get(reflect.TypeOf(q.model)).Fields {
+				key, _, _ := strings.Cut(f.StructField.Tag.Get("json"), ",")
+				if key == "" || key == "-" {
+					continue
+				}
+				if slices.Contains(q.excludes, f.Name) || (len(q.columns) > 0 && !slices.Contains(q.columns, f.Name)) || (q.omitZero && f.HasZeroValue(strct)) {
+					delete(fields, key)
+				}
+			}
+			payload = fields
+		}
 	}
 	var raw json.RawMessage
 	if err := client.Patch(client.WithSyncSeq(ctx, &q.seq), path, payload, &raw); err != nil {

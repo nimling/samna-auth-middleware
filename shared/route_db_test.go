@@ -485,3 +485,35 @@ func TestCreateVirtualClaimCommitsAndRollsBackWithTheCallersTransaction(t *testi
 		}
 	}
 }
+
+func TestARoutedUpdateSendsOnlyTheColumnsTheQueryKeeps(t *testing.T) {
+	db := database(t)
+	ctx := context.Background()
+	var sent map[string]any
+	prophet := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		sent = map[string]any{}
+		_ = json.Unmarshal(raw, &sent)
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"data":null,"count":0}`))
+	}))
+	defer prophet.Close()
+	t.Setenv("SAUTH_ENDPOINT", prophet.URL)
+	db.RouteToProphet = true
+	defer func() { db.RouteToProphet = false }()
+
+	relationID := uuid.New()
+	description := "updated"
+	_ = db.NewUpdate().Model(&sdb.UserRelation{ID: relationID, UserID: uuid.New(), Description: &description, ObjectID: uuid.New(), ObjectType: "claimius.organization"}).
+		ExcludeColumn("id", "user_id", "used_at", "sa_created_at", "sa_updated_at", "sa_deleted_at").
+		OmitZero().
+		Scan(ctx)
+	for _, key := range []string{"id", "user_id", "priority", "pinned"} {
+		if _, ok := sent[key]; ok {
+			t.Fatalf("a routed update must not send %q, an excluded or zero column, got %v", key, sent)
+		}
+	}
+	if sent["description"] != description || sent["object_type"] == nil {
+		t.Fatalf("a routed update must send the columns it keeps, got %v", sent)
+	}
+}
