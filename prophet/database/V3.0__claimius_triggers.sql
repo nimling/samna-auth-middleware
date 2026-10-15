@@ -229,6 +229,10 @@ DROP TRIGGER IF EXISTS tg_emit_sync_event ON claimius.user_field;
 CREATE TRIGGER tg_emit_sync_event AFTER INSERT OR UPDATE OR DELETE ON claimius.user_field
     FOR EACH ROW EXECUTE FUNCTION claimius.emit_sync_event();
 
+DROP TRIGGER IF EXISTS tg_emit_sync_event ON claimius.audit;
+CREATE TRIGGER tg_emit_sync_event AFTER INSERT ON claimius.audit
+    FOR EACH ROW EXECUTE FUNCTION claimius.emit_sync_event();
+
 DROP TRIGGER IF EXISTS tg_emit_sync_event ON claimius.user_token;
 CREATE TRIGGER tg_emit_sync_event AFTER INSERT OR UPDATE OR DELETE ON claimius.user_token
     FOR EACH ROW EXECUTE FUNCTION claimius.emit_sync_event();

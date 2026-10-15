@@ -137,3 +137,36 @@ func TestUserTokenFollowsItsOrganization(t *testing.T) {
 		t.Fatalf("unlinking the organization must delete its tokens from the app, got %v %v", gone, err)
 	}
 }
+
+func TestAuditRowsReachTheirApp(t *testing.T) {
+	appID, claimID := getGrantFixture(t)
+	ctx := context.Background()
+	var orgID uuid.UUID
+	if err := psdb.Instance().NewRaw(`SELECT sa_owner_id FROM claimius.claim WHERE id = ?`, claimID).Scan(ctx, &orgID); err != nil {
+		t.Fatalf("read org: %v", err)
+	}
+	head := getAppHead(t, appID)
+	auditID := uuid.New()
+	if _, err := psdb.Instance().ExecContext(ctx, `
+		INSERT INTO claimius.audit (id, app_id, operation, type, object_type, object_id, sa_owner_id)
+		VALUES (?, ?, 'create', 'claim', 'claimius.claim', ?, ?)
+	`, auditID, appID, claimID, orgID); err != nil {
+		t.Fatalf("audit: %v", err)
+	}
+	var envelope struct {
+		Data []pecho.SyncPayload `json:"data"`
+	}
+	rec := getSyncPage(appID, head, "")
+	if err := json.Unmarshal(rec.Body.Bytes(), &envelope); err != nil {
+		t.Fatalf("decode %s: %v", rec.Body.String(), err)
+	}
+	found := false
+	for _, p := range envelope.Data {
+		if p.EventType == "claimius.audit" && strings.Contains(string(p.Payload), auditID.String()) {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("an audit row must reach its app through the feed as claimius.audit, got %s", rec.Body.String())
+	}
+}

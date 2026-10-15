@@ -880,7 +880,13 @@ BEGIN
         RETURN coalesce(NEW, OLD);
     END IF;
 
-    v_type := TG_TABLE_SCHEMA || '.' || TG_TABLE_NAME;
+    SELECT p.relnamespace::regnamespace::text || '.' || p.relname INTO v_type
+    FROM pg_inherits i
+        JOIN pg_class p ON p.oid = i.inhparent
+    WHERE i.inhrelid = TG_RELID;
+    IF v_type IS NULL THEN
+        v_type := TG_TABLE_SCHEMA || '.' || TG_TABLE_NAME;
+    END IF;
 
     IF TG_OP = 'DELETE' THEN
         v_op := 'delete';
@@ -934,7 +940,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius.emit_sync_event() IS 'Trigger on the source tables. Publishes into sync_event. An organization or location change is written once per app linked to it. An object_asset change is written once per app apps_for_object names for its object, and a link that moves to another object is deleted from the apps that no longer see it. A user_token change is written once per app linked to its owning organization. A samna_user row that goes live in an app publishes the live links on that user to the app.';
+COMMENT ON FUNCTION claimius.emit_sync_event() IS 'Trigger on the source tables, named by the parent when it fires on a partition. Publishes into sync_event. An organization or location change is written once per app linked to it. An object_asset change is written once per app apps_for_object names for its object, and a link that moves to another object is deleted from the apps that no longer see it. A user_token change is written once per app linked to its owning organization. A samna_user row that goes live in an app publishes the live links on that user to the app.';
 
 CREATE OR REPLACE FUNCTION claimius.emit_app_object_sync_event()
     RETURNS TRIGGER AS $$

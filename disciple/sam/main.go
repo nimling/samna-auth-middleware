@@ -364,6 +364,17 @@ func applyUpsert(ctx context.Context, tx bun.Tx, eventType string, raw json.RawM
 		return upsertEntity[shared.ObjectAsset](ctx, tx, raw)
 	case "claimius.user_token":
 		return upsertEntity[shared.UserToken](ctx, tx, raw)
+	case "claimius.audit":
+		var row shared.Audit
+		if err := sauth.Unmarshal(raw, &row); err != nil {
+			return false, fmt.Errorf("unmarshal: %w", err)
+		}
+		res, err := tx.NewInsert().Model(&row).On("CONFLICT DO NOTHING").Exec(ctx)
+		if err != nil {
+			return false, err
+		}
+		n, err := res.RowsAffected()
+		return n > 0, err
 	default:
 		return false, fmt.Errorf("unknown event_type for upsert: %s", eventType)
 	}

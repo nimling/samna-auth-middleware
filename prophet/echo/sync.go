@@ -200,6 +200,7 @@ func GetSyncSnapshot(ctx echo.Context) error {
 		{"claimius.user_relation", &[]UserRelation{}, true},
 		{"claimius.object_asset", &[]shared.ObjectAsset{}, true},
 		{"claimius.user_token", &[]UserToken{}, false},
+		{"claimius.audit", &[]shared.Audit{}, true},
 	}
 
 	var records []SyncPayload

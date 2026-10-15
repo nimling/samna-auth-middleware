@@ -392,3 +392,29 @@ func TestApplyPageAppliesAUserToken(t *testing.T) {
 		t.Fatalf("a deleted token must be gone, got %v %v", tokens, err)
 	}
 }
+
+func TestApplyPageAppliesAnAuditRow(t *testing.T) {
+	db := database(t)
+	ctx := context.Background()
+	from := cursor(t)
+	orgID, auditID := uuid.New(), uuid.New()
+	page := []sam.SyncPayload{
+		organizationPayload(step(from, 1), orgID),
+		{SyncCursor: step(from, 2), Operation: "upsert", EventType: "claimius.audit", Payload: json.RawMessage(fmt.Sprintf(
+			`{"id":%q,"app_id":%q,"operation":"create","message":"","type":"claim","object_type":"claimius.claim","object_id":%q,"sa_owner_id":%q,"sa_created_at":"2026-01-01T00:00:00Z","sa_updated_at":"2026-01-01T00:00:00Z"}`,
+			auditID, uuid.New(), uuid.New(), orgID))},
+	}
+	if err := sam.Disciple().ApplyPage(ctx, from, sam.State{Cursor: step(from, 2)}, page, ""); err != nil {
+		t.Fatalf("apply audit: %v", err)
+	}
+	var stored int
+	if err := db.NewRaw(`SELECT count(*) FROM claimius.audit WHERE id = ?`, auditID).Scan(ctx, &stored); err != nil || stored != 1 {
+		t.Fatalf("an applied audit row must be stored once, got %d %v", stored, err)
+	}
+	if err := sam.Disciple().ApplyPage(ctx, step(from, 2), sam.State{Cursor: step(from, 3)}, []sam.SyncPayload{{SyncCursor: step(from, 3), Operation: page[1].Operation, EventType: page[1].EventType, Payload: page[1].Payload}}, ""); err != nil {
+		t.Fatalf("a repeated audit row must apply without error: %v", err)
+	}
+	if err := db.NewRaw(`SELECT count(*) FROM claimius.audit WHERE id = ?`, auditID).Scan(ctx, &stored); err != nil || stored != 1 {
+		t.Fatalf("a repeated audit row must not duplicate, got %d %v", stored, err)
+	}
+}
