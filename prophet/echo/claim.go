@@ -75,13 +75,23 @@ func PostClaim(ctx echo.Context) error {
 		return respond.Error(ctx, http.StatusBadRequest, err.Error())
 	}
 	claim.AppID = appID
+	if claim.Type == "" {
+		claim.Type = CLAIM_TYPE_USER
+	}
 	if !claim.HasKey("inherits") {
 		claim.Inherits = true
 	}
-	if _, err := sdb.Instance().NewInsert().
-		Model(claim).
-		Returning("*").
-		Exec(ctx.Request().Context()); err != nil {
+	rctx := ctx.Request().Context()
+	var id uuid.UUID
+	if err := sdb.Instance().NewRaw(`SELECT (claimius.insert_claim(
+		p_app_id => ?, p_name => ?, p_description => ?, p_sa_access => ?, p_sa_owner_id => ?,
+		p_sa_root_id => ?, p_sa_created_by => ?, p_inherits => ?, p_type => ?::claimius.claim_type, p_level => ?
+	) -> 'claim' ->> 'id')::uuid`, appID, claim.Name, claim.Description, int(claim.Access), claim.OwnerID,
+		claim.RootID, claim.CreatedBy, claim.Inherits, string(claim.Type), claim.Level).Scan(rctx, &id); err != nil {
+		ctx.Logger().Errorf("PostClaim: %v", err)
+		return respond.Error(ctx, errorsx.ErrToHttpCode(err), "claim insert failed")
+	}
+	if err := sdb.Instance().NewSelect().Model(claim).Where("id = ?", id).Scan(rctx); err != nil {
 		ctx.Logger().Errorf("PostClaim: %v", err)
 		return respond.Error(ctx, errorsx.ErrToHttpCode(err), "claim insert failed")
 	}
@@ -120,7 +130,7 @@ func PutClaim(ctx echo.Context) error {
 		query = query.Set("type = ?", patch.Type)
 	}
 	if patch.HasKey("access") {
-		query = query.Set("sa_access = ?", int(patch.Access))
+		query = query.Set("sa_access = CASE WHEN ?0::int & 16 = 0 THEN claimius._expand_access(?0::int) ELSE ?0::int END", int(patch.Access))
 	}
 	if patch.HasKey("inherits") {
 		query = query.Set("inherits = ?", patch.Inherits)
