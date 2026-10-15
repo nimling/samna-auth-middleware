@@ -194,12 +194,24 @@ func postOrganization(ctx echo.Context, org Organization, appID uuid.UUID) (*Org
 }
 
 func putOrganization(ctx echo.Context, org Organization, appID uuid.UUID) error {
+	columns := make([]string, 0, 6)
+	for key, column := range map[string]string{
+		"name": "name", "description": "description", "type": "type",
+		"external_id": "external_id", "location_id": "sa_location_id", "level": "sa_level",
+	} {
+		if org.HasKey(key) {
+			columns = append(columns, column)
+		}
+	}
+	if len(columns) == 0 {
+		return errorsx.ErrBadRequest
+	}
 	res, err := sdb.Instance().NewUpdate().
 		Model(&org).
+		Column(columns...).
 		Where("sa_deleted_at IS NULL").
 		Where("id = ?", org.ID).
 		Where("claimius.app_has_object(?, 'claimius.organization', id)", appID).
-		OmitZero().
 		Returning("*").
 		Exec(ctx.Request().Context())
 	if err != nil {

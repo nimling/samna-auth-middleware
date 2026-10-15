@@ -68,3 +68,31 @@ func TestPostOrganizationLinksARootTheWayTheDiscipleSendsIt(t *testing.T) {
 		t.Fatalf("post root: the root %s must be linked to app %s", rootID, appID)
 	}
 }
+
+func TestPutOrganizationClearsAFieldSentAsNull(t *testing.T) {
+	appID, claimID := getGrantFixture(t)
+	ctx := context.Background()
+	var rootID uuid.UUID
+	if err := psdb.Instance().NewRaw(`SELECT claim.sa_owner_id FROM claimius.claim WHERE id = ?`, claimID).Scan(ctx, &rootID); err != nil {
+		t.Fatalf("read root: %v", err)
+	}
+	external := "ext-" + uuid.NewString()
+	stored := func() *string {
+		var v *string
+		if err := psdb.Instance().NewRaw(`SELECT external_id FROM claimius.organization WHERE id = ?`, rootID).Scan(ctx, &v); err != nil {
+			t.Fatalf("read external id: %v", err)
+		}
+		return v
+	}
+	getPatchStatus(pecho.PutOrganization, appID, claimID, rootID, `{"external_id":"`+external+`"}`)
+	if v := stored(); v == nil || *v != external {
+		t.Fatalf("an external id sent must be stored, got %v", v)
+	}
+	getPatchStatus(pecho.PutOrganization, appID, claimID, rootID, `{"external_id":null}`)
+	if v := stored(); v != nil {
+		t.Fatalf("an external id sent as null must be cleared, got %q", *v)
+	}
+	if code, _ := getPatchStatus(pecho.PutOrganization, appID, claimID, rootID, `{}`); code != http.StatusBadRequest {
+		t.Fatalf("an empty patch must be refused with 400, got %d", code)
+	}
+}

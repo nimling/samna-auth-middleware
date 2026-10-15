@@ -149,7 +149,8 @@ func TestSyncEventsKeepsACursorPerConsumer(t *testing.T) {
 	first, second := uuid.New(), uuid.New()
 
 	getSyncPage(appID, head, "consumer="+first.String())
-	getSyncPage(appID, client.SyncCursor{}, "consumer="+second.String())
+	below := client.SyncCursor{Txid: head.Txid, Seq: head.Seq - 1}
+	getSyncPage(appID, below, "consumer="+second.String())
 
 	var cursors []client.SyncCursor
 	if err := psdb.Instance().NewRaw(`
@@ -159,7 +160,7 @@ func TestSyncEventsKeepsACursorPerConsumer(t *testing.T) {
 	`, appID, first, second).Scan(context.Background(), &cursors); err != nil {
 		t.Fatalf("read cursors: %v", err)
 	}
-	if len(cursors) != 2 || cursors[0] != head || !cursors[1].IsZero() {
+	if len(cursors) != 2 || cursors[0] != head || cursors[1] != below {
 		t.Fatalf("two consumers of one app must keep their own cursors, got %v", cursors)
 	}
 }
