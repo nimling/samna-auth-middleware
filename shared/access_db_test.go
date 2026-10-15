@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
@@ -424,6 +425,42 @@ func TestOwnerGraphTakesTheWindow(t *testing.T) {
 	}
 	if _, err := db.GetOwnerGraph(ctx, userA, &orgRoot, 0, sdb.ACCESS_READ, sdb.GraphWindow{Sort: "size"}); err == nil {
 		t.Fatal("an unknown sort must be refused")
+	}
+}
+
+func TestClaimGraphReadWaitsOnNoWriterHoldingItsCacheRow(t *testing.T) {
+	db := database(t)
+	ctx := context.Background()
+	if _, err := db.GetClaimGraph(ctx, userA, nil, 0, 0, sdb.GraphWindow{}); err != nil {
+		t.Fatalf("build cache: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE claimius.claim_graph_cache SET snapshot = '1:1:'::pg_snapshot WHERE user_id = ?`, userA); err != nil {
+		t.Fatalf("stale cache: %v", err)
+	}
+	var grant uuid.UUID
+	if err := db.NewRaw(`SELECT id FROM claimius.user_claim WHERE user_id = ? AND sa_deleted_at IS NULL ORDER BY id LIMIT 1`, userA).Scan(ctx, &grant); err != nil {
+		t.Fatalf("grant: %v", err)
+	}
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(ctx, `SELECT claimius.insert_claim(p_name => 'Held writer', p_description => NULL, p_sa_access => 4,
+		p_sa_owner_id => ?, p_sa_root_id => ?, p_sa_created_by => ?)`, orgRoot, orgRoot, grant); err != nil {
+		t.Fatalf("writer: %v", err)
+	}
+	var cached int
+	if err := tx.NewRaw(`SELECT count(*) FROM claimius.claim_graph_cache WHERE user_id = ?`, userA).Scan(ctx, &cached); err != nil {
+		t.Fatalf("cache probe: %v", err)
+	}
+	if cached != 0 {
+		t.Fatalf("expected the writer to drop the reader's cache row, %d left", cached)
+	}
+	readCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	if _, err := db.GetClaimGraph(readCtx, userA, nil, 0, 0, sdb.GraphWindow{}); err != nil {
+		t.Fatalf("a graph read must not wait on a writer holding its cache row: %v", err)
 	}
 }
 

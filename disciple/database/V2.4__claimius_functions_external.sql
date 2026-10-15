@@ -1954,11 +1954,19 @@ BEGIN
         END IF;
 
         IF v_cacheable THEN
-            INSERT INTO claimius.claim_graph_cache (user_id, graph, snapshot)
-            VALUES (p_user_id, v_graph, v_snapshot)
-            ON CONFLICT (user_id) DO UPDATE
-                SET graph = EXCLUDED.graph,
-                    snapshot = EXCLUDED.snapshot;
+            DECLARE
+                v_lock_timeout TEXT := current_setting('lock_timeout');
+            BEGIN
+                PERFORM set_config('lock_timeout', claimius._settle_lock_timeout(), TRUE);
+                INSERT INTO claimius.claim_graph_cache (user_id, graph, snapshot)
+                VALUES (p_user_id, v_graph, v_snapshot)
+                ON CONFLICT (user_id) DO UPDATE
+                    SET graph = EXCLUDED.graph,
+                        snapshot = EXCLUDED.snapshot;
+                PERFORM set_config('lock_timeout', v_lock_timeout, TRUE);
+            EXCEPTION WHEN lock_not_available OR deadlock_detected THEN
+                PERFORM set_config('lock_timeout', v_lock_timeout, TRUE);
+            END;
         END IF;
     END IF;
 
@@ -1977,7 +1985,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = claimius, pg_temp SET plan_cache_mode = force_custom_plan;
 
-COMMENT ON FUNCTION claimius.get_claim_graph(UUID, UUID, INTEGER, INTEGER, INTEGER, TEXT, UUID) IS 'Access graph: user, other users seen, claims, user_claims, claim_object bindings, reachable objects. Optional start claim and depth limit, and a window of p_width children of each type per parent in name or usage order continuing after p_next_id. Default shape served from claimius.claim_graph_cache while every grant, claim and binding of the user was written by a transaction visible in the snapshot taken before the cached graph was built.';
+COMMENT ON FUNCTION claimius.get_claim_graph(UUID, UUID, INTEGER, INTEGER, INTEGER, TEXT, UUID) IS 'Access graph: user, other users seen, claims, user_claims, claim_object bindings, reachable objects. Optional start claim and depth limit, and a window of p_width children of each type per parent in name or usage order continuing after p_next_id. Default shape served from claimius.claim_graph_cache while every grant, claim and binding of the user was written by a transaction visible in the snapshot taken before the cached graph was built. The cache row is written under the settle lock_timeout and skipped when a writer holds it, so a read never waits on a writer.';
 
 CREATE OR REPLACE FUNCTION claimius._invalidate_claim_graph_cache()
     RETURNS TRIGGER AS $$
