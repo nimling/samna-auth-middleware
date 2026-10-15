@@ -78,7 +78,7 @@ err = db.NewInsert().Model(link).Access(ac).Scan(ctx)
 
 1. The prophet names the actor from `SAuth-Forwarded-User`, which the builder sends with every routed write from the access claim it was given, or from the user of the `created_by` grant in the calling app.
 
-2. It authorizes with the actor's WRITE on the object through `get_access`, or the actor's own `samna_user` when the object is the actor. It stamps `sa_owner_id` and `sa_created_by` from that grant. For a link on the actor's own user the owner is the user and `sa_created_by` the actor's default claim grant in the home app, the grant `upsert_app_user` wrote; without one the write is refused with `403`. `sa_created_by` is never NULL.
+2. It authorizes with the actor's WRITE on the object through `get_access`, on another `samna_user` through `get_user_access`, or the actor's own `samna_user` when the object is the actor. It stamps `sa_owner_id` and `sa_created_by` from that grant. For a link on the actor's own user the owner is the user and `sa_created_by` the actor's default claim grant in the home app, the grant `upsert_app_user` wrote; without one the write is refused with `403`. `sa_created_by` is never NULL.
 
 3. `app_id` is the calling app. An update or delete reaches only a live link the calling app is home for, after the same check on the link's object; another link answers `404`. An update changes `kind`, `name`, `description`, `mime_type`, `size` and `index`; the object and the asset of a link do not move through the route.
 

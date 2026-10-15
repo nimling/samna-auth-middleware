@@ -280,6 +280,18 @@ func getObjectAssetGrant(ctx echo.Context, appID, actor uuid.UUID, objectType st
 		}
 		return actor, &grants[0], nil
 	}
+	if objectType == string(OBJECT_TYPE_USER) {
+		users := make([]shared.AccessUser, 0, 1)
+		if err := sdb.Instance().NewRaw("SELECT * FROM claimius.get_user_access(?, ?, ?, ?)",
+			actor, appID, objectID.String(), int(ACCESS_WRITE)).Scan(reqCtx, &users); err != nil {
+			ctx.Logger().Errorf("object asset user grant: %v", err)
+			return uuid.Nil, nil, errorsx.ErrDbUnexpected
+		}
+		if len(users) == 0 || users[0].UserClaimID == nil || users[0].OwnerID == nil {
+			return uuid.Nil, nil, errorsx.ErrForbidden
+		}
+		return *users[0].OwnerID, users[0].UserClaimID, nil
+	}
 	grants := make([]shared.AccessClaim, 0, 1)
 	if err := sdb.Instance().NewRaw("SELECT * FROM claimius.get_access(?, ?, ?, ?, ?)",
 		actor, appID, objectID, objectType, int(ACCESS_WRITE)).Scan(reqCtx, &grants); err != nil {
