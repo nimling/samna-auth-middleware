@@ -364,3 +364,31 @@ func TestPullBacksOffWhileTheSnapshotFailsToApply(t *testing.T) {
 		t.Fatalf("a snapshot that fails to apply must be pulled again only after the backoff, 1 s then 2 s, got %d snapshots in 3.5 s", n)
 	}
 }
+
+func TestApplyPageAppliesAUserToken(t *testing.T) {
+	db := database(t)
+	ctx := context.Background()
+	from := cursor(t)
+	orgID, tokenID, userID := uuid.New(), uuid.New(), uuid.New()
+	external := "ext-" + uuid.NewString()
+	page := []sam.SyncPayload{
+		organizationPayload(step(from, 1), orgID),
+		{SyncCursor: step(from, 2), Operation: "upsert", EventType: "claimius.user_token", Payload: json.RawMessage(fmt.Sprintf(
+			`{"id":%q,"app_id":%q,"user_id":%q,"id_claim":"sub","external_id":%q,"type":"external","sa_owner_id":%q,"sa_created_at":"2026-01-01T00:00:00Z","sa_updated_at":"2026-01-01T00:00:00Z"}`,
+			tokenID, uuid.New(), userID, external, orgID))},
+	}
+	if err := sam.Disciple().ApplyPage(ctx, from, sam.State{Cursor: step(from, 2)}, page, ""); err != nil {
+		t.Fatalf("apply token: %v", err)
+	}
+	tokens, err := db.GetUserTokens(ctx, []uuid.UUID{userID})
+	if err != nil || len(tokens) != 1 || tokens[0].ExternalID != external || tokens[0].OwnerID != orgID {
+		t.Fatalf("an applied token must be read back by user, got %v %v", tokens, err)
+	}
+	deletion := []sam.SyncPayload{{SyncCursor: step(from, 3), Operation: "delete", EventType: "claimius.user_token", Payload: json.RawMessage(fmt.Sprintf(`{"id":%q}`, tokenID))}}
+	if err := sam.Disciple().ApplyPage(ctx, step(from, 2), sam.State{Cursor: step(from, 3)}, deletion, ""); err != nil {
+		t.Fatalf("delete token: %v", err)
+	}
+	if tokens, err := db.GetUserTokens(ctx, []uuid.UUID{userID}); err != nil || len(tokens) != 0 {
+		t.Fatalf("a deleted token must be gone, got %v %v", tokens, err)
+	}
+}

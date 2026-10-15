@@ -199,6 +199,7 @@ func GetSyncSnapshot(ctx echo.Context) error {
 		{"claimius.user_field", &[]UserField{}, true},
 		{"claimius.user_relation", &[]UserRelation{}, true},
 		{"claimius.object_asset", &[]shared.ObjectAsset{}, true},
+		{"claimius.user_token", &[]UserToken{}, false},
 	}
 
 	var records []SyncPayload
@@ -227,6 +228,12 @@ func GetSyncSnapshot(ctx echo.Context) error {
 					q = q.Order("sa_created_at", "id")
 				} else if t.filterApp && appID != uuid.Nil {
 					q = q.Where("app_id = ?", appID)
+				}
+				if t.eventType == "claimius.user_token" {
+					q = q.ExcludeColumn("data")
+					if appID != uuid.Nil {
+						q = q.Where("? IN (SELECT claimius.apps_for_object('claimius.organization', ?TableAlias.sa_owner_id))", appID)
+					}
 				}
 				if err := q.Scan(txCtx); err != nil {
 					ctx.Logger().Errorf("snapshot %s: %v", t.eventType, err)

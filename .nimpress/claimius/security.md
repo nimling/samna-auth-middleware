@@ -64,7 +64,7 @@ Every read function of the external surface is `SECURITY DEFINER` with `SET sear
 
 `session`, `dpop_jti`, `par_request`, `jwks_cache` and `rate_limit` on a prophet, and `dpop_jti` on a disciple, are `UNLOGGED`: no WAL, not replicated, emptied after a crash. Each holds values that expire, and losing all of them costs a login, a new DPoP proof or a refetched key set, never a security property: a replayed DPoP proof still fails on its `iat`. `rate_limit_gcra` keeps one `rate_limit` row per key, the theoretical arrival time of the generic cell rate algorithm, updated under a transaction advisory lock on the key.
 
-`user_token` binds an external identity to a `user_id` for debug and integration paths and never enters the feed.
+`user_token` binds an approved outside identity to a `user_id` under an organization. It is written on the prophet, and the feed carries it to every app the organization is linked to without its `data`, the claims of the token it was approved from, which stay on the prophet.
 
 ## Soft delete
 

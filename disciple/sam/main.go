@@ -362,6 +362,8 @@ func applyUpsert(ctx context.Context, tx bun.Tx, eventType string, raw json.RawM
 		return upsertEntity[shared.UserRelation](ctx, tx, raw)
 	case "claimius.object_asset":
 		return upsertEntity[shared.ObjectAsset](ctx, tx, raw)
+	case "claimius.user_token":
+		return upsertEntity[shared.UserToken](ctx, tx, raw)
 	default:
 		return false, fmt.Errorf("unknown event_type for upsert: %s", eventType)
 	}
@@ -405,6 +407,8 @@ func applyDelete(ctx context.Context, tx bun.Tx, eventType string, raw json.RawM
 		return deleteEntity[shared.UserRelation](ctx, tx, env.ID)
 	case "claimius.object_asset":
 		return deleteEntity[shared.ObjectAsset](ctx, tx, env.ID)
+	case "claimius.user_token":
+		return deleteEntity[shared.UserToken](ctx, tx, env.ID)
 	default:
 		return fmt.Errorf("delete not supported for event_type: %s", eventType)
 	}

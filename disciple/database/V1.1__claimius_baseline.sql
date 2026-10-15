@@ -319,12 +319,13 @@ CREATE TABLE IF NOT EXISTS claimius.user_token (
                                                    sa_updated_at   TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-COMMENT ON TABLE claimius.user_token IS 'Debug only bridge from JWT identity (external_id under id_claim) to claimius.samna_user.user_id. Not synced.';
+COMMENT ON TABLE claimius.user_token IS 'Bridge from an external identity, a token''s claim named by id_claim or a direct external_id, to claimius.samna_user.user_id. Applied from the prophet''s feed without data; written locally in debug mode.';
 
 ALTER TABLE claimius.user_token ADD COLUMN IF NOT EXISTS type TEXT NOT NULL DEFAULT 'token';
 COMMENT ON COLUMN claimius.user_token.type IS 'Binding kind: token for JWT derived, external for direct external_id.';
 
-CREATE UNIQUE INDEX IF NOT EXISTS idx_user_token_app_owner_external
+DROP INDEX IF EXISTS claimius.idx_user_token_app_owner_external;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_user_token_owner_external
     ON claimius.user_token (sa_owner_id, external_id) WHERE sa_deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_user_token_user_id ON claimius.user_token (user_id);
 CREATE INDEX IF NOT EXISTS idx_user_token_type ON claimius.user_token (type) WHERE sa_deleted_at IS NULL;

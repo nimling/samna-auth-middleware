@@ -27,7 +27,7 @@ A write settles only the acting user on the rows it names and raises the area in
 Write functions return one jsonb keyed by table: `(v -> 'claim' ->> 'id')::uuid`.
 
 1. `claim`, `user_claim`, `claim_object`: `insert_*`, `update_*`, `delete_*` only. `p_starts_at` and `p_ends_at` on `insert_user_claim` expire a grant at read time.
-2. `samna_user`: `upsert_app_user`. Guests: `upsert_guest_user`. Secrets: `insert_secret`. Audit: `insert_audit`. Cross app: `merge_user`, prophet set only; samna_auth owns the merge flow and calls it from `internal/service/user.go` `MergeUser`.
+2. `samna_user`: `upsert_app_user`. Guests: `upsert_guest_user`. Secrets: `insert_secret`. Audit: `insert_audit`. External users: `IssueUserToken` and `UpsertUserExternal`, routed to the prophet, which writes the `user_token` row under the organization; the feed carries it to every app the organization is linked to, without `data`, and a forwarded identity resolves in any of those apps. Cross app: `merge_user`, prophet set only; samna_auth owns the merge flow and calls it from `internal/service/user.go` `MergeUser`.
 3. Apps: `upsert_system_app` bootstraps a prophet; `upsert_app(p_actor_user_claim_id, ...)` creates every other app with its links, owner and default claims and grant. Never INSERT `samna_app`.
 4. Disciple bootstrap: `upsert_disciple_state(p_disciple_app_slug)`. Hybrid: `upsert_prophet_peer`, a prophet mirroring one app of a peer, with no `disciple_state` row.
 5. Registration: `upsert_table_info` registers the named tables, idempotent; `delete_table_info` deregisters the named tables. Rerun `upsert_table_info` after adding `sa_parent_id`, `sa_root_id` or `sa_location_id`, after the migration and backfill.

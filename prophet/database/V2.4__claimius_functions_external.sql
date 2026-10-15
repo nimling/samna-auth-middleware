@@ -4325,7 +4325,8 @@ BEGIN
             p_owner_id,
             p_caller_uc
         )
-        ON CONFLICT (app_id, sa_owner_id, external_id) WHERE sa_deleted_at IS NULL DO UPDATE SET
+        ON CONFLICT (sa_owner_id, external_id) WHERE sa_deleted_at IS NULL DO UPDATE SET
+            app_id        = EXCLUDED.app_id,
             user_id       = EXCLUDED.user_id,
             id_claim      = EXCLUDED.id_claim,
             type          = EXCLUDED.type,
