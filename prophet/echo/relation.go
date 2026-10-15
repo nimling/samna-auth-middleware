@@ -133,12 +133,24 @@ func postRelation(ctx echo.Context, relation *UserRelation) (*UserRelation, erro
 }
 
 func putRelation(ctx echo.Context, relation *UserRelation, appID uuid.UUID) error {
+	columns := make([]string, 0, 7)
+	for key, column := range map[string]string{
+		"description": "description", "object_type": "object_type", "object_id": "object_id",
+		"pinned": "pinned", "priority": "priority", "parent_id": "parent_id", "sibling_id": "sibling_id",
+	} {
+		if relation.HasKey(key) {
+			columns = append(columns, column)
+		}
+	}
+	if len(columns) == 0 {
+		return errorsx.ErrBadRequest
+	}
 	res, err := sdb.Instance().NewUpdate().
 		Model(relation).
+		Column(columns...).
 		Where("sa_deleted_at IS NULL").
 		Where("id = ?", relation.ID).
 		Where("app_id = ?", appID).
-		OmitZero().
 		Returning("*").
 		Exec(ctx.Request().Context())
 	if err != nil {

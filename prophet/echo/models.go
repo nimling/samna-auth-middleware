@@ -365,8 +365,8 @@ type UserRelation struct {
 	Description *string    `bun:"description" json:"description,omitempty"`
 	ObjectType  string     `bun:"object_type,notnull" json:"object_type"`
 	ObjectID    uuid.UUID  `bun:"object_id,notnull,type:uuid" json:"object_id"`
-	Pinned      int        `bun:"pinned" json:"pinned"`
-	Priority    int        `bun:"priority" json:"priority"`
+	Pinned      *int       `bun:"pinned" json:"pinned"`
+	Priority    *int       `bun:"priority" json:"priority"`
 	UsedAt      *time.Time `bun:"used_at,default:current_timestamp" json:"used_at,omitempty"`
 	ParentID    *uuid.UUID `bun:"parent_id,type:uuid" json:"parent_id,omitempty"`
 	SiblingID   *uuid.UUID `bun:"sibling_id,type:uuid" json:"sibling_id,omitempty"`
