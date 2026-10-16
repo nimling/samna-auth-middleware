@@ -1244,3 +1244,10 @@ COMMENT ON COLUMN claimius.object_asset.txid IS 'Local transaction that last wro
 DROP INDEX IF EXISTS claimius.idx_object_asset_app_asset;
 CREATE UNIQUE INDEX IF NOT EXISTS idx_object_asset_app_asset_object ON claimius.object_asset (app_id, asset_id, object_type, object_id) WHERE sa_deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_object_asset_object ON claimius.object_asset (object_type, object_id);
+
+UPDATE claimius.table_info SET table_name = 'user_identity' WHERE schema_name = 'claimius' AND table_name = 'user_token';
+UPDATE claimius.object_info SET object_type = 'claimius.user_identity' WHERE object_type = 'claimius.user_token';
+UPDATE claimius.inheritance_info SET ancestor_type = 'claimius.user_identity' WHERE ancestor_type = 'claimius.user_token';
+UPDATE claimius.inheritance_info SET descendant_type = 'claimius.user_identity' WHERE descendant_type = 'claimius.user_token';
+UPDATE claimius.user_object SET object_type = 'claimius.user_identity' WHERE object_type = 'claimius.user_token';
+UPDATE claimius.access_diff SET object_type = 'claimius.user_identity' WHERE object_type = 'claimius.user_token';
