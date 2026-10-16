@@ -2754,7 +2754,7 @@ DECLARE
         'claimius.object_field',
         'claimius.user_field',
         'claimius.user_relation',
-        'claimius.user_token'
+        'claimius.user_identity'
         ];
     v_t TEXT;
 BEGIN
@@ -4087,7 +4087,7 @@ DECLARE
     v_root_id           UUID;
     v_created           BOOLEAN;
     v_user_row          claimius.samna_user;
-    v_token_row         claimius.user_token;
+    v_token_row         claimius.user_identity;
     v_caller_user_id    UUID;
     v_existing_uc       claimius.user_claim;
     v_existing_virtual  claimius.claim;
@@ -4141,7 +4141,7 @@ BEGIN
             RAISE EXCEPTION 'identity external_id required';
         END IF;
         SELECT * INTO v_token_row
-          FROM claimius.user_token
+          FROM claimius.user_identity
          WHERE app_id = p_app_id
            AND sa_owner_id = p_owner_id
            AND external_id = v_identity_id
@@ -4312,7 +4312,7 @@ BEGIN
     END IF;
 
     IF p_identity IS NOT NULL THEN
-        INSERT INTO claimius.user_token (
+        INSERT INTO claimius.user_identity (
             app_id, user_id, id_claim, external_id, type, claim_id, data, sa_owner_id, sa_created_by
         ) VALUES (
             p_app_id,
@@ -4343,18 +4343,18 @@ BEGIN
         'virtual_claim',     v_virtual_claim     -> 'claim',
         'claim_object',      v_claim_obj         -> 'claim_object',
         'caller_user_claim', v_caller_user_claim -> 'user_claim',
-        'user_token',        CASE WHEN p_identity IS NULL THEN NULL ELSE to_jsonb(v_token_row) END
+        'user_identity',        CASE WHEN p_identity IS NULL THEN NULL ELSE to_jsonb(v_token_row) END
     );
 END;
 $$ LANGUAGE plpgsql;
 
 COMMENT ON FUNCTION claimius.insert_organization_user(UUID, UUID, UUID, JSONB, BOOLEAN, JSONB, TEXT) IS
-    'Adds a user to an organization of an app: inserts or upserts the samna_user, grants the supplied claim with p_reason, ensures a per-user virtual claim with full access bound to the user, and when p_caller_uc is not null grants that virtual claim to the caller. The organization must be linked to the app and the caller must be a live user_claim of the app. With p_identity, an outside identity {id_claim, external_id, type, data} names the user: a user_token of the app, owner and external_id reuses its user, the call upserts, and the user_token is written. Without p_identity and with p_upsert=FALSE, raises 23505 when user_id or external_id already exists in the app. Returns samna_user, created, user_claim, virtual_claim, claim_object, caller_user_claim and user_token.';
+    'Adds a user to an organization of an app: inserts or upserts the samna_user, grants the supplied claim with p_reason, ensures a per-user virtual claim with full access bound to the user, and when p_caller_uc is not null grants that virtual claim to the caller. The organization must be linked to the app and the caller must be a live user_claim of the app. With p_identity, an outside identity {id_claim, external_id, type, data} names the user: a user_identity of the app, owner and external_id reuses its user, the call upserts, and the user_identity is written. Without p_identity and with p_upsert=FALSE, raises 23505 when user_id or external_id already exists in the app. Returns samna_user, created, user_claim, virtual_claim, claim_object, caller_user_claim and user_identity.';
 
 GRANT EXECUTE ON FUNCTION claimius.insert_organization_user(UUID, UUID, UUID, JSONB, BOOLEAN, JSONB, TEXT)
     TO claimius_disciple_client, claimius_writer, claimius_admin;
 
-ALTER TABLE claimius.user_token ALTER COLUMN app_id SET DEFAULT claimius.get_app_id();
+ALTER TABLE claimius.user_identity ALTER COLUMN app_id SET DEFAULT claimius.get_app_id();
 ALTER TABLE claimius.audit ALTER COLUMN app_id SET DEFAULT claimius.get_app_id();
 
 CREATE OR REPLACE FUNCTION claimius.notify_notification() RETURNS trigger AS $$

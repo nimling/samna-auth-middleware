@@ -1221,16 +1221,17 @@ $$;
 
 COMMENT ON FUNCTION claimius.get_relations(UUID, UUID[]) IS 'The reader''s live user_relation rows, with p_ids only the ones named there. A relation is its user''s alone, the same rule resolve_access applies to claimius.user_relation, so a row of another user or a soft deleted row never comes back. The caller filters the rows further by object, pin, priority, parent, sibling or description.';
 
-CREATE OR REPLACE FUNCTION claimius.get_user_tokens(
+DROP FUNCTION IF EXISTS claimius.get_user_tokens(UUID[]);
+CREATE OR REPLACE FUNCTION claimius.get_user_identities(
     p_user_ids  UUID[]
-) RETURNS SETOF claimius.user_token
+) RETURNS SETOF claimius.user_identity
 LANGUAGE sql STABLE SECURITY DEFINER SET search_path = claimius, pg_temp AS $$
     SELECT t.*
-    FROM claimius.user_token t
+    FROM claimius.user_identity t
     WHERE t.user_id = ANY(p_user_ids)
 $$;
 
-COMMENT ON FUNCTION claimius.get_user_tokens(UUID[]) IS 'The user_token rows of the users in p_user_ids, soft deleted rows included, with no reader and no access filter. Its sa_created_by is the grant that bound the user, the user''s creator.';
+COMMENT ON FUNCTION claimius.get_user_identities(UUID[]) IS 'The user_identity rows of the users in p_user_ids, soft deleted rows included, with no reader and no access filter. Its sa_created_by is the grant that bound the user, the user''s creator.';
 
 CREATE OR REPLACE FUNCTION claimius.get_object_types()
 RETURNS TABLE(object_type TEXT)
@@ -1279,7 +1280,7 @@ GRANT EXECUTE ON FUNCTION claimius.get_grants(UUID[], UUID[], UUID[], UUID[], BO
     TO claimius_disciple_client, claimius_writer, claimius_admin, claimius_reader;
 GRANT EXECUTE ON FUNCTION claimius.get_bindings(TEXT, UUID[], UUID[])
     TO claimius_disciple_client, claimius_writer, claimius_admin, claimius_reader;
-GRANT EXECUTE ON FUNCTION claimius.get_user_tokens(UUID[])
+GRANT EXECUTE ON FUNCTION claimius.get_user_identities(UUID[])
     TO claimius_disciple_client, claimius_writer, claimius_admin, claimius_reader;
 GRANT EXECUTE ON FUNCTION claimius.get_object_types()
     TO claimius_disciple_client, claimius_writer, claimius_admin, claimius_reader;
@@ -2802,7 +2803,7 @@ DECLARE
         'claimius.object_field',
         'claimius.user_field',
         'claimius.user_relation',
-        'claimius.user_token'
+        'claimius.user_identity'
         ];
     v_t TEXT;
 BEGIN
@@ -3504,7 +3505,7 @@ DECLARE
     v_root_id           UUID;
     v_created           BOOLEAN;
     v_user_row          claimius.samna_user;
-    v_token_row         claimius.user_token;
+    v_token_row         claimius.user_identity;
     v_caller_user_id    UUID;
     v_existing_uc       claimius.user_claim;
     v_existing_virtual  claimius.claim;
@@ -3553,7 +3554,7 @@ BEGIN
             RAISE EXCEPTION 'identity external_id required';
         END IF;
         SELECT * INTO v_token_row
-          FROM claimius.user_token
+          FROM claimius.user_identity
          WHERE TRUE
            AND sa_owner_id = p_owner_id
            AND external_id = v_identity_id
@@ -3716,7 +3717,7 @@ BEGIN
     END IF;
 
     IF p_identity IS NOT NULL THEN
-        INSERT INTO claimius.user_token (
+        INSERT INTO claimius.user_identity (
             user_id, id_claim, external_id, type, claim_id, data, sa_owner_id, sa_created_by
         ) VALUES (
             v_user_row.user_id,
@@ -3745,13 +3746,13 @@ BEGIN
         'virtual_claim',     v_virtual_claim     -> 'claim',
         'claim_object',      v_claim_obj         -> 'claim_object',
         'caller_user_claim', v_caller_user_claim -> 'user_claim',
-        'user_token',        CASE WHEN p_identity IS NULL THEN NULL ELSE to_jsonb(v_token_row) END
+        'user_identity',        CASE WHEN p_identity IS NULL THEN NULL ELSE to_jsonb(v_token_row) END
     );
 END;
 $$ LANGUAGE plpgsql;
 
 COMMENT ON FUNCTION claimius.insert_organization_user(UUID, UUID, JSONB, BOOLEAN, JSONB, TEXT) IS
-    'Adds a user to an organization of the app this disciple mirrors: inserts or upserts the samna_user, grants the supplied claim with p_reason, ensures a per-user virtual claim with full access bound to the user, and when p_caller_uc is not null grants that virtual claim to the caller. The caller must be a live user_claim. With p_identity, an outside identity {id_claim, external_id, type, data} names the user: a user_token of the owner and external_id reuses its user, the call upserts, and the user_token is written. Without p_identity and with p_upsert=FALSE, raises 23505 when user_id or external_id already exists. Returns samna_user, created, user_claim, virtual_claim, claim_object, caller_user_claim and user_token.';
+    'Adds a user to an organization of the app this disciple mirrors: inserts or upserts the samna_user, grants the supplied claim with p_reason, ensures a per-user virtual claim with full access bound to the user, and when p_caller_uc is not null grants that virtual claim to the caller. The caller must be a live user_claim. With p_identity, an outside identity {id_claim, external_id, type, data} names the user: a user_identity of the owner and external_id reuses its user, the call upserts, and the user_identity is written. Without p_identity and with p_upsert=FALSE, raises 23505 when user_id or external_id already exists. Returns samna_user, created, user_claim, virtual_claim, claim_object, caller_user_claim and user_identity.';
 
 GRANT EXECUTE ON FUNCTION claimius.insert_organization_user(UUID, UUID, JSONB, BOOLEAN, JSONB, TEXT)
     TO claimius_disciple_client, claimius_writer, claimius_admin;

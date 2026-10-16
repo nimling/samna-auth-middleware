@@ -183,7 +183,7 @@ func Connect(logger echo.Logger) (*DB, error) {
 		(*Notification)(nil),
 		(*SyncEvent)(nil),
 		(*DiscipleState)(nil),
-		(*UserToken)(nil),
+		(*UserIdentity)(nil),
 	}
 	db.RegisterModel(models...)
 	if db.Replica != nil {

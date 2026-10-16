@@ -131,8 +131,8 @@ DROP TRIGGER IF EXISTS tg_calc_access ON claimius.claim;
 CREATE TRIGGER tg_calc_access AFTER INSERT OR UPDATE OR DELETE ON claimius.claim
     FOR EACH ROW EXECUTE FUNCTION claimius.calc_object_access();
 
-DROP TRIGGER IF EXISTS tg_calc_access ON claimius.user_token;
-CREATE TRIGGER tg_calc_access AFTER INSERT OR UPDATE OR DELETE ON claimius.user_token
+DROP TRIGGER IF EXISTS tg_calc_access ON claimius.user_identity;
+CREATE TRIGGER tg_calc_access AFTER INSERT OR UPDATE OR DELETE ON claimius.user_identity
     FOR EACH ROW EXECUTE FUNCTION claimius.calc_object_access();
 
 DROP TRIGGER IF EXISTS tg_calc_trees ON claimius.user_claim;

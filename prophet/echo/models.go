@@ -48,7 +48,7 @@ type SamnaUser struct {
 	bun.BaseModel `bun:"table:claimius.samna_user" json:"-"`
 }
 
-type UserToken struct {
+type UserIdentity struct {
 	ID            uuid.UUID       `bun:"id,pk,default:gen_random_uuid()" json:"id"`
 	AppID         uuid.UUID       `bun:"app_id,notnull,type:uuid" json:"app_id"`
 	UserID        uuid.UUID       `bun:"user_id,notnull,type:uuid" json:"user_id"`
@@ -62,7 +62,7 @@ type UserToken struct {
 	DeletedAt     *time.Time      `bun:"sa_deleted_at" json:"deleted_at,omitzero"`
 	CreatedAt     time.Time       `bun:"sa_created_at,default:now()" json:"created_at"`
 	UpdatedAt     time.Time       `bun:"sa_updated_at,default:now()" json:"updated_at"`
-	bun.BaseModel `bun:"table:claimius.user_token" json:"-"`
+	bun.BaseModel `bun:"table:claimius.user_identity" json:"-"`
 }
 
 type Asset struct {

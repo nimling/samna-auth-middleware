@@ -199,7 +199,7 @@ func GetSyncSnapshot(ctx echo.Context) error {
 		{"claimius.user_field", &[]UserField{}, true},
 		{"claimius.user_relation", &[]UserRelation{}, true},
 		{"claimius.object_asset", &[]shared.ObjectAsset{}, true},
-		{"claimius.user_token", &[]UserToken{}, false},
+		{"claimius.user_identity", &[]UserIdentity{}, false},
 		{"claimius.audit", &[]shared.Audit{}, true},
 	}
 
@@ -230,7 +230,7 @@ func GetSyncSnapshot(ctx echo.Context) error {
 				} else if t.filterApp && appID != uuid.Nil {
 					q = q.Where("app_id = ?", appID)
 				}
-				if t.eventType == "claimius.user_token" {
+				if t.eventType == "claimius.user_identity" {
 					q = q.ExcludeColumn("data")
 					if appID != uuid.Nil {
 						q = q.Where("? IN (SELECT claimius.apps_for_object('claimius.organization', ?TableAlias.sa_owner_id))", appID)

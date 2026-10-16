@@ -481,14 +481,14 @@ func (q *InsertQuery) execClaimius(ctx context.Context, dest ...any) (handled bo
 	}()
 	switch m := q.model.(type) {
 	case *SamnaUserToken:
-		result, err := q.db.issueUserToken(ctx, q.conn, q.accessClaim, *m)
+		result, err := q.db.postUserFromToken(ctx, q.conn, q.accessClaim, *m)
 		if err != nil {
 			return true, err
 		}
 		q.created = result.Created
 		return true, dispatchScan(result.SamnaUser, dest...)
 	case *SamnaUserExternal:
-		result, err := q.db.upsertUserExternal(ctx, q.conn, q.accessClaim, *m)
+		result, err := q.db.postUserFromExternal(ctx, q.conn, q.accessClaim, *m)
 		if err != nil {
 			return true, err
 		}
@@ -547,8 +547,8 @@ func (q *InsertQuery) execClaimius(ctx context.Context, dest ...any) (handled bo
 		q.created = created
 		*m = *result
 		return true, dispatchScan(q.model, dest...)
-	case "claimius.user_token":
-		return true, fmt.Errorf("user_token creation reserved; use IssueUserToken")
+	case "claimius.user_identity":
+		return true, fmt.Errorf("user_identity creation reserved; use PostUserFromToken")
 	case "claimius.organization":
 		m, ok := embeddedPtr(q.model, reflect.TypeOf(Organization{})).(*Organization)
 		if !ok {

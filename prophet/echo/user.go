@@ -329,7 +329,7 @@ func DeleteUser(ctx echo.Context) error {
 		if affected, err = res.RowsAffected(); err != nil || affected == 0 {
 			return err
 		}
-		_, err = tx.NewRaw("UPDATE claimius.user_token SET sa_deleted_at = NOW() WHERE user_id = ? AND app_id = ? AND sa_deleted_at IS NULL", userID, appID).Exec(c)
+		_, err = tx.NewRaw("UPDATE claimius.user_identity SET sa_deleted_at = NOW() WHERE user_id = ? AND app_id = ? AND sa_deleted_at IS NULL", userID, appID).Exec(c)
 		return err
 	})
 	if err != nil {
@@ -410,7 +410,7 @@ func PostUserTokenValidate(ctx echo.Context) error {
 	var err error
 	if req.ExternalID != "" {
 		err = sdb.Instance().NewRaw(
-			"SELECT t.user_id, t.sa_owner_id FROM claimius.user_token t JOIN claimius.samna_user u ON u.user_id = t.user_id "+
+			"SELECT t.user_id, t.sa_owner_id FROM claimius.user_identity t JOIN claimius.samna_user u ON u.user_id = t.user_id "+
 				"WHERE claimius.app_has_object(?, 'claimius.organization', t.sa_owner_id) AND u.app_id = ? AND u.sa_deleted_at IS NULL AND t.sa_deleted_at IS NULL AND t.type = 'external' AND t.external_id = ? "+
 				"ORDER BY t.sa_created_at DESC LIMIT 1",
 			appID, appID, req.ExternalID,
@@ -430,7 +430,7 @@ func PostUserTokenValidate(ctx echo.Context) error {
 			return respond.Error(ctx, http.StatusInternalServerError, "Internal server error")
 		}
 		err = sdb.Instance().NewRaw(
-			"SELECT t.user_id, t.sa_owner_id FROM claimius.user_token t JOIN claimius.samna_user u ON u.user_id = t.user_id "+
+			"SELECT t.user_id, t.sa_owner_id FROM claimius.user_identity t JOIN claimius.samna_user u ON u.user_id = t.user_id "+
 				"WHERE claimius.app_has_object(?, 'claimius.organization', t.sa_owner_id) AND u.app_id = ? AND u.sa_deleted_at IS NULL AND t.sa_deleted_at IS NULL AND t.external_id = (?::jsonb ->> t.id_claim) "+
 				"ORDER BY t.sa_created_at DESC LIMIT 1",
 			appID, appID, string(claimsJSON),

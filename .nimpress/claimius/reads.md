@@ -3,7 +3,7 @@ gate: auth-middleware
 layout: doc
 title: Reads
 description: The claimius read surface and what each read function reads and writes in index entries and rows as a function of the data, why a check and a page of a listing are independent of tree depth and of the number of users, and which reads may run on a replica.
-tags: get_access, get_direct_access, mutation_access, resolve_access, get_user_access, get_objects, get_organizations, get_locations, get_secrets, get_users, get_claims, get_audit, get_grants, get_bindings, get_user_tokens, get_object_types, get_object_usage, get_relations, get_descendants, get views, select tag, _best_grant, reconcile_if_pending, _settle_user_users_diff, _user_users_for_viewer, key paging, security definer
+tags: get_access, get_direct_access, mutation_access, resolve_access, get_user_access, get_objects, get_organizations, get_locations, get_secrets, get_users, get_claims, get_audit, get_grants, get_bindings, get_user_identities, get_object_types, get_object_usage, get_relations, get_descendants, get views, select tag, _best_grant, reconcile_if_pending, _settle_user_users_diff, _user_users_for_viewer, key paging, security definer
 lastUpdated: true
 ---
 
@@ -31,7 +31,7 @@ On a disciple the same functions exist without the app argument, because a disci
 | `get_scope_access(user, app, path, required)` | Scope grants matching a jsonpath; see [Capabilities](./capabilities.md) |
 | `search`, `get_owner_graph`, `get_claim_graph` | See [Search](./search.md) and [Graphs](./graphs.md) |
 | `get_users(user_ids, ids, emails, external_ids)`, `get_organizations(ids, owner_ids, external_ids)`, `get_locations(ids, parent_ids, external_ids)`, `get_claims(ids, owner_ids)` | Disciple only: the rows named by id, owner, parent, email or external id, no reader; see [Lookups](#lookups) |
-| `get_grants(ids, user_ids, claim_ids, owner_ids, clients)`, `get_bindings(object_type, object_ids, claim_ids)`, `get_user_tokens(user_ids)`, `get_object_types()` | Disciple only: grants, bindings, tokens and registered types by id, no reader; see [Lookups](#lookups) |
+| `get_grants(ids, user_ids, claim_ids, owner_ids, clients)`, `get_bindings(object_type, object_ids, claim_ids)`, `get_user_identities(user_ids)`, `get_object_types()` | Disciple only: grants, bindings, tokens and registered types by id, no reader; see [Lookups](#lookups) |
 | `get_object_usage(user, object_ids, object_types)` | Disciple only: the reader's `used_count` and the name of each object |
 | `get_relations(user, ids)` | Disciple only: the reader's live `user_relation` rows; see [Lookups](#lookups) |
 | `get_descendants(object_type, object_id)`, `get_descendants(object_id)` | The owner, location and parenthood subtrees of an object, with or without its type |
@@ -131,7 +131,7 @@ A row a read already admitted names other rows: a booking its creator through `s
 
 3. `get_bindings(object_type, object_ids, claim_ids)` returns `claim_object` rows on objects of a type, on ids of that type, or of claims. With `get_grants` on their claim ids they are the holders of the bindings on an object; `get_claims(ids, NULL)` gives the claim each binding narrows. Each row carries `effective_access`, the mask the binding gives, `claim & expand(coalesce(binding, claim))`, so a caller never computes it from the internal `_effective_access`. Ids without a type give no rows.
 
-4. `get_user_tokens(user_ids)` returns the users' `user_token` rows; `sa_created_by` on one is the grant that bound the user. `get_object_types()` returns the type of every registered table.
+4. `get_user_identities(user_ids)` returns the users' `user_identity` rows; `sa_created_by` on one is the grant that bound the user. `get_object_types()` returns the type of every registered table.
 
 5. Every argument given applies, and a call with none gives no rows. Soft deleted rows, grants outside their window and bindings of deleted claims are returned as they are, so a caller keeps the filter it had on `sa_deleted_at`, `starts_at` and `ends_at`.
 

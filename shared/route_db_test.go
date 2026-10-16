@@ -80,7 +80,7 @@ func TestEveryWriteHelperOfADiscipleGoesToTheProphetFirst(t *testing.T) {
 	calls, stop := stubProphet(t, db)
 	defer stop()
 	db.RouteToProphet = true
-	tokensBefore := countRows(t, db, "claimius.user_token")
+	tokensBefore := countRows(t, db, "claimius.user_identity")
 
 	claim, err := db.CreateClaim(ctx, nil, ac, sdb.CreateClaimParams{Name: "Routed claim", Access: sdb.ACCESS_READ})
 	if err != nil {
@@ -103,7 +103,7 @@ func TestEveryWriteHelperOfADiscipleGoesToTheProphetFirst(t *testing.T) {
 	if err != nil {
 		t.Fatalf("sign: %v", err)
 	}
-	_, created, err := db.IssueUserToken(ctx, nil, ac, sdb.SamnaUserToken{Token: token, OwnerID: &orgRoot, ClaimID: ac.ClaimID})
+	_, created, err := db.PostUserFromToken(ctx, nil, ac, sdb.SamnaUserToken{Token: token, OwnerID: &orgRoot, ClaimID: ac.ClaimID})
 	if err != nil {
 		t.Fatalf("issue user token: %v", err)
 	}
@@ -134,7 +134,7 @@ func TestEveryWriteHelperOfADiscipleGoesToTheProphetFirst(t *testing.T) {
 			t.Fatalf("write %d must carry the actor %s, got %q", i, ac.UserClaimID, c.createdBy)
 		}
 	}
-	if after := countRows(t, db, "claimius.user_token"); after != tokensBefore {
+	if after := countRows(t, db, "claimius.user_identity"); after != tokensBefore {
 		t.Fatalf("a routed token write must not issue a local token, %d before and %d after", tokensBefore, after)
 	}
 	var stillLive bool
@@ -183,11 +183,11 @@ func TestADiscipleInDebugModeWritesTheSameHelpersLocally(t *testing.T) {
 	if err != nil {
 		t.Fatalf("sign: %v", err)
 	}
-	first, created, err := db.IssueUserToken(ctx, nil, ac, sdb.SamnaUserToken{Token: token, OwnerID: &orgRoot, ClaimID: &claim.ID})
+	first, created, err := db.PostUserFromToken(ctx, nil, ac, sdb.SamnaUserToken{Token: token, OwnerID: &orgRoot, ClaimID: &claim.ID})
 	if err != nil || !created {
 		t.Fatalf("the first token write must create the user, created %v, err %v", created, err)
 	}
-	again, created, err := db.IssueUserToken(ctx, nil, ac, sdb.SamnaUserToken{Token: token, OwnerID: &orgRoot, ClaimID: &claim.ID})
+	again, created, err := db.PostUserFromToken(ctx, nil, ac, sdb.SamnaUserToken{Token: token, OwnerID: &orgRoot, ClaimID: &claim.ID})
 	if err != nil || created || again.UserID != first.UserID {
 		t.Fatalf("the second token write must find the same user, created %v, err %v", created, err)
 	}

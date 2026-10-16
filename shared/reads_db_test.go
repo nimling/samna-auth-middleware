@@ -285,16 +285,16 @@ func TestGetBindingsOnObjectsAndClaims(t *testing.T) {
 	}
 }
 
-func TestGetUserTokensOfUsers(t *testing.T) {
+func TestGetUserIdentitiesOfUsers(t *testing.T) {
 	db := database(t)
 	ctx := context.Background()
 	user := uuid.New()
 	if _, err := db.NewRaw(`
-		INSERT INTO claimius.user_token (user_id, external_id, sa_owner_id, sa_created_by)
+		INSERT INTO claimius.user_identity (user_id, external_id, sa_owner_id, sa_created_by)
 		VALUES (?, ?, ?, ?)`, user, "reads-"+user.String(), orgKept, userC).Exec(ctx); err != nil {
 		t.Fatalf("insert token: %v", err)
 	}
-	tokens, err := db.GetUserTokens(ctx, []uuid.UUID{user})
+	tokens, err := db.GetUserIdentities(ctx, []uuid.UUID{user})
 	if err != nil {
 		t.Fatalf("tokens: %v", err)
 	}

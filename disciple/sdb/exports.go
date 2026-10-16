@@ -34,7 +34,7 @@ type (
 	UserClaim                = shared.UserClaim
 	UserRelation             = shared.UserRelation
 	UserRelationFilters      = shared.UserRelationFilters
-	UserToken                = shared.UserToken
+	UserIdentity             = shared.UserIdentity
 )
 
 const (

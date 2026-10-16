@@ -338,7 +338,10 @@ CREATE INDEX IF NOT EXISTS idx_claim_object_lookup
     ON claimius.claim_object (claim_id, object_type, object_id)
     WHERE sa_deleted_at IS NULL AND object_id IS NOT NULL;
 
-CREATE TABLE IF NOT EXISTS claimius.user_token (
+ALTER TABLE IF EXISTS claimius.user_token RENAME TO user_identity;
+DROP INDEX IF EXISTS claimius.idx_user_token_user_id, claimius.idx_user_token_app_id, claimius.idx_user_token_type, claimius.idx_user_token_sa_owner_id, claimius.idx_user_token_sa_deleted_at, claimius.idx_user_token_owner_external;
+
+CREATE TABLE IF NOT EXISTS claimius.user_identity (
                                                    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
                                                    app_id          UUID NOT NULL REFERENCES claimius.samna_app(id),
                                                    user_id         UUID NOT NULL,
@@ -354,19 +357,19 @@ CREATE TABLE IF NOT EXISTS claimius.user_token (
                                                    sa_updated_at   TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-COMMENT ON TABLE claimius.user_token IS 'Bridge from an external identity, a token''s claim named by id_claim or a direct external_id, to claimius.samna_user.user_id. Written on the prophet, it syncs to its app without data.';
+COMMENT ON TABLE claimius.user_identity IS 'Bridge from an external identity, a token''s claim named by id_claim or a direct external_id, to claimius.samna_user.user_id. Written on the prophet, it syncs to its app without data.';
 
-ALTER TABLE claimius.user_token ADD COLUMN IF NOT EXISTS type TEXT NOT NULL DEFAULT 'token';
-COMMENT ON COLUMN claimius.user_token.type IS 'Binding kind: token for JWT derived, external for direct external_id.';
+ALTER TABLE claimius.user_identity ADD COLUMN IF NOT EXISTS type TEXT NOT NULL DEFAULT 'token';
+COMMENT ON COLUMN claimius.user_identity.type IS 'Binding kind: token for JWT derived, external for direct external_id.';
 
-DROP INDEX IF EXISTS claimius.idx_user_token_app_owner_external;
-CREATE UNIQUE INDEX IF NOT EXISTS idx_user_token_owner_external
-    ON claimius.user_token (sa_owner_id, external_id) WHERE sa_deleted_at IS NULL;
-CREATE INDEX IF NOT EXISTS idx_user_token_user_id ON claimius.user_token (user_id);
-CREATE INDEX IF NOT EXISTS idx_user_token_app_id ON claimius.user_token (app_id);
-CREATE INDEX IF NOT EXISTS idx_user_token_type ON claimius.user_token (type) WHERE sa_deleted_at IS NULL;
-CREATE INDEX IF NOT EXISTS idx_user_token_sa_owner_id ON claimius.user_token (sa_owner_id);
-CREATE INDEX IF NOT EXISTS idx_user_token_sa_deleted_at ON claimius.user_token (sa_deleted_at);
+DROP INDEX IF EXISTS claimius.idx_user_identity_app_owner_external;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_user_identity_owner_external
+    ON claimius.user_identity (sa_owner_id, external_id) WHERE sa_deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_user_identity_user_id ON claimius.user_identity (user_id);
+CREATE INDEX IF NOT EXISTS idx_user_identity_app_id ON claimius.user_identity (app_id);
+CREATE INDEX IF NOT EXISTS idx_user_identity_type ON claimius.user_identity (type) WHERE sa_deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_user_identity_sa_owner_id ON claimius.user_identity (sa_owner_id);
+CREATE INDEX IF NOT EXISTS idx_user_identity_sa_deleted_at ON claimius.user_identity (sa_deleted_at);
 
 CREATE TABLE IF NOT EXISTS claimius.table_info (
                                                    id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),

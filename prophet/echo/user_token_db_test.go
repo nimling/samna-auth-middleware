@@ -38,7 +38,7 @@ func getTokenPayloads(t *testing.T, rec *httptest.ResponseRecorder, id uuid.UUID
 	}
 	rows := make([]map[string]any, 0, 1)
 	for _, p := range payloads {
-		if p.EventType != "claimius.user_token" {
+		if p.EventType != "claimius.user_identity" {
 			continue
 		}
 		row := map[string]any{}
@@ -83,7 +83,7 @@ func TestUserTokenFollowsItsOrganization(t *testing.T) {
 	tokenID := uuid.New()
 	external := "ext-" + uuid.NewString()
 	if _, err := psdb.Instance().ExecContext(ctx, `
-		INSERT INTO claimius.user_token (id, app_id, user_id, external_id, type, data, sa_owner_id)
+		INSERT INTO claimius.user_identity (id, app_id, user_id, external_id, type, data, sa_owner_id)
 		VALUES (?, ?, ?, ?, 'external', '{"sub":"secret"}', ?)
 	`, tokenID, appID, grantUser, external, orgID); err != nil {
 		t.Fatalf("token: %v", err)
@@ -132,7 +132,7 @@ func TestUserTokenFollowsItsOrganization(t *testing.T) {
 	}
 	var gone bool
 	if err := psdb.Instance().NewRaw(`
-		SELECT EXISTS (SELECT 1 FROM claimius.sync_event WHERE app_id = ? AND event_type = 'claimius.user_token' AND operation = 'delete' AND payload ->> 'id' = ?)
+		SELECT EXISTS (SELECT 1 FROM claimius.sync_event WHERE app_id = ? AND event_type = 'claimius.user_identity' AND operation = 'delete' AND payload ->> 'id' = ?)
 	`, linked.ID, tokenID.String()).Scan(ctx, &gone); err != nil || !gone {
 		t.Fatalf("unlinking the organization must delete its tokens from the app, got %v %v", gone, err)
 	}

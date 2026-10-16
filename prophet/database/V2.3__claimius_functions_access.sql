@@ -913,7 +913,7 @@ BEGIN
             WHERE o.app_id NOT IN (
                 SELECT claimius.apps_for_object(v_row ->> 'object_type', (v_row ->> 'object_id')::UUID, (v_row ->> 'app_id')::UUID));
         END IF;
-    ELSIF v_type = 'claimius.user_token' THEN
+    ELSIF v_type = 'claimius.user_identity' THEN
         v_row := to_jsonb(coalesce(NEW, OLD));
         INSERT INTO claimius.sync_event (operation, event_type, payload, app_id)
         SELECT v_op, v_type, v_payload, a.app_id
@@ -940,7 +940,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius.emit_sync_event() IS 'Trigger on the source tables, named by the parent when it fires on a partition. Publishes into sync_event. An organization or location change is written once per app linked to it. An object_asset change is written once per app apps_for_object names for its object, and a link that moves to another object is deleted from the apps that no longer see it. A user_token change is written once per app linked to its owning organization. A samna_user row that goes live in an app publishes the live links on that user to the app.';
+COMMENT ON FUNCTION claimius.emit_sync_event() IS 'Trigger on the source tables, named by the parent when it fires on a partition. Publishes into sync_event. An organization or location change is written once per app linked to it. An object_asset change is written once per app apps_for_object names for its object, and a link that moves to another object is deleted from the apps that no longer see it. A user_identity change is written once per app linked to its owning organization. A samna_user row that goes live in an app publishes the live links on that user to the app.';
 
 CREATE OR REPLACE FUNCTION claimius.emit_app_object_sync_event()
     RETURNS TRIGGER AS $$
@@ -968,8 +968,8 @@ BEGIN
           AND l.object_id = v_link.object_id
         ORDER BY l.sa_created_at;
         INSERT INTO claimius.sync_event (operation, event_type, payload, app_id)
-        SELECT 'delete', 'claimius.user_token', jsonb_build_object('id', t.id, 'app_id', t.app_id), v_link.app_id
-        FROM claimius.user_token t
+        SELECT 'delete', 'claimius.user_identity', jsonb_build_object('id', t.id, 'app_id', t.app_id), v_link.app_id
+        FROM claimius.user_identity t
         WHERE v_link.object_type = 'claimius.organization'
           AND t.sa_owner_id = v_link.object_id
         ORDER BY t.sa_created_at;
@@ -998,8 +998,8 @@ BEGIN
     ORDER BY l.sa_created_at;
 
     INSERT INTO claimius.sync_event (operation, event_type, payload, app_id)
-    SELECT 'upsert', 'claimius.user_token', to_jsonb(t) - 'txid', v_link.app_id
-    FROM claimius.user_token t
+    SELECT 'upsert', 'claimius.user_identity', to_jsonb(t) - 'txid', v_link.app_id
+    FROM claimius.user_identity t
     WHERE v_link.object_type = 'claimius.organization'
       AND t.sa_owner_id = v_link.object_id
       AND t.sa_deleted_at IS NULL
@@ -1009,7 +1009,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius.emit_app_object_sync_event() IS 'Trigger on app_object. Publishes the linked row, its live object_asset links and, for an organization, its live user_token rows to the app on link, and the delete of those and of the row on unlink.';
+COMMENT ON FUNCTION claimius.emit_app_object_sync_event() IS 'Trigger on app_object. Publishes the linked row, its live object_asset links and, for an organization, its live user_identity rows to the app on link, and the delete of those and of the row on unlink.';
 
 CREATE OR REPLACE FUNCTION claimius.get_app_home(p_app_id UUID)
     RETURNS TEXT AS $$

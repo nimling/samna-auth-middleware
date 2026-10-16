@@ -306,7 +306,7 @@ const (
 	OBJECT_TYPE_AUDIT         = "claimius.audit"
 	OBJECT_TYPE_OBJECT_FIELD  = "claimius.object_field"
 	OBJECT_TYPE_USER_FIELD    = "claimius.user_field"
-	OBJECT_TYPE_USER_TOKEN    = "claimius.user_token"
+	OBJECT_TYPE_USER_TOKEN    = "claimius.user_identity"
 	OBJECT_TYPE_OBJECT_ASSET  = "claimius.object_asset"
 )
 
@@ -389,8 +389,8 @@ type SamnaUserExternal struct {
 	CreatedBy    *uuid.UUID `json:"created_by,omitempty"`
 }
 
-type UserToken struct {
-	bun.BaseModel `bun:"table:claimius.user_token"`
+type UserIdentity struct {
+	bun.BaseModel `bun:"table:claimius.user_identity"`
 
 	ID         uuid.UUID       `bun:"id,pk,default:gen_random_uuid()" json:"id"`
 	UserID     uuid.UUID       `bun:"user_id,notnull,type:uuid" json:"user_id"`

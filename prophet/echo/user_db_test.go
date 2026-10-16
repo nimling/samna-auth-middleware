@@ -22,11 +22,11 @@ func TestPostUserTokenValidateReturnsTheMappingOwner(t *testing.T) {
 	appID, _ := getGrantFixture(t)
 	ctx := context.Background()
 	if _, err := psdb.Instance().ExecContext(ctx, `
-		INSERT INTO claimius.user_token (app_id, user_id, id_claim, external_id, sa_owner_id)
+		INSERT INTO claimius.user_identity (app_id, user_id, id_claim, external_id, sa_owner_id)
 		SELECT ?, ?, 'sub', 'ext-sub-owner', ?
-		WHERE NOT EXISTS (SELECT 1 FROM claimius.user_token WHERE external_id = 'ext-sub-owner')
+		WHERE NOT EXISTS (SELECT 1 FROM claimius.user_identity WHERE external_id = 'ext-sub-owner')
 	`, appID, grantUser, grantRoot); err != nil {
-		t.Fatalf("seed user_token: %v", err)
+		t.Fatalf("seed user_identity: %v", err)
 	}
 	token, err := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{"sub": "ext-sub-owner"}).SignedString([]byte("host-system"))
 	if err != nil {

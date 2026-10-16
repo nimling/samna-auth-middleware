@@ -105,7 +105,7 @@ SELECT is((SELECT result -> 'samna_user' ->> 'user_id' FROM second_identity),
     'both calls name the same user');
 
 SELECT ok(EXISTS (
-        SELECT 1 FROM claimius.user_token t JOIN claimius.user_claim uc ON uc.user_id = t.user_id
+        SELECT 1 FROM claimius.user_identity t JOIN claimius.user_claim uc ON uc.user_id = t.user_id
         WHERE t.external_id = 'ext-e5'
           AND t.user_id = (SELECT (result -> 'samna_user' ->> 'user_id')::UUID FROM first_identity)
           AND uc.claim_id = pg_temp.crew('member') AND uc.reason = 'Invited' AND t.sa_deleted_at IS NULL),

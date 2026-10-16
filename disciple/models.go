@@ -11,7 +11,7 @@ type (
 	ClaimObject  = shared.ClaimObject
 	SamnaClient  = shared.SamnaClient
 	SamnaSecret  = shared.SamnaSecret
-	UserToken    = shared.UserToken
+	UserIdentity = shared.UserIdentity
 	ObjectField  = shared.ObjectField
 	UserField    = shared.UserField
 	UserRelation = shared.UserRelation

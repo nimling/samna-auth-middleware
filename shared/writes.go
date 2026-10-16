@@ -48,7 +48,7 @@ func (d *DB) validateTokenDebug(ctx context.Context, token string) (*SamnaUser, 
 	var ownerID uuid.UUID
 	err = d.NewRaw(`
 		SELECT t.user_id, t.sa_owner_id
-		  FROM claimius.user_token t
+		  FROM claimius.user_identity t
 		 WHERE t.sa_deleted_at IS NULL
 		   AND t.external_id   = (?::jsonb ->> t.id_claim)
 		 ORDER BY t.sa_created_at DESC
@@ -91,7 +91,7 @@ func (d *DB) ResolveExternalUser(ctx context.Context, callerID uuid.UUID, extern
 	var ownerID uuid.UUID
 	err := d.NewRaw(`
 		SELECT t.user_id, t.sa_owner_id
-		  FROM claimius.user_token t
+		  FROM claimius.user_identity t
 		 WHERE t.type          = 'external'
 		   AND t.external_id   = ?
 		   AND t.sa_deleted_at IS NULL

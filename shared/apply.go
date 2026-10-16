@@ -120,8 +120,8 @@ func applyUpsert(ctx context.Context, idb bun.IDB, conn bun.IConn, eventType str
 		return upsertEntity[UserRelation](ctx, idb, conn, raw)
 	case "claimius.object_asset":
 		return upsertEntity[ObjectAsset](ctx, idb, conn, raw)
-	case "claimius.user_token":
-		return upsertEntity[UserToken](ctx, idb, conn, raw)
+	case "claimius.user_identity":
+		return upsertEntity[UserIdentity](ctx, idb, conn, raw)
 	case "claimius.audit":
 		var row Audit
 		if err := sauth.Unmarshal(raw, &row); err != nil {
@@ -180,8 +180,8 @@ func applyDelete(ctx context.Context, idb bun.IDB, conn bun.IConn, eventType str
 		return deleteEntity[UserRelation](ctx, idb, conn, env.ID)
 	case "claimius.object_asset":
 		return deleteEntity[ObjectAsset](ctx, idb, conn, env.ID)
-	case "claimius.user_token":
-		return deleteEntity[UserToken](ctx, idb, conn, env.ID)
+	case "claimius.user_identity":
+		return deleteEntity[UserIdentity](ctx, idb, conn, env.ID)
 	default:
 		return fmt.Errorf("delete not supported for event_type: %s", eventType)
 	}
