@@ -36,6 +36,8 @@ export type { EdgeConfig, EdgeCallbacks, EdgeMode, ViewerClaim } from './session
 export { nimpressAuth, scopePages, PAGE_SCOPE_KEY } from './nimpress'
 export type { NimpressAuthConfig, NimpressAuthFunctions, NimpressViewer, NimpressAccessRequirement } from './nimpress'
 export { createAuthFetch, guardedFetch } from './fetch'
+export { readStream, EVENT_STREAM } from './stream'
+export type { Step, StepStatus, StreamResult } from './stream'
 export { createServiceClient } from './service'
 export type { ServiceClient } from './service'
 export {
