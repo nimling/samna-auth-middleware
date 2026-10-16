@@ -81,3 +81,4 @@ Write functions return one jsonb keyed by table: `(v -> 'claim' ->> 'id')::uuid`
 4. Sync lag: compare `disciple_state (last_applied_txid, last_applied_seq)` with `get_sync_seq(app_id)` and `sync_consumer` on the prophet.
 5. Stale pair: `recompute_user_object(app, user, type, id)`, rarely needed.
 6. Public surface prefixes: `get_`, `insert_`, `update_`, `delete_`, `upsert_`. `_` prefixed functions are internal.
+ 7. A host that held claimius data before it became a disciple lifts it into the prophet once with `sam.Disciple().Lift`, over `POST /sam/lift`: one transaction, every row stamped with the app and its organizations linked, stopped whole by any id the prophet already holds. Never in debug mode.
