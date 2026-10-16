@@ -3875,3 +3875,46 @@ END;
 $$ LANGUAGE plpgsql;
 
 COMMENT ON FUNCTION claimius.insert_secret(TEXT, TEXT, TIMESTAMPTZ, UUID, UUID) IS 'Stores a secret of an app, its value already encrypted under the app seed, owned by an organization, and binds it to the claim of the actor p_sa_created_by with owner, write and read, so the secret is reached through the actor''s claim as on the prophet. Returns samna_secret and claim_object.';
+
+CREATE OR REPLACE FUNCTION claimius.get_orphan_bindings(
+    p_grace  INTERVAL DEFAULT '10 minutes'
+) RETURNS SETOF claimius.claim_object
+LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = claimius, pg_temp AS $$
+DECLARE
+    v_table RECORD;
+BEGIN
+    FOR v_table IN
+        SELECT ti.schema_name, ti.table_name, ti.object_type
+        FROM claimius.table_info ti
+        WHERE NOT ti.is_internal
+    LOOP
+        RETURN QUERY EXECUTE format(
+            'SELECT co.* FROM claimius.claim_object co
+             WHERE co.object_type = %L
+               AND co.object_id IS NOT NULL
+               AND co.sa_deleted_at IS NULL
+               AND co.sa_created_at < now() - $1
+               AND NOT EXISTS (SELECT 1 FROM %I.%I t WHERE t.id = co.object_id)
+             ORDER BY co.sa_created_at',
+            v_table.object_type, v_table.schema_name, v_table.table_name)
+        USING p_grace;
+    END LOOP;
+END;
+$$;
+
+COMMENT ON FUNCTION claimius.get_orphan_bindings(INTERVAL) IS 'Live bindings on a registered table of the host whose object does not exist there, older than p_grace so a binding copied ahead of the transaction that creates its object is never taken: what a routed write left on the prophet when the host''s own transaction failed after it.';
+
+CREATE OR REPLACE FUNCTION claimius.get_orphan_claims(
+    p_grace  INTERVAL DEFAULT '10 minutes'
+) RETURNS SETOF claimius.claim
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = claimius, pg_temp AS $$
+    SELECT c.*
+    FROM claimius.claim c
+    WHERE c.type = 'virtual'
+      AND c.sa_deleted_at IS NULL
+      AND c.sa_created_at < now() - p_grace
+      AND NOT EXISTS (SELECT 1 FROM claimius.claim_object co WHERE co.claim_id = c.id AND co.sa_deleted_at IS NULL)
+    ORDER BY c.sa_created_at
+$$;
+
+COMMENT ON FUNCTION claimius.get_orphan_claims(INTERVAL) IS 'Live virtual claims older than p_grace with no live binding left: the claim a routed write made for an object the host never committed, once its binding is gone.';

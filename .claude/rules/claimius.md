@@ -82,3 +82,4 @@ Write functions return one jsonb keyed by table: `(v -> 'claim' ->> 'id')::uuid`
 5. Stale pair: `recompute_user_object(app, user, type, id)`, rarely needed.
 6. Public surface prefixes: `get_`, `insert_`, `update_`, `delete_`, `upsert_`. `_` prefixed functions are internal.
  7. An organization or location unlinked from the app arrives on the feed as a delete and is retired on the disciple, `sa_deleted_at` set, never removed: the host's rows and the claimius rows under it keep their references, and the access derivation gives nothing under a retired organization.
+ 8. A routed write the host's own transaction then failed after leaves its binding or virtual claim on the prophet; the disciple's leader removes those every 10 minutes through `CleanOrphans`, over `get_orphan_bindings` and `get_orphan_claims`, after a 10 minute grace. Never on the request path.

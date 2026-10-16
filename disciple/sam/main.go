@@ -121,7 +121,7 @@ func (r *Replica) Pull(ctx context.Context) {
 	}
 	backoff := time.Second
 	failed := 0
-	var drained, moved time.Time
+	var drained, moved, cleaned time.Time
 	for {
 		wait := activeInterval
 		pulling, err := r.pulling(ctx)
@@ -178,6 +178,12 @@ func (r *Replica) Pull(ctx context.Context) {
 			drained = time.Now()
 			if _, err := r.DB.PostAccessDiffDrain(ctx, drainPairs); err != nil {
 				report(fmt.Errorf("drain access_diff: %w", err))
+			}
+		}
+		if r.Peer == nil && time.Since(cleaned) >= cleanInterval {
+			cleaned = time.Now()
+			if _, err := r.CleanOrphans(ctx); err != nil {
+				report(fmt.Errorf("clean orphans: %w", err))
 			}
 		}
 		select {
