@@ -2215,13 +2215,15 @@ DROP FUNCTION IF EXISTS claimius.update_claim(UUID, TEXT, TEXT, INTEGER, BOOLEAN
 DROP FUNCTION IF EXISTS claimius.update_claim(UUID, TEXT, TEXT, INTEGER, BOOLEAN);
 DROP FUNCTION IF EXISTS claimius.update_claim(uuid,text,text,integer,boolean);
 
+DROP FUNCTION IF EXISTS claimius.update_claim(UUID, TEXT, TEXT, INTEGER, BOOLEAN, INTEGER);
 CREATE OR REPLACE FUNCTION claimius.update_claim(
     p_claim_id          UUID,
     p_name              TEXT DEFAULT NULL,
     p_description       TEXT DEFAULT NULL,
     p_sa_access         INTEGER DEFAULT NULL,
     p_inherits          BOOLEAN DEFAULT NULL,
-    p_level             INTEGER DEFAULT NULL
+    p_level             INTEGER DEFAULT NULL,
+    p_type              claimius.claim_type DEFAULT NULL
 ) RETURNS JSONB AS $$
 DECLARE
     v_row    claimius.claim;
@@ -2249,13 +2251,14 @@ BEGIN
                               sa_access   = coalesce(NULLIF(v_access, 0), sa_access),
                               inherits    = coalesce(p_inherits, inherits),
                               level       = coalesce(p_level, level)
+                              , type        = coalesce(p_type, type)
     WHERE id = p_claim_id
     RETURNING * INTO v_row;
     RETURN jsonb_build_object('claim', to_jsonb(v_row));
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius.update_claim(p_claim_id uuid, p_name text, p_description text, p_sa_access integer, p_inherits boolean, p_level integer) IS 'Patches selected fields on a claim. p_sa_access is expanded on grant claims so owner implies write+read+execute, write implies read+execute, execute implies read. Member bit 0x20 stands alone. Deny claims keep the supplied bits verbatim. Empty p_name and zero p_sa_access are treated as preserve so PATCH callers that send only one field do not wipe the others. A mask with no bit besides deny is refused with SQLSTATE 22023.';
+COMMENT ON FUNCTION claimius.update_claim(p_claim_id uuid, p_name text, p_description text, p_sa_access integer, p_inherits boolean, p_level integer, p_type claimius.claim_type) IS 'Patches selected fields on a claim, type included. p_sa_access is expanded on grant claims so owner implies write+read+execute, write implies read+execute, execute implies read. Member bit 0x20 stands alone. Deny claims keep the supplied bits verbatim. Empty p_name and zero p_sa_access are treated as preserve so PATCH callers that send only one field do not wipe the others. A mask with no bit besides deny is refused with SQLSTATE 22023.';
 
 DROP FUNCTION IF EXISTS claimius.remove_claim(UUID, UUID);
 

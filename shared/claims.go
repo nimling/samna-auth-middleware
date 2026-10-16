@@ -229,6 +229,7 @@ func (d *DB) updateClaim(ctx context.Context, conn bun.IConn, ac *AccessClaim, c
 		access      interface{}
 		inherits    interface{}
 		level       interface{}
+		claimType   interface{}
 	)
 	if claim.HasKey("name") {
 		name = claim.Name
@@ -245,9 +246,12 @@ func (d *DB) updateClaim(ctx context.Context, conn bun.IConn, ac *AccessClaim, c
 	if claim.HasKey("level") {
 		level = claim.Level
 	}
+	if claim.HasKey("type") {
+		claimType = string(claim.Type)
+	}
 	var payload []byte
 	err := d.NewRaw(`
-		SELECT (claimius.update_claim(?, ?, ?, ?, ?, ?) -> 'claim')::jsonb
+		SELECT (claimius.update_claim(?, ?, ?, ?, ?, ?, ?::claimius.claim_type) -> 'claim')::jsonb
 	`,
 		claimID,
 		name,
@@ -255,6 +259,7 @@ func (d *DB) updateClaim(ctx context.Context, conn bun.IConn, ac *AccessClaim, c
 		access,
 		inherits,
 		level,
+		claimType,
 	).Conn(conn).Scan(ctx, &payload)
 	if err != nil {
 		return nil, err
