@@ -418,3 +418,30 @@ func TestApplyPageAppliesAnAuditRow(t *testing.T) {
 		t.Fatalf("a repeated audit row must not duplicate, got %d %v", stored, err)
 	}
 }
+
+func TestApplyPageRetiresAnUnlinkedOrganizationItsRowsStillReference(t *testing.T) {
+	db := database(t)
+	ctx := context.Background()
+	from := cursor(t)
+	orgID, claimID := uuid.New(), uuid.New()
+	page := []sam.SyncPayload{
+		organizationPayload(step(from, 1), orgID),
+		{SyncCursor: step(from, 2), Operation: "upsert", EventType: "claimius.claim", Payload: json.RawMessage(fmt.Sprintf(
+			`{"id":%q,"name":"Owner","sa_access":15,"inherits":true,"type":"user","level":0,"sa_owner_id":%q,"sa_root_id":%q,"sa_created_at":"2026-01-01T00:00:00Z","sa_updated_at":"2026-01-01T00:00:00Z"}`,
+			claimID, orgID, orgID))},
+	}
+	if err := sam.Disciple().ApplyPage(ctx, from, sam.State{Cursor: step(from, 2)}, page, ""); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	unlink := []sam.SyncPayload{{SyncCursor: step(from, 3), Operation: "delete", EventType: "claimius.organization", Payload: json.RawMessage(fmt.Sprintf(`{"id":%q}`, orgID))}}
+	if err := sam.Disciple().ApplyPage(ctx, step(from, 2), sam.State{Cursor: step(from, 3)}, unlink, ""); err != nil {
+		t.Fatalf("an organization leaving the app must apply while rows still reference it, got %v", err)
+	}
+	var deleted bool
+	if err := db.NewRaw(`SELECT sa_deleted_at IS NOT NULL FROM claimius.organization WHERE id = ?`, orgID).Scan(ctx, &deleted); err != nil || !deleted {
+		t.Fatalf("an organization leaving the app must be retired, got %v %v", deleted, err)
+	}
+	if got := cursor(t); got != step(from, 3) {
+		t.Fatalf("the cursor must move past the unlink, got %s", got)
+	}
+}

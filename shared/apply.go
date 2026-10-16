@@ -163,9 +163,9 @@ func applyDelete(ctx context.Context, idb bun.IDB, conn bun.IConn, eventType str
 	case "claimius.samna_secret":
 		return deleteEntity[SamnaSecret](ctx, idb, conn, env.ID)
 	case "claimius.organization":
-		return deleteEntity[Organization](ctx, idb, conn, env.ID)
+		return retireEntity[Organization](ctx, idb, conn, env.ID)
 	case "claimius.location":
-		return deleteEntity[Location](ctx, idb, conn, env.ID)
+		return retireEntity[Location](ctx, idb, conn, env.ID)
 	case "claimius.claim":
 		return deleteEntity[Claim](ctx, idb, conn, env.ID)
 	case "claimius.user_claim":
@@ -203,6 +203,26 @@ func deleteEntity[T any](ctx context.Context, idb bun.IDB, conn bun.IConn, id js
 	}
 	if _, err := result.RowsAffected(); err != nil {
 		return fmt.Errorf("delete %T rows: %w", entity, err)
+	}
+	return nil
+}
+
+func retireEntity[T any](ctx context.Context, idb bun.IDB, conn bun.IConn, id json.RawMessage) error {
+	var key string
+	if err := json.Unmarshal(id, &key); err != nil {
+		return fmt.Errorf("unmarshal id: %w", err)
+	}
+	entity := new(T)
+	q := idb.NewUpdate().Model(entity).
+		Set("sa_deleted_at = now()").
+		Set("sa_updated_at = now()").
+		Where("id = ?", key).
+		Where("sa_deleted_at IS NULL")
+	if conn != nil {
+		q = q.Conn(conn)
+	}
+	if _, err := q.Exec(ctx); err != nil {
+		return fmt.Errorf("retire %T: %w", entity, err)
 	}
 	return nil
 }
