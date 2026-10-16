@@ -62,3 +62,14 @@ func getRoutePath(e *echo.Echo, method, path string) string {
 	e.Router().Find(method, path, ctx)
 	return ctx.Path()
 }
+
+func TestRegisterEndpointsServesTheLift(t *testing.T) {
+	e := echo.New()
+	RegisterEndpoints(e.Group("/sam"))
+	for _, r := range e.Routes() {
+		if r.Method == http.MethodPost && r.Path == "/sam/lift" {
+			return
+		}
+	}
+	t.Fatal("POST /sam/lift must be registered for a disciple to lift its data")
+}

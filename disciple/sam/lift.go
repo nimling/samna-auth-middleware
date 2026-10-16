@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/nimling/samna-auth-middleware/v2/client"
@@ -27,6 +28,8 @@ type LiftResult struct {
 }
 
 var ErrLiftDebug = errors.New("lift: a disciple in debug mode holds its own data and lifts nothing")
+
+const liftTimeout = 30 * time.Minute
 
 var liftTables = []struct {
 	eventType string
@@ -76,7 +79,7 @@ func (r *Replica) Lift(ctx context.Context) (*LiftResult, error) {
 	var seq client.SyncCursor
 	var prophet string
 	target := r.target(state, "")
-	reqCtx := client.WithProphet(client.WithSyncSeq(client.WithTarget(ctx, target), &seq), &prophet)
+	reqCtx := client.WithProphet(client.WithSyncSeq(client.WithTarget(client.WithTimeout(ctx, liftTimeout), target), &seq), &prophet)
 	var result LiftResult
 	if err := client.Post(reqCtx, "lift", LiftRequest{Records: records}, &result); err != nil {
 		return nil, fmt.Errorf("lift: %w", err)
