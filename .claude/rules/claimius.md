@@ -78,7 +78,7 @@ Write functions return one jsonb keyed by table: `(v -> 'claim' ->> 'id')::uuid`
 1. Role grants live in `V6.0__claimius_grants.sql`; never call `_grant_prophet_roles` or `_grant_disciple_roles`.
 2. A write to an app another prophet is home for raises `P0409` with the home in the hint; `/sam` answers 409 with `SAuth-Home`. Send the write there.
 3. `replay_mode` is set only by the middleware: the sync pull, and the local copy of a routed write's answer, which goes through the same `shared.ApplyEvent` as its feed row and sets only the columns the answer carries. Never by app code.
- 4. An organization or location unlinked from the app arrives on the feed as a delete and is retired on the disciple, `sa_deleted_at` set, never removed: the host's rows and the claimius rows under it keep their references, and the access derivation gives nothing under a retired organization.
 4. Sync lag: compare `disciple_state (last_applied_txid, last_applied_seq)` with `get_sync_seq(app_id)` and `sync_consumer` on the prophet.
 5. Stale pair: `recompute_user_object(app, user, type, id)`, rarely needed.
 6. Public surface prefixes: `get_`, `insert_`, `update_`, `delete_`, `upsert_`. `_` prefixed functions are internal.
+ 7. An organization or location unlinked from the app arrives on the feed as a delete and is retired on the disciple, `sa_deleted_at` set, never removed: the host's rows and the claimius rows under it keep their references, and the access derivation gives nothing under a retired organization.
