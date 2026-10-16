@@ -517,3 +517,37 @@ func TestARoutedUpdateSendsOnlyTheColumnsTheQueryKeeps(t *testing.T) {
 		t.Fatalf("a routed update must send the columns it keeps, got %v", sent)
 	}
 }
+
+func TestARoutedAnswerKeepsTheColumnsItDoesNotCarry(t *testing.T) {
+	db := database(t)
+	ctx := context.Background()
+	clientID := uuid.New()
+	if _, err := db.ExecContext(ctx, `INSERT INTO claimius.samna_client (id, name, client_id, secret_hash, status, sa_owner_id) VALUES (?, 'Machine', ?, 'kept', 'active', ?)`,
+		clientID, uuid.New(), uuid.New()); err != nil {
+		t.Fatalf("client: %v", err)
+	}
+	prophet := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		row := map[string]any{"id": clientID.String(), "name": "Renamed", "status": "active"}
+		w.Header().Set("Content-Type", "application/json")
+		body, _ := json.Marshal(map[string]any{"data": row, "count": 1})
+		w.Write(body)
+	}))
+	defer prophet.Close()
+	t.Setenv("SAUTH_ENDPOINT", prophet.URL)
+	db.RouteToProphet = true
+	defer func() { db.RouteToProphet = false }()
+
+	if err := db.NewUpdate().Model(&sdb.SamnaClient{ID: clientID, Name: "Renamed"}).Column("name").Scan(ctx); err != nil {
+		t.Fatalf("routed update: %v", err)
+	}
+	var stored struct {
+		Name       string `bun:"name"`
+		SecretHash string `bun:"secret_hash"`
+	}
+	if err := db.NewRaw(`SELECT name, secret_hash FROM claimius.samna_client WHERE id = ?`, clientID).Scan(ctx, &stored); err != nil {
+		t.Fatalf("read client: %v", err)
+	}
+	if stored.Name != "Renamed" || stored.SecretHash != "kept" {
+		t.Fatalf("the local copy of a routed answer must set the columns it carries and keep the ones it does not, got %+v", stored)
+	}
+}

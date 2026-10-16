@@ -15,7 +15,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 	"github.com/nimling/samna-auth-middleware/v2/client"
-	"github.com/nimling/samna-auth-middleware/v2/internal/store"
 	"github.com/uptrace/bun"
 	"github.com/uptrace/bun/driver/pgdriver"
 )
@@ -230,16 +229,10 @@ func (d *DB) applyRouted(ctx context.Context, conn bun.IConn, model any, raw jso
 			if _, err := c.ExecContext(ctx, "SELECT set_config('claimius.replay_mode', 'true', true)"); err != nil {
 				return err
 			}
-			changed, err := store.Upsert(ctx, d.DB, c, result)
-			if err != nil {
+			if err := ApplyEvent(ctx, d.DB, c, "upsert", modelTableName(d, result), raw); err != nil {
 				return err
 			}
-			if changed {
-				if err := RecomputeExternal(ctx, c, modelTableName(d, result), raw); err != nil {
-					return err
-				}
-			}
-			_, err = c.ExecContext(ctx, "SELECT set_config('claimius.replay_mode', 'false', true)")
+			_, err := c.ExecContext(ctx, "SELECT set_config('claimius.replay_mode', 'false', true)")
 			return err
 		}
 		if conn != nil {
@@ -832,11 +825,10 @@ func (q *UpdateQuery) route(ctx context.Context, dest ...any) error {
 			strct := reflect.Indirect(reflect.ValueOf(q.model))
 			for _, f := range q.db.Dialect().Tables().Get(reflect.TypeOf(q.model)).Fields {
 				key, _, _ := strings.Cut(f.StructField.Tag.Get("json"), ",")
-				if key == "" || key == "-" {
-					continue
-				}
 				if slices.Contains(q.excludes, f.Name) || (len(q.columns) > 0 && !slices.Contains(q.columns, f.Name)) || (q.omitZero && f.HasZeroValue(strct)) {
 					delete(fields, key)
+					delete(fields, f.Name)
+					delete(fields, f.StructField.Tag.Get("sauth"))
 				}
 			}
 			payload = fields

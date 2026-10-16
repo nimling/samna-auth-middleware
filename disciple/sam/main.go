@@ -11,8 +11,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/nimling/samna-auth-middleware/v2/client"
 	sdb "github.com/nimling/samna-auth-middleware/v2/disciple/sdb"
-	"github.com/nimling/samna-auth-middleware/v2/internal/store"
-	"github.com/nimling/samna-auth-middleware/v2/sauth"
 	"github.com/nimling/samna-auth-middleware/v2/shared"
 	"github.com/nimling/samna-auth-middleware/v2/utils"
 	"github.com/uptrace/bun"
@@ -230,26 +228,6 @@ type SyncPayload struct {
 	Payload   json.RawMessage `json:"payload"`
 }
 
-type idEnvelope struct {
-	ID json.RawMessage `json:"id"`
-}
-
-func stripAppID(raw json.RawMessage) json.RawMessage {
-	var m map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &m); err != nil {
-		return raw
-	}
-	if _, ok := m["app_id"]; !ok {
-		return raw
-	}
-	delete(m, "app_id")
-	cleaned, err := json.Marshal(m)
-	if err != nil {
-		return raw
-	}
-	return cleaned
-}
-
 func (r *Replica) ApplyPage(ctx context.Context, from client.SyncCursor, to State, payloads []SyncPayload, reconcile string) error {
 	return r.DB.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
 		if _, err := tx.ExecContext(ctx, "SET LOCAL claimius.replay_mode = 'true'"); err != nil {
@@ -300,150 +278,7 @@ func (r *Replica) applyPeerPayload(ctx context.Context, tx bun.Tx, payload SyncP
 }
 
 func ApplyPayload(ctx context.Context, tx bun.Tx, payload SyncPayload) error {
-	if payload.EventType == "claimius.samna_app" {
-		return nil
-	}
-	payload.Payload = stripAppID(payload.Payload)
-
-	switch payload.Operation {
-	case "upsert":
-		changed, err := applyUpsert(ctx, tx, payload.EventType, payload.Payload)
-		if err != nil || !changed {
-			return err
-		}
-	case "delete":
-		if err := applyDelete(ctx, tx, payload.EventType, payload.Payload); err != nil {
-			return err
-		}
-	default:
-		return fmt.Errorf("unknown sync operation: %s", payload.Operation)
-	}
-
-	return shared.RecomputeExternal(ctx, tx, payload.EventType, payload.Payload)
-}
-
-func applyUpsert(ctx context.Context, tx bun.Tx, eventType string, raw json.RawMessage) (bool, error) {
-	switch eventType {
-	case "claimius.samna_user":
-		var incoming shared.SamnaUser
-		if err := sauth.Unmarshal(raw, &incoming); err != nil {
-			return false, fmt.Errorf("unmarshal: %w", err)
-		}
-		if _, err := tx.NewUpdate().
-			Model((*shared.SamnaUser)(nil)).
-			Set("sa_deleted_at = now()").
-			Set("sa_updated_at = now()").
-			Where("user_id = ?", incoming.UserID).
-			Where("id <> ?", incoming.ID).
-			Where("sa_deleted_at IS NULL").
-			Exec(ctx); err != nil {
-			return false, fmt.Errorf("retire superseded samna_user %s: %w", incoming.UserID, err)
-		}
-		return store.Upsert(ctx, tx, nil, &incoming)
-	case "claimius.samna_client":
-		return upsertEntity[shared.SamnaClient](ctx, tx, raw)
-	case "claimius.samna_secret":
-		return upsertEntity[shared.SamnaSecret](ctx, tx, raw)
-	case "claimius.organization":
-		return upsertEntity[shared.Organization](ctx, tx, raw)
-	case "claimius.location":
-		return upsertEntity[shared.Location](ctx, tx, raw)
-	case "claimius.claim":
-		return upsertEntity[shared.Claim](ctx, tx, raw)
-	case "claimius.user_claim":
-		return upsertEntity[shared.UserClaim](ctx, tx, raw)
-	case "claimius.claim_object":
-		return upsertEntity[shared.ClaimObject](ctx, tx, raw)
-	case "claimius.object_field":
-		return upsertEntity[shared.ObjectField](ctx, tx, raw)
-	case "claimius.user_field":
-		return upsertEntity[shared.UserField](ctx, tx, raw)
-	case "claimius.user_relation":
-		return upsertEntity[shared.UserRelation](ctx, tx, raw)
-	case "claimius.object_asset":
-		return upsertEntity[shared.ObjectAsset](ctx, tx, raw)
-	case "claimius.user_token":
-		return upsertEntity[shared.UserToken](ctx, tx, raw)
-	case "claimius.audit":
-		var row shared.Audit
-		if err := sauth.Unmarshal(raw, &row); err != nil {
-			return false, fmt.Errorf("unmarshal: %w", err)
-		}
-		res, err := tx.NewInsert().Model(&row).On("CONFLICT DO NOTHING").Exec(ctx)
-		if err != nil {
-			return false, err
-		}
-		n, err := res.RowsAffected()
-		return n > 0, err
-	default:
-		return false, fmt.Errorf("unknown event_type for upsert: %s", eventType)
-	}
-}
-
-func upsertEntity[T any](ctx context.Context, tx bun.Tx, raw json.RawMessage) (bool, error) {
-	var entity T
-	if err := sauth.Unmarshal(raw, &entity); err != nil {
-		return false, fmt.Errorf("unmarshal: %w", err)
-	}
-	return store.Upsert(ctx, tx, nil, &entity)
-}
-
-func applyDelete(ctx context.Context, tx bun.Tx, eventType string, raw json.RawMessage) error {
-	var env idEnvelope
-	if err := json.Unmarshal(raw, &env); err != nil {
-		return fmt.Errorf("unmarshal id envelope: %w", err)
-	}
-	switch eventType {
-	case "claimius.samna_user":
-		return deleteEntity[shared.SamnaUser](ctx, tx, env.ID)
-	case "claimius.samna_client":
-		return deleteEntity[shared.SamnaClient](ctx, tx, env.ID)
-	case "claimius.samna_secret":
-		return deleteEntity[shared.SamnaSecret](ctx, tx, env.ID)
-	case "claimius.organization":
-		return deleteEntity[shared.Organization](ctx, tx, env.ID)
-	case "claimius.location":
-		return deleteEntity[shared.Location](ctx, tx, env.ID)
-	case "claimius.claim":
-		return deleteEntity[shared.Claim](ctx, tx, env.ID)
-	case "claimius.user_claim":
-		return deleteEntity[shared.UserClaim](ctx, tx, env.ID)
-	case "claimius.claim_object":
-		return deleteEntity[shared.ClaimObject](ctx, tx, env.ID)
-	case "claimius.object_field":
-		return deleteEntity[shared.ObjectField](ctx, tx, env.ID)
-	case "claimius.user_field":
-		return deleteEntity[shared.UserField](ctx, tx, env.ID)
-	case "claimius.user_relation":
-		return deleteEntity[shared.UserRelation](ctx, tx, env.ID)
-	case "claimius.object_asset":
-		return deleteEntity[shared.ObjectAsset](ctx, tx, env.ID)
-	case "claimius.user_token":
-		return deleteEntity[shared.UserToken](ctx, tx, env.ID)
-	default:
-		return fmt.Errorf("delete not supported for event_type: %s", eventType)
-	}
-}
-
-func deleteEntity[T any](ctx context.Context, tx bun.Tx, id json.RawMessage) error {
-	var key string
-	if err := json.Unmarshal(id, &key); err != nil {
-		return fmt.Errorf("unmarshal id: %w", err)
-	}
-	entity := new(T)
-	result, err := tx.NewDelete().Model(entity).
-		Where("id = ?", key).Exec(ctx)
-	if err != nil {
-		return fmt.Errorf("delete %T: %w", entity, err)
-	}
-	rows, err := result.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("delete %T rows: %w", entity, err)
-	}
-	if rows == 0 {
-		sdb.Instance().Logger.Debugf("disciple sync: delete %T id %s matched no row", entity, key)
-	}
-	return nil
+	return shared.ApplyEvent(ctx, tx, nil, payload.Operation, payload.EventType, payload.Payload)
 }
 
 func (r *Replica) UpdateSeq(ctx context.Context, tx bun.Tx, from client.SyncCursor, to State) error {
