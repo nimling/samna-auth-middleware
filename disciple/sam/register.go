@@ -54,3 +54,13 @@ func RegisterCaptureRead(g *echo.Group) {
 	analytics.GET("/heat", h.GetAnalyticsHeat)
 	analytics.GET("/summary", h.GetAnalyticsSummary)
 }
+
+func RegisterCli(g *echo.Group) {
+	cli := g.Group("/cli")
+	cli.GET("", h.GetCli)
+	cli.POST("", h.PostCli)
+	cli.POST("/session", h.PostCliSession)
+	cli.POST("/token", h.PostCliToken)
+	cli.POST("/refresh", h.PostCliRefresh)
+	cli.POST("/logout", h.PostCliLogout)
+}
