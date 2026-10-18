@@ -30,8 +30,9 @@ func PostGuestToken(ctx echo.Context) error {
 	}
 
 	appID, _ := ctx.Get("app_id").(uuid.UUID)
+	appSlug, _ := ctx.Get("app_slug").(string)
 	masterKey, _ := ctx.Get("app_key").(encryption.MasterKeyPair)
-	token, err := sdb.IssueGuestToken(ctx.Request().Context(), appID, masterKey, body.ClaimID, body.UserID, "")
+	token, err := sdb.IssueGuestToken(ctx.Request().Context(), appID, appSlug, masterKey, body.ClaimID, body.UserID, "")
 	if errors.Is(err, shared.ErrNotFound) {
 		return respond.Error(ctx, http.StatusNotFound, "Not found")
 	}

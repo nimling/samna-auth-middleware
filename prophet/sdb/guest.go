@@ -27,7 +27,7 @@ type GuestTokenResponse struct {
 	EndsAt          *time.Time `json:"ends_at,omitempty"`
 }
 
-func IssueGuestToken(ctx context.Context, appID uuid.UUID, masterKey encryption.MasterKeyPair, claimID uuid.UUID, userID uuid.UUID, issuer string) (*GuestTokenResponse, error) {
+func IssueGuestToken(ctx context.Context, appID uuid.UUID, appSlug string, masterKey encryption.MasterKeyPair, claimID uuid.UUID, userID uuid.UUID, issuer string) (*GuestTokenResponse, error) {
 	guestUserID := uuid.NewSHA1(appID, []byte("guest:"+claimID.String()))
 
 	var payload []byte
@@ -57,7 +57,7 @@ func IssueGuestToken(ctx context.Context, appID uuid.UUID, masterKey encryption.
 		issuer = utils.Cfg().Endpoint
 	}
 
-	accessToken, expiresIn, err := signGuestAccessToken(masterKey.PrivateKey, appID, guestUserID, issuer, guest.UserClaim.StartsAt, guest.UserClaim.EndsAt)
+	accessToken, expiresIn, err := signGuestAccessToken(masterKey.PrivateKey, appID, appSlug, guestUserID, issuer, guest.UserClaim.StartsAt, guest.UserClaim.EndsAt)
 	if err != nil {
 		return nil, fmt.Errorf("sign access token: %w", err)
 	}
@@ -77,7 +77,7 @@ type guestClaims struct {
 	jwt.RegisteredClaims
 }
 
-func signGuestAccessToken(privateKey *rsa.PrivateKey, appID, userID uuid.UUID, issuer string, startsAt, endsAt *time.Time) (string, int, error) {
+func signGuestAccessToken(privateKey *rsa.PrivateKey, appID uuid.UUID, appSlug string, userID uuid.UUID, issuer string, startsAt, endsAt *time.Time) (string, int, error) {
 	now := time.Now()
 	nbf := now
 	if startsAt != nil && startsAt.After(now) {
@@ -89,6 +89,7 @@ func signGuestAccessToken(privateKey *rsa.PrivateKey, appID, userID uuid.UUID, i
 			ID:        uuid.NewString(),
 			Subject:   userID.String(),
 			Issuer:    issuer,
+			Audience:  jwt.ClaimStrings{appSlug},
 			IssuedAt:  jwt.NewNumericDate(now),
 			NotBefore: jwt.NewNumericDate(nbf),
 		},
