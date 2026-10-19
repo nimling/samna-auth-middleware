@@ -13,6 +13,7 @@ const (
 	PKCEVerifierCookie = "sauth_pkce_verifier"
 	OAuthStateCookie   = "sauth_oauth_state"
 	LoginNextCookie    = "sauth_login_next"
+	CliTargetCookie    = "sauth_cli_target"
 )
 
 func GenerateVerifier() (string, error) {
@@ -72,4 +73,9 @@ func EndSessionURL() (string, error) {
 		parsed.RawQuery = q.Encode()
 	}
 	return parsed.String(), nil
+}
+
+func RevokeURLFor(slug string) (string, error) {
+	endpoint := utils.Cfg().Endpoint
+	return joinURL(endpoint, fmt.Sprintf("api/app/%s/oauth/revoke", slug))
 }

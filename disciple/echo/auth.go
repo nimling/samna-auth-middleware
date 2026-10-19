@@ -35,15 +35,32 @@ func GetLogin(ctx echo.Context) error {
 		utils.WriteCookie(ctx, &http.Cookie{Name: client.LoginNextCookie, Value: next, Path: "/", MaxAge: 600})
 	}
 
+	challenge := client.ChallengeS256(verifier)
+	cliTarget := ""
+	if cliChallenge := ctx.QueryParam("cli_challenge"); cliChallenge != "" {
+		target, ok := getCliTarget(cliChallenge, ctx.QueryParam("cli_redirect"), ctx.QueryParam("cli_state"))
+		if !ok {
+			return respondError(ctx, http.StatusBadRequest, cliTargetRefusal)
+		}
+		challenge = cliChallenge
+		cliTarget = target
+	}
+
 	slug := utils.Cfg().AppSlug
 	redirectURI := utils.Cfg().RedirectURI
-	authURL, err := client.AuthorizeURL(slug, redirectURI, state, client.ChallengeS256(verifier))
+	authURL, err := client.AuthorizeURL(slug, redirectURI, state, challenge)
 	if err != nil {
 		ctx.Logger().Errorf("GetLogin authorize url: %v", err)
 		return respondError(ctx, http.StatusInternalServerError, "Internal Server Error")
 	}
 
-	utils.WriteCookie(ctx, &http.Cookie{Name: client.PKCEVerifierCookie, Value: verifier, Path: "/", MaxAge: 600})
+	if cliTarget != "" {
+		utils.ClearCookie(ctx, client.PKCEVerifierCookie)
+		utils.WriteCookie(ctx, &http.Cookie{Name: client.CliTargetCookie, Value: cliTarget, Path: "/", MaxAge: 600})
+	} else {
+		utils.ClearCookie(ctx, client.CliTargetCookie)
+		utils.WriteCookie(ctx, &http.Cookie{Name: client.PKCEVerifierCookie, Value: verifier, Path: "/", MaxAge: 600})
+	}
 	utils.WriteCookie(ctx, &http.Cookie{Name: client.OAuthStateCookie, Value: state, Path: "/", MaxAge: 600})
 
 	return Redirect(ctx, http.StatusTemporaryRedirect, authURL)
@@ -77,6 +94,13 @@ func GetCallback(ctx echo.Context) error {
 		utils.ClearCookie(ctx, client.PKCEVerifierCookie)
 		utils.ClearCookie(ctx, client.OAuthStateCookie)
 		return Redirect(ctx, http.StatusFound, resume)
+	}
+
+	if cliCookie, cliErr := ctx.Cookie(client.CliTargetCookie); cliErr == nil && cliCookie.Value != "" {
+		utils.ClearCookie(ctx, client.CliTargetCookie)
+		utils.ClearCookie(ctx, client.OAuthStateCookie)
+		utils.ClearCookie(ctx, client.LoginNextCookie)
+		return respondCliCode(ctx, cliCookie.Value, code)
 	}
 
 	verifierCookie, verifierErr := ctx.Cookie(client.PKCEVerifierCookie)

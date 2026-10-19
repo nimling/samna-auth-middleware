@@ -41,8 +41,8 @@ func getLoginNext(t *testing.T, target string, referer string) string {
 }
 
 func TestGetLoginRemembersNextQuery(t *testing.T) {
-	if got := getLoginNext(t, "/api/auth/login?next=%2Fapi%2Fauth%2Fcli%3Fcode%3Dabc", "http://localhost:4200/other"); got != "/api/auth/cli?code=abc" {
-		t.Errorf("sauth_login_next = %q, want /api/auth/cli?code=abc", got)
+	if got := getLoginNext(t, "/api/auth/login?next=%2Fsettings%3Ftab%3Dkeys", "http://localhost:4200/other"); got != "/settings?tab=keys" {
+		t.Errorf("sauth_login_next = %q, want /settings?tab=keys", got)
 	}
 }
 
@@ -70,7 +70,7 @@ func TestGetLoginCarriesNextInTheState(t *testing.T) {
 	t.Setenv("SAUTH_REDIRECT_URI", "http://localhost:4200/api/auth/callback")
 
 	e := echo.New()
-	req := httptest.NewRequest(http.MethodGet, "/api/auth/login?next=%2Fcli%3Flogin%3Dabc", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/auth/login?next=%2Fsettings%3Ftab%3Dkeys", nil)
 	rec := httptest.NewRecorder()
 	ctx := e.NewContext(req, rec)
 
@@ -81,7 +81,7 @@ func TestGetLoginCarriesNextInTheState(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Location: %v", err)
 	}
-	if state := location.Query().Get("state"); !strings.HasSuffix(state, ".L2NsaT9sb2dpbj1hYmM") {
+	if state := location.Query().Get("state"); !strings.HasSuffix(state, ".L3NldHRpbmdzP3RhYj1rZXlz") {
 		t.Errorf("state = %q, want the next path encoded after the dot", state)
 	}
 }

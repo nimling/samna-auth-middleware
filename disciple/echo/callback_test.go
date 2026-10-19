@@ -226,14 +226,14 @@ func TestGetCallbackResumesTheLoginFromTheStateInAnotherBrowser(t *testing.T) {
 	t.Setenv("SAUTH_PAGE_REDIRECT", "http://localhost:4200/")
 
 	e := echo.New()
-	req := httptest.NewRequest(http.MethodGet, "/api/auth/callback?code=abc&state=st1.L2NsaT9sb2dpbj1hYmM", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/auth/callback?code=abc&state=st1.L3NldHRpbmdzP3RhYj1rZXlz", nil)
 	rec := httptest.NewRecorder()
 	ctx := e.NewContext(req, rec)
 
 	if err := saecho.GetCallback(ctx); err != nil {
 		t.Fatalf("GetCallback: %v", err)
 	}
-	if location := rec.Header().Get("Location"); location != "/api/auth/login?next=%2Fcli%3Flogin%3Dabc" {
+	if location := rec.Header().Get("Location"); location != "/api/auth/login?next=%2Fsettings%3Ftab%3Dkeys" {
 		t.Fatalf("Location = %q, want the login restarted with the next path from the state", location)
 	}
 }

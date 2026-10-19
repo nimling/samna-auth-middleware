@@ -82,7 +82,6 @@ body {
   accent-color: var(--auth-accent);
   caret-color: var(--auth-accent);
 }
-body[data-state="approved"] { --cli-ring: color-mix(in oklab, var(--auth-success), transparent 25%); }
 body[data-state="failed"] { --cli-ring: color-mix(in oklab, var(--auth-danger), transparent 25%); }
 p, h1 { margin: 0; }
 .cli-dialog {
@@ -130,7 +129,6 @@ p, h1 { margin: 0; }
   background: var(--auth-accent);
   box-shadow: 0 0 0.8em var(--auth-accent);
 }
-body[data-state="approved"] .cli-mark::before { background: var(--auth-success); box-shadow: 0 0 0.8em var(--auth-success); }
 body[data-state="failed"] .cli-mark::before { background: var(--auth-danger); box-shadow: 0 0 0.8em var(--auth-danger); }
 .cli-title {
   font-family: "Bricolage Grotesque", var(--auth-font);
@@ -146,8 +144,6 @@ body[data-state="failed"] .cli-mark::before { background: var(--auth-danger); bo
   text-wrap: pretty;
 }
 .cli-text code { font-family: var(--auth-font-mono); letter-spacing: 0.12em; color: var(--auth-ink); }
-.cli-done, body[data-state="approved"] :is(.cli-pending, form) { display: none; }
-body[data-state="approved"] .cli-done { display: revert; }
 form { display: grid; gap: clamp(1em, 2.5vw, 1.6em); }
 .cli-label {
   display: grid;
@@ -210,83 +206,18 @@ body[data-state="failed"] #result { color: var(--auth-danger); }
 @media (prefers-reduced-motion: reduce) {
   .cli-dialog, .cli-code, .cli-approve { transition: none; }
 }
+.cli-paste { font-family: var(--auth-font-mono); font-size: 0.85em; color: var(--auth-ink); overflow-wrap: anywhere; user-select: all; }
 </style>
 </head>
-<body data-state="pending">
-<main class="cli-dialog" aria-labelledby="cli-title" aria-live="polite">
+<body>
+<main class="cli-dialog" aria-labelledby="cli-title">
 <span class="cli-mark">{{.App}} cli</span>
-<h1 id="cli-title" class="cli-title"><span class="cli-pending">Sign in the {{.App}} cli</span><span class="cli-done">Approved, return to your terminal</span></h1>
-<p class="cli-text cli-pending">Approve only a code your own terminal printed. The cli then acts as you on this server.</p>
-<p class="cli-text cli-done">Return to your terminal, the cli now acts as you on this server.</p>
-<p id="countdown" class="cli-countdown cli-done" role="status"></p>
-<form id="approval">
-<label class="cli-label" for="code">Code
-<input id="code" class="cli-code" value="{{.Code}}" autocomplete="off" autocapitalize="characters" spellcheck="false" inputmode="text">
-</label>
-<button id="approve" class="cli-approve" type="submit">Approve</button>
-<p id="result" class="cli-text" role="alert"></p>
-</form>
+<h1 id="cli-title" class="cli-title">Paste this code in your terminal</h1>
+<p class="cli-text">Paste it only into the terminal where you started the sign in. It works once, for the next few minutes, and only together with that terminal's own secret.</p>
+<p class="cli-paste">{{.Code}}</p>
 </main>
 <footer class="cli-footer">
-<span class="cli-rights">© <span id="year"></span> Samna. All rights reserved.</span>
-
+<span class="cli-rights">Samna</span>
 </footer>
-<script>
-document.getElementById("year").textContent = new Date().getFullYear();
-const csrfCookie = {{.CSRFCookie}};
-const csrfHeader = {{.CSRFHeader}};
-const approvalPath = {{.ApprovalPath}};
-const login = {{.Login}};
-const closeSeconds = 5;
-const closeCheckDelay = 400;
-function closeTab() {
-  const countdown = document.getElementById("countdown");
-  window.close();
-  setTimeout(() => {
-    if (!window.closed) countdown.textContent = "You can close this tab";
-  }, closeCheckDelay);
-}
-function startCountdown() {
-  const countdown = document.getElementById("countdown");
-  let seconds = closeSeconds;
-  countdown.textContent = "This tab closes in " + seconds + " s";
-  const timer = setInterval(() => {
-    seconds -= 1;
-    if (seconds > 0) {
-      countdown.textContent = "This tab closes in " + seconds + " s";
-      return;
-    }
-    clearInterval(timer);
-    closeTab();
-  }, 1000);
-}
-document.getElementById("approval").addEventListener("submit", async (event) => {
-  event.preventDefault();
-  const button = document.getElementById("approve");
-  const result = document.getElementById("result");
-  const code = document.getElementById("code").value;
-  const entry = document.cookie.split("; ").find((pair) => pair.startsWith(csrfCookie + "="));
-  const token = entry ? decodeURIComponent(entry.slice(csrfCookie.length + 1)) : "";
-  button.disabled = true;
-  result.textContent = "";
-  const response = await fetch(approvalPath, {
-    method: "POST",
-    credentials: "same-origin",
-    headers: { "Content-Type": "application/json", [csrfHeader]: token },
-    body: JSON.stringify({ login: login, code: code }),
-  }).catch(() => null);
-  const payload = response ? await response.json().catch(() => ({})) : {};
-  button.disabled = false;
-  if (response && response.ok) {
-    document.getElementById("code").value = "";
-    history.replaceState(null, "", location.pathname);
-    document.body.dataset.state = "approved";
-    startCountdown();
-    return;
-  }
-  document.body.dataset.state = "failed";
-  result.textContent = response ? ((payload.error && payload.error.message) || response.statusText) : "The server could not be reached.";
-});
-</script>
 </body>
 </html>

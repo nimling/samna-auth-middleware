@@ -113,10 +113,30 @@ func GetOpenIDConfiguration(ctx context.Context, configURL string) (*OpenIDConfi
 	return &config, nil
 }
 
-func postToken(ctx context.Context, tokenURL string, slug string, secret string, form url.Values) (*ResponseToken, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, tokenURL, strings.NewReader(form.Encode()))
+type TokenError struct {
+	Status      int    `json:"-"`
+	Code        string `json:"error"`
+	Description string `json:"error_description,omitempty"`
+}
+
+func (e *TokenError) Error() string {
+	if e.Description != "" {
+		return fmt.Sprintf("auth server returned %d %s: %s", e.Status, e.Code, e.Description)
+	}
+	return fmt.Sprintf("auth server returned %d %s", e.Status, e.Code)
+}
+
+func (e *TokenError) Unwrap() error {
+	if e.Status == http.StatusUnauthorized {
+		return ErrUnauthorized
+	}
+	return nil
+}
+
+func postAuth(ctx context.Context, target string, slug string, secret string, form url.Values, dest any) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, target, strings.NewReader(form.Encode()))
 	if err != nil {
-		return nil, fmt.Errorf("create request: %w", err)
+		return fmt.Errorf("create request: %w", err)
 	}
 
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -129,22 +149,41 @@ func postToken(ctx context.Context, tokenURL string, slug string, secret string,
 	httpClient := &http.Client{Timeout: 3 * time.Second}
 	resp, err := httpClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("send request: %w", err)
+		return fmt.Errorf("send request: %w", err)
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
-		if resp.StatusCode == http.StatusUnauthorized {
-			return nil, fmt.Errorf("auth server returned status unauthorized: %w", ErrUnauthorized)
-		}
-		return nil, fmt.Errorf("auth server returned status %d", resp.StatusCode)
-	}
-
-	token, err := DecodeJSON[ResponseToken](resp.Body, nil)
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
-		return nil, fmt.Errorf("decode response: %w", err)
+		return fmt.Errorf("read response: %w", err)
+	}
+	var envelope ResponseEnvelope
+	if json.Unmarshal(raw, &envelope) == nil && len(envelope.Data) > 0 {
+		raw = envelope.Data
 	}
 
+	if resp.StatusCode != http.StatusOK {
+		tokenErr := &TokenError{Status: resp.StatusCode}
+		_ = json.Unmarshal(raw, tokenErr)
+		if tokenErr.Code == "" {
+			tokenErr.Code = http.StatusText(resp.StatusCode)
+		}
+		return tokenErr
+	}
+	if dest == nil {
+		return nil
+	}
+	if err := json.Unmarshal(raw, dest); err != nil {
+		return fmt.Errorf("decode response: %w", err)
+	}
+	return nil
+}
+
+func postToken(ctx context.Context, tokenURL string, slug string, secret string, form url.Values) (*ResponseToken, error) {
+	var token ResponseToken
+	if err := postAuth(ctx, tokenURL, slug, secret, form, &token); err != nil {
+		return nil, err
+	}
 	return &token, nil
 }
 
@@ -170,4 +209,11 @@ func PostClientCredentials(ctx context.Context, tokenURL string, clientID string
 	form.Set("client_id", clientID)
 	form.Set("client_secret", clientSecret)
 	return postToken(ctx, tokenURL, "", "", form)
+}
+
+func PostRevoke(ctx context.Context, revokeURL string, slug string, secret string, refreshToken string) error {
+	form := url.Values{}
+	form.Set("token", refreshToken)
+	form.Set("token_type_hint", "refresh_token")
+	return postAuth(ctx, revokeURL, slug, secret, form, nil)
 }

@@ -2,6 +2,7 @@ package smw
 
 import (
 	"net/http"
+	"strconv"
 	"sync"
 	"time"
 
@@ -30,6 +31,7 @@ func RateLimiter(limit int, period time.Duration) echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(ctx echo.Context) error {
 			if !l.allow(ctx.RealIP()) {
+				ctx.Response().Header().Set("Retry-After", strconv.Itoa(int(l.period.Seconds())))
 				return ctx.String(http.StatusTooManyRequests, "Too Many Requests")
 			}
 			return next(ctx)

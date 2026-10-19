@@ -1,8 +1,11 @@
 package sam
 
 import (
+	"time"
+
 	"github.com/labstack/echo/v4"
 	h "github.com/nimling/samna-auth-middleware/v2/disciple/echo"
+	"github.com/nimling/samna-auth-middleware/v2/smw"
 	"github.com/nimling/samna-auth-middleware/v2/uptime"
 )
 
@@ -56,11 +59,8 @@ func RegisterCaptureRead(g *echo.Group) {
 }
 
 func RegisterCli(g *echo.Group) {
+	limit := smw.RateLimiter(60, time.Minute)
 	cli := g.Group("/cli")
-	cli.GET("", h.GetCli)
-	cli.POST("", h.PostCli)
-	cli.POST("/session", h.PostCliSession)
-	cli.POST("/token", h.PostCliToken)
-	cli.POST("/refresh", h.PostCliRefresh)
-	cli.POST("/logout", h.PostCliLogout)
+	cli.POST("/token", h.PostCliToken, limit)
+	cli.POST("/revoke", h.PostCliRevoke, limit)
 }
