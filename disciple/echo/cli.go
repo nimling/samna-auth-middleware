@@ -82,7 +82,7 @@ func PostCliToken(ctx echo.Context) error {
 	}
 	if err != nil {
 		var tokenErr *client.TokenError
-		if errors.As(err, &tokenErr) && tokenErr.Status < http.StatusInternalServerError && tokenErr.Status != http.StatusUnauthorized {
+		if errors.As(err, &tokenErr) && tokenErr.Status < http.StatusInternalServerError && tokenErr.Code != "invalid_client" {
 			return respondOAuthError(ctx, http.StatusBadRequest, tokenErr.Code, tokenErr.Description)
 		}
 		ctx.Logger().Errorf("PostCliToken: %v", err)

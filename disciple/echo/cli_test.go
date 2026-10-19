@@ -220,3 +220,23 @@ func TestPostCliRevokeRevokesTheClisRefreshFamily(t *testing.T) {
 		t.Errorf("status = %d calls = %v forms = %v", rec.Code, prophet.paths, prophet.forms)
 	}
 }
+
+func TestPostCliTokenRelaysADeadRefreshTokenAsInvalidGrant(t *testing.T) {
+	(&fakeProphet{status: http.StatusUnauthorized, body: `{"data":{"error":"invalid_grant","error_description":"refresh token expired"},"count":1}`}).serve(t)
+
+	rec := callCli(t, http.MethodPost, "/api/auth/cli/token", url.Values{"grant_type": {"refresh_token"}, "refresh_token": {"dead"}}, nil, saecho.PostCliToken)
+
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), `"error":"invalid_grant"`) {
+		t.Errorf("status = %d body = %s, want 400 invalid_grant so the cli asks to log in again", rec.Code, rec.Body.String())
+	}
+}
+
+func TestPostCliTokenHidesTheServicesOwnClientFailure(t *testing.T) {
+	(&fakeProphet{status: http.StatusUnauthorized, body: `{"error":"invalid_client","error_description":"invalid app secret"}`}).serve(t)
+
+	rec := callCli(t, http.MethodPost, "/api/auth/cli/token", url.Values{"grant_type": {"refresh_token"}, "refresh_token": {"any"}}, nil, saecho.PostCliToken)
+
+	if rec.Code != http.StatusBadGateway || !strings.Contains(rec.Body.String(), `"error":"server_error"`) {
+		t.Errorf("status = %d body = %s, want 502 server_error: the service's own secret is not the cli's fault", rec.Code, rec.Body.String())
+	}
+}
