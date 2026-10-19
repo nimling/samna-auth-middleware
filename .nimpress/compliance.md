@@ -389,7 +389,7 @@ curl -sI https://<tst-connect-host>/ | grep -i strict-transport-security
 
 ```bash
 grep -rn 'cli_login' disciple/database disciple/sdb
-just test disciple/echo
+just test 'TestGetLoginSendsTheClisChallengeAndKeepsNoVerifier|TestGetCallbackHandsTheCodeToTheLoopbackWithoutExchanging'
 ```
 
 4. Pass: no table or query in the disciple set; `TestGetLoginSendsTheClisChallengeAndKeepsNoVerifier` and `TestGetCallbackHandsTheCodeToTheLoopbackWithoutExchanging` pass.
@@ -405,7 +405,7 @@ just test disciple/echo
 3. Method:
 
 ```bash
-just test disciple/echo
+just test 'TestGetLoginSendsTheClisChallengeAndKeepsNoVerifier|TestGetCallbackHandsTheCodeToTheLoopbackWithoutExchanging'
 ```
 
 4. Pass: `TestGetLoginRefusesANonLoopbackRedirect` and `TestGetLoginWithoutCliClearsAStaleCliTarget` pass.
@@ -421,7 +421,7 @@ just test disciple/echo
 3. Method:
 
 ```bash
-just test disciple/echo
+just test 'TestGetLoginSendsTheClisChallengeAndKeepsNoVerifier|TestGetCallbackHandsTheCodeToTheLoopbackWithoutExchanging'
 ```
 
 4. Pass: `TestPostCliTokenExchangesTheCodeWithTheClisVerifier`, `TestPostCliTokenRelaysTheProphetsRefusal` and `TestPostCliRevokeRevokesTheClisRefreshFamily` pass.
