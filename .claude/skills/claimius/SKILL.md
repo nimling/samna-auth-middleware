@@ -92,7 +92,7 @@ WHERE id = :recipe_id;
 
 1. It calls no claimius write function from its own SQL or Go.
 2. It checks with `sdb.Instance().MutationAccess`, filters listings with `sdb.ObjectWhere`, and writes `claim`, `claim_object` and `user_claim` through the builder, which routes them to the prophet. Which call when: `references/access.md`.
-3. The handler shape, the way `bookable_server_test` does it: the workspace rule `.claude/rules/claimius.md`.
+3. The handler shape, the way `bookable_server` does it: the workspace rule `.claude/rules/claimius.md`.
 4. On a disciple only the sync layer writes claimius tables.
 
 ## Binding and cascade
