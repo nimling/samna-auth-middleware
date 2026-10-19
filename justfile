@@ -17,24 +17,21 @@ build:
 tidy:
     go mod tidy
 
-test target='':
+test name="":
     #!/usr/bin/env bash
     set -e
     export PGSSLMODE=disable
-    if [ -n "{{target}}" ]; then
-        go test ./{{target}}/...
-        exit
-    fi
-    go test ./...
+    run=(); [ -z {{quote(name)}} ] || run=(-run {{quote(name)}})
+    go test "${run[@]}" ./...
     tmp=$(mktemp -d); names=""
     trap 'docker rm -f $names >/dev/null 2>&1; rm -rf "$tmp"' EXIT
     db() { bash scripts/db.sh "$1" > "$tmp/$2"; names="$names $(sed -n 's/^name=//p' "$tmp/$2")"; sed -n 's/^export //p' "$tmp/$2" | tr ' ' '\n' | sed "s/^/export $3/" > "$tmp/$2.env"; }
     db disciple disciple ""
-    (. "$tmp/disciple.env"; go test -tags dbtest -count=1 -p 1 ./shared/... ./disciple/... ./smw/...)
+    (. "$tmp/disciple.env"; go test -tags dbtest -count=1 -p 1 "${run[@]}" ./shared/... ./disciple/... ./smw/...)
     db prophet prophet ""
     db prophet peer PEER_
     db disciple federated DISCIPLE_
-    (. "$tmp/prophet.env"; . "$tmp/peer.env"; . "$tmp/federated.env"; go test -tags dbtest -count=1 -p 1 ./prophet/...)
+    (. "$tmp/prophet.env"; . "$tmp/peer.env"; . "$tmp/federated.env"; go test -tags dbtest -count=1 -p 1 "${run[@]}" ./prophet/...)
 
 verify:
     #!/usr/bin/env bash

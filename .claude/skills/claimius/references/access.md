@@ -1,5 +1,7 @@
 # Access lookups on `*DB`
 
+The Go access calls on `shared.DB`, `samna_auth_middleware/shared/access.go`, reached through `sdb.Instance()` on a disciple.
+
 `ErrNoAccess` is 403 on writes and a filter on reads, never 500. `ErrInternalServer` is 500.
 
 | Call | SQL | Use when |

@@ -1,85 +1,57 @@
 ---
 name: deploy
-description: Build, test, mirror, commit, push, and tag a new version of samna_auth_middleware so both the Go module and the @nimling typescript package go out together.
+description: Releases samna_auth_middleware. Tests, mirrors the Go change into the @nimling typescript package, builds both, commits, pushes and tags through sbump so the Go module and the typescript package go out in one tag. Use when the user says deploy, release or ship in this repo, or asks for a patch, minor or major release of the middleware. Not for running the tests alone, which is the test skill, not for moving a consumer onto the new tag, which is that consumer's work, and not for the sbump flags themselves, which is the sbump skill.
+argument-hint: [patch|minor|major]
+allowed-tools: Bash(just *), Bash(git *), Bash(cd ts *), Bash(pnpm *), Bash(sbump *)
 ---
 
-# deploy
+The release of this repo, in order, stopping on the first failure with the error verbatim. The test recipes are the `test` skill; the standing release rules are `.claude/rules/deploy.md`; sbump itself is the `sbump` skill.
 
-Ship a new version of `samna_auth_middleware`. The repo publishes two artefacts that must stay in sync: the Go module consumed via `go get github.com/nimling/samna-auth-middleware/v2` and the typescript package under `ts/` consumed via npm. A deploy that ships the Go side without the typescript mirror is a deploy that breaks consumers.
+## 1. Tests for the change
 
-When the user says "deploy" in this repo, execute these steps in order. Stop on the first failure and surface the error.
+1. Read the change with `git diff` and `git status` and name its observable surface.
+2. New behaviour in `shared/`, `prophet/`, `disciple/`, `smw/`, `client/`, `utils/` or `uptime/` with an observable contract gets a test beside the package, `<package>/<name>_test.go`, with the `dbtest` build tag when it needs a database. A SQL contract gets a pgTAP file under `test/sql/<role>/`, one per role that carries the change.
+3. Anything that changes a return value, a sentinel error, an http status, a SQL function call, a parameter shape, an enum or a struct field is covered. Trivial moves and rename only diffs need none.
+4. The test hits the public function and asserts on the returned value or the error sentinel, never on the internal call graph.
 
-## 1. Write or update Go tests for meaningful parts of the change
+## 2. Run the tests
 
-Every piece of new behaviour in `shared/`, `prophet/`, `disciple/`, `smw/`, `client/`, `utils/` or `uptime/` that has an observable contract needs a test beside the package it covers, as `<package>/<name>_test.go`, with the `dbtest` build tag when it needs a database. A SQL contract gets a pgTAP file under `test/sql/<role>/`, one per role that carries the change. Look at the diff with `git diff` and `git status`, identify the meaningful surface, and either extend an existing test file or add one. Trivial moves and rename only diffs do not need a new test. Anything that changes a return value, a sentinel error, an http status, a SQL function call, a parameter shape, an enum, or a struct field MUST be covered.
+1. `just test`, as the `test` skill describes. A change touching a route adds `just test-hurl`; one touching the sync or the access functions adds `just verify`.
+2. Failure: report the failing test names and stop. No commit, no bump.
 
-The test must assert the observable contract, not the internal call graph. Hit the public function, assert on the returned value or error sentinel.
+## 3. Mirror into `ts/`
 
-## 2. Run the Go tests
+1. Go types with a counterpart in `ts/src/types.ts`, from `shared/models.go` or elsewhere, change there too, matched by json tag, not Go field name.
+2. A new or changed sentinel error gets a matching named export in `ts/src/`.
+3. A new endpoint, query parameter, header or status the client speaks goes into `ts/src/client.ts`, `ts/src/fetch.ts` or `ts/src/session.ts`.
+4. A contract with a browser side assertion updates `ts/src/<name>.test.ts`.
+5. `ts/src/index.ts` keeps every export, the stream reader from `./stream` included: `.claude/rules/deploy.md` Every change 3.
+6. A Go diff with no browser facing surface makes this step a no op; say so in the commit message.
 
-```
-just test
-```
+## 4. Build
 
-Runs `go test ./...`, then the `dbtest` tagged suites against role databases `scripts/db.sh` builds with `smig up` in local postgres containers: `./shared/... ./disciple/... ./smw/...` on the disciple set, and `./prophet/...` on the prophet set with a peer prophet exported as `PEER_PG*` and a disciple exported as `DISCIPLE_PG*` for the federation tests. The containers are removed afterwards. `smig test` is not part of testing and is never run. `just test <package>` runs `go test ./<package>/...` alone. `just test-hurl` runs the hurl files under `test/hurl/` against the example disciple; run it when the change touches a route. Failure: report the failing test names and stop. Do not commit, do not bump.
+1. `just build` runs `go build ./...`. Failure: report the build output and stop.
+2. `cd ts && pnpm install --frozen-lockfile && pnpm run build` type checks and emits `ts/dist/`, which is never committed. Failure: report the errors and stop.
 
-## 3. Mirror the Go change to typescript under `ts/`
+## 5. Commit and push
 
-The typescript package under `ts/src/` mirrors the Go surface that is callable from a browser or node consumer. Walk through the Go diff and apply the equivalent change to `ts/src/`:
+1. Add `.nimpress/changelog/v<version>.md` for the version step 6 writes.
+2. Stage the files of the release by name with `git add <files>`, never another session's work. When the tree holds changes that are not the release, release from a clean clone, because `sbump` refuses a dirty tree.
+3. `git commit -m "<one line>"` describing the user visible change, `#<number>: <description>` when an issue covers it: `~/.claude/rules/git.md`.
+4. `git push` on the current branch. Nothing to commit after `.gitignore` drops the build outputs: skip the commit and still push.
 
-1. Type changes in `shared/models.go` or any other Go type that has a counterpart in `ts/src/types.ts` go into `ts/src/types.ts`. Match the json tag, not the Go field name.
-2. New or changed sentinel errors get a matching named export in `ts/src/`.
-3. New http endpoints, query parameters, header names, or status codes that the typescript client speaks get mirrored into `ts/src/client.ts`, `ts/src/fetch.ts`, or `ts/src/session.ts` as appropriate.
-4. Update the typescript tests beside the module, `ts/src/<name>.test.ts`, if the contract change has a browser side assertion.
+## 6. Bump and tag
 
-If the Go diff has zero browser facing surface, this step is a no op and the deploy can move on. Document that no op in the commit message so a reviewer does not wonder.
-
-## 4. Build the Go module
-
-```
-just build
-```
-
-`go build ./...`. Failure: report the build output and stop.
-
-## 5. Type check and build the typescript package
-
-```
-cd ts && pnpm install --frozen-lockfile && pnpm run build
-```
-
-Emits `ts/dist/`. Failure: report the offending errors and stop.
-
-## 6. Commit and push
-
-Stage every changed file relevant to the release. Write a single sentence describing the user visible change. Push to `origin/main`.
-
-```
-git add -A
-git commit -m "<one sentence describing the change>"
-git push
-```
-
-If the working tree has nothing to commit after the build outputs are excluded by `.gitignore`, skip the commit but still push so the bump in the next step pushes a clean ref.
-
-## 7. Bump and tag
-
-```
-just deploy
-```
-
-Calls `sbump patch --env APP_VERSION --json ts/package.json@.version --push-version --auto --workflow`. Patch bump, tag write, tag push. The GitHub Actions workflows attached to tag pushes create the release, build and publish the `@nimling` typescript package, and publish `.nimpress` to the docs site; consumers of the Go module pick the new tag up via `go get github.com/nimling/samna-auth-middleware/v2@vX.Y.Z` and move the `ref` of their claimius git include to the same tag. The module path carries the major version, `github.com/nimling/samna-auth-middleware/v2` from 2.0.0 on, because Go accepts a tag at v2 or above only for a path ending in its major; a breaking release moves both the tag and the path, and every import in every consumer follows.
-
-For minor or major releases, run `sbump major|minor --env APP_VERSION --json ts/package.json@.version --push-version --auto --workflow` instead of `just deploy`, which always bumps a patch. A release carries its `.nimpress/changelog/v<version>.md` entry in the commit before the bump.
+1. Patch: `just deploy`, which runs `sbump patch --env APP_VERSION --json ts/package.json@.version --push-version --auto --workflow`: both version fields, the tag and the push in one run.
+2. Minor or major: `sbump minor --env APP_VERSION --json ts/package.json@.version --push-version --auto --workflow`, or `major`; `just deploy` always bumps a patch.
+3. The tag runs `release.yml`, `typescript-publish.yml` and `docs.yml`: the GitHub release with the `sauth-bff-<os>-<arch>` binaries, the `@nimling` package publish, and `.nimpress` to the docs site. Success is all three green on the tag.
+4. Consumers then move `go get github.com/nimling/samna-auth-middleware/v2@vX.Y.Z` and the `ref` of their `Claimius Schema` include together: `.claude/rules/deploy.md` Releasing 1. A breaking release moves the module path suffix too, Releasing 2.
 
 ## Never
 
-1. Skip steps 1, 2, 4, or 5. A missing test, a failing test, a failing Go build, or a failing typescript build must block the deploy.
-
-2. Edit `ts/package.json` `version` by hand. `sbump` owns that field. The same applies to `APP_VERSION` in `.env`.
-
+1. Skip steps 1, 2 or 4. A missing test, a failing test, a failing Go build or a failing typescript build blocks the release.
+2. Hand edit `ts/package.json` `version` or `APP_VERSION` in `.env`; `sbump` owns both.
 3. Use `--no-verify` or `--no-gpg-sign`.
-
-4. Run `pnpm publish` directly. The tag pushed by `just deploy` triggers the workflow that publishes.
-
-5. Ship a Go change with a browser facing contract without mirroring it into `ts/src/`. The two sides go out in the same tag or not at all.
+4. Run `pnpm publish` or `git tag`; the tag `just deploy` pushes runs the publish.
+5. Ship a Go change with a browser facing contract without its `ts/src/` mirror in the same tag.
+6. Commit `ts/dist/`.
