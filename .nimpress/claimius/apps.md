@@ -14,8 +14,8 @@ An app is one product that claimius governs: Samna Auth itself, Bookable, Nimplo
 | Column | Holds |
 |---|---|
 | `slug` | The unique name a disciple presents to its prophet |
-| `private_key` | The key the prophet signs the app's tokens with |
-| `private_seed` | The seed the app's secrets are encrypted with |
+| `private_key` | The key the prophet signs the app's tokens with, wrapped at rest under `SAUTH_MASTER_KEY` |
+| `private_seed` | The seed the app's secrets are encrypted with, wrapped at rest under `SAUTH_MASTER_KEY`; `GET /sam/app` answers it opened to the app itself, which holds it in memory to open its secrets |
 | `app_secret`, `secret_version` | The hashed secret a disciple authenticates with |
 | `redirect_uris`, `connection`, `provider_ids` | The login configuration |
 | `claim_id` | The default claim `upsert_app_user` grants a new user |

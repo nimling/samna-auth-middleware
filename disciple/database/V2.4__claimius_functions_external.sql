@@ -1002,6 +1002,32 @@ $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = claimius, pg_temp;
 
 COMMENT ON FUNCTION claimius.get_secrets(p_user_id uuid, p_required_access integer, p_after uuid, p_limit integer) IS 'Secrets whose effective mask covers p_required_access, one get_objects page in id order.';
 
+CREATE OR REPLACE FUNCTION claimius.get_secret_value(
+    p_user_id    UUID,
+    p_secret_id  UUID
+) RETURNS TEXT AS $$
+DECLARE
+    v_value TEXT;
+BEGIN
+    IF NOT claimius.check_user_active(p_user_id) THEN
+        RETURN NULL;
+    END IF;
+
+    IF NOT EXISTS (SELECT 1 FROM claimius.get_access(p_user_id, p_secret_id, 'claimius.samna_secret', 4)) THEN
+        RETURN NULL;
+    END IF;
+
+    SELECT s.value INTO v_value
+    FROM claimius.samna_secret s
+    WHERE s.id = p_secret_id
+      AND s.sa_deleted_at IS NULL;
+
+    RETURN v_value;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = claimius, pg_temp;
+
+COMMENT ON FUNCTION claimius.get_secret_value(p_user_id uuid, p_secret_id uuid) IS 'The stored value of one secret, still ciphertext under the app seed, when p_user_id reaches it with read through get_access: the claim of its creator that insert_secret bound, or any claim the user holds on it. NULL for an inactive user, a user without read, and a deleted secret. The seed never reaches the database; the service opens the value in process.';
+
 CREATE OR REPLACE FUNCTION claimius.get_object_assets(
     p_user_id      UUID,
     p_object_type  TEXT,

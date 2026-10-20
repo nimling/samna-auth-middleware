@@ -250,7 +250,7 @@ func TestDebugSeedEncryptsAndResolvesASecret(t *testing.T) {
 	if secret.Value == "plain" {
 		t.Fatal("secret value was stored unencrypted")
 	}
-	plain, err := secret.Resolve(ctx, db)
+	plain, err := secret.Resolve(ctx, db, userA)
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}

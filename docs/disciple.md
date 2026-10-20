@@ -1,6 +1,6 @@
 # Disciple
 
-The disciple is a local replica. It never signs or decrypts, its app identity comes from the environment, and it keeps its database current by pulling from the prophet in the background. It consumes tokens; it does not issue them.
+The disciple is a local replica. It never signs or decrypts, so a secret it writes comes back as ciphertext it cannot open outside debug mode, its app identity comes from the environment, and it keeps its database current by pulling from the prophet in the background. It consumes tokens; it does not issue them.
 
 ## Packages
 

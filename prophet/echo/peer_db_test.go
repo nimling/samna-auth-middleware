@@ -47,10 +47,23 @@ type peerApp struct {
 	Org    uuid.UUID
 	Slug   string
 	Secret string
+	Seed   string
+}
+
+const testMasterKey = "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY="
+
+func getWrapped(t *testing.T, plain string) string {
+	t.Helper()
+	wrapped, err := encryption.WrapAtRest(plain)
+	if err != nil {
+		t.Fatalf("wrap at rest: %v", err)
+	}
+	return wrapped
 }
 
 func postPeerApp(t *testing.T, actor uuid.UUID) peerApp {
 	t.Helper()
+	t.Setenv("SAUTH_MASTER_KEY", testMasterKey)
 	ctx := context.Background()
 	key, err := rsa.GenerateKey(rand.Reader, 1024)
 	if err != nil {
@@ -60,22 +73,26 @@ func postPeerApp(t *testing.T, actor uuid.UUID) peerApp {
 	if _, err := rand.Read(orgSeed); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
+	appSeed := make([]byte, 32)
+	if _, err := rand.Read(appSeed); err != nil {
+		t.Fatalf("app seed: %v", err)
+	}
 	secret, hash, err := encryption.GenerateAppSecret(orgSeed, 1)
 	if err != nil {
 		t.Fatalf("app secret: %v", err)
 	}
-	app := peerApp{ID: uuid.New(), Org: uuid.New(), Slug: "gotest_peer_" + uuid.NewString()[:8], Secret: secret}
+	app := peerApp{ID: uuid.New(), Org: uuid.New(), Slug: "gotest_peer_" + uuid.NewString()[:8], Secret: secret, Seed: hex.EncodeToString(appSeed)}
 	db := psdb.Instance()
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO claimius.organization (id, name, type, private_seed, sa_owner_id, sa_root_id, sa_level, sa_created_by)
 		VALUES (?, 'Peer home', 'company', ?, ?, ?, 0, ?)
-	`, app.Org, hex.EncodeToString(orgSeed), app.Org, app.Org, actor); err != nil {
+	`, app.Org, getWrapped(t, hex.EncodeToString(orgSeed)), app.Org, app.Org, actor); err != nil {
 		t.Fatalf("home org: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO claimius.samna_app (id, slug, name, private_key, private_seed, app_secret, sa_owner_id, sa_created_by)
 		VALUES (?, ?, 'Peer app', ?, ?, ?, ?, ?)
-	`, app.ID, app.Slug, base64.RawURLEncoding.EncodeToString(x509.MarshalPKCS1PrivateKey(key)), hex.EncodeToString(orgSeed), hash, app.Org, actor); err != nil {
+	`, app.ID, app.Slug, getWrapped(t, base64.RawURLEncoding.EncodeToString(x509.MarshalPKCS1PrivateKey(key))), getWrapped(t, app.Seed), hash, app.Org, actor); err != nil {
 		t.Fatalf("home app: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `SELECT claimius.upsert_app_object(?, 'claimius.organization', ?, ?)`, app.ID, app.Org, actor); err != nil {

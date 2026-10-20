@@ -10,10 +10,12 @@ import (
 	"os"
 	"reflect"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/labstack/echo/v4"
 	"github.com/nimling/samna-auth-middleware/v2/client"
+	"github.com/nimling/samna-auth-middleware/v2/pkg/encryption"
 	"github.com/nimling/samna-auth-middleware/v2/utils"
 	"github.com/uptrace/bun"
 	"github.com/uptrace/bun/dialect/pgdialect"
@@ -96,13 +98,55 @@ func (d *DB) GetApp(ctx context.Context) (*SamnaApp, error) {
 		app.PrivateSeed = seed
 		return app, nil
 	}
+	if d.RouteToProphet {
+		app, err := d.GetAppEnv(ctx)
+		if err != nil {
+			return nil, err
+		}
+		seed, err := GetAppSeed(ctx)
+		if err != nil {
+			return nil, err
+		}
+		app.PrivateSeed = seed
+		return app, nil
+	}
 	var app SamnaApp
 	if err := d.Read(ctx, func(ctx context.Context, db *bun.DB) error {
 		return db.NewRaw(`SELECT * FROM claimius.get_app() LIMIT 1`).Scan(ctx, &app)
 	}); err != nil {
 		return nil, fmt.Errorf("no claimius app registered: %w", err)
 	}
+	seed, err := encryption.UnwrapAtRest(app.PrivateSeed)
+	if err != nil {
+		return nil, fmt.Errorf("open app seed: %w", err)
+	}
+	app.PrivateSeed = seed
 	return &app, nil
+}
+
+type AppSeed struct {
+	PrivateSeed string `json:"private_seed"`
+}
+
+var appSeed atomic.Pointer[string]
+
+func GetAppSeed(ctx context.Context) (string, error) {
+	if seed := appSeed.Load(); seed != nil {
+		return *seed, nil
+	}
+	var delivered AppSeed
+	if err := client.Get(ctx, "app", &delivered); err != nil {
+		return "", fmt.Errorf("get app seed from the prophet: %w", err)
+	}
+	if delivered.PrivateSeed == "" {
+		return "", errors.New("the prophet delivered no app seed")
+	}
+	appSeed.Store(&delivered.PrivateSeed)
+	return delivered.PrivateSeed, nil
+}
+
+func DeleteAppSeed() {
+	appSeed.Store(nil)
 }
 
 func (d *DB) GetAppEnv(ctx context.Context) (*SamnaApp, error) {

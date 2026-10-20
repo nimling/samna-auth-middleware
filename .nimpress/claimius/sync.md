@@ -31,7 +31,9 @@ A disciple therefore holds the organizations linked to its app and no other:
 
 The feed carries source rows and nothing derived from them. `user_object`, `user_users`, `user_users_diff`, `object_info`, `inheritance_info`, `access_diff` and `audit` never publish, `get_sync_events` excludes `claimius.user_object`, `claimius.user_users`, `claimius.user_users_diff` and `claimius.audit` by event type, and the base files delete any such row left in the outbox. A settle writes pairs, `user_users_diff` rows and counts, never source rows, so it emits nothing; each database derives and folds the rows of its own pairs.
 
-Two kinds of event travel only to a peer prophet, a pull with `peer = true`: `app_handover` events, and an organization's `private_seed`, which `get_sync_events` strips from every organization payload it serves to a disciple.
+Two kinds of event travel only to a peer prophet, a pull with `peer = true`: `app_handover` events, and an organization's `private_seed`, wrapped under the prophet's `SAUTH_MASTER_KEY`, which `get_sync_events` strips from every organization payload it serves to a disciple.
+
+The app's own `private_seed` is never in the feed. A disciple fetches it from `GET /sam/app` with its app slug and secret at startup and holds it in memory; see [Security](./security.md), Secrets 7.
 
 ## The cursor
 

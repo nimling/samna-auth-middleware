@@ -3,13 +3,13 @@ gate: auth-middleware
 layout: doc
 title: Security
 description: The four roles and their grants per role, read functions that run as their owner, secrets under the app seed and the credential cache, the unlogged token tables, soft delete, and what a compromised disciple can and cannot do.
-tags: claimius_admin, claimius_writer, claimius_reader, claimius_disciple_client, _grant_prophet_roles, _grant_disciple_roles, _match_audit_partition_grants, security definer, search_path, samna_secret, private_seed, bcrypt, credential cache, unlogged, rate_limit_gcra, soft delete
+tags: claimius_admin, claimius_writer, claimius_reader, claimius_disciple_client, _grant_prophet_roles, _grant_disciple_roles, _match_audit_partition_grants, security definer, search_path, samna_secret, get_secret_value, private_seed, SAUTH_MASTER_KEY, bcrypt, credential cache, unlogged, rate_limit_gcra, soft delete
 lastUpdated: true
 ---
 
 # Security
 
-Claimius guards access in four layers: database roles that decide which connection may touch which table and function, read functions that run as their owner with a pinned `search_path`, secrets that are encrypted or hashed under keys a disciple never holds, and the app as the boundary of what any one service can reach.
+Claimius guards access in four layers: database roles that decide which connection may touch which table and function, read functions that run as their owner with a pinned `search_path`, secrets that are encrypted or hashed under keys the database never holds, and the app as the boundary of what any one service can reach.
 
 ## Roles
 
@@ -50,15 +50,17 @@ Every read function of the external surface is `SECURITY DEFINER` with `SET sear
 
 1. `samna_secret.value` is AES 256 GCM ciphertext under the app's `private_seed`, with a random 96 bit nonce per value. GCM authenticates as it encrypts, so a changed ciphertext fails to open.
 
-2. `samna_app` carries `private_key` and `private_seed`. Its events carry no `app_id` and no pull serves them, and a disciple skips the event type, so the keys never reach a disciple. They reach a peer prophet only in the app row of `get_peer_snapshot`, and the home serves `peer=true` only to a pull presenting the peer secret of a live `peer_grant` for that app in `SAuth-Peer-Secret`, so the app credential its disciples hold does not open them.
+2. `samna_app` carries `private_key` and `private_seed`, both stored wrapped at rest: `enc:v1:` and AES 256 GCM under the prophet's `SAUTH_MASTER_KEY`, 32 random bytes the database never holds (`pkg/encryption/master.go:32`). `ImportMasterKeyPair` opens them where the prophet signs or encrypts (`pkg/encryption/crypto.go:54`) and refuses a value that is not wrapped. Their events carry no `app_id` and no pull serves them, and a disciple skips the event type, so the rows never reach a disciple. They reach a peer prophet only in the app row of `get_peer_snapshot`, still wrapped, so a peer opens them only under the same master key; the home serves `peer=true` only to a pull presenting the peer secret of a live `peer_grant` for that app in `SAuth-Peer-Secret`, so the app credential its disciples hold does not open them.
 
 3. `samna_client.secret_hash` is a bcrypt hash and `samna_app.app_secret` is HMAC SHA256 of the raw secret keyed with the owning organization's `private_seed`: a copy can verify a credential and cannot recover it.
 
 4. The middleware pays bcrypt once per credential. `verifyClientSecret` keeps, per `client_id`, the SHA-256 digest of the secret that passed and the `secret_hash` it passed against. A later request rereads the client row by primary key for its status, expiry and hash, and compares its secret's digest to the kept one in constant time while the hash is unchanged. bcrypt runs again only when the client presents another secret or its `secret_hash` changes, so a revoked client or a rotated secret stops on the next request. `smw.AppMiddleware` keeps the imported key pair of an app per app id and imports it again when the row's `private_key` or `private_seed` differs.
 
-5. `organization.private_seed` is generated at a root and inherited by its children, and keys `app_secret` hashing for the apps owned in the tree. It travels to peer prophets only: `get_sync_events` drops it from organization payloads for a disciple, and the disciple snapshot never marshals it, so a disciple cannot verify or forge an `app_secret`.
+5. `organization.private_seed` keys `app_secret` hashing for the apps owned in the tree. No SQL mints it: the service mints it, wrapped under `SAUTH_MASTER_KEY`, the first time an app of the organization needs a secret, and a child created later takes its owner's (`_set_self_owner_on_insert`, `prophet/database/V2.3__claimius_functions_access.sql:1400`). `smw.AppMiddleware` opens it to verify an app secret (`smw/app.go:100`). It travels to peer prophets only: `get_sync_events` drops it from organization payloads for a disciple, and the disciple snapshot never marshals it, so a disciple cannot verify or forge an `app_secret`.
 
 6. `insert_secret` stores a secret and binds it to the claim of the actor in `sa_created_by` with owner, write and read in one statement, on the prophet for a routed write and on a debug disciple locally. The binding travels with the secret, so every disciple of the app reaches it through `get_secrets` and gates it with `MutationAccess` like any other object.
+
+7. A value opens only in a process that holds the app's `private_seed`, and only for a user who reads the secret. The prophet encrypts every routed write with it (`prophet/echo/secret.go:59`) and the feed carries the ciphertext. A deployed disciple receives its own app's seed from `GET /sam/app` (`prophet/echo/app.go:11`), the route `smw.AppMiddleware` answers only to that app's `SAUTH_APP_SLUG` and `SAUTH_APP_SECRET`, opened from its wrapping and sent `Cache-Control: no-store`. `sam.SyncStart` fetches it at startup (`disciple/sam/main.go:94`) and `shared.GetAppSeed` holds it in process memory (`shared/main.go:133`); it is never written to a table, a file or a log. `SamnaSecret.Resolve(ctx, db, userID)` (`shared/secret.go:141`) first calls `claimius.get_secret_value(user, secret)` (`disciple/database/V2.4__claimius_functions_external.sql:1005`), which answers the ciphertext only to a user `get_access` gives read on the secret, the creator through the claim `insert_secret` bound or any holder of a claim reaching it, and NULL to anyone else, so `Resolve` answers `ErrNoAccess` before any seed is used. It then opens the value with AES 256 GCM; when the held seed cannot open it, it drops the seed, fetches it again once and retries, which is how a changed seed reaches a running disciple. A background job resolves as the user behind the row's `sa_created_by` grant. On a debug disciple the seed is `SAUTH_DEBUG_PRIVATE_SEED` and the path is the same. The key never reaches Postgres. `GET /sam/secret` and `GET /sam/secret/:id` answer the ciphertext, and no route answers plaintext.
 
 ## Ephemeral tables
 
@@ -79,7 +81,7 @@ A disciple's database and process hold its app's mirrored rows, its own tables, 
 | Read everything its app holds, and answer its own service's access questions however it likes | Read another app's rows: the prophet serves only the app its credential names |
 | Send routed writes for its own app, stamped with any grant of that app in `sa_created_by` | Write for another app: the app key names the app, and every routed write runs for it alone |
 | Pull its own app's feed | Sign a token: it holds no `private_key` |
-| Store ciphertext of its app's secrets | Decrypt a secret: it holds no `private_seed` |
+| Store ciphertext of its app's secrets, and decrypt them in process with its own app's seed, held in memory from `GET /sam/app` | Decrypt another app's secrets: the prophet answers each app only its own seed, and the seed is never stored on the disciple |
 | | Hand out more than the stamped grant holds: `_check_claim_composition` refuses a binding whose mask exceeds what that grant's user holds on the object, or for a first binding owner on the organization it opens, and a link to a claim that user cannot read |
 | | Replay a DPoP bound token without the client's private key |
 | | Write an app another prophet decides: the home refuses it |

@@ -40,12 +40,26 @@ func GenerateMasterKey() (*MasterKeyPair, error) {
 
 func ExportMasterKeyPair(masterKey *MasterKeyPair) (string, string, error) {
 	privateKeyBytes := x509.MarshalPKCS1PrivateKey(masterKey.PrivateKey)
-	privateKeyBase64 := base64.RawURLEncoding.EncodeToString(privateKeyBytes)
-	seedHex := hex.EncodeToString(masterKey.Seed)
-	return privateKeyBase64, seedHex, nil
+	storedPrivateKey, err := WrapAtRest(base64.RawURLEncoding.EncodeToString(privateKeyBytes))
+	if err != nil {
+		return "", "", err
+	}
+	storedSeed, err := WrapAtRest(hex.EncodeToString(masterKey.Seed))
+	if err != nil {
+		return "", "", err
+	}
+	return storedPrivateKey, storedSeed, nil
 }
 
-func ImportMasterKeyPair(privateKeyBase64 string, seedHex string) (*MasterKeyPair, error) {
+func ImportMasterKeyPair(storedPrivateKey string, storedSeed string) (*MasterKeyPair, error) {
+	privateKeyBase64, err := UnwrapAtRest(storedPrivateKey)
+	if err != nil {
+		return nil, fmt.Errorf("private key: %w", err)
+	}
+	seedHex, err := UnwrapAtRest(storedSeed)
+	if err != nil {
+		return nil, fmt.Errorf("seed: %w", err)
+	}
 	privateKeyBytes, err := base64.RawURLEncoding.DecodeString(privateKeyBase64)
 	if err != nil {
 		return nil, err

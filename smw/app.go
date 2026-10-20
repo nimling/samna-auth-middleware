@@ -97,7 +97,12 @@ func AppMiddleware(next echo.HandlerFunc) echo.HandlerFunc {
 			ctx.Logger().Infof("Owner org not found for slug=%s: %v", appSlug, err)
 			return ctx.NoContent(http.StatusUnauthorized)
 		}
-		orgSeed, err := hex.DecodeString(ownerOrg.PrivateSeed)
+		orgSeedHex, err := encryption.UnwrapAtRest(ownerOrg.PrivateSeed)
+		if err != nil {
+			ctx.Logger().Infof("Owner org seed not readable for slug=%s: %v", appSlug, err)
+			return ctx.NoContent(http.StatusUnauthorized)
+		}
+		orgSeed, err := hex.DecodeString(orgSeedHex)
 		if err != nil {
 			ctx.Logger().Infof("Invalid owner org seed for slug=%s: %v", appSlug, err)
 			return ctx.NoContent(http.StatusUnauthorized)

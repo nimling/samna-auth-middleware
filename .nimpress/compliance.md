@@ -687,17 +687,20 @@ just test smw
 
 1. Standard: ISO/IEC 27001:2022 A.8.24; OWASP ASVS V6.2.1.
 
-2. Check: secrets are AES GCM with a fresh nonce per write.
+2. Check: secrets are AES GCM with a fresh nonce per write; the app and organization keys that seal them are stored wrapped under a master key the database never holds; a value opens only in process, for a user with read on it.
 
 3. Method:
 
 ```bash
 sed -n 10,30p shared/cipher.go
+sed -n 20,75p pkg/encryption/master.go
+grep -n -A20 'FUNCTION claimius.get_secret_value' disciple/database/V2.4__claimius_functions_external.sql
+just test 'MasterKey|WrapAtRest|UnwrapAtRest|ImportMasterKeyPair|SamApp|GetSecretValue|Resolve'
 ```
 
-4. Pass: `cipher.NewGCM` with a nonce from `crypto/rand`.
+4. Pass: `cipher.NewGCM` with a nonce from `crypto/rand`; `WrapAtRest` refuses without a 32 byte `SAUTH_MASTER_KEY` and `UnwrapAtRest` refuses a plain value; `get_secret_value` answers NULL to a user without read; the named tests pass.
 
-5. Today: `passes`, `shared/cipher.go:12`, `shared/secret.go:61`.
+5. Today: `passes`. Secrets: `shared/cipher.go:12`, `shared/secret.go:62` on a debug disciple, `utils/aes.go:12` from `prophet/echo/secret.go:59` on the prophet, which encrypts every routed write. Keys at rest: `pkg/encryption/master.go:20`, `pkg/encryption/master.go:49`, opened by `ImportMasterKeyPair` at `pkg/encryption/crypto.go:54` and for the organization seed at `smw/app.go:100`. Delivery and opening: `GET /sam/app` answers the calling app its own seed (`prophet/echo/app.go:11`), held in memory (`shared/main.go:133`), and `Resolve` (`shared/secret.go:141`) reads through `get_secret_value` (`disciple/database/V2.4__claimius_functions_external.sql:1005`).
 
 ### C42, TLS to Postgres
 
@@ -714,7 +717,7 @@ az containerapp show -g <resource-group> -n <container-app> --query "properties.
 
 4. Pass: the default holds and no deployed env sets a weaker mode.
 
-5. Today: `untested`, the default passes at `shared/main.go:145`; the deployed env values are unread.
+5. Today: `untested`, the default passes at `shared/main.go:189`; the deployed env values are unread.
 
 ## Personal data
 
@@ -881,7 +884,7 @@ curl -s -o /dev/null -w '%{http_code}\n' https://<tst-connect-host>/.well-known/
 
 4. Pass: 200 with `resource` and `authorization_servers`.
 
-5. Today: `fails`, the only well known path is the discovery read at `shared/main.go:222`.
+5. Today: `fails`, the only well known path is the discovery read at `shared/main.go:266`.
 
 ### C53, resource indicators
 

@@ -2,6 +2,7 @@ package shared
 
 import (
 	"context"
+	"database/sql"
 	"encoding/hex"
 	"fmt"
 	"time"
@@ -137,24 +138,37 @@ func (d *DB) deleteSecret(ctx context.Context, conn bun.IConn, ac *AccessClaim, 
 	return &secret, nil
 }
 
-func (s *SamnaSecret) Resolve(ctx context.Context, d *DB) (string, error) {
+func (s *SamnaSecret) Resolve(ctx context.Context, d *DB, userID uuid.UUID) (string, error) {
 	if s == nil {
 		return "", fmt.Errorf("secret is nil")
 	}
 	if s.ExpiresAt != nil && !s.ExpiresAt.After(time.Now()) {
 		return "", ErrSecretExpired
 	}
-	app, err := d.GetApp(ctx)
+	var value sql.NullString
+	if err := d.NewRaw("SELECT claimius.get_secret_value(?, ?)", userID, s.ID).Scan(ctx, &value); err != nil {
+		return "", fmt.Errorf("get_secret_value: %w", err)
+	}
+	if !value.Valid {
+		return "", ErrNoAccess
+	}
+	ciphertext, err := hex.DecodeString(value.String)
 	if err != nil {
 		return "", err
 	}
-	seed, err := hex.DecodeString(app.PrivateSeed)
-	if err != nil {
-		return "", err
+	for attempt := 0; ; attempt++ {
+		app, err := d.GetApp(ctx)
+		if err != nil {
+			return "", err
+		}
+		seed, err := hex.DecodeString(app.PrivateSeed)
+		if err != nil {
+			return "", err
+		}
+		plain, err := aesDecrypt(ciphertext, seed)
+		if err == nil || !d.RouteToProphet || attempt > 0 {
+			return plain, err
+		}
+		DeleteAppSeed()
 	}
-	ciphertext, err := hex.DecodeString(s.Value)
-	if err != nil {
-		return "", err
-	}
-	return aesDecrypt(ciphertext, seed)
 }

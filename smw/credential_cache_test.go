@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/nimling/samna-auth-middleware/v2/pkg/encryption"
 	pecho "github.com/nimling/samna-auth-middleware/v2/prophet/echo"
 	"github.com/nimling/samna-auth-middleware/v2/shared"
 	"golang.org/x/crypto/bcrypt"
@@ -59,12 +60,22 @@ func getTestApp(t *testing.T) pecho.SamnaApp {
 	}
 	return pecho.SamnaApp{
 		ID:          uuid.New(),
-		PrivateKey:  base64.RawURLEncoding.EncodeToString(x509.MarshalPKCS1PrivateKey(key)),
-		PrivateSeed: "00112233445566778899aabbccddeeff",
+		PrivateKey:  getWrapped(t, base64.RawURLEncoding.EncodeToString(x509.MarshalPKCS1PrivateKey(key))),
+		PrivateSeed: getWrapped(t, "00112233445566778899aabbccddeeff"),
 	}
 }
 
+func getWrapped(t *testing.T, plain string) string {
+	t.Helper()
+	wrapped, err := encryption.WrapAtRest(plain)
+	if err != nil {
+		t.Fatalf("wrap at rest: %v", err)
+	}
+	return wrapped
+}
+
 func TestGetAppKeyImportsTheKeyPairOnce(t *testing.T) {
+	t.Setenv("SAUTH_MASTER_KEY", "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=")
 	app := getTestApp(t)
 
 	first, err := getAppKey(app)
@@ -76,7 +87,7 @@ func TestGetAppKeyImportsTheKeyPairOnce(t *testing.T) {
 		t.Fatalf("a second request must reuse the imported key pair, got %p and %p (%v)", first, again, err)
 	}
 
-	app.PrivateSeed = "ffeeddccbbaa99887766554433221100"
+	app.PrivateSeed = getWrapped(t, "ffeeddccbbaa99887766554433221100")
 	rotated, err := getAppKey(app)
 	if err != nil {
 		t.Fatalf("import rotated key pair: %v", err)

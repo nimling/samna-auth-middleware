@@ -66,4 +66,4 @@ A routed write still goes to the prophet over HTTP, which judges a binding on a 
 
 ## Debug mode
 
-`SAUTH_DEBUG_USER_ID` or `SAUTH_DEBUG_CLIENTS` turns a disciple into a self contained service: authentication is bypassed, the pull loop does not start, and every write runs through the local claimius functions. `SAUTH_DEBUG_PRIVATE_SEED` gives a debug disciple the app seed it encrypts local secrets with. It exists for local development and test runs, proves nothing about the prophet path, and is never set in a deployed environment.
+`SAUTH_DEBUG_USER_ID` or `SAUTH_DEBUG_CLIENTS` turns a disciple into a self contained service: authentication is bypassed, the pull loop does not start, and every write runs through the local claimius functions. `SAUTH_DEBUG_PRIVATE_SEED` gives a debug disciple the app seed it encrypts local secrets with and `SamnaSecret.Resolve` opens them with; a deployed disciple takes the seed from `GET /sam/app` instead, and both open a secret on the same path, through `get_secret_value` for a user with read on it. It exists for local development and test runs, proves nothing about the prophet path, and is never set in a deployed environment.

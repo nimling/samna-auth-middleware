@@ -59,6 +59,7 @@ func SyncStart(ctx context.Context) {
 		return
 	}
 	go bindClient(ctx, Disciple(), leadInterval)
+	go getAppSeed(ctx, sdb.Instance().DB, leadInterval)
 	go shared.LeadSync(ctx, sdb.Instance().DB, SyncLockKey(utils.Cfg().AppSlug), leadInterval, Disciple().Pull)
 }
 
@@ -88,6 +89,21 @@ func PeerSyncStart(ctx context.Context, db *shared.DB) {
 			}
 		}
 	}()
+}
+
+func getAppSeed(ctx context.Context, db *shared.DB, interval time.Duration) {
+	for {
+		_, err := shared.GetAppSeed(ctx)
+		if err == nil || ctx.Err() != nil {
+			return
+		}
+		db.Logger.Warnf("sync: %v", err)
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(interval):
+		}
+	}
 }
 
 func bindClient(ctx context.Context, r *Replica, interval time.Duration) {

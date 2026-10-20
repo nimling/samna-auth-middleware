@@ -1406,18 +1406,13 @@ BEGIN
     IF NEW.sa_root_id  = v_zero THEN NEW.sa_root_id  := NULL; END IF;
     IF NEW.sa_owner_id = v_zero THEN NEW.sa_owner_id := NULL; END IF;
 
-    IF NEW.private_seed IS NULL OR NEW.private_seed = '' THEN
-        IF NEW.sa_owner_id IS NULL OR NEW.sa_owner_id = NEW.id THEN
-            NEW.private_seed := encode(gen_random_bytes(32), 'hex');
-        ELSE
-            SELECT o.private_seed INTO NEW.private_seed
-            FROM claimius.organization o
-            WHERE o.id = NEW.sa_owner_id;
-            IF NEW.private_seed IS NULL OR NEW.private_seed = '' THEN
-                NEW.private_seed := encode(gen_random_bytes(32), 'hex');
-            END IF;
-        END IF;
+    IF (NEW.private_seed IS NULL OR NEW.private_seed = '')
+       AND NEW.sa_owner_id IS NOT NULL AND NEW.sa_owner_id <> NEW.id THEN
+        SELECT o.private_seed INTO NEW.private_seed
+        FROM claimius.organization o
+        WHERE o.id = NEW.sa_owner_id;
     END IF;
+    NEW.private_seed := coalesce(NEW.private_seed, '');
 
     IF NEW.sa_root_id IS NOT NULL THEN
         RETURN NEW;
@@ -1438,7 +1433,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius._set_self_owner_on_insert() IS 'BEFORE INSERT for organizations. Self references on root creation; copies parent org sa_root_id otherwise.';
+COMMENT ON FUNCTION claimius._set_self_owner_on_insert() IS 'BEFORE INSERT for organizations. Self references on root creation; copies parent org sa_root_id otherwise. A child without a private_seed takes its owner''s. No seed is minted here: the seed keys app_secret and is stored wrapped under the service master key, which never reaches the database, so the service mints it the first time an app of the organization needs a secret.';
 
 CREATE OR REPLACE FUNCTION claimius._set_self_root_on_insert()
     RETURNS TRIGGER AS $$

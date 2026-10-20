@@ -136,7 +136,7 @@ This page covers the Go module `github.com/nimling/samna-auth-middleware/v2` onl
 
 1. Status: `missing`
 
-2. Evidence: searched `oauth-protected-resource`, `well-known` and `authorization_servers`; the only well known path is the OIDC discovery read at `shared/main.go:222`.
+2. Evidence: searched `oauth-protected-resource`, `well-known` and `authorization_servers`; the only well known path is the OIDC discovery read at `shared/main.go:266`.
 
 3. Gap: no `/.well-known/oauth-protected-resource` document and no `resource_metadata` in a 401 challenge, which the MCP authorization spec requires.
 
@@ -198,7 +198,7 @@ This page covers the Go module `github.com/nimling/samna-auth-middleware/v2` onl
 
 1. Status: `not applicable`
 
-2. Evidence: searched `Signature-Input`, `webhook`, `X-Hub-Signature`; the middleware sends no webhooks. HMAC SHA256 is used only to hash app secrets (`pkg/encryption/crypto.go:96`).
+2. Evidence: searched `Signature-Input`, `webhook`, `X-Hub-Signature`; the middleware sends no webhooks. HMAC SHA256 is used only to hash app secrets (`pkg/encryption/crypto.go:110`).
 
 ## Specifications
 
@@ -206,7 +206,7 @@ This page covers the Go module `github.com/nimling/samna-auth-middleware/v2` onl
 
 1. Status: `built`
 
-2. Evidence: issuer, token endpoint and `jwks_uri` read from `/.well-known/openid-configuration` at `shared/main.go:222`; `end_session` with `post_logout_redirect_uri` at `client/pkce.go:57`.
+2. Evidence: issuer, token endpoint and `jwks_uri` read from `/.well-known/openid-configuration` at `shared/main.go:266`; `end_session` with `post_logout_redirect_uri` at `client/pkce.go:57`.
 
 ### WHATWG server sent events
 
@@ -262,7 +262,7 @@ This page covers the Go module `github.com/nimling/samna-auth-middleware/v2` onl
 
 1. Status: `partial`
 
-2. Evidence: secrets AES GCM at rest (`shared/cipher.go:12`, `shared/secret.go:61`), client secrets bcrypt (`smw/client_auth.go:171`), Postgres `sslmode` defaults to `verify-full` (`shared/main.go:145`).
+2. Evidence: secrets AES GCM at rest (`shared/cipher.go:12`, `shared/secret.go:62`), the app and organization keys that seal them wrapped under `SAUTH_MASTER_KEY` (`pkg/encryption/master.go:32`, opened at `pkg/encryption/crypto.go:54`), a secret opened only in process for a user with read through `get_secret_value` (`shared/secret.go:141`, `disciple/database/V2.4__claimius_functions_external.sql:1005`) with the app's own seed from `GET /sam/app` held in memory (`prophet/echo/app.go:11`, `shared/main.go:133`), client secrets bcrypt (`smw/client_auth.go:171`), Postgres `sslmode` defaults to `verify-full` (`shared/main.go:189`).
 
 3. Gap: field level masks are not applied in Go.
 
@@ -304,7 +304,7 @@ Status: `partial`.
 
 12. GDPR Art. 17, right to erasure: `partial`. `DeleteUser` soft deletes `samna_user` and `user_identity` (`shared/user.go:248`, `shared/user.go:271`, `prophet/echo/user.go:307`); no hard delete or anonymisation of the row, `user_field`, `user_relation`, `notification`, `audit.sa_created_by`, `consent` or `analytics_*`, and no hook asks the host to erase its own rows.
 
-13. GDPR Art. 32, security of processing: `partial`. TLS to Postgres by default (`shared/main.go:145`), secrets AES GCM (`shared/cipher.go:12`), DPoP and mTLS binding (`smw/token.go:59`).
+13. GDPR Art. 32, security of processing: `partial`. TLS to Postgres by default (`shared/main.go:189`), secrets AES GCM (`shared/cipher.go:12`, `utils/aes.go:12`) under keys wrapped at rest (`pkg/encryption/master.go:32`) and opened only for a reader (`shared/secret.go:141`), DPoP and mTLS binding (`smw/token.go:59`).
 
 ## Personal data
 
