@@ -68,7 +68,7 @@ An access code opens one claim. The table is `claimius.code`, written on the pro
 | `count`, `used_count` | Uses allowed, 0 unlimited, and taken; a use is taken in one statement on the prophet |
 | `revoked_at` | Set by `DeleteCode`; a revoked code never resolves again |
 
-1. The helpers are `GetCodeValue()`, `GetCodeHash(value)` and `GetCodeURL(base, path, value)`; on a disciple `PostCode(ctx, ac, claimID, body, base)` returns the row with `value` and `url` once, `GetCodes(ctx, claimID)` lists a claim's codes, `DeleteCode(ctx, ac, id)` revokes one and `GetCodeAccess(ctx, value)` resolves one, cached for 30 seconds and cleared by any code, claim or grant event of the feed. `ac` is OWNER on the claim; the prophet's `insert_code` and `delete_code` check it again. The prophet set has the same functions in `prophet/sdb` with the app id first, for samna_auth.
+1. The helpers are `GetCodeValue()`, `GetCodeHash(value)` and `GetCodeURL(base, path, value)`; on a disciple `PostCode(ctx, ac, claimID, body, base)` returns the row with `value` and `url` once, `GetCodes(ctx, claimID)` lists a claim's codes, `DeleteCode(ctx, ac, id)` revokes one and `GetCodeAccess(ctx, value)` resolves one, cached for 30 seconds and cleared by any code, claim or grant event of the feed. `ac` is OWNER on the claim; the prophet's `insert_code` and `delete_code` check it again. The prophet set has the same functions in `prophet/sdb` with the app id first, for samna_auth; `uuid.Nil` there finds, redeems or lists a code in any app, and `CodeAccess.AppID` names the app.
 
 2. Action codes stay with the service that runs actions: bookable's own `code` table and its Tengo actions use these helpers and nothing else.
 

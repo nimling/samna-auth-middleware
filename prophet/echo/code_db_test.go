@@ -144,6 +144,22 @@ func TestCodesAreWrittenOnTheProphetAndResolvedOnTheDisciple(t *testing.T) {
 		}
 	}
 
+	anywhere, err := disciple.PostCode(ctx, ac, readers, shared.BodyCode{Kind: shared.CODE_KIND_INVITE}, "")
+	if err != nil {
+		t.Fatalf("post invite: %v", err)
+	}
+	found, err := psdb.GetCodeAccess(ctx, uuid.Nil, anywhere.Value)
+	if err != nil || found.AppID == nil || *found.AppID != app.ID {
+		t.Fatalf("the prophet finds a code in any app by its value and names the app, got %v %v", found, err)
+	}
+	if _, err := psdb.PostCodeRedeem(ctx, uuid.Nil, shared.GetCodeHash(anywhere.Value), owner); err != nil {
+		t.Fatalf("the prophet redeems a code in any app: %v", err)
+	}
+	listed, err := psdb.GetCodes(ctx, uuid.Nil, readers)
+	if err != nil || len(listed) != 3 {
+		t.Fatalf("the prophet lists the claim's codes across apps, got %d %v", len(listed), err)
+	}
+
 	if _, err := disciple.DeleteCode(ctx, ac, invite.ID); err != nil {
 		t.Fatalf("revoke on the prophet: %v", err)
 	}
@@ -159,7 +175,7 @@ func TestCodesAreWrittenOnTheProphetAndResolvedOnTheDisciple(t *testing.T) {
 		t.Fatalf("snapshot: %v", err)
 	}
 	var snapped int
-	if err := disciple.NewRaw(`SELECT count(*) FROM claimius.code WHERE claim_id = ? AND hash <> ''`, readers).Scan(ctx, &snapped); err != nil || snapped != 2 {
+	if err := disciple.NewRaw(`SELECT count(*) FROM claimius.code WHERE claim_id = ? AND hash <> ''`, readers).Scan(ctx, &snapped); err != nil || snapped != 3 {
 		t.Fatalf("the snapshot carries the app's codes with their hashes, got %d %v", snapped, err)
 	}
 }

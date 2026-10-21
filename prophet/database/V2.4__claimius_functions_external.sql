@@ -5156,13 +5156,13 @@ CREATE OR REPLACE FUNCTION claimius.get_codes(
 ) RETURNS SETOF claimius.code AS $$
     SELECT *
     FROM claimius.code
-    WHERE app_id = p_app_id
-      AND claim_id = p_claim_id
+    WHERE (p_app_id IS NULL OR app_id = p_app_id)
+      AND (p_claim_id IS NULL OR claim_id = p_claim_id)
       AND sa_deleted_at IS NULL
     ORDER BY sa_created_at DESC, id
 $$ LANGUAGE sql STABLE;
 
-COMMENT ON FUNCTION claimius.get_codes(UUID, UUID) IS 'The codes of one claim of the app, revoked ones included, newest first. The caller checks the reader owns the claim.';
+COMMENT ON FUNCTION claimius.get_codes(UUID, UUID) IS 'The codes of one claim of the app, revoked ones included, newest first; a NULL claim lists every code of the app and a NULL app every code of the claim, or of the prophet. The caller checks the reader owns each claim.';
 
 CREATE OR REPLACE FUNCTION claimius.get_code(
     p_app_id UUID,
@@ -5186,12 +5186,12 @@ CREATE OR REPLACE FUNCTION claimius.get_code(
          ORDER BY uc.sa_created_at
          LIMIT 1
     ) g ON TRUE
-    WHERE c.app_id = p_app_id
+    WHERE (p_app_id IS NULL OR c.app_id = p_app_id)
       AND c.hash = p_hash
       AND c.sa_deleted_at IS NULL
 $$ LANGUAGE sql STABLE;
 
-COMMENT ON FUNCTION claimius.get_code(UUID, TEXT) IS 'The code of the app whose value hashes to p_hash as JSON, with guest_mode, the mode of its claim, and guest_user_id and guest_user_claim_id, the guest holding the claim and its grant, or NULL. The window, the count and revoked_at are the caller''s to check; update_code_used and redeem_code check them again atomically.';
+COMMENT ON FUNCTION claimius.get_code(UUID, TEXT) IS 'The code whose value hashes to p_hash, in the app or in any app when p_app_id is NULL, as JSON with its app_id, with guest_mode, the mode of its claim, and guest_user_id and guest_user_claim_id, the guest holding the claim and its grant, or NULL. The window, the count and revoked_at are the caller''s to check; update_code_used and redeem_code check them again atomically.';
 
 CREATE OR REPLACE FUNCTION claimius.update_code_used(
     p_app_id UUID,
@@ -5221,14 +5221,14 @@ DECLARE
     v_grant claimius.user_claim;
 BEGIN
     SELECT * INTO v_code FROM claimius.code
-     WHERE app_id = p_app_id AND hash = p_hash AND sa_deleted_at IS NULL
+     WHERE (p_app_id IS NULL OR app_id = p_app_id) AND hash = p_hash AND sa_deleted_at IS NULL
      FOR UPDATE;
     IF NOT FOUND OR v_code.kind <> 'invite' THEN
         RAISE EXCEPTION 'redeem_code: no invite code' USING ERRCODE = 'P0404';
     END IF;
 
     SELECT * INTO v_grant FROM claimius.user_claim
-     WHERE app_id = p_app_id AND claim_id = v_code.claim_id AND user_id = p_user_id AND sa_deleted_at IS NULL
+     WHERE app_id = v_code.app_id AND claim_id = v_code.claim_id AND user_id = p_user_id AND sa_deleted_at IS NULL
      LIMIT 1;
     IF FOUND THEN
         RETURN jsonb_build_object('code', to_jsonb(v_code), 'user_claim', to_jsonb(v_grant) - 'txid');
@@ -5247,7 +5247,7 @@ BEGIN
     END IF;
 
     v_grant := jsonb_populate_record(NULL::claimius.user_claim, claimius.insert_user_claim(
-        p_app_id        => p_app_id,
+        p_app_id        => v_code.app_id,
         p_claim_id      => v_code.claim_id,
         p_user_id       => p_user_id,
         p_sa_owner_id   => v_code.sa_owner_id,
@@ -5257,7 +5257,7 @@ BEGIN
         p_ends_at       => v_code.ends_at
     ) -> 'user_claim');
 
-    PERFORM claimius.insert_audit(p_app_id, 'redeem code', 'update', 'claimius.claim', v_code.claim_id,
+    PERFORM claimius.insert_audit(v_code.app_id, 'redeem code', 'update', 'claimius.claim', v_code.claim_id,
                                   v_code.sa_owner_id, v_grant.id,
                                   format('invite code %s on claim %s redeemed by %s', v_code.id, v_code.claim_id, p_user_id));
 
@@ -5265,4 +5265,4 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius.redeem_code(UUID, TEXT, UUID) IS 'Redeems an invite code for a signed in user in one transaction: locks the code, takes one use only when it is live and not used up, and grants its claim to the user under the creator''s grant, the code window as the grant window, with an audit row naming the code id, never the value. A user already holding the claim gets the grant back and spends no use. Raises P0404 for no invite code and P0403 for one revoked, outside its window or used up. Returns code and user_claim.';
+COMMENT ON FUNCTION claimius.redeem_code(UUID, TEXT, UUID) IS 'Redeems an invite code for a signed in user in one transaction, in the app or in any app when p_app_id is NULL: locks the code, takes one use only when it is live and not used up, and grants its claim to the user under the creator''s grant, the code window as the grant window, with an audit row naming the code id, never the value. A user already holding the claim gets the grant back and spends no use. Raises P0404 for no invite code and P0403 for one revoked, outside its window or used up. Returns code and user_claim.';

@@ -70,6 +70,7 @@ type Code struct {
 
 type CodeAccess struct {
 	Code
+	AppID            *uuid.UUID `bun:"-" json:"app_id,omitempty"`
 	GuestMode        GuestMode  `bun:"-" json:"guest_mode"`
 	GuestUserID      *uuid.UUID `bun:"-" json:"guest_user_id,omitempty"`
 	GuestUserClaimID *uuid.UUID `bun:"-" json:"guest_user_claim_id,omitempty"`

@@ -51,7 +51,7 @@ func PostCode(ctx context.Context, appID uuid.UUID, body shared.BodySamCode) (js
 
 func GetCodes(ctx context.Context, appID, claimID uuid.UUID) ([]shared.Code, error) {
 	codes := make([]shared.Code, 0)
-	if err := instance.NewRaw("SELECT * FROM claimius.get_codes(?, ?)", appID, claimID).Scan(ctx, &codes); err != nil && !errors.Is(err, sql.ErrNoRows) {
+	if err := instance.NewRaw("SELECT id, hash, kind, claim_id, object_id, object_type, data, starts_at, ends_at, count, used_count, revoked_at, sa_owner_id, sa_created_by, sa_deleted_at, sa_created_at, sa_updated_at FROM claimius.get_codes(?, ?)", uuid.NullUUID{UUID: appID, Valid: appID != uuid.Nil}, uuid.NullUUID{UUID: claimID, Valid: claimID != uuid.Nil}).Scan(ctx, &codes); err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return nil, err
 	}
 	return codes, nil
@@ -67,7 +67,7 @@ func DeleteCode(ctx context.Context, appID, userID, codeID uuid.UUID) (json.RawM
 
 func GetCodeAccess(ctx context.Context, appID uuid.UUID, value string) (*shared.CodeAccess, error) {
 	var raw []byte
-	if err := instance.NewRaw("SELECT claimius.get_code(?, ?)", appID, shared.GetCodeHash(value)).Scan(ctx, (*[]byte)(&raw)); err != nil && !errors.Is(err, sql.ErrNoRows) {
+	if err := instance.NewRaw("SELECT claimius.get_code(?, ?)", uuid.NullUUID{UUID: appID, Valid: appID != uuid.Nil}, shared.GetCodeHash(value)).Scan(ctx, (*[]byte)(&raw)); err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return nil, fmt.Errorf("get code: %w", err)
 	}
 	if len(raw) == 0 {
@@ -96,7 +96,7 @@ func PutCodeUsed(ctx context.Context, appID uuid.UUID, hash string) (json.RawMes
 
 func PostCodeRedeem(ctx context.Context, appID uuid.UUID, hash string, userID uuid.UUID) (json.RawMessage, error) {
 	var raw json.RawMessage
-	if err := instance.NewRaw("SELECT claimius.redeem_code(?, ?, ?)", appID, hash, userID).Scan(ctx, (*[]byte)(&raw)); err != nil {
+	if err := instance.NewRaw("SELECT claimius.redeem_code(?, ?, ?)", uuid.NullUUID{UUID: appID, Valid: appID != uuid.Nil}, hash, userID).Scan(ctx, (*[]byte)(&raw)); err != nil {
 		var pgErr pgdriver.Error
 		if errors.As(err, &pgErr) && (pgErr.Field('C') == "P0404" || pgErr.Field('C') == "P0403") {
 			return nil, shared.ErrCodeInvalid
