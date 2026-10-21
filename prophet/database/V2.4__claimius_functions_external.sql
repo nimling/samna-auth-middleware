@@ -3262,6 +3262,7 @@ $$ LANGUAGE plpgsql;
 COMMENT ON FUNCTION claimius.upsert_prophet_peer(p_system_app_slug text, p_system_app_name text, p_system_app_private_key text, p_system_app_private_seed text, p_upstream_prophet text, p_upstream_endpoint text, p_upstream_app_slug text, p_upstream_app_secret text, p_upstream_peer_secret text, p_system_user_id uuid, p_system_app_redirect_uri text, p_system_app_sync_uri text, p_system_app_contact_email text, p_system_app_image text, p_system_app_provider_ids uuid[], p_system_app_style jsonb, p_system_app_description text, p_system_org_name text, p_system_claim_name text, p_system_claim_id uuid, p_default_claim jsonb) IS 'Bootstrap as a hybrid: a prophet mirroring one app of an upstream prophet registered as its peer.';
 
 DROP FUNCTION IF EXISTS claimius.create_app(uuid,text,text,uuid,text,text,text[],text,text,text,integer,jsonb,uuid);
+DROP FUNCTION IF EXISTS claimius.upsert_app(uuid,text,text,uuid,text,text,text[],text,text,text,integer,jsonb,uuid);
 CREATE OR REPLACE FUNCTION claimius.upsert_app(
     p_actor_user_claim_id UUID,
     p_slug                TEXT,
@@ -3275,11 +3276,13 @@ CREATE OR REPLACE FUNCTION claimius.upsert_app(
     p_connection          TEXT    DEFAULT 'code',
     p_owner_access        INTEGER DEFAULT 15,
     p_default_claim       JSONB   DEFAULT NULL,
-    p_app_id              UUID    DEFAULT NULL
+    p_app_id              UUID    DEFAULT NULL,
+    p_parent_id           UUID    DEFAULT NULL
 ) RETURNS JSONB AS $$
 DECLARE
     v_actor             claimius.user_claim;
     v_org               claimius.organization;
+    v_parent            claimius.samna_app;
     v_app               claimius.samna_app;
     v_claim_id          UUID;
     v_default_claim_id  UUID;
@@ -3300,13 +3303,25 @@ BEGIN
         RAISE EXCEPTION 'upsert_app: organization % not found', p_org_id USING ERRCODE = '22023';
     END IF;
 
+    IF p_parent_id IS NOT NULL THEN
+        SELECT * INTO v_parent
+        FROM claimius.samna_app
+        WHERE id = p_parent_id AND sa_deleted_at IS NULL;
+        IF NOT FOUND THEN
+            RAISE EXCEPTION 'upsert_app: parent app % not found', p_parent_id USING ERRCODE = '22023';
+        END IF;
+        IF v_parent.sa_owner_id <> v_org.id THEN
+            RAISE EXCEPTION 'upsert_app: parent app % is owned by organization %, not %', v_parent.slug, v_parent.sa_owner_id, v_org.id USING ERRCODE = '22023';
+        END IF;
+    END IF;
+
     INSERT INTO claimius.samna_app (
         id, slug, name, description, redirect_uris, sync_uri, status, connection,
-        private_key, private_seed, sa_owner_id, sa_created_by
+        private_key, private_seed, sa_owner_id, sa_created_by, sa_parent_id
     ) VALUES (
         coalesce(claimius.ensure_uuid_null(p_app_id), gen_random_uuid()), p_slug, p_name, p_description,
         p_redirect_uris, p_sync_uri, 'active', p_connection::claimius.app_connection,
-        p_private_key, p_private_seed, v_org.id, p_actor_user_claim_id
+        p_private_key, p_private_seed, v_org.id, p_actor_user_claim_id, p_parent_id
     )
     ON CONFLICT (slug) DO UPDATE SET
         name          = EXCLUDED.name,
@@ -3321,6 +3336,13 @@ BEGIN
 
     IF v_app.sa_owner_id <> v_org.id THEN
         RAISE EXCEPTION 'upsert_app: app % is owned by organization %, not %', p_slug, v_app.sa_owner_id, v_org.id USING ERRCODE = '22023';
+    END IF;
+    IF v_app.sa_parent_id <> coalesce(p_parent_id, v_app.id) THEN
+        RAISE EXCEPTION 'upsert_app: app % has parent %, not %', p_slug, v_app.sa_parent_id, coalesce(p_parent_id, v_app.id) USING ERRCODE = '22023';
+    END IF;
+
+    IF p_parent_id IS NOT NULL THEN
+        RETURN jsonb_build_object('samna_app', to_jsonb(v_app));
     END IF;
 
     INSERT INTO claimius.prophet_state (app_id, last_applied_seq)
@@ -3494,7 +3516,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius.upsert_app(UUID, TEXT, TEXT, UUID, TEXT, TEXT, TEXT[], TEXT, TEXT, TEXT, INTEGER, JSONB, UUID) IS 'Registers a new app on an existing prophet, owned by an existing organization the actor holds owner on in its own app. Every row is stamped with the actor''s user_claim.id. Links the organization tree, creates and binds the owner claim and grants it to the actor''s user in the app, and creates and binds the default claim. Idempotent on slug. Returns jsonb keyed by table.';
+COMMENT ON FUNCTION claimius.upsert_app(UUID, TEXT, TEXT, UUID, TEXT, TEXT, TEXT[], TEXT, TEXT, TEXT, INTEGER, JSONB, UUID, UUID) IS 'Registers a new app on an existing prophet, owned by an existing organization the actor holds owner on in its own app. Every row is stamped with the actor''s user_claim.id. Links the organization tree, creates and binds the owner claim and grants it to the actor''s user in the app, and creates and binds the default claim. With p_parent_id it registers a child app of that parent, owned by the same organization, and creates nothing else: users, claims, organizations and the sync resolve on the root. Idempotent on slug; never reparents. Returns jsonb keyed by table.';
 
 DROP FUNCTION IF EXISTS claimius.ensure_app_user(UUID, UUID, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT);
 DROP FUNCTION IF EXISTS claimius.ensure_app_user(UUID, UUID, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT);

@@ -321,6 +321,8 @@ type SamnaApp struct {
 	ClaimID       *uuid.UUID   `bun:"claim_id,type:uuid" json:"claim_id,omitempty"`
 	Style         *ObjectStyle `bun:"style,type:jsonb" json:"style,omitempty"`
 	OwnerID       uuid.UUID    `bun:"sa_owner_id,notnull,type:uuid" json:"owner_id"`
+	ParentID      uuid.UUID    `bun:"sa_parent_id,notnull,type:uuid" json:"parent_id"`
+	RootID        uuid.UUID    `bun:"sa_root_id,notnull,type:uuid" json:"root_id"`
 	CreatedBy     uuid.UUID    `bun:"sa_created_by,notnull,type:uuid" json:"created_by"`
 	DeletedAt     *time.Time   `bun:"sa_deleted_at" json:"deleted_at,omitzero"`
 	CreatedAt     time.Time    `bun:"sa_created_at,notnull,default:current_timestamp" json:"created_at"`

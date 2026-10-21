@@ -8,11 +8,35 @@ import (
 
 	"github.com/labstack/echo/v4"
 	"github.com/nimling/samna-auth-middleware/v2/client"
+	"github.com/nimling/samna-auth-middleware/v2/shared"
 	"github.com/nimling/samna-auth-middleware/v2/smw"
 	"github.com/nimling/samna-auth-middleware/v2/utils"
 )
 
+func getCookieApp(ctx echo.Context, name string) *shared.SamnaApp {
+	cookie, err := ctx.Cookie(name)
+	if err != nil || cookie.Value == "" {
+		return nil
+	}
+	app, err := shared.GetApp(ctx.Request().Context(), cookie.Value)
+	if err != nil {
+		return nil
+	}
+	return app
+}
+
 func GetLogin(ctx echo.Context) error {
+	slug := utils.Cfg().AppSlug
+	var app *shared.SamnaApp
+	if appSlug := ctx.QueryParam("app"); appSlug != "" && appSlug != slug {
+		found, err := shared.GetApp(ctx.Request().Context(), appSlug)
+		if err != nil {
+			return respondError(ctx, http.StatusBadRequest, "unknown app")
+		}
+		app = found
+		slug = found.Slug
+	}
+
 	verifier, err := client.GenerateVerifier()
 	if err != nil {
 		ctx.Logger().Errorf("GetLogin verifier: %v", err)
@@ -46,7 +70,6 @@ func GetLogin(ctx echo.Context) error {
 		cliTarget = target
 	}
 
-	slug := utils.Cfg().AppSlug
 	redirectURI := utils.Cfg().RedirectURI
 	authURL, err := client.AuthorizeURL(slug, redirectURI, state, challenge)
 	if err != nil {
@@ -62,6 +85,11 @@ func GetLogin(ctx echo.Context) error {
 		utils.WriteCookie(ctx, &http.Cookie{Name: client.PKCEVerifierCookie, Value: verifier, Path: "/", MaxAge: 600})
 	}
 	utils.WriteCookie(ctx, &http.Cookie{Name: client.OAuthStateCookie, Value: state, Path: "/", MaxAge: 600})
+	if app != nil && cliTarget == "" {
+		utils.WriteCookie(ctx, &http.Cookie{Name: client.LoginAppCookie, Value: app.Slug, Path: "/", MaxAge: 600})
+	} else {
+		utils.ClearCookie(ctx, client.LoginAppCookie)
+	}
 
 	return Redirect(ctx, http.StatusTemporaryRedirect, authURL)
 }
@@ -72,7 +100,11 @@ func GetCallback(ctx echo.Context) error {
 		return respondError(ctx, http.StatusBadRequest, "missing code")
 	}
 
+	app := getCookieApp(ctx, client.LoginAppCookie)
 	startOver := utils.Cfg().PageRedirect
+	if app != nil {
+		startOver = app.GetPrimaryOrigin()
+	}
 	if startOver == "" {
 		startOver = "/"
 	}
@@ -87,6 +119,9 @@ func GetCallback(ctx echo.Context) error {
 	resume := startOver
 	if stateNext != "" {
 		resume = strings.TrimSuffix(ctx.Request().URL.Path, "callback") + "login?next=" + url.QueryEscape(stateNext)
+		if app != nil {
+			resume += "&app=" + url.QueryEscape(app.Slug)
+		}
 	}
 	stateCookie, stateErr := ctx.Cookie(client.OAuthStateCookie)
 	if stateErr != nil || stateCookie.Value == "" || stateParam == "" || stateParam != stateCookie.Value {
@@ -100,6 +135,7 @@ func GetCallback(ctx echo.Context) error {
 		utils.ClearCookie(ctx, client.CliTargetCookie)
 		utils.ClearCookie(ctx, client.OAuthStateCookie)
 		utils.ClearCookie(ctx, client.LoginNextCookie)
+		utils.ClearCookie(ctx, client.LoginAppCookie)
 		return respondCliCode(ctx, cliCookie.Value, code)
 	}
 
@@ -137,7 +173,7 @@ func GetCallback(ctx echo.Context) error {
 	}
 	smw.WriteCSRFCookie(ctx)
 
-	pageRedirect := utils.Cfg().PageRedirect
+	pageRedirect := startOver
 	if stateNext != "" {
 		pageRedirect = stateNext
 	}
@@ -145,8 +181,14 @@ func GetCallback(ctx echo.Context) error {
 		pageRedirect = nextCookie.Value
 	}
 	utils.ClearCookie(ctx, client.LoginNextCookie)
-	if pageRedirect == "" {
-		pageRedirect = "/"
+	utils.ClearCookie(ctx, client.LoginAppCookie)
+	if app != nil {
+		utils.WriteCookie(ctx, &http.Cookie{Name: client.AppSlugCookie, Value: app.Slug, Path: "/", MaxAge: tokens.RefreshExpiresIn})
+		if strings.HasPrefix(pageRedirect, "/") {
+			pageRedirect = strings.TrimSuffix(app.GetPrimaryOrigin(), "/") + pageRedirect
+		}
+	} else {
+		utils.ClearCookie(ctx, client.AppSlugCookie)
 	}
 	return Redirect(ctx, http.StatusFound, pageRedirect)
 }
@@ -157,7 +199,12 @@ func GetLogout(ctx echo.Context) error {
 		accessToken = cookie.Value
 	}
 
-	for _, name := range []string{"sauth_csrf_token", "sauth_refresh_token", "sauth_access_token"} {
+	slug, pageRedirect := utils.Cfg().AppSlug, utils.Cfg().PageRedirect
+	if app := getCookieApp(ctx, client.AppSlugCookie); app != nil {
+		slug, pageRedirect = app.Slug, app.GetPrimaryOrigin()
+	}
+
+	for _, name := range []string{"sauth_csrf_token", "sauth_refresh_token", "sauth_access_token", client.AppSlugCookie} {
 		utils.ClearCookie(ctx, name)
 	}
 
@@ -170,7 +217,7 @@ func GetLogout(ctx echo.Context) error {
 		}
 	}
 
-	endSessionURL, err := client.EndSessionURL()
+	endSessionURL, err := client.EndSessionURL(slug, pageRedirect)
 	if err != nil {
 		ctx.Logger().Errorf("GetLogout end session url: %v", err)
 		return ctx.NoContent(http.StatusOK)

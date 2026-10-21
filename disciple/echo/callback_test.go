@@ -253,3 +253,80 @@ func TestGetCallbackIgnoresAProtocolRelativeNextInTheState(t *testing.T) {
 		t.Fatalf("Location = %q, want the page redirect", location)
 	}
 }
+
+func TestGetCallbackReturnsToTheChildApp(t *testing.T) {
+	tokenServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/app/testapp/oauth/token" {
+			t.Errorf("token path = %s, want the root app's", r.URL.Path)
+		}
+		if r.Header.Get("SAuth-App-Slug") != "testapp" || r.Header.Get("SAuth-App-Secret") != "secret" {
+			t.Errorf("the child's code is not exchanged with the root app's credentials")
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"data":{"access_token":"tok","refresh_token":"ref","token_type":"Bearer","access_expires_in":3600,"refresh_expires_in":2592000},"count":1,"request_id":"00000000-0000-0000-0000-000000000000"}`))
+	}))
+	defer tokenServer.Close()
+
+	t.Setenv("SAUTH_ENDPOINT", tokenServer.URL)
+	t.Setenv("SAUTH_APP_SLUG", "testapp")
+	t.Setenv("SAUTH_APP_SECRET", "secret")
+	t.Setenv("SAUTH_REDIRECT_URI", "http://localhost:4200/api/auth/callback")
+	t.Setenv("SAUTH_PAGE_REDIRECT", "http://localhost:4200/")
+	t.Setenv("SAUTH_DEBUG_USER_ID", "a0000000-0000-4000-8000-00000000000a")
+	t.Setenv("SAUTH_DEBUG_APPS", "testapp-web=http://web.example/")
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/api/auth/callback?code=abc&state=st1", nil)
+	req.AddCookie(&http.Cookie{Name: "sauth_oauth_state", Value: "st1"})
+	req.AddCookie(&http.Cookie{Name: "sauth_pkce_verifier", Value: "ver1"})
+	req.AddCookie(&http.Cookie{Name: "sauth_login_next", Value: "/bookings"})
+	req.AddCookie(&http.Cookie{Name: "sauth_login_app", Value: "testapp-web"})
+	rec := httptest.NewRecorder()
+	ctx := e.NewContext(req, rec)
+
+	if err := saecho.GetCallback(ctx); err != nil {
+		t.Fatalf("GetCallback: %v", err)
+	}
+	if rec.Code != http.StatusFound {
+		t.Fatalf("status = %d, want 302", rec.Code)
+	}
+	if location := rec.Header().Get("Location"); location != "http://web.example/bookings" {
+		t.Errorf("location = %q, want http://web.example/bookings", location)
+	}
+	got := map[string]string{}
+	for _, c := range rec.Result().Cookies() {
+		got[c.Name] = c.Value
+	}
+	if got["sauth_app_slug"] != "testapp-web" {
+		t.Errorf("sauth_app_slug = %q, want testapp-web", got["sauth_app_slug"])
+	}
+}
+
+func TestGetLogoutEndsTheChildAppSession(t *testing.T) {
+	authServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	defer authServer.Close()
+
+	t.Setenv("SAUTH_ENDPOINT", authServer.URL)
+	t.Setenv("SAUTH_APP_SLUG", "testapp")
+	t.Setenv("SAUTH_APP_SECRET", "secret")
+	t.Setenv("SAUTH_PAGE_REDIRECT", "http://localhost:4200/")
+	t.Setenv("SAUTH_DEBUG_USER_ID", "a0000000-0000-4000-8000-00000000000a")
+	t.Setenv("SAUTH_DEBUG_APPS", "testapp-web=http://web.example")
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/api/auth/logout", nil)
+	req.AddCookie(&http.Cookie{Name: "sauth_app_slug", Value: "testapp-web"})
+	rec := httptest.NewRecorder()
+	ctx := e.NewContext(req, rec)
+
+	if err := saecho.GetLogout(ctx); err != nil {
+		t.Fatalf("GetLogout: %v", err)
+	}
+	location := rec.Header().Get("Location")
+	if !strings.Contains(location, "/api/app/testapp-web/oauth/end_session") {
+		t.Errorf("location = %q, want the child app's end_session", location)
+	}
+	if !strings.Contains(location, "post_logout_redirect_uri=http%3A%2F%2Fweb.example") {
+		t.Errorf("location = %q, want the child app's origin", location)
+	}
+}

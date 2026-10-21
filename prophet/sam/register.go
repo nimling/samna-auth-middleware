@@ -93,6 +93,7 @@ func RegisterEndpoints(g *echo.Group) {
 
 	app := g.Group("/app")
 	app.GET("", h.GetSamApp)
+	app.GET("/apps", h.GetSamApps)
 
 	guest := g.Group("/guest")
 	guest.POST("", h.PostGuestToken)

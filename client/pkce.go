@@ -14,6 +14,8 @@ const (
 	OAuthStateCookie   = "sauth_oauth_state"
 	LoginNextCookie    = "sauth_login_next"
 	CliTargetCookie    = "sauth_cli_target"
+	LoginAppCookie     = "sauth_login_app"
+	AppSlugCookie      = "sauth_app_slug"
 )
 
 func GenerateVerifier() (string, error) {
@@ -55,9 +57,8 @@ func TokenURLFor(slug string) (string, error) {
 	return joinURL(endpoint, fmt.Sprintf("api/app/%s/oauth/token", slug))
 }
 
-func EndSessionURL() (string, error) {
+func EndSessionURL(slug string, pageRedirect string) (string, error) {
 	endpoint := utils.Cfg().Endpoint
-	slug := utils.Cfg().AppSlug
 	joined, err := joinURL(endpoint, fmt.Sprintf("api/app/%s/oauth/end_session", slug))
 	if err != nil {
 		return "", fmt.Errorf("build end session url: %w", err)
@@ -66,7 +67,6 @@ func EndSessionURL() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("parse end session url: %w", err)
 	}
-	pageRedirect := utils.Cfg().PageRedirect
 	if pageRedirect != "" {
 		q := parsed.Query()
 		q.Set("post_logout_redirect_uri", pageRedirect)

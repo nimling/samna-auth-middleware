@@ -106,6 +106,16 @@ describe('static mode', () => {
     expect(url.searchParams.get('next')).toBe(`${window.location.origin}/test`)
   })
 
+  it('sends a child app login to the bff with its slug and the page to return to', () => {
+    configureEdge({ endpoint: '', clientSlug: 'bookable', mode: 'bff', bffPath: 'https://api.example.io/api/auth', app: 'bookable-web' })
+
+    const url = new URL(getLoginUrl(undefined, '/bookings'))
+
+    expect(url.origin + url.pathname).toBe('https://api.example.io/api/auth/login')
+    expect(url.searchParams.get('app')).toBe('bookable-web')
+    expect(url.searchParams.get('next')).toBe('/bookings')
+  })
+
   it('ends the session on the prophet with a credentialed get', async () => {
     configureEdge({ endpoint: 'https://auth.example.io', clientSlug: 'docs', mode: EDGE_MODE_STATIC })
     const calls = stubFetch(200, {})

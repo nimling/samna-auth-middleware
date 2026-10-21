@@ -728,10 +728,19 @@ type SamnaApp struct {
 	ClaimID       *uuid.UUID       `bun:"claim_id" json:"claim_id"`
 	Style         *json.RawMessage `bun:"style,type:jsonb" json:"style"`
 	OwnerID       uuid.UUID        `bun:"sa_owner_id" json:"owner_id"`
+	ParentID      uuid.UUID        `bun:"sa_parent_id,nullzero" json:"parent_id"`
+	RootID        uuid.UUID        `bun:"sa_root_id,nullzero" json:"root_id"`
 	CreatedBy     uuid.UUID        `bun:"sa_created_by" json:"created_by"`
 	DeletedAt     *time.Time       `bun:"sa_deleted_at" json:"deleted_at,omitzero"`
 	CreatedAt     time.Time        `bun:"sa_created_at,default:now()" json:"created_at"`
 	UpdatedAt     time.Time        `bun:"sa_updated_at,default:now()" json:"updated_at"`
+}
+
+func (a SamnaApp) GetPrimaryOrigin() string {
+	if len(a.RedirectUris) == 0 {
+		return ""
+	}
+	return a.RedirectUris[0]
 }
 
 type ObjectField struct {

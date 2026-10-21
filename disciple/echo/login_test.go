@@ -85,3 +85,62 @@ func TestGetLoginCarriesNextInTheState(t *testing.T) {
 		t.Errorf("state = %q, want the next path encoded after the dot", state)
 	}
 }
+
+func TestGetLoginAuthorizesAChildApp(t *testing.T) {
+	t.Setenv("SAUTH_ENDPOINT", "http://auth.example")
+	t.Setenv("SAUTH_APP_SLUG", "testapp")
+	t.Setenv("SAUTH_REDIRECT_URI", "http://localhost:4200/api/auth/callback")
+	t.Setenv("SAUTH_DEBUG_USER_ID", "a0000000-0000-4000-8000-00000000000a")
+	t.Setenv("SAUTH_DEBUG_APPS", "testapp-web=http://web.example")
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/api/auth/login?app=testapp-web&next=%2Fbookings", nil)
+	rec := httptest.NewRecorder()
+	ctx := e.NewContext(req, rec)
+
+	if err := saecho.GetLogin(ctx); err != nil {
+		t.Fatalf("GetLogin: %v", err)
+	}
+	if rec.Code != http.StatusTemporaryRedirect {
+		t.Fatalf("status = %d, want 307", rec.Code)
+	}
+	location, err := url.Parse(rec.Header().Get("Location"))
+	if err != nil {
+		t.Fatalf("parse location: %v", err)
+	}
+	if location.Path != "/api/app/testapp-web/oauth/authorize" || location.Query().Get("client_id") != "testapp-web" {
+		t.Errorf("location = %q, want the child app's authorize", location)
+	}
+	if location.Query().Get("redirect_uri") != "http://localhost:4200/api/auth/callback" {
+		t.Errorf("redirect_uri = %q, want the disciple callback", location.Query().Get("redirect_uri"))
+	}
+	app := ""
+	for _, c := range rec.Result().Cookies() {
+		if c.Name == "sauth_login_app" {
+			app = c.Value
+		}
+	}
+	if app != "testapp-web" {
+		t.Errorf("sauth_login_app = %q, want testapp-web", app)
+	}
+}
+
+func TestGetLoginRefusesAnUnknownApp(t *testing.T) {
+	t.Setenv("SAUTH_ENDPOINT", "http://auth.example")
+	t.Setenv("SAUTH_APP_SLUG", "testapp")
+	t.Setenv("SAUTH_REDIRECT_URI", "http://localhost:4200/api/auth/callback")
+	t.Setenv("SAUTH_DEBUG_USER_ID", "a0000000-0000-4000-8000-00000000000a")
+	t.Setenv("SAUTH_DEBUG_APPS", "testapp-web=http://web.example")
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/api/auth/login?app=otherapp", nil)
+	rec := httptest.NewRecorder()
+	ctx := e.NewContext(req, rec)
+
+	if err := saecho.GetLogin(ctx); err != nil {
+		t.Fatalf("GetLogin: %v", err)
+	}
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", rec.Code)
+	}
+}

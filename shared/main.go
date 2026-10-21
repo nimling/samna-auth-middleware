@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"reflect"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -147,6 +148,47 @@ func GetAppSeed(ctx context.Context) (string, error) {
 
 func DeleteAppSeed() {
 	appSeed.Store(nil)
+}
+
+var childApps atomic.Pointer[[]SamnaApp]
+
+func GetApps(ctx context.Context) ([]SamnaApp, error) {
+	if GetDebugMode() != DebugModeNone {
+		apps := []SamnaApp{}
+		for _, pair := range strings.Split(utils.Cfg().DebugApps, ",") {
+			slug, origin, ok := strings.Cut(strings.TrimSpace(pair), "=")
+			if ok && slug != "" && origin != "" {
+				apps = append(apps, SamnaApp{Slug: slug, RedirectUris: []string{origin}})
+			}
+		}
+		return apps, nil
+	}
+	if apps := childApps.Load(); apps != nil {
+		return *apps, nil
+	}
+	return PutApps(ctx)
+}
+
+func PutApps(ctx context.Context) ([]SamnaApp, error) {
+	apps := []SamnaApp{}
+	if err := client.Get(ctx, "app/apps", &apps); err != nil {
+		return nil, fmt.Errorf("get child apps from the prophet: %w", err)
+	}
+	childApps.Store(&apps)
+	return apps, nil
+}
+
+func GetApp(ctx context.Context, slug string) (*SamnaApp, error) {
+	apps, err := GetApps(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for i := range apps {
+		if apps[i].Slug == slug && apps[i].GetPrimaryOrigin() != "" {
+			return &apps[i], nil
+		}
+	}
+	return nil, ErrNotFound
 }
 
 func (d *DB) GetAppEnv(ctx context.Context) (*SamnaApp, error) {
