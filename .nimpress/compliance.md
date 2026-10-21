@@ -975,7 +975,7 @@ just test TestTheGuardRedactsTheCodeFromTheRequestAndTheSpan
 
 1. Standard: RFC 6750 section 5.3; W3C capability URLs; RFC 6265bis section 4.1.3.
 
-2. Check: a navigation carrying `samk` answers `303` to the URL without it, with `Referrer-Policy: no-referrer` and a `__Host-` cookie that is `HttpOnly`, `Secure`, `SameSite=Lax` and expires with the code.
+2. Check: a navigation carrying `samk` on a route with `Guest` answers `303` to the URL without it, with `Referrer-Policy: no-referrer` and a `__Host-` cookie that is `HttpOnly`, `Secure`, `SameSite=Lax` and expires with the code.
 
 3. Method:
 
@@ -1024,17 +1024,17 @@ just test TestACodeIsStoredByItsHashAndNeverByItsValue
 
 1. Standard: OWASP ASVS V4.1.3, least privilege.
 
-2. Check: a guest, reached by code or by an open guest claim, is refused anything past READ and its access mask holds READ only, whatever its claim holds; every guest request writes an audit row naming the claim and the code id.
+2. Check: a guest, reached by code or by an open guest claim, is reached only on a route group mounted with `UserAuthOptions{Guest: true}`, where it is refused anything past READ and its access mask holds READ only, whatever its claim holds; every guest request writes an audit row naming the claim and the code id; on any other route a guest code is no identity and the request answers `401`, or the login redirect on a navigation, with no use spent and no audit row.
 
 3. Method:
 
 ```bash
-just test 'TestAGuestCodeInTheHeaderActsAsTheGuestAndIsAudited|TestAnOpenGuestClaimServesARouteThatAllowsGuests'
+just test 'TestAGuestCodeInTheHeaderActsAsTheGuestAndIsAudited|TestAnOpenGuestClaimServesARouteThatAllowsGuests|TestAGuestCodeIsNoIdentityOnARouteWithoutGuest'
 ```
 
-4. Pass: WRITE is refused, READ answers mask 4, and one audit row names the claim and the code without the value.
+4. Pass: WRITE is refused, READ answers mask 4, one audit row names the claim and the code without the value, and a route without `Guest` answers `401` and `302` to the login while the single use code stays unused.
 
-5. Today: `passes`, `get_access` in both `V2.4` files and `smw/code.go:151`.
+5. Today: `passes`, `get_access` in both `V2.4` files, `smw/code.go:128` and `smw/code.go:156`.
 
 ## Summary
 

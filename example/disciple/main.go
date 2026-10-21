@@ -38,8 +38,9 @@ func main() {
 	sam.RegisterStatus(e.Group(uptime.StatusBasePath))
 	sam.RegisterCli(e.Group("/api/auth"))
 
+	sam.RegisterEndpoints(e.Group("", smw.UserAuthMiddleware(&smw.UserAuthOptions{Guest: true})))
+
 	api := e.Group("", smw.UserAuthMiddleware(nil))
-	sam.RegisterEndpoints(api)
 
 	api.GET("/api/access/:type/:id", GetAccess)
 	api.POST("/api/access", PostAccessBatch)

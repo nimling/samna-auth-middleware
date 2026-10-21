@@ -290,7 +290,7 @@ func TestAGuestCodeOnANavigationIsStrippedWithA303AndAHostCookie(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/board?view=1&samk="+code.Value, nil)
 	req.Header.Set("Accept", "text/html")
-	rec, _ := serveGuard(t, nil, f.org, shared.ACCESS_READ, req)
+	rec, _ := serveGuard(t, guestRoute, f.org, shared.ACCESS_READ, req)
 	if rec.Code != http.StatusSeeOther {
 		t.Fatalf("a navigation carrying samk answers 303, got %d", rec.Code)
 	}
@@ -310,7 +310,7 @@ func TestAGuestCodeOnANavigationIsStrippedWithA303AndAHostCookie(t *testing.T) {
 
 	follow := httptest.NewRequest(http.MethodGet, "/board?view=1", nil)
 	follow.AddCookie(&http.Cookie{Name: smw.CodeCookie, Value: code.Value})
-	rec, answer := serveGuard(t, nil, f.org, shared.ACCESS_READ, follow)
+	rec, answer := serveGuard(t, guestRoute, f.org, shared.ACCESS_READ, follow)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("the cookie carries the guest, got %d %s", rec.Code, rec.Body.String())
 	}
@@ -340,7 +340,7 @@ func TestAGuestCodeInTheHeaderActsAsTheGuestAndIsAudited(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/board", nil)
 	req.Header.Set(smw.CodeHeader, code.Value)
-	rec, answer := serveGuard(t, nil, f.org, shared.ACCESS_READ, req)
+	rec, answer := serveGuard(t, guestRoute, f.org, shared.ACCESS_READ, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("an api call with SAuth-Code is served, got %d", rec.Code)
 	}
@@ -362,7 +362,7 @@ func TestAGuestCodeInTheHeaderActsAsTheGuestAndIsAudited(t *testing.T) {
 
 	write := httptest.NewRequest(http.MethodGet, "/api/board", nil)
 	write.Header.Set(smw.CodeHeader, code.Value)
-	if rec, _ := serveGuard(t, nil, f.org, shared.ACCESS_WRITE, write); rec.Code != http.StatusForbidden {
+	if rec, _ := serveGuard(t, guestRoute, f.org, shared.ACCESS_WRITE, write); rec.Code != http.StatusForbidden {
 		t.Fatalf("a guest never writes, got %d", rec.Code)
 	}
 }
@@ -380,9 +380,9 @@ func TestTheGuardRedactsTheCodeFromTheRequestAndTheSpan(t *testing.T) {
 
 	server := newAuthServerWithFailingRefresh(t)
 	t.Cleanup(server.Close)
-	_ = userAuthHandlerAgainst(t, server, nil)
+	_ = userAuthHandlerAgainst(t, server, guestRoute)
 	var seen guardAnswer
-	handler := smw.TelemetryMiddleware()(smw.UserAuthMiddleware(nil)(func(ctx echo.Context) error {
+	handler := smw.TelemetryMiddleware()(smw.UserAuthMiddleware(guestRoute)(func(ctx echo.Context) error {
 		seen.Query = ctx.Request().URL.RawQuery + "|" + ctx.Request().RequestURI + "|" + ctx.QueryParam(smw.CodeParam)
 		return ctx.NoContent(http.StatusOK)
 	}))
@@ -495,4 +495,57 @@ func TestAnInviteWithoutALoginKeepsTheCodeThroughTheLogin(t *testing.T) {
 	if rec, _ := serveGuard(t, nil, f.org, shared.ACCESS_READ, api); rec.Code != http.StatusUnauthorized {
 		t.Fatalf("an api call with an invite and no login answers 401, got %d", rec.Code)
 	}
+}
+
+var guestRoute = &smw.UserAuthOptions{Guest: true}
+
+func TestAGuestCodeIsNoIdentityOnARouteWithoutGuest(t *testing.T) {
+	f := getCodeFixture(t)
+	f.putGuest(t, shared.GUEST_MODE_CODE)
+	code := f.postCode(t, shared.BodyCode{Kind: shared.CODE_KIND_GUEST, Count: 1})
+
+	api := httptest.NewRequest(http.MethodGet, "/api/board", nil)
+	api.Header.Set(smw.CodeHeader, code.Value)
+	if rec, _ := serveGuard(t, nil, f.org, shared.ACCESS_READ, api); rec.Code != http.StatusUnauthorized {
+		t.Fatalf("an api call with SAuth-Code on a route without Guest answers 401, got %d", rec.Code)
+	}
+
+	cookie := httptest.NewRequest(http.MethodGet, "/api/board", nil)
+	cookie.AddCookie(&http.Cookie{Name: smw.CodeCookie, Value: code.Value})
+	rec, _ := serveGuard(t, nil, f.org, shared.ACCESS_READ, cookie)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("the code cookie on a route without Guest answers 401, got %d", rec.Code)
+	}
+	if getCodeCookie(rec) != nil {
+		t.Fatal("a route without Guest leaves the code cookie alone")
+	}
+
+	nav := httptest.NewRequest(http.MethodGet, "/board?samk="+code.Value, nil)
+	nav.Header.Set("Accept", "text/html")
+	rec, _ = serveGuard(t, nil, f.org, shared.ACCESS_READ, nav)
+	if rec.Code != http.StatusFound {
+		t.Fatalf("a navigation with samk on a route without Guest goes to the login, got %d", rec.Code)
+	}
+	if loc := rec.Header().Get("Location"); loc != "/api/auth/login" || strings.Contains(loc, code.Value) {
+		t.Fatalf("the login redirect carries no code, got %q", loc)
+	}
+	if getCodeCookie(rec) != nil {
+		t.Fatal("a route without Guest writes no code cookie")
+	}
+	if rec.Header().Get("Referrer-Policy") != "no-referrer" {
+		t.Fatal("an answer to a request carrying a code sends Referrer-Policy no-referrer")
+	}
+
+	var audited int
+	if err := sdb.Instance().NewRaw(`SELECT count(*) FROM claimius.audit WHERE object_id = ? AND operation = 'guest request'`, f.readers).Scan(context.Background(), &audited); err != nil || audited != 0 {
+		t.Fatalf("no guest request is audited on a route without Guest, got %d %v", audited, err)
+	}
+
+	guest := httptest.NewRequest(http.MethodGet, "/api/board", nil)
+	guest.Header.Set(smw.CodeHeader, code.Value)
+	rec, answer := serveGuard(t, guestRoute, f.org, shared.ACCESS_READ, guest)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("the single use code is still unused and serves a route with Guest, got %d", rec.Code)
+	}
+	f.assertGuest(t, answer)
 }

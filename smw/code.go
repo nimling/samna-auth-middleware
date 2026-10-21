@@ -125,6 +125,12 @@ func serveCode(ctx echo.Context, config *AuthMiddlewareConfig, value string, sou
 
 	switch access.Kind {
 	case shared.CODE_KIND_GUEST:
+		if !config.Guest {
+			if authenticated && source == codeSourceQuery && isNavigationGet(ctx) {
+				return respondCodeStripped(ctx)
+			}
+			return serveRequest(ctx, config, authenticated, proceed)
+		}
 		return serveGuestCode(ctx, access, value, source, authenticated, proceed)
 	case shared.CODE_KIND_INVITE:
 		return serveInviteCode(ctx, access, value, source, authenticated, proceed)
