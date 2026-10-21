@@ -38,6 +38,7 @@ export const OBJECT_TYPE_USER_RELATION = 'claimius.user_relation'
 export const OBJECT_TYPE_SAMNA_APP = 'claimius.samna_app'
 export const OBJECT_TYPE_SAMNA_CLIENT = 'claimius.samna_client'
 export const OBJECT_TYPE_SAMNA_SECRET = 'claimius.samna_secret'
+export const OBJECT_TYPE_CODE = 'claimius.code'
 
 export const USER_ID_KEY = 'user_id'
 export const ACCESS_TOKEN_KEY = 'access_token'
@@ -51,6 +52,58 @@ export const APP_SLUG_HEADER = 'SAuth-App-Slug'
 export const APP_SECRET_HEADER = 'SAuth-App-Secret'
 export const USER_TOKEN_HEADER = 'SAuth-User-Token'
 export const USER_EXTERNAL_HEADER = 'SAuth-User-ID'
+export const CODE_PARAM = 'samk'
+export const CODE_HEADER = 'SAuth-Code'
+export const CODE_COOKIE = '__Host-sauth_samk'
+
+export type CodeKind = 'invite' | 'guest'
+
+export const CODE_KIND_INVITE: CodeKind = 'invite'
+export const CODE_KIND_GUEST: CodeKind = 'guest'
+
+export type GuestMode = 'open' | 'code' | 'off'
+
+export const GUEST_MODE_OPEN: GuestMode = 'open'
+export const GUEST_MODE_CODE: GuestMode = 'code'
+export const GUEST_MODE_OFF: GuestMode = 'off'
+
+export interface Code {
+  id: string
+  kind: CodeKind
+  claim_id: string
+  object_id?: string
+  object_type?: string
+  data: Record<string, unknown>
+  starts_at?: string
+  ends_at?: string
+  count: number
+  used_count: number
+  revoked_at?: string
+  owner_id: string
+  created_by: string
+  created_at: string
+  updated_at: string
+}
+
+export interface CodeCreated extends Code {
+  value: string
+  url?: string
+}
+
+export interface BodyCode {
+  kind: CodeKind
+  object_id?: string
+  object_type?: string
+  data?: Record<string, unknown>
+  starts_at?: string
+  ends_at?: string
+  count: number
+  path?: string
+}
+
+export interface BodyClaimGuest {
+  mode: GuestMode
+}
 
 export interface ResponseEnvelope<T> {
   data: T
@@ -115,6 +168,8 @@ export interface AuthMiddlewareConfig {
   openIDConfigURL: string
   debugUserID?: string
   debugClients?: Record<string, DebugClient>
+  optional?: boolean
+  guest?: boolean
 }
 
 export interface UserAuthOptions {
@@ -122,6 +177,8 @@ export interface UserAuthOptions {
   clientSecret?: string
   redirectURI?: string
   pageRedirectURI?: string
+  optional?: boolean
+  guest?: boolean
 }
 
 export interface ResponseToken {

@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/MicahParks/keyfunc/v3"
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 	"github.com/nimling/samna-auth-middleware/v2/shared"
@@ -31,6 +32,9 @@ func UserAuthMiddleware(opts *UserAuthOptions) echo.MiddlewareFunc {
 				if forwardErr := forwardUserExternal(ctx); forwardErr != nil {
 					return respondAuthError(ctx, forwardErr)
 				}
+				if value, source := readCode(ctx); value != "" {
+					return serveCode(ctx, config, value, source, true, proceed)
+				}
 				return proceed(ctx)
 			}
 		}
@@ -40,6 +44,12 @@ func UserAuthMiddleware(opts *UserAuthOptions) echo.MiddlewareFunc {
 				proceed := next
 				clientErr := authenticateClient(ctx, config.DebugClients)
 				if errors.Is(clientErr, ErrorCredentialMissing) {
+					if value, source := readCode(ctx); value != "" {
+						return serveCode(ctx, config, value, source, false, proceed)
+					}
+					if config.Guest {
+						return serveAnonymous(ctx, proceed)
+					}
 					if config.Optional {
 						return proceed(ctx)
 					}
@@ -53,6 +63,9 @@ func UserAuthMiddleware(opts *UserAuthOptions) echo.MiddlewareFunc {
 				}
 				if forwardErr := forwardUserExternal(ctx); forwardErr != nil {
 					return respondAuthError(ctx, forwardErr)
+				}
+				if value, source := readCode(ctx); value != "" {
+					return serveCode(ctx, config, value, source, true, proceed)
 				}
 				return proceed(ctx)
 			}
@@ -80,42 +93,42 @@ func UserAuthMiddleware(opts *UserAuthOptions) echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		proceed := wait(next)
 		return func(ctx echo.Context) error {
-			if bearerErr := authenticateBearer(ctx, config, jwksClient.Keyfunc); !errors.Is(bearerErr, ErrorCredentialMissing) {
-				if bearerErr != nil {
-					return respondAuthError(ctx, bearerErr)
-				}
-				return proceed(ctx)
+			authenticated, authErr := authenticateRequest(ctx, config, jwksClient.Keyfunc)
+			if authErr != nil {
+				return respondAuthError(ctx, authErr)
 			}
-
-			if cookieErr := authenticateCookie(ctx, config, jwksClient.Keyfunc); !errors.Is(cookieErr, ErrorCredentialMissing) {
-				if cookieErr != nil {
-					return respondAuthError(ctx, cookieErr)
-				}
-				return proceed(ctx)
+			if value, source := readCode(ctx); value != "" {
+				return serveCode(ctx, config, value, source, authenticated, proceed)
 			}
-
-			if clientErr := authenticateClient(ctx, nil); !errors.Is(clientErr, ErrorCredentialMissing) {
-				if clientErr != nil {
-					return respondAuthError(ctx, clientErr)
-				}
-				if forwardErr := forwardUserToken(ctx); forwardErr != nil {
-					return respondAuthError(ctx, forwardErr)
-				}
-				if forwardErr := forwardUserExternal(ctx); forwardErr != nil {
-					return respondAuthError(ctx, forwardErr)
-				}
-				return proceed(ctx)
-			}
-
-			if config.Optional {
-				return proceed(ctx)
-			}
-			return respondUnauthenticated(ctx)
+			return serveRequest(ctx, config, authenticated, proceed)
 		}
 	}
 }
 
+func authenticateRequest(ctx echo.Context, config *AuthMiddlewareConfig, keyFunc jwt.Keyfunc) (bool, error) {
+	if bearerErr := authenticateBearer(ctx, config, keyFunc); !errors.Is(bearerErr, ErrorCredentialMissing) {
+		return bearerErr == nil, bearerErr
+	}
+	if cookieErr := authenticateCookie(ctx, config, keyFunc); !errors.Is(cookieErr, ErrorCredentialMissing) {
+		return cookieErr == nil, cookieErr
+	}
+	if clientErr := authenticateClient(ctx, nil); !errors.Is(clientErr, ErrorCredentialMissing) {
+		if clientErr != nil {
+			return false, clientErr
+		}
+		if forwardErr := forwardUserToken(ctx); forwardErr != nil {
+			return false, forwardErr
+		}
+		if forwardErr := forwardUserExternal(ctx); forwardErr != nil {
+			return false, forwardErr
+		}
+		return true, nil
+	}
+	return false, nil
+}
+
 func getLoginPath() string {
+
 	redirect, err := url.Parse(utils.Cfg().RedirectURI)
 	if err != nil || redirect.Path == "" {
 		return ""
@@ -202,6 +215,7 @@ func configFromUserAuthOptions(opts *UserAuthOptions) *AuthMiddlewareConfig {
 		DebugUserID:     parseUUID(c.DebugUserID),
 		DebugClients:    parseDebugClients(),
 		Optional:        opts.Optional,
+		Guest:           opts.Guest,
 		SeqTimeout:      opts.SeqTimeout,
 	}
 }

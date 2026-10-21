@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"strconv"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -28,7 +30,7 @@ type GuestTokenResponse struct {
 }
 
 func IssueGuestToken(ctx context.Context, appID uuid.UUID, appSlug string, masterKey encryption.MasterKeyPair, claimID uuid.UUID, userID uuid.UUID, issuer string) (*GuestTokenResponse, error) {
-	guestUserID := uuid.NewSHA1(appID, []byte("guest:"+claimID.String()))
+	guestUserID := GetGuestUserID(appID, claimID)
 
 	var payload []byte
 	if err := instance.NewRaw("SELECT claimius.upsert_guest_user(?, ?, ?, ?)", appID, claimID, userID, guestUserID).Scan(ctx, &payload); err != nil {
@@ -95,13 +97,18 @@ func signGuestAccessToken(privateKey *rsa.PrivateKey, appID uuid.UUID, appSlug s
 		},
 	}
 
+	lifetime := 900
+	if v, err := strconv.Atoi(os.Getenv("SAUTH_ACCESS_TOKEN_DURATION")); err == nil && v > 0 {
+		lifetime = v
+	}
+	expiresAt := nbf.Add(time.Duration(lifetime) * time.Second)
+	if endsAt != nil && endsAt.Before(expiresAt) {
+		expiresAt = *endsAt
+	}
+	claims.ExpiresAt = jwt.NewNumericDate(expiresAt)
 	expiresIn := 0
-	if endsAt != nil {
-		claims.ExpiresAt = jwt.NewNumericDate(*endsAt)
-		diff := time.Until(*endsAt)
-		if diff > 0 {
-			expiresIn = int(diff.Seconds())
-		}
+	if diff := time.Until(expiresAt); diff > 0 {
+		expiresIn = int(diff.Seconds())
 	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)

@@ -11,6 +11,8 @@ import (
 const (
 	UserIDKey      = "user_id"
 	AccessTokenKey = "access_token"
+	AnonymousKey   = "anonymous"
+	CodeKey        = "sauth_code"
 )
 
 const authCodeParamKey = "code"
@@ -67,6 +69,7 @@ type AuthMiddlewareConfig struct {
 	DebugUserID         *uuid.UUID
 	DebugClients        map[string]DebugClient
 	Optional            bool
+	Guest               bool
 	SeqTimeout          time.Duration
 }
 
@@ -76,6 +79,7 @@ type UserAuthOptions struct {
 	RedirectURI     string
 	PageRedirectURI string
 	Optional        bool
+	Guest           bool
 	SeqTimeout      time.Duration
 }
 

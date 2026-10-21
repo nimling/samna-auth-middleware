@@ -20,6 +20,7 @@ BEGIN
              claimius.merge_user, claimius.migrate_root,
              claimius.upsert_system_app, claimius.upsert_disciple_state, claimius.upsert_prophet_peer, claimius.upsert_app,
              claimius.insert_app_handover, claimius.update_app_handover, claimius.apply_peer_event, claimius.insert_secret, claimius.upsert_peer_grant, claimius.upsert_guest_user,
+             claimius.update_claim_guest, claimius.insert_code, claimius.delete_code, claimius.update_code_used, claimius.redeem_code,
              claimius.upsert_table_info, claimius.delete_table_info, claimius.upsert_internal_table_info,
              claimius.recompute_state
              FROM claimius_reader';
@@ -29,7 +30,7 @@ BEGIN
              claimius.samna_app, claimius.samna_user, claimius.samna_client, claimius.samna_secret,
              claimius.organization, claimius.location,
              claimius.object_field, claimius.user_field, claimius.user_relation, claimius.object_asset,
-             claimius.notification, claimius.prophet_state, claimius.sync_consumer, claimius.peer_grant
+             claimius.notification, claimius.prophet_state, claimius.sync_consumer, claimius.peer_grant, claimius.code
              TO claimius_writer';
     EXECUTE 'GRANT INSERT, UPDATE, DELETE ON claimius.claim_graph_cache TO claimius_writer';
     EXECUTE 'GRANT UPDATE ON claimius.prophet_peer TO claimius_writer';
@@ -50,6 +51,7 @@ BEGIN
              claimius.merge_user, claimius.migrate_root,
              claimius.upsert_system_app, claimius.upsert_disciple_state, claimius.upsert_prophet_peer, claimius.upsert_app,
              claimius.insert_app_handover, claimius.update_app_handover, claimius.apply_peer_event, claimius.insert_secret, claimius.upsert_peer_grant, claimius.upsert_guest_user,
+             claimius.update_claim_guest, claimius.insert_code, claimius.delete_code, claimius.update_code_used, claimius.redeem_code,
              claimius.upsert_table_info, claimius.delete_table_info, claimius.upsert_internal_table_info,
              claimius.recompute_state
              FROM claimius_reader';

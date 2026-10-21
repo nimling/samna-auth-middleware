@@ -14,6 +14,10 @@ DROP TRIGGER IF EXISTS tg_update_timestamp ON claimius.samna_secret;
 CREATE TRIGGER tg_update_timestamp BEFORE UPDATE ON claimius.samna_secret
     FOR EACH ROW EXECUTE FUNCTION claimius.update_timestamp();
 
+DROP TRIGGER IF EXISTS tg_update_timestamp ON claimius.code;
+CREATE TRIGGER tg_update_timestamp BEFORE UPDATE ON claimius.code
+    FOR EACH ROW EXECUTE FUNCTION claimius.update_timestamp();
+
 DROP TRIGGER IF EXISTS tg_update_timestamp ON claimius.organization;
 CREATE TRIGGER tg_update_timestamp BEFORE UPDATE ON claimius.organization
     FOR EACH ROW EXECUTE FUNCTION claimius.update_timestamp();
@@ -201,6 +205,10 @@ DROP TRIGGER IF EXISTS tg_emit_sync_event ON claimius.samna_secret;
 CREATE TRIGGER tg_emit_sync_event AFTER INSERT OR UPDATE OR DELETE ON claimius.samna_secret
     FOR EACH ROW EXECUTE FUNCTION claimius.emit_sync_event();
 
+DROP TRIGGER IF EXISTS tg_emit_sync_event ON claimius.code;
+CREATE TRIGGER tg_emit_sync_event AFTER INSERT OR UPDATE OR DELETE ON claimius.code
+    FOR EACH ROW EXECUTE FUNCTION claimius.emit_sync_event();
+
 DROP TRIGGER IF EXISTS tg_emit_sync_event ON claimius.organization;
 CREATE TRIGGER tg_emit_sync_event AFTER INSERT OR UPDATE OR DELETE ON claimius.organization
     FOR EACH ROW EXECUTE FUNCTION claimius.emit_sync_event();
@@ -259,6 +267,10 @@ CREATE TRIGGER tg_enforce_app_home BEFORE INSERT OR UPDATE OR DELETE ON claimius
 
 DROP TRIGGER IF EXISTS tg_enforce_app_home ON claimius.samna_secret;
 CREATE TRIGGER tg_enforce_app_home BEFORE INSERT OR UPDATE OR DELETE ON claimius.samna_secret
+    FOR EACH ROW EXECUTE FUNCTION claimius.enforce_app_home();
+
+DROP TRIGGER IF EXISTS tg_enforce_app_home ON claimius.code;
+CREATE TRIGGER tg_enforce_app_home BEFORE INSERT OR UPDATE OR DELETE ON claimius.code
     FOR EACH ROW EXECUTE FUNCTION claimius.enforce_app_home();
 
 DROP TRIGGER IF EXISTS tg_enforce_app_home ON claimius.organization;

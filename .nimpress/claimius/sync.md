@@ -15,7 +15,7 @@ A prophet appends every change of a mirrored source table to `sync_event`. A con
 
 `sync_event (seq bigserial, operation, event_type, payload jsonb, app_id, written_at, txid xid8)` is indexed by its primary key `seq`, by `idx_sync_event_app_txid_seq (app_id, txid, seq)` and by `idx_sync_event_written_brin`, a BRIN summary on `written_at`. `txid` defaults to `pg_current_xact_id()`, the transaction that wrote the event.
 
-`emit_sync_event`, an after row trigger on `samna_app`, `samna_user`, `samna_client`, `samna_secret`, `organization`, `location`, `claim`, `user_claim`, `claim_object`, `object_field`, `user_field`, `user_relation`, `object_asset` and `app_handover`, writes in the transaction of the change, so an event exists exactly when its change committed. An `upsert` carries the full row less `txid`; a `delete` carries its `id` and `app_id`. The trigger writes nothing under `replay_mode` and nothing on a database with no `prophet_state` row, so a pure disciple writes no events.
+`emit_sync_event`, an after row trigger on `samna_app`, `samna_user`, `samna_client`, `samna_secret`, `organization`, `location`, `claim`, `user_claim`, `claim_object`, `object_field`, `user_field`, `user_relation`, `object_asset`, `code` and `app_handover`, writes in the transaction of the change, so an event exists exactly when its change committed. An `upsert` carries the full row less `txid`; a `delete` carries its `id` and `app_id`. The trigger writes nothing under `replay_mode` and nothing on a database with no `prophet_state` row, so a pure disciple writes no events.
 
 An `organization` or `location` has no `app_id`. Its change is written once per app holding a live `app_object` link to it, stamped with that app, through `apps_for_object`. `emit_app_object_sync_event` on `app_object` publishes the linked row and its live asset links to the app when a link goes live, and the delete of its asset links and of the row to that app alone when the link ends, so a row linked after it was written reaches the app's consumers and an unlinked one leaves them. An asset link is written once per app that sees its object; see [Assets](./assets.md).
 
@@ -69,7 +69,7 @@ The pull loop runs on every process of a service. Each takes a session level `pg
 
 1. Every event at or below the lowest cursor among all consumers in contact within `stale_after`, 7 days by default. A consumer out of contact longer is treated as gone, so one dead disciple cannot hold the outbox.
 
-2. Per app, every event beyond as many as the app has source rows, `count_sync_source_rows`: the rows of the nine app scoped tables `samna_user`, `claim`, `user_claim`, `claim_object`, `samna_client`, `samna_secret`, `object_field`, `user_field` and `user_relation`, the live organization and location links, and the asset links published to the app.
+2. Per app, every event beyond as many as the app has source rows, `count_sync_source_rows`: the rows of the ten app scoped tables `samna_user`, `claim`, `user_claim`, `claim_object`, `samna_client`, `samna_secret`, `object_field`, `user_field`, `user_relation` and `code`, the live organization and location links, and the asset links published to the app.
 
 It records the highest position removed per app in `prophet_state (trimmed_txid, trimmed_seq)`.
 

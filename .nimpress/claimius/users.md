@@ -3,7 +3,7 @@ gate: auth-middleware
 layout: doc
 title: Users
 description: One person or machine, one stable user_id, one samna_user row per app, machine clients, delegation through get_user_access, and user_users with the count it holds, the user_users_diff rows a write raises and a read folds, what each reads and writes, and why the count is exact.
-tags: samna_user, user_id, upsert_app_user, check_user_active, merge_user, samna_client, get_user_access, get_users, user_users, user_users_diff, _settle_user_users_diff, _user_users_for_viewer, delegation
+tags: samna_user, user_id, upsert_app_user, guest, upsert_guest_user, update_claim_guest, claimius.code, samk, get_guest_access, check_user_active, merge_user, samna_client, get_user_access, get_users, user_users, user_users_diff, _settle_user_users_diff, _user_users_for_viewer, delegation
 lastUpdated: true
 ---
 
@@ -46,15 +46,47 @@ A user is who acts. A person and a machine client are both users, and both hold 
 
 ## Guests
 
-A guest is the holder of one claim without an account: a `samna_user` of type `guest` with the id `uuid.NewSHA1(app, "guest:" + claim)`, one per app and claim.
+A guest is the holder of one claim without an account: a `samna_user` of type `guest` with the id `uuid.NewSHA1(app, "guest:" + claim)`, one per app and claim. A guest reads at most: `get_access` answers a guest user nothing past READ and returns its mask with the READ bit only, whatever its claim holds.
 
-1. A disciple asks for one with `POST /sam/guest`, naming the claim and the user that owns it.
+1. A guest claim is a claim granted to its guest, with a mode in `claim.guest_mode`: `open`, anyone without a credential acts as the guest; `code`, only the holder of a live guest code does; `off`, the default, neither. `sdb.Instance().PutClaimGuest(ctx, ac, claimID, mode)`, with `ac` OWNER on the claim, routes to `PUT /sam/claim/:id/guest`, where `update_claim_guest` ensures the guest and its grant through `upsert_guest_user` and sets the mode. `off` leaves the guest and its grant in place.
 
-2. The prophet runs `upsert_guest_user(app, claim, actor, guest)`. It refuses a claim outside the calling app with `P0404` and an actor that does not own the claim with `P0403`, and writes the guest and its grant of the claim under the actor's owning grant.
+2. `POST /sam/guest` still signs a guest token for an owner of the claim. The token always carries `exp`: the access token lifetime, `SAUTH_ACCESS_TOKEN_DURATION` or 900 seconds, capped by the grant's `ends_at`.
 
-3. The prophet signs the guest token with the calling app's key, bounded by the grant's `starts_at` and `ends_at`.
+3. The guest lives on the prophet, the only place that can sign its token, and reaches the app's disciples through the feed like any user, so a disciple answers a guest's access from the synced grant.
 
-The guest lives on the prophet, the only place that can sign its token, and reaches the app's disciples through the feed like any user, so a disciple answers a guest's access from the synced grant.
+## Access codes
+
+An access code opens one claim. The table is `claimius.code`, written on the prophet and synced to every disciple of the app; a disciple routes its writes to `/sam/code` as it routes secrets. The value is 32 random bytes in base64url, shown once at creation; the table holds `hash`, its hex SHA-256, never the value.
+
+| Column | Is |
+|---|---|
+| `kind` | `invite`: a signed in user redeems it into a grant of the claim. `guest`: its holder acts as the guest of the claim |
+| `claim_id` | The claim it opens |
+| `object_id`, `object_type` | Optional object the service handed it out for |
+| `data` | Free JSON the service keeps with it |
+| `starts_at`, `ends_at` | The window it resolves in; an invite's window is also the window of the grant it writes |
+| `count`, `used_count` | Uses allowed, 0 unlimited, and taken; a use is taken in one statement on the prophet |
+| `revoked_at` | Set by `DeleteCode`; a revoked code never resolves again |
+
+1. The helpers are `GetCodeValue()`, `GetCodeHash(value)` and `GetCodeURL(base, path, value)`; on a disciple `PostCode(ctx, ac, claimID, body, base)` returns the row with `value` and `url` once, `GetCodes(ctx, claimID)` lists a claim's codes, `DeleteCode(ctx, ac, id)` revokes one and `GetCodeAccess(ctx, value)` resolves one, cached for 30 seconds and cleared by any code, claim or grant event of the feed. `ac` is OWNER on the claim; the prophet's `insert_code` and `delete_code` check it again. The prophet set has the same functions in `prophet/sdb` with the app id first, for samna_auth.
+
+2. Action codes stay with the service that runs actions: bookable's own `code` table and its Tengo actions use these helpers and nothing else.
+
+## The guard
+
+`smw.UserAuthMiddleware` resolves the actor in this order: bearer, cookie, machine client, then the code, then the anonymous guest.
+
+1. `samk` is a reserved query parameter on every route, `smw.CodeParam`. An API call may send the value in the header `SAuth-Code` instead; a browser carries it in the `__Host-sauth_samk` cookie after its first visit. The guard takes the value off the request, out of the URL and the header, before the handler or a request logger reads it, and sets `Referrer-Policy: no-referrer` on the answer.
+
+2. A guest code acts as the guest of its claim, and every such request writes an audit row naming the claim and the code id, never the value. On a navigation GET the guard sets `__Host-sauth_samk`, `HttpOnly; Secure; SameSite=Lax; Path=/`, expiring with the code, and answers `303` to the same URL without `samk`.
+
+3. An invite code needs a login. Without one, a navigation stores the value in the same cookie for ten minutes and goes to `/api/auth/login?next=` the URL without `samk`; the login returns there, and the guard redeems the invite for the signed in user in one transaction, `redeem_code`, granting the claim. A user who already holds the claim spends no use.
+
+4. A signed in user who brings a guest code stays the actor and is never downgraded; the code adds nothing to the user's own rights. How the two should combine is not decided: no union is made.
+
+5. Twenty failed resolves from one address within a minute answer `429` with `Retry-After` for the rest of the minute, valid codes included. A resolve the database cannot answer is `503`, never a pass.
+
+6. A route group mounted with `smw.UserAuthOptions{Guest: true}` serves a request with no credential and no code as anonymous: `UserIDKey` is `shared.AnonymousUserID` and `AnonymousKey` is set. `MutationAccess`, `GetAccess`, `MutationAccessMany` and `ObjectWhere` resolve that actor through `get_guest_access(object_type, object_id)`: the guest of an open guest claim covering the object, capped at READ, with an audit row per resolved check. An object no open claim covers answers as before, the handler's `403` turned into `401`. Without `Guest` nothing changes.
 
 ## Acting for another user
 

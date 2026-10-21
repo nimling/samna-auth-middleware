@@ -35,6 +35,9 @@ func selfAccessClaim(userID uuid.UUID, requiredAccess ClaimAccess) *AccessClaim 
 const mutationAccessQuery = "SELECT * FROM claimius.mutation_access($1::uuid, $2::text, $3::text, $4::int)"
 
 func (d *DB) MutationAccess(ctx context.Context, userID, objectID uuid.UUID, objectType string, requiredAccess ClaimAccess) (*AccessClaim, error) {
+	if userID == AnonymousUserID {
+		return d.getGuestAccess(ctx, objectID, objectType, requiredAccess)
+	}
 	if objectType == OBJECT_TYPE_USER && userID == objectID {
 		return selfAccessClaim(userID, requiredAccess), nil
 	}
@@ -163,6 +166,14 @@ func (d *DB) MutationAccessMany(ctx context.Context, requests []AccessRequest) (
 		ac.UserID = requests[idx].UserID
 		set[idx].Claim = &ac
 		d.Usage.Add(nil, requests[idx].UserID, requests[idx].ObjectType, requests[idx].ObjectID)
+	}
+	for i, r := range requests {
+		if r.UserID != AnonymousUserID {
+			continue
+		}
+		if ac, guestErr := d.getGuestAccess(ctx, r.ObjectID, r.ObjectType, r.RequiredAccess); guestErr == nil {
+			set[i].Claim = ac
+		}
 	}
 	return set, nil
 }

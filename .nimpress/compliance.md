@@ -953,11 +953,94 @@ cd ts && pnpm audit --prod
 
 5. Today: `untested`, no workflow in `.github/workflows/` runs either.
 
+## Access codes
+
+### C57, no code in a log or a span
+
+1. Standard: RFC 6750 section 5.3; OWASP ASVS V3.1.1; OWASP ASVS V7.1.1.
+
+2. Check: neither `samk` nor `SAuth-Code` reaches a handler, a request logger or a telemetry span.
+
+3. Method:
+
+```bash
+just test TestTheGuardRedactsTheCodeFromTheRequestAndTheSpan
+```
+
+4. Pass: the handler sees the URL and headers without the code and no span attribute or name carries the value.
+
+5. Today: `passes`, `smw/code.go:44` takes both off the request and `smw/code_db_test.go` records the spans.
+
+### C58, the code leaves the address bar
+
+1. Standard: RFC 6750 section 5.3; W3C capability URLs; RFC 6265bis section 4.1.3.
+
+2. Check: a navigation carrying `samk` answers `303` to the URL without it, with `Referrer-Policy: no-referrer` and a `__Host-` cookie that is `HttpOnly`, `Secure`, `SameSite=Lax` and expires with the code.
+
+3. Method:
+
+```bash
+just test TestAGuestCodeOnANavigationIsStrippedWithA303AndAHostCookie
+just test-hurl
+```
+
+4. Pass: the status, `Location`, `Referrer-Policy` and cookie attributes match.
+
+5. Today: `passes`, `smw/code.go:96`, `smw/code.go:104` and `smw/code.go:67`.
+
+### C59, code redemption is atomic and rate limited
+
+1. Standard: RFC 6585 section 4; OWASP ASVS V2.2.1.
+
+2. Check: two concurrent redeems of a single use invite grant once, a used up, revoked or out of window code never resolves, and twenty failed resolves from one address answer `429` for the rest of the minute, valid codes included.
+
+3. Method:
+
+```bash
+just test 'TestAnInviteRedeemsOnceIntoAGrantOfItsClaim|TestACodeResolvesOnlyInsideItsWindowCountAndUntilRevoked|TestRepeatedFailedCodesAnswer429'
+```
+
+4. Pass: one grant, `ErrCodeInvalid` for the rest, and `429` with `Retry-After`.
+
+5. Today: `passes`, `redeem_code` and `update_code_used` in both `V2.4` files and `smw/code.go:108`.
+
+### C60, codes are stored by hash
+
+1. Standard: RFC 6819 section 5.1.4.1.3; ISO/IEC 27001:2022 A.8.24.
+
+2. Check: no column of `claimius.code` on the prophet or a disciple holds a code value.
+
+3. Method:
+
+```bash
+just test TestACodeIsStoredByItsHashAndNeverByItsValue
+```
+
+4. Pass: the row is found by the SHA-256 of the value and no column contains the value.
+
+5. Today: `passes`, `shared/code.go:139` and both baselines.
+
+### C61, a guest reads at most
+
+1. Standard: OWASP ASVS V4.1.3, least privilege.
+
+2. Check: a guest, reached by code or by an open guest claim, is refused anything past READ and its access mask holds READ only, whatever its claim holds; every guest request writes an audit row naming the claim and the code id.
+
+3. Method:
+
+```bash
+just test 'TestAGuestCodeInTheHeaderActsAsTheGuestAndIsAudited|TestAnOpenGuestClaimServesARouteThatAllowsGuests'
+```
+
+4. Pass: WRITE is refused, READ answers mask 4, and one audit row names the claim and the code without the value.
+
+5. Today: `passes`, `get_access` in both `V2.4` files and `smw/code.go:151`.
+
 ## Summary
 
-1. 56 checks.
+1. 61 checks.
 
-2. 17 pass: C1, C6, C9, C14, C17, C18, C21, C23, C27, C28, C29, C32, C36, C40, C41, C44, C45.
+2. 22 pass: C1, C6, C9, C14, C17, C18, C21, C23, C27, C28, C29, C32, C36, C40, C41, C44, C45, C57, C58, C59, C60, C61.
 
 3. 37 fail: C2, C3, C4, C5, C7, C8, C10, C11, C12, C13, C15, C16, C19, C20, C22, C24, C25, C26, C30, C31, C33, C34, C35, C37, C38, C39, C43, C46, C47, C48, C49, C50, C51, C52, C53, C54, C55.
 

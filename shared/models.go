@@ -67,6 +67,7 @@ var claimiusObjectTypes = map[string]ObjectType{
 	StripObjectSchema(OBJECT_TYPE_USER_FIELD):    OBJECT_TYPE_USER_FIELD,
 	StripObjectSchema(OBJECT_TYPE_USER_TOKEN):    OBJECT_TYPE_USER_TOKEN,
 	StripObjectSchema(OBJECT_TYPE_OBJECT_ASSET):  OBJECT_TYPE_OBJECT_ASSET,
+	StripObjectSchema(OBJECT_TYPE_CODE):          OBJECT_TYPE_CODE,
 }
 
 func ResolveObjectType(s string) (ObjectType, error) {
@@ -308,6 +309,7 @@ const (
 	OBJECT_TYPE_USER_FIELD    = "claimius.user_field"
 	OBJECT_TYPE_USER_TOKEN    = "claimius.user_identity"
 	OBJECT_TYPE_OBJECT_ASSET  = "claimius.object_asset"
+	OBJECT_TYPE_CODE          = "claimius.code"
 )
 
 type OrganizationType string
@@ -466,6 +468,7 @@ type Claim struct {
 	Inherits     bool          `bun:"inherits" json:"inherits"`
 	Level        int           `bun:"level" json:"level"`
 	Type         ClaimType     `bun:"type,default:'user'" json:"type"`
+	GuestMode    GuestMode     `bun:"guest_mode,default:'off'" json:"guest_mode,omitempty"`
 	OwnerID      uuid.UUID     `bun:"sa_owner_id" json:"owner_id"`
 	RootID       uuid.UUID     `bun:"sa_root_id" json:"root_id"`
 	CreatedBy    *uuid.UUID    `bun:"sa_created_by" json:"created_by"`

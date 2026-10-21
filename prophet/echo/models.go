@@ -103,29 +103,6 @@ type ObjectAsset struct {
 	bun.BaseModel `bun:"table:public.object_asset" json:"-"`
 }
 
-type Code struct {
-	ID            uuid.UUID   `bun:"id,pk,type:uuid,default:gen_random_uuid()" json:"id"`
-	AppID         uuid.UUID   `bun:"app_id,notnull,type:uuid" json:"app_id"`
-	Value         string      `bun:"code,notnull,nullzero" json:"code"`
-	Count         int         `bun:"count,notnull,default:1" json:"count"`
-	RedeemedCount int         `bun:"redeemed_count,notnull,default:0" json:"redeemed_count"`
-	StartsAt      *time.Time  `bun:"starts_at" json:"starts_at,omitempty"`
-	EndsAt        *time.Time  `bun:"ends_at" json:"ends_at,omitempty"`
-	ExpiresAt     *time.Time  `bun:"expires_at" json:"expires_at,omitempty"`
-	RedeemedAt    *time.Time  `bun:"redeemed_at" json:"redeemed_at,omitempty"`
-	UserID        *uuid.UUID  `bun:"user_id,type:uuid" json:"user_id,omitempty"`
-	ClaimID       *uuid.UUID  `bun:"claim_id,type:uuid" json:"claim_id,omitempty"`
-	ReferenceType *string     `bun:"reference_type" json:"reference_type,omitempty"`
-	ReferenceID   *uuid.UUID  `bun:"reference_id,type:uuid" json:"reference_id,omitempty"`
-	OwnerID       uuid.UUID   `bun:"sa_owner_id,notnull,type:uuid" json:"owner_id"`
-	CreatedBy     uuid.UUID   `bun:"sa_created_by,notnull,type:uuid" json:"created_by"`
-	DeletedAt     *time.Time  `bun:"sa_deleted_at" json:"deleted_at,omitzero"`
-	CreatedAt     time.Time   `bun:"sa_created_at,default:current_timestamp,notnull" json:"created_at"`
-	UpdatedAt     time.Time   `bun:"sa_updated_at,default:current_timestamp,notnull" json:"updated_at"`
-	Access        ClaimAccess `bun:"access,scanonly" json:"access,omitempty"`
-	bun.BaseModel `bun:"table:public.code" json:"-"`
-}
-
 type UserField struct {
 	ID            uuid.UUID    `bun:"id,pk,notnull,type:uuid,default:gen_random_uuid()" json:"id"`
 	AppID         uuid.UUID    `bun:"app_id,notnull,type:uuid" json:"app_id"`
@@ -226,6 +203,7 @@ type Claim struct {
 	Inherits    bool        `bun:"inherits,notnull" json:"inherits"`
 	Level       int         `bun:"level,notnull,default:0" json:"level"`
 	Type        ClaimType   `bun:"type,notnull,default:'system'" json:"type"`
+	GuestMode   string      `bun:"guest_mode,notnull,default:'off'" json:"guest_mode,omitempty"`
 	CreatedBy   *uuid.UUID  `bun:"sa_created_by,type:uuid" json:"created_by,omitempty"`
 	OwnerID     uuid.UUID   `bun:"sa_owner_id,type:uuid,notnull" json:"owner_id"`
 	RootID      uuid.UUID   `bun:"sa_root_id,type:uuid,notnull" json:"root_id"`

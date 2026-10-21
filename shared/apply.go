@@ -21,6 +21,9 @@ func ApplyEvent(ctx context.Context, idb bun.IDB, conn bun.IConn, operation, eve
 		return nil
 	}
 	raw = stripAppID(raw)
+	if eventType == OBJECT_TYPE_CODE || eventType == OBJECT_TYPE_CLAIM || eventType == OBJECT_TYPE_USER_CLAIM {
+		DeleteCodeCache()
+	}
 	switch operation {
 	case "upsert":
 		changed, err := applyUpsert(ctx, idb, conn, eventType, raw)
@@ -122,6 +125,8 @@ func applyUpsert(ctx context.Context, idb bun.IDB, conn bun.IConn, eventType str
 		return upsertEntity[ObjectAsset](ctx, idb, conn, raw)
 	case "claimius.user_identity":
 		return upsertEntity[UserIdentity](ctx, idb, conn, raw)
+	case OBJECT_TYPE_CODE:
+		return upsertEntity[Code](ctx, idb, conn, raw)
 	case "claimius.audit":
 		var row Audit
 		if err := sauth.Unmarshal(raw, &row); err != nil {
@@ -182,6 +187,8 @@ func applyDelete(ctx context.Context, idb bun.IDB, conn bun.IConn, eventType str
 		return deleteEntity[ObjectAsset](ctx, idb, conn, env.ID)
 	case "claimius.user_identity":
 		return deleteEntity[UserIdentity](ctx, idb, conn, env.ID)
+	case OBJECT_TYPE_CODE:
+		return deleteEntity[Code](ctx, idb, conn, env.ID)
 	default:
 		return fmt.Errorf("delete not supported for event_type: %s", eventType)
 	}

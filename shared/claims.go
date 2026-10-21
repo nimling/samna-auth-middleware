@@ -13,6 +13,9 @@ import (
 )
 
 func (d *DB) GetAccess(ctx context.Context, userID, objectID uuid.UUID, objectType string, requiredAccess ClaimAccess) (*AccessClaim, error) {
+	if userID == AnonymousUserID {
+		return d.getGuestAccess(ctx, objectID, objectType, requiredAccess)
+	}
 	if objectType == OBJECT_TYPE_USER && userID == objectID {
 		return selfAccessClaim(userID, requiredAccess), nil
 	}
