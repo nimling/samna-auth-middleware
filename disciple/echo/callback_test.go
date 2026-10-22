@@ -1,6 +1,7 @@
 package echo_test
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -8,6 +9,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 	saecho "github.com/nimling/samna-auth-middleware/v2/disciple/echo"
+	"github.com/nimling/samna-auth-middleware/v2/shared"
 )
 
 func TestGetCallbackSetsTokenAndCSRFCookies(t *testing.T) {
@@ -323,5 +325,57 @@ func TestGetLogoutEndsTheInitiateAppSession(t *testing.T) {
 	}
 	if !strings.Contains(location, "post_logout_redirect_uri=http%3A%2F%2Fweb.example") {
 		t.Errorf("location = %q, want the initiate app's origin", location)
+	}
+}
+
+func TestGetCallbackSetsTheInitiateAppCookieScopeFromTheProphet(t *testing.T) {
+	prophet := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/sam/app/initiate":
+			w.Write([]byte(`{"data":[{"slug":"testapp-web","redirect_uris":["https://web.example","https://web.example/api/auth/callback?app=testapp-web"],"cookie_domain":"","cookie_same_site":"none"}],"count":1,"request_id":"00000000-0000-0000-0000-000000000000"}`))
+		case "/api/app/testapp/oauth/token":
+			if err := r.ParseForm(); err != nil || r.PostForm.Get("redirect_uri") != "https://web.example/api/auth/callback?app=testapp-web" {
+				t.Errorf("redirect_uri = %q, want the initiate app's registered callback", r.PostForm.Get("redirect_uri"))
+			}
+			w.Write([]byte(`{"data":{"access_token":"tok","refresh_token":"ref","token_type":"Bearer","access_expires_in":3600,"refresh_expires_in":2592000},"count":1,"request_id":"00000000-0000-0000-0000-000000000000"}`))
+		default:
+			t.Errorf("unexpected path %s", r.URL.Path)
+		}
+	}))
+	defer prophet.Close()
+
+	t.Setenv("SAUTH_ENDPOINT", prophet.URL)
+	t.Setenv("SAUTH_APP_SLUG", "testapp")
+	t.Setenv("SAUTH_APP_SECRET", "secret")
+	t.Setenv("SAUTH_REDIRECT_URI", "https://api.example/api/auth/callback")
+	t.Setenv("SAUTH_COOKIE_DOMAIN", "api.example")
+	t.Setenv("SAUTH_DEBUG_USER_ID", "")
+	t.Setenv("SAUTH_DEBUG_CLIENTS", "")
+
+	if _, err := shared.PutInitiateApps(context.Background()); err != nil {
+		t.Fatalf("PutInitiateApps: %v", err)
+	}
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/api/auth/callback?app=testapp-web&code=abc&state=st1", nil)
+	req.AddCookie(&http.Cookie{Name: "sauth_oauth_state", Value: "st1"})
+	req.AddCookie(&http.Cookie{Name: "sauth_pkce_verifier", Value: "ver1"})
+	rec := httptest.NewRecorder()
+	ctx := e.NewContext(req, rec)
+
+	if err := saecho.GetCallback(ctx); err != nil {
+		t.Fatalf("GetCallback: %v", err)
+	}
+	if location := rec.Header().Get("Location"); location != "https://web.example" {
+		t.Errorf("location = %q, want https://web.example", location)
+	}
+	for _, c := range rec.Result().Cookies() {
+		if c.Name != "sauth_access_token" {
+			continue
+		}
+		if c.Domain != "" || c.SameSite != http.SameSiteNoneMode || !c.Secure {
+			t.Errorf("sauth_access_token domain=%q samesite=%v secure=%v, want host only, none, secure", c.Domain, c.SameSite, c.Secure)
+		}
 	}
 }

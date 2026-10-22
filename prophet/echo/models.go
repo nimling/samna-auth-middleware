@@ -303,32 +303,34 @@ type SamnaSecret struct {
 }
 
 type SamnaApp struct {
-	ID            uuid.UUID    `bun:"id,pk,notnull,type:uuid,default:gen_random_uuid()" json:"id"`
-	Slug          string       `bun:"slug,notnull" json:"slug"`
-	Name          string       `bun:"name,notnull" json:"name"`
-	Description   string       `bun:"description" json:"description,omitempty"`
-	ContactEmail  *string      `bun:"contact_email" json:"contact_email,omitempty"`
-	AppImage      *string      `bun:"app_image" json:"app_image,omitempty"`
-	RedirectURIs  []string     `bun:"redirect_uris,array,type:text[]" json:"redirect_uris"`
-	SyncURI       string       `bun:"sync_uri,notnull" json:"sync_uri,omitempty"`
-	ProviderIDs   []uuid.UUID  `bun:"provider_ids,array,type:uuid[]" json:"provider_ids,omitempty"`
-	Status        AppStatus    `bun:"status,notnull,default:'active'" json:"status"`
-	PrivateKey    string       `bun:"private_key,notnull" json:"private_key,omitempty"`
-	PrivateSeed   string       `bun:"private_seed,notnull" json:"private_seed,omitempty"`
-	AppSecret     *string      `bun:"app_secret" json:"app_secret,omitempty"`
-	HomeProphet   *string      `bun:"home_prophet" json:"home_prophet,omitempty"`
-	SecretVersion int          `bun:"secret_version,notnull,default:1" json:"-"`
-	ClaimID       *uuid.UUID   `bun:"claim_id,type:uuid" json:"claim_id,omitempty"`
-	Style         *ObjectStyle `bun:"style,type:jsonb" json:"style,omitempty"`
-	OwnerID       uuid.UUID    `bun:"sa_owner_id,notnull,type:uuid" json:"owner_id"`
-	ParentID      uuid.UUID    `bun:"sa_parent_id,notnull,type:uuid" json:"parent_id"`
-	RootID        uuid.UUID    `bun:"sa_root_id,notnull,type:uuid" json:"root_id"`
-	CreatedBy     uuid.UUID    `bun:"sa_created_by,notnull,type:uuid" json:"created_by"`
-	DeletedAt     *time.Time   `bun:"sa_deleted_at" json:"deleted_at,omitzero"`
-	CreatedAt     time.Time    `bun:"sa_created_at,notnull,default:current_timestamp" json:"created_at"`
-	UpdatedAt     time.Time    `bun:"sa_updated_at,notnull,default:current_timestamp" json:"updated_at"`
-	Access        ClaimAccess  `bun:"access,scanonly" json:"access,omitempty"`
-	bun.BaseModel `bun:"table:claimius.samna_app" json:"-"`
+	ID             uuid.UUID    `bun:"id,pk,notnull,type:uuid,default:gen_random_uuid()" json:"id"`
+	Slug           string       `bun:"slug,notnull" json:"slug"`
+	Name           string       `bun:"name,notnull" json:"name"`
+	Description    string       `bun:"description" json:"description,omitempty"`
+	ContactEmail   *string      `bun:"contact_email" json:"contact_email,omitempty"`
+	AppImage       *string      `bun:"app_image" json:"app_image,omitempty"`
+	RedirectURIs   []string     `bun:"redirect_uris,array,type:text[]" json:"redirect_uris"`
+	SyncURI        string       `bun:"sync_uri,notnull" json:"sync_uri,omitempty"`
+	ProviderIDs    []uuid.UUID  `bun:"provider_ids,array,type:uuid[]" json:"provider_ids,omitempty"`
+	Status         AppStatus    `bun:"status,notnull,default:'active'" json:"status"`
+	PrivateKey     string       `bun:"private_key,notnull" json:"private_key,omitempty"`
+	PrivateSeed    string       `bun:"private_seed,notnull" json:"private_seed,omitempty"`
+	AppSecret      *string      `bun:"app_secret" json:"app_secret,omitempty"`
+	HomeProphet    *string      `bun:"home_prophet" json:"home_prophet,omitempty"`
+	SecretVersion  int          `bun:"secret_version,notnull,default:1" json:"-"`
+	ClaimID        *uuid.UUID   `bun:"claim_id,type:uuid" json:"claim_id,omitempty"`
+	Style          *ObjectStyle `bun:"style,type:jsonb" json:"style,omitempty"`
+	OwnerID        uuid.UUID    `bun:"sa_owner_id,notnull,type:uuid" json:"owner_id"`
+	ParentID       uuid.UUID    `bun:"sa_parent_id,notnull,type:uuid" json:"parent_id"`
+	RootID         uuid.UUID    `bun:"sa_root_id,notnull,type:uuid" json:"root_id"`
+	CookieDomain   *string      `bun:"cookie_domain" json:"cookie_domain,omitempty"`
+	CookieSameSite *string      `bun:"cookie_same_site" json:"cookie_same_site,omitempty"`
+	CreatedBy      uuid.UUID    `bun:"sa_created_by,notnull,type:uuid" json:"created_by"`
+	DeletedAt      *time.Time   `bun:"sa_deleted_at" json:"deleted_at,omitzero"`
+	CreatedAt      time.Time    `bun:"sa_created_at,notnull,default:current_timestamp" json:"created_at"`
+	UpdatedAt      time.Time    `bun:"sa_updated_at,notnull,default:current_timestamp" json:"updated_at"`
+	Access         ClaimAccess  `bun:"access,scanonly" json:"access,omitempty"`
+	bun.BaseModel  `bun:"table:claimius.samna_app" json:"-"`
 }
 
 func (a SamnaApp) GetPrimaryOrigin() string {

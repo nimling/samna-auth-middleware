@@ -95,6 +95,8 @@ An Initiate app is another frontend of a disciple's app. It has its own slug, `r
 
 A disciple reads its root's Initiate apps from `GET /sam/app/initiate` and keeps them in memory, refreshed every minute. The frontend opens `/api/auth/<slug>/login`; the disciple authorizes that app with the marked callback as `redirect_uri`, the prophet returns to `/api/auth/callback?app=<slug>`, the callback exchanges the code with the root's credentials and that same `redirect_uri`, and the person returns to the Initiate app's origin. `/api/auth/<slug>/logout` returns there too.
 
+The Initiate app's configuration in samna_auth decides how its frontend reaches the disciple. Its registered callback is either the disciple's own `/api/auth/callback?app=<slug>` or the frontend's host with the same path when that host routes `/api` to the disciple. `cookie_domain` and `cookie_same_site` set its session cookies: host only or a shared parent domain, and `none` when the frontend calls the disciple from another site. Every origin among its redirect URIs is allowed by `smw.GetOriginAllowed` in the disciple's CORS, and `smw.InitiateMiddleware` keeps a refresh on the same cookie settings.
+
 ## Which apps a write belongs to
 
 `_app_ids_for_row(object_type, row)` scopes a row for its calc trigger:

@@ -1,15 +1,18 @@
 package smw
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/base64"
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/labstack/echo/v4"
 	"github.com/nimling/samna-auth-middleware/v2/client"
+	"github.com/nimling/samna-auth-middleware/v2/shared"
 	"github.com/nimling/samna-auth-middleware/v2/utils"
 )
 
@@ -141,4 +144,25 @@ func refreshTokens(ctx echo.Context, config AuthMiddlewareConfig) (*client.Respo
 	}
 
 	return tokenResp, nil
+}
+
+func InitiateMiddleware(next echo.HandlerFunc) echo.HandlerFunc {
+	return func(ctx echo.Context) error {
+		if origin := ctx.Request().Header.Get(echo.HeaderOrigin); origin != "" {
+			if initiate, err := shared.GetOriginInitiateApp(ctx.Request().Context(), origin); err == nil {
+				ctx.Set(utils.CookieScopeKey, initiate.GetCookieScope())
+			}
+		}
+		return next(ctx)
+	}
+}
+
+func GetOriginAllowed(origins []string) func(string) (bool, error) {
+	return func(origin string) (bool, error) {
+		if slices.Contains(origins, origin) {
+			return true, nil
+		}
+		_, err := shared.GetOriginInitiateApp(context.Background(), origin)
+		return err == nil, nil
+	}
 }

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"reflect"
 	"strconv"
 	"strings"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/nimling/nimbody"
+	"github.com/nimling/samna-auth-middleware/v2/utils"
 	"github.com/nimling/samna-auth-middleware/v2/client"
 	"github.com/nimling/samna-auth-middleware/v2/pkg/jsonx"
 	"github.com/uptrace/bun"
@@ -710,30 +712,32 @@ type SamnaSecret struct {
 type SamnaApp struct {
 	bun.BaseModel `bun:"table:claimius.samna_app"`
 
-	ID            uuid.UUID        `bun:"id,pk,default:gen_random_uuid()" json:"id"`
-	Slug          string           `bun:"slug" json:"slug"`
-	Name          string           `bun:"name" json:"name"`
-	Description   string           `bun:"description,default:''" json:"description"`
-	ContactEmail  *string          `bun:"contact_email" json:"contact_email"`
-	AppImage      *string          `bun:"app_image" json:"app_image"`
-	RedirectUris  []string         `bun:"redirect_uris,array,default:'{}'" json:"redirect_uris"`
-	SyncUri       string           `bun:"sync_uri,default:''" json:"sync_uri"`
-	ProviderIDs   []uuid.UUID      `bun:"provider_ids,array,default:'{}'" json:"provider_ids"`
-	Status        string           `bun:"status,default:'active'" json:"status"`
-	Connection    string           `bun:"connection,default:'code'" json:"connection"`
-	PrivateKey    string           `bun:"private_key" json:"-"`
-	PrivateSeed   string           `bun:"private_seed" json:"-"`
-	AppSecret     *string          `bun:"app_secret" json:"-"`
-	SecretVersion int              `bun:"secret_version,default:1" json:"secret_version"`
-	ClaimID       *uuid.UUID       `bun:"claim_id" json:"claim_id"`
-	Style         *json.RawMessage `bun:"style,type:jsonb" json:"style"`
-	OwnerID       uuid.UUID        `bun:"sa_owner_id" json:"owner_id"`
-	ParentID      uuid.UUID        `bun:"sa_parent_id,nullzero" json:"parent_id"`
-	RootID        uuid.UUID        `bun:"sa_root_id,nullzero" json:"root_id"`
-	CreatedBy     uuid.UUID        `bun:"sa_created_by" json:"created_by"`
-	DeletedAt     *time.Time       `bun:"sa_deleted_at" json:"deleted_at,omitzero"`
-	CreatedAt     time.Time        `bun:"sa_created_at,default:now()" json:"created_at"`
-	UpdatedAt     time.Time        `bun:"sa_updated_at,default:now()" json:"updated_at"`
+	ID             uuid.UUID        `bun:"id,pk,default:gen_random_uuid()" json:"id"`
+	Slug           string           `bun:"slug" json:"slug"`
+	Name           string           `bun:"name" json:"name"`
+	Description    string           `bun:"description,default:''" json:"description"`
+	ContactEmail   *string          `bun:"contact_email" json:"contact_email"`
+	AppImage       *string          `bun:"app_image" json:"app_image"`
+	RedirectUris   []string         `bun:"redirect_uris,array,default:'{}'" json:"redirect_uris"`
+	SyncUri        string           `bun:"sync_uri,default:''" json:"sync_uri"`
+	ProviderIDs    []uuid.UUID      `bun:"provider_ids,array,default:'{}'" json:"provider_ids"`
+	Status         string           `bun:"status,default:'active'" json:"status"`
+	Connection     string           `bun:"connection,default:'code'" json:"connection"`
+	PrivateKey     string           `bun:"private_key" json:"-"`
+	PrivateSeed    string           `bun:"private_seed" json:"-"`
+	AppSecret      *string          `bun:"app_secret" json:"-"`
+	SecretVersion  int              `bun:"secret_version,default:1" json:"secret_version"`
+	ClaimID        *uuid.UUID       `bun:"claim_id" json:"claim_id"`
+	Style          *json.RawMessage `bun:"style,type:jsonb" json:"style"`
+	OwnerID        uuid.UUID        `bun:"sa_owner_id" json:"owner_id"`
+	ParentID       uuid.UUID        `bun:"sa_parent_id,nullzero" json:"parent_id"`
+	RootID         uuid.UUID        `bun:"sa_root_id,nullzero" json:"root_id"`
+	CookieDomain   *string          `bun:"cookie_domain" json:"cookie_domain"`
+	CookieSameSite *string          `bun:"cookie_same_site" json:"cookie_same_site"`
+	CreatedBy      uuid.UUID        `bun:"sa_created_by" json:"created_by"`
+	DeletedAt      *time.Time       `bun:"sa_deleted_at" json:"deleted_at,omitzero"`
+	CreatedAt      time.Time        `bun:"sa_created_at,default:now()" json:"created_at"`
+	UpdatedAt      time.Time        `bun:"sa_updated_at,default:now()" json:"updated_at"`
 }
 
 func (a SamnaApp) GetPrimaryOrigin() string {
@@ -741,6 +745,36 @@ func (a SamnaApp) GetPrimaryOrigin() string {
 		return ""
 	}
 	return a.RedirectUris[0]
+}
+
+func (a SamnaApp) GetCallbackURI() string {
+	for _, uri := range a.RedirectUris {
+		if parsed, err := url.Parse(uri); err == nil && parsed.Query().Get("app") == a.Slug {
+			return uri
+		}
+	}
+	return ""
+}
+
+func (a SamnaApp) GetOrigins() []string {
+	origins := make([]string, 0, len(a.RedirectUris))
+	for _, uri := range a.RedirectUris {
+		if parsed, err := url.Parse(uri); err == nil && parsed.Host != "" {
+			origins = append(origins, parsed.Scheme+"://"+parsed.Host)
+		}
+	}
+	return origins
+}
+
+func (a SamnaApp) GetCookieScope() utils.CookieScope {
+	scope := utils.CookieScope{}
+	if a.CookieDomain != nil {
+		scope.Domain = *a.CookieDomain
+	}
+	if a.CookieSameSite != nil {
+		scope.SameSite = *a.CookieSameSite
+	}
+	return scope
 }
 
 type ObjectField struct {

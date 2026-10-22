@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -157,9 +158,14 @@ func GetInitiateApps(ctx context.Context) ([]SamnaApp, error) {
 		apps := []SamnaApp{}
 		for _, pair := range strings.Split(utils.Cfg().DebugInitiateApps, ",") {
 			slug, origin, ok := strings.Cut(strings.TrimSpace(pair), "=")
-			if ok && slug != "" && origin != "" {
-				apps = append(apps, SamnaApp{Slug: slug, RedirectUris: []string{origin}})
+			callback, err := url.Parse(utils.Cfg().RedirectURI)
+			if !ok || slug == "" || origin == "" || err != nil {
+				continue
 			}
+			query := callback.Query()
+			query.Set("app", slug)
+			callback.RawQuery = query.Encode()
+			apps = append(apps, SamnaApp{Slug: slug, RedirectUris: []string{origin, callback.String()}})
 		}
 		return apps, nil
 	}
@@ -184,7 +190,20 @@ func GetInitiateApp(ctx context.Context, slug string) (*SamnaApp, error) {
 		return nil, err
 	}
 	for i := range apps {
-		if apps[i].Slug == slug && apps[i].GetPrimaryOrigin() != "" {
+		if apps[i].Slug == slug && apps[i].GetCallbackURI() != "" {
+			return &apps[i], nil
+		}
+	}
+	return nil, ErrNotFound
+}
+
+func GetOriginInitiateApp(ctx context.Context, origin string) (*SamnaApp, error) {
+	apps, err := GetInitiateApps(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for i := range apps {
+		if apps[i].GetCallbackURI() != "" && slices.Contains(apps[i].GetOrigins(), origin) {
 			return &apps[i], nil
 		}
 	}

@@ -23,6 +23,7 @@ func GetLogin(ctx echo.Context) error {
 		}
 		initiate = found
 		slug = found.Slug
+		ctx.Set(utils.CookieScopeKey, found.GetCookieScope())
 	}
 
 	verifier, err := client.GenerateVerifier()
@@ -60,7 +61,11 @@ func GetLogin(ctx echo.Context) error {
 		cliTarget = target
 	}
 
-	authURL, err := client.AuthorizeURL(slug, client.RedirectURIFor(slug), state, challenge)
+	redirectURI := utils.Cfg().RedirectURI
+	if initiate != nil {
+		redirectURI = initiate.GetCallbackURI()
+	}
+	authURL, err := client.AuthorizeURL(slug, redirectURI, state, challenge)
 	if err != nil {
 		ctx.Logger().Errorf("GetLogin authorize url: %v", err)
 		return respondError(ctx, http.StatusInternalServerError, "Internal Server Error")
@@ -84,7 +89,7 @@ func GetCallback(ctx echo.Context) error {
 		return respondError(ctx, http.StatusBadRequest, "missing code")
 	}
 
-	slug := utils.Cfg().AppSlug
+	redirectURI := utils.Cfg().RedirectURI
 	startOver := utils.Cfg().PageRedirect
 	var initiate *shared.SamnaApp
 	if appSlug := ctx.QueryParam("app"); appSlug != "" {
@@ -93,8 +98,9 @@ func GetCallback(ctx echo.Context) error {
 			return respondError(ctx, http.StatusNotFound, "unknown app")
 		}
 		initiate = found
-		slug = found.Slug
+		redirectURI = found.GetCallbackURI()
 		startOver = found.GetPrimaryOrigin()
+		ctx.Set(utils.CookieScopeKey, found.GetCookieScope())
 	}
 	if startOver == "" {
 		startOver = "/"
@@ -141,7 +147,7 @@ func GetCallback(ctx echo.Context) error {
 		return respondError(ctx, http.StatusInternalServerError, "Internal Server Error")
 	}
 
-	tokens, err := client.PostAuthCode(ctx.Request().Context(), tokenURL, rootSlug, utils.Cfg().AppSecret, code, client.RedirectURIFor(slug), verifierCookie.Value)
+	tokens, err := client.PostAuthCode(ctx.Request().Context(), tokenURL, rootSlug, utils.Cfg().AppSecret, code, redirectURI, verifierCookie.Value)
 	if err != nil {
 		ctx.Logger().Warnf("GetCallback exchange refused, clearing the flow cookies and sending the visitor back to start over: %v", err)
 		utils.ClearCookie(ctx, client.PKCEVerifierCookie)
@@ -177,6 +183,7 @@ func GetLogout(ctx echo.Context) error {
 			return respondError(ctx, http.StatusNotFound, "unknown app")
 		}
 		slug, pageRedirect = initiate.Slug, initiate.GetPrimaryOrigin()
+		ctx.Set(utils.CookieScopeKey, initiate.GetCookieScope())
 	}
 
 	accessToken := ""
