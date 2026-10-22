@@ -6,9 +6,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/labstack/gommon/log"
 	"github.com/nimling/samna-auth-middleware/v2/client"
 	sdb "github.com/nimling/samna-auth-middleware/v2/disciple/sdb"
 	"github.com/nimling/samna-auth-middleware/v2/shared"
@@ -55,21 +57,38 @@ func (r *Replica) reportStalledCursor(ctx context.Context, reason string) string
 	return fmt.Sprintf("cursor %s %s, reconciled from a fresh snapshot", state.Cursor, reason)
 }
 
-func SyncStart(ctx context.Context) {
-	if shared.GetDebugMode() != shared.DebugModeNone {
-		return
+func Init(ctx context.Context) error {
+	if sdb.Instance() == nil {
+		return shared.ErrNotConnected
 	}
-	go bindClient(ctx, Disciple(), leadInterval)
-	go getAppSeed(ctx, sdb.Instance().DB, leadInterval)
-	go putInitiateApps(ctx, sdb.Instance().DB, initiateInterval)
-	go shared.LeadSync(ctx, sdb.Instance().DB, SyncLockKey(utils.Cfg().AppSlug), leadInterval, Disciple().Pull)
+	r, err := start(ctx, false)
+	if err != nil {
+		return err
+	}
+	if shared.GetDebugMode() != shared.DebugModeNone {
+		return nil
+	}
+	db := sdb.Instance().DB
+	r.run(func() { bindClient(ctx, Disciple(), leadInterval) })
+	r.run(func() { getAppSeed(ctx, db, leadInterval) })
+	r.run(func() { putInitiateApps(ctx, db, initiateInterval) })
+	r.run(func() { shared.LeadSync(ctx, db, SyncLockKey(utils.Cfg().AppSlug), leadInterval, Disciple().Pull) })
+	return nil
 }
 
-func PeerSyncStart(ctx context.Context, db *shared.DB) {
-	if shared.GetDebugMode() != shared.DebugModeNone {
-		return
+func PeerInit(ctx context.Context) error {
+	db := shared.Instance()
+	if db == nil {
+		return shared.ErrNotConnected
 	}
-	go func() {
+	r, err := start(ctx, true)
+	if err != nil {
+		return err
+	}
+	if shared.GetDebugMode() != shared.DebugModeNone {
+		return nil
+	}
+	r.run(func() {
 		started := make(map[uuid.UUID]bool)
 		for {
 			var peers []shared.ProphetPeer
@@ -81,8 +100,8 @@ func PeerSyncStart(ctx context.Context, db *shared.DB) {
 					continue
 				}
 				started[peers[i].ID] = true
-				r := &Replica{DB: db, Peer: &peers[i]}
-				go shared.LeadSync(ctx, db, "claimius.prophet_peer:"+peers[i].ID.String(), leadInterval, r.Pull)
+				replica := &Replica{DB: db, Peer: &peers[i]}
+				r.run(func() { shared.LeadSync(ctx, db, "claimius.prophet_peer:"+replica.Peer.ID.String(), leadInterval, replica.Pull) })
 			}
 			select {
 			case <-ctx.Done():
@@ -90,7 +109,8 @@ func PeerSyncStart(ctx context.Context, db *shared.DB) {
 			case <-time.After(leadInterval):
 			}
 		}
-	}()
+	})
+	return nil
 }
 
 func getAppSeed(ctx context.Context, db *shared.DB, interval time.Duration) {
@@ -381,4 +401,72 @@ func (r *Replica) GetState(ctx context.Context) (State, error) {
 		state.Endpoint = *row.Endpoint
 	}
 	return state, nil
+}
+
+var (
+	ErrNotStarted = errors.New("sync not started: call sam.Init")
+	ErrStarted    = errors.New("sync already started")
+)
+
+type runner struct {
+	wg     sync.WaitGroup
+	done   chan struct{}
+	synced bool
+	peered bool
+}
+
+var (
+	runMu sync.Mutex
+	run   *runner
+)
+
+func start(ctx context.Context, peer bool) (*runner, error) {
+	runMu.Lock()
+	defer runMu.Unlock()
+	if run == nil || run.ended() {
+		r := &runner{done: make(chan struct{})}
+		r.wg.Add(1)
+		go func() {
+			<-ctx.Done()
+			r.wg.Done()
+			r.wg.Wait()
+			close(r.done)
+		}()
+		run = r
+	}
+	if (peer && run.peered) || (!peer && run.synced) {
+		return nil, ErrStarted
+	}
+	run.peered = run.peered || peer
+	run.synced = run.synced || !peer
+	return run, nil
+}
+
+func (r *runner) run(work func()) {
+	r.wg.Add(1)
+	go func() {
+		defer r.wg.Done()
+		work()
+	}()
+}
+
+func (r *runner) ended() bool {
+	select {
+	case <-r.done:
+		return true
+	default:
+		return false
+	}
+}
+
+func Done() <-chan struct{} {
+	runMu.Lock()
+	defer runMu.Unlock()
+	if run == nil {
+		log.Error(ErrNotStarted)
+		done := make(chan struct{})
+		close(done)
+		return done
+	}
+	return run.done
 }

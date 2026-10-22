@@ -52,4 +52,4 @@ Samna Auth keeps a monitor per app. A monitor of kind `http` carries a `target`,
 
 Point the monitor at `<app origin>/api/status/health` with `expected_status` 200. Because the route is dependency free, a failing check means the process or the network in front of it, and nothing else. Samna Auth itself answers `GET /api/status/health` the same way, with an empty `data`, and probes it on its own monitor.
 
-The heartbeat is the other direction: `uptime.Init` makes the disciple report a beat to the prophet on an interval, with the checks the service names, such as a database ping. The health route says the process is up; the heartbeat says what it can reach.
+The heartbeat is the other direction: `uptime.Init(ctx, logger, opts)` makes the disciple report a beat to the prophet on an interval, with the checks the service names, such as a database ping. The health route says the process is up; the heartbeat says what it can reach.

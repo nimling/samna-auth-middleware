@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"net/http"
-	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -20,94 +19,10 @@ import (
 )
 
 const (
-	SyncHoldMax      = 25 * time.Second
-	syncChannel      = "claimius_sync"
-	syncRetry        = 100 * time.Millisecond
-	syncListenerPing = 90 * time.Second
+	SyncHoldMax = 25 * time.Second
+	syncChannel = "claimius_sync"
+	syncRetry   = 100 * time.Millisecond
 )
-
-type syncFeed struct {
-	mu      sync.Mutex
-	waiters map[uuid.UUID]map[chan struct{}]struct{}
-}
-
-var (
-	syncFeedOnce sync.Once
-	syncFeedRun  *syncFeed
-)
-
-func getSyncFeed(d *shared.DB) *syncFeed {
-	syncFeedOnce.Do(func() {
-		listener := pq.NewListener(d.GetConnectionString(), time.Second, time.Minute, func(_ pq.ListenerEventType, err error) {
-			if err != nil {
-				d.Logger.Errorf("sync listener: %v", err)
-			}
-		})
-		if err := listener.Listen(syncChannel); err != nil {
-			d.Logger.Errorf("sync listener: listen %s: %v", syncChannel, err)
-			_ = listener.Close()
-			return
-		}
-		syncFeedRun = &syncFeed{waiters: make(map[uuid.UUID]map[chan struct{}]struct{})}
-		go syncFeedRun.listen(d, listener)
-	})
-	return syncFeedRun
-}
-
-func (f *syncFeed) listen(d *shared.DB, listener *pq.Listener) {
-	for {
-		select {
-		case n := <-listener.Notify:
-			if n == nil {
-				f.wake(nil)
-				continue
-			}
-			if appID, err := uuid.Parse(n.Extra); err == nil {
-				f.wake(&appID)
-			}
-		case <-time.After(syncListenerPing):
-			go func() {
-				if err := listener.Ping(); err != nil {
-					d.Logger.Errorf("sync listener ping failed: %v", err)
-				}
-			}()
-		}
-	}
-}
-
-func (f *syncFeed) subscribe(appID uuid.UUID) (<-chan struct{}, func()) {
-	ch := make(chan struct{}, 1)
-	f.mu.Lock()
-	if f.waiters[appID] == nil {
-		f.waiters[appID] = make(map[chan struct{}]struct{})
-	}
-	f.waiters[appID][ch] = struct{}{}
-	f.mu.Unlock()
-	return ch, func() {
-		f.mu.Lock()
-		delete(f.waiters[appID], ch)
-		if len(f.waiters[appID]) == 0 {
-			delete(f.waiters, appID)
-		}
-		f.mu.Unlock()
-	}
-}
-
-func (f *syncFeed) wake(appID *uuid.UUID) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	for id, set := range f.waiters {
-		if appID != nil && id != *appID {
-			continue
-		}
-		for ch := range set {
-			select {
-			case ch <- struct{}{}:
-			default:
-			}
-		}
-	}
-}
 
 type SyncPayload struct {
 	client.SyncCursor
@@ -348,13 +263,15 @@ func GetSyncEvents(ctx echo.Context) error {
 }
 
 func getSyncPage(ctx context.Context, d *shared.DB, appID uuid.UUID, seq client.SyncCursor, hold time.Duration, peer bool) ([]SyncEvent, error) {
-	var wake <-chan struct{}
+	var wake <-chan *pq.Notification
 	if hold > 0 {
-		if feed := getSyncFeed(d); feed != nil {
-			ch, stop := feed.subscribe(appID)
-			defer stop()
-			wake = ch
+		listenCtx, stop := context.WithCancel(ctx)
+		defer stop()
+		ch, err := d.Listen(listenCtx, syncChannel)
+		if err != nil {
+			return nil, err
 		}
+		wake = ch
 	}
 	deadline := time.NewTimer(hold)
 	defer deadline.Stop()
@@ -376,8 +293,10 @@ func getSyncPage(ctx context.Context, d *shared.DB, appID uuid.UUID, seq client.
 			return nil, ctx.Err()
 		case <-deadline.C:
 			return events, nil
-		case <-wake:
-			pending = true
+		case n := <-wake:
+			if n == nil || n.Extra == appID.String() {
+				pending = true
+			}
 		case <-again:
 		}
 	}

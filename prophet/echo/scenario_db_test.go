@@ -18,21 +18,27 @@ import (
 	psdb "github.com/nimling/samna-auth-middleware/v2/prophet/sdb"
 	"github.com/nimling/samna-auth-middleware/v2/shared"
 	"github.com/nimling/samna-auth-middleware/v2/smw"
+	"github.com/uptrace/bun"
+	"github.com/uptrace/bun/dialect/pgdialect"
+	"github.com/uptrace/bun/driver/pgdriver"
 )
 
 func getDiscipleDB(t *testing.T) *shared.DB {
+	return getRoleDB(t, "DISCIPLE_", "a disciple database is required, as just test and just verify provide")
+}
+
+func getRoleDB(t *testing.T, prefix, need string) *shared.DB {
 	t.Helper()
+	env := make(map[string]string)
 	for _, key := range []string{"PGHOST", "PGPORT", "PGDATABASE", "PGUSER", "PGPASSWORD"} {
-		value := os.Getenv("DISCIPLE_" + key)
+		value := os.Getenv(prefix + key)
 		if value == "" {
-			t.Fatalf("DISCIPLE_%s is not set: a disciple database is required, as just test and just verify provide", key)
+			t.Fatalf("%s%s is not set: %s", prefix, key, need)
 		}
-		t.Setenv(key, value)
+		env[key] = value
 	}
-	db, err := shared.Connect(echo.New().Logger)
-	if err != nil {
-		t.Fatalf("connect disciple: %v", err)
-	}
+	dsn := fmt.Sprintf("postgres://%s:%s@%s:%s/%s?sslmode=disable", env["PGUSER"], env["PGPASSWORD"], env["PGHOST"], env["PGPORT"], env["PGDATABASE"])
+	db := &shared.DB{DB: bun.NewDB(sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dsn))), pgdialect.New()), Logger: echo.New().Logger, ConnStr: dsn}
 	t.Cleanup(func() { _ = db.Close() })
 	return db
 }

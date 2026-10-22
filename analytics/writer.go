@@ -6,19 +6,21 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/labstack/gommon/log"
 	"github.com/nimling/samna-auth-middleware/v2/shared"
 )
 
 func PostSession(ctx context.Context, appID uuid.UUID, anonymousID, sessionKey string, context_ json.RawMessage, userID *uuid.UUID, ip, userAgent string) (bool, error) {
-	if run == nil {
-		return false, nil
+	r := current()
+	if r == nil {
+		return false, ErrNotStarted
 	}
 	body := context_
 	if len(body) == 0 {
 		body = json.RawMessage("{}")
 	}
 	var result string
-	if err := run.db.NewRaw(
+	if err := r.db.NewRaw(
 		"SELECT claimius.upsert_analytics_session(?, ?, ?, ?::jsonb, ?, ?::inet, ?)",
 		appID, anonymousID, sessionKey, body, userID, nullString(ip), nullString(userAgent),
 	).Scan(ctx, &result); err != nil {
@@ -34,25 +36,52 @@ func PostSession(ctx context.Context, appID uuid.UUID, anonymousID, sessionKey s
 }
 
 func Post(appID uuid.UUID, sessionKey string, events []shared.AnalyticsEventInput) {
-	if run == nil || len(events) == 0 {
+	if len(events) == 0 {
+		return
+	}
+	r := current()
+	if r == nil {
+		log.Errorf("analytics: %d events dropped: %v", len(events), ErrNotStarted)
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.closed {
+		r.logger.Errorf("analytics: %d events dropped: the runner has ended", len(events))
 		return
 	}
 	select {
-	case run.jobs <- job{appID: appID, sessionKey: sessionKey, events: events}:
+	case r.jobs <- job{appID: appID, sessionKey: sessionKey, events: events}:
 	default:
-		run.logger.Errorf("analytics: job queue full, dropped %d events", len(events))
+		r.logger.Errorf("analytics: job queue full, dropped %d events", len(events))
 	}
 }
 
 func (r *runner) writeLoop(ctx context.Context) {
+	work := context.WithoutCancel(ctx)
 	for {
 		select {
 		case <-ctx.Done():
-			return
-		case <-r.stopChan:
+			r.drain(work)
 			return
 		case j := <-r.jobs:
-			r.exec(ctx, j)
+			r.exec(work, j)
+		}
+	}
+}
+
+func (r *runner) drain(ctx context.Context) {
+	r.mu.Lock()
+	r.closed = true
+	r.mu.Unlock()
+	drainCtx, cancel := context.WithTimeout(ctx, drainTimeout)
+	defer cancel()
+	for {
+		select {
+		case j := <-r.jobs:
+			r.exec(drainCtx, j)
+		default:
+			return
 		}
 	}
 }
@@ -79,8 +108,6 @@ func (r *runner) foldLoop(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
-			return
-		case <-r.stopChan:
 			return
 		case <-ticker.C:
 			r.fold(ctx)

@@ -394,7 +394,10 @@ func TestUsageFlushTouchesTheCheckedPair(t *testing.T) {
 			t.Fatalf("check: %v", err)
 		}
 	}
-	db.Usage.Stop()
+	if err := db.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	db = database(t)
 	if _, err := db.GetOrganizations(ctx, userA, sdb.ACCESS_READ, nil, 0); err != nil {
 		t.Fatalf("list: %v", err)
 	}

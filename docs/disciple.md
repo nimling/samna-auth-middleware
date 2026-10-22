@@ -8,7 +8,7 @@ The disciple is a local replica. It never signs or decrypts, so a secret it writ
 |---------|--------|------|
 | `sdb` | `disciple/sdb` | Database layer. `sdb.Init(logger)` connects the pool and loads config once. |
 | `echo` | `disciple/echo` | The individual HTTP handlers: the me routes, the login flow, notifications, consent, capture and uptime. |
-| `sam` | `disciple/sam` | `sam.RegisterEndpoints(group)` mounts the handlers, `sam.RegisterCapture(group)` and `sam.RegisterCaptureRead(group)` mount consent and capture, and `sam.SyncStart(ctx)` runs the pull loop. |
+| `sam` | `disciple/sam` | `sam.RegisterEndpoints(group)` mounts the handlers, `sam.RegisterCapture(group)` and `sam.RegisterCaptureRead(group)` mount consent and capture, and `sam.Init(ctx)` runs the pull loop. |
 | `smw` | `smw` | Middleware. |
 
 ## main.go
@@ -18,6 +18,12 @@ package main
 
 import (
 	"context"
+	"errors"
+	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
 
 	"github.com/labstack/echo/v4"
 	sam "github.com/nimling/samna-auth-middleware/v2/disciple/sam"
@@ -26,18 +32,31 @@ import (
 )
 
 func main() {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 	e := echo.New()
 
 	if _, err := sdb.Init(e.Logger); err != nil {
+		e.Logger.Fatal(err)
+	}
+	if err := sam.Init(ctx); err != nil {
 		e.Logger.Fatal(err)
 	}
 
 	api := e.Group("", smw.UserAuthMiddleware(nil))
 	sam.RegisterEndpoints(api)
 
-	sam.SyncStart(context.Background())
-
-	e.Logger.Fatal(e.Start(":8080"))
+	go func() {
+		if err := e.Start(":8080"); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			e.Logger.Fatal(err)
+		}
+	}()
+	<-ctx.Done()
+	shutdown, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	_ = e.Shutdown(shutdown)
+	<-sam.Done()
+	_ = sdb.Instance().Close()
 }
 ```
 
@@ -49,7 +68,7 @@ func main() {
 
 3. `smw.UserAuthMiddleware(opts)` protects the routes. Pass `nil` to take the slug, secret, redirect and page redirect from the config.
 
-4. `sam.SyncStart(ctx)` launches the background pull loop that keeps the local database current. Call it on every pod; one pod per database takes the sync lock and pulls, the others stand by. The puller takes a snapshot on first run, then pulls one page after its cursor at a time, each held open by the prophet while there is nothing new, backing off on failure and logging through the database logger. It returns immediately and runs until the context ends.
+4. `sam.Init(ctx)` launches the background pull loop that keeps the local database current, and returns an error only when it cannot start. Call it on every pod with the context `main` makes from `signal.NotifyContext`; one pod per database takes the sync lock and pulls, the others stand by. The puller takes a snapshot on first run, then pulls one page after its cursor at a time, each held open by the prophet while there is nothing new, backing off on failure and logging through the database logger. It returns immediately and runs until the context ends; `sam.Done()` closes once it has. The order of start and shutdown every runner follows is [Lifecycle](../.nimpress/disciple.md#lifecycle).
 
 ## App scoping
 
@@ -83,20 +102,24 @@ The browser half is one call, `configureConsent({ endpoint: '/api/auth' })`, whi
 
 ## Uptime
 
-The prophet probes the app from outside; `uptime.Init` is the app reporting from inside. Call it once after `sdb.Init`, hand it the checks that decide whether the app is healthy, and it registers the app's `heartbeat` monitor on the prophet and beats on the interval. The [Uptime](../README.md#uptime) section of the readme carries the options, the handlers and the prophet contract.
+The prophet probes the app from outside; `uptime.Init` is the app reporting from inside. Call it once after `sdb.Init` with the context of `main`, hand it the checks that decide whether the app is healthy, and it registers the app's `heartbeat` monitor on the prophet and beats on the interval. The [Uptime](../README.md#uptime) section of the readme carries the options, the handlers and the prophet contract.
 
 ```go
-uptime.Init(e.Logger, uptime.Options{
+if err := uptime.Init(ctx, e.Logger, uptime.Options{
 	Version: version,
 	Checks:  []uptime.Check{{Name: "database", Run: sdb.Instance().PingContext}},
-})
+}); err != nil {
+	e.Logger.Fatal(err)
+}
 ```
+
+It ends when the context does; wait on `uptime.Done()` after the http server has shut down.
 
 `saecho.GetUptime` answers with the app's own last beat and `saecho.GetUptimeStatus` proxies the prophet's public status for the app's slug. Mount either where the app wants the view; neither is part of `sam.RegisterEndpoints`.
 
 ## Notes
 
-Sync is pull only. There is no inbound sync endpoint on a disciple and none on the prophet; the disciple reaches out to `GET /sam/sync/snapshot` and `GET /sam/sync/:cursor` through `sam.SyncStart`, with a `(txid, seq)` cursor written `<txid>.<seq>`. The feed carries source rows only, and the disciple settles its own access from them. It binds to the prophet that answers it and routes its writes there. See [Sync](sync.md).
+Sync is pull only. There is no inbound sync endpoint on a disciple and none on the prophet; the disciple reaches out to `GET /sam/sync/snapshot` and `GET /sam/sync/:cursor` through `sam.Init`, with a `(txid, seq)` cursor written `<txid>.<seq>`. The feed carries source rows only, and the disciple settles its own access from them. It binds to the prophet that answers it and routes its writes there. See [Sync](sync.md).
 
 Object types pass through the middleware untouched over JSON and into the database. A disciple's own tables are qualified by the consumer in their `table:` tags, which `ObjectTypeOf` returns as written, and `upsert_table_info` raises on an unqualified name. `ObjectType.Validate` is the opt in check for the consumer's own types.
 </content>

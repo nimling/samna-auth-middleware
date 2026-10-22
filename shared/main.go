@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/labstack/echo/v4"
+	"github.com/lib/pq"
 	"github.com/nimling/samna-auth-middleware/v2/client"
 	"github.com/nimling/samna-auth-middleware/v2/pkg/encryption"
 	"github.com/nimling/samna-auth-middleware/v2/utils"
@@ -31,6 +32,7 @@ type DB struct {
 	ConnStr string
 	Usage   *ObjectUsage
 	stmts   sync.Map
+	listen  *listen
 
 	RouteToProphet bool
 }
@@ -254,7 +256,7 @@ func Connect(logger echo.Logger) (*DB, error) {
 	redactedDSN := fmt.Sprintf("postgres://%s:*********@%s:%s/%s?sslmode=%s", pgUser, pgHost, pgPort, pgDatabase, sslMode)
 
 	logger.Info("DSN:", redactedDSN)
-	db := &DB{DB: openPool(dsn), Logger: logger, ConnStr: dsn}
+	db := &DB{DB: openPool(dsn), Logger: logger, ConnStr: dsn, listen: &listen{subs: make(map[string]map[chan *pq.Notification]struct{})}}
 	if err := db.Ping(); err != nil {
 		return nil, fmt.Errorf("ping: %w", err)
 	}
@@ -297,7 +299,24 @@ func Connect(logger echo.Logger) (*DB, error) {
 
 	resolveOIDC(logger)
 
+	instance.Store(db)
 	return db, nil
+}
+
+var instance atomic.Pointer[DB]
+
+func Instance() *DB {
+	return instance.Load()
+}
+
+func (d *DB) Close() error {
+	d.Usage.close()
+	if d.Replica != nil {
+		if err := d.Replica.Close(); err != nil {
+			return err
+		}
+	}
+	return d.DB.Close()
 }
 
 func openPool(dsn string) *bun.DB {

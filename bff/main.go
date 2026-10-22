@@ -2,6 +2,7 @@ package bff
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
@@ -23,6 +24,7 @@ import (
 const (
 	SessionPath          = "/session"
 	HeaderXForwardedHost = "X-Forwarded-Host"
+	shutdownTimeout      = 10 * time.Second
 )
 
 type Config struct {
@@ -92,9 +94,29 @@ func Serve(ctx context.Context, config Config) error {
 		}, siteGate)
 	}
 
-	sam.SyncStart(ctx)
+	if err := sam.Init(ctx); err != nil {
+		return err
+	}
 
-	return e.Start(":" + config.Port)
+	served := make(chan error, 1)
+	go func() {
+		if err := e.Start(":" + config.Port); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			served <- err
+		}
+		close(served)
+	}()
+	select {
+	case err := <-served:
+		return err
+	case <-ctx.Done():
+	}
+	shutdownCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), shutdownTimeout)
+	defer cancel()
+	if err := e.Shutdown(shutdownCtx); err != nil {
+		e.Logger.Errorf("shutdown: %v", err)
+	}
+	<-sam.Done()
+	return sdb.Instance().Close()
 }
 
 func GetSession(ctx echo.Context) error {

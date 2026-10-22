@@ -43,7 +43,7 @@ func TestObjectUsage_CountsPerKeyAndFlushesOnStop(t *testing.T) {
 	}
 	u.Add(nil, user, OBJECT_TYPE_LOCATION, object)
 	u.Add(nil, uuid.Nil, OBJECT_TYPE_LOCATION, object)
-	u.Stop()
+	u.close()
 	flushes := sink.seen()
 	if len(flushes) != 1 {
 		t.Fatalf("expected one flush on stop, got %d", len(flushes))
@@ -59,7 +59,7 @@ func TestObjectUsage_CountsPerKeyAndFlushesOnStop(t *testing.T) {
 func TestObjectUsage_FlushesAtTheKeyLimit(t *testing.T) {
 	sink := &usageSink{}
 	u := startObjectUsage(sink.post, nil, time.Hour, 3)
-	defer u.Stop()
+	defer u.close()
 	user := uuid.New()
 	for i := 0; i < 3; i++ {
 		u.Add(nil, user, OBJECT_TYPE_ORGANIZATION, uuid.New())
@@ -79,7 +79,7 @@ func TestObjectUsage_FlushesOnTheInterval(t *testing.T) {
 	var reported error
 	var mu sync.Mutex
 	u := startObjectUsage(sink.post, func(err error) { mu.Lock(); reported = err; mu.Unlock() }, 20*time.Millisecond, 1000)
-	defer u.Stop()
+	defer u.close()
 	u.Add(nil, uuid.New(), OBJECT_TYPE_ORGANIZATION, uuid.New())
 	deadline := time.Now().Add(2 * time.Second)
 	for len(sink.seen()) == 0 && time.Now().Before(deadline) {
@@ -100,7 +100,7 @@ func TestObjectUsage_FlushesOnTheInterval(t *testing.T) {
 func TestObjectUsage_NilIsANoOp(t *testing.T) {
 	var u *ObjectUsage
 	u.Add(nil, uuid.New(), OBJECT_TYPE_ORGANIZATION, uuid.New())
-	u.Stop()
+	u.close()
 }
 
 type pgCodeError string
@@ -149,7 +149,7 @@ func TestObjectUsage_KeysOnTheAppChecked(t *testing.T) {
 	u.Add(&appB, user, OBJECT_TYPE_ORGANIZATION, object)
 	u.Add(nil, user, OBJECT_TYPE_ORGANIZATION, object)
 	u.Add(nil, user, OBJECT_TYPE_ORGANIZATION, object)
-	u.Stop()
+	u.close()
 	flushes := sink.seen()
 	if len(flushes) != 1 || len(flushes[0]) != 3 {
 		t.Fatalf("expected one flush of three keys, one per app, got %v", flushes)
@@ -169,7 +169,7 @@ func TestObjectUsage_FlushesInTheLockOrder(t *testing.T) {
 		u.Add(&app, uuid.New(), OBJECT_TYPE_ORGANIZATION, uuid.New())
 		u.Add(nil, uuid.New(), OBJECT_TYPE_LOCATION, uuid.New())
 	}
-	u.Stop()
+	u.close()
 	posts, _ := sink.seen()
 	if len(posts) != 1 || len(posts[0]) != 100 {
 		t.Fatalf("expected one flush of 100 keys, got %d flushes", len(posts))
@@ -189,7 +189,7 @@ func TestObjectUsage_RetriesADeadlock(t *testing.T) {
 		user, object := uuid.New(), uuid.New()
 		u.Add(nil, user, OBJECT_TYPE_ORGANIZATION, object)
 		u.Add(nil, user, OBJECT_TYPE_ORGANIZATION, object)
-		u.Stop()
+		u.close()
 		posts, counts := sink.seen()
 		if len(posts) != 2 || counts[1][0] != 2 {
 			t.Fatalf("%s: expected the batch posted again with its counts, got %v %v", code, posts, counts)
@@ -215,7 +215,7 @@ func TestObjectUsage_KeepsTheCountsOfAFailedFlush(t *testing.T) {
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
-	u.Stop()
+	u.close()
 	posts, counts := sink.seen()
 	if len(posts) < 2 {
 		t.Fatalf("expected the failed batch flushed again, got %d flushes", len(posts))

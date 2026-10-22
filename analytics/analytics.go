@@ -2,11 +2,13 @@ package analytics
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
+	"github.com/labstack/gommon/log"
 	"github.com/nimling/samna-auth-middleware/v2/shared"
 )
 
@@ -15,7 +17,15 @@ const (
 	CaptureBytesMax  = 8 << 20
 	CaptureMaxAge    = "7 days"
 	foldInterval     = time.Hour
+	foldLead         = time.Minute
+	foldLockKey      = "claimius.analytics_fold"
 	rawRetentionDays = 30
+	drainTimeout     = 10 * time.Second
+)
+
+var (
+	ErrNotStarted = errors.New("analytics not started: call analytics.Init")
+	ErrStarted    = errors.New("analytics already started")
 )
 
 type job struct {
@@ -25,47 +35,77 @@ type job struct {
 }
 
 type runner struct {
-	db       *shared.DB
-	logger   echo.Logger
-	jobs     chan job
-	stopChan chan struct{}
-	mu       sync.Mutex
-	running  bool
+	db     *shared.DB
+	logger echo.Logger
+	jobs   chan job
+	done   chan struct{}
+	mu     sync.Mutex
+	closed bool
 }
 
-var run *runner
+var (
+	runMu sync.Mutex
+	run   *runner
+)
 
-func Init(db *shared.DB) error {
-	if run != nil {
-		return nil
+func Init(ctx context.Context) error {
+	db := shared.Instance()
+	if db == nil {
+		return shared.ErrNotConnected
 	}
-	run = &runner{
-		db:       db,
-		logger:   db.Logger,
-		jobs:     make(chan job, jobBuffer),
-		stopChan: make(chan struct{}),
-		running:  true,
+	runMu.Lock()
+	defer runMu.Unlock()
+	if run != nil && !run.ended() {
+		return ErrStarted
 	}
-	go run.writeLoop(context.Background())
-	go run.foldLoop(context.Background())
+	r := &runner{
+		db:     db,
+		logger: db.Logger,
+		jobs:   make(chan job, jobBuffer),
+		done:   make(chan struct{}),
+	}
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		r.writeLoop(ctx)
+	}()
+	go func() {
+		defer wg.Done()
+		shared.LeadSync(ctx, db, foldLockKey, foldLead, r.foldLoop)
+	}()
+	go func() {
+		wg.Wait()
+		r.logger.Info("analytics runner stopped")
+		close(r.done)
+	}()
+	run = r
 	db.Logger.Info("analytics runner started")
 	return nil
 }
 
-func Stop() {
-	if run == nil {
-		return
+func Done() <-chan struct{} {
+	r := current()
+	if r == nil {
+		log.Error(ErrNotStarted)
+		done := make(chan struct{})
+		close(done)
+		return done
 	}
-	run.mu.Lock()
-	defer run.mu.Unlock()
-	if !run.running {
-		return
-	}
-	run.running = false
-	close(run.stopChan)
-	run.logger.Info("analytics runner stopped")
+	return r.done
 }
 
-func Running() bool {
-	return run != nil && run.running
+func current() *runner {
+	runMu.Lock()
+	defer runMu.Unlock()
+	return run
+}
+
+func (r *runner) ended() bool {
+	select {
+	case <-r.done:
+		return true
+	default:
+		return false
+	}
 }

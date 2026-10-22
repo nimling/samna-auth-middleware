@@ -90,7 +90,7 @@ func (u *ObjectUsage) Add(appID *uuid.UUID, userID uuid.UUID, objectType string,
 	}
 }
 
-func (u *ObjectUsage) Stop() {
+func (u *ObjectUsage) close() {
 	if u == nil {
 		return
 	}

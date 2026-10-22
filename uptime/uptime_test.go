@@ -32,7 +32,6 @@ func newProphetStub(t *testing.T, existing []uptime.Monitor, failFirst bool) *pr
 	stub := &prophetStub{monitorID: uuid.New(), existing: existing, failFirst: failFirst}
 	stub.srv = httptest.NewServer(http.HandlerFunc(stub.handle))
 	t.Cleanup(stub.srv.Close)
-	t.Cleanup(uptime.Stop)
 	t.Setenv("SAUTH_ENDPOINT", stub.srv.URL)
 	t.Setenv("SAUTH_APP_SLUG", "testapp")
 	t.Setenv("SAUTH_APP_SECRET", "secret")
@@ -82,6 +81,18 @@ func (s *prophetStub) beatCount() int {
 	return len(s.beats)
 }
 
+func initUptime(t *testing.T, opts uptime.Options) {
+	t.Helper()
+	ctx, cancel := context.WithCancel(t.Context())
+	if err := uptime.Init(ctx, echo.New().Logger, opts); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+	t.Cleanup(func() {
+		cancel()
+		<-uptime.Done()
+	})
+}
+
 func waitFor(t *testing.T, what string, cond func() bool) {
 	t.Helper()
 	deadline := time.Now().Add(3 * time.Second)
@@ -97,7 +108,7 @@ func waitFor(t *testing.T, what string, cond func() bool) {
 func TestInitRegistersTheHeartbeatMonitorAndBeats(t *testing.T) {
 	stub := newProphetStub(t, nil, false)
 
-	uptime.Init(echo.New().Logger, uptime.Options{
+	initUptime(t, uptime.Options{
 		Interval: 20 * time.Millisecond,
 		Version:  "1.2.3",
 		Checks: []uptime.Check{
@@ -146,7 +157,7 @@ func TestInitReusesAnExistingHeartbeatMonitor(t *testing.T) {
 	stub := newProphetStub(t, []uptime.Monitor{existing}, false)
 	stub.monitorID = existing.ID
 
-	uptime.Init(echo.New().Logger, uptime.Options{Interval: 20 * time.Millisecond})
+	initUptime(t, uptime.Options{Interval: 20 * time.Millisecond})
 
 	waitFor(t, "first beat", func() bool { return stub.beatCount() >= 1 })
 
@@ -170,7 +181,7 @@ func TestInitReusesAnExistingHeartbeatMonitor(t *testing.T) {
 func TestInitRetriesABeatAfterAServerError(t *testing.T) {
 	stub := newProphetStub(t, nil, true)
 
-	uptime.Init(echo.New().Logger, uptime.Options{Interval: 20 * time.Millisecond, Version: "v"})
+	initUptime(t, uptime.Options{Interval: 20 * time.Millisecond, Version: "v"})
 
 	waitFor(t, "first beat", func() bool { return stub.beatCount() >= 1 })
 	waitFor(t, "unreported heartbeat", func() bool {
@@ -183,8 +194,10 @@ func TestInitRetriesABeatAfterAServerError(t *testing.T) {
 		return last != nil && last.Reported && last.Version == "v"
 	})
 
-	if !uptime.Running() {
+	select {
+	case <-uptime.Done():
 		t.Fatalf("reporter stopped after a failed beat")
+	default:
 	}
 }
 
@@ -192,13 +205,43 @@ func TestInitIsDisabledInDebugMode(t *testing.T) {
 	stub := newProphetStub(t, nil, false)
 	t.Setenv("SAUTH_DEBUG_USER_ID", uuid.NewString())
 
-	uptime.Init(echo.New().Logger, uptime.Options{Interval: 20 * time.Millisecond})
+	initUptime(t, uptime.Options{Interval: 20 * time.Millisecond})
 
 	time.Sleep(60 * time.Millisecond)
-	if uptime.Running() {
+	select {
+	case <-uptime.Done():
+	default:
 		t.Fatalf("reporter running in debug mode")
 	}
 	if stub.beatCount() != 0 {
 		t.Fatalf("beats = %d, want 0", stub.beatCount())
+	}
+}
+
+func TestInitTwiceIsRefused(t *testing.T) {
+	newProphetStub(t, nil, false)
+	initUptime(t, uptime.Options{Interval: 20 * time.Millisecond})
+	if err := uptime.Init(t.Context(), echo.New().Logger, uptime.Options{}); !errors.Is(err, uptime.ErrStarted) {
+		t.Fatalf("second init = %v, want ErrStarted", err)
+	}
+}
+
+func TestCancelClosesDone(t *testing.T) {
+	stub := newProphetStub(t, nil, false)
+	ctx, cancel := context.WithCancel(t.Context())
+	if err := uptime.Init(ctx, echo.New().Logger, uptime.Options{Interval: 20 * time.Millisecond}); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+	waitFor(t, "first beat", func() bool { return stub.beatCount() >= 1 })
+	cancel()
+	select {
+	case <-uptime.Done():
+	case <-time.After(3 * time.Second):
+		t.Fatalf("Done not closed after cancel")
+	}
+	beats := stub.beatCount()
+	time.Sleep(60 * time.Millisecond)
+	if stub.beatCount() != beats {
+		t.Fatalf("beats after the end: %d, want %d", stub.beatCount(), beats)
 	}
 }

@@ -1,6 +1,6 @@
 # Prophet
 
-The prophet is the source of truth. It holds the full app row including key and seed material, authenticates the apps that talk to it, serves the sync feed, and exposes the full admin API. It is the home of its own apps and decides their writes; a prophet that mirrors an app of a peer prophet pulls that one app with `sam.PeerSyncStart`.
+The prophet is the source of truth. It holds the full app row including key and seed material, authenticates the apps that talk to it, serves the sync feed, and exposes the full admin API. It is the home of its own apps and decides their writes; a prophet that mirrors an app of a peer prophet pulls that one app with `sam.PeerInit`.
 
 ## Packages
 
@@ -48,6 +48,8 @@ func main() {
 
 3. `sam.RegisterEndpoints(group)` mounts the user, relation, organization, location, claim, asset, app, guest, sync, client, secret, search, code, field, notification, consent and analytics routes. The sync feed the disciples consume is part of this set. Organization, location, user, claim, client, secret and relation take `PATCH` beside `PUT`. A grant is addressed by claim and member within the calling app: `PATCH` and `DELETE` on `claim/:claim_id/object/:id` name the bound object, and on `claim/:claim_id/user/:id` the granted user.
 
+The prophet starts `notification.Init(ctx)`, which the SSE notification stream needs, `analytics.Init(ctx)`, whose hourly fold runs on one replica, and `sam.PeerInit(ctx)` when it mirrors a peer, all on the context `main` makes from `signal.NotifyContext`, and joins each `Done()` after the http server has shut down, as [Lifecycle](../.nimpress/disciple.md#lifecycle) orders. A held `GET sync/:cursor` waits on `claimius_sync` through the process's one listener, `(*shared.DB).Listen`, for as long as the request holds.
+
 4. `smw.UserAuthMiddleware(opts)` protects browser and bearer facing routes. Pass `nil` to take the slug, secret, redirect and page redirect from the config. `smw.ClientAuthMiddleware()` protects service to service routes.
 
 ## App scoping
@@ -72,9 +74,9 @@ The policy a decision is recorded against and the document the banner links are 
 
 ## Notes
 
-Sync is pull only. The prophet serves the snapshot and delta feed at `GET sync/snapshot` and `GET sync/:cursor` under the registered group, the delta read through `claimius.get_sync_events` after a `<txid>.<seq>` cursor, source rows only, organizations and locations once per linked app. A pull is served only when `claimius.check_sync_home` agrees the prophet serves that consumer; otherwise it answers `409` with the prophet the consumer stays with in `SAuth-Home`. There is no inbound sync route on the prophet and it does not run `SyncStart`; that is the disciple side.
+Sync is pull only. The prophet serves the snapshot and delta feed at `GET sync/snapshot` and `GET sync/:cursor` under the registered group, the delta read through `claimius.get_sync_events` after a `<txid>.<seq>` cursor, source rows only, organizations and locations once per linked app. A pull is served only when `claimius.check_sync_home` agrees the prophet serves that consumer; otherwise it answers `409` with the prophet the consumer stays with in `SAuth-Home`. There is no inbound sync route on the prophet and it does not run `sam.Init`; that is the disciple side.
 
-Federation runs in SQL and in one Go call. Each `claimius.prophet_peer` row names a peer prophet, its endpoint and the slug and secret of one app mirrored from it; `sam.PeerSyncStart(ctx, db)` pulls every row as that app, with `peer=true`, and applies each row through `claimius.apply_peer_event`. `claimius.insert_app_handover` and `claimius.update_app_handover` move an app's home between two prophets. See [Prophets and disciples](../.nimpress/claimius/prophets.md).
+Federation runs in SQL and in one Go call. Each `claimius.prophet_peer` row names a peer prophet, its endpoint and the slug and secret of one app mirrored from it; `sam.PeerInit(ctx)` pulls every row as that app, with `peer=true`, and applies each row through `claimius.apply_peer_event`. `claimius.insert_app_handover` and `claimius.update_app_handover` move an app's home between two prophets. See [Prophets and disciples](../.nimpress/claimius/prophets.md).
 
 Object types are schema qualified over JSON and in the database alike.
 </content>

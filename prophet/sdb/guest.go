@@ -33,7 +33,7 @@ func IssueGuestToken(ctx context.Context, appID uuid.UUID, appSlug string, maste
 	guestUserID := GetGuestUserID(appID, claimID)
 
 	var payload []byte
-	if err := instance.NewRaw("SELECT claimius.upsert_guest_user(?, ?, ?, ?)", appID, claimID, userID, guestUserID).Scan(ctx, &payload); err != nil {
+	if err := Instance().NewRaw("SELECT claimius.upsert_guest_user(?, ?, ?, ?)", appID, claimID, userID, guestUserID).Scan(ctx, &payload); err != nil {
 		var pgErr pgdriver.Error
 		if errors.As(err, &pgErr) {
 			switch pgErr.Field('C') {

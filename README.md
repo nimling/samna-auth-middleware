@@ -15,8 +15,8 @@ go get github.com/nimling/samna-auth-middleware/v2
 | Role | Holds | Sync | API |
 |------|-------|------|-----|
 | Prophet | Full app row with key and seed material | Serves the snapshot and delta feed | `sam.RegisterEndpoints` mounts the full admin API |
-| Disciple | App identity from the environment | Pulls in the background via `sam.SyncStart`, one pod per database | `sam.RegisterEndpoints` mounts the me and login routes |
-| Hybrid | A prophet set up with `claimius.upsert_prophet_peer` | Serves its own apps, and pulls one app of a peer prophet via `sam.PeerSyncStart` | As the prophet; writes of the mirrored app are refused and belong to the peer |
+| Disciple | App identity from the environment | Pulls in the background via `sam.Init`, one pod per database | `sam.RegisterEndpoints` mounts the me and login routes |
+| Hybrid | A prophet set up with `claimius.upsert_prophet_peer` | Serves its own apps, and pulls one app of a peer prophet via `sam.PeerInit` | As the prophet; writes of the mirrored app are refused and belong to the peer |
 
 A binary is one role. Both roles wire the same four identifiers. Each app has one home prophet that decides its writes, and a disciple relies on exactly one prophet, the one it is bound to.
 
@@ -26,12 +26,14 @@ A binary is one role. Both roles wire the same four identifiers. Each app has on
 |---------|----------------|-----------------|------|
 | `sdb` | `prophet/sdb` | `disciple/sdb` | Database layer. `sdb.Init(logger)` connects the pool and loads config once. |
 | `echo` | `prophet/echo` | `disciple/echo` | The individual HTTP handlers. |
-| `sam` | `prophet/sam` | `disciple/sam` | `sam.RegisterEndpoints(group)`; `sam.SyncStart(ctx)` on the disciple, `sam.PeerSyncStart(ctx, db)` on a prophet mirroring a peer. |
+| `sam` | `prophet/sam` | `disciple/sam` | `sam.RegisterEndpoints(group)`; `sam.Init(ctx)` on the disciple, `sam.PeerInit(ctx)` on a prophet mirroring a peer. |
 | `smw` | `smw` | `smw` | Middleware, shared by both roles. |
 | `client` | `client` | `client` | HTTP client for the Samna Auth API. |
 | `utils` | `utils` | `utils` | Config loader, cookies, and debug helpers. |
 | `database` | `prophet/database` | `disciple/database` | The `claimius` base SQL set for the role, read by a consumer as a smig git include. |
-| `uptime` | | `uptime` | The heartbeat reporter. `uptime.Init(logger, opts)` registers the app's `heartbeat` monitor and beats to the prophet. |
+| `uptime` | | `uptime` | The heartbeat reporter. `uptime.Init(ctx, logger, opts)` registers the app's `heartbeat` monitor and beats to the prophet. |
+| `notification` | `notification` | `notification` | In app notifications: `Write`, `WriteUser` and the SSE `Stream` behind the notification routes. `notification.Init(ctx)` starts it on either role. |
+| `analytics` | `analytics` | | Consent, sessions, events and the hourly fold on the prophet. `analytics.Init(ctx)` starts it. |
 
 ## Getting started
 
@@ -71,19 +73,22 @@ accessToken := ctx.Get(smw.AccessTokenKey).(string)
 
 The prophet probes every app from outside on its `monitor` rows. The `uptime` package is the inside half: a disciple imports it, calls it once at boot, and from then on the app reports its own health to the prophet on the app key, with the checks it chose to run. Its entrypoints:
 
-- `uptime.Init(logger, opts)` reads the app slug, secret and endpoint from the same config the `client` package uses, registers one monitor named `heartbeat` of kind `heartbeat` for the app if none exists, and starts a goroutine that runs the checks and posts a beat every `opts.Interval`, default sixty seconds. A registration or beat that fails is logged and retried on the next tick; nothing here is fatal. Debug mode disables it the way it disables the sync pull loop.
+- `uptime.Init(ctx, logger, opts) error` reads the app slug, secret and endpoint from the same config the `client` package uses, registers one monitor named `heartbeat` of kind `heartbeat` for the app if none exists, and starts a goroutine that runs the checks and posts a beat every `opts.Interval`, default sixty seconds. A registration or beat that fails is logged and retried on the next tick; nothing here is fatal, and `Init` returns an error only on a second call while it runs. Debug mode disables it the way it disables the sync pull loop.
 - `uptime.Options` carries `Interval`, `Version`, the string reported with every beat, and `Checks`, a list of `uptime.Check{Name, Run}` the app supplies. A check is any `func(ctx context.Context) error`, a database ping being the usual one. A check that returns an error fails the beat and carries its message.
-- `uptime.Stop()` ends the goroutine. `uptime.GetHeartbeat()` returns the app's own last beat, its checks, its version and whether the prophet accepted it.
+- Cancelling `ctx` ends the goroutine and closes `uptime.Done()`. `uptime.GetHeartbeat()` returns the app's own last beat, its checks, its version and whether the prophet accepted it.
 
 ```go
-uptime.Init(e.Logger, uptime.Options{
+if err := uptime.Init(ctx, e.Logger, uptime.Options{
 	Version: version,
 	Checks: []uptime.Check{
 		{Name: "database", Run: sdb.Instance().PingContext},
 	},
-})
-defer uptime.Stop()
+}); err != nil {
+	e.Logger.Fatal(err)
+}
 ```
+
+After the http server has shut down, `<-uptime.Done()`. The order every runner follows is [Lifecycle](.nimpress/disciple.md#lifecycle).
 
 Two handlers in `disciple/echo` give a disciple a view of it without knowing the prophet. `GetUptime` answers with the last `Heartbeat`, and `GetUptimeStatus` proxies the prophet's public status page for the app's own slug, so a page the disciple serves can draw its uptime:
 

@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+	"github.com/labstack/gommon/log"
 	"github.com/nimling/samna-auth-middleware/v2/shared"
 )
 
@@ -30,12 +31,9 @@ type job struct {
 }
 
 func Write(in Notification, objectType string, objectID uuid.UUID) {
-	if run == nil {
-		return
-	}
 	qualified, err := shared.ResolveObjectType(objectType)
 	if err != nil {
-		run.logger.Errorf("notification Write: %v", err)
+		log.Errorf("notification Write: %v", err)
 		return
 	}
 	id := objectID
@@ -43,29 +41,56 @@ func Write(in Notification, objectType string, objectID uuid.UUID) {
 }
 
 func WriteUser(in Notification, userIDs ...uuid.UUID) {
-	if run == nil || len(userIDs) == 0 {
+	if len(userIDs) == 0 {
 		return
 	}
 	enqueue(job{in: in, userIDs: userIDs})
 }
 
 func enqueue(j job) {
+	r := current()
+	if r == nil {
+		log.Errorf("notification %q dropped: %v", j.in.Title, ErrNotStarted)
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.closed {
+		r.logger.Errorf("notification %q dropped: the runner has ended", j.in.Title)
+		return
+	}
 	select {
-	case run.jobs <- j:
+	case r.jobs <- j:
 	default:
-		run.logger.Errorf("notification: job queue full, dropped")
+		r.logger.Errorf("notification %q dropped: job queue full", j.in.Title)
 	}
 }
 
 func (r *runner) writeLoop(ctx context.Context) {
+	work := context.WithoutCancel(ctx)
 	for {
 		select {
 		case <-ctx.Done():
-			return
-		case <-r.stopChan:
+			r.drain(work)
 			return
 		case j := <-r.jobs:
-			r.exec(ctx, j)
+			r.exec(work, j)
+		}
+	}
+}
+
+func (r *runner) drain(ctx context.Context) {
+	r.mu.Lock()
+	r.closed = true
+	r.mu.Unlock()
+	drainCtx, cancel := context.WithTimeout(ctx, drainTimeout)
+	defer cancel()
+	for {
+		select {
+		case j := <-r.jobs:
+			r.exec(drainCtx, j)
+		default:
+			return
 		}
 	}
 }

@@ -2,12 +2,14 @@ package uptime
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
+	"github.com/labstack/gommon/log"
 
 	"github.com/nimling/samna-auth-middleware/v2/client"
 	"github.com/nimling/samna-auth-middleware/v2/shared"
@@ -32,66 +34,86 @@ type runner struct {
 	opts      Options
 	monitorID uuid.UUID
 	last      *Heartbeat
-	stopChan  chan struct{}
+	done      chan struct{}
 	mu        sync.Mutex
-	running   bool
 }
 
-var run *runner
+var (
+	ErrNotStarted = errors.New("uptime not started: call uptime.Init")
+	ErrStarted    = errors.New("uptime already started")
+)
 
-func Init(logger echo.Logger, opts Options) {
-	if run != nil && run.running {
-		return
-	}
-	if shared.GetDebugMode() != shared.DebugModeNone {
-		logger.Info("uptime reporter disabled in debug mode")
-		return
+var (
+	runMu sync.Mutex
+	run   *runner
+)
+
+func Init(ctx context.Context, logger echo.Logger, opts Options) error {
+	runMu.Lock()
+	defer runMu.Unlock()
+	if run != nil && !run.ended() {
+		return ErrStarted
 	}
 	if opts.Interval <= 0 {
 		opts.Interval = defaultInterval
 	}
-	run = &runner{
-		logger:   logger,
-		opts:     opts,
-		stopChan: make(chan struct{}),
-		running:  true,
+	r := &runner{logger: logger, opts: opts, done: make(chan struct{})}
+	run = r
+	if shared.GetDebugMode() != shared.DebugModeNone {
+		close(r.done)
+		logger.Info("uptime reporter disabled in debug mode")
+		return nil
 	}
-	if err := run.register(context.Background()); err != nil {
+	if err := r.register(ctx); err != nil {
 		logger.Errorf("uptime register: %v", err)
 	}
-	go run.loop(context.Background())
+	go func() {
+		defer close(r.done)
+		r.loop(ctx)
+		logger.Info("uptime reporter stopped")
+	}()
 	logger.Info("uptime reporter started")
+	return nil
 }
 
-func Stop() {
-	if run == nil {
-		return
+func Done() <-chan struct{} {
+	r := current()
+	if r == nil {
+		log.Error(ErrNotStarted)
+		done := make(chan struct{})
+		close(done)
+		return done
 	}
-	run.mu.Lock()
-	defer run.mu.Unlock()
-	if !run.running {
-		return
-	}
-	run.running = false
-	close(run.stopChan)
-	run.logger.Info("uptime reporter stopped")
+	return r.done
 }
 
-func Running() bool {
-	return run != nil && run.running
+func current() *runner {
+	runMu.Lock()
+	defer runMu.Unlock()
+	return run
+}
+
+func (r *runner) ended() bool {
+	select {
+	case <-r.done:
+		return true
+	default:
+		return false
+	}
 }
 
 func GetHeartbeat() *Heartbeat {
-	if run == nil {
+	r := current()
+	if r == nil {
 		return nil
 	}
-	run.mu.Lock()
-	defer run.mu.Unlock()
-	if run.last == nil {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.last == nil {
 		return nil
 	}
-	copied := *run.last
-	copied.Checks = append([]BeatCheck(nil), run.last.Checks...)
+	copied := *r.last
+	copied.Checks = append([]BeatCheck(nil), r.last.Checks...)
 	return &copied
 }
 
@@ -154,8 +176,6 @@ func (r *runner) loop(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
-			return
-		case <-r.stopChan:
 			return
 		case <-ticker.C:
 			r.tick(ctx)

@@ -2,8 +2,8 @@
 gate: samna-developer
 layout: doc
 title: Sync in Go
-description: The /sam/sync routes on the prophet, the pull loop SyncStart on the disciple under one leader per database, pages applied in one transaction, binding to one prophet, the peer pull, reconciling from a snapshot, and the drain between pulls.
-tags: SyncStart, PeerSyncStart, Replica, Move, LeadSync, SyncLockKey, PullSync, PullSnapshot, ApplyPage, ApplyPayload, SyncCursor, WaitForSeq, read your writes, SAuth-Prophet, SAuth-Home, SAuth-Seq, advisory lock, /sam/sync, snapshot, drain
+description: The /sam/sync routes on the prophet, the pull loop sam.Init on the disciple under one leader per database, pages applied in one transaction, binding to one prophet, the peer pull, reconciling from a snapshot, and the drain between pulls.
+tags: sam.Init, PeerInit, Replica, Move, LeadSync, SyncLockKey, PullSync, PullSnapshot, ApplyPage, ApplyPayload, SyncCursor, WaitForSeq, read your writes, SAuth-Prophet, SAuth-Home, SAuth-Seq, advisory lock, /sam/sync, snapshot, drain
 lastUpdated: true
 ---
 
@@ -33,7 +33,7 @@ A disciple answers a request that made routed writes only once its cursor has re
 
 ## One leader per database
 
-`sam.SyncStart(ctx)` returns at once and owns its goroutines. In debug mode it does nothing. On every pod it runs `LeadSync(ctx, db, SyncLockKey(app slug), 5 s, Disciple().Pull)`: the pod that takes the session level advisory lock `pg_try_advisory_lock(hashtextextended(key, 0))` on a dedicated connection runs the pull for as long as it holds it, and checks the connection every 5 s; every other pod tries the lock every 5 s and does no sync work. A holder whose work ends, or whose connection stops answering, discards the connection, which releases the lock, and the next pod to try takes over. However many pods run, each event is applied once. Every pod also follows the binding of the disciple, below, through `client.Bind`.
+`sam.Init(ctx)` returns at once and owns its goroutines; it returns an error only when it cannot start, and `sam.Done()` closes once the context has ended and every goroutine has returned ([Lifecycle](../../disciple.md#lifecycle)). In debug mode it starts nothing. On every pod it runs `LeadSync(ctx, db, SyncLockKey(app slug), 5 s, Disciple().Pull)`: the pod that takes the session level advisory lock `pg_try_advisory_lock(hashtextextended(key, 0))` on a dedicated connection runs the pull for as long as it holds it, and checks the connection every 5 s; every other pod tries the lock every 5 s and does no sync work. A holder whose work ends, or whose connection stops answering, discards the connection, which releases the lock, and the next pod to try takes over. However many pods run, each event is applied once. Every pod also follows the binding of the disciple, below, through `client.Bind`.
 
 ## The pull loop
 
@@ -63,7 +63,7 @@ A routed write commits on the prophet before the host's own transaction does, so
 
 ## The peer pull
 
-`sam.PeerSyncStart(ctx, db)` runs the same loop on a prophet for every row of `prophet_peer`, `shared.ProphetPeer`, one leader per row under the lock key `claimius.prophet_peer:<id>`, and picks up a row added later within 5 s. The replica is named by the row id, authenticates as the mirrored app through `client.WithTarget` with the row's endpoint, slug and secret, and pulls with `peer=true`, which serves the column shaped peer snapshot and the app's handovers. Each row applies through `claimius.apply_peer_event` under `replay_mode`; a row refused as a collision is recorded in `peer_collision` and the page goes on. It pulls while the row is `active` and `get_app_home` names the peer, and stops once this prophet accepts the app. No drain runs there; the prophet schedules its own. The mirrored `samna_app` row carries the peer in `home_prophet`, read as `SamnaApp.HomeProphet`. See [Prophets and disciples](../prophets.md).
+`sam.PeerInit(ctx)` runs the same loop on a prophet for every row of `prophet_peer`, `shared.ProphetPeer`, one leader per row under the lock key `claimius.prophet_peer:<id>`, and picks up a row added later within 5 s. The replica is named by the row id, authenticates as the mirrored app through `client.WithTarget` with the row's endpoint, slug and secret, and pulls with `peer=true`, which serves the column shaped peer snapshot and the app's handovers. Each row applies through `claimius.apply_peer_event` under `replay_mode`; a row refused as a collision is recorded in `peer_collision` and the page goes on. It pulls while the row is `active` and `get_app_home` names the peer, and stops once this prophet accepts the app. No drain runs there; the prophet schedules its own. The mirrored `samna_app` row carries the peer in `home_prophet`, read as `SamnaApp.HomeProphet`. See [Prophets and disciples](../prophets.md).
 
 ## Cost
 

@@ -11,7 +11,6 @@ import (
 	"encoding/hex"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"testing"
 
 	"github.com/google/uuid"
@@ -26,20 +25,7 @@ import (
 )
 
 func getPeerDB(t *testing.T) *shared.DB {
-	t.Helper()
-	for _, key := range []string{"PGHOST", "PGPORT", "PGDATABASE", "PGUSER", "PGPASSWORD"} {
-		value := os.Getenv("PEER_" + key)
-		if value == "" {
-			t.Fatalf("PEER_%s is not set: a peer prophet database is required, as just test provides", key)
-		}
-		t.Setenv(key, value)
-	}
-	db, err := shared.Connect(echo.New().Logger)
-	if err != nil {
-		t.Fatalf("connect peer: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	return db
+	return getRoleDB(t, "PEER_", "a peer prophet database is required, as just test provides")
 }
 
 type peerApp struct {

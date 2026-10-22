@@ -5,10 +5,12 @@ The disciple keeps its local copy current by pulling from the prophet. A consume
 ## Entry point
 
 ```go
-sam.SyncStart(ctx)
+if err := sam.Init(ctx); err != nil {
+	e.Logger.Fatal(err)
+}
 ```
 
-`SyncStart(ctx context.Context)` is the whole contract. One line in the consumer main, after the database is initialized, on every pod. It returns immediately. The consumer never spawns the goroutine, never checks debug mode, never writes a restart loop, never elects a leader, and never handles a returned error channel.
+`sam.Init(ctx context.Context) error` is the whole contract. One call in the consumer main, after `sdb.Init`, on every pod, with the context `main` makes from `signal.NotifyContext`. It returns at once, and returns an error only when it cannot start: no database, or a second call while it runs. Cancelling the context is the only way it ends; `sam.Done()` is closed once every worker has returned. The consumer never spawns the goroutine, never checks debug mode, never writes a restart loop and never elects a leader.
 
 ## Where it pulls from
 
@@ -22,11 +24,11 @@ Organizations and locations are selected through `claimius.app_object_ids`, sinc
 
 This is why a machine client created on the prophet becomes usable on a disciple without any further step, and why it must be created under the serving app's id.
 
-## What SyncStart owns internally
+## What sam.Init owns internally
 
-1. Debug check. When the process runs in debug mode the disciple is self contained and there is no prophet to pull from, so `SyncStart` does no work. The consumer does not gate the call on an env var.
+1. Debug check. When the process runs in debug mode the disciple is self contained and there is no prophet to pull from, so `sam.Init` does no work. The consumer does not gate the call on an env var.
 
-2. Its own goroutines. `SyncStart` spawns the background workers itself and returns immediately. The consumer does not write `go func()`.
+2. Its own goroutines. `sam.Init` spawns the background workers itself and returns immediately. The consumer does not write `go func()`.
 
 3. One puller per database. Every pod runs `LeadSync`, and only the pod holding the session level advisory lock `SyncLockKey(app slug)` pulls. The others try again every 5 s and take over when the holder goes.
 
@@ -44,9 +46,4 @@ A routed write answers with the app's feed position in `SAuth-Seq`, kept on the 
 
 ## Consumer shape
 
-```go
-sam.SyncStart(context.Background())
-e.Logger.Fatal(e.Start(":" + serverPort))
-```
-
-The only consumer code is the call. No debug branch. No restart logic. No lifecycle management. No error channel. Everything that makes the sync correct lives behind `SyncStart`. See [Sync in Go](../.nimpress/claimius/middleware/sync.md).
+The call and the join, in the order every runner of the middleware follows: [Lifecycle](../.nimpress/disciple.md#lifecycle). No debug branch. No restart logic. No error channel. Everything that makes the sync correct lives behind `sam.Init`. See [Sync in Go](../.nimpress/claimius/middleware/sync.md).

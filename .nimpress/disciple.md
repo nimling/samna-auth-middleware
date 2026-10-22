@@ -14,15 +14,56 @@ A disciple is a product service that mirrors one app from the prophet. It answer
 ## Wiring
 
 ```go
+ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+defer stop()
+
 if _, err := sdb.Init(e.Logger); err != nil {
+	e.Logger.Fatal(err)
+}
+if err := notification.Init(ctx); err != nil {
+	e.Logger.Fatal(err)
+}
+if err := sam.Init(ctx); err != nil {
+	e.Logger.Fatal(err)
+}
+if err := uptime.Init(ctx, e.Logger, uptime.Options{}); err != nil {
 	e.Logger.Fatal(err)
 }
 api := e.Group("/api", smw.UserAuthMiddleware(nil))
 sam.RegisterEndpoints(api)
-sam.SyncStart(context.Background())
+
+go func() {
+	if err := e.Start(":" + port); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		e.Logger.Fatal(err)
+	}
+}()
+<-ctx.Done()
+shutdown, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+defer cancel()
+if err := e.Shutdown(shutdown); err != nil {
+	e.Logger.Errorf("shutdown: %v", err)
+}
+<-notification.Done()
+<-sam.Done()
+<-uptime.Done()
+if err := sdb.Instance().Close(); err != nil {
+	e.Logger.Errorf("close database: %v", err)
+}
 ```
 
-`SyncStart` returns immediately and owns its goroutines, backoff and logging, on every pod. In debug mode it does nothing.
+## Lifecycle
+
+Every background runner of the middleware has the same two calls: `sam.Init` and `sam.PeerInit`, `notification.Init`, `analytics.Init` and `uptime.Init`, each joined by its package's `Done()`.
+
+1. One context. `main` makes it with `signal.NotifyContext` and hands it to every `Init`. Cancelling it is the only way a runner ends; there is no `Stop`.
+2. `Init(ctx) error` starts the goroutines and returns at once. It returns an error only when the runner cannot start: no database (`shared.ErrNotConnected`), the first `LISTEN` failing, or a second call while the runner still runs (`ErrStarted`). A host treats that error as fatal. After start, failures are logged and retried.
+3. One database. `shared.Connect`, which `sdb.Init` calls once, creates the process's pool and records it; `sdb.Instance()` on either role answers that record, and the runners read it themselves. No `Init` takes a database.
+4. One `LISTEN` connection. `(*shared.DB).Listen(ctx, channel)` hands each subscriber its own channel of notifications on one `pq.Listener` per process, adding the channel on the first subscriber and dropping it on the last. `notification` listens on `claimius_notification`, and a prophet's held `/sam/sync/:cursor` pull on `claimius_sync` for as long as the request holds. The connection closes when the last subscriber's context ends. A `nil` notification means the connection was re-established and notifications may have been lost.
+5. A clean end. On cancel `notification` and `analytics` stop taking work, write what is queued within 10 s and close their `Done()`; every open notification stream ends at once, so `e.Shutdown` is not held by it. A write after that is logged as dropped. `uptime` and `sam` return their workers and close `Done()`.
+6. Order. The pool first, then the runners, then the routes, then serve. On the signal: shut the http server down, wait on every `Done()`, and close the database last. `(*shared.DB).Close` writes the usage counts still held before it closes the pool.
+7. No hidden state. Before `Init`, `notification.Write` and `WriteUser` and `analytics.Post` log the drop, `notification.Stream`, `analytics.PostSession`, `GetConsent` and `PostConsent` return `ErrNotStarted`, and `Done()` logs it and answers a closed channel.
+8. One replica folds. The hourly analytics fold and expiry run under `shared.LeadSync` with the lock key `claimius.analytics_fold`, so of N prophet replicas one folds.
+9. Debug mode. `sam.Init`, `sam.PeerInit` and `uptime.Init` start nothing in debug mode and still return `nil`, and their `Done()` closes once the context ends.
 
 `UserAuthMiddleware` also holds the answer of a request that made routed writes until the pull has applied them, so the client's next request reads them back. A route outside it gets the same with `smw.WaitForSeq(timeout)`.
 

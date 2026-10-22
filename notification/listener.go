@@ -3,31 +3,18 @@ package notification
 import (
 	"context"
 	"encoding/json"
-	"time"
 
 	"github.com/google/uuid"
+	"github.com/lib/pq"
 	"github.com/nimling/samna-auth-middleware/v2/shared"
 )
 
-func (r *runner) listenLoop(ctx context.Context) {
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-r.stopChan:
-			return
-		case n := <-r.listener.Notify:
-			if n == nil {
-				continue
-			}
-			r.dispatch(ctx, n.Extra)
-		case <-time.After(listenerPing):
-			go func() {
-				if err := r.listener.Ping(); err != nil {
-					r.logger.Errorf("notification listener ping failed: %v", err)
-				}
-			}()
+func (r *runner) listenLoop(ctx context.Context, notify <-chan *pq.Notification) {
+	for n := range notify {
+		if n == nil {
+			continue
 		}
+		r.dispatch(ctx, n.Extra)
 	}
 }
 

@@ -65,11 +65,12 @@ func GetConsent(ctx context.Context, appID uuid.UUID, userID *uuid.UUID, anonymo
 		PolicyURL:     PolicyURL(),
 		Categories:    shared.ConsentCategories{Necessary: true},
 	}
-	if run == nil {
-		return state, nil
+	r := current()
+	if r == nil {
+		return nil, ErrNotStarted
 	}
 	var row shared.Consent
-	err := run.db.NewRaw(
+	err := r.db.NewRaw(
 		"SELECT * FROM claimius.get_consent(?, ?, ?)",
 		appID, userID, nullString(anonymousID),
 	).Scan(ctx, &row)
@@ -99,17 +100,12 @@ func PostConsent(ctx context.Context, appID uuid.UUID, in shared.ConsentRequest,
 	if err != nil {
 		return nil, err
 	}
-	if run == nil {
-		return &shared.ConsentState{
-			AnonymousID:   in.AnonymousID,
-			PolicyVersion: PolicyVersion(),
-			PolicyURL:     PolicyURL(),
-			Decided:       true,
-			Categories:    in.Categories,
-		}, nil
+	r := current()
+	if r == nil {
+		return nil, ErrNotStarted
 	}
 	var result string
-	if err := run.db.NewRaw(
+	if err := r.db.NewRaw(
 		"SELECT claimius.insert_consent(?, ?, ?::jsonb, ?, ?, ?::inet, ?)",
 		appID, in.AnonymousID, json.RawMessage(categories), in.PolicyVersion, userID, nullString(ip), nullString(userAgent),
 	).Scan(ctx, &result); err != nil {

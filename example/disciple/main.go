@@ -5,7 +5,10 @@ import (
 	"errors"
 	"net/http"
 	"os"
+	"os/signal"
 	"strconv"
+	"syscall"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
@@ -29,6 +32,9 @@ type accessVerdict struct {
 }
 
 func main() {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
 	e := echo.New()
 
 	if _, err := sdb.Init(e.Logger); err != nil {
@@ -51,13 +57,29 @@ func main() {
 	api.GET("/api/organizations", GetOrganizations)
 	api.GET("/api/locations", GetLocations)
 
-	sam.SyncStart(context.Background())
+	if err := sam.Init(ctx); err != nil {
+		e.Logger.Fatal(err)
+	}
 
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"
 	}
-	e.Logger.Fatal(e.Start(":" + port))
+	go func() {
+		if err := e.Start(":" + port); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			e.Logger.Fatal(err)
+		}
+	}()
+	<-ctx.Done()
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := e.Shutdown(shutdownCtx); err != nil {
+		e.Logger.Errorf("shutdown: %v", err)
+	}
+	<-sam.Done()
+	if err := sdb.Instance().Close(); err != nil {
+		e.Logger.Errorf("close database: %v", err)
+	}
 }
 
 func actor(ctx echo.Context) uuid.UUID {

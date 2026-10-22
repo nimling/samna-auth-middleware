@@ -11,8 +11,9 @@ import (
 )
 
 func Stream(ctx echo.Context, userID uuid.UUID) error {
-	if run == nil {
-		return errors.New("notification runner not started")
+	r := current()
+	if r == nil {
+		return ErrNotStarted
 	}
 	res := ctx.Response()
 	res.Header().Set(echo.HeaderContentType, "text/event-stream")
@@ -26,8 +27,8 @@ func Stream(ctx echo.Context, userID uuid.UUID) error {
 	}
 	flusher.Flush()
 
-	client := run.hub.register(userID)
-	defer run.hub.unregister(userID, client)
+	client := r.hub.register(userID)
+	defer r.hub.unregister(userID, client)
 
 	ticker := time.NewTicker(heartbeat)
 	defer ticker.Stop()
@@ -37,7 +38,7 @@ func Stream(ctx echo.Context, userID uuid.UUID) error {
 		select {
 		case <-done:
 			return nil
-		case <-run.stopChan:
+		case <-r.stop:
 			return nil
 		case msg, ok := <-client.Send:
 			if !ok {

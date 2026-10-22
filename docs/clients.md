@@ -42,7 +42,7 @@ A client with no claim authenticates and sees nothing. Bind a claim the same way
 
 ## Reaching the disciple
 
-The feed carries `claimius.samna_client`, `claimius.samna_secret`, `claim`, `user_claim` and `claim_object` as source rows, filtered by `app_id`, in the snapshot `GetSyncSnapshot` and in every page after it. The disciple's `sam.SyncStart(ctx)` loop applies them and derives the client's `user_object` pairs itself on the client's next read, so a client created on the prophet becomes usable on the disciple within one pull.
+The feed carries `claimius.samna_client`, `claimius.samna_secret`, `claim`, `user_claim` and `claim_object` as source rows, filtered by `app_id`, in the snapshot `GetSyncSnapshot` and in every page after it. The disciple's `sam.Init(ctx)` loop applies them and derives the client's `user_object` pairs itself on the client's next read, so a client created on the prophet becomes usable on the disciple within one pull.
 
 Nothing on the serving side calls the prophet per request. `authenticateClient` reads the local copy only: it runs bcrypt once per credential and after that compares the digest of the presented secret with the one it verified, rereading the client row by `client_id` on every request, so a revoked client or a rotated secret stops on the next call.
 
@@ -89,4 +89,4 @@ From there the handler runs the same access lookups it runs for a human.
 
 ## Debug
 
-`SAUTH_DEBUG_CLIENTS` holds a JSON map of static client credentials and bypasses the database lookup. `SAUTH_DEBUG_USER_ID` short circuits authentication entirely and pins one user id. Both also stop `SyncStart` from pulling, so a deployment with either variable set holds no replicated clients at all.
+`SAUTH_DEBUG_CLIENTS` holds a JSON map of static client credentials and bypasses the database lookup. `SAUTH_DEBUG_USER_ID` short circuits authentication entirely and pins one user id. Both also stop `sam.Init` from pulling, so a deployment with either variable set holds no replicated clients at all.

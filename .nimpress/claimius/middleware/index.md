@@ -14,7 +14,7 @@ Claimius is the schema: its model, its functions and their guarantees, independe
 | Claimius | The middleware |
 |---|---|
 | The tables, the `get_*` and write functions, the triggers, the settle | The Go calls that reach them: `MutationAccess`, `ScopeAccess`, `ObjectWhere` and the rest |
-| `sync_event`, `get_sync_events`, the `(txid, seq)` cursors | The `/sam/sync` routes, the pull loop `SyncStart`, the peer pull `PeerSyncStart` |
+| `sync_event`, `get_sync_events`, the `(txid, seq)` cursors | The `/sam/sync` routes, the pull loop `sam.Init`, the peer pull `PeerInit` |
 | `drain_access_diff` | The drain the pull loop runs between pulls, `PostAccessDiffDrain` |
 | The actor model, `sa_created_by` | Stamping the actor on a routed write from the `AccessClaim` |
 | `touch_object_usage` | Counting uses in process and flushing them |

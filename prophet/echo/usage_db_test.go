@@ -60,7 +60,12 @@ func TestUsageFlushCountsTheAppChecked(t *testing.T) {
 	app := otherApp
 	db.Usage.Add(&app, grantUser, "claimius.organization", grantRoot)
 	db.Usage.Add(&app, grantUser, "claimius.organization", grantRoot)
-	db.Usage.Stop()
+	if err := db.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	if db, err = psdb.Init(echo.New().Logger); err != nil {
+		t.Fatalf("connect: %v", err)
+	}
 	if _, err := db.ExecContext(ctx, `SELECT count(*) FROM claimius.get_objects(?, ?, 'claimius.organization')`, grantUser, otherApp); err != nil {
 		t.Fatalf("list: %v", err)
 	}
