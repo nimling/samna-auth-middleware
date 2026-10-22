@@ -13,27 +13,15 @@ import (
 	"github.com/nimling/samna-auth-middleware/v2/utils"
 )
 
-func getCookieApp(ctx echo.Context, name string) *shared.SamnaApp {
-	cookie, err := ctx.Cookie(name)
-	if err != nil || cookie.Value == "" {
-		return nil
-	}
-	app, err := shared.GetApp(ctx.Request().Context(), cookie.Value)
-	if err != nil {
-		return nil
-	}
-	return app
-}
-
 func GetLogin(ctx echo.Context) error {
 	slug := utils.Cfg().AppSlug
-	var app *shared.SamnaApp
-	if appSlug := ctx.QueryParam("app"); appSlug != "" && appSlug != slug {
-		found, err := shared.GetApp(ctx.Request().Context(), appSlug)
+	var initiate *shared.SamnaApp
+	if appSlug := ctx.Param("app"); appSlug != "" {
+		found, err := shared.GetInitiateApp(ctx.Request().Context(), appSlug)
 		if err != nil {
-			return respondError(ctx, http.StatusBadRequest, "unknown app")
+			return respondError(ctx, http.StatusNotFound, "unknown app")
 		}
-		app = found
+		initiate = found
 		slug = found.Slug
 	}
 
@@ -48,15 +36,17 @@ func GetLogin(ctx echo.Context) error {
 		return respondError(ctx, http.StatusInternalServerError, "Internal Server Error")
 	}
 
-	next := ctx.QueryParam("next")
-	if next == "" {
-		if referer, refErr := url.Parse(ctx.Request().Referer()); refErr == nil && strings.EqualFold(referer.Host, ctx.Request().Host) && referer.Path != ctx.Request().URL.Path {
-			next = referer.RequestURI()
+	if initiate == nil {
+		next := ctx.QueryParam("next")
+		if next == "" {
+			if referer, refErr := url.Parse(ctx.Request().Referer()); refErr == nil && strings.EqualFold(referer.Host, ctx.Request().Host) && referer.Path != ctx.Request().URL.Path {
+				next = referer.RequestURI()
+			}
 		}
-	}
-	if strings.HasPrefix(next, "/") && !strings.HasPrefix(next, "//") {
-		state += "." + base64.RawURLEncoding.EncodeToString([]byte(next))
-		utils.WriteCookie(ctx, &http.Cookie{Name: client.LoginNextCookie, Value: next, Path: "/", MaxAge: 600})
+		if strings.HasPrefix(next, "/") && !strings.HasPrefix(next, "//") {
+			state += "." + base64.RawURLEncoding.EncodeToString([]byte(next))
+			utils.WriteCookie(ctx, &http.Cookie{Name: client.LoginNextCookie, Value: next, Path: "/", MaxAge: 600})
+		}
 	}
 
 	challenge := client.ChallengeS256(verifier)
@@ -70,8 +60,7 @@ func GetLogin(ctx echo.Context) error {
 		cliTarget = target
 	}
 
-	redirectURI := utils.Cfg().RedirectURI
-	authURL, err := client.AuthorizeURL(slug, redirectURI, state, challenge)
+	authURL, err := client.AuthorizeURL(slug, client.RedirectURIFor(slug), state, challenge)
 	if err != nil {
 		ctx.Logger().Errorf("GetLogin authorize url: %v", err)
 		return respondError(ctx, http.StatusInternalServerError, "Internal Server Error")
@@ -85,11 +74,6 @@ func GetLogin(ctx echo.Context) error {
 		utils.WriteCookie(ctx, &http.Cookie{Name: client.PKCEVerifierCookie, Value: verifier, Path: "/", MaxAge: 600})
 	}
 	utils.WriteCookie(ctx, &http.Cookie{Name: client.OAuthStateCookie, Value: state, Path: "/", MaxAge: 600})
-	if app != nil && cliTarget == "" {
-		utils.WriteCookie(ctx, &http.Cookie{Name: client.LoginAppCookie, Value: app.Slug, Path: "/", MaxAge: 600})
-	} else {
-		utils.ClearCookie(ctx, client.LoginAppCookie)
-	}
 
 	return Redirect(ctx, http.StatusTemporaryRedirect, authURL)
 }
@@ -100,10 +84,17 @@ func GetCallback(ctx echo.Context) error {
 		return respondError(ctx, http.StatusBadRequest, "missing code")
 	}
 
-	app := getCookieApp(ctx, client.LoginAppCookie)
+	slug := utils.Cfg().AppSlug
 	startOver := utils.Cfg().PageRedirect
-	if app != nil {
-		startOver = app.GetPrimaryOrigin()
+	var initiate *shared.SamnaApp
+	if appSlug := ctx.QueryParam("app"); appSlug != "" {
+		found, err := shared.GetInitiateApp(ctx.Request().Context(), appSlug)
+		if err != nil {
+			return respondError(ctx, http.StatusNotFound, "unknown app")
+		}
+		initiate = found
+		slug = found.Slug
+		startOver = found.GetPrimaryOrigin()
 	}
 	if startOver == "" {
 		startOver = "/"
@@ -111,7 +102,7 @@ func GetCallback(ctx echo.Context) error {
 
 	stateParam := ctx.QueryParam("state")
 	stateNext := ""
-	if dot := strings.LastIndex(stateParam, "."); dot >= 0 {
+	if dot := strings.LastIndex(stateParam, "."); initiate == nil && dot >= 0 {
 		if raw, decodeErr := base64.RawURLEncoding.DecodeString(stateParam[dot+1:]); decodeErr == nil && strings.HasPrefix(string(raw), "/") && !strings.HasPrefix(string(raw), "//") {
 			stateNext = string(raw)
 		}
@@ -119,9 +110,6 @@ func GetCallback(ctx echo.Context) error {
 	resume := startOver
 	if stateNext != "" {
 		resume = strings.TrimSuffix(ctx.Request().URL.Path, "callback") + "login?next=" + url.QueryEscape(stateNext)
-		if app != nil {
-			resume += "&app=" + url.QueryEscape(app.Slug)
-		}
 	}
 	stateCookie, stateErr := ctx.Cookie(client.OAuthStateCookie)
 	if stateErr != nil || stateCookie.Value == "" || stateParam == "" || stateParam != stateCookie.Value {
@@ -135,7 +123,6 @@ func GetCallback(ctx echo.Context) error {
 		utils.ClearCookie(ctx, client.CliTargetCookie)
 		utils.ClearCookie(ctx, client.OAuthStateCookie)
 		utils.ClearCookie(ctx, client.LoginNextCookie)
-		utils.ClearCookie(ctx, client.LoginAppCookie)
 		return respondCliCode(ctx, cliCookie.Value, code)
 	}
 
@@ -147,16 +134,14 @@ func GetCallback(ctx echo.Context) error {
 		return Redirect(ctx, http.StatusFound, resume)
 	}
 
-	slug := utils.Cfg().AppSlug
-	secret := utils.Cfg().AppSecret
-	redirectURI := utils.Cfg().RedirectURI
-	tokenURL, err := client.TokenURLFor(slug)
+	rootSlug := utils.Cfg().AppSlug
+	tokenURL, err := client.TokenURLFor(rootSlug)
 	if err != nil {
 		ctx.Logger().Errorf("GetCallback token url: %v", err)
 		return respondError(ctx, http.StatusInternalServerError, "Internal Server Error")
 	}
 
-	tokens, err := client.PostAuthCode(ctx.Request().Context(), tokenURL, slug, secret, code, redirectURI, verifierCookie.Value)
+	tokens, err := client.PostAuthCode(ctx.Request().Context(), tokenURL, rootSlug, utils.Cfg().AppSecret, code, client.RedirectURIFor(slug), verifierCookie.Value)
 	if err != nil {
 		ctx.Logger().Warnf("GetCallback exchange refused, clearing the flow cookies and sending the visitor back to start over: %v", err)
 		utils.ClearCookie(ctx, client.PKCEVerifierCookie)
@@ -177,34 +162,29 @@ func GetCallback(ctx echo.Context) error {
 	if stateNext != "" {
 		pageRedirect = stateNext
 	}
-	if nextCookie, nextErr := ctx.Cookie(client.LoginNextCookie); nextErr == nil && strings.HasPrefix(nextCookie.Value, "/") && !strings.HasPrefix(nextCookie.Value, "//") {
+	if nextCookie, nextErr := ctx.Cookie(client.LoginNextCookie); initiate == nil && nextErr == nil && strings.HasPrefix(nextCookie.Value, "/") && !strings.HasPrefix(nextCookie.Value, "//") {
 		pageRedirect = nextCookie.Value
 	}
 	utils.ClearCookie(ctx, client.LoginNextCookie)
-	utils.ClearCookie(ctx, client.LoginAppCookie)
-	if app != nil {
-		utils.WriteCookie(ctx, &http.Cookie{Name: client.AppSlugCookie, Value: app.Slug, Path: "/", MaxAge: tokens.RefreshExpiresIn})
-		if strings.HasPrefix(pageRedirect, "/") {
-			pageRedirect = strings.TrimSuffix(app.GetPrimaryOrigin(), "/") + pageRedirect
-		}
-	} else {
-		utils.ClearCookie(ctx, client.AppSlugCookie)
-	}
 	return Redirect(ctx, http.StatusFound, pageRedirect)
 }
 
 func GetLogout(ctx echo.Context) error {
+	slug, pageRedirect := utils.Cfg().AppSlug, utils.Cfg().PageRedirect
+	if appSlug := ctx.Param("app"); appSlug != "" {
+		initiate, err := shared.GetInitiateApp(ctx.Request().Context(), appSlug)
+		if err != nil {
+			return respondError(ctx, http.StatusNotFound, "unknown app")
+		}
+		slug, pageRedirect = initiate.Slug, initiate.GetPrimaryOrigin()
+	}
+
 	accessToken := ""
 	if cookie, err := ctx.Cookie("sauth_access_token"); err == nil {
 		accessToken = cookie.Value
 	}
 
-	slug, pageRedirect := utils.Cfg().AppSlug, utils.Cfg().PageRedirect
-	if app := getCookieApp(ctx, client.AppSlugCookie); app != nil {
-		slug, pageRedirect = app.Slug, app.GetPrimaryOrigin()
-	}
-
-	for _, name := range []string{"sauth_csrf_token", "sauth_refresh_token", "sauth_access_token", client.AppSlugCookie} {
+	for _, name := range []string{"sauth_csrf_token", "sauth_refresh_token", "sauth_access_token"} {
 		utils.ClearCookie(ctx, name)
 	}
 

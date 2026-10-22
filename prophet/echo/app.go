@@ -29,7 +29,7 @@ func GetSamApp(ctx echo.Context) error {
 	return respond.JSON(ctx, http.StatusOK, app, 1)
 }
 
-func GetSamApps(ctx echo.Context) error {
+func GetSamInitiateApps(ctx echo.Context) error {
 	app, ok := ctx.Get("app").(SamnaApp)
 	if !ok {
 		return respond.Error(ctx, http.StatusBadRequest, "Missing app context")
@@ -45,7 +45,7 @@ func GetSamApps(ctx echo.Context) error {
 		Order("slug").
 		Scan(ctx.Request().Context())
 	if err != nil {
-		ctx.Logger().Errorf("GetSamApps of app %s: %v", app.Slug, err)
+		ctx.Logger().Errorf("GetSamInitiateApps of app %s: %v", app.Slug, err)
 		return respond.Error(ctx, http.StatusInternalServerError, "App list query failed")
 	}
 

@@ -14,8 +14,6 @@ const (
 	OAuthStateCookie   = "sauth_oauth_state"
 	LoginNextCookie    = "sauth_login_next"
 	CliTargetCookie    = "sauth_cli_target"
-	LoginAppCookie     = "sauth_login_app"
-	AppSlugCookie      = "sauth_app_slug"
 )
 
 func GenerateVerifier() (string, error) {
@@ -50,6 +48,21 @@ func AuthorizeURL(slug string, redirectURI string, state string, challenge strin
 	q.Set("code_challenge_method", "S256")
 	parsed.RawQuery = q.Encode()
 	return parsed.String(), nil
+}
+
+func RedirectURIFor(slug string) string {
+	redirectURI := utils.Cfg().RedirectURI
+	if slug == utils.Cfg().AppSlug {
+		return redirectURI
+	}
+	parsed, err := url.Parse(redirectURI)
+	if err != nil {
+		return redirectURI
+	}
+	q := parsed.Query()
+	q.Set("app", slug)
+	parsed.RawQuery = q.Encode()
+	return parsed.String()
 }
 
 func TokenURLFor(slug string) (string, error) {

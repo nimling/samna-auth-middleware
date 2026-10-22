@@ -6,19 +6,19 @@ import (
 )
 
 type Config struct {
-	Endpoint      string
-	AppSlug       string
-	AppSecret     string
-	ClientID      string
-	ClientSecret  string
-	RedirectURI   string
-	PageRedirect  string
-	ClientTimeout string
-	DebugUserID   string
-	DebugClients  string
-	DebugSeed     string
-	DebugApps     string
-	ReplicaDSN    string
+	Endpoint          string
+	AppSlug           string
+	AppSecret         string
+	ClientID          string
+	ClientSecret      string
+	RedirectURI       string
+	PageRedirect      string
+	ClientTimeout     string
+	DebugUserID       string
+	DebugClients      string
+	DebugSeed         string
+	DebugInitiateApps string
+	ReplicaDSN        string
 
 	Issuer       string
 	TokenURL     url.URL
@@ -40,7 +40,7 @@ func loadConfig() {
 	cfg.DebugUserID = os.Getenv("SAUTH_DEBUG_USER_ID")
 	cfg.DebugClients = os.Getenv("SAUTH_DEBUG_CLIENTS")
 	cfg.DebugSeed = os.Getenv("SAUTH_DEBUG_PRIVATE_SEED")
-	cfg.DebugApps = os.Getenv("SAUTH_DEBUG_APPS")
+	cfg.DebugInitiateApps = os.Getenv("SAUTH_DEBUG_INITIATE_APPS")
 	cfg.ReplicaDSN = os.Getenv("SAUTH_REPLICA_DSN")
 }
 

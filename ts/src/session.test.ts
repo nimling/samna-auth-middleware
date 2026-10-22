@@ -9,6 +9,7 @@ import {
   configureEdge,
   endSession,
   getLoginUrl,
+  getLogoutUrl,
   readClaims,
   readSessionFromDocument
 } from './session'
@@ -106,14 +107,11 @@ describe('static mode', () => {
     expect(url.searchParams.get('next')).toBe(`${window.location.origin}/test`)
   })
 
-  it('sends a child app login to the bff with its slug and the page to return to', () => {
-    configureEdge({ endpoint: '', clientSlug: 'bookable', mode: 'bff', bffPath: 'https://api.example.io/api/auth', app: 'bookable-web' })
+  it('sends an initiate app login and logout to the bff under its slug', () => {
+    configureEdge({ endpoint: '', clientSlug: 'bookable', mode: 'bff', bffPath: 'https://api.example.io/api/auth', initiate: 'bookable-web' })
 
-    const url = new URL(getLoginUrl(undefined, '/bookings'))
-
-    expect(url.origin + url.pathname).toBe('https://api.example.io/api/auth/login')
-    expect(url.searchParams.get('app')).toBe('bookable-web')
-    expect(url.searchParams.get('next')).toBe('/bookings')
+    expect(getLoginUrl(undefined, '/bookings')).toBe('https://api.example.io/api/auth/bookable-web/login')
+    expect(getLogoutUrl('/bookings')).toBe('https://api.example.io/api/auth/bookable-web/logout')
   })
 
   it('ends the session on the prophet with a credentialed get', async () => {

@@ -86,17 +86,19 @@ func TestGetLoginCarriesNextInTheState(t *testing.T) {
 	}
 }
 
-func TestGetLoginAuthorizesAChildApp(t *testing.T) {
+func TestGetLoginAuthorizesAnInitiateAppFromItsPath(t *testing.T) {
 	t.Setenv("SAUTH_ENDPOINT", "http://auth.example")
 	t.Setenv("SAUTH_APP_SLUG", "testapp")
 	t.Setenv("SAUTH_REDIRECT_URI", "http://localhost:4200/api/auth/callback")
 	t.Setenv("SAUTH_DEBUG_USER_ID", "a0000000-0000-4000-8000-00000000000a")
-	t.Setenv("SAUTH_DEBUG_APPS", "testapp-web=http://web.example")
+	t.Setenv("SAUTH_DEBUG_INITIATE_APPS", "testapp-web=http://web.example")
 
 	e := echo.New()
-	req := httptest.NewRequest(http.MethodGet, "/api/auth/login?app=testapp-web&next=%2Fbookings", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/auth/testapp-web/login", nil)
 	rec := httptest.NewRecorder()
 	ctx := e.NewContext(req, rec)
+	ctx.SetParamNames("app")
+	ctx.SetParamValues("testapp-web")
 
 	if err := saecho.GetLogin(ctx); err != nil {
 		t.Fatalf("GetLogin: %v", err)
@@ -109,38 +111,31 @@ func TestGetLoginAuthorizesAChildApp(t *testing.T) {
 		t.Fatalf("parse location: %v", err)
 	}
 	if location.Path != "/api/app/testapp-web/oauth/authorize" || location.Query().Get("client_id") != "testapp-web" {
-		t.Errorf("location = %q, want the child app's authorize", location)
+		t.Errorf("location = %q, want the initiate app's authorize", location)
 	}
-	if location.Query().Get("redirect_uri") != "http://localhost:4200/api/auth/callback" {
-		t.Errorf("redirect_uri = %q, want the disciple callback", location.Query().Get("redirect_uri"))
-	}
-	app := ""
-	for _, c := range rec.Result().Cookies() {
-		if c.Name == "sauth_login_app" {
-			app = c.Value
-		}
-	}
-	if app != "testapp-web" {
-		t.Errorf("sauth_login_app = %q, want testapp-web", app)
+	if got := location.Query().Get("redirect_uri"); got != "http://localhost:4200/api/auth/callback?app=testapp-web" {
+		t.Errorf("redirect_uri = %q, want the disciple callback marked with the initiate app", got)
 	}
 }
 
-func TestGetLoginRefusesAnUnknownApp(t *testing.T) {
+func TestGetLoginRefusesAnUnknownInitiateApp(t *testing.T) {
 	t.Setenv("SAUTH_ENDPOINT", "http://auth.example")
 	t.Setenv("SAUTH_APP_SLUG", "testapp")
 	t.Setenv("SAUTH_REDIRECT_URI", "http://localhost:4200/api/auth/callback")
 	t.Setenv("SAUTH_DEBUG_USER_ID", "a0000000-0000-4000-8000-00000000000a")
-	t.Setenv("SAUTH_DEBUG_APPS", "testapp-web=http://web.example")
+	t.Setenv("SAUTH_DEBUG_INITIATE_APPS", "testapp-web=http://web.example")
 
 	e := echo.New()
-	req := httptest.NewRequest(http.MethodGet, "/api/auth/login?app=otherapp", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/auth/otherapp/login", nil)
 	rec := httptest.NewRecorder()
 	ctx := e.NewContext(req, rec)
+	ctx.SetParamNames("app")
+	ctx.SetParamValues("otherapp")
 
 	if err := saecho.GetLogin(ctx); err != nil {
 		t.Fatalf("GetLogin: %v", err)
 	}
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400", rec.Code)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", rec.Code)
 	}
 }

@@ -85,15 +85,15 @@ It stamps `p_actor_user_claim_id` into every `sa_created_by` and:
 
 It is idempotent on the slug and on each claim's name, and returns one jsonb object keyed `samna_app`, `organization`, `samna_user`, `claim`, `default_claim`, `user_claim` and `claim_object`. The owner claim's first binding is the one binding of an app that no pair can authorize, because the app has none yet; it passes when the actor holds owner on the organization that owns the app, judged in the actor's own app. That rule is how the authority over an organization extends to the apps it owns; see [Claims](./claims.md). `app_secret` is written afterwards by the implementing side, as for the system app, and the reader role cannot call `upsert_app`.
 
-## Child apps
+## Initiate apps
 
-Apps form a tree through `sa_parent_id` and `sa_root_id`, the same parenthood columns any registered table can carry: a root app references itself in both, and the `parenthood` closure keeps every child under its root, so a grant on the root app reaches its children.
+Apps form a tree through `sa_parent_id` and `sa_root_id`, the same parenthood columns any registered table can carry: a root app references itself in both, and the `parenthood` closure keeps every Initiate app under its root, so a grant on the root app reaches its Initiate apps.
 
-A child app is another frontend of its root. It has its own slug, `redirect_uris`, pages and style, and the first redirect URI is the origin its frontend lives on. Everything else is the root's: users, claims, organizations, the sync and the tokens.
+An Initiate app is another frontend of a disciple's app. It has its own slug, `redirect_uris`, pages and style. Its first redirect URI is the origin its frontend lives on, and the disciple's callback marked with its slug, `<SAUTH_REDIRECT_URI>?app=<slug>`, is among them. Everything else is the root's: users, claims, organizations, the sync and the tokens.
 
-`upsert_app` with `p_parent_id` registers one. The parent must be live and owned by `p_org_id`; the call upserts the `samna_app` row under the parent and returns `{"samna_app": ...}` without a `prophet_state` row, a `samna_user`, organization links or claims. A rerun with another parent, or without one for a child, is refused with `22023`: an app is never reparented.
+`upsert_app` with `p_parent_id` registers one. The parent must be live and owned by `p_org_id`; the call upserts the `samna_app` row under the parent and returns `{"samna_app": ...}` without a `prophet_state` row, a `samna_user`, organization links or claims. A rerun with another parent, or without one for an Initiate app, is refused with `22023`: an app is never reparented.
 
-A disciple reads its root's children from `GET /sam/app/apps` and keeps them in memory, refreshed every minute. A login through `/api/auth/login?app=<child slug>` authorizes the child against the disciple's own callback, the callback exchanges the code with the root's credentials, and the person returns to the child's origin; logout returns there too.
+A disciple reads its root's Initiate apps from `GET /sam/app/initiate` and keeps them in memory, refreshed every minute. The frontend opens `/api/auth/<slug>/login`; the disciple authorizes that app with the marked callback as `redirect_uri`, the prophet returns to `/api/auth/callback?app=<slug>`, the callback exchanges the code with the root's credentials and that same `redirect_uri`, and the person returns to the Initiate app's origin. `/api/auth/<slug>/logout` returns there too.
 
 ## Which apps a write belongs to
 

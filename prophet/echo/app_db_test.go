@@ -90,43 +90,43 @@ func TestSamAppRefusesWithoutAMasterKey(t *testing.T) {
 	}
 }
 
-func TestSamAppsListsOnlyTheChildAppsOfTheCaller(t *testing.T) {
+func TestSamInitiateAppsListsOnlyTheInitiateAppsOfTheCaller(t *testing.T) {
 	getGrantFixture(t)
 	root := postPeerApp(t, grantUser)
 	other := postPeerApp(t, grantUser)
-	child := "gotest_child_" + uuid.NewString()[:8]
+	initiate := "gotest_initiate_" + uuid.NewString()[:8]
 	if _, err := psdb.Instance().ExecContext(context.Background(), `
 		INSERT INTO claimius.samna_app (slug, name, redirect_uris, private_key, private_seed, sa_owner_id, sa_created_by, sa_parent_id)
-		VALUES (?, 'Child app', ARRAY['https://child.example'], 'key', 'seed', ?, ?, ?)
-	`, child, root.Org, grantUser, root.ID); err != nil {
-		t.Fatalf("child app: %v", err)
+		VALUES (?, 'Initiate app', ARRAY['https://web.example'], 'key', 'seed', ?, ?, ?)
+	`, initiate, root.Org, grantUser, root.ID); err != nil {
+		t.Fatalf("initiate app: %v", err)
 	}
 	server := getSamAppServer(t)
 
 	get := func(slug, secret string) []shared.SamnaApp {
-		req, _ := http.NewRequest(http.MethodGet, server.URL+"/sam/app/apps", nil)
+		req, _ := http.NewRequest(http.MethodGet, server.URL+"/sam/app/initiate", nil)
 		req.Header.Set("SAuth-App-Slug", slug)
 		req.Header.Set("SAuth-App-Secret", secret)
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
-			t.Fatalf("get /sam/app/apps: %v", err)
+			t.Fatalf("get /sam/app/initiate: %v", err)
 		}
 		defer resp.Body.Close()
 		if resp.StatusCode != http.StatusOK {
-			t.Fatalf("get /sam/app/apps: status %d", resp.StatusCode)
+			t.Fatalf("get /sam/app/initiate: status %d", resp.StatusCode)
 		}
 		var body struct {
 			Data []shared.SamnaApp `json:"data"`
 		}
 		if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
-			t.Fatalf("decode /sam/app/apps: %v", err)
+			t.Fatalf("decode /sam/app/initiate: %v", err)
 		}
 		return body.Data
 	}
 
 	apps := get(root.Slug, root.Secret)
-	if len(apps) != 1 || apps[0].Slug != child || apps[0].GetPrimaryOrigin() != "https://child.example" || apps[0].RootID != root.ID {
-		t.Fatalf("the root must list its one child with its origin, got %+v", apps)
+	if len(apps) != 1 || apps[0].Slug != initiate || apps[0].GetPrimaryOrigin() != "https://web.example" || apps[0].RootID != root.ID {
+		t.Fatalf("the root must list its one initiate app with its origin, got %+v", apps)
 	}
 	if apps := get(other.Slug, other.Secret); len(apps) != 0 {
 		t.Fatalf("another root must list none, got %+v", apps)

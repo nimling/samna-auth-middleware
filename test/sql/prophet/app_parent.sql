@@ -11,7 +11,7 @@ DECLARE
     v_tenant  UUID := '10000000-0000-4000-8000-000000000e01';
     v_other   UUID := '10000000-0000-4000-8000-000000000e02';
     v_root    UUID;
-    v_child   UUID;
+    v_initiate   UUID;
 BEGIN
     v_init := claimius.upsert_system_app(
         p_system_app_slug         => 'sqltest_parent',
@@ -32,13 +32,13 @@ BEGIN
         p_actor_user_claim_id => v_sys_uc, p_slug => 'sqltest_parent_root', p_name => 'Root app',
         p_org_id => v_tenant, p_private_key => 'key', p_private_seed => 'seed'
     ) -> 'samna_app' ->> 'id')::UUID;
-    v_child := (claimius.upsert_app(
-        p_actor_user_claim_id => v_sys_uc, p_slug => 'sqltest_parent_child', p_name => 'Child app',
+    v_initiate := (claimius.upsert_app(
+        p_actor_user_claim_id => v_sys_uc, p_slug => 'sqltest_parent_initiate', p_name => 'Initiate app',
         p_org_id => v_tenant, p_private_key => 'key', p_private_seed => 'seed',
-        p_redirect_uris => ARRAY['https://child.example', 'https://api.example/api/auth/callback'],
+        p_redirect_uris => ARRAY['https://web.example', 'https://api.example/api/auth/callback'],
         p_parent_id => v_root
     ) -> 'samna_app' ->> 'id')::UUID;
-    INSERT INTO boot VALUES ('root', v_root), ('child', v_child);
+    INSERT INTO boot VALUES ('root', v_root), ('initiate', v_initiate);
 END $$;
 
 CREATE FUNCTION pg_temp.boot(p_key TEXT) RETURNS UUID AS $$
@@ -52,44 +52,44 @@ SELECT ok(EXISTS (
 
 SELECT ok(EXISTS (
         SELECT 1 FROM claimius.samna_app
-        WHERE id = pg_temp.boot('child') AND sa_parent_id = pg_temp.boot('root') AND sa_root_id = pg_temp.boot('root')),
-    'a child app takes its parent and the parent''s root');
+        WHERE id = pg_temp.boot('initiate') AND sa_parent_id = pg_temp.boot('root') AND sa_root_id = pg_temp.boot('root')),
+    'an Initiate app takes its parent and the parent''s root');
 
 SELECT ok(EXISTS (
         SELECT 1 FROM claimius.inheritance_info
         WHERE tree_type = 'parenthood' AND ancestor_type = 'claimius.samna_app'
-          AND ancestor_id = pg_temp.boot('root') AND descendant_id = pg_temp.boot('child') AND depth = 1),
-    'the parenthood closure carries the child under its root');
+          AND ancestor_id = pg_temp.boot('root') AND descendant_id = pg_temp.boot('initiate') AND depth = 1),
+    'the parenthood closure carries the Initiate app under its root');
 
 SELECT is_empty($$
-    SELECT 'claim' FROM claimius.claim WHERE app_id = pg_temp.boot('child')
+    SELECT 'claim' FROM claimius.claim WHERE app_id = pg_temp.boot('initiate')
     UNION ALL
-    SELECT 'claim_object' FROM claimius.claim_object WHERE app_id = pg_temp.boot('child')
+    SELECT 'claim_object' FROM claimius.claim_object WHERE app_id = pg_temp.boot('initiate')
     UNION ALL
-    SELECT 'samna_user' FROM claimius.samna_user WHERE app_id = pg_temp.boot('child')
+    SELECT 'samna_user' FROM claimius.samna_user WHERE app_id = pg_temp.boot('initiate')
     UNION ALL
-    SELECT 'prophet_state' FROM claimius.prophet_state WHERE app_id = pg_temp.boot('child')
+    SELECT 'prophet_state' FROM claimius.prophet_state WHERE app_id = pg_temp.boot('initiate')
     UNION ALL
-    SELECT 'claim_id' FROM claimius.samna_app WHERE id = pg_temp.boot('child') AND claim_id IS NOT NULL
-$$, 'a child app owns no claims, bindings, users or sync state');
+    SELECT 'claim_id' FROM claimius.samna_app WHERE id = pg_temp.boot('initiate') AND claim_id IS NOT NULL
+$$, 'an Initiate app owns no claims, bindings, users or sync state');
 
 SELECT ok(EXISTS (SELECT 1 FROM claimius.get_access('00000000-0000-4000-8000-000000000e00', pg_temp.boot('root'),
-        pg_temp.boot('child'), 'claimius.samna_app', 4)),
-    'the root app''s owner reads the child app through the parenthood tree');
+        pg_temp.boot('initiate'), 'claimius.samna_app', 4)),
+    'the root app''s owner reads the Initiate app through the parenthood tree');
 
 SELECT is(claimius.upsert_app(
-        p_actor_user_claim_id => pg_temp.boot('sys_uc'), p_slug => 'sqltest_parent_child', p_name => 'Child app renamed',
+        p_actor_user_claim_id => pg_temp.boot('sys_uc'), p_slug => 'sqltest_parent_initiate', p_name => 'Initiate app renamed',
         p_org_id => '10000000-0000-4000-8000-000000000e01', p_private_key => 'key', p_private_seed => 'seed',
         p_parent_id => pg_temp.boot('root')) -> 'samna_app' ->> 'name',
-    'Child app renamed',
-    'upsert_app updates a child app in place on its slug');
+    'Initiate app renamed',
+    'upsert_app updates an Initiate app in place on its slug');
 
 SELECT throws_like($$
     SELECT claimius.upsert_app(
-        p_actor_user_claim_id => pg_temp.boot('sys_uc'), p_slug => 'sqltest_parent_child', p_name => 'Child app',
+        p_actor_user_claim_id => pg_temp.boot('sys_uc'), p_slug => 'sqltest_parent_initiate', p_name => 'Initiate app',
         p_org_id => '10000000-0000-4000-8000-000000000e01', p_private_key => 'key', p_private_seed => 'seed')
-$$, 'upsert_app: app sqltest_parent_child has parent%',
-    'upsert_app never turns a child app into a root');
+$$, 'upsert_app: app sqltest_parent_initiate has parent%',
+    'upsert_app never turns an Initiate app into a root');
 
 SELECT throws_like($$
     SELECT claimius.upsert_app(
@@ -97,7 +97,7 @@ SELECT throws_like($$
         p_org_id => '10000000-0000-4000-8000-000000000e02', p_private_key => 'key', p_private_seed => 'seed',
         p_parent_id => pg_temp.boot('root'))
 $$, 'upsert_app: parent app sqltest_parent_root is owned by organization%',
-    'a child app is owned by its parent''s organization');
+    'an Initiate app is owned by its parent''s organization');
 
 SELECT throws_like($$
     SELECT claimius.upsert_app(
@@ -105,7 +105,7 @@ SELECT throws_like($$
         p_org_id => '10000000-0000-4000-8000-000000000e01', p_private_key => 'key', p_private_seed => 'seed',
         p_parent_id => '10000000-0000-4000-8000-0000000000ff')
 $$, 'upsert_app: parent app % not found',
-    'a child app needs a live parent');
+    'an Initiate app needs a live parent');
 
 SELECT * FROM finish();
 ROLLBACK;

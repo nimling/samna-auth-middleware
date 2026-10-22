@@ -22,8 +22,8 @@ END $$;
 CREATE INDEX IF NOT EXISTS idx_samna_app_sa_parent_id ON claimius.samna_app (sa_parent_id);
 CREATE INDEX IF NOT EXISTS idx_samna_app_sa_root_id ON claimius.samna_app (sa_root_id);
 
-COMMENT ON COLUMN claimius.samna_app.sa_parent_id IS 'Parent app. Equals id at root. A child app is another frontend of its root: own slug, redirect URIs, pages and style, while users, claims, organizations and the sync resolve on the root.';
-COMMENT ON COLUMN claimius.samna_app.sa_root_id IS 'Root app. Equals id at root. Tokens for a child app''s login are issued for the root.';
+COMMENT ON COLUMN claimius.samna_app.sa_parent_id IS 'Parent app. Equals id at root. An Initiate app is another frontend of its root: own slug, redirect URIs, pages and style, while users, claims, organizations and the sync resolve on the root.';
+COMMENT ON COLUMN claimius.samna_app.sa_root_id IS 'Root app. Equals id at root. Tokens for an Initiate app''s login are issued for the root.';
 
 DO $$
 DECLARE

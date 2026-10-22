@@ -3516,7 +3516,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius.upsert_app(UUID, TEXT, TEXT, UUID, TEXT, TEXT, TEXT[], TEXT, TEXT, TEXT, INTEGER, JSONB, UUID, UUID) IS 'Registers a new app on an existing prophet, owned by an existing organization the actor holds owner on in its own app. Every row is stamped with the actor''s user_claim.id. Links the organization tree, creates and binds the owner claim and grants it to the actor''s user in the app, and creates and binds the default claim. With p_parent_id it registers a child app of that parent, owned by the same organization, and creates nothing else: users, claims, organizations and the sync resolve on the root. Idempotent on slug; never reparents. Returns jsonb keyed by table.';
+COMMENT ON FUNCTION claimius.upsert_app(UUID, TEXT, TEXT, UUID, TEXT, TEXT, TEXT[], TEXT, TEXT, TEXT, INTEGER, JSONB, UUID, UUID) IS 'Registers a new app on an existing prophet, owned by an existing organization the actor holds owner on in its own app. Every row is stamped with the actor''s user_claim.id. Links the organization tree, creates and binds the owner claim and grants it to the actor''s user in the app, and creates and binds the default claim. With p_parent_id it registers an Initiate app of that parent, owned by the same organization, and creates nothing else: users, claims, organizations and the sync resolve on the root. Idempotent on slug; never reparents. Returns jsonb keyed by table.';
 
 DROP FUNCTION IF EXISTS claimius.ensure_app_user(UUID, UUID, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT);
 DROP FUNCTION IF EXISTS claimius.ensure_app_user(UUID, UUID, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT);

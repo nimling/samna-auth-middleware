@@ -150,12 +150,12 @@ func DeleteAppSeed() {
 	appSeed.Store(nil)
 }
 
-var childApps atomic.Pointer[[]SamnaApp]
+var initiateApps atomic.Pointer[[]SamnaApp]
 
-func GetApps(ctx context.Context) ([]SamnaApp, error) {
+func GetInitiateApps(ctx context.Context) ([]SamnaApp, error) {
 	if GetDebugMode() != DebugModeNone {
 		apps := []SamnaApp{}
-		for _, pair := range strings.Split(utils.Cfg().DebugApps, ",") {
+		for _, pair := range strings.Split(utils.Cfg().DebugInitiateApps, ",") {
 			slug, origin, ok := strings.Cut(strings.TrimSpace(pair), "=")
 			if ok && slug != "" && origin != "" {
 				apps = append(apps, SamnaApp{Slug: slug, RedirectUris: []string{origin}})
@@ -163,23 +163,23 @@ func GetApps(ctx context.Context) ([]SamnaApp, error) {
 		}
 		return apps, nil
 	}
-	if apps := childApps.Load(); apps != nil {
+	if apps := initiateApps.Load(); apps != nil {
 		return *apps, nil
 	}
-	return PutApps(ctx)
+	return PutInitiateApps(ctx)
 }
 
-func PutApps(ctx context.Context) ([]SamnaApp, error) {
+func PutInitiateApps(ctx context.Context) ([]SamnaApp, error) {
 	apps := []SamnaApp{}
-	if err := client.Get(ctx, "app/apps", &apps); err != nil {
-		return nil, fmt.Errorf("get child apps from the prophet: %w", err)
+	if err := client.Get(ctx, "app/initiate", &apps); err != nil {
+		return nil, fmt.Errorf("get initiate apps from the prophet: %w", err)
 	}
-	childApps.Store(&apps)
+	initiateApps.Store(&apps)
 	return apps, nil
 }
 
-func GetApp(ctx context.Context, slug string) (*SamnaApp, error) {
-	apps, err := GetApps(ctx)
+func GetInitiateApp(ctx context.Context, slug string) (*SamnaApp, error) {
+	apps, err := GetInitiateApps(ctx)
 	if err != nil {
 		return nil, err
 	}

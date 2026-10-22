@@ -13,6 +13,8 @@ func RegisterEndpoints(g *echo.Group) {
 	g.GET("/login", h.GetLogin)
 	g.GET("/callback", h.GetCallback)
 	g.GET("/logout", h.GetLogout)
+	g.GET("/:app/login", h.GetLogin)
+	g.GET("/:app/logout", h.GetLogout)
 
 	me := g.Group("/me")
 	me.GET("", h.GetMe)
