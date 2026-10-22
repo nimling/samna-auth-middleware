@@ -1,5 +1,5 @@
 ---
-gate: auth-middleware
+gate: samna-developer
 layout: doc
 title: Storage
 description: The rows and bytes each claimius table holds as functions of the data, the indexes each carries and the index entries each row written costs, the shape of the B-trees a read descends, and the dead rows each maintenance step leaves.

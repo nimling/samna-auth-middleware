@@ -8,11 +8,24 @@ import (
 
 	"github.com/labstack/echo/v4"
 	"github.com/nimling/samna-auth-middleware/v2/client"
+	"github.com/nimling/samna-auth-middleware/v2/shared"
 	"github.com/nimling/samna-auth-middleware/v2/smw"
 	"github.com/nimling/samna-auth-middleware/v2/utils"
 )
 
 func GetLogin(ctx echo.Context) error {
+	slug := utils.Cfg().AppSlug
+	var initiate *shared.SamnaApp
+	if appSlug := ctx.Param("app"); appSlug != "" {
+		found, err := shared.GetInitiateApp(ctx.Request().Context(), appSlug)
+		if err != nil {
+			return respondError(ctx, http.StatusNotFound, "unknown app")
+		}
+		initiate = found
+		slug = found.Slug
+		ctx.Set(utils.CookieScopeKey, found.GetCookieScope())
+	}
+
 	verifier, err := client.GenerateVerifier()
 	if err != nil {
 		ctx.Logger().Errorf("GetLogin verifier: %v", err)
@@ -24,15 +37,17 @@ func GetLogin(ctx echo.Context) error {
 		return respondError(ctx, http.StatusInternalServerError, "Internal Server Error")
 	}
 
-	next := ctx.QueryParam("next")
-	if next == "" {
-		if referer, refErr := url.Parse(ctx.Request().Referer()); refErr == nil && strings.EqualFold(referer.Host, ctx.Request().Host) && referer.Path != ctx.Request().URL.Path {
-			next = referer.RequestURI()
+	if initiate == nil {
+		next := ctx.QueryParam("next")
+		if next == "" {
+			if referer, refErr := url.Parse(ctx.Request().Referer()); refErr == nil && strings.EqualFold(referer.Host, ctx.Request().Host) && referer.Path != ctx.Request().URL.Path {
+				next = referer.RequestURI()
+			}
 		}
-	}
-	if strings.HasPrefix(next, "/") && !strings.HasPrefix(next, "//") {
-		state += "." + base64.RawURLEncoding.EncodeToString([]byte(next))
-		utils.WriteCookie(ctx, &http.Cookie{Name: client.LoginNextCookie, Value: next, Path: "/", MaxAge: 600})
+		if strings.HasPrefix(next, "/") && !strings.HasPrefix(next, "//") {
+			state += "." + base64.RawURLEncoding.EncodeToString([]byte(next))
+			utils.WriteCookie(ctx, &http.Cookie{Name: client.LoginNextCookie, Value: next, Path: "/", MaxAge: 600})
+		}
 	}
 
 	challenge := client.ChallengeS256(verifier)
@@ -46,8 +61,10 @@ func GetLogin(ctx echo.Context) error {
 		cliTarget = target
 	}
 
-	slug := utils.Cfg().AppSlug
 	redirectURI := utils.Cfg().RedirectURI
+	if initiate != nil {
+		redirectURI = initiate.GetCallbackURI()
+	}
 	authURL, err := client.AuthorizeURL(slug, redirectURI, state, challenge)
 	if err != nil {
 		ctx.Logger().Errorf("GetLogin authorize url: %v", err)
@@ -72,14 +89,26 @@ func GetCallback(ctx echo.Context) error {
 		return respondError(ctx, http.StatusBadRequest, "missing code")
 	}
 
+	redirectURI := utils.Cfg().RedirectURI
 	startOver := utils.Cfg().PageRedirect
+	var initiate *shared.SamnaApp
+	if appSlug := ctx.QueryParam("app"); appSlug != "" {
+		found, err := shared.GetInitiateApp(ctx.Request().Context(), appSlug)
+		if err != nil {
+			return respondError(ctx, http.StatusNotFound, "unknown app")
+		}
+		initiate = found
+		redirectURI = found.GetCallbackURI()
+		startOver = found.GetPrimaryOrigin()
+		ctx.Set(utils.CookieScopeKey, found.GetCookieScope())
+	}
 	if startOver == "" {
 		startOver = "/"
 	}
 
 	stateParam := ctx.QueryParam("state")
 	stateNext := ""
-	if dot := strings.LastIndex(stateParam, "."); dot >= 0 {
+	if dot := strings.LastIndex(stateParam, "."); initiate == nil && dot >= 0 {
 		if raw, decodeErr := base64.RawURLEncoding.DecodeString(stateParam[dot+1:]); decodeErr == nil && strings.HasPrefix(string(raw), "/") && !strings.HasPrefix(string(raw), "//") {
 			stateNext = string(raw)
 		}
@@ -111,16 +140,14 @@ func GetCallback(ctx echo.Context) error {
 		return Redirect(ctx, http.StatusFound, resume)
 	}
 
-	slug := utils.Cfg().AppSlug
-	secret := utils.Cfg().AppSecret
-	redirectURI := utils.Cfg().RedirectURI
-	tokenURL, err := client.TokenURLFor(slug)
+	rootSlug := utils.Cfg().AppSlug
+	tokenURL, err := client.TokenURLFor(rootSlug)
 	if err != nil {
 		ctx.Logger().Errorf("GetCallback token url: %v", err)
 		return respondError(ctx, http.StatusInternalServerError, "Internal Server Error")
 	}
 
-	tokens, err := client.PostAuthCode(ctx.Request().Context(), tokenURL, slug, secret, code, redirectURI, verifierCookie.Value)
+	tokens, err := client.PostAuthCode(ctx.Request().Context(), tokenURL, rootSlug, utils.Cfg().AppSecret, code, redirectURI, verifierCookie.Value)
 	if err != nil {
 		ctx.Logger().Warnf("GetCallback exchange refused, clearing the flow cookies and sending the visitor back to start over: %v", err)
 		utils.ClearCookie(ctx, client.PKCEVerifierCookie)
@@ -137,21 +164,28 @@ func GetCallback(ctx echo.Context) error {
 	}
 	smw.WriteCSRFCookie(ctx)
 
-	pageRedirect := utils.Cfg().PageRedirect
+	pageRedirect := startOver
 	if stateNext != "" {
 		pageRedirect = stateNext
 	}
-	if nextCookie, nextErr := ctx.Cookie(client.LoginNextCookie); nextErr == nil && strings.HasPrefix(nextCookie.Value, "/") && !strings.HasPrefix(nextCookie.Value, "//") {
+	if nextCookie, nextErr := ctx.Cookie(client.LoginNextCookie); initiate == nil && nextErr == nil && strings.HasPrefix(nextCookie.Value, "/") && !strings.HasPrefix(nextCookie.Value, "//") {
 		pageRedirect = nextCookie.Value
 	}
 	utils.ClearCookie(ctx, client.LoginNextCookie)
-	if pageRedirect == "" {
-		pageRedirect = "/"
-	}
 	return Redirect(ctx, http.StatusFound, pageRedirect)
 }
 
 func GetLogout(ctx echo.Context) error {
+	slug, pageRedirect := utils.Cfg().AppSlug, utils.Cfg().PageRedirect
+	if appSlug := ctx.Param("app"); appSlug != "" {
+		initiate, err := shared.GetInitiateApp(ctx.Request().Context(), appSlug)
+		if err != nil {
+			return respondError(ctx, http.StatusNotFound, "unknown app")
+		}
+		slug, pageRedirect = initiate.Slug, initiate.GetPrimaryOrigin()
+		ctx.Set(utils.CookieScopeKey, initiate.GetCookieScope())
+	}
+
 	accessToken := ""
 	if cookie, err := ctx.Cookie("sauth_access_token"); err == nil {
 		accessToken = cookie.Value
@@ -170,7 +204,7 @@ func GetLogout(ctx echo.Context) error {
 		}
 	}
 
-	endSessionURL, err := client.EndSessionURL()
+	endSessionURL, err := client.EndSessionURL(slug, pageRedirect)
 	if err != nil {
 		ctx.Logger().Errorf("GetLogout end session url: %v", err)
 		return ctx.NoContent(http.StatusOK)

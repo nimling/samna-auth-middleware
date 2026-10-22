@@ -73,6 +73,7 @@ func RegisterEndpoints(g *echo.Group) {
 	claim.PATCH("/:claim_id/user/:id", h.PatchClaimUser)
 	claim.DELETE("/:claim_id/user/:id", h.DeleteClaimUser)
 	claim.GET("/:id/audit", h.GetClaimAudit)
+	claim.PUT("/:id/guest", h.PutClaimGuest)
 
 	asset := g.Group("/asset")
 	asset.GET("", h.GetAssets)
@@ -92,6 +93,7 @@ func RegisterEndpoints(g *echo.Group) {
 
 	app := g.Group("/app")
 	app.GET("", h.GetSamApp)
+	app.GET("/initiate", h.GetSamInitiateApps)
 
 	guest := g.Group("/guest")
 	guest.POST("", h.PostGuestToken)
@@ -124,9 +126,9 @@ func RegisterEndpoints(g *echo.Group) {
 
 	code := g.Group("/code")
 	code.GET("", h.GetCodes)
-	code.GET("/:code", h.GetCode)
 	code.POST("", h.PostCode)
-	code.PUT("/:id", h.PutCode)
+	code.PUT("/used", h.PutCodeUsed)
+	code.POST("/redeem", h.PostCodeRedeem)
 	code.DELETE("/:id", h.DeleteCode)
 
 	field := g.Group("/field")

@@ -551,3 +551,76 @@ func TestARoutedAnswerKeepsTheColumnsItDoesNotCarry(t *testing.T) {
 		t.Fatalf("the local copy of a routed answer must set the columns it carries and keep the ones it does not, got %+v", stored)
 	}
 }
+
+func TestABindingKeepsTheOwnerItIsGivenRoutedOrLocal(t *testing.T) {
+	db := database(t)
+	ctx := context.Background()
+	ac, err := db.MutationAccess(ctx, userA, orgAlpha, sdb.OBJECT_TYPE_ORGANIZATION, sdb.ACCESS_WRITE)
+	if err != nil {
+		t.Fatalf("access: %v", err)
+	}
+	if ac.OwnerID != orgRoot {
+		t.Fatalf("the access on Alpha must carry Alpha's own owner, Root, got %s", ac.OwnerID)
+	}
+	organization := sdb.ObjectType(sdb.OBJECT_TYPE_ORGANIZATION)
+
+	var owners []string
+	prophet := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		row := map[string]any{}
+		_ = json.Unmarshal(raw, &row)
+		owner, _ := row["owner_id"].(string)
+		owners = append(owners, owner)
+		row["id"] = uuid.New().String()
+		body, _ := json.Marshal(map[string]any{"data": row, "count": 1})
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(body)
+	}))
+	defer prophet.Close()
+	t.Setenv("SAUTH_ENDPOINT", prophet.URL)
+	db.RouteToProphet = true
+	routed := uuid.New()
+	if err := db.NewInsert().Model(&sdb.ClaimObject{ClaimID: *ac.ClaimID, ObjectID: &routed, ObjectType: &organization, OwnerID: orgAlpha, Inherits: true}).Access(ac).Scan(ctx); err != nil {
+		t.Fatalf("routed binding: %v", err)
+	}
+	if len(owners) != 1 || owners[0] != orgAlpha.String() {
+		t.Fatalf("the routed binding must carry the owner it was given, Alpha, got %v", owners)
+	}
+
+	db.RouteToProphet = false
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	defer tx.Rollback()
+	local := uuid.New()
+	if _, err := tx.ExecContext(ctx, `INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
+		VALUES (?, 'Under Alpha', 'company', ?, ?, 2, ?)`, local, orgAlpha, orgRoot, *ac.UserClaimID); err != nil {
+		t.Fatalf("insert the row: %v", err)
+	}
+	if err := db.NewInsert().Model(&sdb.ClaimObject{ClaimID: *ac.ClaimID, ObjectID: &local, ObjectType: &organization, OwnerID: orgAlpha, Inherits: true}).Access(ac).Conn(tx).Scan(ctx); err != nil {
+		t.Fatalf("local binding: %v", err)
+	}
+	var owner uuid.UUID
+	if err := tx.NewRaw("SELECT sa_owner_id FROM claimius.claim_object WHERE object_id = ? AND sa_deleted_at IS NULL", local).Scan(ctx, &owner); err != nil {
+		t.Fatalf("read the binding: %v", err)
+	}
+	if owner != orgAlpha {
+		t.Fatalf("the local binding must keep the owner it was given, Alpha, got %s", owner)
+	}
+
+	unset := uuid.New()
+	if _, err := tx.ExecContext(ctx, `INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
+		VALUES (?, 'Unset under Alpha', 'company', ?, ?, 2, ?)`, unset, orgAlpha, orgRoot, *ac.UserClaimID); err != nil {
+		t.Fatalf("insert the row: %v", err)
+	}
+	if err := db.NewInsert().Model(&sdb.ClaimObject{ClaimID: *ac.ClaimID, ObjectID: &unset, ObjectType: &organization, Inherits: true}).Access(ac).Conn(tx).Scan(ctx); err != nil {
+		t.Fatalf("local binding without an owner: %v", err)
+	}
+	if err := tx.NewRaw("SELECT sa_owner_id FROM claimius.claim_object WHERE object_id = ? AND sa_deleted_at IS NULL", unset).Scan(ctx, &owner); err != nil {
+		t.Fatalf("read the binding: %v", err)
+	}
+	if owner != ac.OwnerID {
+		t.Fatalf("a binding given no owner takes the access owner %s, got %s", ac.OwnerID, owner)
+	}
+}

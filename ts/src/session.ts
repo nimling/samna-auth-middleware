@@ -26,6 +26,7 @@ export interface EdgeConfig {
   clientSlug: string
   mode?: EdgeMode
   bffPath?: string
+  initiate?: string
   cookieNames?: {
     accessToken?: string
     refreshToken?: string
@@ -177,6 +178,7 @@ export async function readSessionFromDocument(): Promise<ClaimUser | null> {
 
 export function getLoginUrl(provider?: string, returnTo?: string): string {
   if (getEdgeMode() === EDGE_MODE_BFF) {
+    if (edgeConfig.initiate) return `${getBffPath()}/${encodeURIComponent(edgeConfig.initiate)}/login`
     return withNext(`${getBffPath()}/login`, returnTo)
   }
   const base = getLogin(getAuthEndpoint(), edgeConfig.clientSlug, provider)
@@ -188,6 +190,7 @@ export function getLoginUrl(provider?: string, returnTo?: string): string {
 
 export function getLogoutUrl(returnTo?: string): string {
   if (getEdgeMode() === EDGE_MODE_BFF) {
+    if (edgeConfig.initiate) return `${getBffPath()}/${encodeURIComponent(edgeConfig.initiate)}/logout`
     return withNext(`${getBffPath()}/logout`, returnTo)
   }
   const url = new URL(`${getAuthEndpoint()}${PROPHET_LOGOUT_PATH}`)

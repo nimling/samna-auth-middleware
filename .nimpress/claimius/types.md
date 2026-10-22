@@ -1,5 +1,5 @@
 ---
-gate: auth-middleware
+gate: samna-developer
 layout: doc
 title: Types
 description: Why organization, location, user and claim, joined by two bindings and three trees, are the types authorization needs, how every common model reduces to them, and why that set keeps a derivation constant in the size of the data.

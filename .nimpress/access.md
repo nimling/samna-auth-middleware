@@ -1,5 +1,5 @@
 ---
-gate: auth-middleware
+gate: samna-developer
 layout: doc
 title: Access
 description: The access lookups a handler calls before it reads or writes, what each one returns, which SQL function answers it, and how listings page.

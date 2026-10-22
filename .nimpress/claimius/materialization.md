@@ -1,5 +1,5 @@
 ---
-gate: auth-middleware
+gate: samna-developer
 layout: doc
 title: Materialization
 description: The per pair access index user_object, the set based recompute every settle is made of with its read and write counts, how a write raises an area in access_diff keyed by its transaction and its root, how a check settles one pair by the pair's mark and a listing the reader's whole share from its cursor in one pass, how a pair entering or leaving raises a user_users_diff row that the reads of viewers fold, how the drain settles shares ahead of reads and trims the areas every active cursor has passed, and why every read returns current pairs.

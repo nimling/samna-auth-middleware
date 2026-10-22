@@ -1,5 +1,5 @@
 ---
-gate: auth-middleware
+gate: samna-developer
 layout: doc
 title: Search
 description: Full text search over everything a user can reach, matched against the search vector each object carries once in object_info and ranked by text match plus the reader's decayed usage, with the entries each of its two plans reads.

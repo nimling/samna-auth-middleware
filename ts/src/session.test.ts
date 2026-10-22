@@ -9,6 +9,7 @@ import {
   configureEdge,
   endSession,
   getLoginUrl,
+  getLogoutUrl,
   readClaims,
   readSessionFromDocument
 } from './session'
@@ -104,6 +105,13 @@ describe('static mode', () => {
     expect(url.origin + url.pathname).toBe('https://auth.example.io/api/auth/login')
     expect(url.searchParams.get('client_slug')).toBe('docs')
     expect(url.searchParams.get('next')).toBe(`${window.location.origin}/test`)
+  })
+
+  it('sends an initiate app login and logout to the bff under its slug', () => {
+    configureEdge({ endpoint: '', clientSlug: 'bookable', mode: 'bff', bffPath: 'https://api.example.io/api/auth', initiate: 'bookable-web' })
+
+    expect(getLoginUrl(undefined, '/bookings')).toBe('https://api.example.io/api/auth/bookable-web/login')
+    expect(getLogoutUrl('/bookings')).toBe('https://api.example.io/api/auth/bookable-web/logout')
   })
 
   it('ends the session on the prophet with a credentialed get', async () => {

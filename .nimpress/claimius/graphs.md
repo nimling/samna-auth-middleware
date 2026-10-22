@@ -1,5 +1,5 @@
 ---
-gate: auth-middleware
+gate: samna-developer
 layout: doc
 title: Graphs
 description: The owner graph and the claim graph, their node shape, the window that bounds the rows they return, the rows each reads as a function of the tree and the reader, the per user cache of the default claim graph validated on read against the snapshot it was built under, and its hit ratio.

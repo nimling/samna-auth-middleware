@@ -9,6 +9,8 @@ import (
 	"net/url"
 	"os"
 	"reflect"
+	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -147,6 +149,65 @@ func GetAppSeed(ctx context.Context) (string, error) {
 
 func DeleteAppSeed() {
 	appSeed.Store(nil)
+}
+
+var initiateApps atomic.Pointer[[]SamnaApp]
+
+func GetInitiateApps(ctx context.Context) ([]SamnaApp, error) {
+	if GetDebugMode() != DebugModeNone {
+		apps := []SamnaApp{}
+		for _, pair := range strings.Split(utils.Cfg().DebugInitiateApps, ",") {
+			slug, origin, ok := strings.Cut(strings.TrimSpace(pair), "=")
+			callback, err := url.Parse(utils.Cfg().RedirectURI)
+			if !ok || slug == "" || origin == "" || err != nil {
+				continue
+			}
+			query := callback.Query()
+			query.Set("app", slug)
+			callback.RawQuery = query.Encode()
+			apps = append(apps, SamnaApp{Slug: slug, RedirectUris: []string{origin, callback.String()}})
+		}
+		return apps, nil
+	}
+	if apps := initiateApps.Load(); apps != nil {
+		return *apps, nil
+	}
+	return PutInitiateApps(ctx)
+}
+
+func PutInitiateApps(ctx context.Context) ([]SamnaApp, error) {
+	apps := []SamnaApp{}
+	if err := client.Get(ctx, "app/initiate", &apps); err != nil {
+		return nil, fmt.Errorf("get initiate apps from the prophet: %w", err)
+	}
+	initiateApps.Store(&apps)
+	return apps, nil
+}
+
+func GetInitiateApp(ctx context.Context, slug string) (*SamnaApp, error) {
+	apps, err := GetInitiateApps(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for i := range apps {
+		if apps[i].Slug == slug && apps[i].GetCallbackURI() != "" {
+			return &apps[i], nil
+		}
+	}
+	return nil, ErrNotFound
+}
+
+func GetOriginInitiateApp(ctx context.Context, origin string) (*SamnaApp, error) {
+	apps, err := GetInitiateApps(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for i := range apps {
+		if apps[i].GetCallbackURI() != "" && slices.Contains(apps[i].GetOrigins(), origin) {
+			return &apps[i], nil
+		}
+	}
+	return nil, ErrNotFound
 }
 
 func (d *DB) GetAppEnv(ctx context.Context) (*SamnaApp, error) {

@@ -26,6 +26,7 @@ const (
 	drainInterval              = time.Second
 	drainPairs                 = 1000
 	moveInterval               = time.Minute
+	initiateInterval           = time.Minute
 )
 
 type Replica struct {
@@ -60,6 +61,7 @@ func SyncStart(ctx context.Context) {
 	}
 	go bindClient(ctx, Disciple(), leadInterval)
 	go getAppSeed(ctx, sdb.Instance().DB, leadInterval)
+	go putInitiateApps(ctx, sdb.Instance().DB, initiateInterval)
 	go shared.LeadSync(ctx, sdb.Instance().DB, SyncLockKey(utils.Cfg().AppSlug), leadInterval, Disciple().Pull)
 }
 
@@ -98,6 +100,19 @@ func getAppSeed(ctx context.Context, db *shared.DB, interval time.Duration) {
 			return
 		}
 		db.Logger.Warnf("sync: %v", err)
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(interval):
+		}
+	}
+}
+
+func putInitiateApps(ctx context.Context, db *shared.DB, interval time.Duration) {
+	for {
+		if _, err := shared.PutInitiateApps(ctx); err != nil && ctx.Err() == nil {
+			db.Logger.Warnf("sync: %v", err)
+		}
 		select {
 		case <-ctx.Done():
 			return

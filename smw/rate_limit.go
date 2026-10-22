@@ -65,3 +65,17 @@ func (l *rateLimiter) allow(key string) bool {
 	w.count++
 	return true
 }
+
+func (l *rateLimiter) blocked(key string) bool {
+	now := time.Now()
+
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	w, ok := l.windows[key]
+	return ok && now.Before(w.reset) && w.count >= l.limit
+}
+
+func (l *rateLimiter) fail(key string) {
+	l.allow(key)
+}

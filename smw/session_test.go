@@ -207,3 +207,16 @@ func TestNavigationRedirectsToTheLoginBesideTheRedirectURI(t *testing.T) {
 		t.Fatalf("status %d location %q, want 302 /auth/login", rec.Code, loc)
 	}
 }
+
+func TestGetOriginAllowedAdmitsTheInitiateAppOrigins(t *testing.T) {
+	t.Setenv("SAUTH_REDIRECT_URI", "http://localhost:4200/api/auth/callback")
+	t.Setenv("SAUTH_DEBUG_USER_ID", "a0000000-0000-4000-8000-00000000000a")
+	t.Setenv("SAUTH_DEBUG_INITIATE_APPS", "testapp-web=http://web.example")
+
+	allowed := smw.GetOriginAllowed([]string{"http://portal.example"})
+	for origin, want := range map[string]bool{"http://portal.example": true, "http://web.example": true, "http://evil.example": false} {
+		if got, _ := allowed(origin); got != want {
+			t.Errorf("origin %s allowed = %v, want %v", origin, got, want)
+		}
+	}
+}

@@ -66,6 +66,14 @@ This page covers the Go module `github.com/nimling/samna-auth-middleware/v2` onl
 
 3. Gap: no `WWW-Authenticate` header with `error="invalid_token"` or `insufficient_scope` on any 401 or 403.
 
+### RFC 6750 section 5.3 and OWASP ASVS V3.1.1, codes in URLs
+
+1. Status: `partial`
+
+2. Evidence: the URL carries an access code, never a token, and the code is 256 random bits from `GetCodeValue` (`shared/code.go:131`) stored only as its SHA-256 (`shared/code.go:139`, `disciple/database/V1.1__claimius_baseline.sql:1000`, `prophet/database/V1.1__claimius_baseline.sql:1261`); a navigation carrying `samk` is answered `303` to the URL without it (`smw/code.go:96`) and the code moves to a `__Host-` cookie (`smw/code.go:67`); every answer carrying or following a code sends `Referrer-Policy: no-referrer` (`smw/code.go:104`); the guard takes `samk` and `SAuth-Code` off the request before a handler, a logger or a span reads them (`smw/code.go:44`, `smw/code.go:58`), and the span records the path only; API calls send the header `SAuth-Code` instead of the query; a code resolves only inside its window, below its count and until revoked (`shared/code.go:162`), and a revoke reaches every disciple through the feed and clears the resolve cache (`shared/apply.go:25`); a guest reads at most (`disciple/database/V2.4__claimius_functions_external.sql:34`), and a guest code is an identity only on a route group mounted with `UserAuthOptions{Guest: true}` (`smw/code.go:128`). This follows the W3C capability URL practice: unguessable, short lived where possible, revocable, moved out of the address bar on first use, and kept out of `Referer`.
+
+3. Gap: the first request still carries the code in its URL, so a proxy or load balancer log in front of the service and the browser history entry of that first request can hold it; a guest code without `ends_at` lives until revoked; a mail scanner that follows a link spends a counted guest use.
+
 ### RFC 9449, DPoP
 
 1. Status: `partial`
@@ -156,9 +164,9 @@ This page covers the Go module `github.com/nimling/samna-auth-middleware/v2` onl
 
 1. Status: `partial`
 
-2. Evidence: `utils/cookie.go:37` writes `HttpOnly`, `Secure` and `SameSite` (Lax by default, `SAUTH_COOKIE_SAMESITE`); CSRF double submit at `smw/session.go:67`; the access, refresh, PKCE and state cookies at `disciple/echo/auth.go:46` and `disciple/echo/auth.go:110`.
+2. Evidence: `utils/cookie.go:37` writes `HttpOnly`, `Secure` and `SameSite` (Lax by default, `SAUTH_COOKIE_SAMESITE`); CSRF double submit at `smw/session.go:67`; the access, refresh, PKCE and state cookies at `disciple/echo/auth.go:46` and `disciple/echo/auth.go:110`; the access code cookie `__Host-sauth_samk` is `HttpOnly; Secure; SameSite=Lax; Path=/` with no `Domain` and expires with its code at `smw/code.go:67`.
 
-3. Gap: `Secure` is off when no cookie domain resolves (`utils/cookie.go:27`), and no `__Host-` prefix is used.
+3. Gap: `Secure` is off on the session cookies when no cookie domain resolves (`utils/cookie.go:27`), and only the access code cookie uses the `__Host-` prefix.
 
 ### RFC 6797, HSTS
 
@@ -184,7 +192,7 @@ This page covers the Go module `github.com/nimling/samna-auth-middleware/v2` onl
 
 1. Status: `partial`
 
-2. Evidence: a fixed window per client IP at `smw/rate_limit.go:24`, answering 429 at `smw/rate_limit.go:33`, mounted on the BFF subscription route at `bff/main.go:73`.
+2. Evidence: a fixed window per client IP at `smw/rate_limit.go:24`, answering 429 at `smw/rate_limit.go:33`, mounted on the BFF subscription route at `bff/main.go:73`; failed access code resolves, twenty per address and minute, answer 429 with `Retry-After` and hold valid codes too until the window passes (`smw/code.go:108`), and an unanswerable resolve is 503, never a pass.
 
 3. Gap: no `Retry-After`, in memory per process, and not mounted on the auth or cli routes.
 

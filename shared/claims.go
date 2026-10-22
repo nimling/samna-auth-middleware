@@ -13,6 +13,9 @@ import (
 )
 
 func (d *DB) GetAccess(ctx context.Context, userID, objectID uuid.UUID, objectType string, requiredAccess ClaimAccess) (*AccessClaim, error) {
+	if userID == AnonymousUserID {
+		return d.getGuestAccess(ctx, objectID, objectType, requiredAccess)
+	}
 	if objectType == OBJECT_TYPE_USER && userID == objectID {
 		return selfAccessClaim(userID, requiredAccess), nil
 	}
@@ -289,8 +292,12 @@ func (d *DB) insertClaimObject(ctx context.Context, conn bun.IConn, ac *AccessCl
 	if ac == nil {
 		return nil, ErrNoAccess
 	}
-	co.OwnerID = ac.OwnerID
-	co.RootID = ac.RootID
+	if co.OwnerID == uuid.Nil {
+		co.OwnerID = ac.OwnerID
+	}
+	if co.RootID == uuid.Nil {
+		co.RootID = ac.RootID
+	}
 	co.CreatedBy = ac.UserClaimID
 	var payload []byte
 	err := d.NewRaw(`

@@ -85,3 +85,57 @@ func TestGetLoginCarriesNextInTheState(t *testing.T) {
 		t.Errorf("state = %q, want the next path encoded after the dot", state)
 	}
 }
+
+func TestGetLoginAuthorizesAnInitiateAppFromItsPath(t *testing.T) {
+	t.Setenv("SAUTH_ENDPOINT", "http://auth.example")
+	t.Setenv("SAUTH_APP_SLUG", "testapp")
+	t.Setenv("SAUTH_REDIRECT_URI", "http://localhost:4200/api/auth/callback")
+	t.Setenv("SAUTH_DEBUG_USER_ID", "a0000000-0000-4000-8000-00000000000a")
+	t.Setenv("SAUTH_DEBUG_INITIATE_APPS", "testapp-web=http://web.example")
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/api/auth/testapp-web/login", nil)
+	rec := httptest.NewRecorder()
+	ctx := e.NewContext(req, rec)
+	ctx.SetParamNames("app")
+	ctx.SetParamValues("testapp-web")
+
+	if err := saecho.GetLogin(ctx); err != nil {
+		t.Fatalf("GetLogin: %v", err)
+	}
+	if rec.Code != http.StatusTemporaryRedirect {
+		t.Fatalf("status = %d, want 307", rec.Code)
+	}
+	location, err := url.Parse(rec.Header().Get("Location"))
+	if err != nil {
+		t.Fatalf("parse location: %v", err)
+	}
+	if location.Path != "/api/app/testapp-web/oauth/authorize" || location.Query().Get("client_id") != "testapp-web" {
+		t.Errorf("location = %q, want the initiate app's authorize", location)
+	}
+	if got := location.Query().Get("redirect_uri"); got != "http://localhost:4200/api/auth/callback?app=testapp-web" {
+		t.Errorf("redirect_uri = %q, want the disciple callback marked with the initiate app", got)
+	}
+}
+
+func TestGetLoginRefusesAnUnknownInitiateApp(t *testing.T) {
+	t.Setenv("SAUTH_ENDPOINT", "http://auth.example")
+	t.Setenv("SAUTH_APP_SLUG", "testapp")
+	t.Setenv("SAUTH_REDIRECT_URI", "http://localhost:4200/api/auth/callback")
+	t.Setenv("SAUTH_DEBUG_USER_ID", "a0000000-0000-4000-8000-00000000000a")
+	t.Setenv("SAUTH_DEBUG_INITIATE_APPS", "testapp-web=http://web.example")
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/api/auth/otherapp/login", nil)
+	rec := httptest.NewRecorder()
+	ctx := e.NewContext(req, rec)
+	ctx.SetParamNames("app")
+	ctx.SetParamValues("otherapp")
+
+	if err := saecho.GetLogin(ctx); err != nil {
+		t.Fatalf("GetLogin: %v", err)
+	}
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", rec.Code)
+	}
+}

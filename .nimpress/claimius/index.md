@@ -1,5 +1,5 @@
 ---
-gate: auth-middleware
+gate: samna-developer
 layout: doc
 title: Claimius
 description: The Postgres schema that governs access for every Samna service, stated as a fixed Datalog program over its tables, with the rows each part stores, reads and writes as functions of the data, and the Go middleware that carries it for Samna Auth.
@@ -47,6 +47,7 @@ Claimius owns and validates its own types. It reads no more of the implementing 
 | [Audit](./audit.md) | The trail, written in the change's transaction, on monthly partitions |
 | [Storage](./storage.md) | Rows, bytes and index entries per table and per write |
 | [Comparison](./comparison.md) | Claimius against Zanzibar and its descendants and against Entra ID, in counts |
+| [A worked example](./example.md) | The tree live on the tst and prd prophets, Samna Auth, Samna, Nimtech, Executive and Consult, with its claims, scopes and inheritance |
 
 ## The middleware
 

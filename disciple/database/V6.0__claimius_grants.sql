@@ -19,6 +19,7 @@ BEGIN
              claimius.insert_claim_object, claimius.update_claim_object, claimius.delete_claim_object,
              claimius.migrate_root,
              claimius.upsert_disciple_state, claimius.insert_secret,
+             claimius.update_claim_guest, claimius.insert_code, claimius.delete_code, claimius.redeem_code,
              claimius.upsert_table_info, claimius.delete_table_info, claimius.upsert_internal_table_info,
              claimius.recompute_state
              FROM claimius_reader';
@@ -28,7 +29,7 @@ BEGIN
              claimius.claim, claimius.user_claim, claimius.claim_object,
              claimius.object_field, claimius.user_field, claimius.user_relation, claimius.object_asset,
              claimius.audit, claimius.inheritance_info, claimius.table_info,
-             claimius.notification, claimius.claim_graph_cache
+             claimius.notification, claimius.claim_graph_cache, claimius.code
              TO claimius_disciple_client';
     EXECUTE 'REVOKE INSERT, UPDATE, DELETE ON claimius.claim_graph_cache FROM claimius_reader';
     EXECUTE 'GRANT SELECT ON claimius.get_users, claimius.get_organizations, claimius.get_locations,

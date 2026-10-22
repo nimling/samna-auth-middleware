@@ -269,6 +269,12 @@ COMMENT ON COLUMN claimius.claim.level IS 'Precedence of the claim. A deny subtr
 DROP INDEX IF EXISTS claimius.idx_claim_sa_deleted_at;
 ALTER TABLE claimius.claim ADD COLUMN IF NOT EXISTS txid XID8 NOT NULL DEFAULT pg_current_xact_id();
 COMMENT ON COLUMN claimius.claim.txid IS 'Local transaction that last wrote the row, stamped by tg_update_txid on every insert and update, a replayed one included. get_claim_graph compares it to the snapshot a cached graph was built under.';
+ALTER TABLE claimius.claim ADD COLUMN IF NOT EXISTS guest_mode TEXT NOT NULL DEFAULT 'off';
+DO $$ BEGIN
+    ALTER TABLE claimius.claim ADD CONSTRAINT claim_guest_mode_check CHECK (guest_mode IN ('open', 'code', 'off'));
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+COMMENT ON COLUMN claimius.claim.guest_mode IS 'How the guest of the claim is reached: open, by anyone without a credential, through a disciple''s get_guest_access; code, only by the holder of a live guest code of the claim; off, not at all. Set only through update_claim_guest, which also ensures the guest and its grant. A guest reads at most: get_access caps a guest user at READ.';
 
 CREATE TABLE IF NOT EXISTS claimius.user_claim (
                                                    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -1251,3 +1257,44 @@ UPDATE claimius.inheritance_info SET ancestor_type = 'claimius.user_identity' WH
 UPDATE claimius.inheritance_info SET descendant_type = 'claimius.user_identity' WHERE descendant_type = 'claimius.user_token';
 UPDATE claimius.user_object SET object_type = 'claimius.user_identity' WHERE object_type = 'claimius.user_token';
 UPDATE claimius.access_diff SET object_type = 'claimius.user_identity' WHERE object_type = 'claimius.user_token';
+
+CREATE TABLE IF NOT EXISTS claimius.code (
+                                             id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                                             app_id          UUID NOT NULL REFERENCES claimius.samna_app(id),
+                                             hash            TEXT NOT NULL,
+                                             kind            TEXT NOT NULL,
+                                             claim_id        UUID NOT NULL REFERENCES claimius.claim(id),
+                                             object_id       UUID,
+                                             object_type     TEXT,
+                                             data            JSONB NOT NULL DEFAULT '{}'::JSONB,
+                                             starts_at       TIMESTAMPTZ,
+                                             ends_at         TIMESTAMPTZ,
+                                             count           INTEGER NOT NULL DEFAULT 0,
+                                             used_count      INTEGER NOT NULL DEFAULT 0,
+                                             revoked_at      TIMESTAMPTZ,
+                                             sa_owner_id     UUID NOT NULL,
+                                             sa_created_by   UUID NOT NULL,
+                                             sa_deleted_at   TIMESTAMPTZ,
+                                             sa_created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+                                             sa_updated_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+                                             CONSTRAINT code_kind_check CHECK (kind IN ('invite', 'guest')),
+                                             CONSTRAINT code_count_check CHECK (count >= 0 AND used_count >= 0)
+);
+
+COMMENT ON TABLE claimius.code IS 'Access code of a claim, written on the prophet and replicated to the app''s disciples. The value is shown once at creation and never stored: hash is its SHA-256. An invite code grants the claim to the signed in user who redeems it; a guest code lets its holder act as the guest of the claim. Not a registered access table: a code is managed by the owners of its claim.';
+COMMENT ON COLUMN claimius.code.hash IS 'Hex SHA-256 of the code value. The value itself, 32 random bytes base64url, is never stored.';
+COMMENT ON COLUMN claimius.code.kind IS 'invite: redeemed once per signed in user into a grant of the claim. guest: the holder acts as the guest of the claim.';
+COMMENT ON COLUMN claimius.code.object_id IS 'Optional object the code was handed out for, for the service to open.';
+COMMENT ON COLUMN claimius.code.object_type IS 'Schema qualified type of object_id.';
+COMMENT ON COLUMN claimius.code.data IS 'Free form JSON the creating service keeps with the code.';
+COMMENT ON COLUMN claimius.code.starts_at IS 'The code resolves from this time on; NULL from creation.';
+COMMENT ON COLUMN claimius.code.ends_at IS 'The code resolves until this time; NULL with no end.';
+COMMENT ON COLUMN claimius.code.count IS 'Uses the code allows; 0 is unlimited.';
+COMMENT ON COLUMN claimius.code.used_count IS 'Uses so far, raised atomically by update_code_used and redeem_code.';
+COMMENT ON COLUMN claimius.code.revoked_at IS 'Set by delete_code; a revoked code never resolves again.';
+COMMENT ON COLUMN claimius.code.sa_owner_id IS 'Owning organization of the claim.';
+COMMENT ON COLUMN claimius.code.sa_created_by IS 'user_claim.id of the grant by which the creator owns the claim.';
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_code_app_hash ON claimius.code (app_id, hash) WHERE sa_deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_code_claim_id ON claimius.code (claim_id);
+CREATE INDEX IF NOT EXISTS idx_code_app_id ON claimius.code (app_id);

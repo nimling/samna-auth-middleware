@@ -1,5 +1,5 @@
 ---
-gate: auth-middleware
+gate: samna-developer
 layout: doc
 title: Apps
 description: samna_app, how upsert_system_app and upsert_app create an app, the two scoping mechanisms, app scoped tables and app_object links, what each costs a query, scoping per role, and the identity helpers that tell SQL which app it runs as.
@@ -64,7 +64,8 @@ claimius.upsert_app(
     p_connection          TEXT    DEFAULT 'code',
     p_owner_access        INTEGER DEFAULT 15,
     p_default_claim       JSONB   DEFAULT NULL,
-    p_app_id              UUID    DEFAULT NULL
+    p_app_id              UUID    DEFAULT NULL,
+    p_parent_id           UUID    DEFAULT NULL
 ) RETURNS JSONB
 ```
 
@@ -83,6 +84,18 @@ It stamps `p_actor_user_claim_id` into every `sa_created_by` and:
 6. Creates the default claim, `<name> Reader` with read unless `p_default_claim` gives `name`, `description` or `sa_access`, binds it on the app and on the organization, and sets it as the app's `claim_id`.
 
 It is idempotent on the slug and on each claim's name, and returns one jsonb object keyed `samna_app`, `organization`, `samna_user`, `claim`, `default_claim`, `user_claim` and `claim_object`. The owner claim's first binding is the one binding of an app that no pair can authorize, because the app has none yet; it passes when the actor holds owner on the organization that owns the app, judged in the actor's own app. That rule is how the authority over an organization extends to the apps it owns; see [Claims](./claims.md). `app_secret` is written afterwards by the implementing side, as for the system app, and the reader role cannot call `upsert_app`.
+
+## Initiate apps
+
+Apps form a tree through `sa_parent_id` and `sa_root_id`, the same parenthood columns any registered table can carry: a root app references itself in both, and the `parenthood` closure keeps every Initiate app under its root, so a grant on the root app reaches its Initiate apps.
+
+An Initiate app is another frontend of a disciple's app. It has its own slug, `redirect_uris`, pages and style. Its first redirect URI is the origin its frontend lives on, and the disciple's callback marked with its slug, `<SAUTH_REDIRECT_URI>?app=<slug>`, is among them. Everything else is the root's: users, claims, organizations, the sync and the tokens.
+
+`upsert_app` with `p_parent_id` registers one. The parent must be live and owned by `p_org_id`; the call upserts the `samna_app` row under the parent and returns `{"samna_app": ...}` without a `prophet_state` row, a `samna_user`, organization links or claims. A rerun with another parent, or without one for an Initiate app, is refused with `22023`: an app is never reparented.
+
+A disciple reads its root's Initiate apps from `GET /sam/app/initiate` and keeps them in memory, refreshed every minute. The frontend opens `/api/auth/<slug>/login`; the disciple authorizes that app with the marked callback as `redirect_uri`, the prophet returns to `/api/auth/callback?app=<slug>`, the callback exchanges the code with the root's credentials and that same `redirect_uri`, and the person returns to the Initiate app's origin. `/api/auth/<slug>/logout` returns there too.
+
+The Initiate app's configuration in samna_auth decides how its frontend reaches the disciple. Its registered callback is either the disciple's own `/api/auth/callback?app=<slug>` or the frontend's host with the same path when that host routes `/api` to the disciple. `cookie_domain` and `cookie_same_site` set its session cookies: host only or a shared parent domain, and `none` when the frontend calls the disciple from another site. Every origin among its redirect URIs is allowed by `smw.GetOriginAllowed` in the disciple's CORS, and `smw.InitiateMiddleware` keeps a refresh on the same cookie settings.
 
 ## Which apps a write belongs to
 

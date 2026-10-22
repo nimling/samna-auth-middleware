@@ -1,5 +1,5 @@
 ---
-gate: auth-middleware
+gate: samna-developer
 layout: doc
 title: Objects
 description: What an object is to claimius, how an implementing side registers its tables with upsert_table_info, the sa_* columns and table_info, the inheritance_info closure with its row counts and the rows each write moves, object_info written once per object, and why the closure is a table.

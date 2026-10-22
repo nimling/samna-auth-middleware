@@ -1,5 +1,5 @@
 ---
-gate: auth-middleware
+gate: samna-developer
 layout: doc
 title: Assets
 description: The shared link from an asset to a claimius object, object_asset, which apps it is published to, how a link is read and written, and how a file is fetched end to end through the prophet without any hop keeping or inventing freshness.

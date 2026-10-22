@@ -1,5 +1,5 @@
 ---
-gate: auth-middleware
+gate: samna-developer
 layout: doc
 title: Usage
 description: What claimius records about how its objects and apps are used, the per pair count of checks with its decay and where it is read, the per user relations, and the prophet's consent gated capture of sessions and events folded into a heat grid, with the rows each step reads and writes.

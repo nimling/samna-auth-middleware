@@ -12,9 +12,16 @@ type (
 	ClaimAccess              = shared.ClaimAccess
 	ClaimObject              = shared.ClaimObject
 	ClaimType                = shared.ClaimType
+	Code                     = shared.Code
+	CodeAccess               = shared.CodeAccess
+	CodeCreated              = shared.CodeCreated
+	CodeKind                 = shared.CodeKind
+	BodyCode                 = shared.BodyCode
+	BodyClaimGuest           = shared.BodyClaimGuest
 	CreateClaimParams        = shared.CreateClaimParams
 	CreateVirtualClaimParams = shared.CreateVirtualClaimParams
 	Creator                  = shared.Creator
+	GuestMode                = shared.GuestMode
 	Descendant               = shared.Descendant
 	GrantFilters             = shared.GrantFilters
 	GraphNode                = shared.GraphNode
@@ -50,6 +57,14 @@ const (
 	CLAIM_TYPE_SYSTEM         = shared.CLAIM_TYPE_SYSTEM
 	CLAIM_TYPE_USER           = shared.CLAIM_TYPE_USER
 	CLAIM_TYPE_VIRTUAL        = shared.CLAIM_TYPE_VIRTUAL
+	CODE_KIND_GUEST           = shared.CODE_KIND_GUEST
+	CODE_KIND_INVITE          = shared.CODE_KIND_INVITE
+	CodeParam                 = shared.CodeParam
+	CodeHeader                = shared.CodeHeader
+	GUEST_MODE_CODE           = shared.GUEST_MODE_CODE
+	GUEST_MODE_OFF            = shared.GUEST_MODE_OFF
+	GUEST_MODE_OPEN           = shared.GUEST_MODE_OPEN
+	OBJECT_TYPE_CODE          = shared.OBJECT_TYPE_CODE
 	OBJECT_TYPE_CLAIM         = shared.OBJECT_TYPE_CLAIM
 	OBJECT_TYPE_CLAIM_OBJECT  = shared.OBJECT_TYPE_CLAIM_OBJECT
 	OBJECT_TYPE_LOCATION      = shared.OBJECT_TYPE_LOCATION
@@ -68,6 +83,12 @@ const (
 var (
 	AuditWhere           = shared.AuditWhere
 	ClaimWhere           = shared.ClaimWhere
+	AnonymousUserID      = shared.AnonymousUserID
+	ErrBadCode           = shared.ErrBadCode
+	ErrCodeInvalid       = shared.ErrCodeInvalid
+	GetCodeHash          = shared.GetCodeHash
+	GetCodeURL           = shared.GetCodeURL
+	GetCodeValue         = shared.GetCodeValue
 	ErrNoAccess          = shared.ErrNoAccess
 	ErrNotFound          = shared.ErrNotFound
 	ErrRootConflict      = shared.ErrRootConflict

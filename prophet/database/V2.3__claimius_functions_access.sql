@@ -173,13 +173,23 @@ DECLARE
 BEGIN
     PERFORM claimius._retree_object(v_object_type, (coalesce(NEW, OLD)).id, to_jsonb(OLD), to_jsonb(NEW));
     IF v_object_type = 'claimius.samna_app' THEN
+        IF TG_OP = 'INSERT' AND NEW.sa_deleted_at IS NULL THEN
+            INSERT INTO claimius.inheritance_info (tree_type, root_id, ancestor_type, ancestor_id, descendant_type, descendant_id, depth)
+            VALUES ('parenthood', NEW.sa_root_id, v_object_type, NEW.id, v_object_type, NEW.id, 0)
+            ON CONFLICT DO NOTHING;
+            IF NEW.sa_parent_id <> NEW.id THEN
+                PERFORM claimius._splice_subtree('parenthood', v_object_type, NEW.id, NEW.sa_root_id, NEW.sa_parent_id);
+            END IF;
+        ELSIF TG_OP <> 'INSERT' AND OLD.sa_deleted_at IS NULL AND (TG_OP = 'DELETE' OR NEW.sa_deleted_at IS NOT NULL) THEN
+            PERFORM claimius._splice_subtree('parenthood', v_object_type, OLD.id, OLD.sa_root_id, NULL);
+        END IF;
         PERFORM claimius._write_object_info(v_object_type, ARRAY[(coalesce(NEW, OLD)).id]);
     END IF;
     RETURN coalesce(NEW, OLD);
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius.calc_object_trees() IS 'Trigger on owned tables outside the access targets. Maintains their closure rows, and the object_info row of a samna_app so the app as an object has one.';
+COMMENT ON FUNCTION claimius.calc_object_trees() IS 'Trigger on owned tables outside the access targets. Maintains their closure rows, and for a samna_app its parenthood closure under its root app and its object_info row so the app as an object has one.';
 
 CREATE OR REPLACE FUNCTION claimius.calc_hierarchical_access()
     RETURNS TRIGGER AS $$

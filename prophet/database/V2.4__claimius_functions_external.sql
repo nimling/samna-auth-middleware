@@ -20,9 +20,17 @@ CREATE OR REPLACE FUNCTION claimius.get_access(
                 ) AS $$
 DECLARE
     v_pair RECORD;
+    v_cap  INTEGER := ~0;
 BEGIN
     IF NOT claimius.check_user_active(p_app_id, p_user_id) THEN
         RETURN;
+    END IF;
+
+    IF EXISTS (SELECT 1 FROM claimius.samna_user u WHERE u.user_id = p_user_id AND u.app_id = p_app_id AND u.type = 'guest' AND u.sa_deleted_at IS NULL) THEN
+        IF (p_required_access & ~4) <> 0 THEN
+            RETURN;
+        END IF;
+        v_cap := 4;
     END IF;
 
     SELECT s.* INTO v_pair FROM claimius._settle_pair(p_app_id, p_user_id, p_object_type, p_object_id) s;
@@ -34,7 +42,7 @@ BEGIN
                 best.user_claim_id,
                 best.claim_id,
                 best.claim_name,
-                best.access_bits,
+                best.access_bits & v_cap,
                 v_pair.scope,
                 v_pair.sa_owner_id,
                 v_pair.sa_owner_root_id,
@@ -49,12 +57,12 @@ BEGIN
 
     IF NOT v_pair.settled THEN
         RETURN QUERY
-            SELECT * FROM claimius.get_direct_access(p_user_id, p_app_id, p_object_id, p_object_type, p_required_access, FALSE, FALSE);
+            SELECT d.user_object_id, d.user_claim_id, d.claim_id, d.claim_name, d.sa_access & v_cap, d.scope, d.sa_owner_id, d.sa_root_id, d.sa_location_id, d.direct_grant, d.level FROM claimius.get_direct_access(p_user_id, p_app_id, p_object_id, p_object_type, p_required_access, FALSE, FALSE) d;
     END IF;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = claimius, pg_temp;
 
-COMMENT ON FUNCTION claimius.get_access(UUID, UUID, UUID, TEXT, INTEGER) IS 'Strongest active claim based grant for one (user, app, object) whose mask covers p_required_access: the user row, then the point settle and the read of the pair with its object_info row in one pass through _settle_pair, and the grant chosen from the pair. Only when the settle was skipped on a lock and the pair gives nothing does it walk the ancestors through get_direct_access. user_claim_id is the actor token for follow-on writes. sa_root_id is the owning organization root, suitable for FK to claimius.organization on follow-on claim and claim_object writes.';
+COMMENT ON FUNCTION claimius.get_access(UUID, UUID, UUID, TEXT, INTEGER) IS 'Strongest active claim based grant for one (user, app, object) whose mask covers p_required_access: the user row, then the point settle and the read of the pair with its object_info row in one pass through _settle_pair, and the grant chosen from the pair. Only when the settle was skipped on a lock and the pair gives nothing does it walk the ancestors through get_direct_access. user_claim_id is the actor token for follow-on writes. sa_root_id is the owning organization root, suitable for FK to claimius.organization on follow-on claim and claim_object writes. A user of type guest is capped at READ: a requirement past READ answers nothing and the returned mask keeps the READ bit only.';
 
 DROP FUNCTION IF EXISTS claimius.get_direct_access(UUID, UUID, UUID, TEXT);
 
@@ -3254,6 +3262,7 @@ $$ LANGUAGE plpgsql;
 COMMENT ON FUNCTION claimius.upsert_prophet_peer(p_system_app_slug text, p_system_app_name text, p_system_app_private_key text, p_system_app_private_seed text, p_upstream_prophet text, p_upstream_endpoint text, p_upstream_app_slug text, p_upstream_app_secret text, p_upstream_peer_secret text, p_system_user_id uuid, p_system_app_redirect_uri text, p_system_app_sync_uri text, p_system_app_contact_email text, p_system_app_image text, p_system_app_provider_ids uuid[], p_system_app_style jsonb, p_system_app_description text, p_system_org_name text, p_system_claim_name text, p_system_claim_id uuid, p_default_claim jsonb) IS 'Bootstrap as a hybrid: a prophet mirroring one app of an upstream prophet registered as its peer.';
 
 DROP FUNCTION IF EXISTS claimius.create_app(uuid,text,text,uuid,text,text,text[],text,text,text,integer,jsonb,uuid);
+DROP FUNCTION IF EXISTS claimius.upsert_app(uuid,text,text,uuid,text,text,text[],text,text,text,integer,jsonb,uuid);
 CREATE OR REPLACE FUNCTION claimius.upsert_app(
     p_actor_user_claim_id UUID,
     p_slug                TEXT,
@@ -3267,11 +3276,13 @@ CREATE OR REPLACE FUNCTION claimius.upsert_app(
     p_connection          TEXT    DEFAULT 'code',
     p_owner_access        INTEGER DEFAULT 15,
     p_default_claim       JSONB   DEFAULT NULL,
-    p_app_id              UUID    DEFAULT NULL
+    p_app_id              UUID    DEFAULT NULL,
+    p_parent_id           UUID    DEFAULT NULL
 ) RETURNS JSONB AS $$
 DECLARE
     v_actor             claimius.user_claim;
     v_org               claimius.organization;
+    v_parent            claimius.samna_app;
     v_app               claimius.samna_app;
     v_claim_id          UUID;
     v_default_claim_id  UUID;
@@ -3292,13 +3303,25 @@ BEGIN
         RAISE EXCEPTION 'upsert_app: organization % not found', p_org_id USING ERRCODE = '22023';
     END IF;
 
+    IF p_parent_id IS NOT NULL THEN
+        SELECT * INTO v_parent
+        FROM claimius.samna_app
+        WHERE id = p_parent_id AND sa_deleted_at IS NULL;
+        IF NOT FOUND THEN
+            RAISE EXCEPTION 'upsert_app: parent app % not found', p_parent_id USING ERRCODE = '22023';
+        END IF;
+        IF v_parent.sa_owner_id <> v_org.id THEN
+            RAISE EXCEPTION 'upsert_app: parent app % is owned by organization %, not %', v_parent.slug, v_parent.sa_owner_id, v_org.id USING ERRCODE = '22023';
+        END IF;
+    END IF;
+
     INSERT INTO claimius.samna_app (
         id, slug, name, description, redirect_uris, sync_uri, status, connection,
-        private_key, private_seed, sa_owner_id, sa_created_by
+        private_key, private_seed, sa_owner_id, sa_created_by, sa_parent_id
     ) VALUES (
         coalesce(claimius.ensure_uuid_null(p_app_id), gen_random_uuid()), p_slug, p_name, p_description,
         p_redirect_uris, p_sync_uri, 'active', p_connection::claimius.app_connection,
-        p_private_key, p_private_seed, v_org.id, p_actor_user_claim_id
+        p_private_key, p_private_seed, v_org.id, p_actor_user_claim_id, p_parent_id
     )
     ON CONFLICT (slug) DO UPDATE SET
         name          = EXCLUDED.name,
@@ -3313,6 +3336,13 @@ BEGIN
 
     IF v_app.sa_owner_id <> v_org.id THEN
         RAISE EXCEPTION 'upsert_app: app % is owned by organization %, not %', p_slug, v_app.sa_owner_id, v_org.id USING ERRCODE = '22023';
+    END IF;
+    IF v_app.sa_parent_id <> coalesce(p_parent_id, v_app.id) THEN
+        RAISE EXCEPTION 'upsert_app: app % has parent %, not %', p_slug, v_app.sa_parent_id, coalesce(p_parent_id, v_app.id) USING ERRCODE = '22023';
+    END IF;
+
+    IF p_parent_id IS NOT NULL THEN
+        RETURN jsonb_build_object('samna_app', to_jsonb(v_app));
     END IF;
 
     INSERT INTO claimius.prophet_state (app_id, last_applied_seq)
@@ -3486,7 +3516,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius.upsert_app(UUID, TEXT, TEXT, UUID, TEXT, TEXT, TEXT[], TEXT, TEXT, TEXT, INTEGER, JSONB, UUID) IS 'Registers a new app on an existing prophet, owned by an existing organization the actor holds owner on in its own app. Every row is stamped with the actor''s user_claim.id. Links the organization tree, creates and binds the owner claim and grants it to the actor''s user in the app, and creates and binds the default claim. Idempotent on slug. Returns jsonb keyed by table.';
+COMMENT ON FUNCTION claimius.upsert_app(UUID, TEXT, TEXT, UUID, TEXT, TEXT, TEXT[], TEXT, TEXT, TEXT, INTEGER, JSONB, UUID, UUID) IS 'Registers a new app on an existing prophet, owned by an existing organization the actor holds owner on in its own app. Every row is stamped with the actor''s user_claim.id. Links the organization tree, creates and binds the owner claim and grants it to the actor''s user in the app, and creates and binds the default claim. With p_parent_id it registers an Initiate app of that parent, owned by the same organization, and creates nothing else: users, claims, organizations and the sync resolve on the root. Idempotent on slug; never reparents. Returns jsonb keyed by table.';
 
 DROP FUNCTION IF EXISTS claimius.ensure_app_user(UUID, UUID, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT);
 DROP FUNCTION IF EXISTS claimius.ensure_app_user(UUID, UUID, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT);
@@ -4439,7 +4469,7 @@ DECLARE
     v_n     BIGINT;
 BEGIN
     FOREACH v_table IN ARRAY ARRAY['samna_user', 'claim', 'user_claim', 'claim_object', 'samna_client',
-                                   'samna_secret', 'object_field', 'user_field', 'user_relation'] LOOP
+                                   'samna_secret', 'object_field', 'user_field', 'user_relation', 'code'] LOOP
         EXIT WHEN p_limit IS NOT NULL AND v_total >= p_limit;
         EXECUTE format('SELECT count(*) FROM (SELECT 1 FROM claimius.%I WHERE app_id = $1 LIMIT $2) t', v_table)
             INTO v_n USING p_app_id, p_limit - v_total;
@@ -4734,7 +4764,7 @@ BEGIN
     IF p_event_type NOT IN ('claimius.samna_app', 'claimius.app_handover', 'claimius.organization', 'claimius.location',
                             'claimius.samna_user', 'claimius.claim', 'claimius.user_claim', 'claimius.claim_object',
                             'claimius.samna_client', 'claimius.samna_secret', 'claimius.object_field',
-                            'claimius.user_field', 'claimius.user_relation', 'claimius.object_asset') THEN
+                            'claimius.user_field', 'claimius.user_relation', 'claimius.object_asset', 'claimius.code') THEN
         RAISE EXCEPTION 'apply_peer_event: unknown event type %', p_event_type;
     END IF;
     IF p_operation NOT IN ('upsert', 'delete') THEN
@@ -5004,3 +5034,257 @@ END;
 $$ LANGUAGE plpgsql;
 
 COMMENT ON FUNCTION claimius.upsert_guest_user(UUID, UUID, UUID, UUID) IS 'Ensures the guest user of a claim in an app, a samna_user of type guest, and its grant of the claim, made under the grant by which the actor owns the claim. The guest and its grant are written on the prophet, which alone signs the guest token, and reach the app''s disciples through the feed. Raises P0404 for a claim outside the app and P0403 when the actor does not own it. Returns samna_user and user_claim.';
+
+CREATE OR REPLACE FUNCTION claimius._check_code_owner(
+    p_app_id        UUID,
+    p_claim_id      UUID,
+    p_actor_user_id UUID
+) RETURNS UUID AS $$
+DECLARE
+    v_actor_uc UUID;
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM claimius.claim
+        WHERE id = p_claim_id AND app_id = p_app_id AND sa_deleted_at IS NULL
+    ) THEN
+        RAISE EXCEPTION 'claim % not found in the app', p_claim_id USING ERRCODE = 'P0404';
+    END IF;
+
+    SELECT a.user_claim_id INTO v_actor_uc
+      FROM claimius.get_access(p_actor_user_id, p_app_id, p_claim_id, 'claimius.claim', 1) a
+     LIMIT 1;
+    IF v_actor_uc IS NULL THEN
+        SELECT a.user_claim_id INTO v_actor_uc
+          FROM claimius.get_direct_access(p_actor_user_id, p_app_id, p_claim_id, 'claimius.claim', 1) a
+         LIMIT 1;
+    END IF;
+    IF v_actor_uc IS NULL THEN
+        RAISE EXCEPTION 'the actor does not own claim %', p_claim_id USING ERRCODE = 'P0403';
+    END IF;
+    RETURN v_actor_uc;
+END;
+$$ LANGUAGE plpgsql;
+
+COMMENT ON FUNCTION claimius._check_code_owner(UUID, UUID, UUID) IS 'The grant by which the actor owns a claim of the app, the check every code and guest write runs. Raises P0404 for a claim outside the app and P0403 when the actor does not own it.';
+
+CREATE OR REPLACE FUNCTION claimius.update_claim_guest(
+    p_app_id        UUID,
+    p_claim_id      UUID,
+    p_actor_user_id UUID,
+    p_guest_user_id UUID,
+    p_mode          TEXT
+) RETURNS JSONB AS $$
+DECLARE
+    v_guest JSONB;
+    v_claim claimius.claim;
+BEGIN
+    IF p_mode NOT IN ('open', 'code', 'off') THEN
+        RAISE EXCEPTION 'update_claim_guest: unknown mode %', p_mode USING ERRCODE = '22023';
+    END IF;
+    PERFORM claimius._check_code_owner(p_app_id, p_claim_id, p_actor_user_id);
+
+    v_guest := claimius.upsert_guest_user(p_app_id, p_claim_id, p_actor_user_id, p_guest_user_id);
+
+    UPDATE claimius.claim SET guest_mode = p_mode
+     WHERE id = p_claim_id AND app_id = p_app_id
+    RETURNING * INTO v_claim;
+
+    RETURN v_guest || jsonb_build_object('claim', to_jsonb(v_claim) - 'txid');
+END;
+$$ LANGUAGE plpgsql;
+
+COMMENT ON FUNCTION claimius.update_claim_guest(UUID, UUID, UUID, UUID, TEXT) IS 'Makes a claim a guest claim: ensures its guest and the guest''s grant through upsert_guest_user and sets guest_mode to open, code or off. off leaves the guest and its grant in place and only stops open and code resolution. Raises P0404 for a claim outside the app, P0403 when the actor does not own it and 22023 for an unknown mode. Returns claim, samna_user and user_claim.';
+
+CREATE OR REPLACE FUNCTION claimius.insert_code(
+    p_app_id        UUID,
+    p_actor_user_id UUID,
+    p_claim_id      UUID,
+    p_hash          TEXT,
+    p_kind          TEXT,
+    p_object_id     UUID DEFAULT NULL,
+    p_object_type   TEXT DEFAULT NULL,
+    p_data          JSONB DEFAULT NULL,
+    p_starts_at     TIMESTAMPTZ DEFAULT NULL,
+    p_ends_at       TIMESTAMPTZ DEFAULT NULL,
+    p_count         INTEGER DEFAULT 0
+) RETURNS JSONB AS $$
+DECLARE
+    v_actor_uc UUID;
+    v_claim    claimius.claim;
+    v_row      claimius.code;
+BEGIN
+    IF p_hash IS NULL OR p_hash !~ '^[0-9a-f]{64}$' THEN
+        RAISE EXCEPTION 'insert_code: the hash must be 64 lowercase hex characters' USING ERRCODE = '22023';
+    END IF;
+    IF p_starts_at IS NOT NULL AND p_ends_at IS NOT NULL AND p_ends_at <= p_starts_at THEN
+        RAISE EXCEPTION 'insert_code: ends_at must follow starts_at' USING ERRCODE = '22023';
+    END IF;
+    v_actor_uc := claimius._check_code_owner(p_app_id, p_claim_id, p_actor_user_id);
+
+    SELECT * INTO v_claim FROM claimius.claim WHERE id = p_claim_id;
+    IF p_kind = 'guest' AND v_claim.guest_mode = 'off' THEN
+        RAISE EXCEPTION 'insert_code: claim % is not a guest claim', p_claim_id USING ERRCODE = '22023';
+    END IF;
+
+    INSERT INTO claimius.code (app_id, hash, kind, claim_id, object_id, object_type, data,
+                               starts_at, ends_at, count, sa_owner_id, sa_created_by)
+    VALUES (p_app_id, p_hash, p_kind, p_claim_id, p_object_id, p_object_type, coalesce(p_data, '{}'::JSONB),
+            p_starts_at, p_ends_at, coalesce(p_count, 0), v_claim.sa_owner_id, v_actor_uc)
+    RETURNING * INTO v_row;
+
+    PERFORM claimius.insert_audit(p_app_id, 'insert code', 'create', 'claimius.claim', v_row.claim_id,
+                                  v_claim.sa_owner_id, v_actor_uc,
+                                  format('%s code %s on claim %s', p_kind, v_row.id, p_claim_id));
+
+    RETURN jsonb_build_object('code', to_jsonb(v_row));
+END;
+$$ LANGUAGE plpgsql;
+
+COMMENT ON FUNCTION claimius.insert_code(UUID, UUID, UUID, TEXT, TEXT, UUID, TEXT, JSONB, TIMESTAMPTZ, TIMESTAMPTZ, INTEGER) IS 'Stores an access code of a claim by the SHA-256 of its value, never the value, made under the grant by which the actor owns the claim. A guest code needs a claim whose guest_mode is not off. Raises P0404 for a claim outside the app, P0403 when the actor does not own it and 22023 for a malformed hash, window or kind. Returns code.';
+
+CREATE OR REPLACE FUNCTION claimius.delete_code(
+    p_app_id        UUID,
+    p_actor_user_id UUID,
+    p_code_id       UUID
+) RETURNS JSONB AS $$
+DECLARE
+    v_row      claimius.code;
+    v_actor_uc UUID;
+BEGIN
+    SELECT * INTO v_row FROM claimius.code
+     WHERE id = p_code_id AND app_id = p_app_id AND sa_deleted_at IS NULL;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'code % not found in the app', p_code_id USING ERRCODE = 'P0404';
+    END IF;
+    v_actor_uc := claimius._check_code_owner(p_app_id, v_row.claim_id, p_actor_user_id);
+
+    UPDATE claimius.code SET revoked_at = coalesce(revoked_at, now())
+     WHERE id = p_code_id
+    RETURNING * INTO v_row;
+
+    PERFORM claimius.insert_audit(p_app_id, 'revoke code', 'delete', 'claimius.claim', v_row.claim_id,
+                                  v_row.sa_owner_id, v_actor_uc,
+                                  format('%s code %s on claim %s', v_row.kind, v_row.id, v_row.claim_id));
+
+    RETURN jsonb_build_object('code', to_jsonb(v_row));
+END;
+$$ LANGUAGE plpgsql;
+
+COMMENT ON FUNCTION claimius.delete_code(UUID, UUID, UUID) IS 'Revokes a code: sets revoked_at, after which it never resolves, on the prophet and on every disciple once the feed carries the row. The row stays for the owners of the claim to list. Raises P0404 for an unknown code and P0403 when the actor does not own its claim. Returns code.';
+
+CREATE OR REPLACE FUNCTION claimius.get_codes(
+    p_app_id   UUID,
+    p_claim_id UUID
+) RETURNS SETOF claimius.code AS $$
+    SELECT *
+    FROM claimius.code
+    WHERE (p_app_id IS NULL OR app_id = p_app_id)
+      AND (p_claim_id IS NULL OR claim_id = p_claim_id)
+      AND sa_deleted_at IS NULL
+    ORDER BY sa_created_at DESC, id
+$$ LANGUAGE sql STABLE;
+
+COMMENT ON FUNCTION claimius.get_codes(UUID, UUID) IS 'The codes of one claim of the app, revoked ones included, newest first; a NULL claim lists every code of the app and a NULL app every code of the claim, or of the prophet. The caller checks the reader owns each claim.';
+
+CREATE OR REPLACE FUNCTION claimius.get_code(
+    p_app_id UUID,
+    p_hash   TEXT
+) RETURNS JSONB AS $$
+    SELECT to_jsonb(c) || jsonb_build_object(
+               'guest_mode', cl.guest_mode,
+               'guest_user_id', g.user_id,
+               'guest_user_claim_id', g.id)
+    FROM claimius.code c
+    JOIN claimius.claim cl ON cl.id = c.claim_id AND cl.sa_deleted_at IS NULL
+    LEFT JOIN LATERAL (
+        SELECT uc.id, uc.user_id
+          FROM claimius.user_claim uc
+          JOIN claimius.samna_user u ON u.user_id = uc.user_id AND u.app_id = uc.app_id
+         WHERE uc.claim_id = c.claim_id
+                 AND uc.app_id = c.app_id
+           AND uc.sa_deleted_at IS NULL
+           AND u.type = 'guest'
+           AND u.sa_deleted_at IS NULL
+         ORDER BY uc.sa_created_at
+         LIMIT 1
+    ) g ON TRUE
+    WHERE (p_app_id IS NULL OR c.app_id = p_app_id)
+      AND c.hash = p_hash
+      AND c.sa_deleted_at IS NULL
+$$ LANGUAGE sql STABLE;
+
+COMMENT ON FUNCTION claimius.get_code(UUID, TEXT) IS 'The code whose value hashes to p_hash, in the app or in any app when p_app_id is NULL, as JSON with its app_id, with guest_mode, the mode of its claim, and guest_user_id and guest_user_claim_id, the guest holding the claim and its grant, or NULL. The window, the count and revoked_at are the caller''s to check; update_code_used and redeem_code check them again atomically.';
+
+CREATE OR REPLACE FUNCTION claimius.update_code_used(
+    p_app_id UUID,
+    p_hash   TEXT
+) RETURNS SETOF claimius.code AS $$
+    UPDATE claimius.code
+       SET used_count = used_count + 1
+     WHERE app_id = p_app_id
+       AND hash = p_hash
+       AND sa_deleted_at IS NULL
+       AND revoked_at IS NULL
+       AND (starts_at IS NULL OR starts_at <= now())
+       AND (ends_at IS NULL OR ends_at > now())
+       AND (count = 0 OR used_count < count)
+    RETURNING *
+$$ LANGUAGE sql;
+
+COMMENT ON FUNCTION claimius.update_code_used(UUID, TEXT) IS 'Takes one use of a live code in one statement: no row when the code is unknown, revoked, outside its window or used up, so two concurrent uses of the last one never both pass.';
+
+CREATE OR REPLACE FUNCTION claimius.redeem_code(
+    p_app_id  UUID,
+    p_hash    TEXT,
+    p_user_id UUID
+) RETURNS JSONB AS $$
+DECLARE
+    v_code  claimius.code;
+    v_grant claimius.user_claim;
+BEGIN
+    SELECT * INTO v_code FROM claimius.code
+     WHERE (p_app_id IS NULL OR app_id = p_app_id) AND hash = p_hash AND sa_deleted_at IS NULL
+     FOR UPDATE;
+    IF NOT FOUND OR v_code.kind <> 'invite' THEN
+        RAISE EXCEPTION 'redeem_code: no invite code' USING ERRCODE = 'P0404';
+    END IF;
+
+    SELECT * INTO v_grant FROM claimius.user_claim
+     WHERE app_id = v_code.app_id AND claim_id = v_code.claim_id AND user_id = p_user_id AND sa_deleted_at IS NULL
+     LIMIT 1;
+    IF FOUND THEN
+        RETURN jsonb_build_object('code', to_jsonb(v_code), 'user_claim', to_jsonb(v_grant) - 'txid');
+    END IF;
+
+    UPDATE claimius.code
+       SET used_count = used_count + 1
+     WHERE id = v_code.id
+       AND revoked_at IS NULL
+       AND (starts_at IS NULL OR starts_at <= now())
+       AND (ends_at IS NULL OR ends_at > now())
+       AND (count = 0 OR used_count < count)
+    RETURNING * INTO v_code;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'redeem_code: the code is revoked, outside its window or used up' USING ERRCODE = 'P0403';
+    END IF;
+
+    v_grant := jsonb_populate_record(NULL::claimius.user_claim, claimius.insert_user_claim(
+        p_app_id        => v_code.app_id,
+        p_claim_id      => v_code.claim_id,
+        p_user_id       => p_user_id,
+        p_sa_owner_id   => v_code.sa_owner_id,
+        p_sa_created_by => v_code.sa_created_by,
+        p_reason        => format('invite code %s', v_code.id),
+        p_starts_at     => v_code.starts_at,
+        p_ends_at       => v_code.ends_at
+    ) -> 'user_claim');
+
+    PERFORM claimius.insert_audit(v_code.app_id, 'redeem code', 'update', 'claimius.claim', v_code.claim_id,
+                                  v_code.sa_owner_id, v_grant.id,
+                                  format('invite code %s on claim %s redeemed by %s', v_code.id, v_code.claim_id, p_user_id));
+
+    RETURN jsonb_build_object('code', to_jsonb(v_code), 'user_claim', to_jsonb(v_grant) - 'txid');
+END;
+$$ LANGUAGE plpgsql;
+
+COMMENT ON FUNCTION claimius.redeem_code(UUID, TEXT, UUID) IS 'Redeems an invite code for a signed in user in one transaction, in the app or in any app when p_app_id is NULL: locks the code, takes one use only when it is live and not used up, and grants its claim to the user under the creator''s grant, the code window as the grant window, with an audit row naming the code id, never the value. A user already holding the claim gets the grant back and spends no use. Raises P0404 for no invite code and P0403 for one revoked, outside its window or used up. Returns code and user_claim.';
