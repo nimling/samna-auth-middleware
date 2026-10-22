@@ -1,5 +1,5 @@
 ---
-gate: auth-middleware
+gate: samna-developer
 layout: doc
 title: Security
 description: The four roles and their grants per role, read functions that run as their owner, secrets under the app seed and the credential cache, the unlogged token tables, soft delete, and what a compromised disciple can and cannot do.

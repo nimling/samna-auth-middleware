@@ -1,5 +1,5 @@
 ---
-gate: auth-middleware
+gate: samna-developer
 layout: doc
 title: Sync
 description: The outbox of source rows a prophet writes, the (txid, seq) cursor served below the snapshot xmin, pages applied whole by one consumer per database, per consumer cursors and trimming capped at the source rows, and the cursor as the consistency token, in events and rows as functions of the data.

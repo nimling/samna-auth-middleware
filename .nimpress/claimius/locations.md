@@ -1,5 +1,5 @@
 ---
-gate: auth-middleware
+gate: samna-developer
 layout: doc
 title: Locations
 description: The location tree, how a row pins into it with sa_location_id, how a location is also a node of its owner's ownership tree, and the closure rows each location write inserts and deletes.

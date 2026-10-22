@@ -1,5 +1,5 @@
 ---
-gate: auth-middleware
+gate: samna-developer
 layout: doc
 title: Sync in Go
 description: The /sam/sync routes on the prophet, the pull loop SyncStart on the disciple under one leader per database, pages applied in one transaction, binding to one prophet, the peer pull, reconciling from a snapshot, and the drain between pulls.

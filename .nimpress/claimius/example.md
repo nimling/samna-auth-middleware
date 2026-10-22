@@ -1,5 +1,5 @@
 ---
-gate: auth-middleware
+gate: samna-developer
 layout: doc
 title: A worked example
 description: The organization and claim tree live on the tst and prd prophets, Samna Auth, Samna, Nimtech, Executive and Consult, as the worked example of organizations, claims, claim objects, scopes and inheritance, and how each claim reaches a disciple.

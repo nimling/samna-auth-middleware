@@ -1,5 +1,5 @@
 ---
-gate: auth-middleware
+gate: samna-developer
 layout: doc
 title: Denials
 description: Deny claims, the two deny classes, the subtraction _apply_denies computes over the derivations of one pair, closure under implication, denies scoped to fields, what a creator keeps, and a worked scenario of an organization admin with a denied branch.

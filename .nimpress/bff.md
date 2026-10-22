@@ -3,7 +3,7 @@ layout: doc
 title: BFF
 description: The sauth-bff binary that sits in front of a static site, runs the login against Samna Auth, holds the session in cookies and gates the pages the site marks guarded.
 tags: bff, sauth-bff, login, session, handoff, cookies, nimpress guard, static site
-gate: auth-middleware
+gate: samna-developer
 lastUpdated: true
 ---
 
