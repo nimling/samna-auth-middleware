@@ -38,6 +38,8 @@ type runner struct {
 var (
 	runMu sync.Mutex
 	run   *runner
+
+	serveCtx, EndStreams = context.WithCancel(context.Background())
 )
 
 func Init(ctx context.Context) error {

@@ -40,6 +40,8 @@ func Stream(ctx echo.Context, userID uuid.UUID) error {
 			return nil
 		case <-r.stop:
 			return nil
+		case <-serveCtx.Done():
+			return nil
 		case msg, ok := <-client.Send:
 			if !ok {
 				return nil

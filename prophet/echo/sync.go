@@ -24,6 +24,8 @@ const (
 	syncRetry   = 100 * time.Millisecond
 )
 
+var serveCtx, EndStreams = context.WithCancel(context.Background())
+
 type SyncPayload struct {
 	client.SyncCursor
 	Operation string          `json:"operation"`
@@ -292,6 +294,8 @@ func getSyncPage(ctx context.Context, d *shared.DB, appID uuid.UUID, seq client.
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		case <-deadline.C:
+			return events, nil
+		case <-serveCtx.Done():
 			return events, nil
 		case n := <-wake:
 			if n == nil || n.Extra == appID.String() {

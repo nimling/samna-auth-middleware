@@ -251,3 +251,25 @@ func TestAppHomeRefusesAWriteForAnAppAnotherProphetDecides(t *testing.T) {
 		t.Fatal("a write for an app decided here must pass")
 	}
 }
+
+func TestEndStreamsAnswersAHeldPullAtOnce(t *testing.T) {
+	appID, _ := getGrantFixture(t)
+	answered := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		answered <- getSyncPage(appID, getAppHead(t, appID), "wait=20")
+	}()
+	select {
+	case rec := <-answered:
+		t.Fatalf("the pull answered before EndStreams: %d %s", rec.Code, rec.Body.String())
+	case <-time.After(500 * time.Millisecond):
+	}
+	pecho.EndStreams()
+	select {
+	case rec := <-answered:
+		if rec.Code != http.StatusOK || len(getPageSeqs(t, rec)) != 0 {
+			t.Fatalf("an ended pull must answer empty: %d %s", rec.Code, rec.Body.String())
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatalf("the held pull is still waiting 2s after EndStreams")
+	}
+}
