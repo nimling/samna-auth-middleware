@@ -27,7 +27,7 @@ var (
 )
 
 func GetAssetData(ctx echo.Context) error {
-	var source func(context.Context, uuid.UUID) (*sdb.AssetResponse, error)
+	var source func(context.Context, uuid.UUID) (*shared.AssetResponse, error)
 	if db := sdb.Instance(); db != nil {
 		source = db.AssetSource
 	}
@@ -47,7 +47,7 @@ func GetObjectAssetData(ctx echo.Context, linkID uuid.UUID) error {
 	return getProphetAssetData(ctx, linkID, db.AssetCache)
 }
 
-func getAssetData(ctx echo.Context, source func(context.Context, uuid.UUID) (*sdb.AssetResponse, error)) error {
+func getAssetData(ctx echo.Context, source func(context.Context, uuid.UUID) (*shared.AssetResponse, error)) error {
 	if err := getProphetToken(ctx.Request()); err != nil {
 		ctx.Logger().Warnf("asset data: %v", err)
 		return respondError(ctx, http.StatusUnauthorized, "Unauthorized")
@@ -114,7 +114,7 @@ func getProphetKeys(jwksURL string) (jwt.Keyfunc, error) {
 	return k.Keyfunc, nil
 }
 
-func getProphetAssetData(ctx echo.Context, linkID uuid.UUID, cache sdb.AssetCache) error {
+func getProphetAssetData(ctx echo.Context, linkID uuid.UUID, cache shared.AssetCache) error {
 	reqCtx := ctx.Request().Context()
 	conditional := http.Header{}
 	for _, name := range client.ConditionalHeaders {
@@ -171,7 +171,7 @@ func getProphetAssetData(ctx echo.Context, linkID uuid.UUID, cache sdb.AssetCach
 	return putProphetResponse(ctx, linkID, cache, resp)
 }
 
-func putProphetResponse(ctx echo.Context, linkID uuid.UUID, cache sdb.AssetCache, resp *http.Response) error {
+func putProphetResponse(ctx echo.Context, linkID uuid.UUID, cache shared.AssetCache, resp *http.Response) error {
 	defer resp.Body.Close()
 	for _, name := range client.AssetHeaders {
 		if v := resp.Header.Get(name); v != "" {
@@ -213,7 +213,7 @@ func putProphetError(ctx echo.Context, err error) error {
 	return respondError(ctx, http.StatusBadGateway, "Bad gateway")
 }
 
-func putAssetResponse(ctx echo.Context, res *sdb.AssetResponse, conditional http.Header) error {
+func putAssetResponse(ctx echo.Context, res *shared.AssetResponse, conditional http.Header) error {
 	if res.Body != nil {
 		defer res.Body.Close()
 	}

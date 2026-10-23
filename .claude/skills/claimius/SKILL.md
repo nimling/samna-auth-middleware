@@ -121,7 +121,7 @@ WHERE id = :recipe_id;
 2. On a disciple write it through the builder, `NewInsert().Model(&shared.ObjectAsset{...}).Access(ac)` with `ac` WRITE on the object, self for the actor's own user. The prophet checks WRITE again and stamps owner and grant; a link on the actor's own user takes its default claim grant in the home app and is refused without one.
 3. On the prophet insert, update or soft delete it directly with `app_id` the home app.
 4. Read with `get_object_assets`, in Go `GetObjectAssets(ctx, user, type, id, kind)` and `GetObjectAsset(ctx, user, linkID)`; never SELECT the table to decide what a user sees.
-5. Serve the file from the own route with `disciple/echo.GetObjectAssetData(ctx, linkID)`, which fetches through the prophet; hand the middleware the storage as `sdb.Options.AssetSource` at `sdb.Init`, optionally an `AssetCache`. `Content-Type`, `Content-Length`, `ETag`, `Last-Modified` and `Cache-Control` pass through untouched. Long form: `samna_auth_middleware/.nimpress/claimius/assets.md`.
+5. Serve the file from the own route with `disciple/echo.GetObjectAssetData(ctx, linkID)`, which fetches through the prophet; hand the middleware the storage as `shared.Options.AssetSource` at `sdb.Init`, optionally an `AssetCache`. `Content-Type`, `Content-Length`, `ETag`, `Last-Modified` and `Cache-Control` pass through untouched. Long form: `samna_auth_middleware/.nimpress/claimius/assets.md`.
 
 ## A registered application table
 

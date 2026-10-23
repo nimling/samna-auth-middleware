@@ -154,7 +154,7 @@ func serveGuestCode(ctx echo.Context, access *shared.CodeAccess, value string, s
 	ctx.Set(CodeKey, access)
 	if !authenticated {
 		ctx.Set(UserIDKey, *access.GuestUserID)
-		if err := shared.WriteAudit(reqCtx, sdb.Instance().DB.DB, nil, "guest request", "read", shared.OBJECT_TYPE_CLAIM,
+		if err := shared.WriteAudit(reqCtx, sdb.Instance().DB, nil, "guest request", "read", shared.OBJECT_TYPE_CLAIM,
 			access.ClaimID, access.OwnerID, access.GuestUserClaimID,
 			fmt.Sprintf("guest of claim %s with code %s: %s %s", access.ClaimID, access.ID, ctx.Request().Method, ctx.Request().URL.Path)); err != nil {
 			ctx.Logger().Errorf("audit guest request on code %s: %v", access.ID, err)

@@ -37,7 +37,7 @@ type Replica struct {
 }
 
 func Disciple() *Replica {
-	return &Replica{DB: sdb.Instance().DB}
+	return &Replica{DB: sdb.Instance()}
 }
 
 type State struct {
@@ -68,7 +68,7 @@ func Init(ctx context.Context) error {
 	if shared.GetDebugMode() != shared.DebugModeNone {
 		return nil
 	}
-	db := sdb.Instance().DB
+	db := sdb.Instance()
 	r.run(func() { bindClient(ctx, Disciple(), leadInterval) })
 	r.run(func() { getAppSeed(ctx, db, leadInterval) })
 	r.run(func() { putInitiateApps(ctx, db, initiateInterval) })
