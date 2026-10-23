@@ -13,6 +13,7 @@ import (
 	"github.com/labstack/gommon/log"
 	"github.com/nimling/samna-auth-middleware/v2/client"
 	sdb "github.com/nimling/samna-auth-middleware/v2/disciple/sdb"
+	"github.com/nimling/samna-auth-middleware/v2/notification"
 	"github.com/nimling/samna-auth-middleware/v2/shared"
 	"github.com/nimling/samna-auth-middleware/v2/utils"
 	"github.com/uptrace/bun"
@@ -37,7 +38,7 @@ type Replica struct {
 }
 
 func Disciple() *Replica {
-	return &Replica{DB: sdb.Instance()}
+	return &Replica{DB: sdb.Instance().DB}
 }
 
 type State struct {
@@ -61,55 +62,22 @@ func Init(ctx context.Context) error {
 	if sdb.Instance() == nil {
 		return shared.ErrNotConnected
 	}
-	r, err := start(ctx, false)
+	db := sdb.Instance().DB
+	r, err := start(ctx)
 	if err != nil {
 		return err
 	}
+	if err := notification.Init(ctx, db); err != nil {
+		return err
+	}
+	r.run(func() { <-notification.Done() })
 	if shared.GetDebugMode() != shared.DebugModeNone {
 		return nil
 	}
-	db := sdb.Instance()
 	r.run(func() { bindClient(ctx, Disciple(), leadInterval) })
 	r.run(func() { getAppSeed(ctx, db, leadInterval) })
 	r.run(func() { putInitiateApps(ctx, db, initiateInterval) })
 	r.run(func() { shared.LeadSync(ctx, db, SyncLockKey(utils.Cfg().AppSlug), leadInterval, Disciple().Pull) })
-	return nil
-}
-
-func PeerInit(ctx context.Context) error {
-	db := shared.Instance()
-	if db == nil {
-		return shared.ErrNotConnected
-	}
-	r, err := start(ctx, true)
-	if err != nil {
-		return err
-	}
-	if shared.GetDebugMode() != shared.DebugModeNone {
-		return nil
-	}
-	r.run(func() {
-		started := make(map[uuid.UUID]bool)
-		for {
-			var peers []shared.ProphetPeer
-			if err := db.NewSelect().Model(&peers).Scan(ctx); err != nil && ctx.Err() == nil {
-				db.Logger.Errorf("peer sync: read prophet_peer: %v", err)
-			}
-			for i := range peers {
-				if started[peers[i].ID] {
-					continue
-				}
-				started[peers[i].ID] = true
-				replica := &Replica{DB: db, Peer: &peers[i]}
-				r.run(func() { shared.LeadSync(ctx, db, "claimius.prophet_peer:"+replica.Peer.ID.String(), leadInterval, replica.Pull) })
-			}
-			select {
-			case <-ctx.Done():
-				return
-			case <-time.After(leadInterval):
-			}
-		}
-	})
 	return nil
 }
 
@@ -409,10 +377,8 @@ var (
 )
 
 type runner struct {
-	wg     sync.WaitGroup
-	done   chan struct{}
-	synced bool
-	peered bool
+	wg   sync.WaitGroup
+	done chan struct{}
 }
 
 var (
@@ -420,26 +386,22 @@ var (
 	run   *runner
 )
 
-func start(ctx context.Context, peer bool) (*runner, error) {
+func start(ctx context.Context) (*runner, error) {
 	runMu.Lock()
 	defer runMu.Unlock()
-	if run == nil || run.ended() {
-		r := &runner{done: make(chan struct{})}
-		r.wg.Add(1)
-		go func() {
-			<-ctx.Done()
-			r.wg.Done()
-			r.wg.Wait()
-			close(r.done)
-		}()
-		run = r
-	}
-	if (peer && run.peered) || (!peer && run.synced) {
+	if run != nil && !run.ended() {
 		return nil, ErrStarted
 	}
-	run.peered = run.peered || peer
-	run.synced = run.synced || !peer
-	return run, nil
+	r := &runner{done: make(chan struct{})}
+	r.wg.Add(1)
+	go func() {
+		<-ctx.Done()
+		r.wg.Done()
+		r.wg.Wait()
+		close(r.done)
+	}()
+	run = r
+	return r, nil
 }
 
 func (r *runner) run(work func()) {

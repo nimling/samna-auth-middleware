@@ -101,8 +101,8 @@ reader → app /api/asset/:id/data → prophet /sam/object_asset/:id/data → ho
 The host registers both callbacks with its configuration:
 
 ```go
-db, err := sdb.Init(e.Logger, shared.Options{
-	AssetSource: func(ctx context.Context, assetID uuid.UUID) (*shared.AssetResponse, error) { ... },
+db, err := sdb.Init(e.Logger, sdb.Options{
+	AssetSource: func(ctx context.Context, assetID uuid.UUID) (*sdb.AssetResponse, error) { ... },
 	AssetCache:  cache,
 })
 ```

@@ -8,16 +8,19 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
+	sam "github.com/nimling/samna-auth-middleware/v2/disciple/sam"
 	sdb "github.com/nimling/samna-auth-middleware/v2/disciple/sdb"
 	"github.com/nimling/samna-auth-middleware/v2/notification"
 )
 
 func TestNotificationCancelDrainsTheQueueAndClosesDone(t *testing.T) {
+	t.Setenv("SAUTH_DEBUG_USER_ID", uuid.NewString())
 	db, err := sdb.Init(echo.New().Logger)
 	if err != nil {
 		t.Fatalf("connect: %v", err)
@@ -27,10 +30,10 @@ func TestNotificationCancelDrainsTheQueueAndClosesDone(t *testing.T) {
 		t.Fatalf("user: %v", err)
 	}
 	ctx, cancel := context.WithCancel(t.Context())
-	if err := notification.Init(ctx); err != nil {
+	if err := sam.Init(ctx); err != nil {
 		t.Fatalf("init: %v", err)
 	}
-	if err := notification.Init(ctx); !errors.Is(err, notification.ErrStarted) {
+	if err := sam.Init(ctx); !errors.Is(err, sam.ErrStarted) {
 		t.Fatalf("second init = %v, want ErrStarted", err)
 	}
 	const queued = 50
@@ -39,7 +42,7 @@ func TestNotificationCancelDrainsTheQueueAndClosesDone(t *testing.T) {
 	}
 	cancel()
 	select {
-	case <-notification.Done():
+	case <-sam.Done():
 	case <-time.After(15 * time.Second):
 		t.Fatalf("Done not closed after cancel")
 	}
@@ -57,20 +60,21 @@ func TestNotificationCancelDrainsTheQueueAndClosesDone(t *testing.T) {
 		t.Fatalf("a write after the end was written: %d", n)
 	}
 	again, stop := context.WithCancel(t.Context())
-	if err := notification.Init(again); err != nil {
+	if err := sam.Init(again); err != nil {
 		t.Fatalf("init after the end: %v", err)
 	}
 	stop()
-	<-notification.Done()
+	<-sam.Done()
 }
 
 func TestEndStreamsEndsAnOpenStreamBeforeTheRunnerEnds(t *testing.T) {
+	t.Setenv("SAUTH_DEBUG_USER_ID", uuid.NewString())
 	if _, err := sdb.Init(echo.New().Logger); err != nil {
 		t.Fatalf("connect: %v", err)
 	}
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
-	if err := notification.Init(ctx); err != nil {
+	if err := sam.Init(ctx); err != nil {
 		t.Fatalf("init: %v", err)
 	}
 	e := echo.New()
@@ -106,7 +110,7 @@ func TestEndStreamsEndsAnOpenStreamBeforeTheRunnerEnds(t *testing.T) {
 		t.Fatalf("the stream is still open 2s after EndStreams")
 	}
 	select {
-	case <-notification.Done():
+	case <-sam.Done():
 		t.Fatalf("the runner ended with the streams")
 	default:
 	}
@@ -116,5 +120,64 @@ func TestEndStreamsEndsAnOpenStreamBeforeTheRunnerEnds(t *testing.T) {
 		t.Fatalf("shutdown after EndStreams: %v after %s", err, time.Since(start))
 	}
 	cancel()
-	<-notification.Done()
+	<-sam.Done()
+}
+
+func TestDiscipleInitRunsSyncAndNotification(t *testing.T) {
+	t.Setenv("SAUTH_DEBUG_USER_ID", "")
+	t.Setenv("SAUTH_DEBUG_CLIENTS", "")
+	t.Setenv("SAUTH_ENDPOINT", "http://127.0.0.1:1")
+	t.Setenv("SAUTH_APP_SLUG", "gotest-disciple-"+uuid.NewString())
+	db, err := sdb.Init(echo.New().Logger)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	conn, err := db.Conn(t.Context())
+	if err != nil {
+		t.Fatalf("conn: %v", err)
+	}
+	defer conn.Close()
+	key := sam.SyncLockKey(os.Getenv("SAUTH_APP_SLUG"))
+	tryLock := func() bool {
+		var held bool
+		if err := conn.QueryRowContext(t.Context(), "SELECT pg_try_advisory_lock(hashtextextended(?, 0))", key).Scan(&held); err != nil {
+			t.Fatalf("try lock: %v", err)
+		}
+		if held {
+			if _, err := conn.ExecContext(t.Context(), "SELECT pg_advisory_unlock(hashtextextended(?, 0))", key); err != nil {
+				t.Fatalf("unlock: %v", err)
+			}
+		}
+		return held
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	if err := sam.Init(ctx); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for tryLock() {
+		if time.Now().After(deadline) {
+			t.Fatalf("the sync never took the leader lock")
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	select {
+	case <-notification.Done():
+		t.Fatalf("notification did not start with sam.Init")
+	default:
+	}
+	cancel()
+	select {
+	case <-sam.Done():
+	case <-time.After(15 * time.Second):
+		t.Fatalf("Done not closed after cancel")
+	}
+	select {
+	case <-notification.Done():
+	default:
+		t.Fatalf("sam.Done closed before notification ended")
+	}
+	if !tryLock() {
+		t.Fatalf("the sync kept the leader lock after the end")
+	}
 }

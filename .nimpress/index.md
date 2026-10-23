@@ -31,7 +31,7 @@ The prophet is the authority, and each app has one home prophet that decides its
 |---|---|---|---|
 | `sdb` | `prophet/sdb` | `disciple/sdb` | The database layer, the access lookups, the usage counter and the audit writer |
 | `echo` | `prophet/echo` | `disciple/echo` | The HTTP handlers |
-| `sam` | `prophet/sam` | `disciple/sam` | Route registration; the pull loop `sam.Init`, and on a prophet the peer pull `PeerInit` |
+| `sam` | `prophet/sam` | `disciple/sam` | Route registration and the role's one runtime start `sam.Init`: on a disciple the pull loop and notification, on a prophet notification, analytics and the peer pull |
 | `smw` | `smw` | `smw` | Authentication middleware for both roles |
 | `client` | `client` | `client` | The HTTP client a disciple reaches the prophet with |
 | `database` | `prophet/database` | `disciple/database` | The canonical claimius SQL set for the role |
@@ -39,7 +39,7 @@ The prophet is the authority, and each app has one home prophet that decides its
 | `notification` | `notification` | `notification` | In app notifications and their SSE stream |
 | `analytics` | `analytics` | | Consent, capture and the hourly fold, prophet only |
 
-Every background runner starts with `Init(ctx) error` and is joined by its `Done()`; the order is [Lifecycle](disciple.md#lifecycle).
+Each role starts its runtime once with `sam.Init(ctx) error`, joined by `sam.Done()`, beside `uptime.Init`; the order is [Lifecycle](disciple.md#lifecycle).
 
 `shared` carries the implementation both roles use. A consumer never imports it; each role package reexports what it needs.
 

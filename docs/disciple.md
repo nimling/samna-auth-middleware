@@ -8,7 +8,7 @@ The disciple is a local replica. It never signs or decrypts, so a secret it writ
 |---------|--------|------|
 | `sdb` | `disciple/sdb` | Database layer. `sdb.Init(logger)` connects the pool and loads config once. |
 | `echo` | `disciple/echo` | The individual HTTP handlers: the me routes, the login flow, notifications, consent, capture and uptime. |
-| `sam` | `disciple/sam` | `sam.RegisterEndpoints(group)` mounts the handlers, `sam.RegisterCapture(group)` and `sam.RegisterCaptureRead(group)` mount consent and capture, and `sam.Init(ctx)` runs the pull loop. |
+| `sam` | `disciple/sam` | `sam.RegisterEndpoints(group)` mounts the handlers, `sam.RegisterCapture(group)` and `sam.RegisterCaptureRead(group)` mount consent and capture, and `sam.Init(ctx)` starts the pull loop and notification. |
 | `smw` | `smw` | Middleware. |
 
 ## main.go
@@ -28,23 +28,27 @@ import (
 	"github.com/labstack/echo/v4"
 	sam "github.com/nimling/samna-auth-middleware/v2/disciple/sam"
 	sdb "github.com/nimling/samna-auth-middleware/v2/disciple/sdb"
+	"github.com/nimling/samna-auth-middleware/v2/notification"
 	smw "github.com/nimling/samna-auth-middleware/v2/smw"
 )
 
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	runCtx, cancelRun := context.WithCancel(context.Background())
+	defer cancelRun()
 	e := echo.New()
 
 	if _, err := sdb.Init(e.Logger); err != nil {
 		e.Logger.Fatal(err)
 	}
-	if err := sam.Init(ctx); err != nil {
+	if err := sam.Init(runCtx); err != nil {
 		e.Logger.Fatal(err)
 	}
 
 	api := e.Group("", smw.UserAuthMiddleware(nil))
 	sam.RegisterEndpoints(api)
+	e.Server.RegisterOnShutdown(notification.EndStreams)
 
 	go func() {
 		if err := e.Start(":8080"); err != nil && !errors.Is(err, http.ErrServerClosed) {
@@ -55,6 +59,7 @@ func main() {
 	shutdown, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	_ = e.Shutdown(shutdown)
+	cancelRun()
 	<-sam.Done()
 	_ = sdb.Instance().Close()
 }
@@ -68,7 +73,7 @@ func main() {
 
 3. `smw.UserAuthMiddleware(opts)` protects the routes. Pass `nil` to take the slug, secret, redirect and page redirect from the config.
 
-4. `sam.Init(ctx)` launches the background pull loop that keeps the local database current, and returns an error only when it cannot start. Call it on every pod with the context `main` makes from `signal.NotifyContext`; one pod per database takes the sync lock and pulls, the others stand by. The puller takes a snapshot on first run, then pulls one page after its cursor at a time, each held open by the prophet while there is nothing new, backing off on failure and logging through the database logger. It returns immediately and runs until the context ends; `sam.Done()` closes once it has. The order of start and shutdown every runner follows is [Lifecycle](../.nimpress/disciple.md#lifecycle).
+4. `sam.Init(runCtx)` is the disciple's one runtime start: it launches the background pull loop that keeps the local database current and the notification runner, reading `sdb.Instance()` itself, and returns an error only when it cannot start. Call it on every pod with a run context `main` cancels after `e.Shutdown`, and register `notification.EndStreams` with `e.Server.RegisterOnShutdown`; one pod per database takes the sync lock and pulls, the others stand by. The puller takes a snapshot on first run, then pulls one page after its cursor at a time, each held open by the prophet while there is nothing new, backing off on failure and logging through the database logger. It returns immediately and runs until the run context ends; `sam.Done()` closes once the sync and notification have ended. The order of start and shutdown every runner follows is [Lifecycle](../.nimpress/disciple.md#lifecycle).
 
 ## App scoping
 
@@ -102,10 +107,10 @@ The browser half is one call, `configureConsent({ endpoint: '/api/auth' })`, whi
 
 ## Uptime
 
-The prophet probes the app from outside; `uptime.Init` is the app reporting from inside. Call it once after `sdb.Init` with the context of `main`, hand it the checks that decide whether the app is healthy, and it registers the app's `heartbeat` monitor on the prophet and beats on the interval. The [Uptime](../README.md#uptime) section of the readme carries the options, the handlers and the prophet contract.
+The prophet probes the app from outside; `uptime.Init` is the app reporting from inside. Call it once after `sdb.Init` with the run context of `main`, hand it the checks that decide whether the app is healthy, and it registers the app's `heartbeat` monitor on the prophet and beats on the interval. The [Uptime](../README.md#uptime) section of the readme carries the options, the handlers and the prophet contract.
 
 ```go
-if err := uptime.Init(ctx, e.Logger, uptime.Options{
+if err := uptime.Init(runCtx, e.Logger, uptime.Options{
 	Version: version,
 	Checks:  []uptime.Check{{Name: "database", Run: sdb.Instance().PingContext}},
 }); err != nil {

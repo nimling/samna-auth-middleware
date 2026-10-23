@@ -16,7 +16,7 @@ go get github.com/nimling/samna-auth-middleware/v2
 |------|-------|------|-----|
 | Prophet | Full app row with key and seed material | Serves the snapshot and delta feed | `sam.RegisterEndpoints` mounts the full admin API |
 | Disciple | App identity from the environment | Pulls in the background via `sam.Init`, one pod per database | `sam.RegisterEndpoints` mounts the me and login routes |
-| Hybrid | A prophet set up with `claimius.upsert_prophet_peer` | Serves its own apps, and pulls one app of a peer prophet via `sam.PeerInit` | As the prophet; writes of the mirrored app are refused and belong to the peer |
+| Hybrid | A prophet set up with `claimius.upsert_prophet_peer` | Serves its own apps, and pulls one app of a peer prophet through the prophet `sam.Init` | As the prophet; writes of the mirrored app are refused and belong to the peer |
 
 A binary is one role. Both roles wire the same four identifiers. Each app has one home prophet that decides its writes, and a disciple relies on exactly one prophet, the one it is bound to.
 
@@ -26,14 +26,14 @@ A binary is one role. Both roles wire the same four identifiers. Each app has on
 |---------|----------------|-----------------|------|
 | `sdb` | `prophet/sdb` | `disciple/sdb` | Database layer. `sdb.Init(logger)` connects the pool and loads config once. |
 | `echo` | `prophet/echo` | `disciple/echo` | The individual HTTP handlers. |
-| `sam` | `prophet/sam` | `disciple/sam` | `sam.RegisterEndpoints(group)`; `sam.Init(ctx)` on the disciple, `sam.PeerInit(ctx)` on a prophet mirroring a peer. |
+| `sam` | `prophet/sam` | `disciple/sam` | `sam.RegisterEndpoints(group)`; `sam.Init(ctx)`, the one runtime start of the role: sync and notification on the disciple, notification, analytics and the peer sync on the prophet. |
 | `smw` | `smw` | `smw` | Middleware, shared by both roles. |
 | `client` | `client` | `client` | HTTP client for the Samna Auth API. |
 | `utils` | `utils` | `utils` | Config loader, cookies, and debug helpers. |
 | `database` | `prophet/database` | `disciple/database` | The `claimius` base SQL set for the role, read by a consumer as a smig git include. |
 | `uptime` | | `uptime` | The heartbeat reporter. `uptime.Init(ctx, logger, opts)` registers the app's `heartbeat` monitor and beats to the prophet. |
-| `notification` | `notification` | `notification` | In app notifications: `Write`, `WriteUser` and the SSE `Stream` behind the notification routes. `notification.Init(ctx)` starts it on either role. |
-| `analytics` | `analytics` | | Consent, sessions, events and the hourly fold on the prophet. `analytics.Init(ctx)` starts it. |
+| `notification` | `notification` | `notification` | In app notifications: `Write`, `WriteUser` and the SSE `Stream` behind the notification routes. Started by `sam.Init` on either role. |
+| `analytics` | `analytics` | | Consent, sessions, events and the hourly fold on the prophet. Started by the prophet `sam.Init`. |
 
 ## Getting started
 

@@ -30,7 +30,7 @@ func database(t *testing.T) *shared.DB {
 			t.Fatalf("connect: %v", err)
 		}
 	}
-	db := sdb.Instance()
+	db := sdb.Instance().DB
 	if _, err := db.ExecContext(context.Background(),
 		`INSERT INTO claimius.disciple_state (last_applied_txid, last_applied_seq) SELECT 0, 0 WHERE NOT EXISTS (SELECT 1 FROM claimius.disciple_state)`); err != nil {
 		t.Fatalf("cursor row: %v", err)

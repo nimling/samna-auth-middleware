@@ -20,7 +20,7 @@ const (
 )
 
 var (
-	ErrNotStarted = errors.New("notification not started: call notification.Init")
+	ErrNotStarted = errors.New("notification not started: call sam.Init")
 	ErrStarted    = errors.New("notification already started")
 )
 
@@ -42,8 +42,7 @@ var (
 	serveCtx, EndStreams = context.WithCancel(context.Background())
 )
 
-func Init(ctx context.Context) error {
-	db := shared.Instance()
+func Init(ctx context.Context, db *shared.DB) error {
 	if db == nil {
 		return shared.ErrNotConnected
 	}

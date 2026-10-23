@@ -6,8 +6,6 @@ import (
 	"database/sql/driver"
 	"errors"
 	"fmt"
-	"io"
-	"net/http"
 	"net/url"
 	"os"
 	"reflect"
@@ -17,7 +15,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 	"github.com/lib/pq"
 	"github.com/nimling/samna-auth-middleware/v2/client"
@@ -27,22 +24,6 @@ import (
 	"github.com/uptrace/bun/dialect/pgdialect"
 	"github.com/uptrace/bun/driver/pgdriver"
 )
-
-type AssetResponse struct {
-	Status int
-	Header http.Header
-	Body   io.ReadCloser
-}
-
-type AssetCache interface {
-	Get(ctx context.Context, linkID uuid.UUID, conditional http.Header) (*AssetResponse, error)
-	Put(ctx context.Context, linkID uuid.UUID, header http.Header, body io.Reader) error
-}
-
-type Options struct {
-	AssetSource func(ctx context.Context, assetID uuid.UUID) (*AssetResponse, error)
-	AssetCache  AssetCache
-}
 
 type DB struct {
 	*bun.DB
@@ -54,7 +35,6 @@ type DB struct {
 	listen  *listen
 
 	RouteToProphet bool
-	Options
 }
 
 type stmtKey struct {
@@ -319,14 +299,7 @@ func Connect(logger echo.Logger) (*DB, error) {
 
 	resolveOIDC(logger)
 
-	instance.Store(db)
 	return db, nil
-}
-
-var instance atomic.Pointer[DB]
-
-func Instance() *DB {
-	return instance.Load()
 }
 
 func (d *DB) Close() error {

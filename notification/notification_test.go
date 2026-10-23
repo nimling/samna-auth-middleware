@@ -13,7 +13,7 @@ import (
 )
 
 func TestInitWithoutDatabaseIsRefused(t *testing.T) {
-	if err := notification.Init(t.Context()); !errors.Is(err, shared.ErrNotConnected) {
+	if err := notification.Init(t.Context(), nil); !errors.Is(err, shared.ErrNotConnected) {
 		t.Fatalf("init = %v, want ErrNotConnected", err)
 	}
 }

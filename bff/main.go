@@ -16,6 +16,7 @@ import (
 	h "github.com/nimling/samna-auth-middleware/v2/disciple/echo"
 	sam "github.com/nimling/samna-auth-middleware/v2/disciple/sam"
 	sdb "github.com/nimling/samna-auth-middleware/v2/disciple/sdb"
+	"github.com/nimling/samna-auth-middleware/v2/notification"
 	"github.com/nimling/samna-auth-middleware/v2/smw"
 	"github.com/nimling/samna-auth-middleware/v2/uptime"
 	"github.com/nimling/samna-auth-middleware/v2/utils"
@@ -94,9 +95,12 @@ func Serve(ctx context.Context, config Config) error {
 		}, siteGate)
 	}
 
-	if err := sam.Init(ctx); err != nil {
+	runCtx, cancelRun := context.WithCancel(context.WithoutCancel(ctx))
+	defer cancelRun()
+	if err := sam.Init(runCtx); err != nil {
 		return err
 	}
+	e.Server.RegisterOnShutdown(notification.EndStreams)
 
 	served := make(chan error, 1)
 	go func() {
@@ -115,6 +119,7 @@ func Serve(ctx context.Context, config Config) error {
 	if err := e.Shutdown(shutdownCtx); err != nil {
 		e.Logger.Errorf("shutdown: %v", err)
 	}
+	cancelRun()
 	<-sam.Done()
 	return sdb.Instance().Close()
 }

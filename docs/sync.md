@@ -5,12 +5,12 @@ The disciple keeps its local copy current by pulling from the prophet. A consume
 ## Entry point
 
 ```go
-if err := sam.Init(ctx); err != nil {
+if err := sam.Init(runCtx); err != nil {
 	e.Logger.Fatal(err)
 }
 ```
 
-`sam.Init(ctx context.Context) error` is the whole contract. One call in the consumer main, after `sdb.Init`, on every pod, with the context `main` makes from `signal.NotifyContext`. It returns at once, and returns an error only when it cannot start: no database, or a second call while it runs. Cancelling the context is the only way it ends; `sam.Done()` is closed once every worker has returned. The consumer never spawns the goroutine, never checks debug mode, never writes a restart loop and never elects a leader.
+`sam.Init(ctx context.Context) error` is the whole contract. One call in the consumer main, after `sdb.Init`, on every pod, with the run context `main` cancels after `e.Shutdown`. It starts the pull and the notification runner, reading `sdb.Instance()` itself. It returns at once, and returns an error only when it cannot start: no database, or a second call while it runs. Cancelling the run context is the only way it ends; `sam.Done()` is closed once every worker and the notification runner have returned. The consumer never spawns the goroutine, never checks debug mode, never writes a restart loop and never elects a leader.
 
 ## Where it pulls from
 
@@ -26,7 +26,7 @@ This is why a machine client created on the prophet becomes usable on a disciple
 
 ## What sam.Init owns internally
 
-1. Debug check. When the process runs in debug mode the disciple is self contained and there is no prophet to pull from, so `sam.Init` does no work. The consumer does not gate the call on an env var.
+1. Debug check. When the process runs in debug mode the disciple is self contained and there is no prophet to pull from, so `sam.Init` starts no pull, only notification. The consumer does not gate the call on an env var.
 
 2. Its own goroutines. `sam.Init` spawns the background workers itself and returns immediately. The consumer does not write `go func()`.
 

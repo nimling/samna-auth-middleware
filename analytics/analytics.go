@@ -24,7 +24,7 @@ const (
 )
 
 var (
-	ErrNotStarted = errors.New("analytics not started: call analytics.Init")
+	ErrNotStarted = errors.New("analytics not started: call sam.Init")
 	ErrStarted    = errors.New("analytics already started")
 )
 
@@ -48,8 +48,7 @@ var (
 	run   *runner
 )
 
-func Init(ctx context.Context) error {
-	db := shared.Instance()
+func Init(ctx context.Context, db *shared.DB) error {
 	if db == nil {
 		return shared.ErrNotConnected
 	}

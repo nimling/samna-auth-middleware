@@ -14,7 +14,9 @@ func TestInitWithoutDatabaseIsRefused(t *testing.T) {
 	if err := sam.Init(t.Context()); !errors.Is(err, shared.ErrNotConnected) {
 		t.Fatalf("init = %v, want ErrNotConnected", err)
 	}
-	if err := sam.PeerInit(t.Context()); !errors.Is(err, shared.ErrNotConnected) {
-		t.Fatalf("peer init = %v, want ErrNotConnected", err)
+	select {
+	case <-sam.Done():
+	default:
+		t.Fatalf("Done before Init blocks")
 	}
 }

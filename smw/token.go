@@ -58,7 +58,7 @@ func ValidateToken(r *http.Request, tokenString string, config *AuthMiddlewareCo
 
 	if claims.CNF != nil {
 		if claims.CNF.JKT != "" {
-			proof, proofErr := dpop.Verify(r, r.Header.Get(dpop.Header), tokenString, dpop.PostgresReplayStore{DB: discipledb.Instance().DB})
+			proof, proofErr := dpop.Verify(r, r.Header.Get(dpop.Header), tokenString, dpop.PostgresReplayStore{DB: discipledb.Instance().DB.DB})
 			if proofErr != nil {
 				return nil, fmt.Errorf("dpop proof: %w", proofErr)
 			}

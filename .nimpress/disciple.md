@@ -16,21 +16,21 @@ A disciple is a product service that mirrors one app from the prophet. It answer
 ```go
 ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 defer stop()
+runCtx, cancelRun := context.WithCancel(context.Background())
+defer cancelRun()
 
 if _, err := sdb.Init(e.Logger); err != nil {
 	e.Logger.Fatal(err)
 }
-if err := notification.Init(ctx); err != nil {
+if err := sam.Init(runCtx); err != nil {
 	e.Logger.Fatal(err)
 }
-if err := sam.Init(ctx); err != nil {
-	e.Logger.Fatal(err)
-}
-if err := uptime.Init(ctx, e.Logger, uptime.Options{}); err != nil {
+if err := uptime.Init(runCtx, e.Logger, uptime.Options{}); err != nil {
 	e.Logger.Fatal(err)
 }
 api := e.Group("/api", smw.UserAuthMiddleware(nil))
 sam.RegisterEndpoints(api)
+e.Server.RegisterOnShutdown(notification.EndStreams)
 
 go func() {
 	if err := e.Start(":" + port); err != nil && !errors.Is(err, http.ErrServerClosed) {
@@ -43,7 +43,7 @@ defer cancel()
 if err := e.Shutdown(shutdown); err != nil {
 	e.Logger.Errorf("shutdown: %v", err)
 }
-<-notification.Done()
+cancelRun()
 <-sam.Done()
 <-uptime.Done()
 if err := sdb.Instance().Close(); err != nil {
@@ -53,18 +53,18 @@ if err := sdb.Instance().Close(); err != nil {
 
 ## Lifecycle
 
-Every background runner of the middleware has the same two calls: `sam.Init` and `sam.PeerInit`, `notification.Init`, `analytics.Init` and `uptime.Init`, each joined by its package's `Done()`.
+Each role has one runtime start, `sam.Init(ctx) error`, joined by `sam.Done()`. The disciple's `disciple/sam.Init` starts the sync, the app seed, the Initiate apps and notification; the prophet's `prophet/sam.Init` starts notification, analytics and the peer sync. `uptime.Init(ctx, logger, opts)` is the one other host call, joined by `uptime.Done()`, and takes no database.
 
-1. One context. `main` makes it with `signal.NotifyContext` and hands it to every `Init`. Cancelling it is the only way a runner ends; there is no `Stop`.
-2. `Init(ctx) error` starts the goroutines and returns at once. It returns an error only when the runner cannot start: no database (`shared.ErrNotConnected`), the first `LISTEN` failing, or a second call while the runner still runs (`ErrStarted`). A host treats that error as fatal. After start, failures are logged and retried.
-3. One database. `shared.Connect`, which `sdb.Init` calls once, creates the process's pool and records it; `sdb.Instance` on either role is `shared.Instance`, one accessor answering that `*shared.DB`, and the runners read it themselves. The disciple's `sdb.Init(logger, shared.Options{AssetSource, AssetCache})` sets the asset options on that same `*shared.DB`; there is no disciple wrapper type. No `Init` takes a database.
+1. One run context. `main` makes the signal context with `signal.NotifyContext` and a run context it cancels after `e.Shutdown` returns, and hands the run context to `sam.Init` and `uptime.Init`. Cancelling it is the only way a runner ends; there is no `Stop`.
+2. `Init(ctx) error` starts the goroutines and returns at once. It returns an error only when the runtime cannot start: no database (`shared.ErrNotConnected`), the first `LISTEN` failing, or a second call while it still runs (`ErrStarted`). A host treats that error as fatal. After start, failures are logged and retried.
+3. Each role owns its database. `sdb.Init` on the role creates the process's pool through `shared.Connect` and holds it; `sdb.Instance()` answers it, the disciple's as `*sdb.DB`, which embeds `*shared.DB` with the asset `sdb.Options{AssetSource, AssetCache}` given to `sdb.Init`. `sam.Init` reads its role's `sdb.Instance()` and hands that `*shared.DB` to what it starts: `notification.Init(ctx, db)` and `analytics.Init(ctx, db)` are wiring inside the middleware, and no host calls them or passes a database.
 4. One `LISTEN` connection. `(*shared.DB).Listen(ctx, channel)` hands each subscriber its own channel of notifications on one `pq.Listener` per process, adding the channel on the first subscriber and dropping it on the last. `notification` listens on `claimius_notification`, and a prophet's held `/sam/sync/:cursor` pull on `claimius_sync` for as long as the request holds. The connection closes when the last subscriber's context ends. A `nil` notification means the connection was re-established and notifications may have been lost.
-5. A clean end. On cancel `notification` and `analytics` stop taking work, write what is queued within 10 s and close their `Done()`. A write after that is logged as dropped. `uptime` and `sam` return their workers and close `Done()`.
-6. Long lived handlers end with the server, not the runner. `notification.EndStreams` ends every open notification stream, and on a prophet `prophetecho.EndStreams` (`prophet/echo`) answers every held `/sam/sync/:cursor` pull with what it has. A host registers each one it mounts with `e.Server.RegisterOnShutdown(notification.EndStreams)` before it serves, so `e.Shutdown` ends them as it begins instead of waiting for its deadline; the runner keeps writing until its own context ends.
-7. Order. The pool first, then the runners, then the routes and their `RegisterOnShutdown`, then serve. On the signal: shut the http server down, wait on every `Done()`, and close the database last. `(*shared.DB).Close` writes the usage counts still held before it closes the pool.
-8. No hidden state. Before `Init`, `notification.Write` and `WriteUser` and `analytics.Post` log the drop, `notification.Stream`, `analytics.PostSession`, `GetConsent` and `PostConsent` return `ErrNotStarted`, and `Done()` logs it and answers a closed channel.
+5. A clean end. On cancel `notification` and `analytics` stop taking work, write what is queued within 10 s and end; a write after that is logged as dropped. The sync and peer workers return. `sam.Done()` closes once everything its `Init` started has ended, and `uptime.Done()` once the reporter has.
+6. Long lived handlers end with the server, not the runner. `notification.EndStreams` ends every open notification stream, and on a prophet `prophetecho.EndStreams` (`prophet/echo`) answers every held `/sam/sync/:cursor` pull with what it has. A host registers each one it mounts with `e.Server.RegisterOnShutdown(notification.EndStreams)` before it serves, so `e.Shutdown` ends them as it begins instead of waiting for its deadline; the runtime keeps writing until the run context ends.
+7. Order. The pool first, then `sam.Init` and `uptime.Init`, then the routes and their `RegisterOnShutdown`, then serve. On the signal: shut the http server down, cancel the run context, wait on `sam.Done()` and `uptime.Done()`, and close the database last. `(*shared.DB).Close` writes the usage counts still held before it closes the pool.
+8. No hidden state. Before `sam.Init`, `notification.Write` and `WriteUser` and `analytics.Post` log the drop, `notification.Stream`, `analytics.PostSession`, `GetConsent` and `PostConsent` return `ErrNotStarted`, and `Done()` logs it and answers a closed channel.
 9. One replica folds. The hourly analytics fold and expiry run under `shared.LeadSync` with the lock key `claimius.analytics_fold`, so of N prophet replicas one folds.
-10. Debug mode. `sam.Init`, `sam.PeerInit` and `uptime.Init` start nothing in debug mode and still return `nil`, and their `Done()` closes once the context ends.
+10. Debug mode. `sam.Init` starts notification, and on the prophet analytics, in debug mode too; the sync, seed, Initiate apps and peer sync start only outside it. `sam.Done()` closes once the context ends. `uptime.Init` starts nothing in debug mode, returns `nil` and its `Done()` is closed at once.
 
 `UserAuthMiddleware` also holds the answer of a request that made routed writes until the pull has applied them, so the client's next request reads them back. A route outside it gets the same with `smw.WaitForSeq(timeout)`.
 
