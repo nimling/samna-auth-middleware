@@ -105,6 +105,19 @@ export interface BodyClaimGuest {
   mode: GuestMode
 }
 
+export interface Retention {
+  kind: string
+  days: number
+  prune: string
+  pruned: number | null
+  pruned_at: string | null
+  updated_at: string
+}
+
+export interface BodyRetention {
+  days: number
+}
+
 export interface ResponseEnvelope<T> {
   data: T
   error?: string

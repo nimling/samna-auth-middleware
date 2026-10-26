@@ -102,25 +102,24 @@ $$ LANGUAGE sql STABLE;
 
 COMMENT ON FUNCTION claimius.get_analytics_heat(UUID, TEXT, INTEGER, TEXT, DATE, DATE) IS 'The heat field for a page, already in page coordinates at capture scale, so the caller passes the rows straight to the overlay.';
 
-CREATE OR REPLACE FUNCTION claimius.delete_analytics_event(p_before DATE) RETURNS BIGINT AS $$
+DROP FUNCTION IF EXISTS claimius.delete_analytics_event(DATE);
+CREATE OR REPLACE FUNCTION claimius.delete_analytics_event(p_keep INTERVAL) RETURNS BIGINT AS $$
 DECLARE
-    v_rows BIGINT;
+    v_before DATE;
+    v_rows   BIGINT;
 BEGIN
-    IF p_before IS NULL THEN
-        RAISE EXCEPTION 'delete_analytics_event needs a cutoff';
+    IF p_keep IS NULL OR p_keep < INTERVAL '1 day' THEN
+        RAISE EXCEPTION 'delete_analytics_event keeps at least a day, got %', p_keep USING ERRCODE = '22023';
     END IF;
+    v_before := ((now() - p_keep) AT TIME ZONE 'UTC')::date;
 
-    IF p_before > (now() AT TIME ZONE 'UTC')::date THEN
-        RAISE EXCEPTION 'delete_analytics_event cannot drop a day that has not finished';
-    END IF;
-
-    PERFORM claimius.upsert_analytics_heat(NULL, p_before - 1);
+    PERFORM claimius.upsert_analytics_heat(NULL, v_before - 1);
 
     DELETE FROM claimius.analytics_event
-    WHERE (occurred_at AT TIME ZONE 'UTC')::date < p_before;
+    WHERE (occurred_at AT TIME ZONE 'UTC')::date < v_before;
     GET DIAGNOSTICS v_rows = ROW_COUNT;
     RETURN v_rows;
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius.delete_analytics_event(DATE) IS 'Drops raw signal from every day before the cutoff, folding those days first so the heat field keeps everything it had. The cutoff is a day boundary and never today, because folding an unfinished day would discard the rest of it.';
+COMMENT ON FUNCTION claimius.delete_analytics_event(INTERVAL) IS 'Drops raw signal from every UTC day before the day p_keep ago, folding those days first so the heat field keeps everything it had. The cutoff is a day boundary at least a day back, because folding an unfinished day would discard the rest of it. The analytics_event retention prune.';

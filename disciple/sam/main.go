@@ -71,6 +71,7 @@ func Init(ctx context.Context) error {
 		return err
 	}
 	r.run(func() { <-notification.Done() })
+	r.run(func() { shared.LeadSync(ctx, db, shared.RetentionLockKey, leadInterval, db.DeleteExpiredLoop) })
 	if shared.GetDebugMode() != shared.DebugModeNone {
 		return nil
 	}

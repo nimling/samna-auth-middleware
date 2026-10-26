@@ -14,9 +14,10 @@ import (
 	"github.com/nimling/samna-auth-middleware/v2/notification"
 	psam "github.com/nimling/samna-auth-middleware/v2/prophet/sam"
 	psdb "github.com/nimling/samna-auth-middleware/v2/prophet/sdb"
+	"github.com/nimling/samna-auth-middleware/v2/shared"
 )
 
-func TestProphetInitRunsNotificationAnalyticsAndPeerSync(t *testing.T) {
+func TestProphetInitRunsNotificationAnalyticsRetentionAndPeerSync(t *testing.T) {
 	t.Setenv("SAUTH_DEBUG_USER_ID", "")
 	t.Setenv("SAUTH_DEBUG_CLIENTS", "")
 	db, err := psdb.Init(echo.New().Logger)
@@ -52,7 +53,7 @@ func TestProphetInitRunsNotificationAnalyticsAndPeerSync(t *testing.T) {
 		}
 		return held
 	}
-	locks := []string{"claimius.analytics_fold", "claimius.prophet_peer:" + peerID.String()}
+	locks := []string{"claimius.analytics_fold", shared.RetentionLockKey, "claimius.prophet_peer:" + peerID.String()}
 	ctx, cancel := context.WithCancel(t.Context())
 	if err := psam.Init(ctx); err != nil {
 		t.Fatalf("init: %v", err)

@@ -72,16 +72,16 @@ COMMIT;
 
 BEGIN;
 SELECT ok(EXISTS (SELECT 1 FROM claimius.access_diff d WHERE d.txid < pg_temp.low_cursor()),
-    'before the drain areas below the oldest active cursor are still stored');
+    'before the trim areas below the oldest active cursor are still stored');
 SELECT is(pg_temp.trimmed(), '0'::XID8, 'and nothing has been trimmed');
 COMMIT;
 
-SELECT claimius.drain_access_diff();
+SELECT claimius.trim_access_diff();
 COMMIT;
 
 BEGIN;
 SELECT is_empty($$SELECT 1 FROM claimius.access_diff d WHERE d.txid < pg_temp.low_cursor()$$,
-    'the drain trims every area below the oldest cursor among the users used within 7 days');
+    'the trim removes every area below the oldest cursor among the users used within 7 days');
 SELECT is(pg_temp.trimmed(), pg_temp.low_cursor(), 'and records that cursor as the trimmed position');
 SELECT ok(EXISTS (SELECT 1 FROM claimius.access_diff d WHERE d.object_id = '10000000-0000-4000-8000-000000d5a010'),
     'an area above that cursor stays');
@@ -109,7 +109,7 @@ BEGIN;
 SELECT is(pg_temp.listed('a0000000-0000-4000-8000-000000d5a001'), 6::BIGINT, 'the active reader lists the later organization too');
 COMMIT;
 
-SELECT claimius.drain_access_diff();
+SELECT claimius.trim_access_diff();
 COMMIT;
 
 BEGIN;

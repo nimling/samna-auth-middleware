@@ -905,22 +905,21 @@ COMMENT ON FUNCTION claimius.reconcile_if_pending(UUID, TEXT, UUID) IS 'Settles 
 DROP FUNCTION IF EXISTS claimius.drain_access_diff(INTEGER);
 CREATE OR REPLACE FUNCTION claimius.drain_access_diff(
     p_limit_pairs   INTEGER DEFAULT 1000
-) RETURNS INTEGER AS $$
+) RETURNS TABLE (settled INTEGER, failures TEXT[]) AS $$
 DECLARE
     v_lock_timeout TEXT := current_setting('lock_timeout');
     v_user      RECORD;
-    v_app       RECORD;
-    v_low       XID8;
     v_since     TIMESTAMPTZ;
     v_areas     INTEGER;
-    v_settled   INTEGER := 0;
 BEGIN
+    settled := 0;
+    failures := ARRAY[]::TEXT[];
     PERFORM set_config('lock_timeout', claimius._settle_lock_timeout(), TRUE);
     BEGIN
         FOR v_user IN
             SELECT a.user_id, a.settled_txid, a.settled_at, a.last_used_at
             FROM claimius.user_activity a
-            WHERE a.settled_txid < (SELECT max(d.txid) FROM claimius.access_diff d)
+            WHERE a.settled_txid < (SELECT d.txid FROM claimius.access_diff d ORDER BY d.txid DESC LIMIT 1)
             ORDER BY a.last_used_at DESC
             LIMIT least(greatest(p_limit_pairs, 0), 64)
         LOOP
@@ -936,33 +935,61 @@ BEGIN
             CONTINUE WHEN extract(epoch FROM now() - v_since) < v_areas * extract(epoch FROM now() - v_user.last_used_at);
             CONTINUE WHEN NOT pg_try_advisory_xact_lock(hashtextextended('claimius.share:' || v_user.user_id::TEXT, 0));
             IF claimius._settle_diff_share(v_user.user_id) THEN
-                v_settled := v_settled + 1;
+                settled := settled + 1;
             END IF;
         END LOOP;
+    EXCEPTION
+        WHEN lock_not_available OR deadlock_detected THEN
+            NULL;
+        WHEN OTHERS THEN
+            failures := failures || ('settle: ' || SQLERRM);
+    END;
+    PERFORM set_config('lock_timeout', v_lock_timeout, TRUE);
 
-        FOR v_app IN
-            SELECT ds.access_trimmed_txid
-            FROM claimius.disciple_state ds
-        LOOP
-            SELECT min(a.settled_txid) INTO v_low
-            FROM claimius.user_activity a
-            WHERE a.last_used_at > now() - INTERVAL '7 days';
-            CONTINUE WHEN v_low IS NULL OR v_low <= v_app.access_trimmed_txid;
-            DELETE FROM claimius.access_diff d WHERE d.txid < v_low;
-            UPDATE claimius.disciple_state SET access_trimmed_txid = v_low;
-        END LOOP;
-    EXCEPTION WHEN lock_not_available OR deadlock_detected THEN
-        NULL;
+    BEGIN
+        PERFORM claimius._settle_usage_diff(NULL, greatest(p_limit_pairs, 0));
+    EXCEPTION WHEN OTHERS THEN
+        failures := failures || ('usage_diff: ' || SQLERRM);
     END;
 
-    PERFORM set_config('lock_timeout', v_lock_timeout, TRUE);
-    PERFORM claimius._settle_usage_diff(NULL, greatest(p_limit_pairs, 0));
-    PERFORM claimius._settle_user_users_diff(NULL, greatest(p_limit_pairs, 0));
-    RETURN v_settled;
+    BEGIN
+        PERFORM claimius._settle_user_users_diff(NULL, greatest(p_limit_pairs, 0));
+    EXCEPTION WHEN OTHERS THEN
+        failures := failures || ('user_users_diff: ' || SQLERRM);
+    END;
+    RETURN NEXT;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = claimius, pg_temp;
 
-COMMENT ON FUNCTION claimius.drain_access_diff(INTEGER) IS 'Settles shares ahead of their reads, off the request path: takes the users whose cursor is below the newest area of their app, most recently used first and at most 64, and settles each whose read rate 1 / (now - last_used_at) is at least the raise rate n / (now - settled_at) of the n areas since its cursor, under its own share lock. Then trims, per app, every area below the lowest cursor among the users used within 7 days and records that cursor as the trimmed position. Then folds the usage_diff and user_users_diff rows of the oldest p_limit_pairs objects. Returns the shares settled.';
+COMMENT ON FUNCTION claimius.drain_access_diff(INTEGER) IS 'Settles shares ahead of their reads, off the request path: takes the users whose cursor is below the newest area, most recently used first and at most 64, and settles each whose read rate 1 / (now - last_used_at) is at least the raise rate n / (now - settled_at) of the n areas since its cursor, under its own share lock. Then folds the usage_diff and user_users_diff rows of the oldest p_limit_pairs objects. Each of the three steps runs in its own subtransaction, so a failing step leaves the others to run: returns the shares settled and one message per failed step, which the caller logs. Trimming is trim_access_diff, run by the retention job.';
+
+CREATE OR REPLACE FUNCTION claimius.trim_access_diff(
+    p_keep  INTERVAL DEFAULT INTERVAL '7 days'
+) RETURNS BIGINT AS $$
+DECLARE
+    v_trimmed   XID8;
+    v_low       XID8;
+    v_deleted   BIGINT;
+BEGIN
+    SELECT ds.access_trimmed_txid INTO v_trimmed FROM claimius.disciple_state ds LIMIT 1;
+    IF NOT FOUND THEN
+        RETURN 0;
+    END IF;
+    SELECT min(a.settled_txid) INTO v_low
+    FROM claimius.user_activity a
+    WHERE a.last_used_at > now() - p_keep;
+    v_low := coalesce(v_low, pg_snapshot_xmin(pg_current_snapshot()));
+    IF v_low <= v_trimmed THEN
+        RETURN 0;
+    END IF;
+    DELETE FROM claimius.access_diff d WHERE d.txid < v_low;
+    GET DIAGNOSTICS v_deleted = ROW_COUNT;
+    UPDATE claimius.disciple_state SET access_trimmed_txid = v_low;
+    RETURN v_deleted;
+END;
+$$ LANGUAGE plpgsql;
+
+COMMENT ON FUNCTION claimius.trim_access_diff(INTERVAL) IS 'Trims every area below the lowest cursor among the users used within p_keep, or below the oldest running transaction when no user was, and records that position as access_trimmed_txid on disciple_state. A reader whose cursor is below it resettles its whole reach. Returns the areas removed. The access_diff retention prune.';
 
 CREATE OR REPLACE FUNCTION claimius.cascade_user_soft_delete(p_user_id UUID)
     RETURNS VOID AS $$

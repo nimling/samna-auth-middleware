@@ -1278,32 +1278,33 @@ COMMENT ON FUNCTION claimius.reconcile_if_pending(UUID, UUID, TEXT, UUID) IS 'Se
 DROP FUNCTION IF EXISTS claimius.drain_access_diff(INTEGER);
 CREATE OR REPLACE FUNCTION claimius.drain_access_diff(
     p_limit_pairs   INTEGER DEFAULT 1000
-) RETURNS INTEGER AS $$
+) RETURNS TABLE (settled INTEGER, failures TEXT[]) AS $$
 DECLARE
     v_lock_timeout TEXT := current_setting('lock_timeout');
     v_user      RECORD;
-    v_app       RECORD;
-    v_low       XID8;
     v_since     TIMESTAMPTZ;
     v_areas     INTEGER;
-    v_settled   INTEGER := 0;
 BEGIN
+    settled := 0;
+    failures := ARRAY[]::TEXT[];
     PERFORM set_config('lock_timeout', claimius._settle_lock_timeout(), TRUE);
     BEGIN
         FOR v_user IN
             SELECT a.app_id, a.user_id, a.settled_txid, a.settled_at, a.last_used_at
-            FROM claimius.user_activity a
-                JOIN (
-                    SELECT d.app_id, max(d.txid) AS newest
-                    FROM claimius.access_diff d
-                    GROUP BY d.app_id
-                ) m ON m.app_id = a.app_id AND a.settled_txid < m.newest
+            FROM claimius.samna_app s
+                CROSS JOIN LATERAL (
+                    SELECT d.txid FROM claimius.access_diff d
+                    WHERE d.app_id = s.id
+                    ORDER BY d.txid DESC
+                    LIMIT 1
+                ) m
+                JOIN claimius.user_activity a ON a.app_id = s.id AND a.settled_txid < m.txid
             WHERE EXISTS (
                       SELECT 1 FROM claimius.prophet_state ps
-                      WHERE ps.app_id = a.app_id AND ps.system_app_slug IS NOT NULL)
+                      WHERE ps.app_id = s.id AND ps.system_app_slug IS NOT NULL)
                OR NOT EXISTS (
                       SELECT 1 FROM claimius.sync_consumer c
-                      WHERE c.app_id = a.app_id AND c.last_contact_at > now() - INTERVAL '7 days')
+                      WHERE c.app_id = s.id AND c.last_contact_at > now() - INTERVAL '7 days')
             ORDER BY a.last_used_at DESC
             LIMIT least(greatest(p_limit_pairs, 0), 64)
         LOOP
@@ -1319,38 +1320,67 @@ BEGIN
             CONTINUE WHEN extract(epoch FROM now() - v_since) < v_areas * extract(epoch FROM now() - v_user.last_used_at);
             CONTINUE WHEN NOT pg_try_advisory_xact_lock(hashtextextended('claimius.share:' || v_user.app_id::TEXT || ':' || v_user.user_id::TEXT, 0));
             IF claimius._settle_diff_share(v_user.app_id, v_user.user_id) THEN
-                v_settled := v_settled + 1;
+                settled := settled + 1;
             END IF;
         END LOOP;
+    EXCEPTION
+        WHEN lock_not_available OR deadlock_detected THEN
+            NULL;
+        WHEN OTHERS THEN
+            failures := failures || ('settle: ' || SQLERRM);
+    END;
+    PERFORM set_config('lock_timeout', v_lock_timeout, TRUE);
 
-        FOR v_app IN
-            SELECT ps.app_id, ps.access_trimmed_txid
-            FROM claimius.prophet_state ps
-            WHERE ps.system_app_slug IS NOT NULL
-               OR NOT EXISTS (
-                      SELECT 1 FROM claimius.sync_consumer c
-                      WHERE c.app_id = ps.app_id AND c.last_contact_at > now() - INTERVAL '7 days')
-        LOOP
-            SELECT min(a.settled_txid) INTO v_low
-            FROM claimius.user_activity a
-            WHERE a.app_id = v_app.app_id
-              AND a.last_used_at > now() - INTERVAL '7 days';
-            CONTINUE WHEN v_low IS NULL OR v_low <= v_app.access_trimmed_txid;
-            DELETE FROM claimius.access_diff d WHERE d.app_id = v_app.app_id AND d.txid < v_low;
-            UPDATE claimius.prophet_state ps SET access_trimmed_txid = v_low WHERE ps.app_id = v_app.app_id;
-        END LOOP;
-    EXCEPTION WHEN lock_not_available OR deadlock_detected THEN
-        NULL;
+    BEGIN
+        PERFORM claimius._settle_usage_diff(NULL, NULL, greatest(p_limit_pairs, 0));
+    EXCEPTION WHEN OTHERS THEN
+        failures := failures || ('usage_diff: ' || SQLERRM);
     END;
 
-    PERFORM set_config('lock_timeout', v_lock_timeout, TRUE);
-    PERFORM claimius._settle_usage_diff(NULL, NULL, greatest(p_limit_pairs, 0));
-    PERFORM claimius._settle_user_users_diff(NULL, NULL, greatest(p_limit_pairs, 0));
-    RETURN v_settled;
+    BEGIN
+        PERFORM claimius._settle_user_users_diff(NULL, NULL, greatest(p_limit_pairs, 0));
+    EXCEPTION WHEN OTHERS THEN
+        failures := failures || ('user_users_diff: ' || SQLERRM);
+    END;
+    RETURN NEXT;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = claimius, pg_temp;
 
-COMMENT ON FUNCTION claimius.drain_access_diff(INTEGER) IS 'Settles shares ahead of their reads, off the request path: takes the users whose cursor is below the newest area of their app, most recently used first and at most 64, and settles each whose read rate 1 / (now - last_used_at) is at least the raise rate n / (now - settled_at) of the n areas since its cursor, under its own share lock. Then trims, per app, every area below the lowest cursor among the users used within 7 days and records that cursor as the trimmed position. On the prophet only its own apps and apps with no disciple in contact. Then folds the usage_diff and user_users_diff rows of the oldest p_limit_pairs objects. Returns the shares settled.';
+COMMENT ON FUNCTION claimius.drain_access_diff(INTEGER) IS 'Settles shares ahead of their reads, off the request path: takes the users whose cursor is below the newest area of their app, read per app from the (app_id, txid) index, most recently used first and at most 64, and settles each whose read rate 1 / (now - last_used_at) is at least the raise rate n / (now - settled_at) of the n areas since its cursor, under its own share lock. On the prophet only its own apps and apps with no disciple in contact. Then folds the usage_diff and user_users_diff rows of the oldest p_limit_pairs objects. Each of the three steps runs in its own subtransaction, so a failing step leaves the others to run: returns the shares settled and one message per failed step, which the caller logs. Trimming is trim_access_diff, run by the retention job.';
+
+CREATE OR REPLACE FUNCTION claimius.trim_access_diff(
+    p_keep  INTERVAL DEFAULT INTERVAL '7 days'
+) RETURNS BIGINT AS $$
+DECLARE
+    v_app       RECORD;
+    v_low       XID8;
+    v_n         BIGINT;
+    v_deleted   BIGINT := 0;
+BEGIN
+    FOR v_app IN
+        SELECT s.id AS app_id, coalesce(ps.access_trimmed_txid, '0'::XID8) AS access_trimmed_txid
+        FROM claimius.samna_app s
+            LEFT JOIN claimius.prophet_state ps ON ps.app_id = s.id
+        WHERE EXISTS (SELECT 1 FROM claimius.access_diff d WHERE d.app_id = s.id)
+    LOOP
+        SELECT min(a.settled_txid) INTO v_low
+        FROM claimius.user_activity a
+        WHERE a.app_id = v_app.app_id
+          AND a.last_used_at > now() - p_keep;
+        v_low := coalesce(v_low, pg_snapshot_xmin(pg_current_snapshot()));
+        CONTINUE WHEN v_low <= v_app.access_trimmed_txid;
+        DELETE FROM claimius.access_diff d WHERE d.app_id = v_app.app_id AND d.txid < v_low;
+        GET DIAGNOSTICS v_n = ROW_COUNT;
+        INSERT INTO claimius.prophet_state (app_id, access_trimmed_txid)
+        VALUES (v_app.app_id, v_low)
+        ON CONFLICT (app_id) DO UPDATE SET access_trimmed_txid = EXCLUDED.access_trimmed_txid;
+        v_deleted := v_deleted + v_n;
+    END LOOP;
+    RETURN v_deleted;
+END;
+$$ LANGUAGE plpgsql;
+
+COMMENT ON FUNCTION claimius.trim_access_diff(INTERVAL) IS 'Trims, per app holding areas, child apps and apps a disciple pulls included, every area below the lowest cursor among the app''s users used within p_keep, or below the oldest running transaction when no user was, and records that position as the app''s access_trimmed_txid, creating its prophet_state row when the app has none. A reader whose cursor is below it resettles its whole reach. Returns the areas removed. The access_diff retention prune.';
 
 CREATE OR REPLACE FUNCTION claimius.cascade_user_soft_delete(p_app_id UUID, p_user_id UUID)
     RETURNS VOID AS $$

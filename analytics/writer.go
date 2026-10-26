@@ -126,17 +126,8 @@ func (r *runner) fold(ctx context.Context) {
 		r.logger.Errorf("analytics fold: %v", err)
 		return
 	}
-
-	var dropped int64
-	if err := r.db.NewRaw(
-		"SELECT claimius.delete_analytics_event(?::date)",
-		day(now.AddDate(0, 0, -rawRetentionDays)),
-	).Scan(ctx, &dropped); err != nil {
-		r.logger.Errorf("analytics expire: %v", err)
-		return
-	}
-	if cells > 0 || dropped > 0 {
-		r.logger.Infof("analytics fold: %d cells written, %d raw rows dropped", cells, dropped)
+	if cells > 0 {
+		r.logger.Infof("analytics fold: %d cells written", cells)
 	}
 }
 

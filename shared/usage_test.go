@@ -229,3 +229,37 @@ func TestObjectUsage_KeepsTheCountsOfAFailedFlush(t *testing.T) {
 		t.Fatal("a failed flush must be reported")
 	}
 }
+
+func TestObjectUsage_CapsItsKeysAndReportsTheUsesItDrops(t *testing.T) {
+	var reported []error
+	u := &ObjectUsage{counts: make(map[usageKey]int64), limit: 2, full: make(chan struct{}, 1)}
+	user := uuid.New()
+	first, second, third, fourth := uuid.New(), uuid.New(), uuid.New(), uuid.New()
+	u.Add(nil, user, OBJECT_TYPE_ORGANIZATION, first)
+	u.Add(nil, user, OBJECT_TYPE_ORGANIZATION, second)
+	u.Add(nil, user, OBJECT_TYPE_ORGANIZATION, third)
+	if len(u.counts) != 2 || u.dropped != 1 {
+		t.Fatalf("a full map takes no new key, got %d keys and %d dropped", len(u.counts), u.dropped)
+	}
+	select {
+	case <-u.full:
+	default:
+		t.Fatal("a full map asks for a flush")
+	}
+	u.post = func(context.Context, []usageKey, []int64) error {
+		u.Add(nil, user, OBJECT_TYPE_ORGANIZATION, third)
+		u.Add(nil, user, OBJECT_TYPE_ORGANIZATION, fourth)
+		return errors.New("down")
+	}
+	u.report = func(err error) { reported = append(reported, err) }
+	u.flush()
+	if len(u.counts) != 2 {
+		t.Fatalf("a failed flush merges back no more keys than the limit, got %d", len(u.counts))
+	}
+	if len(reported) != 2 || reported[1].Error() != "3 uses dropped over the limit of 2 keys" {
+		t.Fatalf("the failure and the uses dropped are reported, got %v", reported)
+	}
+	if u.dropped != 0 {
+		t.Fatalf("a report clears the dropped count, got %d", u.dropped)
+	}
+}

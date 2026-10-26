@@ -103,7 +103,7 @@ A prophet records how its apps are used, gated by consent and read through a sco
 
 A cell is replaced, not added to, and only when its weight or sessions changed, so folding a day again writes only the cells that moved. It returns the cells written. `get_analytics_heat` reads the cells of a page and days, not the events.
 
-`delete_analytics_event(before)` folds every day before the cutoff and then deletes the raw events of those days. The heat grid keeps everything it had and the raw signal leaves. The cutoff is a whole day in the past, because a cell replaced from half a day would lose the other half.
+`delete_analytics_event(keep)` folds every UTC day before the day `keep` ago and then deletes the raw events of those days; it is the `analytics_event` prune of the retention job, 30 days by default. `insert_analytics_events` clamps each `occurred_at` into the day before now, so a browser clock cannot place a signal outside the days the fold and the retention cover. The heat grid keeps everything it had and the raw signal leaves. The cutoff is a whole day in the past, because a cell replaced from half a day would lose the other half.
 
 ### Reading capture is a scope grant
 

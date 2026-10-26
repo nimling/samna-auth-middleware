@@ -763,12 +763,12 @@ grep -n 'GetConsent' analytics/*.go
 3. Method:
 
 ```bash
-sed -n 100,110p analytics/writer.go
+grep -n "analytics_event" prophet/database/V5.20__claimius_retention.sql
 ```
 
-4. Pass: `delete_analytics_event` runs with `rawRetentionDays` 30.
+4. Pass: an `analytics_event` row in `claimius.retention`, 30 days by default, pruned once a day by `delete_expired` under the retention job.
 
-5. Today: `passes`, `analytics/analytics.go:18`, `analytics/writer.go:106`.
+5. Today: `passes`, `prophet/database/V5.20__claimius_retention.sql`, `shared/retention.go`.
 
 ### C46, retention for every other personal table
 
@@ -779,12 +779,12 @@ sed -n 100,110p analytics/writer.go
 3. Method:
 
 ```bash
-grep -rn -i 'delete_.*older\|retention' analytics notification audit shared prophet/database disciple/database
+psql -c "SELECT kind, days FROM claimius.get_retention()"
 ```
 
-4. Pass: one sweep per table.
+4. Pass: one retention row and prune per table.
 
-5. Today: `fails`, only `analytics/writer.go:106`; platform control Retention is `missing`.
+5. Today: `fails`, `audit`, `notification`, `consent`, `analytics_session` and `analytics_capture` have a retention row each, `prophet/database/V5.20__claimius_retention.sql` and `disciple/database/V5.3__claimius_retention.sql`, and `usage_diff` is folded by the drain; `user_activity` has no sweep.
 
 ### C47, export contract
 

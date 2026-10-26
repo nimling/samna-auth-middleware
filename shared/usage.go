@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"sort"
 	"sync"
 	"time"
@@ -46,6 +47,7 @@ type ObjectUsage struct {
 	mu      sync.Mutex
 	counts  map[usageKey]int64
 	limit   int
+	dropped int64
 	post    usagePost
 	report  func(error)
 	backoff time.Duration
@@ -79,8 +81,12 @@ func (u *ObjectUsage) Add(appID *uuid.UUID, userID uuid.UUID, objectType string,
 		key.AppID = *appID
 	}
 	u.mu.Lock()
-	u.counts[key]++
-	full := len(u.counts) == u.limit
+	if _, held := u.counts[key]; held || len(u.counts) < u.limit {
+		u.counts[key]++
+	} else {
+		u.dropped++
+	}
+	full := len(u.counts) >= u.limit
 	u.mu.Unlock()
 	if full {
 		select {
@@ -142,16 +148,27 @@ func (u *ObjectUsage) flush() {
 		}
 		time.Sleep(time.Duration(attempt) * u.backoff)
 	}
-	if err == nil {
+	u.mu.Lock()
+	if err != nil {
+		for i, k := range keys {
+			if _, held := u.counts[k]; held || len(u.counts) < u.limit {
+				u.counts[k] += counts[i]
+			} else {
+				u.dropped += counts[i]
+			}
+		}
+	}
+	dropped := u.dropped
+	u.dropped = 0
+	u.mu.Unlock()
+	if u.report == nil {
 		return
 	}
-	u.mu.Lock()
-	for i, k := range keys {
-		u.counts[k] += counts[i]
-	}
-	u.mu.Unlock()
-	if u.report != nil {
+	if err != nil {
 		u.report(err)
+	}
+	if dropped > 0 {
+		u.report(fmt.Errorf("%d uses dropped over the limit of %d keys", dropped, u.limit))
 	}
 }
 

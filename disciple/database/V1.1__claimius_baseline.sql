@@ -634,7 +634,7 @@ UPDATE claimius.disciple_state SET access_trimmed_txid = pg_current_xact_id() WH
 
 COMMENT ON COLUMN claimius.disciple_state.prophet IS 'Slug of the one prophet the disciple is bound to, as that prophet names itself on its feed. The cursor is a position on its feed alone. NULL until the first answer.';
 COMMENT ON COLUMN claimius.disciple_state.endpoint IS 'Where the bound prophet answers. The disciple keeps pulling and routing writes there until another prophet serves it under an agreed handover.';
-COMMENT ON COLUMN claimius.disciple_state.access_trimmed_txid IS 'The lowest cursor among the users used within 7 days at the last trim of access_diff: every area below it is gone, and a reader whose cursor is below it resettles its whole reach.';
+COMMENT ON COLUMN claimius.disciple_state.access_trimmed_txid IS 'The lowest cursor among the users used within the access_diff retention at its last trim, or the oldest running transaction when none was: every area below it is gone, and a reader whose cursor is below it resettles its whole reach.';
 
 DROP TABLE IF EXISTS claimius.reconcile_queue;
 

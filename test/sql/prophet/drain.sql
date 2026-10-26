@@ -88,10 +88,10 @@ INSERT INTO claimius.user_activity (user_id, app_id, last_used_at) VALUES
     ('a0000000-0000-4000-8000-0000000000f2', pg_temp.app(), now() - INTERVAL '1 day'),
     ('a0000000-0000-4000-8000-0000000000f4', pg_temp.served(), now() - INTERVAL '1 minute');
 
-SELECT is(claimius.drain_access_diff(0), 0, 'a drain of no pairs settles nothing');
+SELECT is((SELECT settled FROM claimius.drain_access_diff(0)), 0, 'a drain of no pairs settles nothing');
 SELECT is(pg_temp.pairs('a0000000-0000-4000-8000-0000000000f1', pg_temp.app()), 0::BIGINT, 'no holder is settled before the drain');
 
-SELECT cmp_ok(claimius.drain_access_diff(), '>', 0, 'the drain settles shares');
+SELECT cmp_ok((SELECT settled FROM claimius.drain_access_diff()), '>', 0, 'the drain settles shares');
 
 SELECT is(pg_temp.pairs('a0000000-0000-4000-8000-0000000000f1', pg_temp.app()), 2::BIGINT,
     'a holder who reads more often than areas are raised is settled ahead of the read');
@@ -106,7 +106,7 @@ SELECT ok(pg_temp.cursor_of('a0000000-0000-4000-8000-0000000000f1', pg_temp.app(
     'the share settled moves its holder''s cursor and leaves the cursors of the shares left behind');
 
 UPDATE claimius.sync_consumer SET last_contact_at = now() - INTERVAL '8 days' WHERE app_id = pg_temp.served();
-SELECT claimius.drain_access_diff();
+SELECT * FROM claimius.drain_access_diff();
 SELECT is(pg_temp.pairs('a0000000-0000-4000-8000-0000000000f4', pg_temp.served()), 2::BIGINT,
     'an app no disciple has contacted for 7 days is drained by the prophet');
 
@@ -120,7 +120,7 @@ SELECT is(
 SELECT cmp_ok((SELECT count(*) FROM claimius.user_users_diff WHERE app_id = pg_temp.app()), '>', 0::BIGINT,
     'the pairs a listing settled left user_users_diff rows, which a listing does not fold');
 
-SELECT claimius.drain_access_diff();
+SELECT * FROM claimius.drain_access_diff();
 
 SELECT is_empty($$SELECT 1 FROM claimius.user_users_diff WHERE app_id = pg_temp.app()$$,
     'the drain folds the user_users_diff rows');

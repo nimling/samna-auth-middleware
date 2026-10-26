@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/lib/pq"
@@ -293,8 +295,18 @@ func (d *DB) RootAccess(ctx context.Context, userID uuid.UUID, requiredAccess Cl
 	return &claims[0], nil
 }
 
+type accessDiffDrained struct {
+	Settled  int      `bun:"settled"`
+	Failures []string `bun:"failures,array"`
+}
+
 func (d *DB) PostAccessDiffDrain(ctx context.Context, limitPairs int) (int, error) {
-	var settled int
-	err := d.NewRaw("SELECT claimius.drain_access_diff(?)", limitPairs).Scan(ctx, &settled)
-	return settled, err
+	var drained accessDiffDrained
+	if err := d.NewRaw("SELECT * FROM claimius.drain_access_diff(?)", limitPairs).Scan(ctx, &drained); err != nil {
+		return 0, err
+	}
+	if len(drained.Failures) > 0 {
+		return drained.Settled, fmt.Errorf("drain: %s", strings.Join(drained.Failures, "; "))
+	}
+	return drained.Settled, nil
 }

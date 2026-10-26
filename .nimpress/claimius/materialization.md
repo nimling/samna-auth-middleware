@@ -150,7 +150,7 @@ The fold and the read aggregate the users of an object from one array per object
 
 ## The drain and the trim
 
-`drain_access_diff(p_limit_pairs)`, default 1,000, settles shares ahead of their reads outside any request, then trims the areas every active reader has passed, then folds pending usage and directory rows. It returns the shares settled.
+`drain_access_diff(p_limit_pairs)`, default 1,000, settles shares ahead of their reads outside any request, then folds pending usage and directory rows. Each of the three steps runs in its own subtransaction, so one that fails leaves the others to run; it returns the shares settled and one message per failed step, which `PostAccessDiffDrain` returns as an error the caller logs. The trim is `trim_access_diff`, the `access_diff` prune of the retention job.
 
 ### The drain
 
@@ -164,11 +164,11 @@ The fold and the read aggregate the users of an object from one array per object
 
 ### The trim
 
-1. Per app it takes the lowest cursor among the users used within 7 days.
+1. `trim_access_diff(keep)` runs once a day under the retention job with `keep` the days of the `access_diff` retention row, 7 by default. Per app holding areas, on a prophet every app including a child app and an app a disciple pulls, it takes the lowest cursor among the users used within `keep`, or the oldest running transaction when no user was.
 
-2. It deletes every area with `txid` below that cursor and records the cursor as `access_trimmed_txid` in `prophet_state` or `disciple_state`.
+2. It deletes every area with `txid` below that position and records it as `access_trimmed_txid` in `prophet_state`, creating the row for an app that has none, or in `disciple_state`.
 
-So `access_diff` holds the areas since the oldest active cursor. A reader who comes back later with a mark or a cursor below the trimmed position is sent to the full build of its reach and misses nothing. A lock wait past `_settle_lock_timeout()` or a deadlock during the drain or the trim stops that part and leaves the rest for the next drain.
+So `access_diff` holds the areas since the oldest active cursor. A reader who comes back later with a mark or a cursor below the trimmed position is sent to the full build of its reach and misses nothing. A lock wait past `_settle_lock_timeout()` or a deadlock during the drain's settle stops that step and leaves the rest for the next drain; any other failure of a step is returned and logged.
 
 ### The folds
 

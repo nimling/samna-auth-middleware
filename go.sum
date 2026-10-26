@@ -75,8 +75,8 @@ github.com/mattn/go-isatty v0.0.24 h1:tGZZoVgT/KiqK1c8ocVLeDS8BSWMRd47J3Lbz7vsRe
 github.com/mattn/go-isatty v0.0.24/go.mod h1:nMCL3Zebbrt45jsMDgnfIwz6ydEQApk5oEI3HqDio6A=
 github.com/nimling/nimbody v1.0.4 h1:zHKH/CtgjVp1Q20fqIml7I4Vj0dS9XsR2s1oJjpj1/A=
 github.com/nimling/nimbody v1.0.4/go.mod h1:P+qiBlOF+jkBGDnXgmnV00jlZ11KPpY11TcRQp9ycFw=
-github.com/nimling/nimtel v0.0.3 h1:dN2uZMXV/0Z8lbrc1U4smEWO6+Zbth0Ek5FOIQFwU4k=
-github.com/nimling/nimtel v0.0.3/go.mod h1:PYkXZN1oB/0jc38WJjxdAzklt6a/zL67HSyzMGKe950=
+github.com/nimling/nimtel v0.0.4 h1:ikJEURQF3Wqg8RihU/UTzQ5zMkdYt7QY30vcLR2KGlo=
+github.com/nimling/nimtel v0.0.4/go.mod h1:PYkXZN1oB/0jc38WJjxdAzklt6a/zL67HSyzMGKe950=
 github.com/pkg/browser v0.0.0-20240102092130-5ac0b6a4141c h1:+mdjkGKdHQG3305AYmdv1U2eRNDiU2ErMBj1gwrq8eQ=
 github.com/pkg/browser v0.0.0-20240102092130-5ac0b6a4141c/go.mod h1:7rwL4CYBLnjLxUqIJNnCWiEdr3bn6IUYi15bNlnbCCU=
 github.com/pmezard/go-difflib v1.0.0/go.mod h1:iKH77koFhYxTK1pcRnkKkqfTogsbg7gZNVY4sRDYZ/4=

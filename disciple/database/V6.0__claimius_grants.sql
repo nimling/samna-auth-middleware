@@ -21,7 +21,7 @@ BEGIN
              claimius.upsert_disciple_state, claimius.insert_secret,
              claimius.update_claim_guest, claimius.insert_code, claimius.delete_code, claimius.redeem_code,
              claimius.upsert_table_info, claimius.delete_table_info, claimius.upsert_internal_table_info,
-             claimius.recompute_state
+             claimius.recompute_state, claimius.delete_expired, claimius.update_retention, claimius.upsert_retention
              FROM claimius_reader';
     EXECUTE 'GRANT INSERT, UPDATE, DELETE ON claimius.user_object, claimius.object_info, claimius.user_users, claimius.user_users_diff,
              claimius.disciple_state, claimius.samna_user, claimius.samna_client,

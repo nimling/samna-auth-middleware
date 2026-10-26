@@ -679,7 +679,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_prophet_state_system_singleton
     WHERE system_app_slug IS NOT NULL;
 
 COMMENT ON TABLE claimius.prophet_state IS 'Per app publishing state. (last_applied_txid, last_applied_seq) is the lowest cursor among the app''s consumers in contact, (trimmed_txid, trimmed_seq) the highest position of the app''s events trim_sync_event removed. system_app_slug marks the deployment system app row.';
-COMMENT ON COLUMN claimius.prophet_state.access_trimmed_txid IS 'The lowest cursor among the app''s users used within 7 days at the last trim of access_diff: every area below it is gone, and a reader whose cursor is below it resettles its whole reach.';
+COMMENT ON COLUMN claimius.prophet_state.access_trimmed_txid IS 'The lowest cursor among the app''s users used within the access_diff retention at its last trim, or the oldest running transaction when none was: every area below it is gone, and a reader whose cursor is below it resettles its whole reach.';
 
 CREATE TABLE IF NOT EXISTS claimius.sync_consumer (
                                                       app_id              UUID NOT NULL REFERENCES claimius.samna_app(id),

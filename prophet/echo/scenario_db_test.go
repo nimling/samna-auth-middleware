@@ -157,7 +157,7 @@ func getScenarioUsers(t *testing.T, prophet, disciple *shared.DB, appID uuid.UUI
 func getDisciplePairCounts(t *testing.T, disciple *shared.DB, step string) {
 	t.Helper()
 	ctx := context.Background()
-	if _, err := disciple.ExecContext(ctx, `SELECT claimius.drain_access_diff(1000)`); err != nil {
+	if _, err := disciple.ExecContext(ctx, `SELECT * FROM claimius.drain_access_diff(1000)`); err != nil {
 		t.Fatalf("drain on the disciple %s: %v", step, err)
 	}
 	var left, drift int

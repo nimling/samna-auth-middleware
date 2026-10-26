@@ -71,7 +71,7 @@ The pull loop runs on every process of a service. Each takes a session level `pg
 
 2. Per app, every event beyond as many as the app has source rows, `count_sync_source_rows`: the rows of the ten app scoped tables `samna_user`, `claim`, `user_claim`, `claim_object`, `samna_client`, `samna_secret`, `object_field`, `user_field`, `user_relation` and `code`, the live organization and location links, and the asset links published to the app.
 
-It records the highest position removed per app in `prophet_state (trimmed_txid, trimmed_seq)`.
+It records the highest position removed per app in `prophet_state (trimmed_txid, trimmed_seq)`. It is the `sync_event` prune of the retention job, run once a day with `stale_after` the days of that row.
 
 ## Catch up
 

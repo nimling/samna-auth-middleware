@@ -228,7 +228,7 @@ BEGIN
            e ->> 'type',
            COALESCE(e ->> 'path', ''),
            COALESCE(e -> 'payload', '{}'::jsonb),
-           to_timestamp((e ->> 'occurred_at')::double precision / 1000.0)
+           least(greatest(coalesce(to_timestamp((e ->> 'occurred_at')::double precision / 1000.0), now()), now() - INTERVAL '1 day'), now())
     FROM jsonb_array_elements(p_events) AS e
     WHERE e ->> 'type' IS NOT NULL;
 
@@ -242,7 +242,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius.insert_analytics_events(UUID, TEXT, JSONB) IS 'Writes a batch against an open session. Returns 0 and writes nothing when consent is absent or the session is unknown.';
+COMMENT ON FUNCTION claimius.insert_analytics_events(UUID, TEXT, JSONB) IS 'Writes a batch against an open session, each occurred_at clamped into the day before now so a browser clock cannot place a signal outside the days the fold and the retention cover. Returns 0 and writes nothing when consent is absent or the session is unknown.';
 
 DROP FUNCTION IF EXISTS claimius.capture_app_access(UUID, UUID);
 DROP FUNCTION IF EXISTS claimius.capture_app_ids(UUID);

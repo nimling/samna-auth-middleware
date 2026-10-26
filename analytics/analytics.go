@@ -13,14 +13,13 @@ import (
 )
 
 const (
-	jobBuffer        = 4096
-	CaptureBytesMax  = 8 << 20
-	CaptureMaxAge    = "7 days"
-	foldInterval     = time.Hour
-	foldLead         = time.Minute
-	foldLockKey      = "claimius.analytics_fold"
-	rawRetentionDays = 30
-	drainTimeout     = 10 * time.Second
+	jobBuffer       = 4096
+	CaptureBytesMax = 8 << 20
+	CaptureMaxAge   = "7 days"
+	foldInterval    = time.Hour
+	foldLead        = time.Minute
+	foldLockKey     = "claimius.analytics_fold"
+	drainTimeout    = 10 * time.Second
 )
 
 var (

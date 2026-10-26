@@ -53,7 +53,7 @@ if err := sdb.Instance().Close(); err != nil {
 
 ## Lifecycle
 
-Each role has one runtime start, `sam.Init(ctx) error`, joined by `sam.Done()`. The disciple's `disciple/sam.Init` starts the sync, the app seed, the Initiate apps and notification; the prophet's `prophet/sam.Init` starts notification, analytics and the peer sync. `uptime.Init(ctx, logger, opts)` is the one other host call, joined by `uptime.Done()`, and takes no database.
+Each role has one runtime start, `sam.Init(ctx) error`, joined by `sam.Done()`. The disciple's `disciple/sam.Init` starts the sync, the app seed, the Initiate apps, notification and the retention job; the prophet's `prophet/sam.Init` starts notification, analytics, the retention job and the peer sync. `uptime.Init(ctx, logger, opts)` is the one other host call, joined by `uptime.Done()`, and takes no database.
 
 1. One run context. `main` makes the signal context with `signal.NotifyContext` and a run context it cancels after `e.Shutdown` returns, and hands the run context to `sam.Init` and `uptime.Init`. Cancelling it is the only way a runner ends; there is no `Stop`.
 2. `Init(ctx) error` starts the goroutines and returns at once. It returns an error only when the runtime cannot start: no database (`shared.ErrNotConnected`), the first `LISTEN` failing, or a second call while it still runs (`ErrStarted`). A host treats that error as fatal. After start, failures are logged and retried.
