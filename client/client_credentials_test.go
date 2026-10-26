@@ -2,6 +2,7 @@ package client_test
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -21,7 +22,7 @@ func TestPostClientCredentialsSendsFormCredentialsWithoutAppHeaders(t *testing.T
 		clientSecret = r.Form.Get("client_secret")
 		appSlug = r.Header.Get("SAuth-App-Slug")
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"data":{"access_token":"tok","token_type":"Bearer","access_expires_in":3600},"count":1,"request_id":"00000000-0000-0000-0000-000000000000"}`))
+		w.Write([]byte(`{"access_token":"tok","token_type":"Bearer","expires_in":3600}`))
 	}))
 	defer tokenServer.Close()
 
@@ -32,6 +33,9 @@ func TestPostClientCredentialsSendsFormCredentialsWithoutAppHeaders(t *testing.T
 	if token.AccessToken != "tok" {
 		t.Errorf("access token = %q, want tok", token.AccessToken)
 	}
+	if token.AccessExpiresIn != 3600 {
+		t.Errorf("expires in = %d, want 3600 from the RFC 6749 expires_in", token.AccessExpiresIn)
+	}
 	if grantType != "client_credentials" {
 		t.Errorf("grant_type = %q, want client_credentials", grantType)
 	}
@@ -40,6 +44,21 @@ func TestPostClientCredentialsSendsFormCredentialsWithoutAppHeaders(t *testing.T
 	}
 	if appSlug != "" {
 		t.Errorf("SAuth-App-Slug = %q, want it absent for a client grant", appSlug)
+	}
+}
+
+func TestPostClientCredentialsReadsTheTokenErrorBody(t *testing.T) {
+	tokenServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte(`{"error":"invalid_grant","error_description":"expired"}`))
+	}))
+	defer tokenServer.Close()
+
+	_, err := sclient.PostClientCredentials(context.Background(), tokenServer.URL, "id", "secret")
+	var tokenErr *sclient.TokenError
+	if !errors.As(err, &tokenErr) || tokenErr.Code != "invalid_grant" || tokenErr.Description != "expired" {
+		t.Fatalf("error = %v, want the RFC 6749 invalid_grant body", err)
 	}
 }
 

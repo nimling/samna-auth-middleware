@@ -15,7 +15,7 @@ import (
 type ResponseToken struct {
 	AccessToken      string `json:"access_token"`
 	RefreshToken     string `json:"refresh_token"`
-	AccessExpiresIn  int    `json:"access_expires_in"`
+	AccessExpiresIn  int    `json:"expires_in"`
 	RefreshExpiresIn int    `json:"refresh_expires_in"`
 	TokenType        string `json:"token_type"`
 }
@@ -157,11 +157,6 @@ func postAuth(ctx context.Context, target string, slug string, secret string, fo
 	if err != nil {
 		return fmt.Errorf("read response: %w", err)
 	}
-	var envelope ResponseEnvelope
-	if json.Unmarshal(raw, &envelope) == nil && len(envelope.Data) > 0 {
-		raw = envelope.Data
-	}
-
 	if resp.StatusCode != http.StatusOK {
 		tokenErr := &TokenError{Status: resp.StatusCode}
 		_ = json.Unmarshal(raw, tokenErr)

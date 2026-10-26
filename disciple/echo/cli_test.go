@@ -165,7 +165,7 @@ func TestGetCallbackRefusesACliLoginWithAForeignState(t *testing.T) {
 }
 
 func TestPostCliTokenExchangesTheCodeWithTheClisVerifier(t *testing.T) {
-	prophet := &fakeProphet{status: http.StatusOK, body: `{"data":{"access_token":"acc","refresh_token":"ref","access_expires_in":900,"refresh_expires_in":2592000,"token_type":"Bearer"},"count":1}`}
+	prophet := &fakeProphet{status: http.StatusOK, body: `{"access_token":"acc","refresh_token":"ref","expires_in":900,"refresh_expires_in":2592000,"token_type":"Bearer"}`}
 	prophet.serve(t)
 
 	rec := callCli(t, http.MethodPost, "/api/auth/cli/token", url.Values{"grant_type": {"authorization_code"}, "code": {"thecode"}, "code_verifier": {"theverifier"}}, nil, saecho.PostCliToken)
@@ -190,7 +190,7 @@ func TestPostCliTokenExchangesTheCodeWithTheClisVerifier(t *testing.T) {
 }
 
 func TestPostCliTokenRelaysTheProphetsRefusal(t *testing.T) {
-	(&fakeProphet{status: http.StatusBadRequest, body: `{"data":{"error":"invalid_grant","error_description":"code_verifier does not match code_challenge"},"count":1}`}).serve(t)
+	(&fakeProphet{status: http.StatusBadRequest, body: `{"error":"invalid_grant","error_description":"code_verifier does not match code_challenge"}`}).serve(t)
 
 	rec := callCli(t, http.MethodPost, "/api/auth/cli/token", url.Values{"grant_type": {"authorization_code"}, "code": {"thecode"}, "code_verifier": {"wrong"}}, nil, saecho.PostCliToken)
 
@@ -222,7 +222,7 @@ func TestPostCliRevokeRevokesTheClisRefreshFamily(t *testing.T) {
 }
 
 func TestPostCliTokenRelaysADeadRefreshTokenAsInvalidGrant(t *testing.T) {
-	(&fakeProphet{status: http.StatusUnauthorized, body: `{"data":{"error":"invalid_grant","error_description":"refresh token expired"},"count":1}`}).serve(t)
+	(&fakeProphet{status: http.StatusUnauthorized, body: `{"error":"invalid_grant","error_description":"refresh token expired"}`}).serve(t)
 
 	rec := callCli(t, http.MethodPost, "/api/auth/cli/token", url.Values{"grant_type": {"refresh_token"}, "refresh_token": {"dead"}}, nil, saecho.PostCliToken)
 

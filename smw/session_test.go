@@ -161,7 +161,7 @@ func TestARefreshKeepsTheCSRFTokenTheBrowserAlreadyHolds(t *testing.T) {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"data":{"access_token":"fresh","refresh_token":"next","token_type":"Bearer","access_expires_in":900,"refresh_expires_in":2592000},"count":1}`))
+		w.Write([]byte(`{"access_token":"fresh","refresh_token":"next","token_type":"Bearer","expires_in":900,"refresh_expires_in":2592000}`))
 	}))
 	defer server.Close()
 	handler := userAuthHandlerAgainst(t, server, nil)

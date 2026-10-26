@@ -21,7 +21,7 @@ func TestGetCallbackSetsTokenAndCSRFCookies(t *testing.T) {
 			t.Errorf("missing app credentials on token exchange")
 		}
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"data":{"access_token":"tok","refresh_token":"ref","token_type":"Bearer","access_expires_in":3600,"refresh_expires_in":2592000},"count":1,"request_id":"00000000-0000-0000-0000-000000000000"}`))
+		w.Write([]byte(`{"access_token":"tok","refresh_token":"ref","token_type":"Bearer","expires_in":3600,"refresh_expires_in":2592000}`))
 	}))
 	defer tokenServer.Close()
 
@@ -268,7 +268,7 @@ func TestGetCallbackReturnsToTheInitiateApp(t *testing.T) {
 			t.Errorf("redirect_uri = %q, want the initiate app's callback", r.PostForm.Get("redirect_uri"))
 		}
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"data":{"access_token":"tok","refresh_token":"ref","token_type":"Bearer","access_expires_in":3600,"refresh_expires_in":2592000},"count":1,"request_id":"00000000-0000-0000-0000-000000000000"}`))
+		w.Write([]byte(`{"access_token":"tok","refresh_token":"ref","token_type":"Bearer","expires_in":3600,"refresh_expires_in":2592000}`))
 	}))
 	defer tokenServer.Close()
 
@@ -338,7 +338,7 @@ func TestGetCallbackSetsTheInitiateAppCookieScopeFromTheProphet(t *testing.T) {
 			if err := r.ParseForm(); err != nil || r.PostForm.Get("redirect_uri") != "https://web.example/api/auth/callback?app=testapp-web" {
 				t.Errorf("redirect_uri = %q, want the initiate app's registered callback", r.PostForm.Get("redirect_uri"))
 			}
-			w.Write([]byte(`{"data":{"access_token":"tok","refresh_token":"ref","token_type":"Bearer","access_expires_in":3600,"refresh_expires_in":2592000},"count":1,"request_id":"00000000-0000-0000-0000-000000000000"}`))
+			w.Write([]byte(`{"access_token":"tok","refresh_token":"ref","token_type":"Bearer","expires_in":3600,"refresh_expires_in":2592000}`))
 		default:
 			t.Errorf("unexpected path %s", r.URL.Path)
 		}
