@@ -181,3 +181,41 @@ func TestDiscipleInitRunsSyncAndNotification(t *testing.T) {
 		t.Fatalf("the sync kept the leader lock after the end")
 	}
 }
+
+func TestWriteUserCarriesItsObject(t *testing.T) {
+	t.Setenv("SAUTH_DEBUG_USER_ID", uuid.NewString())
+	db, err := sdb.Init(echo.New().Logger)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	user := uuid.New()
+	if _, err := db.NewRaw(`INSERT INTO claimius.samna_user (user_id) VALUES (?)`, user).Exec(t.Context()); err != nil {
+		t.Fatalf("user: %v", err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	if err := sam.Init(ctx); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+	object := uuid.New()
+	notification.WriteUser(notification.Notification{Title: "access", Type: "access_request", ObjectType: "public.data_page", ObjectID: &object}, user)
+	notification.WriteUser(notification.Notification{Title: "plain", Type: "info"}, user)
+	cancel()
+	<-sam.Done()
+	var rows []struct {
+		Title      string     `bun:"title"`
+		ObjectType *string    `bun:"object_type"`
+		ObjectID   *uuid.UUID `bun:"object_id"`
+	}
+	if err := db.NewRaw(`SELECT title, object_type, object_id FROM claimius.notification WHERE user_id = ? ORDER BY title`, user).Scan(context.Background(), &rows); err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("notifications written = %d, want 2", len(rows))
+	}
+	if rows[0].Title != "access" || rows[0].ObjectType == nil || *rows[0].ObjectType != "public.data_page" || rows[0].ObjectID == nil || *rows[0].ObjectID != object {
+		t.Fatalf("the user notification lost its object: %+v", rows[0])
+	}
+	if rows[1].ObjectType != nil || rows[1].ObjectID != nil {
+		t.Fatalf("a notification without an object carries one: %+v", rows[1])
+	}
+}

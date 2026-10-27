@@ -21,6 +21,8 @@ type Notification struct {
 	CreatedBy   *uuid.UUID
 	OwnerID     *uuid.UUID
 	RepeatsAt   *string
+	ObjectType  string
+	ObjectID    *uuid.UUID
 }
 
 type job struct {
@@ -44,7 +46,17 @@ func WriteUser(in Notification, userIDs ...uuid.UUID) {
 	if len(userIDs) == 0 {
 		return
 	}
-	enqueue(job{in: in, userIDs: userIDs})
+	j := job{in: in, userIDs: userIDs}
+	if in.ObjectType != "" && in.ObjectID != nil {
+		qualified, err := shared.ResolveObjectType(in.ObjectType)
+		if err != nil {
+			log.Errorf("notification WriteUser: %v", err)
+			return
+		}
+		id := *in.ObjectID
+		j.objectType, j.objectID = string(qualified), &id
+	}
+	enqueue(j)
 }
 
 func enqueue(j job) {
@@ -103,10 +115,14 @@ func (r *runner) exec(ctx context.Context, j job) {
 	}
 	var count int
 	if len(j.userIDs) > 0 {
+		var objectType *string
+		if j.objectType != "" {
+			objectType = &j.objectType
+		}
 		placeholders := make([]string, len(j.userIDs))
 		args := []interface{}{
 			in.AppID, in.Title, in.Description, style, in.Type, in.Link,
-			(*string)(nil), (*uuid.UUID)(nil), in.CreatedBy, in.OwnerID, in.RepeatsAt,
+			objectType, j.objectID, in.CreatedBy, in.OwnerID, in.RepeatsAt,
 		}
 		for i, u := range j.userIDs {
 			placeholders[i] = "?"
