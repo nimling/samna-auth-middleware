@@ -37,7 +37,7 @@ Claimius owns and validates its own types. It reads no more of the implementing 
 | [Materialization](./materialization.md) | `user_object` and the pair's mark, the reader's cursor, `access_diff` keyed by transaction and root, the set based share settle, the `user_users` fold for viewers, the locks a settle takes, the drain rule and the trim |
 | [Reads](./reads.md) | Every read function and what it reads and writes |
 | [Writes](./writes.md) | Every write and what it does inside its transaction |
-| [Search](./search.md) | Full text search ranked by text and decayed usage |
+| [Search](./search.md) | Search inside a scope, with or without a query, from the smallest of the reader's pairs, the scope and the matches, extended by host search sources |
 | [Graphs](./graphs.md) | The owner and claim graphs, windows, the snapshot validated cache |
 | [Usage](./usage.md) | The per pair usage count, relations, and the prophet's capture |
 | [Sync](./sync.md) | The outbox of source rows, the `(txid, seq)` cursor, pages, trimming |

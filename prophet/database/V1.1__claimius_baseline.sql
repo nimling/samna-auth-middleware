@@ -482,6 +482,23 @@ CREATE INDEX IF NOT EXISTS idx_object_info_owner_name ON claimius.object_info (s
 CREATE INDEX IF NOT EXISTS idx_object_info_location_name ON claimius.object_info (sa_location_id, sa_name, object_id);
 
 DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_type t JOIN pg_namespace n ON n.oid = t.typnamespace WHERE n.nspname = 'claimius' AND t.typname = 'search_hit') THEN
+        CREATE TYPE claimius.search_hit AS (object_type TEXT, object_id UUID, score REAL);
+    END IF;
+END $$;
+
+CREATE TABLE IF NOT EXISTS claimius.search_source (
+    object_type   TEXT PRIMARY KEY,
+    fn            REGPROCEDURE NOT NULL,
+    sa_created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    sa_updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+COMMENT ON TABLE claimius.search_source IS 'One search function per registered object type, supplied by the host for its own rows. Written by upsert_search_source, read by search.';
+COMMENT ON TYPE claimius.search_hit IS 'One row a search source returns: the object and its score in [0, 1].';
+
+DO $$
 DECLARE
     v_new   BOOLEAN;
     v_table RECORD;

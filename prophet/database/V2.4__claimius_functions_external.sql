@@ -1935,6 +1935,129 @@ $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = claimius, pg_temp;
 
 COMMENT ON FUNCTION claimius.search(UUID, UUID, TEXT, TEXT[], INTEGER, INTEGER, INTEGER) IS 'Full text search over accessible objects whose mask covers p_required_access. user_claim_id is the actor token from the strongest surviving claim grant per object.';
 
+CREATE OR REPLACE FUNCTION claimius._search_scope_smaller(
+    p_app_id       UUID,
+    p_user_id      UUID,
+    p_object_types TEXT[],
+    p_tree         claimius.tree_type,
+    p_scope_type   TEXT,
+    p_scope_ids    UUID[]
+) RETURNS BOOLEAN AS $$
+DECLARE
+    v_k     INTEGER := 64;
+    v_pairs INTEGER;
+    v_scope INTEGER;
+BEGIN
+    LOOP
+        SELECT count(*) INTO v_pairs FROM (
+            SELECT 1 FROM claimius.user_object uo
+            WHERE uo.user_id = p_user_id
+              AND uo.app_id = p_app_id
+              AND (p_object_types IS NULL OR uo.object_type = ANY(p_object_types))
+            LIMIT v_k
+        ) x;
+        SELECT count(*) INTO v_scope FROM (
+            SELECT 1 FROM claimius.inheritance_info ii
+            WHERE ii.ancestor_type = p_scope_type
+              AND ii.ancestor_id   = ANY(p_scope_ids)
+              AND ii.tree_type     = p_tree
+              AND (p_object_types IS NULL OR ii.descendant_type = ANY(p_object_types))
+            LIMIT v_k
+        ) x;
+        IF v_pairs < v_k OR v_scope < v_k THEN
+            RETURN v_scope <= v_pairs;
+        END IF;
+        v_k := v_k * 4;
+    END LOOP;
+END;
+$$ LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = claimius, pg_temp;
+
+COMMENT ON FUNCTION claimius._search_scope_smaller(UUID, UUID, TEXT[], claimius.tree_type, TEXT, UUID[]) IS 'True when the scope''s closure rows are no more than the reader''s pairs of the types. Counts both up to k, from 64 and four times larger per round, and stops at the first round where one falls short, so the cost is linear in the smaller of the two.';
+
+CREATE OR REPLACE FUNCTION claimius._search_text_smaller(
+    p_app_id       UUID,
+    p_user_id      UUID,
+    p_object_types TEXT[],
+    p_tsquery      TSQUERY
+) RETURNS BOOLEAN AS $$
+DECLARE
+    v_plan    JSONB;
+    v_matches NUMERIC;
+    v_pairs   NUMERIC;
+BEGIN
+    EXECUTE 'EXPLAIN (FORMAT JSON) SELECT 1 FROM claimius.object_info oi WHERE oi.search_vector @@ $1 AND ($2::TEXT[] IS NULL OR oi.object_type = ANY($2))'
+        INTO v_plan USING p_tsquery, p_object_types;
+    v_matches := (v_plan -> 0 -> 'Plan' ->> 'Plan Rows')::NUMERIC;
+    EXECUTE 'EXPLAIN (FORMAT JSON) SELECT 1 FROM claimius.user_object uo WHERE uo.user_id = $1 AND uo.app_id = $3 AND ($2::TEXT[] IS NULL OR uo.object_type = ANY($2))'
+        INTO v_plan USING p_user_id, p_object_types, p_app_id;
+    v_pairs := (v_plan -> 0 -> 'Plan' ->> 'Plan Rows')::NUMERIC;
+    RETURN v_matches < v_pairs;
+END;
+$$ LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path = claimius, pg_temp;
+
+COMMENT ON FUNCTION claimius._search_text_smaller(UUID, UUID, TEXT[], TSQUERY) IS 'True when the planner''s estimate of the objects matching the query is below its estimate of the reader''s pairs of the types, so search reads the query''s postings in idx_object_info_search and probes the reader''s pair per match instead of reading the reader''s range. Both are plan estimates, so the choice reads no index entry.';
+
+CREATE OR REPLACE FUNCTION claimius._search_source_hits(
+    p_query        TEXT,
+    p_object_types TEXT[],
+    p_scope_ids    UUID[]
+) RETURNS claimius.search_hit[] AS $$
+DECLARE
+    v_source RECORD;
+    v_part   claimius.search_hit[];
+    v_hits   claimius.search_hit[] := ARRAY[]::claimius.search_hit[];
+BEGIN
+    FOR v_source IN
+        SELECT ss.object_type, ss.fn::oid::regproc AS fn
+        FROM claimius.search_source ss
+        WHERE p_object_types IS NULL OR ss.object_type = ANY(p_object_types)
+        ORDER BY ss.object_type
+    LOOP
+        EXECUTE format(
+            'SELECT coalesce(array_agg(ROW(%L, s.object_id, least(greatest(s.score, 0), 1))::claimius.search_hit), ARRAY[]::claimius.search_hit[]) FROM %s($1, $2) s',
+            v_source.object_type, v_source.fn
+        ) INTO v_part USING p_query, p_scope_ids;
+        v_hits := v_hits || v_part;
+    END LOOP;
+    RETURN v_hits;
+END;
+$$ LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = claimius, pg_temp;
+
+COMMENT ON FUNCTION claimius._search_source_hits(TEXT, TEXT[], UUID[]) IS 'The rows every registered search source of the requested types returns for the query and the scope ids, each score clamped to [0, 1]. The caller keeps a row only where the reader holds a pair on it.';
+
+CREATE OR REPLACE FUNCTION claimius.upsert_search_source(
+    p_object_type TEXT,
+    p_fn          REGPROCEDURE
+) RETURNS claimius.search_source AS $$
+DECLARE
+    v_row claimius.search_source;
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM claimius.table_info ti WHERE ti.object_type = p_object_type) THEN
+        RAISE EXCEPTION 'object type % is not registered', p_object_type USING ERRCODE = 'P0404';
+    END IF;
+    IF (SELECT ARRAY(SELECT t::regtype::text FROM unnest(p.proargtypes) t) FROM pg_proc p WHERE p.oid = p_fn) <> ARRAY['text', 'uuid[]'] THEN
+        RAISE EXCEPTION 'search source % must take (text, uuid[])', p_fn USING ERRCODE = '22023';
+    END IF;
+    INSERT INTO claimius.search_source (object_type, fn)
+    VALUES (p_object_type, p_fn)
+    ON CONFLICT (object_type) DO UPDATE SET fn = EXCLUDED.fn, sa_updated_at = now()
+    RETURNING * INTO v_row;
+    RETURN v_row;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = claimius, pg_temp;
+
+COMMENT ON FUNCTION claimius.upsert_search_source(TEXT, REGPROCEDURE) IS 'Registers the search source of a registered object type: a function (query text, scope_ids uuid[]) returning (object_id uuid, score real) over the host''s own rows of that type. search adds its rows for a non empty query, each kept only where the reader holds a pair on it, with the pair''s grant and field scope.';
+
+CREATE OR REPLACE FUNCTION claimius.delete_search_source(p_object_type TEXT) RETURNS VOID AS $$
+BEGIN
+    DELETE FROM claimius.search_source WHERE object_type = p_object_type;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = claimius, pg_temp;
+
+COMMENT ON FUNCTION claimius.delete_search_source(TEXT) IS 'Removes the search source of an object type.';
+
+GRANT EXECUTE ON FUNCTION claimius.upsert_search_source(TEXT, REGPROCEDURE), claimius.delete_search_source(TEXT) TO claimius_admin;
+
 CREATE OR REPLACE FUNCTION claimius.search(
     p_user_id            UUID,
     p_app_id             UUID,
@@ -1963,15 +2086,21 @@ CREATE OR REPLACE FUNCTION claimius.search(
                    rank                REAL,
                    total_count         INTEGER
                ) AS $$
+#variable_conflict use_column
 DECLARE
     v_tsquery        TSQUERY;
+    v_has_query      BOOLEAN := FALSE;
     v_include_claim  BOOLEAN := p_object_types IS NULL OR 'claimius.claim' = ANY(p_object_types);
     v_include_others BOOLEAN := p_object_types IS NULL OR EXISTS (
         SELECT 1 FROM unnest(p_object_types) t WHERE t <> 'claimius.claim'
     );
-    v_has_scope      BOOLEAN := p_owner_subtree_ids IS NOT NULL
-                              OR p_parent_id IS NOT NULL;
     v_parent_tree    claimius.tree_type;
+    v_scope_tree     claimius.tree_type;
+    v_scope_type     TEXT;
+    v_scope_ids      UUID[];
+    v_from_scope     BOOLEAN := FALSE;
+    v_from_text      BOOLEAN := FALSE;
+    v_hits           claimius.search_hit[] := ARRAY[]::claimius.search_hit[];
 BEGIN
     PERFORM claimius.reconcile_if_pending(p_app_id, p_user_id);
 
@@ -1979,7 +2108,10 @@ BEGIN
         RETURN;
     END IF;
 
-    v_tsquery := websearch_to_tsquery('simple', p_query);
+    IF btrim(coalesce(p_query, '')) <> '' THEN
+        v_tsquery   := websearch_to_tsquery('simple', p_query);
+        v_has_query := numnode(v_tsquery) > 0;
+    END IF;
 
     IF p_parent_type = 'claimius.location' THEN
         v_parent_tree := 'location'::claimius.tree_type;
@@ -1989,67 +2121,143 @@ BEGIN
         v_parent_tree := 'parenthood'::claimius.tree_type;
     END IF;
 
+    IF p_owner_subtree_ids IS NOT NULL THEN
+        v_scope_tree := 'ownership'::claimius.tree_type;
+        v_scope_type := 'claimius.organization';
+        v_scope_ids  := p_owner_subtree_ids;
+    ELSIF p_parent_id IS NOT NULL AND v_parent_tree IS NOT NULL THEN
+        v_scope_tree := v_parent_tree;
+        v_scope_type := p_parent_type;
+        v_scope_ids  := ARRAY[p_parent_id];
+    END IF;
+
+    IF v_scope_tree IS NOT NULL AND v_include_others THEN
+        v_from_scope := claimius._search_scope_smaller(p_app_id, p_user_id, p_object_types, v_scope_tree, v_scope_type, v_scope_ids);
+    END IF;
+
+    IF v_has_query AND v_include_others AND NOT v_from_scope THEN
+        v_from_text := claimius._search_text_smaller(p_app_id, p_user_id, p_object_types, v_tsquery);
+    END IF;
+
+    IF v_has_query AND v_include_others THEN
+        v_hits := claimius._search_source_hits(p_query, p_object_types, v_scope_ids);
+    END IF;
+
     RETURN QUERY
-    WITH combined AS (
-        SELECT
-            claimius.user_object.object_id           AS object_id,
-            claimius.user_object.object_type         AS object_type,
-            best.user_claim_id                       AS user_claim_id,
-            oi.sa_name             AS name,
-            oi.sa_description      AS description,
-            oi.sa_link             AS link,
-            claimius.user_object.sa_access           AS sa_access,
-            claimius.user_object.scope               AS scope,
-            oi.sa_owner_id         AS owner_id,
-            oi.sa_location_id      AS location_id,
-            (claimius.user_object.direct_grant AND best.user_claim_id IS NULL) AS is_direct_grant,
-            (ts_rank(oi.search_vector, v_tsquery) + claimius._decayed_usage(claimius.user_object.used_count, claimius.user_object.last_used_at))::REAL AS rank
-        FROM claimius.user_object
-                 LEFT JOIN LATERAL claimius._best_grant(claimius.user_object.grants, p_required_access) best ON TRUE
-                 JOIN claimius.object_info oi
-                      ON oi.object_type = claimius.user_object.object_type
-                     AND oi.object_id = claimius.user_object.object_id
-        WHERE v_include_others
-          AND claimius.user_object.user_id = p_user_id
-          AND claimius.user_object.app_id = p_app_id
-          AND (claimius.user_object.sa_access & p_required_access) = p_required_access
-          AND oi.search_vector @@ v_tsquery
-          AND (p_object_types IS NULL OR claimius.user_object.object_type = ANY(p_object_types))
-          AND (p_object_ids IS NULL OR claimius.user_object.object_id = ANY(p_object_ids))
-          AND (p_exclude_object_ids IS NULL OR NOT (claimius.user_object.object_id = ANY(p_exclude_object_ids)))
-          AND (p_owner_subtree_ids IS NULL OR EXISTS (
-              SELECT 1 FROM claimius.inheritance_info ii
-              WHERE ii.tree_type       = 'ownership'
-                AND ii.ancestor_type   = 'claimius.organization'
-                AND ii.ancestor_id     = ANY(p_owner_subtree_ids)
-                AND ii.descendant_type = claimius.user_object.object_type
-                AND ii.descendant_id   = claimius.user_object.object_id
-          ))
-          AND (p_parent_id IS NULL OR v_parent_tree IS NULL OR EXISTS (
-              SELECT 1 FROM claimius.inheritance_info ii
-              WHERE ii.tree_type       = v_parent_tree
-                AND ii.ancestor_type   = p_parent_type
-                AND ii.ancestor_id     = p_parent_id
-                AND ii.descendant_type = claimius.user_object.object_type
-                AND ii.descendant_id   = claimius.user_object.object_id
-          ))
-          AND (best.user_claim_id IS NOT NULL OR claimius.user_object.direct_grant)
-
+    WITH scoped AS (
+        SELECT DISTINCT ii.descendant_type AS object_type, ii.descendant_id AS object_id
+        FROM claimius.inheritance_info ii
+        WHERE v_from_scope
+          AND ii.ancestor_type = v_scope_type
+          AND ii.ancestor_id   = ANY(v_scope_ids)
+          AND ii.tree_type     = v_scope_tree
+          AND (p_object_types IS NULL OR ii.descendant_type = ANY(p_object_types))
+    ),
+    pairs AS (
+        SELECT uo.*
+        FROM scoped s
+        JOIN claimius.user_object uo
+          ON uo.user_id     = p_user_id
+         AND uo.app_id      = p_app_id
+         AND uo.object_type = s.object_type
+         AND uo.object_id   = s.object_id
+        WHERE v_from_scope
         UNION ALL
-
+        SELECT uo.*
+        FROM claimius.object_info mi
+        JOIN claimius.user_object uo
+          ON uo.user_id     = p_user_id
+         AND uo.app_id      = p_app_id
+         AND uo.object_type = mi.object_type
+         AND uo.object_id   = mi.object_id
+        WHERE v_from_text
+          AND mi.search_vector @@ v_tsquery
+          AND (p_object_types IS NULL OR mi.object_type = ANY(p_object_types))
+        UNION ALL
+        SELECT uo.*
+        FROM claimius.user_object uo
+        WHERE NOT v_from_scope
+          AND NOT v_from_text
+          AND v_include_others
+          AND uo.user_id = p_user_id
+          AND uo.app_id = p_app_id
+          AND (p_object_types IS NULL OR uo.object_type = ANY(p_object_types))
+    ),
+    objects AS (
         SELECT
-            c.id                                                       AS object_id,
-            'claimius.claim'::TEXT                                     AS object_type,
-            uc.id                                                      AS user_claim_id,
-            c.name                                                     AS name,
-            c.description                                              AS description,
-            NULL::TEXT                                                 AS link,
-            c.sa_access                                                AS sa_access,
-            NULL::JSONB                                                AS scope,
-            c.sa_owner_id                                              AS owner_id,
-            NULL::UUID                                                 AS location_id,
-            TRUE                                                       AS is_direct_grant,
-            ts_rank(to_tsvector('simple', coalesce(c.name, '') || ' ' || coalesce(c.description, '')), v_tsquery) AS rank
+            uo.object_id,
+            uo.object_type,
+            best.user_claim_id,
+            oi.sa_name,
+            oi.sa_description,
+            oi.sa_link,
+            uo.sa_access,
+            uo.scope,
+            oi.sa_owner_id,
+            oi.sa_location_id,
+            (uo.direct_grant AND best.user_claim_id IS NULL) AS is_direct_grant,
+            ((CASE WHEN v_has_query THEN ts_rank(oi.search_vector, v_tsquery) ELSE 0 END)
+                + claimius._decayed_usage(uo.used_count, uo.last_used_at))::REAL AS rank
+        FROM pairs uo
+                 LEFT JOIN LATERAL claimius._best_grant(uo.grants, p_required_access) best ON TRUE
+                 JOIN claimius.object_info oi
+                      ON oi.object_type = uo.object_type
+                     AND oi.object_id   = uo.object_id
+        WHERE (uo.sa_access & p_required_access) = p_required_access
+          AND (NOT v_has_query OR oi.search_vector @@ v_tsquery)
+          AND (best.user_claim_id IS NOT NULL OR uo.direct_grant)
+    ),
+    sourced AS (
+        SELECT
+            uo.object_id,
+            uo.object_type,
+            best.user_claim_id,
+            oi.sa_name,
+            oi.sa_description,
+            oi.sa_link,
+            uo.sa_access,
+            uo.scope,
+            oi.sa_owner_id,
+            oi.sa_location_id,
+            (uo.direct_grant AND best.user_claim_id IS NULL) AS is_direct_grant,
+            (h.score + claimius._decayed_usage(uo.used_count, uo.last_used_at))::REAL AS rank
+        FROM unnest(v_hits) h
+                 JOIN claimius.user_object uo
+                      ON uo.user_id     = p_user_id
+                     AND uo.app_id      = p_app_id
+                     AND uo.object_type = h.object_type
+                     AND uo.object_id   = h.object_id
+                 LEFT JOIN LATERAL claimius._best_grant(uo.grants, p_required_access) best ON TRUE
+                 LEFT JOIN claimius.object_info oi
+                      ON oi.object_type = uo.object_type
+                     AND oi.object_id   = uo.object_id
+        WHERE (uo.sa_access & p_required_access) = p_required_access
+          AND (best.user_claim_id IS NOT NULL OR uo.direct_grant)
+          AND (v_scope_tree IS NULL OR EXISTS (
+              SELECT 1 FROM claimius.inheritance_info ii
+              WHERE ii.descendant_type = uo.object_type
+                AND ii.descendant_id   = uo.object_id
+                AND ii.tree_type       = v_scope_tree
+                AND ii.ancestor_type   = v_scope_type
+                AND ii.ancestor_id     = ANY(v_scope_ids)
+          ))
+    ),
+    claims AS (
+        SELECT
+            c.id,
+            'claimius.claim'::TEXT,
+            uc.id,
+            c.name,
+            c.description,
+            NULL::TEXT,
+            c.sa_access,
+            NULL::JSONB,
+            c.sa_owner_id,
+            NULL::UUID,
+            TRUE,
+            (CASE WHEN v_has_query
+                  THEN ts_rank(to_tsvector('simple', coalesce(c.name, '') || ' ' || coalesce(c.description, '')), v_tsquery)
+                  ELSE 0 END)::REAL
         FROM claimius.claim c
                  JOIN claimius.user_claim uc ON uc.claim_id = c.id
             AND uc.user_id = p_user_id
@@ -2058,34 +2266,62 @@ BEGIN
             AND (uc.starts_at IS NULL OR uc.starts_at <= now())
             AND (uc.ends_at IS NULL OR uc.ends_at > now())
         WHERE v_include_claim
-          AND NOT v_has_scope
+          AND v_scope_tree IS NULL
           AND c.app_id = p_app_id
           AND c.sa_deleted_at IS NULL
           AND (c.sa_access & p_required_access) = p_required_access
-          AND to_tsvector('simple', coalesce(c.name, '') || ' ' || coalesce(c.description, '')) @@ v_tsquery
-          AND (p_object_ids IS NULL OR c.id = ANY(p_object_ids))
-          AND (p_exclude_object_ids IS NULL OR NOT (c.id = ANY(p_exclude_object_ids)))
+          AND (NOT v_has_query OR to_tsvector('simple', coalesce(c.name, '') || ' ' || coalesce(c.description, '')) @@ v_tsquery)
+    ),
+    combined AS (
+        SELECT * FROM objects
+        UNION ALL
+        SELECT * FROM sourced
+        UNION ALL
+        SELECT * FROM claims
+    ),
+    kept AS (
+        SELECT DISTINCT ON (cb.object_type, cb.object_id) cb.*
+        FROM combined cb
+        WHERE (p_object_ids IS NULL OR cb.object_id = ANY(p_object_ids))
+          AND (p_exclude_object_ids IS NULL OR NOT (cb.object_id = ANY(p_exclude_object_ids)))
+          AND (v_from_scope OR p_owner_subtree_ids IS NULL OR cb.object_type = 'claimius.claim' OR EXISTS (
+              SELECT 1 FROM claimius.inheritance_info ii
+              WHERE ii.descendant_type = cb.object_type
+                AND ii.descendant_id   = cb.object_id
+                AND ii.tree_type       = 'ownership'
+                AND ii.ancestor_type   = 'claimius.organization'
+                AND ii.ancestor_id     = ANY(p_owner_subtree_ids)
+          ))
+          AND (p_parent_id IS NULL OR v_parent_tree IS NULL OR (v_from_scope AND p_owner_subtree_ids IS NULL) OR EXISTS (
+              SELECT 1 FROM claimius.inheritance_info ii
+              WHERE ii.descendant_type = cb.object_type
+                AND ii.descendant_id   = cb.object_id
+                AND ii.tree_type       = v_parent_tree
+                AND ii.ancestor_type   = p_parent_type
+                AND ii.ancestor_id     = p_parent_id
+          ))
+        ORDER BY cb.object_type, cb.object_id, cb.rank DESC
     )
-    SELECT combined.object_id,
-           combined.object_type,
-           combined.user_claim_id,
-           combined.name,
-           combined.description,
-           combined.link,
-           combined.sa_access,
-           combined.scope,
-           combined.owner_id,
-           combined.location_id,
-           combined.is_direct_grant,
-           combined.rank,
-           COUNT(*) OVER ()::INTEGER AS total_count
-    FROM combined
-    ORDER BY combined.rank DESC, combined.object_id ASC
+    SELECT k.object_id,
+           k.object_type,
+           k.user_claim_id,
+           k.sa_name,
+           k.sa_description,
+           k.sa_link,
+           k.sa_access,
+           k.scope,
+           k.sa_owner_id,
+           k.sa_location_id,
+           k.is_direct_grant,
+           k.rank,
+           COUNT(*) OVER ()::INTEGER
+    FROM kept k
+    ORDER BY k.rank DESC, k.object_id ASC
     LIMIT p_limit OFFSET p_offset;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = claimius, pg_temp;
 
-COMMENT ON FUNCTION claimius.search(UUID, UUID, TEXT, TEXT[], INTEGER, UUID[], UUID[], UUID[], UUID, TEXT, INTEGER, INTEGER) IS 'Full text search over accessible objects. Includes claimius.claim rows the user holds, skipped when any subtree or parent filter is set. p_owner_subtree_ids scopes via ownership tree. p_parent_id and p_parent_type scope via location or parenthood tree. total_count carries the un-capped match count for pagination. Rows tie-break on object_id so offset pagination tiles without overlap or skip.';
+COMMENT ON FUNCTION claimius.search(UUID, UUID, TEXT, TEXT[], INTEGER, UUID[], UUID[], UUID[], UUID, TEXT, INTEGER, INTEGER) IS 'Search over accessible objects. An empty query lists every accessible object in scope, ranked by the reader''s decayed usage. A query matches object_info.search_vector and the registered search sources, ranked by text match or source score plus decayed usage. With an owner subtree or a parent the read starts from the smaller of the reader''s pairs and the scope''s closure rows, chosen by _search_scope_smaller, and a query without one from the query''s postings in idx_object_info_search when _search_text_smaller estimates them fewer than the reader''s pairs. Includes claimius.claim rows the user holds, skipped when any subtree or parent filter is set. total_count carries the un-capped match count. Rows tie-break on object_id so offset pagination tiles without overlap or skip.';
 
 GRANT EXECUTE ON FUNCTION claimius.search(UUID, UUID, TEXT, TEXT[], INTEGER, INTEGER, INTEGER) TO claimius_disciple_client, claimius_writer, claimius_admin, claimius_reader;
 GRANT EXECUTE ON FUNCTION claimius.search(UUID, UUID, TEXT, TEXT[], INTEGER, UUID[], UUID[], UUID[], UUID, TEXT, INTEGER, INTEGER) TO claimius_disciple_client, claimius_writer, claimius_admin, claimius_reader;
