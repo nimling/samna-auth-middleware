@@ -1901,7 +1901,7 @@ BEGIN
         RETURN;
     END IF;
 
-    v_tsquery := websearch_to_tsquery('simple', p_query);
+    v_tsquery := to_tsquery('simple', regexp_replace(websearch_to_tsquery('simple', p_query)::TEXT, '''([^'']+)''', '''\1'':*', 'g'));
 
     RETURN QUERY
         SELECT
@@ -2109,7 +2109,7 @@ BEGIN
     END IF;
 
     IF btrim(coalesce(p_query, '')) <> '' THEN
-        v_tsquery   := websearch_to_tsquery('simple', p_query);
+        v_tsquery   := to_tsquery('simple', regexp_replace(websearch_to_tsquery('simple', p_query)::TEXT, '''([^'']+)''', '''\1'':*', 'g'));
         v_has_query := numnode(v_tsquery) > 0;
     END IF;
 

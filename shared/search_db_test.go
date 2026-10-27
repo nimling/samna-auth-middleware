@@ -182,3 +182,11 @@ func TestDBSearchTakesObjectTypes(t *testing.T) {
 		t.Fatalf("expected alpha, got %+v", results)
 	}
 }
+
+func TestSearchMatchesWordPrefixes(t *testing.T) {
+	db := database(t)
+	rows := scopedSearch(t, db, userA, "gra", []uuid.UUID{orgRoot})
+	if len(rows) != 1 || rows[0].ObjectID != orgGrand {
+		t.Fatalf("expected grand for the prefix gra, got %+v", rows)
+	}
+}

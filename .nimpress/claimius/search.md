@@ -34,7 +34,7 @@ On a disciple the app argument is absent. `limit` defaults to 20 and `offset` to
 
 1. `reconcile_if_pending` settles the reader's share of every area raised since its cursor, as a listing does, and `check_user_active` refuses an inactive reader; see [Materialization](./materialization.md#a-listing-settles-the-reader-s-share).
 
-2. A query is parsed with `websearch_to_tsquery('simple', query)`: words, quoted phrases, `or`, a leading minus, no stemming, so names and codes in any language match as written. An empty query, or one with no lexeme, is no query: the search lists every accessible object in scope.
+2. A query is parsed with `websearch_to_tsquery('simple', query)`: words, quoted phrases, `or`, a leading minus, no stemming, so names and codes in any language match as written. Every word then matches as a prefix, so `conf` finds `conference` while the user is still typing. An empty query, or one with no lexeme, is no query: the search lists every accessible object in scope.
 
 3. The read starts from the smallest set:
 
