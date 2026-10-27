@@ -178,8 +178,8 @@ export async function readSessionFromDocument(): Promise<ClaimUser | null> {
 
 export function getLoginUrl(provider?: string, returnTo?: string): string {
   if (getEdgeMode() === EDGE_MODE_BFF) {
-    if (edgeConfig.initiate) return `${getBffPath()}/${encodeURIComponent(edgeConfig.initiate)}/login`
-    return withNext(`${getBffPath()}/login`, returnTo)
+    const base = edgeConfig.initiate ? `${getBffPath()}/${encodeURIComponent(edgeConfig.initiate)}/login` : `${getBffPath()}/login`
+    return withNext(base, returnTo ?? window.location.href)
   }
   const base = getLogin(getAuthEndpoint(), edgeConfig.clientSlug, provider)
   if (!returnTo) return base

@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 
 	"github.com/labstack/echo/v4"
@@ -37,17 +38,16 @@ func GetLogin(ctx echo.Context) error {
 		return respondError(ctx, http.StatusInternalServerError, "Internal Server Error")
 	}
 
-	if initiate == nil {
-		next := ctx.QueryParam("next")
-		if next == "" {
-			if referer, refErr := url.Parse(ctx.Request().Referer()); refErr == nil && strings.EqualFold(referer.Host, ctx.Request().Host) && referer.Path != ctx.Request().URL.Path {
-				next = referer.RequestURI()
-			}
+	landing, origins := getReturnScope(initiate)
+	next := ctx.QueryParam("next")
+	if next == "" {
+		if referer, refErr := url.Parse(ctx.Request().Referer()); refErr == nil && strings.EqualFold(referer.Host, ctx.Request().Host) && referer.Path != ctx.Request().URL.Path {
+			next = referer.RequestURI()
 		}
-		if strings.HasPrefix(next, "/") && !strings.HasPrefix(next, "//") {
-			state += "." + base64.RawURLEncoding.EncodeToString([]byte(next))
-			utils.WriteCookie(ctx, &http.Cookie{Name: client.LoginNextCookie, Value: next, Path: "/", MaxAge: 600})
-		}
+	}
+	if getReturnTo(next, landing, origins) != "" {
+		state += "." + base64.RawURLEncoding.EncodeToString([]byte(next))
+		utils.WriteCookie(ctx, &http.Cookie{Name: client.LoginNextCookie, Value: next, Path: "/", MaxAge: 600})
 	}
 
 	challenge := client.ChallengeS256(verifier)
@@ -106,16 +106,21 @@ func GetCallback(ctx echo.Context) error {
 		startOver = "/"
 	}
 
+	landing, origins := getReturnScope(initiate)
 	stateParam := ctx.QueryParam("state")
 	stateNext := ""
-	if dot := strings.LastIndex(stateParam, "."); initiate == nil && dot >= 0 {
-		if raw, decodeErr := base64.RawURLEncoding.DecodeString(stateParam[dot+1:]); decodeErr == nil && strings.HasPrefix(string(raw), "/") && !strings.HasPrefix(string(raw), "//") {
+	if dot := strings.LastIndex(stateParam, "."); dot >= 0 {
+		if raw, decodeErr := base64.RawURLEncoding.DecodeString(stateParam[dot+1:]); decodeErr == nil && getReturnTo(string(raw), landing, origins) != "" {
 			stateNext = string(raw)
 		}
 	}
 	resume := startOver
 	if stateNext != "" {
-		resume = strings.TrimSuffix(ctx.Request().URL.Path, "callback") + "login?next=" + url.QueryEscape(stateNext)
+		loginPath := strings.TrimSuffix(ctx.Request().URL.Path, "callback") + "login"
+		if initiate != nil {
+			loginPath = strings.TrimSuffix(ctx.Request().URL.Path, "callback") + url.PathEscape(initiate.Slug) + "/login"
+		}
+		resume = loginPath + "?next=" + url.QueryEscape(stateNext)
 	}
 	stateCookie, stateErr := ctx.Cookie(client.OAuthStateCookie)
 	if stateErr != nil || stateCookie.Value == "" || stateParam == "" || stateParam != stateCookie.Value {
@@ -165,11 +170,13 @@ func GetCallback(ctx echo.Context) error {
 	smw.WriteCSRFCookie(ctx)
 
 	pageRedirect := startOver
-	if stateNext != "" {
-		pageRedirect = stateNext
+	if target := getReturnTo(stateNext, landing, origins); target != "" {
+		pageRedirect = target
 	}
-	if nextCookie, nextErr := ctx.Cookie(client.LoginNextCookie); initiate == nil && nextErr == nil && strings.HasPrefix(nextCookie.Value, "/") && !strings.HasPrefix(nextCookie.Value, "//") {
-		pageRedirect = nextCookie.Value
+	if nextCookie, nextErr := ctx.Cookie(client.LoginNextCookie); nextErr == nil {
+		if target := getReturnTo(nextCookie.Value, landing, origins); target != "" {
+			pageRedirect = target
+		}
 	}
 	utils.ClearCookie(ctx, client.LoginNextCookie)
 	return Redirect(ctx, http.StatusFound, pageRedirect)
@@ -210,4 +217,38 @@ func GetLogout(ctx echo.Context) error {
 		return ctx.NoContent(http.StatusOK)
 	}
 	return Redirect(ctx, http.StatusFound, endSessionURL)
+}
+
+func getReturnScope(initiate *shared.SamnaApp) (string, []string) {
+	if initiate != nil {
+		return initiate.GetPrimaryOrigin(), initiate.GetOrigins()
+	}
+	landing := utils.Cfg().PageRedirect
+	if parsed, err := url.Parse(landing); err == nil && parsed.Scheme != "" && parsed.Host != "" {
+		return landing, []string{parsed.Scheme + "://" + parsed.Host}
+	}
+	return landing, nil
+}
+
+func getReturnTo(raw string, landing string, origins []string) string {
+	if raw == "" || strings.ContainsAny(raw, "\\\r\n\t") {
+		return ""
+	}
+	if strings.HasPrefix(raw, "/") {
+		if strings.HasPrefix(raw, "//") {
+			return ""
+		}
+		if base, err := url.Parse(landing); err == nil && base.Scheme != "" && base.Host != "" {
+			return base.Scheme + "://" + base.Host + raw
+		}
+		return raw
+	}
+	target, err := url.Parse(raw)
+	if err != nil || (target.Scheme != "https" && target.Scheme != "http") || target.Host == "" || target.User != nil {
+		return ""
+	}
+	if slices.Contains(origins, target.Scheme+"://"+target.Host) {
+		return target.String()
+	}
+	return ""
 }

@@ -110,8 +110,14 @@ describe('static mode', () => {
   it('sends an initiate app login and logout to the bff under its slug', () => {
     configureEdge({ endpoint: '', clientSlug: 'bookable', mode: 'bff', bffPath: 'https://api.example.io/api/auth', initiate: 'bookable-web' })
 
-    expect(getLoginUrl(undefined, '/bookings')).toBe('https://api.example.io/api/auth/bookable-web/login')
+    expect(getLoginUrl(undefined, '/bookings')).toBe('https://api.example.io/api/auth/bookable-web/login?next=%2Fbookings')
     expect(getLogoutUrl('/bookings')).toBe('https://api.example.io/api/auth/bookable-web/logout')
+  })
+
+  it('returns a bff login to the current page when no return is given', () => {
+    configureEdge({ endpoint: '', clientSlug: 'bookable', mode: 'bff', bffPath: 'https://api.example.io/api/auth' })
+
+    expect(getLoginUrl()).toBe(`https://api.example.io/api/auth/login?next=${encodeURIComponent(window.location.href)}`)
   })
 
   it('ends the session on the prophet with a credentialed get', async () => {

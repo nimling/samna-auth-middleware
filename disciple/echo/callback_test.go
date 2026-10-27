@@ -379,3 +379,65 @@ func TestGetCallbackSetsTheInitiateAppCookieScopeFromTheProphet(t *testing.T) {
 		}
 	}
 }
+
+func getCallbackLocation(t *testing.T, target string, next string) string {
+	t.Helper()
+	tokenServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"access_token":"tok","refresh_token":"ref","token_type":"Bearer","expires_in":3600,"refresh_expires_in":2592000}`))
+	}))
+	t.Cleanup(tokenServer.Close)
+
+	t.Setenv("SAUTH_ENDPOINT", tokenServer.URL)
+	t.Setenv("SAUTH_APP_SLUG", "testapp")
+	t.Setenv("SAUTH_APP_SECRET", "secret")
+	t.Setenv("SAUTH_REDIRECT_URI", "https://api.example/api/auth/callback")
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, target, nil)
+	req.AddCookie(&http.Cookie{Name: "sauth_oauth_state", Value: "st1"})
+	req.AddCookie(&http.Cookie{Name: "sauth_pkce_verifier", Value: "ver1"})
+	if next != "" {
+		req.AddCookie(&http.Cookie{Name: "sauth_login_next", Value: next})
+	}
+	rec := httptest.NewRecorder()
+	ctx := e.NewContext(req, rec)
+
+	if err := saecho.GetCallback(ctx); err != nil {
+		t.Fatalf("GetCallback: %v", err)
+	}
+	if rec.Code != http.StatusFound {
+		t.Fatalf("status = %d, want 302", rec.Code)
+	}
+	return rec.Header().Get("Location")
+}
+
+func TestGetCallbackReturnsANextPathOnThePageRedirectOrigin(t *testing.T) {
+	t.Setenv("SAUTH_PAGE_REDIRECT", "https://portal.example")
+	if location := getCallbackLocation(t, "/api/auth/callback?code=abc&state=st1", "/dashboard?tab=1"); location != "https://portal.example/dashboard?tab=1" {
+		t.Errorf("Location = %q, want the path on the page redirect origin", location)
+	}
+}
+
+func TestGetCallbackReturnsAnAbsoluteNextOnThePageRedirectOrigin(t *testing.T) {
+	t.Setenv("SAUTH_PAGE_REDIRECT", "https://portal.example")
+	if location := getCallbackLocation(t, "/api/auth/callback?code=abc&state=st1", "https://portal.example/dashboard"); location != "https://portal.example/dashboard" {
+		t.Errorf("Location = %q, want https://portal.example/dashboard", location)
+	}
+}
+
+func TestGetCallbackFallsBackToThePageRedirectForAForeignNext(t *testing.T) {
+	t.Setenv("SAUTH_PAGE_REDIRECT", "https://portal.example")
+	if location := getCallbackLocation(t, "/api/auth/callback?code=abc&state=st1", "https://evil.example/dashboard"); location != "https://portal.example" {
+		t.Errorf("Location = %q, want the page redirect", location)
+	}
+}
+
+func TestGetCallbackReturnsANextPathOnTheInitiateAppOrigin(t *testing.T) {
+	t.Setenv("SAUTH_PAGE_REDIRECT", "https://portal.example")
+	t.Setenv("SAUTH_DEBUG_USER_ID", "a0000000-0000-4000-8000-00000000000a")
+	t.Setenv("SAUTH_DEBUG_INITIATE_APPS", "testapp-web=https://web.example/")
+	if location := getCallbackLocation(t, "/api/auth/callback?app=testapp-web&code=abc&state=st1", "/bookings"); location != "https://web.example/bookings" {
+		t.Errorf("Location = %q, want the path on the initiate app origin", location)
+	}
+}

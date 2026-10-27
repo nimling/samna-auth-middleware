@@ -139,3 +139,23 @@ func TestGetLoginRefusesAnUnknownInitiateApp(t *testing.T) {
 		t.Fatalf("status = %d, want 404", rec.Code)
 	}
 }
+
+func TestGetLoginRemembersAnAbsoluteNextOnThePageRedirectOrigin(t *testing.T) {
+	t.Setenv("SAUTH_PAGE_REDIRECT", "https://portal.example")
+	if got := getLoginNext(t, "/api/auth/login?next=https%3A%2F%2Fportal.example%2Fdashboard%3Ftab%3D1", ""); got != "https://portal.example/dashboard?tab=1" {
+		t.Errorf("sauth_login_next = %q, want https://portal.example/dashboard?tab=1", got)
+	}
+}
+
+func TestGetLoginIgnoresAnAbsoluteNextOnAForeignOrigin(t *testing.T) {
+	t.Setenv("SAUTH_PAGE_REDIRECT", "https://portal.example")
+	if got := getLoginNext(t, "/api/auth/login?next=https%3A%2F%2Fevil.example%2Fdashboard", ""); got != "" {
+		t.Errorf("sauth_login_next = %q, want empty", got)
+	}
+}
+
+func TestGetLoginIgnoresABackslashNext(t *testing.T) {
+	if got := getLoginNext(t, "/api/auth/login?next=%2F%5Cevil.example", ""); got != "" {
+		t.Errorf("sauth_login_next = %q, want empty", got)
+	}
+}

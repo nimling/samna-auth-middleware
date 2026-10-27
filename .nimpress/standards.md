@@ -98,6 +98,12 @@ This page covers the Go module `github.com/nimling/samna-auth-middleware/v2` onl
 
 3. Gap: the code and refresh exchanges authenticate with the custom headers `SAuth-App-Slug` and `SAuth-App-Secret` (`client/auth.go:153`), not `client_secret_basic` or `client_secret_post`; token errors are parsed into the RFC 6749 section 5.2 codes at `client/auth.go:116`.
 
+### RFC 9700, OAuth 2.0 security best current practice, open redirection
+
+1. Status: `built`
+
+2. Evidence: the login return target is checked at `disciple/echo/auth.go:233`: a path is resolved against the app's configured origin from `disciple/echo/auth.go:222`, an absolute URL is accepted only on a registered origin, protocol relative and backslash targets are dropped; it travels in `state` (`disciple/echo/auth.go:48`) and is checked again at the callback (`disciple/echo/auth.go:113`, `disciple/echo/auth.go:173`).
+
 ### RFC 7636, PKCE
 
 1. Status: `built`
