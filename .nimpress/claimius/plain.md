@@ -74,7 +74,7 @@ In Go the middleware does steps 4 and 5 for you with `MutationAccess`, `GetAcces
 
 ## Proofs and measurements
 
-Measured on the suite in `test/sql`, counted as index entries touched (one entry is one row read from an index):
+Measured on the claimius test suite, counted as index entries touched (one entry is one row read from an index):
 
 | Operation | Entries |
 |---|---|

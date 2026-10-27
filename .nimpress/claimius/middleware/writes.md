@@ -47,7 +47,7 @@ The last three are one operation, `insert_organization_user`: the user, the gran
 
 ## Inside a caller's transaction
 
-`.Conn(tx)` on `NewInsert()`, `NewUpdate()` or `NewDelete()` names the connection the builder writes on locally, bun's `bun.IConn` convention, a `bun.Tx` in practice. Every local statement of the write runs on it: the bun query, the claimius function a typed write calls, the statements a write such as `insertOrganization` would otherwise group in a transaction of its own, and the upsert of a routed write's answer. A binding on a row the same transaction inserted therefore sees that row, and the write commits or rolls back with the caller.
+`.Conn(tx)` on `NewInsert()`, `NewUpdate()` or `NewDelete()` names the connection the builder writes on locally, bun's `bun.IConn` convention, a `bun.Tx` in practice. Every local statement of the write runs on it: the bun query, the claimius function a typed write calls, the statements a write such as an organization insert would otherwise group in a transaction of its own, and the upsert of a routed write's answer. A binding on a row the same transaction inserted therefore sees that row, and the write commits or rolls back with the caller.
 
 ```go
 err := db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {

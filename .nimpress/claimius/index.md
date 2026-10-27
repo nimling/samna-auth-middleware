@@ -15,7 +15,7 @@ Claimius owns and validates its own types. It reads no more of the implementing 
 
 ## Two halves
 
-1. Claimius is the schema: the model, the tables, the functions and their guarantees, independent of any language or host. Everything under "Claimius" below, and every formula in these files, is derived from the SQL in `prophet/database` and `disciple/database`.
+1. Claimius is the schema: the model, the tables, the functions and their guarantees, independent of any language or host. Everything under "Claimius" below, and every formula in these files, is derived from the SQL of the two role sets.
 
 2. The middleware, `samna_auth_middleware`, is the Samna Auth centric implementation of claimius in Go. It carries the schema for Samna Auth as the prophet and for every product service as a disciple, and adds authentication, routed writes, the pull loop, the usage counter and the Go access calls. Everything under "The middleware" below.
 
@@ -155,7 +155,7 @@ anc_t(x, z, h + 1) ← anc_t(x, y, h), up_t(y, z)
 
 ### Masks
 
-The four grant bits are owner 1, write 2, read 4 and execute 8; deny is 16 and member 32. Two functions on masks, from `V2.1__claimius_functions_base.sql`:
+The four grant bits are owner 1, write 2, read 4 and execute 8; deny is 16 and member 32. Two functions on masks:
 
 ```
 X(m)     = m | 14·[m & 1] | 12·[m & 2] | 4·[m & 8]                               _expand_access

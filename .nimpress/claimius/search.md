@@ -144,7 +144,7 @@ A tuple store derives the reader's set on every read, so it pays at least `V` be
 
 ### The bench
 
-`bench/disciple/bench.sql`, one reader holding 16,052 organizations through one claim on a root, a branch of 51 organizations under it, index entries counted by `pg_stat_get_xact_tuples_returned` over the claimius indexes:
+The disciple bench: one reader holding 16,052 organizations through one claim on a root, a branch of 51 organizations under it, index entries counted by `pg_stat_get_xact_tuples_returned` over the claimius indexes:
 
 | Step | Rows | Fresh tables | Analyzed tables |
 |---|---|---|---|

@@ -9,7 +9,7 @@ lastUpdated: true
 
 # BFF
 
-`sauth-bff` is a disciple with no tables of its own. It serves a static build, or proxies a dev server, and puts the login, the session cookies and the access check in front of it, so a site built from markdown can gate pages without a line of server code. It is `cmd/bff` in this repository, built from `bff/`, and every release attaches it to the GitHub release as `sauth-bff-<os>-<arch>`.
+`sauth-bff` is a disciple with no tables of its own. It serves a static build, or proxies a dev server, and puts the login, the session cookies and the access check in front of it, so a site built from markdown can gate pages without a line of server code. Every release attaches it to the GitHub release as `sauth-bff-<os>-<arch>`.
 
 ## Configuration
 

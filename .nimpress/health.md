@@ -22,8 +22,7 @@ api := e.Group("/api", smw.UserAuthMiddleware(nil))
 sam.RegisterEndpoints(api)
 ```
 
-The [BFF](./bff.md) mounts it under the parent of its base path, `/api/status` for the default `/api/auth`. The example disciple under `example/disciple` mounts it the same way, and `just test-hurl` covers it with `test/hurl/status_health.hurl`.
-
+The [BFF](./bff.md) mounts it under the parent of its base path, `/api/status` for the default `/api/auth`.
 ## The answer
 
 ```json

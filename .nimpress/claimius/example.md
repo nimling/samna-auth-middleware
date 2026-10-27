@@ -72,10 +72,9 @@ flowchart TD
 
 2. sasync replicates the claimius rows to every disciple of the app; see [Sync](./sync.md).
 
-3. On the disciple, `sdb.ObjectWhere` reads the object bindings through the stored pairs, and `ScopeAccess` in `shared/access.go`, over `claimius.get_scope_access`, reads the scope grants by jsonpath: `$.page`, `$.file.root`, `$.subscriber`, `$.stats`.
+3. On the disciple, `sdb.ObjectWhere` reads the object bindings through the stored pairs, and `ScopeAccess`, over `claimius.get_scope_access`, reads the scope grants by jsonpath: `$.page`, `$.file.root`, `$.subscriber`, `$.stats`.
 
 ## Changing the tree
 
-1. tst and prd carry the same tree. It is changed only with the `sauth` cli, per config, `sauth --config prd ...`, never with sql or a migration. The former samna_auth seeds `V1.6__initial_nimployer_claims.sql` and `V1.8__initial_analytics_claim.sql` are removed.
-
+1. tst and prd carry the same tree. It is changed only with the `sauth` cli, per config, `sauth --config prd ...`, never with sql or a migration.
 2. The beta apps samna-sign and samna-sync belong under Samna but stay where they are: samna-sign under its own Samna Sign organization, rooted at Samna on prd, and samna-sync under Nimtech. The samna_auth api cannot move them: `Organization.ValidatePatch` refuses `owner_id` and `root_id`, and `PutApp` carries no owner field. They move once the api can move an organization or an app, which for an organization across roots is [`migrate_root`](./organizations.md#crossing-roots).

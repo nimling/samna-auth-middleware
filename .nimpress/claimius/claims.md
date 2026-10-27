@@ -44,8 +44,7 @@ A user holds at most one live grant per claim and app, enforced by `idx_user_cla
 
 ## The effective mask of a binding
 
-`claim_object.sa_access` may be NULL, which means the claim's mask. A binding mask narrows its claim and never widens it: the grant carries the claim mask intersected with the expansion of the binding mask. An owner claim, 15, bound with mask 4 gives 4; a read claim, 4, bound with mask 2 gives 4. The grant bits are the low four bits of the result, and the deny bit in it makes the derivation a deny. The SQL is `_effective_access`.
-
+`claim_object.sa_access` may be NULL, which means the claim's mask. A binding mask narrows its claim and never widens it: the grant carries the claim mask intersected with the expansion of the binding mask. An owner claim, 15, bound with mask 4 gives 4; a read claim, 4, bound with mask 2 gives 4. The grant bits are the low four bits of the result, and the deny bit in it makes the derivation a deny.
 ## What a writer may bind
 
 `_check_claim_composition`, a before trigger on `claim_object`, bounds what a writer may hand out. It runs outside replay on an insert, or on an update of the mask, claim or object, of a live binding on an object that is not a claim. It resolves the writer from `sa_created_by` and settles the writer's pair on the object first.

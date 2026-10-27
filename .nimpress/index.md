@@ -43,7 +43,7 @@ Each role starts its runtime once with `sam.Init(ctx) error`, joined by `sam.Don
 
 `shared` carries the implementation both roles use. A consumer never imports it; each role package reexports what it needs.
 
-`cmd/bff` builds `sauth-bff`, a disciple with no tables that fronts a static site with the login and the session; see [BFF](./bff.md). A site with no server of its own logs in against the prophet directly; see [Static sites](./static.md). Every disciple mounts the dependency free `GET /api/status/health` the status probe reads through `sam.RegisterStatus`; see [Health](./health.md).
+`sauth-bff` is a disciple with no tables that fronts a static site with the login and the session; see [BFF](./bff.md). A site with no server of its own logs in against the prophet directly; see [Static sites](./static.md). Every disciple mounts the dependency free `GET /api/status/health` the status probe reads through `sam.RegisterStatus`; see [Health](./health.md).
 
 ## Authentication
 
@@ -74,7 +74,7 @@ The SQL is not copied into consumers, and a consumer holds none of it on disk. T
     path: disciple/database
 ```
 
-A prophet uses `prophet/database` in the same step. Moving the ref replays the changed base files through smig's preflight, and the base sets bring the claimius tables to the shape of that ref themselves. The middleware carries no `migrations/` folder under either role.
+A prophet uses `prophet/database` in the same step. Moving the ref replays the changed base files through smig's preflight, and the base sets bring the claimius tables to the shape of that ref themselves. The middleware ships no migrations for either role.
 
 ## Configuration
 

@@ -202,7 +202,7 @@ The losses are the first listing after a broad change by `|T|` entries read and 
 
 ### How the claimius figures are measured
 
-Every claimius figure is index entries counted by `pg_stat_get_xact_tuples_returned` over the claimius indexes inside the transaction of the operation, in the pgTAP suites of `test/sql` on a fresh database and in the bench `bench/prophet/bench.sql`, run by `just bench` on a prophet with analyzed tables; where the two plans differ the text says which one a figure comes from. Every other figure is published by its vendor or its authors and is cited below.
+Every claimius figure is index entries counted by `pg_stat_get_xact_tuples_returned` over the claimius indexes inside the transaction of the operation, in the pgTAP test suites on a fresh database and in the prophet bench on a prophet with analyzed tables; where the two plans differ the text says which one a figure comes from. Every other figure is published by its vendor or its authors and is cited below.
 
 ### Claimius measurements
 
