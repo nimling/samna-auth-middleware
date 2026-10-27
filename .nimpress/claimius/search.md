@@ -103,7 +103,7 @@ The merge is exact: an object in the overall top `p` is in the top `p` of its ow
 
 Search decides which objects the reader may see and returns each with the pair's field scope. The implementing side renders them:
 
-1. A search runs as the caller. A route that searches "what user X reaches" filters the caller's own results by X's access, behind `get_user_access` on X, never by searching as X.
+1. A search runs as the caller. A route that searches what user X reaches runs as X only when the caller may act for X, execute on X through `get_user_access`, and writes an `act_as` audit row; every result, expansion and field then follows X. With read on X alone it filters the caller's own results by X's access.
 
 2. Every field a response renders goes through the same redaction as the object's own read; see [Redaction](./redaction.md). A row hydrated beside a result, such as its organization or location, is a lookup by id and renders only what such a lookup may.
 
