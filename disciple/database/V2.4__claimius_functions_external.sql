@@ -2089,7 +2089,8 @@ CREATE OR REPLACE FUNCTION claimius.search(
                    rank                REAL
                ) AS $$
 DECLARE
-    v_tsquery TSQUERY;
+    v_tsquery   TSQUERY;
+    v_has_query BOOLEAN := FALSE;
 BEGIN
     PERFORM claimius.reconcile_if_pending(p_user_id);
 
@@ -2097,7 +2098,10 @@ BEGIN
         RETURN;
     END IF;
 
-    v_tsquery := to_tsquery('simple', regexp_replace(websearch_to_tsquery('simple', p_query)::TEXT, '''([^'']+)''', '''\1'':*', 'g'));
+    IF btrim(coalesce(p_query, '')) <> '' THEN
+        v_tsquery   := to_tsquery('simple', regexp_replace(websearch_to_tsquery('simple', p_query)::TEXT, '''([^'']+)''', '''\1'':*', 'g'));
+        v_has_query := numnode(v_tsquery) > 0;
+    END IF;
 
     RETURN QUERY
         SELECT
@@ -2112,7 +2116,7 @@ BEGIN
             oi.sa_owner_id,
             oi.sa_location_id,
             (claimius.user_object.direct_grant AND best.user_claim_id IS NULL),
-            (ts_rank(oi.search_vector, v_tsquery) + claimius._decayed_usage(claimius.user_object.used_count, claimius.user_object.last_used_at))::REAL
+            ((CASE WHEN v_has_query THEN ts_rank(oi.search_vector, v_tsquery) ELSE 0 END) + claimius._decayed_usage(claimius.user_object.used_count, claimius.user_object.last_used_at))::REAL
         FROM claimius.user_object
                  LEFT JOIN LATERAL claimius._best_grant(claimius.user_object.grants, p_required_access) best ON TRUE
                  JOIN claimius.object_info oi
@@ -2120,7 +2124,7 @@ BEGIN
                      AND oi.object_id = claimius.user_object.object_id
         WHERE claimius.user_object.user_id = p_user_id
           AND (claimius.user_object.sa_access & p_required_access) = p_required_access
-          AND oi.search_vector @@ v_tsquery
+          AND (NOT v_has_query OR oi.search_vector @@ v_tsquery)
           AND (p_object_types IS NULL OR claimius.user_object.object_type = ANY(p_object_types))
           AND (best.user_claim_id IS NOT NULL OR claimius.user_object.direct_grant)
         ORDER BY 12 DESC, 1
@@ -2128,7 +2132,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = claimius, pg_temp;
 
-COMMENT ON FUNCTION claimius.search(UUID, TEXT, TEXT[], INTEGER, INTEGER, INTEGER) IS 'Full text search over accessible objects whose mask covers p_required_access. user_claim_id is the actor token from the strongest surviving claim grant per object.';
+COMMENT ON FUNCTION claimius.search(UUID, TEXT, TEXT[], INTEGER, INTEGER, INTEGER) IS 'Full text search over accessible objects whose mask covers p_required_access. An empty query lists them, ranked by the reader''s decayed usage. user_claim_id is the actor token from the strongest surviving claim grant per object.';
 
 CREATE OR REPLACE FUNCTION claimius._search_scope_smaller(
     p_user_id      UUID,

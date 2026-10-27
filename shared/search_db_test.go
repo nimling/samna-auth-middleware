@@ -190,3 +190,14 @@ func TestSearchMatchesWordPrefixes(t *testing.T) {
 		t.Fatalf("expected grand for the prefix gra, got %+v", rows)
 	}
 }
+
+func TestDBSearchListsOnAnEmptyQuery(t *testing.T) {
+	db := database(t)
+	results, err := db.Search(context.Background(), userA, "", []string{sdb.OBJECT_TYPE_ORGANIZATION}, sdb.ACCESS_READ, 20, 0)
+	if err != nil {
+		t.Fatalf("search: %v", err)
+	}
+	if len(results) < 3 {
+		t.Fatalf("expected root, alpha and grand, got %+v", results)
+	}
+}

@@ -23,7 +23,7 @@ Q  the query's matches       object_info.search_vector under the GIN index idx_o
 
 | Function | Answers |
 |---|---|
-| `search(user, [app,] query, object_types, required, limit, offset)` | The reader's objects matching the query, ranked |
+| `search(user, [app,] query, object_types, required, limit, offset)` | The reader's objects matching the query, ranked, or all of them on an empty query |
 | `search(user, [app,] query, object_types, required, object_ids, exclude_object_ids, owner_subtree_ids, parent_id, parent_type, limit, offset)` | The same inside an owner subtree or under a parent, with id lists, the reader's claims beside the objects when there is no scope, the rows of registered search sources, and `total_count` |
 | `upsert_search_source(object_type, fn)` | Registers a host's search function for one of its registered types |
 | `delete_search_source(object_type)` | Removes it |
