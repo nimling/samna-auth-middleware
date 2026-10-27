@@ -2206,9 +2206,9 @@ BEGIN
         ORDER BY ss.object_type
     LOOP
         EXECUTE format(
-            'SELECT coalesce(array_agg(ROW(%L, s.object_id, least(greatest(s.score, 0), 1))::claimius.search_hit), ARRAY[]::claimius.search_hit[]) FROM %s($1, $2) s',
+            'SELECT coalesce(array_agg(ROW(%L, s.object_id, least(greatest(s.score, 0), 1))::claimius.search_hit), ARRAY[]::claimius.search_hit[]) FROM %s($1, $2, $3) s',
             v_source.object_type, v_source.fn
-        ) INTO v_part USING p_query, p_scope_ids;
+        ) INTO v_part USING v_source.object_type, p_query, p_scope_ids;
         v_hits := v_hits || v_part;
     END LOOP;
     RETURN v_hits;
@@ -2227,8 +2227,8 @@ BEGIN
     IF NOT EXISTS (SELECT 1 FROM claimius.table_info ti WHERE ti.object_type = p_object_type) THEN
         RAISE EXCEPTION 'object type % is not registered', p_object_type USING ERRCODE = 'P0404';
     END IF;
-    IF (SELECT ARRAY(SELECT t::regtype::text FROM unnest(p.proargtypes) t) FROM pg_proc p WHERE p.oid = p_fn) <> ARRAY['text', 'uuid[]'] THEN
-        RAISE EXCEPTION 'search source % must take (text, uuid[])', p_fn USING ERRCODE = '22023';
+    IF (SELECT ARRAY(SELECT t::regtype::text FROM unnest(p.proargtypes) t) FROM pg_proc p WHERE p.oid = p_fn) <> ARRAY['text', 'text', 'uuid[]'] THEN
+        RAISE EXCEPTION 'search source % must take (text, text, uuid[])', p_fn USING ERRCODE = '22023';
     END IF;
     INSERT INTO claimius.search_source (object_type, fn)
     VALUES (p_object_type, p_fn)
@@ -2238,7 +2238,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = claimius, pg_temp;
 
-COMMENT ON FUNCTION claimius.upsert_search_source(TEXT, REGPROCEDURE) IS 'Registers the search source of a registered object type: a function (query text, scope_ids uuid[]) returning (object_id uuid, score real) over the host''s own rows of that type. search adds its rows for a non empty query, each kept only where the reader holds a pair on it, with the pair''s grant and field scope.';
+COMMENT ON FUNCTION claimius.upsert_search_source(TEXT, REGPROCEDURE) IS 'Registers the search source of a registered object type: a function (object_type text, query text, scope_ids uuid[]) returning (object_id uuid, score real) over the host''s own rows of that type. search adds its rows for a non empty query, each kept only where the reader holds a pair on it, with the pair''s grant and field scope.';
 
 CREATE OR REPLACE FUNCTION claimius.delete_search_source(p_object_type TEXT) RETURNS VOID AS $$
 BEGIN
