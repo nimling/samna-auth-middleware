@@ -111,7 +111,7 @@ func (d *DB) Search(ctx context.Context, userID uuid.UUID, query string, objectT
 	results := make([]SearchResult, 0)
 	err := d.NewRaw(
 		`SELECT * FROM claimius.search(?,?, ?::text[], ?, ?, ?)`,
-		userID, query, objectTypes, requiredAccess, limit, offset,
+		userID, query, pq.Array(objectTypes), requiredAccess, limit, offset,
 	).Scan(ctx, &results)
 	if err != nil {
 		return nil, err

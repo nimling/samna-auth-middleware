@@ -34,7 +34,7 @@ On a disciple the app argument is absent. `limit` defaults to 20 and `offset` to
 
 1. `reconcile_if_pending` settles the reader's share of every area raised since its cursor, as a listing does, and `check_user_active` refuses an inactive reader; see [Materialization](./materialization.md#a-listing-settles-the-reader-s-share).
 
-2. A query is parsed with `websearch_to_tsquery('simple', query)`: words, quoted phrases, `or`, a leading minus, no stemming, so names and codes in any language match as written. An empty query, or one with no lexeme, is no query: the search lists every accessible object in scope.
+2. A query is parsed with `websearch_to_tsquery('simple', query)`: words, quoted phrases, `or`, a leading minus, no stemming, so names and codes in any language match as written. Every word then matches as a prefix, so `conf` finds `conference` while the user is still typing. An empty query, or one with no lexeme, is no query: the search lists every accessible object in scope.
 
 3. The read starts from the smallest set:
 
@@ -71,17 +71,17 @@ Among equal text matches what the reader opens most and lately comes first; an e
 A host searches more than a name and a description: a booking's attendees, a reading's text, a mapper's nodes. It registers one function per registered object type:
 
 ```sql
-CREATE FUNCTION public.search_bookings(p_query TEXT, p_scope_ids UUID[])
+CREATE FUNCTION public.search_bookings(p_object_type TEXT, p_query TEXT, p_scope_ids UUID[])
 RETURNS TABLE(object_id UUID, score REAL) AS $$
     SELECT b.id, ts_rank(b.attendee_vector, websearch_to_tsquery('simple', p_query))
     FROM public.booking b
     WHERE b.attendee_vector @@ websearch_to_tsquery('simple', p_query)
 $$ LANGUAGE sql STABLE;
 
-SELECT claimius.upsert_search_source('public.booking', 'public.search_bookings(text, uuid[])'::regprocedure);
+SELECT claimius.upsert_search_source('public.booking', 'public.search_bookings(text, text, uuid[])'::regprocedure);
 ```
 
-1. The function takes `(text, uuid[])`, the query and the scope ids, and returns `(object_id, score)`; `upsert_search_source` refuses another signature with SQLSTATE `22023` and an unregistered type with `P0404`.
+1. The function takes `(text, text, uuid[])`, the object type it is called for, the query and the scope ids, and returns `(object_id, score)`; one function may serve several types of one host; `upsert_search_source` refuses another signature with SQLSTATE `22023` and an unregistered type with `P0404`.
 
 2. The function never decides access. Search joins each row to the reader's pair, keeps it only when the pair passes, and returns the pair's grant and field scope with it, so a source cannot widen what a reader sees.
 

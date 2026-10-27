@@ -118,14 +118,14 @@ func TestSearchSourceRowsPassTheReadersPair(t *testing.T) {
 	db := database(t)
 	ctx := context.Background()
 	if _, err := db.ExecContext(ctx, `
-		CREATE OR REPLACE FUNCTION public.test_org_source(p_query TEXT, p_scope_ids UUID[])
+		CREATE OR REPLACE FUNCTION public.test_org_source(p_object_type TEXT, p_query TEXT, p_scope_ids UUID[])
 		RETURNS TABLE(object_id UUID, score REAL) AS $f$
 			SELECT o.id, 0.9::REAL FROM claimius.organization o
-			WHERE p_query = 'zeta' AND o.id IN ('10000000-0000-4000-8000-000000000111', '30000000-0000-4000-8000-000000000001')
+			WHERE p_object_type = 'claimius.organization' AND p_query = 'zeta' AND o.id IN ('10000000-0000-4000-8000-000000000111', '30000000-0000-4000-8000-000000000001')
 		$f$ LANGUAGE sql STABLE`); err != nil {
 		t.Fatalf("source function: %v", err)
 	}
-	if _, err := db.ExecContext(ctx, `SELECT claimius.upsert_search_source('claimius.organization', 'public.test_org_source(text, uuid[])'::regprocedure)`); err != nil {
+	if _, err := db.ExecContext(ctx, `SELECT claimius.upsert_search_source('claimius.organization', 'public.test_org_source(text, text, uuid[])'::regprocedure)`); err != nil {
 		t.Fatalf("register: %v", err)
 	}
 	t.Cleanup(func() {
@@ -169,5 +169,24 @@ func TestSearchQueryWithoutScopeMatchesTheReach(t *testing.T) {
 	}
 	if rows := scopedSearch(t, db, outsider, "alpha", nil); len(rows) != 0 {
 		t.Fatalf("the outsider holds no pair on alpha, got %+v", rows)
+	}
+}
+
+func TestDBSearchTakesObjectTypes(t *testing.T) {
+	db := database(t)
+	results, err := db.Search(context.Background(), userA, "alpha", []string{sdb.OBJECT_TYPE_ORGANIZATION, sdb.OBJECT_TYPE_LOCATION}, sdb.ACCESS_READ, 20, 0)
+	if err != nil {
+		t.Fatalf("search: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("expected alpha, got %+v", results)
+	}
+}
+
+func TestSearchMatchesWordPrefixes(t *testing.T) {
+	db := database(t)
+	rows := scopedSearch(t, db, userA, "gra", []uuid.UUID{orgRoot})
+	if len(rows) != 1 || rows[0].ObjectID != orgGrand {
+		t.Fatalf("expected grand for the prefix gra, got %+v", rows)
 	}
 }
