@@ -171,3 +171,14 @@ func TestSearchQueryWithoutScopeMatchesTheReach(t *testing.T) {
 		t.Fatalf("the outsider holds no pair on alpha, got %+v", rows)
 	}
 }
+
+func TestDBSearchTakesObjectTypes(t *testing.T) {
+	db := database(t)
+	results, err := db.Search(context.Background(), userA, "alpha", []string{sdb.OBJECT_TYPE_ORGANIZATION, sdb.OBJECT_TYPE_LOCATION}, sdb.ACCESS_READ, 20, 0)
+	if err != nil {
+		t.Fatalf("search: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("expected alpha, got %+v", results)
+	}
+}
