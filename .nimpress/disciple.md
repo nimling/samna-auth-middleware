@@ -68,7 +68,7 @@ Each role has one runtime start, `sam.Init(ctx) error`, joined by `sam.Done()`. 
 
 `UserAuthMiddleware` also holds the answer of a request that made routed writes until the pull has applied them, so the client's next request reads them back. A route outside it gets the same with `smw.WaitForSeq(timeout)`.
 
-`RegisterEndpoints` mounts `login`, `callback` and `logout` under the group. `login?next=<target>` returns the visitor to that target after the callback. The target is a path, resolved against the origin of `SAUTH_PAGE_REDIRECT`, or for an Initiate app against its first redirect URI, or an absolute URL whose origin is that origin, or for an Initiate app one of its registered redirect URI origins. Anything else, a protocol relative path or a backslash included, is dropped and the visitor lands on the configured page (RFC 9700 section 4.11). With no `SAUTH_PAGE_REDIRECT` a path stays on the api host. The TypeScript `startLogin()` in `bff` mode sends the current page when no target is given, so a frontend on its own host calls it without arguments. The path travels in the OAuth `state` as well as in a cookie, so a callback that reaches a browser without the flow cookies, a login link opened in another browser, starts the login again with the same `next` and still lands on it, a cli approval page included.
+`RegisterEndpoints` mounts `login`, `callback` and `logout` under the group. `login?next=<path>` returns the visitor to that same origin path after the callback. The path travels in the OAuth `state` as well as in a cookie, so a callback that reaches a browser without the flow cookies, a login link opened in another browser, starts the login again with the same `next` and still lands on it, a cli approval page included.
 
 ## Writes
 
