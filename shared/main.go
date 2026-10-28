@@ -29,13 +29,14 @@ import (
 
 type DB struct {
 	*bun.DB
-	Replica     *bun.DB
-	Logger      echo.Logger
-	ConnStr     string
-	Usage       *ObjectUsage
-	ColdStorage ColdStorage
-	stmts       sync.Map
-	listen      *listen
+	Replica             *bun.DB
+	Logger              echo.Logger
+	ConnStr             string
+	Usage               *ObjectUsage
+	ColdStorage         ColdStorage
+	ColdStorageResolver ColdStorageResolver
+	stmts               sync.Map
+	listen              *listen
 
 	RouteToProphet bool
 }
@@ -280,6 +281,7 @@ func Connect(logger echo.Logger) (*DB, error) {
 			return nil, fmt.Errorf("cold storage: %w", err)
 		}
 		db.ColdStorage = cold
+		db.ColdStorageResolver = SharedColdStorage{Storage: cold}
 	}
 
 	db.Usage = startObjectUsage(db.postObjectUsage, func(err error) { logger.Warnf("usage flush: %v", err) }, usageFlushInterval, usageFlushKeys)

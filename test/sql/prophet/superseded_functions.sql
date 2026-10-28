@@ -96,7 +96,8 @@ INSERT INTO superseded VALUES
         ('claimius._best_grant(jsonb,uuid,uuid,integer)'),
         ('claimius.upsert_retention(text,integer,text)'),
         ('claimius.delete_expired_audit(interval)'),
-        ('claimius.delete_expired_consent(interval)');
+        ('claimius.delete_expired_consent(interval)'),
+        ('claimius.delete_exported(text,text,text,text[],boolean)');
 
 SELECT is_empty($$
     SELECT s.signature FROM superseded s
