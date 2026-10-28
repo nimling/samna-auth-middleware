@@ -32,7 +32,9 @@ A user is who acts. A person and a machine client are both users, and both hold 
 
 5. `check_user_active(app_id, user_id)` runs in every read. A user who is not active, or whose row is soft deleted, resolves to no access whatever grants they hold, so suspending a user is one column write.
 
-6. Soft deleting a `samna_user` fires `tg_cascade_user_soft_delete` on the transition of `sa_deleted_at` from NULL, which runs `cascade_user_soft_delete`: it soft deletes the user's live grants, relations and field values in the app. Each grant it ends raises the assignment area of that user for that claim; see [Materialization](./materialization.md). The cascade lives in the write, so every read stays a pure predicate.
+6. `user_image` on an app's row is written by the prophet alone. On Samna Auth it holds the user's profile image while the user shares it with the apps they use, and is cleared when they stop; the sync carries the column to every disciple of the app, a cleared one included, so `shared.SamnaUser.UserImage` on a disciple is the shared image or nil. A disciple never writes it back: `/sam` refuses `user_image` on a user update with `400` and takes none on a user create.
+
+7. Soft deleting a `samna_user` fires `tg_cascade_user_soft_delete` on the transition of `sa_deleted_at` from NULL, which runs `cascade_user_soft_delete`: it soft deletes the user's live grants, relations and field values in the app. Each grant it ends raises the assignment area of that user for that claim; see [Materialization](./materialization.md). The cascade lives in the write, so every read stays a pure predicate.
 
 ## Machine clients
 
