@@ -103,7 +103,8 @@ INSERT INTO superseded VALUES
         ('claimius.delete_exported_audit(text[])'),
         ('claimius.get_expired_consent(interval,text,integer)'),
         ('claimius.delete_exported_consent(text[])'),
-        ('claimius.upsert_retention(text,claimius.retention_class,integer,text,text)');
+        ('claimius.upsert_retention(text,claimius.retention_class,integer,text,text)'),
+        ('claimius._check_claim_level(uuid,uuid,uuid,integer)');
 
 SELECT is_empty($$
     SELECT s.signature FROM superseded s

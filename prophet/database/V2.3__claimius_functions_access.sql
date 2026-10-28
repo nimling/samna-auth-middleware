@@ -452,6 +452,47 @@ $$ LANGUAGE plpgsql;
 
 COMMENT ON FUNCTION claimius.calc_claim_access() IS 'Trigger on claim, claim_object, user_claim. A claim whose name, mask, level, inherit flag or deletion changed raises an object area on every live binding of it and of the claims it links to, cascade where the binding inherits and the claim did before or after, and one on the claim object; a grant raises its assignee''s assignment area; a link raises both claims the same way; a binding on an object raises that object''s area; a scope binding raises nothing, since no pair carries it. Then settles the actor''s pairs on the claim and on a binding''s object.';
 
+CREATE OR REPLACE FUNCTION claimius._denied_access(
+    p_app_id      UUID,
+    p_user_id     UUID,
+    p_object_type TEXT,
+    p_object_id   UUID
+) RETURNS INTEGER AS $$
+    WITH held AS (
+        SELECT duc.claim_id AS deny_id, 15 AS cap
+        FROM claimius.user_claim duc
+        WHERE duc.user_id = p_user_id
+          AND duc.app_id = p_app_id
+          AND duc.sa_deleted_at IS NULL
+        UNION
+        SELECT link.object_id, coalesce(link.sa_access & 15, 15)
+        FROM claimius.user_claim huc
+            JOIN claimius.claim h ON h.id = huc.claim_id AND h.sa_deleted_at IS NULL AND h.inherits
+            JOIN claimius.claim_object link ON link.claim_id = h.id AND link.app_id = p_app_id AND link.sa_deleted_at IS NULL
+                 AND link.object_type = 'claimius.claim' AND link.object_id IS NOT NULL AND link.inherits
+        WHERE huc.user_id = p_user_id
+          AND huc.app_id = p_app_id
+          AND huc.sa_deleted_at IS NULL
+    )
+    SELECT coalesce(bit_or(claimius._effective_access(d.sa_access, dco.sa_access) & held.cap & 15), 0)
+    FROM held
+        JOIN claimius.claim d ON d.id = held.deny_id AND d.sa_deleted_at IS NULL
+        JOIN claimius.claim_object dco ON dco.claim_id = d.id AND dco.app_id = p_app_id AND dco.sa_deleted_at IS NULL
+    WHERE (claimius._effective_access(d.sa_access, dco.sa_access) & 16) <> 0
+      AND (
+          (dco.object_type = p_object_type AND dco.object_id = p_object_id)
+          OR (d.inherits AND dco.inherits AND EXISTS (
+              SELECT 1 FROM claimius.inheritance_info a
+              WHERE a.descendant_type = p_object_type
+                AND a.descendant_id = p_object_id
+                AND a.ancestor_type = dco.object_type
+                AND a.ancestor_id = dco.object_id
+                AND a.depth > 0))
+      );
+$$ LANGUAGE sql STABLE;
+
+COMMENT ON FUNCTION claimius._denied_access(UUID, UUID, TEXT, UUID) IS 'The bits, owner, write, read and execute, of every live deny binding reaching the user on the object in the app: through a grant the user holds, or through one inheriting link of a held inheriting claim, capped by the link''s mask; bound on the object itself, or on an ancestor in any tree where the claim and the binding inherit. Levels and classes are not applied; a caller masks the result with the user''s settled pair to keep only what the denies took away.';
+
 CREATE OR REPLACE FUNCTION claimius._check_claim_composition()
     RETURNS TRIGGER AS $$
 DECLARE
@@ -461,8 +502,7 @@ DECLARE
     v_has_access   BOOLEAN;
     v_actor_access INTEGER;
     v_effective    INTEGER;
-    v_level        INTEGER;
-    v_actor_level  INTEGER;
+    v_denied       INTEGER;
     v_system_app_id UUID;
     v_system_access INTEGER;
 BEGIN
@@ -470,14 +510,14 @@ BEGIN
         RETURN NEW;
     END IF;
 
-    SELECT claimius._effective_access(c.sa_access, NEW.sa_access), c.level INTO v_effective, v_level
+    SELECT claimius._effective_access(c.sa_access, NEW.sa_access) INTO v_effective
     FROM claimius.claim c
     WHERE c.id = NEW.claim_id;
 
     IF NEW.object_id IS NOT NULL
         AND NEW.object_type IS DISTINCT FROM 'claimius.claim'
         AND NEW.sa_deleted_at IS NULL
-        AND ((coalesce(v_effective, 0) & 16) = 0 OR coalesce(v_level, 0) > 0)
+        AND (coalesce(v_effective, 0) & 16) = 0
         AND (TG_OP = 'INSERT'
              OR NEW.sa_access IS DISTINCT FROM OLD.sa_access
              OR NEW.claim_id IS DISTINCT FROM OLD.claim_id
@@ -498,13 +538,11 @@ BEGIN
               AND object_type = NEW.object_type
               AND object_id   = NEW.object_id;
 
-            SELECT coalesce(max(coalesce((g ->> 'level')::INTEGER, 0)), 0) INTO v_actor_level
-            FROM claimius.user_object uo
-                CROSS JOIN LATERAL jsonb_array_elements(uo.grants) g
-            WHERE uo.user_id = v_user_id
-              AND uo.app_id = NEW.app_id
-              AND uo.object_type = NEW.object_type
-              AND uo.object_id = NEW.object_id;
+            v_denied := claimius._denied_access(NEW.app_id, v_user_id, NEW.object_type, NEW.object_id) & ~coalesce(v_actor_access, 0);
+            IF (coalesce(v_effective, 0) & v_denied & 15) <> 0 THEN
+                RAISE EXCEPTION 'cannot grant access denied to the writer: user % is denied % on % %, requested %',
+                    v_user_id, v_denied, NEW.object_type, NEW.object_id, v_effective USING ERRCODE = 'P0403';
+            END IF;
 
             IF v_actor_access IS NULL
                 AND NEW.object_type NOT LIKE 'claimius.%'
@@ -515,8 +553,7 @@ BEGIN
             THEN
                 PERFORM claimius.reconcile_if_pending(NEW.app_id, v_user_id, 'claimius.organization', NEW.sa_owner_id);
 
-                SELECT uo.sa_access, coalesce((SELECT max(coalesce((g ->> 'level')::INTEGER, 0)) FROM jsonb_array_elements(uo.grants) g), 0)
-                INTO v_actor_access, v_actor_level
+                SELECT uo.sa_access INTO v_actor_access
                 FROM claimius.user_object uo
                 WHERE uo.user_id = v_user_id
                   AND uo.app_id = NEW.app_id
@@ -619,11 +656,6 @@ BEGIN
                 RAISE EXCEPTION 'cannot grant more access than held: user % holds % on % %, requested %',
                     v_user_id, coalesce(v_actor_access, 0), NEW.object_type, NEW.object_id, v_effective USING ERRCODE = 'P0403';
             END IF;
-
-            IF coalesce(v_level, 0) > coalesce(v_actor_level, 0) THEN
-                RAISE EXCEPTION 'cannot bind a claim of level % above the level % user % holds on % %',
-                    v_level, coalesce(v_actor_level, 0), v_user_id, NEW.object_type, NEW.object_id USING ERRCODE = 'P0403';
-            END IF;
         END IF;
     END IF;
 
@@ -670,31 +702,11 @@ BEGIN
         RAISE EXCEPTION 'cannot compose: user % has no read access to claim %', v_user_id, NEW.object_id USING ERRCODE = 'P0403';
     END IF;
 
-    SELECT greatest(a.level, t.level) INTO v_level
-    FROM claimius.claim a, claimius.claim t
-    WHERE a.id = NEW.claim_id
-      AND t.id = NEW.object_id;
-
-    IF coalesce(v_level, 0) > 0 THEN
-        SELECT coalesce(max(coalesce((g ->> 'level')::INTEGER, 0)), 0) INTO v_actor_level
-        FROM claimius.user_object uo
-            CROSS JOIN LATERAL jsonb_array_elements(uo.grants) g
-        WHERE uo.user_id = v_user_id
-              AND uo.app_id = NEW.app_id
-          AND uo.object_type = 'claimius.claim'
-          AND uo.object_id = NEW.object_id;
-
-        IF v_level > coalesce(v_actor_level, 0) THEN
-            RAISE EXCEPTION 'cannot compose: user % holds level % on claim %, the link needs level %',
-                v_user_id, coalesce(v_actor_level, 0), NEW.object_id, v_level USING ERRCODE = 'P0403';
-        END IF;
-    END IF;
-
     RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius._check_claim_composition() IS 'BEFORE INSERT/UPDATE trigger on claim_object. Rejects a grant whose effective mask hands out more access than the actor holds on the object, denies and removals exempt. An object outside the claimius schema that this database holds no object_info row for, a disciple''s own row, is judged by the actor''s hold on the binding''s owning organization, which _check_app_scope keeps linked to the app; its type is never resolved. When the transaction carries claimius.object_created_by, the grant the calling app reports the row was created under, and that grant is a live user_claim of the actor in the binding''s app, the actor is the row''s creator and holds owner, write, read and execute on it, as the disciple holding the row counts the creator, while the binding''s owning organization is live or not held. The first binding of an app may come from an actor of another app holding owner on the organization that owns the app, judged in the actor''s own app. The first binding on a samna_user holding a claim assigned under the binding''s owning organization may come from an actor holding owner on that organization. Any other binding short of the actor''s hold in its app may still pass on the access the actor holds on the object in the system app, directly or through an inheriting ancestor grant, capped at that access. Enforces composition link invariants: no self loop, no reverse link cycle, caller has read on target claim. Bypassed during disciple replay.';
+COMMENT ON FUNCTION claimius._check_claim_composition() IS 'BEFORE INSERT/UPDATE trigger on claim_object. Rejects a grant whose effective mask gives bits that a deny reaching the actor on the object removes from the actor''s settled pair, whatever the level of either claim, and a grant that hands out more access than the actor holds on the object; denies and removals are exempt and the claim''s level is never judged. An object outside the claimius schema that this database holds no object_info row for, a disciple''s own row, is judged by the actor''s hold on the binding''s owning organization, which _check_app_scope keeps linked to the app; its type is never resolved. When the transaction carries claimius.object_created_by, the grant the calling app reports the row was created under, and that grant is a live user_claim of the actor in the binding''s app, the actor is the row''s creator and holds owner, write, read and execute on it, as the disciple holding the row counts the creator, while the binding''s owning organization is live or not held. The first binding of an app may come from an actor of another app holding owner on the organization that owns the app, judged in the actor''s own app. The first binding on a samna_user holding a claim assigned under the binding''s owning organization may come from an actor holding owner on that organization. Any other binding short of the actor''s hold in its app may still pass on the access the actor holds on the object in the system app, directly or through an inheriting ancestor grant, capped at that access. Enforces composition link invariants: no self loop, no reverse link cycle, caller has read on target claim. Bypassed during disciple replay.';
 
 DROP TRIGGER IF EXISTS tg_check_claim_composition ON claimius.claim_object;
 CREATE TRIGGER tg_check_claim_composition
@@ -703,137 +715,58 @@ CREATE TRIGGER tg_check_claim_composition
 
 DROP FUNCTION IF EXISTS claimius._check_claim_level(UUID, UUID, UUID, INTEGER);
 
-CREATE OR REPLACE FUNCTION claimius._check_claim_level(
+CREATE OR REPLACE FUNCTION claimius._check_claim_denies(
     p_app_id    UUID,
     p_actor_uc  UUID,
-    p_claim_id  UUID,
-    p_level     INTEGER,
-    p_bound     BOOLEAN DEFAULT FALSE
+    p_claim_id  UUID
 ) RETURNS VOID AS $$
 DECLARE
-    v_actor_uc UUID := coalesce(NULLIF(current_setting('claimius.actor', TRUE), '')::UUID, p_actor_uc);
-    v_user_id  UUID;
-    v_binding  RECORD;
-    v_deny     RECORD;
-    v_held     INTEGER;
+    v_user_id UUID;
+    v_binding RECORD;
+    v_held    INTEGER;
+    v_denied  INTEGER;
 BEGIN
-    IF coalesce(p_level, 0) = 0 THEN
-        RETURN;
-    END IF;
-
     SELECT uc.user_id INTO v_user_id
     FROM claimius.user_claim uc
-    WHERE uc.id = v_actor_uc
+    WHERE uc.id = p_actor_uc
       AND uc.app_id = p_app_id
       AND uc.sa_deleted_at IS NULL;
     IF v_user_id IS NULL THEN
         RETURN;
     END IF;
 
-    PERFORM claimius.reconcile_if_pending(p_app_id, v_user_id, 'claimius.claim', p_claim_id);
-    IF NOT EXISTS (
-        SELECT 1 FROM claimius.user_object
-        WHERE user_id = v_user_id
-          AND app_id = p_app_id
-          AND object_type = 'claimius.claim'
-          AND object_id = p_claim_id
-          AND (sa_access & 2) <> 0
-    ) THEN
-        RAISE EXCEPTION 'cannot hand out claim % at level %: user % has no write on it', p_claim_id, p_level, v_user_id USING ERRCODE = 'P0403';
-    END IF;
-
     FOR v_binding IN
-        SELECT co.object_type, co.object_id, co.scope, claimius._effective_access(c.sa_access, co.sa_access) & 15 AS bits
+        SELECT co.object_type, co.object_id, claimius._effective_access(c.sa_access, co.sa_access) & 15 AS bits
         FROM claimius.claim_object co
             JOIN claimius.claim c ON c.id = co.claim_id
         WHERE co.claim_id = p_claim_id
           AND co.app_id = p_app_id
           AND co.sa_deleted_at IS NULL
-          AND (co.object_id IS NULL OR co.object_type <> 'claimius.claim')
+          AND co.object_id IS NOT NULL
+          AND co.object_type <> 'claimius.claim'
           AND (claimius._effective_access(c.sa_access, co.sa_access) & 16) = 0
     LOOP
-        IF p_bound AND v_binding.object_id IS NOT NULL THEN
-            PERFORM claimius.reconcile_if_pending(p_app_id, v_user_id, v_binding.object_type, v_binding.object_id);
-            SELECT coalesce(max(coalesce((g ->> 'level')::INTEGER, 0)), 0) INTO v_held
-            FROM claimius.user_object uo
-                CROSS JOIN LATERAL jsonb_array_elements(uo.grants) g
-            WHERE uo.user_id = v_user_id
-              AND uo.app_id = p_app_id
-              AND uo.object_type = v_binding.object_type
-              AND uo.object_id = v_binding.object_id;
-            IF p_level > v_held THEN
-                RAISE EXCEPTION 'cannot set claim % to level %: user % holds level % on % %',
-                    p_claim_id, p_level, v_user_id, v_held, v_binding.object_type, v_binding.object_id USING ERRCODE = 'P0403';
-            END IF;
-        END IF;
+        v_denied := claimius._denied_access(p_app_id, v_user_id, v_binding.object_type, v_binding.object_id) & v_binding.bits;
+        CONTINUE WHEN v_denied = 0;
 
-        FOR v_deny IN
-            WITH held AS (
-                SELECT c.id AS claim_id, c.sa_access, c.inherits, c.level
-                FROM claimius.user_claim uc
-                    JOIN claimius.claim c ON c.id = uc.claim_id AND c.sa_deleted_at IS NULL
-                WHERE uc.user_id = v_user_id
-                  AND uc.app_id = p_app_id
-                  AND uc.sa_deleted_at IS NULL
-                  AND (uc.starts_at IS NULL OR uc.starts_at <= now())
-                  AND (uc.ends_at IS NULL OR uc.ends_at > now())
-            ),
-            faced AS (
-                SELECT h.level AS lvl, h.inherits AS c_inherits, dco.inherits AS b_inherits,
-                       dco.object_type, dco.object_id, dco.scope,
-                       claimius._effective_access(h.sa_access, dco.sa_access) AS e
-                FROM held h
-                    JOIN claimius.claim_object dco
-                        ON dco.claim_id = h.claim_id AND dco.app_id = p_app_id AND dco.sa_deleted_at IS NULL
-                UNION ALL
-                SELECT greatest(h.level, d.level), h.inherits AND d.inherits, dco.inherits,
-                       dco.object_type, dco.object_id, dco.scope,
-                       CASE WHEN h.level > d.level THEN claimius._effective_access(h.sa_access, link.sa_access)
-                            WHEN d.level > h.level THEN claimius._effective_access(d.sa_access, dco.sa_access)
-                            ELSE (claimius._effective_access(h.sa_access, link.sa_access)
-                                    & claimius._effective_access(d.sa_access, dco.sa_access) & ~16)
-                                 | ((claimius._effective_access(h.sa_access, link.sa_access)
-                                    | claimius._effective_access(d.sa_access, dco.sa_access)) & 16) END
-                FROM held h
-                    JOIN claimius.claim_object link
-                        ON link.claim_id = h.claim_id AND link.app_id = p_app_id AND link.sa_deleted_at IS NULL
-                       AND link.object_type = 'claimius.claim' AND link.inherits
-                    JOIN claimius.claim d ON d.id = link.object_id AND d.sa_deleted_at IS NULL AND d.inherits
-                    JOIN claimius.claim_object dco
-                        ON dco.claim_id = d.id AND dco.app_id = p_app_id AND dco.sa_deleted_at IS NULL
-            )
-            SELECT f.lvl, f.object_type, f.object_id
-            FROM faced f
-            WHERE (f.e & 16) <> 0
-              AND (f.e & v_binding.bits) <> 0
-              AND p_level > f.lvl
-              AND (
-                  (v_binding.object_id IS NULL AND f.object_id IS NULL AND EXISTS (
-                      SELECT 1
-                      FROM jsonb_each(coalesce(v_binding.scope, '{}'::JSONB)) g(k, gv)
-                          JOIN jsonb_each(coalesce(f.scope, '{}'::JSONB)) d(k, dv) USING (k)
-                      WHERE jsonb_typeof(gv) <> 'object'
-                         OR jsonb_typeof(dv) <> 'object'
-                         OR EXISTS (SELECT 1 FROM jsonb_object_keys(gv) gk WHERE dv ? gk)))
-                  OR (f.object_type = v_binding.object_type AND f.object_id = v_binding.object_id)
-                  OR (v_binding.object_id IS NOT NULL AND f.c_inherits AND f.b_inherits AND EXISTS (
-                      SELECT 1 FROM claimius.inheritance_info a
-                      WHERE a.descendant_type = v_binding.object_type
-                        AND a.descendant_id = v_binding.object_id
-                        AND a.ancestor_type = f.object_type
-                        AND a.ancestor_id = f.object_id
-                        AND a.depth > 0))
-              )
-            LIMIT 1
-        LOOP
-            RAISE EXCEPTION 'cannot hand out claim % at level %: user % is denied on % % at level %',
-                p_claim_id, p_level, v_user_id, coalesce(v_deny.object_type, 'scope'), v_deny.object_id, v_deny.lvl USING ERRCODE = 'P0403';
-        END LOOP;
+        PERFORM claimius.reconcile_if_pending(p_app_id, v_user_id, v_binding.object_type, v_binding.object_id);
+        SELECT max(uo.sa_access) INTO v_held
+        FROM claimius.user_object uo
+        WHERE uo.user_id = v_user_id
+          AND uo.app_id = p_app_id
+          AND uo.object_type = v_binding.object_type
+          AND uo.object_id = v_binding.object_id;
+
+        v_denied := v_denied & ~coalesce(v_held, 0);
+        IF v_denied <> 0 THEN
+            RAISE EXCEPTION 'cannot hand out claim %: user % is denied % on % %',
+                p_claim_id, v_user_id, v_denied, v_binding.object_type, v_binding.object_id USING ERRCODE = 'P0403';
+        END IF;
     END LOOP;
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius._check_claim_level(UUID, UUID, UUID, INTEGER, BOOLEAN) IS 'Refuses to hand out, or to set, a claim whose level is not 0 when the actor could not: the actor is the writer named in the transaction setting claimius.actor, else the user of the grant in sa_created_by. The actor needs write on the claim; the level must not be higher than that of any deny the actor faces, held directly or through a link, on an object the claim is bound to, inherited to it, or on a scope binding sharing a path, for the bits the binding hands out; and with p_bound, on a level increase, the actor must hold the new level on every object the claim is bound to. No check at level 0, so everything at 0 behaves as before levels existed.';
+COMMENT ON FUNCTION claimius._check_claim_denies(UUID, UUID, UUID) IS 'Refuses to hand out a claim that gives what is denied to the actor, the user of p_actor_uc in the app: on no object the claim grants bits on may those bits overlap what a deny reaching the actor there removes from the actor''s settled pair. The level of the claim plays no part. An actor that is not a live user_claim of the app passes.';
 
 CREATE OR REPLACE FUNCTION claimius._check_claim_grant()
     RETURNS TRIGGER AS $$
@@ -842,16 +775,15 @@ BEGIN
         RETURN NEW;
     END IF;
     IF TG_TABLE_NAME = 'claim' THEN
-        PERFORM claimius._check_claim_level(NEW.app_id, NEW.sa_created_by, NEW.id, NEW.level, TRUE);
+        PERFORM claimius._check_claim_denies(NEW.app_id, coalesce(nullif(current_setting('claimius.actor', TRUE), '')::UUID, NEW.sa_created_by), NEW.id);
     ELSE
-        PERFORM claimius._check_claim_level(NEW.app_id, NEW.sa_created_by, NEW.claim_id,
-            (SELECT c.level FROM claimius.claim c WHERE c.id = NEW.claim_id));
+        PERFORM claimius._check_claim_denies(NEW.app_id, NEW.sa_created_by, NEW.claim_id);
     END IF;
     RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius._check_claim_grant() IS 'Trigger on user_claim, and on claim when its level increases: runs _check_claim_level for the writer, the transaction setting claimius.actor that update_claim sets, else the actor in sa_created_by, so a claim whose level is not 0 is handed out or lifted only by someone who may.';
+COMMENT ON FUNCTION claimius._check_claim_grant() IS 'Trigger on user_claim, and on claim when its level rises: runs _check_claim_denies for the actor in sa_created_by, so a grant of a claim, or a raise of its level, that gives what a deny removes from the actor is refused with SQLSTATE P0403.';
 
 DROP TRIGGER IF EXISTS tg_check_claim_grant ON claimius.user_claim;
 CREATE TRIGGER tg_check_claim_grant

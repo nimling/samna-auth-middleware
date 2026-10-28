@@ -1,5 +1,5 @@
 BEGIN;
-SELECT plan(17);
+SELECT plan(19);
 
 CREATE TEMP TABLE lvl (key TEXT PRIMARY KEY, id UUID);
 
@@ -78,6 +78,8 @@ DECLARE
     v_g5    UUID;
     v_g2    UUID;
     v_mine  UUID;
+    v_w0    UUID;
+    v_w     UUID;
 BEGIN
     PERFORM claimius.upsert_app_user(p_user_id => 'a0000000-0000-4000-8000-0000000001b1', p_first_name => 'X');
     v_admin := (claimius.insert_claim('Admin', NULL, 15, v_root, v_root, v_sys) -> 'claim' ->> 'id')::UUID;
@@ -97,8 +99,14 @@ BEGIN
     v_mine := (claimius.insert_claim('Raised by X', NULL, 4, v_root, v_root, v_x, p_level => 2) -> 'claim' ->> 'id')::UUID;
     PERFORM claimius.insert_claim_object(p_claim_id => v_mine, p_sa_owner_id => v_root, p_sa_root_id => v_root,
         p_sa_created_by => v_sys, p_object_id => v_child, p_object_type => 'claimius.organization', p_inherits => TRUE);
+    PERFORM claimius.upsert_app_user(p_user_id => 'a0000000-0000-4000-8000-0000000001b2', p_first_name => 'W');
+    v_w0 := (claimius.insert_claim('Write level 0', NULL, 2, v_root, v_root, v_sys) -> 'claim' ->> 'id')::UUID;
+    PERFORM claimius.insert_claim_object(p_claim_id => v_w0, p_sa_owner_id => v_root, p_sa_root_id => v_root,
+        p_sa_created_by => v_sys, p_object_id => v_child, p_object_type => 'claimius.organization', p_inherits => TRUE);
+    v_w := (claimius.insert_user_claim(p_claim_id => v_w0, p_user_id => 'a0000000-0000-4000-8000-0000000001b2',
+        p_sa_owner_id => v_root, p_sa_created_by => v_sys) -> 'user_claim' ->> 'id')::UUID;
     PERFORM set_config('claimius.replay_mode', 'false', TRUE);
-    INSERT INTO lvl VALUES ('x', v_x), ('g5', v_g5), ('g2', v_g2), ('mine', v_mine);
+    INSERT INTO lvl VALUES ('x', v_x), ('g5', v_g5), ('g2', v_g2), ('mine', v_mine), ('w', v_w);
 END $$;
 
 CREATE FUNCTION pg_temp.lvl(p_key TEXT) RETURNS UUID AS $$
@@ -132,49 +140,63 @@ SELECT ok(EXISTS (SELECT 1 FROM claimius.get_scope_access('a0000000-0000-4000-80
 SELECT ok(NOT EXISTS (SELECT 1 FROM claimius.get_scope_access('a0000000-0000-4000-8000-0000000001a6', '$.page.report', 4)),
     'a scope deny of the same level removes the scope grant');
 
-SELECT throws_like($$
+SELECT lives_ok($$
+    SELECT claimius.insert_claim_object(
+        p_claim_id => (claimius.insert_claim('Write level 1', NULL, 2, pg_temp.lvl('root'), pg_temp.lvl('root'), pg_temp.lvl('sys'), p_level => 1) -> 'claim' ->> 'id')::UUID,
+        p_sa_owner_id => pg_temp.lvl('root'), p_sa_root_id => pg_temp.lvl('root'), p_sa_created_by => pg_temp.lvl('w'),
+        p_object_id => pg_temp.lvl('child'), p_object_type => 'claimius.organization')
+$$, 'a level 0 writer with write on the object binds a level 1 claim');
+
+SELECT lives_ok($$
     SELECT claimius.insert_claim_object(
         p_claim_id => (claimius.insert_claim('Grant level 5', NULL, 4, pg_temp.lvl('root'), pg_temp.lvl('root'), pg_temp.lvl('sys'), p_level => 5) -> 'claim' ->> 'id')::UUID,
         p_sa_owner_id => pg_temp.lvl('root'), p_sa_root_id => pg_temp.lvl('root'), p_sa_created_by => pg_temp.lvl('owner'),
         p_object_id => pg_temp.lvl('child'), p_object_type => 'claimius.organization')
-$$, '%cannot bind a claim of level 5%', 'an actor cannot bind a grant above the level it holds on the object');
+$$, 'a writer holding read at level 0 binds a level 5 grant of read');
 
-SELECT throws_like($$
+SELECT lives_ok($$
     SELECT claimius.insert_claim_object(
         p_claim_id => (claimius.insert_claim('Deny level 5', NULL, 20, pg_temp.lvl('root'), pg_temp.lvl('root'), pg_temp.lvl('sys'), p_level => 5) -> 'claim' ->> 'id')::UUID,
         p_sa_owner_id => pg_temp.lvl('root'), p_sa_root_id => pg_temp.lvl('root'), p_sa_created_by => pg_temp.lvl('owner'),
         p_object_id => pg_temp.lvl('child'), p_object_type => 'claimius.organization')
-$$, '%cannot bind a claim of level 5%', 'an actor cannot bind a deny above the level it holds on the object');
+$$, 'a writer binds a deny above every level it holds');
 
 SELECT lives_ok($$
     SELECT claimius.insert_claim_object(
         p_claim_id => (claimius.insert_claim('Deny level 0', NULL, 20, pg_temp.lvl('root'), pg_temp.lvl('root'), pg_temp.lvl('sys')) -> 'claim' ->> 'id')::UUID,
         p_sa_owner_id => pg_temp.lvl('root'), p_sa_root_id => pg_temp.lvl('root'), p_sa_created_by => pg_temp.lvl('owner'),
         p_object_id => pg_temp.lvl('child'), p_object_type => 'claimius.organization')
-$$, 'an actor binds a deny at the level it holds');
+$$, 'a writer binds a deny at the level it holds');
+
+SELECT throws_like($$
+    SELECT claimius.insert_claim_object(
+        p_claim_id => (claimius.insert_claim('Read level 9', NULL, 4, pg_temp.lvl('root'), pg_temp.lvl('root'), pg_temp.lvl('sys'), p_level => 9) -> 'claim' ->> 'id')::UUID,
+        p_sa_owner_id => pg_temp.lvl('root'), p_sa_root_id => pg_temp.lvl('root'), p_sa_created_by => pg_temp.lvl('x'),
+        p_object_id => pg_temp.lvl('child'), p_object_type => 'claimius.organization')
+$$, '%cannot grant access denied to the writer%is denied 4 on%', 'a writer denied read on an object cannot bind a grant giving read there');
 
 SELECT throws_like($$
     SELECT claimius.insert_user_claim(p_claim_id => pg_temp.lvl('g5'), p_user_id => 'a0000000-0000-4000-8000-0000000001a2',
         p_sa_owner_id => pg_temp.lvl('root'), p_sa_created_by => pg_temp.lvl('x'))
-$$, '%is denied on%at level 3%', 'a grant of a claim cannot lift a deny of a lower level the granting actor faces');
+$$, '%is denied 4 on%', 'a grant of a claim cannot give what a deny removes from the granting actor');
 
-SELECT lives_ok($$
+SELECT throws_like($$
     SELECT claimius.insert_user_claim(p_claim_id => pg_temp.lvl('g2'), p_user_id => 'a0000000-0000-4000-8000-0000000001a2',
         p_sa_owner_id => pg_temp.lvl('root'), p_sa_created_by => pg_temp.lvl('x'))
-$$, 'a grant of a claim below the deny the actor faces is accepted');
-
-SELECT throws_like($$
-    SELECT claimius.insert_user_claim(p_claim_id => pg_temp.lvl('g2'), p_user_id => 'a0000000-0000-4000-8000-0000000001a3',
-        p_sa_owner_id => pg_temp.lvl('root'), p_sa_created_by => pg_temp.lvl('owner'))
-$$, '%has no write on it%', 'an actor without write on a claim above level 0 cannot hand it out');
-
-SELECT throws_like($$
-    SELECT claimius.update_claim(pg_temp.lvl('mine'), p_level => 5)
-$$, '%is denied on%at level 3%', 'a claim cannot be raised above a deny its authority faces');
+$$, '%is denied 4 on%', 'the grant is refused whatever the level of the claim against the level of the deny');
 
 SELECT lives_ok($$
+    SELECT claimius.insert_user_claim(p_claim_id => pg_temp.lvl('g2'), p_user_id => 'a0000000-0000-4000-8000-0000000001a3',
+        p_sa_owner_id => pg_temp.lvl('root'), p_sa_created_by => pg_temp.lvl('owner'))
+$$, 'an actor denied nothing a claim gives hands it out at any level, with no write on the claim');
+
+SELECT throws_like($$
     SELECT claimius.update_claim(pg_temp.lvl('mine'), p_level => 3)
-$$, 'a claim is raised up to the level of the deny its authority faces');
+$$, '%is denied 4 on%', 'a claim cannot be raised when its authority is denied what it gives');
+
+SELECT lives_ok($$
+    SELECT claimius.update_claim(pg_temp.lvl('g2'), p_level => 9)
+$$, 'a claim is raised to any level when its authority is denied nothing it gives');
 
 SELECT * FROM finish();
 ROLLBACK;

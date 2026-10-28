@@ -6,6 +6,7 @@ import (
 	"io"
 	"mime/multipart"
 	"net/http"
+	"net/url"
 	"path/filepath"
 	"strings"
 
@@ -37,6 +38,15 @@ type assetInput struct {
 	Type        string
 }
 
+func GetAssetURL(app SamnaApp, assetID uuid.UUID) string {
+	path := "/api/asset/" + assetID.String() + "/data"
+	origin, err := url.Parse(app.GetPrimaryOrigin())
+	if err != nil || origin.Host == "" {
+		return path
+	}
+	return origin.Scheme + "://" + origin.Host + path
+}
+
 func GetAssets(ctx echo.Context) error {
 	appID := ctx.Get("app_id").(uuid.UUID)
 
@@ -56,7 +66,7 @@ func GetAssets(ctx echo.Context) error {
 
 	app, _ := ctx.Get("app").(SamnaApp)
 	for i := range assets {
-		assets[i].AssetURL = app.GetPrimaryOrigin() + "/api/asset/" + assets[i].ID.String() + "/data"
+		assets[i].AssetURL = GetAssetURL(app, assets[i].ID)
 	}
 
 	return respond.JSON(ctx, http.StatusOK, assets, amount)
@@ -90,7 +100,7 @@ func GetAsset(ctx echo.Context) error {
 	}
 
 	app, _ := ctx.Get("app").(SamnaApp)
-	asset.AssetURL = app.GetPrimaryOrigin() + "/api/asset/" + asset.ID.String() + "/data"
+	asset.AssetURL = GetAssetURL(app, asset.ID)
 
 	return respond.JSON(ctx, http.StatusOK, asset, 1)
 }
@@ -267,7 +277,7 @@ func PostAssetUpload(ctx echo.Context) error {
 	}
 
 	app, _ := ctx.Get("app").(SamnaApp)
-	asset.AssetURL = app.GetPrimaryOrigin() + "/api/asset/" + asset.ID.String() + "/data"
+	asset.AssetURL = GetAssetURL(app, asset.ID)
 
 	return respond.JSON(ctx, http.StatusOK, asset, 1)
 }
@@ -326,7 +336,7 @@ func PutAsset(ctx echo.Context) error {
 	}
 
 	app, _ := ctx.Get("app").(SamnaApp)
-	asset.AssetURL = app.GetPrimaryOrigin() + "/api/asset/" + asset.ID.String() + "/data"
+	asset.AssetURL = GetAssetURL(app, asset.ID)
 
 	return respond.JSON(ctx, http.StatusOK, asset, 1)
 }
@@ -386,7 +396,7 @@ func DeleteAsset(ctx echo.Context) error {
 	}
 
 	app, _ := ctx.Get("app").(SamnaApp)
-	asset.AssetURL = app.GetPrimaryOrigin() + "/api/asset/" + asset.ID.String() + "/data"
+	asset.AssetURL = GetAssetURL(app, asset.ID)
 
 	return respond.JSON(ctx, http.StatusOK, asset, 1)
 }
@@ -413,7 +423,7 @@ func assetObjectAssets(ctx echo.Context, id uuid.UUID, objectType ObjectType) er
 	assets := make([]*Asset, 0, len(objectAssets))
 	for _, oa := range objectAssets {
 		if oa.Asset != nil {
-			oa.Asset.AssetURL = app.GetPrimaryOrigin() + "/api/asset/" + oa.Asset.ID.String() + "/data"
+			oa.Asset.AssetURL = GetAssetURL(app, oa.Asset.ID)
 			assets = append(assets, oa.Asset)
 		}
 	}
@@ -528,7 +538,7 @@ func assetPostObject(ctx echo.Context, objectType ObjectType, objectID uuid.UUID
 	}
 
 	app, _ := ctx.Get("app").(SamnaApp)
-	asset.AssetURL = app.GetPrimaryOrigin() + "/api/asset/" + asset.ID.String() + "/data"
+	asset.AssetURL = GetAssetURL(app, asset.ID)
 
 	return &asset, nil
 }

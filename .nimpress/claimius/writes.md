@@ -157,7 +157,7 @@ On a disciple a write to a shared type goes to the prophet, and the row the prop
 | `_reattach_location_in_ownership` | `d(owner) + 2` rows |
 | Composition, the actor's hold | one range reading `max(sa_access)` over the actor's pairs on the object after settling the actor's pair, and one range of the actor's deny bindings with a closure probe each; the binding passes when `eff(c, b) & ~A(actor, y) & 15 = 0` and `eff(c, b) & denied(actor, y) & 15 = 0` |
 | Composition, a link | one probe of `idx_claim_object_object`, and the settle and one probe of the actor's pair on the target claim when the higher level of the two is not 0 |
-| `_check_claim_denies` | one range of `idx_claim_object_claim_id` for the claim's bindings, one `_denied_access` range per non deny object binding, and the settle and one probe of the actor's pair only on a binding where the denied bits overlap; for every claim |
+| `_check_claim_denies` | one range of `idx_claim_object_claim_id` for the claim's bindings, one `_denied_access` pass per non deny object binding, a range of the actor's grants and one of the links of its inheriting claims with a closure probe per deny binding found, and the settle and one probe of the actor's pair only on a binding where the denied bits overlap; for every claim |
 | `_actor_user_for_row` | one probe |
 
 ### Closure rows of a hierarchy write

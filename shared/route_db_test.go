@@ -220,7 +220,7 @@ func TestARefusedWriteIsErrNoAccessRoutedOrLocal(t *testing.T) {
 	refusing := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusForbidden)
-		w.Write([]byte(`{"data":null,"count":0,"error":{"message":"cannot bind a claim of level 5"}}`))
+		w.Write([]byte(`{"data":null,"count":0,"error":{"message":"cannot grant more access than held"}}`))
 	}))
 	defer refusing.Close()
 	t.Setenv("SAUTH_ENDPOINT", refusing.URL)
@@ -247,8 +247,8 @@ func TestARefusedWriteIsErrNoAccessRoutedOrLocal(t *testing.T) {
 		t.Fatalf("create level 5 claim: %v", err)
 	}
 	organization := sdb.ObjectType(sdb.OBJECT_TYPE_ORGANIZATION)
-	if _, err := claim.AssignObject(&sdb.ClaimObject{ObjectID: &orgAlpha, ObjectType: &organization, Inherits: true, OwnerID: orgRoot, RootID: orgRoot}); !errors.Is(err, sdb.ErrNoAccess) {
-		t.Fatalf("a binding above the level the actor holds must be ErrNoAccess, got %v", err)
+	if _, err := claim.AssignObject(&sdb.ClaimObject{ObjectID: &orgAlpha, ObjectType: &organization, Inherits: true, OwnerID: orgRoot, RootID: orgRoot}); err != nil {
+		t.Fatalf("a binding of a level 5 claim needs no level on the object, got %v", err)
 	}
 }
 

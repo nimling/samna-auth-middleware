@@ -139,17 +139,22 @@ func TestALevelHandOutSeesADenyThroughALink(t *testing.T) {
 	}
 }
 
-func TestALevelIncreaseIsCheckedForTheWriter(t *testing.T) {
+func TestALevelIncreaseIsNotJudgedByLevelButByTheDeniesTheWriterFaces(t *testing.T) {
 	f := getLevelFixture(t)
 	ctx := context.Background()
 	plain := postLevelClaim(t, f.app, "Plain", 4, 0)
 	postLevelBinding(t, f.app, plain, &f.child, "claimius.organization", true, "", grantUser)
 	var raw string
-	err := psdb.Instance().NewRaw(`SELECT claimius.update_claim(p_claim_id => ?, p_level => 3, p_actor_user_claim_id => ?)`, plain, f.writerGrant).Scan(ctx, &raw)
-	if getSQLState(err) != "P0403" {
-		t.Fatalf("a writer holding level 0 on the bound object must not set the claim to level 3, got %v", err)
+	if err := psdb.Instance().NewRaw(`SELECT claimius.update_claim(p_claim_id => ?, p_level => 3, p_actor_user_claim_id => ?)`, plain, f.writerGrant).Scan(ctx, &raw); err != nil {
+		t.Fatalf("a writer facing no deny sets the level, whatever level it holds: %v", err)
 	}
-	if err := psdb.Instance().NewRaw(`SELECT claimius.update_claim(p_claim_id => ?, p_level => 3)`, plain).Scan(ctx, &raw); err != nil {
+	noRead := postLevelClaim(t, f.app, "No read", 20, 0)
+	postLevelBinding(t, f.app, noRead, &f.child, "claimius.organization", true, "", grantUser)
+	postLevelGrant(t, f.app, noRead, f.writer, grantUser)
+	if err := psdb.Instance().NewRaw(`SELECT claimius.update_claim(p_claim_id => ?, p_level => 5, p_actor_user_claim_id => ?)`, plain, f.writerGrant).Scan(ctx, &raw); getSQLState(err) != "P0403" {
+		t.Fatalf("a writer denied read on the bound object must not raise a read claim bound there, got %v", err)
+	}
+	if err := psdb.Instance().NewRaw(`SELECT claimius.update_claim(p_claim_id => ?, p_level => 5)`, plain).Scan(ctx, &raw); err != nil {
 		t.Fatalf("the creator stamp of the system sets the level: %v", err)
 	}
 }
