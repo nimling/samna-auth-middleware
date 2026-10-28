@@ -202,7 +202,7 @@ one `check_user_active`, one probe of the reader's `samna_user` row for the gues
 With `a'_x` ancestors on the chains of the walk and `B'_x` bindings on them:
 
 ```
-entries(get_direct_access) ≈ 1 + 2C + 3 a'_x + 3 B'_x + O(1)
+entries(get_direct_access) ≈ 4 + 2C + a'_x + 3 B'_x
 ```
 
 A hit of the gate is one check. A miss is one check and one probe of the object's live row, the walk added only when the settle was skipped.
