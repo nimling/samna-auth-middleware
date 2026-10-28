@@ -230,7 +230,7 @@ func (u *SamnaUser) ValidatePost() error {
 }
 
 func (u *SamnaUser) ValidatePut() error {
-	if err := disallowKeys(u, append(commonForbiddenKeys, "user_id")...); err != nil {
+	if err := disallowKeys(u, append(commonForbiddenKeys, "user_id", "user_image")...); err != nil {
 		return err
 	}
 	if u.HasKey("email") {

@@ -445,3 +445,39 @@ func TestApplyPageRetiresAnUnlinkedOrganizationItsRowsStillReference(t *testing.
 		t.Fatalf("the cursor must move past the unlink, got %s", got)
 	}
 }
+
+func TestApplyPageTakesTheSharedUserImageAndItsWithdrawal(t *testing.T) {
+	db := database(t)
+	ctx := context.Background()
+	id := uuid.New()
+	userID := uuid.New()
+	image := "https://auth.example.no/api/asset/" + uuid.NewString() + "/data"
+
+	apply := func(userImage string) *string {
+		t.Helper()
+		from := cursor(t)
+		payload := sam.SyncPayload{
+			SyncCursor: step(from, 1),
+			Operation:  "upsert",
+			EventType:  "claimius.samna_user",
+			Payload: json.RawMessage(fmt.Sprintf(
+				`{"id":%q,"user_id":%q,"first_name":"Image","email":"image@example.no","user_image":%s,"status":"active","sa_created_at":"2026-01-01T00:00:00Z","sa_updated_at":"2026-01-01T00:00:00Z"}`,
+				id, userID, userImage)),
+		}
+		if err := sam.Disciple().ApplyPage(ctx, from, sam.State{Cursor: step(from, 1)}, []sam.SyncPayload{payload}, ""); err != nil {
+			t.Fatalf("apply page: %v", err)
+		}
+		var stored shared.SamnaUser
+		if err := db.NewSelect().Model(&stored).Where("id = ?", id).Scan(ctx); err != nil {
+			t.Fatalf("read user: %v", err)
+		}
+		return stored.UserImage
+	}
+
+	if got := apply(fmt.Sprintf("%q", image)); got == nil || *got != image {
+		t.Fatalf("a shared image must reach the disciple, got %v", got)
+	}
+	if got := apply("null"); got != nil {
+		t.Fatalf("a withdrawn image must be cleared on the disciple, got %q", *got)
+	}
+}
