@@ -6,7 +6,7 @@ Two artefacts ship in one tag: the Go module `github.com/nimling/samna-auth-midd
 
 1. A Go change with a browser facing contract is mirrored into `ts/src/` in the same change: types into `types.ts` by json tag, sentinel errors as named exports, endpoints, params, headers and statuses into `client.ts`, `fetch.ts` or `session.ts`.
 2. Go tests sit beside the package as `<package>/<name>_test.go`, with the `dbtest` tag when they need a database. TypeScript tests sit beside the module as `ts/src/<name>.test.ts`.
-3. `ts/src/index.ts` is the package surface: a rewrite of that file keeps every export, the stream reader included (`readStream`, `EVENT_STREAM`, `Step`, `StepStatus`, `StreamResult` from `./stream`). `alpha0071` shipped `dist/stream.js` without the export and the connect portal could not import it.
+3. `ts/src/index.ts` is the package surface: a rewrite of that file keeps every export, the stream reader included (`readStream`, `EVENT_STREAM`, `Step`, `StepStatus`, `StreamResult` from `./stream`). A release once shipped `dist/stream.js` without the export and the connect portal could not import it.
 4. A schema change is proven by the consumers' Go and hurl tests, locally and then on tst after the release is pinned and deployed.
 
 ## Releasing

@@ -14,7 +14,7 @@ SELECT claimius.upsert_app_user(
 );
 ```
 
-Idempotent. Inserts the per app `samna_user` row if missing AND grants the app's default claim, `samna_app.claim_id` configured during `upsert_system_app`, as a `user_claim`. Returns `{"samna_user": {...}, "user_claim": {...}}` when the app has a default claim, or `{"samna_user": {...}}` when it doesn't. The default claim is intentionally minimal: holding it alone grants no resource access. It is the "you have an account in this app" marker. The implementing app grants additional claims later as users earn permissions.
+Idempotent. Inserts the per app `samna_user` row if missing AND grants the app's default claim, `samna_app.claim_id` configured during `upsert_system_app`, as a `user_claim`. Returns `{"samna_user": {...}, "user_claim": {...}}` when the app has a default claim, or `{"samna_user": {...}}` when it has none. The default claim is intentionally minimal: holding it alone grants no resource access. It is the "you have an account in this app" marker. The implementing app grants additional claims later as users earn permissions.
 
 ## Granting a permission
 
@@ -55,11 +55,9 @@ Binding to the kitchen organization with `inherits = TRUE` cascades to all recip
 
 ## Building a query against your own table
 
-```sql
--- WRONG: leaks rows the user shouldn't see
-SELECT * FROM public.recipe WHERE kitchen_id = $kitchen_id;
+`SELECT * FROM public.recipe WHERE kitchen_id = $kitchen_id` leaks rows the user may not see. Gate it on `get_objects`:
 
--- RIGHT: gated by user access
+```sql
 SELECT r.*
 FROM public.recipe r
 WHERE r.id IN (
@@ -71,6 +69,6 @@ WHERE r.id IN (
 For the basics use the rendering columns `get_objects` joins from `object_info`:
 
 ```sql
-SELECT object_id, sa_name, sa_description, sa_access
+SELECT object_id, sa_name, sa_description, sa_link, sa_access
 FROM claimius.get_objects($user_id, $app_id, 'public.recipe', $required_access);
 ```
