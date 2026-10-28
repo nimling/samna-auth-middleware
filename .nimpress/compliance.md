@@ -641,14 +641,14 @@ sed -n 11,35p audit/audit.go
 3. Method:
 
 ```bash
-grep -n "'audit', 'audit'" disciple/database/V5.4__claimius_retention_class.sql prophet/database/V5.21__claimius_retention_class.sql
+grep -n "'audit'" disciple/database/V5.3__claimius_retention.sql prophet/database/V5.20__claimius_retention.sql
 grep -n 'delete_expired_audit' disciple/database/V5.6__claimius_retention_age.sql prophet/database/V5.26__claimius_retention_age.sql
 grep -rn -i 'prev_hash\|immutab' disciple/database prophet/database audit
 ```
 
-4. Pass: a retention row of class `audit` with a sweep, and a chain column or an append only sink.
+4. Pass: a retention row for `audit` with a sweep, and a chain column or an append only sink.
 
-5. Today: `fails`. The `audit` row is class `audit`, 365 days (`disciple/database/V5.4__claimius_retention_class.sql:136`), pruned by `delete_expired_audit`, which drops each monthly partition past the retention (`disciple/database/V5.6__claimius_retention_age.sql:29`, `:69`). Live rows carry no hash chain and no sink keeps them.
+5. Today: `fails`. The `audit` row keeps 365 days (`disciple/database/V5.3__claimius_retention.sql`), pruned by `delete_expired_audit`, which drops each monthly partition past the retention (`disciple/database/V5.6__claimius_retention_age.sql:29`, `:69`). Live rows carry no hash chain and no sink keeps them.
 
 ### C39, trace context to the prophet
 
@@ -764,12 +764,12 @@ grep -n 'GetConsent' analytics/*.go
 3. Method:
 
 ```bash
-grep -n "analytics_event" prophet/database/V5.21__claimius_retention_class.sql
+grep -n "analytics_event" prophet/database/V5.20__claimius_retention.sql
 ```
 
-4. Pass: an `analytics_event` row of class `log` in `claimius.retention`, 30 days by default, pruned once a day by `delete_expired` under the retention job.
+4. Pass: an `analytics_event` row in `claimius.retention`, 30 days by default, pruned once a day by `delete_expired` under the retention job.
 
-5. Today: `passes`, `prophet/database/V5.21__claimius_retention_class.sql:311`, `shared/retention.go:66`.
+5. Today: `passes`, `prophet/database/V5.20__claimius_retention.sql`, `shared/retention.go`.
 
 ### C46, retention for every other personal table
 
@@ -780,12 +780,12 @@ grep -n "analytics_event" prophet/database/V5.21__claimius_retention_class.sql
 3. Method:
 
 ```bash
-psql -c "SELECT kind, class, days FROM claimius.get_retention()"
+psql -c "SELECT kind, days FROM claimius.get_retention()"
 ```
 
 4. Pass: one retention row and prune per table.
 
-5. Today: `fails`. `notification` (`log`), `analytics_session` (`log`) and `analytics_capture` (`cache`) have a retention row each (`prophet/database/V5.21__claimius_retention_class.sql:304`, `disciple/database/V5.4__claimius_retention_class.sql:133`), and `usage_diff` is folded by the drain; `consent` has no retention row and is kept (`prophet/database/V5.26__claimius_retention_age.sql:15`), and `user_activity` has no sweep.
+5. Today: `fails`. `notification`, `analytics_session` and `analytics_capture` have a retention row each (`prophet/database/V5.20__claimius_retention.sql`, `disciple/database/V5.3__claimius_retention.sql`), and `usage_diff` is folded by the drain; `consent` has no retention row and is kept (`prophet/database/V5.26__claimius_retention_age.sql:15`), and `user_activity` has no sweep.
 
 ### C47, export contract
 
