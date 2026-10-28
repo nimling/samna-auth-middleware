@@ -157,7 +157,7 @@ Five views carry those joins instead: `claimius.get_users` over `samna_user`, `c
 
 2. A view runs with its owner's rights and the planner merges it into the statement, so the join condition reaches the table's own index: a join through `get_organizations` probes `organization_pkey` as the join on the table did.
 
-3. `claimius_reader` holds `SELECT` on the five views and on no table, granted in `V6.0`. They carry the `get_` names of the lookups they mirror, so the rule holds as written: app code names a `claimius` relation only through a `get_` name.
+3. `claimius_reader` holds `SELECT` on the five views, read and write on the token tables it keeps itself, `session`, `dpop_jti`, `rate_limit`, `par_request` and `jwks_cache`, `SELECT` on the consent and analytics tables, and nothing on a model or derived table, granted in `V6.0`. The views carry the `get_` names of the lookups they mirror, so the rule holds as written: app code names a `claimius` model relation only through a `get_` name.
 
 4. The bun models `SamnaUser`, `Organization`, `Location`, `Claim` and `UserClaim` in `shared` carry `select:claimius.get_<name>` beside `table:claimius.<name>` in their `bun.BaseModel` tag. bun reads a select, a belongs-to join and a has-many load from the `select` name and writes an insert, an update and a delete to the `table` name, so a model that `bun:",extend"`s one of them, and every relation pointing at one, reads through the view with no change at the call. A consumer model of its own over a claimius table, such as a compact owner, adds the same `select:` option.
 
@@ -181,7 +181,7 @@ A read writes only its settle: the pairs it recomputes and the marks it moves, t
 
 ## Definer rights
 
-Every `get_*`, `search`, `resolve_access` and `mutation_access` is `SECURITY DEFINER` with `search_path = claimius, pg_temp`. The `claimius_reader` role holds no privilege on any table, so a connection that only reads gets answers through these functions and the five [get views](#the-get-views), and cannot select the pairs, the closure or the grants directly. The settle a read performs is written with the owner's privileges, and the pinned `search_path` keeps a caller from shadowing a claimius object with its own. See [Security](./security.md).
+Every `get_*`, `search`, `resolve_access` and `mutation_access` is `SECURITY DEFINER` with `search_path = claimius, pg_temp`. The `claimius_reader` role holds no privilege on a model or derived table, so a connection that only reads gets answers through these functions and the five [get views](#the-get-views), and cannot select the pairs, the closure or the grants directly. The settle a read performs is written with the owner's privileges, and the pinned `search_path` keeps a caller from shadowing a claimius object with its own. See [Security](./security.md).
 
 ## Plans
 
@@ -235,8 +235,8 @@ for a page of `p` rows, a descent of `h` levels and the settle `s` of the reader
 |---|---|
 | `get_organizations`, `get_locations` | One `get_objects` page per round, plus one table probe and one `app_has_object` probe of `idx_app_object_unique` per row read |
 | `get_secrets` | One `get_objects` page plus one `samna_secret` probe per row |
-| `get_users` | `Σ_{x ∈ V_u} U_x` on the reader's first view and nothing after, then `1 + S_u + Σ_{x ∈ T_u} (m_x + U_x) + 2C + b + |targets|`: the reader's `S_u` rows of `idx_user_users_viewer`, the rows still pending on its `T_u` objects, its grants with their `b` bindings on `claimius.samna_user`, and one `samna_user` probe per target |
-| `get_claims(user, app, required)` | One probe of the reader's grants per live claim of the app |
+| `get_users` | `Σ_{x ∈ V_u} U_x` on the reader's first view and nothing after, then `1 + S_u + V_u + Σ_{x ∈ T_u} (m_x + U_x) + 2C + b + |targets|`: the reader's `S_u` rows of `idx_user_users_viewer`, the `V_u` probes of `user_users_diff` by key that find its `T_u` pending objects, the rows still pending on them, its grants with their `b` bindings on `claimius.samna_user`, and one `samna_user` probe per target |
+| `get_claims(user, app, required)` | One range of `idx_user_claim_user_app` and one claim probe per live grant, or one grant probe per live claim of every app when the planner scans `claim`; the function filters no `app_id` |
 | `get_claims(user, app, object_id, object_type)` | The point settle and one claim probe per derivation of the pair |
 | `get_audit` | The reader's `V_{u,organization}` pairs, then the app's rows newest first until `limit + offset` are kept |
 | `get_users(user_ids, ids, emails, external_ids)`, `get_organizations(ids, owner_ids, external_ids)`, `get_locations(ids, parent_ids, external_ids)`, `get_claims(ids, owner_ids)` | One index probe per id given, or one range of the owner or parent index per owner or parent, plus a heap tuple per row. An external id probes the `external_id` index of `organization` or `location`. A user named only by email or external id reads `samna_user` once: the email is compared on `lower(email)` and the `external_id` index holds live rows only |

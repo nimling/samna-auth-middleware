@@ -28,7 +28,7 @@ It is written like any binding: `insert_claim`, then `insert_claim_object` with 
 1. It takes the user's live grants in the app inside their window, joined to their live claims.
 2. It takes each claim's live scope bindings and keeps those where `jsonb_path_exists(scope, path)`. The argument is a jsonpath and starts with `$`: `$.page` matches any page grant, `$.page."time-report"` one page, `$.page.keyvalue() ? (@.key like_regex "report")` a pattern ([PostgreSQL, SQL/JSON path language](https://www.postgresql.org/docs/17/functions-json.html#FUNCTIONS-SQLJSON-PATH)).
 3. Each matching binding carries the claim mask narrowed by the binding mask; a NULL binding mask is the claim mask.
-4. Each matching deny binding subtracts its bits from every matching grant binding whose claim level is not higher than the deny's. What remains is closed under implication. Composition links are not followed here: a scope binding on a claim the user reaches only through a link does not match.
+4. Each matching deny binding subtracts its bits from every matching grant binding whose claim level is not higher than the deny's. What remains is closed under implication. A scope binding on a claim reached through one inheriting link matches too, with the composed mask and the higher of the two levels.
 5. A binding left with no bit, or whose bits do not cover `required`, is dropped.
 
 The answer is one row per surviving binding, with its grant, its claim, its settled mask and level, and the binding's own id, `scope`, mask and `inherits`, ordered by claim and binding. Deny bindings are never returned. An empty answer is a normal no.
@@ -63,12 +63,12 @@ a(binding) = close(e & 15 & ~X_p(level))      kept when a ≠ 0 and a & required
 With `C` live grants of the user and `β` scope bindings on their claims:
 
 ```
-index entries read    = 1 + 2C + β
+index entries read    = 1 + 2C + β + L + 2L'
 jsonpath evaluations  = β
 rows written          = 0
 ```
 
-one range of `idx_user_claim_user_app`, `C` claim probes, and one probe of `idx_claim_object_no_object` per claim. The cost is the same whether the app has ten users or a million.
+one range of `idx_user_claim_user_app`, `C` claim probes, one probe of `idx_claim_object_no_object` per claim, and for the links out of the held claims one range of `idx_claim_object_claim_id` per held claim, `L` links, with one claim probe and one `idx_claim_object_no_object` probe per linked claim, `L'` of them. The cost is the same whether the app has ten users or a million.
 
 ## Proofs and measurements
 

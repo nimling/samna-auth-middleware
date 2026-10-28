@@ -41,7 +41,7 @@ On a disciple the app argument is absent. `limit` defaults to 20 and `offset` to
 | Path | Chosen when | Reads |
 |---|---|---|
 | The scope's closure rows, each probed for the reader's pair | an owner subtree or a parent is set and `_search_scope_smaller` counts the scope's rows no more than the reader's pairs | `S` closure entries and one pair probe and one `object_info` row per object in scope |
-| The query's postings, each probed for the reader's pair | a query, when the scope path was not taken and `_search_text_smaller` estimates the matches fewer than the reader's pairs; the scope and parent filters then apply to each match | `M_q` postings and one pair probe per match |
+| The query's postings, each probed for the reader's pair | a query, when the scope path was not taken and `_search_text_smaller` estimates the matches fewer than the reader's pairs; the scope and parent filters then apply to each match | `M_q` postings, one pair probe per match, and one `object_info` probe per match that holds a pair |
 | The reader's range | otherwise | two entries per pair of the requested types |
 
 4. `_search_scope_smaller` counts both sets up to `k`, from 64 and four times larger each round, and stops at the first round where one falls short, so the choice costs at most a constant times the smaller set. `_search_text_smaller` compares the planner's estimates of the two and reads no index entry.
@@ -114,7 +114,7 @@ Search decides which objects the reader may see and returns each with the pair's
 For a reader with `V` pairs of the requested types, a scope with `S` closure rows, a query matching `M_q` objects, `n` rows kept and a page of `p`:
 
 ```
-entries     = s + c + min(2V, 3S, 2M_q) + n f
+entries     = s + c + min(2V, 3S, 2M_q + n) + n f
 comparisons = n log₂ n
 ```
 

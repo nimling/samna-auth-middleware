@@ -56,7 +56,7 @@ The merge runs when the pair is recomputed, never on a read.
 
 2. `get_objects` and `search` return the pair's stored `scope` on every row.
 
-3. `get_direct_access` returns the raw `scope` of the binding it found, and skips a binding whose scope names no field of the type.
+3. `get_direct_access` returns the settled field masks of the derivation it chose, as the pair would store them, and skips a binding whose scope names no field of the type.
 
 ## What a response withholds
 
@@ -80,7 +80,7 @@ with `a_g(f)` of [the model](./index.md#the-access-of-a-pair). Per derivation:
 
 2. A scoped grant carries `close(e_g & 15 & ~D_g(f))` on each field `f` its scope names and nothing on any other field.
 
-3. The creator carries `close(15 & ~(X_d | F_d(f)))`.
+3. The creator carries `close(15 & ~(H_c | X_d | F_d(f)))`.
 
 The stored scope:
 

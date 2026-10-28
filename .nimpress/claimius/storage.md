@@ -69,7 +69,7 @@ Every claimius table falls in one of three groups: the model, the rows a writer 
 
 6. A usage flush leaves one `usage_diff` row per pair counted, dead once folded, and one dead version per `user_activity` row it moves. A share settle leaves one heap only version of the cursor; the fold leaves one dead version per pair it moves.
 
-7. `trim_sync_event` deletes the outbox rows owed to nobody in one statement per pass. A month of audit is retired by dropping its partition once the month is older than the `audit` retention, never by deleting rows; only `audit_default` is deleted from by row.
+7. `trim_sync_event` deletes the outbox rows owed to nobody in one statement per pass. Audit rows older than `audit_days` are deleted by row by `claimius.prune`, from every partition, once the table is over its size limit; no partition is dropped.
 
 `user_object`, `access_diff`, `user_users_diff` and `usage_diff` set `autovacuum_vacuum_scale_factor` and `autovacuum_analyze_scale_factor` to 0.02. Each turns over a small share of its rows on every settle or flush, and at the default scale factor a large table would carry a fifth of its size in dead versions before a vacuum ran.
 
@@ -114,7 +114,7 @@ A closure row is two object pairs, a root, a depth and two timestamps: about 140
 | `usage_diff` | 1 |
 | `user_activity` | 1, 2 for a viewer; 0 for a cursor move |
 | `sync_event` | 2, and a BRIN summary per range of pages |
-| `claim` | 5 on a prophet, 6 for a deny; 4 and 5 on a disciple |
+| `claim` | 5 on a prophet, 6 for a deny; 3 and 4 on a disciple |
 | `user_claim` | 5 |
 | `claim_object` | 6 for a live object binding, 5 for a live scope grant |
 | `audit` | 4 on a prophet, 3 on a disciple, and a BRIN summary |

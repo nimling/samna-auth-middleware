@@ -120,7 +120,7 @@ An actor acts for a target without becoming the target. `get_user_access(actor, 
 |---|---|---|
 | Self, the actor is the target | 47: owner, write, read, execute, member | nothing |
 | Shared visibility, a positive count from actor to target | 36: read, member | the one `user_users` row of the pair by its key, and the pending `user_users_diff` rows of the actor and of the target: only an object one of the two moved on can change their count |
-| A claim bound to the target's `samna_user` row | the effective mask of each non deny binding, limited to owner, write, read and execute, inside the grant's window | the actor's grants, their claims and their bindings on the target |
+| A claim bound to the target's `samna_user` row | the effective mask of each non deny binding less the bits of the deny bindings on the same target whose level is not lower, closed under implication, limited to owner, write, read and execute, inside the grant's window | the actor's grants, their claims and their bindings on the target |
 
 The row the actor writes carries the actor's `user_claim.id` in `sa_created_by` and the target's `user_id` as its subject, so the acting party stays visible. The verdict is a live grant, so revoking it revokes the delegation on the next read.
 
