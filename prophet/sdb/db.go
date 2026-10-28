@@ -18,6 +18,7 @@ func Init(logger echo.Logger) (*DB, error) {
 	if err != nil {
 		return nil, err
 	}
+	d.Prophet = true
 	instance = d
 	return d, nil
 }

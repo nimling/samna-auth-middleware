@@ -19,7 +19,7 @@ DO $$
             CREATE TYPE claimius.app_status AS ENUM ('draft', 'active', 'inactive', 'erroneous');
         END IF;
         IF NOT EXISTS (SELECT 1 FROM pg_type t JOIN pg_namespace n ON n.oid = t.typnamespace WHERE t.typname = 'app_connection' AND n.nspname = 'claimius') THEN
-            CREATE TYPE claimius.app_connection AS ENUM ('direct', 'code', 'bff');
+            CREATE TYPE claimius.app_connection AS ENUM ('direct', 'code', 'bff', 'static');
         END IF;
     END $$;
 
@@ -45,12 +45,29 @@ CREATE TABLE IF NOT EXISTS claimius.samna_app (
                                                   sa_created_by   UUID NOT NULL,
                                                   sa_deleted_at   TIMESTAMPTZ,
                                                   sa_created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
-                                                  sa_updated_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+                                                  sa_updated_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+                                                  sa_parent_id    UUID NOT NULL REFERENCES claimius.samna_app(id),
+                                                  sa_root_id      UUID NOT NULL REFERENCES claimius.samna_app(id),
+                                                  cookie_domain   TEXT,
+                                                  cookie_same_site TEXT CHECK (cookie_same_site IN ('lax', 'strict', 'none'))
 );
+
+CREATE INDEX IF NOT EXISTS idx_samna_app_sa_parent_id ON claimius.samna_app (sa_parent_id);
+
+CREATE INDEX IF NOT EXISTS idx_samna_app_sa_root_id ON claimius.samna_app (sa_root_id);
+
+COMMENT ON COLUMN claimius.samna_app.sa_parent_id IS 'Parent app. Equals id at root. An Initiate app is another frontend of its root: own slug, redirect URIs, pages and style, while users, claims, organizations and the sync resolve on the root.';
+
+COMMENT ON COLUMN claimius.samna_app.sa_root_id IS 'Root app. Equals id at root. Tokens for an Initiate app''s login are issued for the root.';
+
+COMMENT ON COLUMN claimius.samna_app.cookie_domain IS 'Domain an Initiate app''s session cookies are set on by its disciple. Empty for host only cookies on the host that served the request, a parent domain to share them with the disciple''s host.';
+
+COMMENT ON COLUMN claimius.samna_app.cookie_same_site IS 'SameSite of an Initiate app''s session cookies: lax or strict when the frontend shares a site with the disciple or routes its api through its own host, none when it calls the disciple from another site.';
+
 
 COMMENT ON TABLE claimius.samna_app IS 'App registry. Set of rows determines deployment role.';
 COMMENT ON COLUMN claimius.samna_app.slug IS 'URL slug for app, unique.';
-COMMENT ON COLUMN claimius.samna_app.connection IS 'Session delivery mode. direct issues session cookies straight from the callback and the prophet serves the content. code hands an auth code to the app backend for exchange.';
+COMMENT ON COLUMN claimius.samna_app.connection IS 'Session delivery mode. direct, code, bff, or static.';
 COMMENT ON COLUMN claimius.samna_app.contact_email IS 'Contact email for the app.';
 COMMENT ON COLUMN claimius.samna_app.app_image IS 'App image URL or asset reference.';
 COMMENT ON COLUMN claimius.samna_app.redirect_uris IS 'Registered OAuth redirect URIs. First entry is the primary origin.';
@@ -89,8 +106,12 @@ CREATE TABLE IF NOT EXISTS claimius.samna_user (
                                                    config          JSONB,
                                                    sa_deleted_at   TIMESTAMPTZ,
                                                    sa_created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
-                                                   sa_updated_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+                                                   sa_updated_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+                                                   profile         JSONB NOT NULL DEFAULT '{}'::jsonb
 );
+
+COMMENT ON COLUMN claimius.samna_user.profile IS 'The user''s public profile, free form. The user writes its own keys on Samna Auth; an app writes under its own slug through PUT /sam/profile, {"<app_slug>": {"<field>": {"label", "value", "link", "index"}}}; the sync carries the whole object to every app that sees the user. The keys a product shows are its own.';
+
 
 COMMENT ON TABLE claimius.samna_user IS 'User record. One row per (user_id, app_id) pair.';
 COMMENT ON COLUMN claimius.samna_user.user_id IS 'Stable application identifier across apps. Used in all references.';
@@ -248,7 +269,8 @@ CREATE TABLE IF NOT EXISTS claimius.claim (
                                               sa_deleted_at   TIMESTAMPTZ,
                                               sa_created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
                                               sa_updated_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
-                                              txid            XID8 NOT NULL DEFAULT pg_current_xact_id()
+                                              txid            XID8 NOT NULL DEFAULT pg_current_xact_id(),
+                                              CONSTRAINT claim_app_id_id_key UNIQUE (app_id, id)
 );
 
 COMMENT ON TABLE claimius.claim IS 'Permission template. Access is a bitwise mask.';
@@ -289,8 +311,14 @@ CREATE TABLE IF NOT EXISTS claimius.user_claim (
                                                    sa_deleted_at   TIMESTAMPTZ,
                                                    sa_created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
                                                    sa_updated_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
-                                                   txid            XID8 NOT NULL DEFAULT pg_current_xact_id()
+                                                   txid            XID8 NOT NULL DEFAULT pg_current_xact_id(),
+                                                   CONSTRAINT user_claim_app_claim_fkey FOREIGN KEY (app_id, claim_id) REFERENCES claimius.claim (app_id, id)
 );
+
+COMMENT ON CONSTRAINT claim_object_app_claim_fkey ON claimius.claim_object IS 'A binding lives in the app of its claim, so the feed and the snapshot of an app never carry a binding whose claim they do not.';
+
+COMMENT ON CONSTRAINT user_claim_app_claim_fkey ON claimius.user_claim IS 'A grant lives in the app of its claim, so the feed and the snapshot of an app never carry a grant whose claim they do not.';
+
 
 COMMENT ON TABLE claimius.user_claim IS 'Grants a claim to a user in an app. id is referenced as sa_created_by everywhere.';
 COMMENT ON COLUMN claimius.user_claim.user_id IS 'References samna_user.user_id, not samna_user.id.';
@@ -325,7 +353,8 @@ CREATE TABLE IF NOT EXISTS claimius.claim_object (
                                                      CONSTRAINT claim_object_object_pair CHECK (
                                                          (object_id IS NULL AND object_type IS NULL)
                                                       OR (object_id IS NOT NULL AND object_type IS NOT NULL)
-                                                     )
+                                                     ),
+                                                     CONSTRAINT claim_object_app_claim_fkey FOREIGN KEY (app_id, claim_id) REFERENCES claimius.claim (app_id, id)
 );
 
 COMMENT ON TABLE claimius.claim_object IS 'Binds a claim. With (object_type, object_id) scope keys are field names; without them scope keys are custom.';
@@ -654,8 +683,12 @@ CREATE TABLE IF NOT EXISTS claimius.sync_event (
                                                    event_type      TEXT NOT NULL,
                                                    payload         JSONB NOT NULL,
                                                    written_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
-                                                   txid            XID8 NOT NULL DEFAULT pg_current_xact_id()
+                                                   txid            XID8 NOT NULL DEFAULT pg_current_xact_id(),
+                                                   app_id          UUID
 );
+
+CREATE INDEX IF NOT EXISTS idx_sync_event_app_txid_seq ON claimius.sync_event (app_id, txid, seq);
+
 
 ALTER TABLE claimius.sync_event ADD COLUMN IF NOT EXISTS txid XID8 NOT NULL DEFAULT pg_current_xact_id();
 
@@ -1315,3 +1348,224 @@ COMMENT ON COLUMN claimius.code.sa_created_by IS 'user_claim.id of the grant by 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_code_app_hash ON claimius.code (app_id, hash) WHERE sa_deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_code_claim_id ON claimius.code (claim_id);
 CREATE INDEX IF NOT EXISTS idx_code_app_id ON claimius.code (app_id);
+
+CREATE UNLOGGED TABLE IF NOT EXISTS claimius.session (
+    id         text PRIMARY KEY,
+    data       jsonb NOT NULL,
+    expires_at timestamptz NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_session_expires_at ON claimius.session (expires_at);
+
+CREATE UNLOGGED TABLE IF NOT EXISTS claimius.dpop_jti (
+    jti        text PRIMARY KEY,
+    expires_at timestamptz NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_dpop_jti_expires_at ON claimius.dpop_jti (expires_at);
+
+CREATE UNLOGGED TABLE IF NOT EXISTS claimius.rate_limit (
+    key text PRIMARY KEY,
+    tat timestamptz NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_rate_limit_tat ON claimius.rate_limit (tat);
+
+CREATE UNLOGGED TABLE IF NOT EXISTS claimius.par_request (
+    request_uri text PRIMARY KEY,
+    payload     jsonb NOT NULL,
+    expires_at  timestamptz NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_par_request_expires_at ON claimius.par_request (expires_at);
+
+CREATE UNLOGGED TABLE IF NOT EXISTS claimius.jwks_cache (
+    cache_key  text PRIMARY KEY,
+    body       jsonb NOT NULL,
+    expires_at timestamptz NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_jwks_cache_expires_at ON claimius.jwks_cache (expires_at);
+
+CREATE TABLE IF NOT EXISTS claimius.notification (
+                                                     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                                                     app_id          UUID NOT NULL REFERENCES claimius.samna_app(id),
+                                                     user_id         UUID NOT NULL,
+                                                     title           TEXT NOT NULL,
+                                                     description     TEXT,
+                                                     style           JSONB NOT NULL DEFAULT '{}'::jsonb,
+                                                     type            TEXT NOT NULL,
+                                                     link            TEXT,
+                                                     object_id       UUID,
+                                                     object_type     TEXT,
+                                                     sa_created_by   UUID,
+                                                     sa_owner_id     UUID,
+                                                     read_at         TIMESTAMPTZ,
+                                                     closed_at       TIMESTAMPTZ,
+                                                     repeats_at      INTERVAL,
+                                                     sa_deleted_at   TIMESTAMPTZ,
+                                                     sa_created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+                                                     sa_updated_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+COMMENT ON TABLE claimius.notification IS 'Per user notification. One row per recipient.';
+
+COMMENT ON COLUMN claimius.notification.user_id IS 'Recipient samna user_id. The fan out key.';
+
+COMMENT ON COLUMN claimius.notification.style IS 'Per notification presentation customization as JSON.';
+
+COMMENT ON COLUMN claimius.notification.object_id IS 'Target object the notification points at, when any.';
+
+COMMENT ON COLUMN claimius.notification.object_type IS 'Qualified object type of object_id, when any.';
+
+COMMENT ON COLUMN claimius.notification.sa_created_by IS 'User that triggered the notification, when a user did.';
+
+COMMENT ON COLUMN claimius.notification.sa_owner_id IS 'Owning organization in a managed environment, when any.';
+
+COMMENT ON COLUMN claimius.notification.repeats_at IS 'Recurrence interval for repeating notifications.';
+
+CREATE INDEX IF NOT EXISTS idx_notification_user ON claimius.notification (app_id, user_id, sa_created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_notification_object ON claimius.notification (object_id, object_type);
+
+CREATE INDEX IF NOT EXISTS idx_notification_sa_deleted_at ON claimius.notification (sa_deleted_at);
+
+CREATE TABLE IF NOT EXISTS claimius.consent (
+    id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    app_id         UUID NOT NULL REFERENCES claimius.samna_app(id),
+    user_id        UUID,
+    anonymous_id   TEXT NOT NULL,
+    categories     JSONB NOT NULL DEFAULT '{}'::jsonb,
+    policy_version TEXT NOT NULL,
+    ip             INET,
+    user_agent     TEXT,
+    granted_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+    revoked_at     TIMESTAMPTZ,
+    sa_created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    sa_updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+COMMENT ON TABLE claimius.consent IS 'One live cookie consent decision per app and identity. A known user resolves across apps.';
+
+COMMENT ON COLUMN claimius.consent.user_id IS 'Samna user_id when the visitor was authenticated at decision time.';
+
+COMMENT ON COLUMN claimius.consent.anonymous_id IS 'Durable browser held id. The identity key while user_id is null.';
+
+COMMENT ON COLUMN claimius.consent.categories IS 'Per category grant as JSON, keyed necessary, preferences, analytics, marketing.';
+
+COMMENT ON COLUMN claimius.consent.policy_version IS 'Policy the visitor agreed to. A newer policy re-prompts.';
+
+COMMENT ON COLUMN claimius.consent.ip IS 'Address the decision came from, recorded as evidence.';
+
+COMMENT ON COLUMN claimius.consent.revoked_at IS 'Set when a newer decision supersedes this one.';
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_consent_live_user ON claimius.consent (app_id, user_id) WHERE user_id IS NOT NULL AND revoked_at IS NULL;
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_consent_live_anonymous ON claimius.consent (app_id, anonymous_id) WHERE user_id IS NULL AND revoked_at IS NULL;
+
+CREATE INDEX IF NOT EXISTS idx_consent_user ON claimius.consent (user_id) WHERE user_id IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS claimius.analytics_session (
+    id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    app_id        UUID NOT NULL REFERENCES claimius.samna_app(id),
+    user_id       UUID,
+    anonymous_id  TEXT NOT NULL,
+    session_key   TEXT NOT NULL,
+    entry_path    TEXT,
+    referrer      TEXT,
+    user_agent    TEXT,
+    ip            INET,
+    language      TEXT,
+    timezone      TEXT,
+    platform      TEXT,
+    screen_width  INTEGER,
+    screen_height INTEGER,
+    device_pixel_ratio REAL,
+    context       JSONB NOT NULL DEFAULT '{}'::jsonb,
+    started_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+    last_seen_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+COMMENT ON TABLE claimius.analytics_session IS 'Durable context of one visit. Events reference it so context is written once.';
+
+COMMENT ON COLUMN claimius.analytics_session.session_key IS 'Browser generated session id. Unique per app.';
+
+COMMENT ON COLUMN claimius.analytics_session.context IS 'Everything else the recorder could read, as JSON.';
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_analytics_session_key ON claimius.analytics_session (app_id, session_key);
+
+CREATE INDEX IF NOT EXISTS idx_analytics_session_user ON claimius.analytics_session (app_id, user_id, started_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_analytics_session_anonymous ON claimius.analytics_session (app_id, anonymous_id, started_at DESC);
+
+CREATE TABLE IF NOT EXISTS claimius.analytics_event (
+    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    app_id      UUID NOT NULL REFERENCES claimius.samna_app(id),
+    session_id  UUID NOT NULL REFERENCES claimius.analytics_session(id),
+    user_id     UUID,
+    type        TEXT NOT NULL,
+    path        TEXT NOT NULL,
+    payload     JSONB NOT NULL DEFAULT '{}'::jsonb,
+    occurred_at TIMESTAMPTZ NOT NULL,
+    received_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+COMMENT ON TABLE claimius.analytics_event IS 'Append only capture. One row per signal, pointer samples included.';
+
+COMMENT ON COLUMN claimius.analytics_event.type IS 'Signal kind such as click, pointer, scroll, input, submit, view.';
+
+COMMENT ON COLUMN claimius.analytics_event.payload IS 'Signal body. Coordinates, viewport, selector and text for a click, sample arrays for pointer.';
+
+COMMENT ON COLUMN claimius.analytics_event.occurred_at IS 'Browser clock at capture. received_at is the server clock at write.';
+
+CREATE INDEX IF NOT EXISTS idx_analytics_event_session ON claimius.analytics_event (session_id, occurred_at);
+
+CREATE INDEX IF NOT EXISTS idx_analytics_event_path ON claimius.analytics_event (app_id, path, occurred_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_analytics_event_type ON claimius.analytics_event (app_id, type, occurred_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_analytics_event_received ON claimius.analytics_event USING BRIN (received_at);
+
+CREATE TABLE IF NOT EXISTS claimius.analytics_capture (
+    id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    app_id         UUID NOT NULL REFERENCES claimius.samna_app(id),
+    path           TEXT NOT NULL,
+    content_type   TEXT NOT NULL,
+    body           BYTEA NOT NULL,
+    captured_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT analytics_capture_app_id_path_key UNIQUE (app_id, path)
+);
+
+COMMENT ON TABLE claimius.analytics_capture IS 'A picture of a page as the browser rendered it, one per app, path and viewport width.';
+
+CREATE INDEX IF NOT EXISTS idx_analytics_capture_app ON claimius.analytics_capture (app_id, captured_at DESC);
+
+COMMENT ON TABLE claimius.analytics_capture IS 'A serialised copy of a page as the browser held it, one per app and path.';
+
+COMMENT ON COLUMN claimius.analytics_capture.body IS 'The document tree as posted, masked. content_type says what it is.';
+
+CREATE TABLE IF NOT EXISTS claimius.analytics_heat (
+    app_id         UUID NOT NULL REFERENCES claimius.samna_app(id),
+    path           TEXT NOT NULL,
+    viewport_width INTEGER NOT NULL,
+    type           TEXT NOT NULL,
+    bucket_x       INTEGER NOT NULL,
+    bucket_y       INTEGER NOT NULL,
+    day            DATE NOT NULL,
+    weight         BIGINT NOT NULL DEFAULT 0,
+    sessions       BIGINT NOT NULL DEFAULT 0,
+    PRIMARY KEY (app_id, path, viewport_width, type, day, bucket_x, bucket_y)
+);
+
+COMMENT ON TABLE claimius.analytics_heat IS 'The heat field as a grid. One row per cell per kind per day, folded out of analytics_event.';
+
+COMMENT ON COLUMN claimius.analytics_heat.bucket_x IS 'Page x at capture scale divided by claimius.analytics_bucket_size, floored.';
+
+COMMENT ON COLUMN claimius.analytics_heat.bucket_y IS 'Page y at capture scale divided by claimius.analytics_bucket_size, floored.';
+
+COMMENT ON COLUMN claimius.analytics_heat.weight IS 'Summed weight in the cell. A click counts 4 and every other kind counts 1, the same weighting the overlay draws with.';
+
+COMMENT ON COLUMN claimius.analytics_heat.sessions IS 'Distinct sessions that put weight in the cell, so a single visitor cannot read as a hot area.';
+
+CREATE INDEX IF NOT EXISTS idx_analytics_heat_read ON claimius.analytics_heat (app_id, path, day DESC);
+

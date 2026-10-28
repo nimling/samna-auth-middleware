@@ -1,32 +1,27 @@
 BEGIN;
-SELECT plan(17);
+SELECT plan(5);
 
-SELECT has_column('claimius', 'samna_user', c, 'samna_user carries ' || c)
-FROM unnest(ARRAY['bio', 'job_title', 'company', 'website', 'linkedin']) AS c;
-
-SELECT col_type_is('claimius', 'samna_user', c, 'text', c || ' is text')
-FROM unnest(ARRAY['bio', 'job_title', 'company', 'website', 'linkedin']) AS c;
-
-SELECT col_is_null('claimius', 'samna_user', c, c || ' is nullable')
-FROM unnest(ARRAY['bio', 'job_title', 'company', 'website', 'linkedin']) AS c;
+SELECT has_column('claimius', 'samna_user', 'profile', 'samna_user carries profile');
+SELECT col_type_is('claimius', 'samna_user', 'profile', 'jsonb', 'profile is jsonb');
+SELECT col_default_is('claimius', 'samna_user', 'profile', '''{}''::jsonb', 'profile starts empty');
 
 SELECT claimius.upsert_disciple_state();
 SELECT claimius.upsert_app_user(p_user_id => 'a0000000-0000-4000-8000-0000000000e1', p_first_name => 'Profile');
 
 SELECT is(
-    (SELECT ROW(bio, job_title, company, website, linkedin)::TEXT FROM claimius.samna_user WHERE user_id = 'a0000000-0000-4000-8000-0000000000e1'),
-    ROW(NULL::TEXT, NULL::TEXT, NULL::TEXT, NULL::TEXT, NULL::TEXT)::TEXT,
-    'a user written without profile fields holds none'
+    (SELECT profile FROM claimius.samna_user WHERE user_id = 'a0000000-0000-4000-8000-0000000000e1'),
+    '{}'::jsonb,
+    'a user written without a profile holds an empty object'
 );
 
 UPDATE claimius.samna_user
-SET bio = 'Builds access control', job_title = 'Engineer', company = 'Nimtech', website = 'https://example.no', linkedin = 'https://www.linkedin.com/in/example'
+SET profile = '{"bio": "Builds access control", "bookable": {"certificate": {"label": "Certificate", "value": "Solutions Architect", "index": 0}}}'::jsonb
 WHERE user_id = 'a0000000-0000-4000-8000-0000000000e1';
 
 SELECT is(
-    (SELECT ROW(bio, job_title, company, website, linkedin)::TEXT FROM claimius.samna_user WHERE user_id = 'a0000000-0000-4000-8000-0000000000e1'),
-    ROW('Builds access control', 'Engineer', 'Nimtech', 'https://example.no', 'https://www.linkedin.com/in/example')::TEXT,
-    'profile fields persist on the user row'
+    (SELECT profile -> 'bookable' -> 'certificate' ->> 'label' FROM claimius.samna_user WHERE user_id = 'a0000000-0000-4000-8000-0000000000e1'),
+    'Certificate',
+    'the profile the sync writes is read back as stored'
 );
 
 SELECT * FROM finish();

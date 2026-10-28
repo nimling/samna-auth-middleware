@@ -77,8 +77,12 @@ CREATE TABLE IF NOT EXISTS claimius.samna_user (
                                                    config          JSONB,
                                                    sa_deleted_at   TIMESTAMPTZ,
                                                    sa_created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
-                                                   sa_updated_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+                                                   sa_updated_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+                                                   profile         JSONB NOT NULL DEFAULT '{}'::jsonb
 );
+
+COMMENT ON COLUMN claimius.samna_user.profile IS 'The user''s public profile, free form, as the prophet holds it: the user''s own keys and one object per app slug, carried by the sync. The keys a product shows are its own.';
+
 
 COMMENT ON TABLE claimius.samna_user IS 'User record. One row per user_id.';
 COMMENT ON COLUMN claimius.samna_user.user_id IS 'Stable application identifier across apps. Used in all references.';
@@ -1053,3 +1057,11 @@ COMMENT ON COLUMN claimius.code.sa_created_by IS 'user_claim.id of the grant by 
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_code_hash ON claimius.code (hash) WHERE sa_deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_code_claim_id ON claimius.code (claim_id);
+
+CREATE UNLOGGED TABLE IF NOT EXISTS claimius.dpop_jti (
+    jti        text PRIMARY KEY,
+    expires_at timestamptz NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_dpop_jti_expires_at ON claimius.dpop_jti (expires_at);
+

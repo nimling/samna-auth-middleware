@@ -14,9 +14,9 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/nimling/nimbody"
-	"github.com/nimling/samna-auth-middleware/v2/utils"
 	"github.com/nimling/samna-auth-middleware/v2/client"
 	"github.com/nimling/samna-auth-middleware/v2/pkg/jsonx"
+	"github.com/nimling/samna-auth-middleware/v2/utils"
 	"github.com/uptrace/bun"
 )
 
@@ -355,11 +355,7 @@ type SamnaUser struct {
 	Email      string           `bun:"email" json:"email"`
 	ExternalID *string          `bun:"external_id" json:"external_id,omitempty"`
 	UserImage  *string          `bun:"user_image" json:"user_image,omitempty"`
-	Bio        *string          `bun:"bio" json:"bio,omitempty"`
-	JobTitle   *string          `bun:"job_title" json:"job_title,omitempty"`
-	Company    *string          `bun:"company" json:"company,omitempty"`
-	Website    *string          `bun:"website" json:"website,omitempty"`
-	Linkedin   *string          `bun:"linkedin" json:"linkedin,omitempty"`
+	Profile    json.RawMessage  `bun:"profile,type:jsonb" json:"profile"`
 	Status     *string          `bun:"status,default:'active'" json:"status,omitempty"`
 	Type       *string          `bun:"type,default:'user'" json:"-"`
 	Config     *json.RawMessage `bun:"config" json:"config,omitzero"`

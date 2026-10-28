@@ -1,14 +1,10 @@
 BEGIN;
-SELECT plan(18);
+SELECT plan(9);
 
-SELECT has_column('claimius', 'samna_user', c, 'samna_user carries ' || c)
-FROM unnest(ARRAY['bio', 'job_title', 'company', 'website', 'linkedin']) AS c;
-
-SELECT col_type_is('claimius', 'samna_user', c, 'text', c || ' is text')
-FROM unnest(ARRAY['bio', 'job_title', 'company', 'website', 'linkedin']) AS c;
-
-SELECT col_is_null('claimius', 'samna_user', c, c || ' is nullable')
-FROM unnest(ARRAY['bio', 'job_title', 'company', 'website', 'linkedin']) AS c;
+SELECT has_column('claimius', 'samna_user', 'profile', 'samna_user carries profile');
+SELECT col_type_is('claimius', 'samna_user', 'profile', 'jsonb', 'profile is jsonb');
+SELECT col_default_is('claimius', 'samna_user', 'profile', '''{}''::jsonb', 'profile starts empty');
+SELECT hasnt_table('claimius', 'profile_item', 'the profile item table is gone');
 
 CREATE TEMP TABLE boot (key TEXT PRIMARY KEY, id UUID);
 
@@ -32,28 +28,34 @@ BEGIN
     );
 END $$;
 
-SELECT is(
-    (SELECT ROW(bio, job_title, company, website, linkedin)::TEXT FROM claimius.samna_user WHERE user_id = 'a0000000-0000-4000-8000-000000000e01'),
-    ROW(NULL::TEXT, NULL::TEXT, NULL::TEXT, NULL::TEXT, NULL::TEXT)::TEXT,
-    'upsert_app_user writes a user without profile fields'
-);
-
 UPDATE claimius.samna_user
-SET bio = 'Builds access control', job_title = 'Engineer', company = 'Nimtech', website = 'https://example.no', linkedin = 'https://www.linkedin.com/in/example'
+SET profile = '{"bio": "Builds access control"}'::jsonb
 WHERE user_id = 'a0000000-0000-4000-8000-000000000e01';
 
 SELECT is(
-    (SELECT ROW(bio, job_title, company, website, linkedin)::TEXT FROM claimius.samna_user WHERE user_id = 'a0000000-0000-4000-8000-000000000e01'),
-    ROW('Builds access control', 'Engineer', 'Nimtech', 'https://example.no', 'https://www.linkedin.com/in/example')::TEXT,
-    'profile fields persist on the user row'
+    claimius.upsert_profile_item((SELECT id FROM boot WHERE key = 'app'), 'a0000000-0000-4000-8000-000000000e01', 'certificate', '{"label": "Certificate", "value": "Solutions Architect", "index": 0}'::jsonb),
+    '{"bio": "Builds access control", "sqltest_profile": {"certificate": {"label": "Certificate", "value": "Solutions Architect", "index": 0}}}'::jsonb,
+    'an app writes an item under its slug and the field, beside the user''s own keys'
 );
 
 SELECT is(
-    (SELECT payload ->> 'linkedin' FROM claimius.sync_event
-     WHERE event_type = 'claimius.samna_user' AND payload ->> 'user_id' = 'a0000000-0000-4000-8000-000000000e01'
-     ORDER BY seq DESC LIMIT 1),
-    'https://www.linkedin.com/in/example',
-    'the sync feed carries the profile fields to disciples'
+    (SELECT profile -> 'sqltest_profile' -> 'certificate' ->> 'value' FROM claimius.samna_user WHERE user_id = 'a0000000-0000-4000-8000-000000000e01'),
+    'Solutions Architect',
+    'the item sits on the user row'
+);
+
+SELECT throws_ok($$
+    SELECT claimius.upsert_profile_item((SELECT id FROM boot WHERE key = 'app'), 'a0000000-0000-4000-8000-000000000e01', 'Name!', '{"label": "x", "value": "y"}'::jsonb)
+$$, '22023', NULL, 'a malformed field is refused');
+
+SELECT throws_ok($$
+    SELECT claimius.upsert_profile_item((SELECT id FROM boot WHERE key = 'app'), gen_random_uuid(), 'certificate', '{"label": "x", "value": "y"}'::jsonb)
+$$, 'P0404', NULL, 'a user with no live row in the app gets no item');
+
+SELECT is(
+    claimius.delete_profile_item((SELECT id FROM boot WHERE key = 'app'), 'a0000000-0000-4000-8000-000000000e01', 'certificate'),
+    '{"bio": "Builds access control"}'::jsonb,
+    'removing the last field removes the app''s object and leaves the user''s own keys'
 );
 
 SELECT * FROM finish();

@@ -2,11 +2,11 @@ package shared
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"regexp"
 	"strings"
-	"time"
 	"unicode/utf8"
 
 	"github.com/google/uuid"
@@ -21,42 +21,32 @@ var (
 var profileFieldPattern = regexp.MustCompile(`^[a-z][a-z0-9_.]{0,63}$`)
 
 type ProfileItem struct {
-	ID         uuid.UUID `bun:"id" json:"id"`
-	AppID      uuid.UUID `bun:"app_id" json:"app_id"`
-	AppSlug    string    `bun:"app_slug" json:"app_slug,omitempty"`
-	AppName    string    `bun:"app_name" json:"app_name,omitempty"`
-	UserID     uuid.UUID `bun:"user_id" json:"user_id"`
-	ObjectType string    `bun:"object_type" json:"object_type"`
-	ObjectID   uuid.UUID `bun:"object_id" json:"object_id"`
-	Field      string    `bun:"field" json:"field"`
-	Label      string    `bun:"label" json:"label"`
-	Value      string    `bun:"value" json:"value"`
-	Link       *string   `bun:"link" json:"link,omitempty"`
-	Index      int       `bun:"index" json:"index"`
-	CreatedAt  time.Time `bun:"sa_created_at" json:"created_at"`
-	UpdatedAt  time.Time `bun:"sa_updated_at" json:"updated_at"`
+	Label string  `json:"label"`
+	Value string  `json:"value"`
+	Link  *string `json:"link,omitempty"`
+	Index int     `json:"index"`
 }
 
 type BodySamProfileItem struct {
-	UserID     uuid.UUID `json:"user_id"`
-	ObjectType string    `json:"object_type"`
-	ObjectID   uuid.UUID `json:"object_id"`
-	Field      string    `json:"field"`
-	Label      string    `json:"label"`
-	Value      string    `json:"value"`
-	Link       *string   `json:"link,omitempty"`
-	Index      int       `json:"index"`
+	UserID uuid.UUID `json:"user_id"`
+	Field  string    `json:"field"`
+	Label  string    `json:"label"`
+	Value  string    `json:"value"`
+	Link   *string   `json:"link,omitempty"`
+	Index  int       `json:"index"`
 }
 
 type BodySamProfileItemKey struct {
-	UserID     uuid.UUID `json:"user_id"`
-	ObjectType string    `json:"object_type"`
-	ObjectID   uuid.UUID `json:"object_id"`
-	Field      *string   `json:"field,omitempty"`
+	UserID uuid.UUID `json:"user_id"`
+	Field  *string   `json:"field,omitempty"`
+}
+
+func (b BodySamProfileItem) Item() ProfileItem {
+	return ProfileItem{Label: strings.TrimSpace(b.Label), Value: strings.TrimSpace(b.Value), Link: b.Link, Index: b.Index}
 }
 
 func (b BodySamProfileItem) Validate() error {
-	if err := (BodySamProfileItemKey{UserID: b.UserID, ObjectType: b.ObjectType, ObjectID: b.ObjectID, Field: &b.Field}).Validate(); err != nil {
+	if err := (BodySamProfileItemKey{UserID: b.UserID, Field: &b.Field}).Validate(); err != nil {
 		return err
 	}
 	if n := utf8.RuneCountInString(strings.TrimSpace(b.Label)); n == 0 || n > 80 {
@@ -72,11 +62,8 @@ func (b BodySamProfileItem) Validate() error {
 }
 
 func (b BodySamProfileItemKey) Validate() error {
-	if b.UserID == uuid.Nil || b.ObjectID == uuid.Nil {
-		return fmt.Errorf("%w: user_id and object_id are required", ErrBadProfileItem)
-	}
-	if n := len(b.ObjectType); n == 0 || n > 120 {
-		return fmt.Errorf("%w: object_type is required", ErrBadProfileItem)
+	if b.UserID == uuid.Nil {
+		return fmt.Errorf("%w: user_id is required", ErrBadProfileItem)
 	}
 	if b.Field != nil && !profileFieldPattern.MatchString(*b.Field) {
 		return fmt.Errorf("%w: field must be lower case letters, digits, _ and . and start with a letter", ErrBadProfileItem)
@@ -91,7 +78,7 @@ func profileActor(ac *AccessClaim, userID uuid.UUID) error {
 	return nil
 }
 
-func (d *DB) PutProfileItem(ctx context.Context, ac *AccessClaim, item BodySamProfileItem) (*ProfileItem, error) {
+func (d *DB) PutProfileItem(ctx context.Context, ac *AccessClaim, item BodySamProfileItem) (json.RawMessage, error) {
 	if err := profileActor(ac, item.UserID); err != nil {
 		return nil, err
 	}
@@ -101,14 +88,14 @@ func (d *DB) PutProfileItem(ctx context.Context, ac *AccessClaim, item BodySamPr
 	if !d.RouteToProphet {
 		return nil, ErrNoProphet
 	}
-	var out ProfileItem
-	if err := client.Put(ctx, "profile", item, &out); err != nil {
+	var profile json.RawMessage
+	if err := client.Put(ctx, "profile", item, &profile); err != nil {
 		return nil, profileError(err)
 	}
-	return &out, nil
+	return profile, nil
 }
 
-func (d *DB) DeleteProfileItem(ctx context.Context, ac *AccessClaim, key BodySamProfileItemKey) ([]ProfileItem, error) {
+func (d *DB) DeleteProfileItem(ctx context.Context, ac *AccessClaim, key BodySamProfileItemKey) (json.RawMessage, error) {
 	if err := profileActor(ac, key.UserID); err != nil {
 		return nil, err
 	}
@@ -118,22 +105,11 @@ func (d *DB) DeleteProfileItem(ctx context.Context, ac *AccessClaim, key BodySam
 	if !d.RouteToProphet {
 		return nil, ErrNoProphet
 	}
-	out := make([]ProfileItem, 0)
-	if err := client.Delete(ctx, "profile", key, &out); err != nil {
+	var profile json.RawMessage
+	if err := client.Delete(ctx, "profile", key, &profile); err != nil {
 		return nil, profileError(err)
 	}
-	return out, nil
-}
-
-func (d *DB) GetProfileItems(ctx context.Context, userID uuid.UUID) ([]ProfileItem, error) {
-	if !d.RouteToProphet {
-		return nil, ErrNoProphet
-	}
-	out := make([]ProfileItem, 0)
-	if err := client.Get(ctx, "profile?user_id="+userID.String(), &out); err != nil {
-		return nil, profileError(err)
-	}
-	return out, nil
+	return profile, nil
 }
 
 func profileError(err error) error {

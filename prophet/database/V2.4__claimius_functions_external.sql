@@ -2792,11 +2792,7 @@ BEGIN
                     last_name     = v_source_app_user.last_name,
                     user_name     = v_source_app_user.user_name,
                     user_image    = v_source_app_user.user_image,
-                    bio           = v_source_app_user.bio,
-                    job_title     = v_source_app_user.job_title,
-                    company       = v_source_app_user.company,
-                    website       = v_source_app_user.website,
-                    linkedin      = v_source_app_user.linkedin,
+                    profile       = v_source_app_user.profile,
                     phone         = v_source_app_user.phone,
                     config        = v_source_app_user.config,
                     external_id   = coalesce(v_source_app_user.external_id, external_id),
@@ -3659,8 +3655,8 @@ BEGIN
         SELECT 1 FROM claimius.samna_user
         WHERE user_id = v_actor.user_id AND app_id = v_app.id AND sa_deleted_at IS NULL
     ) THEN
-        INSERT INTO claimius.samna_user (user_id, app_id, first_name, last_name, user_name, user_image, bio, job_title, company, website, linkedin, email, phone, status, type)
-        SELECT v_actor.user_id, v_app.id, su.first_name, su.last_name, su.user_name, su.user_image, su.bio, su.job_title, su.company, su.website, su.linkedin, su.email, su.phone, 'active', su.type
+        INSERT INTO claimius.samna_user (user_id, app_id, first_name, last_name, user_name, user_image, profile, email, phone, status, type)
+        SELECT v_actor.user_id, v_app.id, su.first_name, su.last_name, su.user_name, su.user_image, su.profile, su.email, su.phone, 'active', su.type
         FROM claimius.samna_user su
         WHERE su.user_id = v_actor.user_id AND su.app_id = v_actor.app_id AND su.sa_deleted_at IS NULL
         LIMIT 1;
@@ -5640,3 +5636,1013 @@ END;
 $$ LANGUAGE plpgsql;
 
 COMMENT ON FUNCTION claimius.prune(JSONB) IS 'Retention. Every runtime table belongs to a kind, audit, analytics, notification, token or log. p_settings sets days per table (<table>_days) or per kind (<kind>_days), and a size per kind (<kind>_size_mb) or for all (size_mb, 4096). A table under its size is left alone; over it, every row whose time column is older than its days is deleted, and 0 days leaves a table alone. A host with runtime tables of its own defines public.prune(JSONB) of the same shape, and it runs after.';
+
+CREATE OR REPLACE FUNCTION claimius.rate_limit_gcra(
+    p_key    text,
+    p_rate   double precision,
+    p_burst  double precision,
+    p_period double precision,
+    p_cost   double precision
+) RETURNS TABLE (
+    allowed     boolean,
+    remaining   integer,
+    retry_after double precision,
+    reset_after double precision
+) AS $$
+DECLARE
+    v_emission     double precision := p_period / p_rate;
+    v_increment    double precision := (p_period / p_rate) * p_cost;
+    v_burst_offset double precision := (p_period / p_rate) * p_burst;
+    v_now          double precision := extract(epoch from clock_timestamp());
+    v_tat          double precision;
+    v_new_tat      double precision;
+    v_allow_at     double precision;
+    v_diff         double precision;
+    v_remaining    double precision;
+BEGIN
+    PERFORM pg_advisory_xact_lock(hashtext(p_key));
+
+    SELECT extract(epoch from tat) INTO v_tat
+    FROM claimius.rate_limit WHERE key = p_key;
+
+    IF v_tat IS NULL THEN
+        v_tat := v_now;
+    END IF;
+    v_tat := greatest(v_tat, v_now);
+
+    v_new_tat := v_tat + v_increment;
+    v_allow_at := v_new_tat - v_burst_offset;
+    v_diff := v_now - v_allow_at;
+    v_remaining := floor(v_diff / v_emission);
+
+    IF v_remaining < 0 THEN
+        allowed := false;
+        remaining := 0;
+        retry_after := -v_diff;
+        reset_after := v_tat - v_now;
+        RETURN NEXT;
+        RETURN;
+    END IF;
+
+    reset_after := v_new_tat - v_now;
+    IF reset_after > 0 THEN
+        INSERT INTO claimius.rate_limit (key, tat)
+        VALUES (p_key, to_timestamp(v_new_tat))
+        ON CONFLICT (key) DO UPDATE SET tat = to_timestamp(v_new_tat);
+    END IF;
+
+    allowed := true;
+    remaining := v_remaining::integer;
+    retry_after := -1;
+    RETURN NEXT;
+END;
+$$ LANGUAGE plpgsql;
+
+COMMENT ON FUNCTION claimius.rate_limit_gcra(text, double precision, double precision, double precision, double precision) IS 'Generic cell rate limiter over the unlogged rate_limit table, serialized per key: advances the theoretical arrival time of p_key by p_cost at p_rate per p_period with a burst of p_burst, and returns whether the request is allowed, the requests remaining, and the seconds to retry and to reset.';
+
+CREATE OR REPLACE FUNCTION claimius.get_sync_seq(p_app_id UUID)
+    RETURNS TABLE (txid BIGINT, seq BIGINT) AS $$
+    SELECT coalesce(max(h.txid), 0), coalesce(max(h.seq), 0)
+    FROM (
+        SELECT e.txid::TEXT::BIGINT AS txid, e.seq
+        FROM claimius.sync_event e
+        WHERE e.app_id = p_app_id
+        ORDER BY e.txid DESC, e.seq DESC
+        LIMIT 1
+    ) h;
+$$ LANGUAGE sql STABLE;
+
+COMMENT ON FUNCTION claimius.get_sync_seq(UUID) IS 'Highest (txid, seq) position written for one app. A routed write answers with it, and the disciple that routed the write reads its own write once its cursor reaches it.';
+
+CREATE OR REPLACE FUNCTION claimius.check_sync_cursor(p_app_id UUID, p_txid BIGINT, p_seq BIGINT)
+    RETURNS TEXT AS $$
+DECLARE
+    v_issued    BIGINT;
+    v_trimmed   RECORD;
+    v_events    BIGINT;
+    v_rows      BIGINT;
+    v_txid      XID8 := p_txid::TEXT::XID8;
+BEGIN
+    v_issued := coalesce(pg_sequence_last_value(pg_get_serial_sequence('claimius.sync_event', 'seq')::REGCLASS), 0);
+    IF p_seq > v_issued OR v_txid > pg_snapshot_xmax(pg_current_snapshot()) THEN
+        RETURN 'ahead';
+    END IF;
+
+    SELECT ps.trimmed_txid, ps.trimmed_seq INTO v_trimmed FROM claimius.prophet_state ps WHERE ps.app_id = p_app_id;
+    IF FOUND AND (v_txid, p_seq) < (v_trimmed.trimmed_txid, v_trimmed.trimmed_seq) THEN
+        RETURN 'trimmed';
+    END IF;
+
+    SELECT count(*) INTO v_events
+    FROM (SELECT 1 FROM claimius.sync_event e WHERE e.app_id = p_app_id AND (e.txid, e.seq) > (v_txid, p_seq) LIMIT 1001) b;
+    IF v_events = 0 THEN
+        RETURN NULL;
+    END IF;
+    IF claimius.count_sync_source_rows(p_app_id, v_events) < v_events THEN
+        RETURN 'backlog';
+    END IF;
+    IF v_events <= 1000 THEN
+        RETURN NULL;
+    END IF;
+
+    v_rows := claimius.count_sync_source_rows(p_app_id);
+    SELECT count(*) INTO v_events
+    FROM (SELECT 1 FROM claimius.sync_event e WHERE e.app_id = p_app_id AND (e.txid, e.seq) > (v_txid, p_seq) LIMIT v_rows + 1) b;
+    IF v_events > v_rows THEN
+        RETURN 'backlog';
+    END IF;
+    RETURN NULL;
+END;
+$$ LANGUAGE plpgsql STABLE;
+
+COMMENT ON FUNCTION claimius.check_sync_cursor(UUID, BIGINT, BIGINT) IS 'Whether a consumer at a (txid, seq) cursor must take the snapshot instead of the feed. NULL when the feed serves it; ahead when the cursor is above every sequence or transaction the prophet issued; trimmed when events after the cursor were trimmed; backlog when the app''s events after the cursor outnumber its source rows.';
+
+CREATE OR REPLACE FUNCTION claimius.check_sync_home(p_app_id UUID, p_prophet TEXT)
+    RETURNS TEXT AS $$
+    SELECT CASE
+        WHEN a.home_prophet IS NOT NULL THEN a.home_prophet
+        WHEN coalesce(p_prophet, '') IN ('', l.slug) THEN NULL
+        WHEN EXISTS (
+            SELECT 1 FROM claimius.app_handover h
+            WHERE h.app_id = a.id
+              AND h.from_prophet = p_prophet
+              AND h.to_prophet = l.slug
+              AND h.status = 'accepted'
+        ) THEN NULL
+        ELSE p_prophet
+    END
+    FROM claimius.samna_app a
+        CROSS JOIN (SELECT slug FROM claimius.get_app()) l
+    WHERE a.id = p_app_id;
+$$ LANGUAGE sql STABLE;
+
+COMMENT ON FUNCTION claimius.check_sync_home(UUID, TEXT) IS 'Whether this prophet serves the feed of an app to a consumer bound to p_prophet. NULL when it does: it is the app''s home and the consumer is unbound, bound here, or bound to a prophet that handed the app over here and saw it accepted. Otherwise the slug of the prophet the consumer stays with: the app''s home, or the one it is bound to.';
+
+CREATE OR REPLACE FUNCTION claimius.get_peer_snapshot(p_app_id UUID)
+    RETURNS TABLE (event_type TEXT, payload JSONB) AS $$
+    SELECT s.event_type, s.payload
+    FROM (
+        SELECT 1 AS step, 0 AS level, 'claimius.samna_app' AS event_type, to_jsonb(a) - 'txid' AS payload, a.sa_created_at AS created
+        FROM claimius.samna_app a WHERE a.id = p_app_id
+        UNION ALL
+        SELECT 2, 0, 'claimius.app_handover', to_jsonb(h) - 'txid', h.sa_created_at
+        FROM claimius.app_handover h WHERE h.app_id = p_app_id
+        UNION ALL
+        SELECT 3, o.sa_level, 'claimius.organization', to_jsonb(o) - 'txid', o.sa_created_at
+        FROM claimius.organization o WHERE o.id IN (SELECT claimius.app_object_ids(p_app_id, 'claimius.organization'))
+        UNION ALL
+        SELECT 4, l.sa_level, 'claimius.location', to_jsonb(l) - 'txid', l.sa_created_at
+        FROM claimius.location l WHERE l.id IN (SELECT claimius.app_object_ids(p_app_id, 'claimius.location'))
+        UNION ALL
+        SELECT 5, 0, 'claimius.samna_user', to_jsonb(u) - 'txid', u.sa_created_at
+        FROM claimius.samna_user u WHERE u.app_id = p_app_id
+        UNION ALL
+        SELECT 6, 0, 'claimius.claim', to_jsonb(c) - 'txid', c.sa_created_at
+        FROM claimius.claim c WHERE c.app_id = p_app_id
+        UNION ALL
+        SELECT 7, 0, 'claimius.user_claim', to_jsonb(uc) - 'txid', uc.sa_created_at
+        FROM claimius.user_claim uc WHERE uc.app_id = p_app_id
+        UNION ALL
+        SELECT 8, 0, 'claimius.claim_object', to_jsonb(co) - 'txid', co.sa_created_at
+        FROM claimius.claim_object co WHERE co.app_id = p_app_id
+        UNION ALL
+        SELECT 9, 0, 'claimius.samna_client', to_jsonb(sc) - 'txid', sc.sa_created_at
+        FROM claimius.samna_client sc WHERE sc.app_id = p_app_id
+        UNION ALL
+        SELECT 10, 0, 'claimius.samna_secret', to_jsonb(ss) - 'txid', ss.sa_created_at
+        FROM claimius.samna_secret ss WHERE ss.app_id = p_app_id
+        UNION ALL
+        SELECT 11, 0, 'claimius.object_field', to_jsonb(f) - 'txid', f.sa_created_at
+        FROM claimius.object_field f WHERE f.app_id = p_app_id
+        UNION ALL
+        SELECT 12, 0, 'claimius.user_field', to_jsonb(uf) - 'txid', uf.sa_created_at
+        FROM claimius.user_field uf WHERE uf.app_id = p_app_id
+        UNION ALL
+        SELECT 13, 0, 'claimius.user_relation', to_jsonb(r) - 'txid', r.sa_created_at
+        FROM claimius.user_relation r WHERE r.app_id = p_app_id
+        UNION ALL
+        SELECT 14, 0, 'claimius.object_asset', to_jsonb(oa) - 'txid', oa.sa_created_at
+        FROM claimius.object_asset oa
+        WHERE p_app_id IN (SELECT claimius.apps_for_object(oa.object_type, oa.object_id, oa.app_id))
+        UNION ALL
+        SELECT 15, 0, 'claimius.code', to_jsonb(cd), cd.sa_created_at
+        FROM claimius.code cd WHERE cd.app_id = p_app_id
+    ) s
+    ORDER BY s.step, s.level, s.created;
+$$ LANGUAGE sql STABLE;
+
+COMMENT ON FUNCTION claimius.get_peer_snapshot(UUID) IS 'Every source row of one app in the shape its feed events carry, for a peer prophet mirroring the app: the app row and its handovers first, parents before children, so each row applies against rows already applied. The object_asset links follow, every link apps_for_object publishes to the app, and the codes of the app come last, after the claims they open.';
+
+CREATE OR REPLACE FUNCTION claimius.get_consent(
+    p_app_id       UUID,
+    p_user_id      UUID DEFAULT NULL,
+    p_anonymous_id TEXT DEFAULT NULL
+) RETURNS SETOF claimius.consent AS $$
+    SELECT *
+    FROM claimius.consent
+    WHERE revoked_at IS NULL
+      AND (
+          (p_user_id IS NOT NULL AND user_id = p_user_id)
+          OR (p_anonymous_id IS NOT NULL AND user_id IS NULL AND anonymous_id = p_anonymous_id AND app_id = p_app_id)
+      )
+    ORDER BY (app_id = p_app_id) DESC, granted_at DESC
+    LIMIT 1;
+$$ LANGUAGE sql STABLE;
+
+COMMENT ON FUNCTION claimius.get_consent(UUID, UUID, TEXT) IS 'Strongest live consent for an identity. A known user matches across apps, preferring the asking app. An anonymous visitor matches within the app only.';
+
+CREATE OR REPLACE FUNCTION claimius.insert_consent(
+    p_app_id         UUID,
+    p_anonymous_id   TEXT,
+    p_categories     JSONB,
+    p_policy_version TEXT,
+    p_user_id        UUID DEFAULT NULL,
+    p_ip             INET DEFAULT NULL,
+    p_user_agent     TEXT DEFAULT NULL
+) RETURNS JSONB AS $$
+DECLARE
+    v_row claimius.consent;
+BEGIN
+    UPDATE claimius.consent
+    SET revoked_at = now(), sa_updated_at = now()
+    WHERE app_id = p_app_id
+      AND revoked_at IS NULL
+      AND (
+          (p_user_id IS NOT NULL AND user_id = p_user_id)
+          OR (p_user_id IS NULL AND user_id IS NULL AND anonymous_id = p_anonymous_id)
+      );
+
+    INSERT INTO claimius.consent (
+        app_id, user_id, anonymous_id, categories, policy_version, ip, user_agent
+    ) VALUES (
+        p_app_id, p_user_id, p_anonymous_id, COALESCE(p_categories, '{}'::jsonb), p_policy_version, p_ip, p_user_agent
+    )
+    RETURNING * INTO v_row;
+
+    RETURN jsonb_build_object('consent', to_jsonb(v_row));
+END;
+$$ LANGUAGE plpgsql;
+
+COMMENT ON FUNCTION claimius.insert_consent(UUID, TEXT, JSONB, TEXT, UUID, INET, TEXT) IS 'Records a consent decision, revoking the previous live one for the same identity.';
+
+CREATE OR REPLACE FUNCTION claimius.consent_allows(
+    p_app_id       UUID,
+    p_category     TEXT,
+    p_user_id      UUID DEFAULT NULL,
+    p_anonymous_id TEXT DEFAULT NULL
+) RETURNS BOOLEAN AS $$
+    SELECT COALESCE(
+        (SELECT (categories ->> p_category)::boolean
+         FROM claimius.get_consent(p_app_id, p_user_id, p_anonymous_id)),
+        FALSE
+    );
+$$ LANGUAGE sql STABLE;
+
+COMMENT ON FUNCTION claimius.consent_allows(UUID, TEXT, UUID, TEXT) IS 'True when the identity granted one category. Absent consent is a denial.';
+
+CREATE OR REPLACE FUNCTION claimius.upsert_analytics_session(
+    p_app_id       UUID,
+    p_anonymous_id TEXT,
+    p_session_key  TEXT,
+    p_context      JSONB DEFAULT '{}'::jsonb,
+    p_user_id      UUID DEFAULT NULL,
+    p_ip           INET DEFAULT NULL,
+    p_user_agent   TEXT DEFAULT NULL
+) RETURNS JSONB AS $$
+DECLARE
+    v_row claimius.analytics_session;
+BEGIN
+    IF NOT claimius.consent_allows(p_app_id, 'analytics', p_user_id, p_anonymous_id) THEN
+        RETURN jsonb_build_object('analytics_session', NULL);
+    END IF;
+
+    INSERT INTO claimius.analytics_session (
+        app_id, user_id, anonymous_id, session_key, entry_path, referrer,
+        user_agent, ip, language, timezone, platform,
+        screen_width, screen_height, device_pixel_ratio, context
+    ) VALUES (
+        p_app_id, p_user_id, p_anonymous_id, p_session_key,
+        p_context ->> 'entry_path',
+        p_context ->> 'referrer',
+        p_user_agent,
+        p_ip,
+        p_context ->> 'language',
+        p_context ->> 'timezone',
+        p_context ->> 'platform',
+        (p_context ->> 'screen_width')::integer,
+        (p_context ->> 'screen_height')::integer,
+        (p_context ->> 'device_pixel_ratio')::real,
+        p_context
+    )
+    ON CONFLICT (app_id, session_key) DO UPDATE
+        SET last_seen_at = now(),
+            user_id      = COALESCE(EXCLUDED.user_id, claimius.analytics_session.user_id)
+    RETURNING * INTO v_row;
+
+    RETURN jsonb_build_object('analytics_session', to_jsonb(v_row));
+END;
+$$ LANGUAGE plpgsql;
+
+COMMENT ON FUNCTION claimius.upsert_analytics_session(UUID, TEXT, TEXT, JSONB, UUID, INET, TEXT) IS 'Opens or touches the session row for a visit. Returns a null body when the analytics category is not granted.';
+
+CREATE OR REPLACE FUNCTION claimius.insert_analytics_events(
+    p_app_id      UUID,
+    p_session_key TEXT,
+    p_events      JSONB
+) RETURNS INTEGER AS $$
+DECLARE
+    v_session claimius.analytics_session;
+    v_written INTEGER;
+BEGIN
+    SELECT * INTO v_session
+    FROM claimius.analytics_session
+    WHERE app_id = p_app_id AND session_key = p_session_key;
+
+    IF NOT FOUND THEN
+        RETURN 0;
+    END IF;
+
+    IF NOT claimius.consent_allows(p_app_id, 'analytics', v_session.user_id, v_session.anonymous_id) THEN
+        RETURN 0;
+    END IF;
+
+    INSERT INTO claimius.analytics_event (app_id, session_id, user_id, type, path, payload, occurred_at)
+    SELECT p_app_id,
+           v_session.id,
+           v_session.user_id,
+           e ->> 'type',
+           COALESCE(e ->> 'path', ''),
+           COALESCE(e -> 'payload', '{}'::jsonb),
+           least(greatest(coalesce(to_timestamp((e ->> 'occurred_at')::double precision / 1000.0), now()), now() - INTERVAL '1 day'), now())
+    FROM jsonb_array_elements(p_events) AS e
+    WHERE e ->> 'type' IS NOT NULL;
+
+    GET DIAGNOSTICS v_written = ROW_COUNT;
+
+    UPDATE claimius.analytics_session
+    SET last_seen_at = now()
+    WHERE id = v_session.id;
+
+    RETURN v_written;
+END;
+$$ LANGUAGE plpgsql;
+
+COMMENT ON FUNCTION claimius.insert_analytics_events(UUID, TEXT, JSONB) IS 'Writes a batch against an open session, each occurred_at clamped into the day before now so a browser clock cannot place a signal outside the days the fold and the retention cover. Returns 0 and writes nothing when consent is absent or the session is unknown.';
+
+CREATE OR REPLACE FUNCTION claimius.capture_user_apps(p_user_id UUID)
+    RETURNS SETOF UUID AS $$
+    WITH granted AS (
+        SELECT c.app_id, co.scope
+        FROM claimius.user_claim uc
+            JOIN claimius.claim c ON c.id = uc.claim_id
+            JOIN claimius.claim_object co ON co.claim_id = c.id
+        WHERE uc.user_id = p_user_id
+          AND uc.sa_deleted_at IS NULL
+          AND c.sa_deleted_at IS NULL
+          AND co.sa_deleted_at IS NULL
+          AND (uc.starts_at IS NULL OR uc.starts_at <= now())
+          AND (uc.ends_at IS NULL OR uc.ends_at > now())
+          AND co.object_id IS NULL
+          AND jsonb_path_exists(co.scope, '$.analytics'::jsonpath)
+          AND (claimius._effective_access(c.sa_access, co.sa_access) & 16) = 0
+          AND (claimius._effective_access(c.sa_access, co.sa_access) & 4) = 4
+    )
+    SELECT app_id FROM granted
+    UNION
+    SELECT named::uuid
+    FROM granted, jsonb_array_elements_text(
+        CASE WHEN jsonb_typeof(scope -> 'analytics' -> 'app') = 'array'
+             THEN scope -> 'analytics' -> 'app'
+             ELSE '[]'::jsonb END) AS named
+    WHERE named ~ '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$';
+$$ LANGUAGE sql STABLE;
+
+COMMENT ON FUNCTION claimius.capture_user_apps(UUID) IS 'Producer apps whose capture one person may read: the app each live analytics grant sits in, plus every app id named in that grant''s scope.';
+
+CREATE OR REPLACE FUNCTION claimius.analytics_enabled(p_app_id UUID)
+    RETURNS BOOLEAN AS $$
+    SELECT EXISTS (
+        SELECT 1
+        FROM claimius.user_claim uc
+            JOIN claimius.claim c ON c.id = uc.claim_id
+            JOIN claimius.claim_object co ON co.claim_id = uc.claim_id
+        WHERE c.app_id = p_app_id
+          AND uc.sa_deleted_at IS NULL
+          AND c.sa_deleted_at IS NULL
+          AND co.sa_deleted_at IS NULL
+          AND (uc.starts_at IS NULL OR uc.starts_at <= now())
+          AND (uc.ends_at IS NULL OR uc.ends_at > now())
+          AND co.object_id IS NULL
+          AND jsonb_path_exists(co.scope, '$.analytics'::jsonpath)
+          AND (claimius._effective_access(c.sa_access, co.sa_access) & 16) = 0
+    );
+$$ LANGUAGE sql STABLE;
+
+COMMENT ON FUNCTION claimius.analytics_enabled(UUID) IS 'True when the app holds a live object-less grant carrying the analytics scope. A NULL claim_object access inherits the claim mask.';
+
+CREATE OR REPLACE FUNCTION claimius.get_analytics_events(
+    p_user_id      UUID,
+    p_producer_app UUID DEFAULT NULL,
+    p_session_id   UUID DEFAULT NULL,
+    p_visitor      UUID DEFAULT NULL,
+    p_type         TEXT DEFAULT NULL,
+    p_path         TEXT DEFAULT NULL,
+    p_from         TIMESTAMPTZ DEFAULT NULL,
+    p_to           TIMESTAMPTZ DEFAULT NULL,
+    p_limit        INTEGER DEFAULT 100,
+    p_offset       INTEGER DEFAULT 0
+) RETURNS SETOF claimius.analytics_event AS $$
+    SELECT e.*
+    FROM claimius.analytics_event e
+    WHERE e.app_id IN (SELECT claimius.capture_user_apps(p_user_id))
+      AND (p_producer_app IS NULL OR e.app_id = p_producer_app)
+      AND (p_session_id IS NULL OR e.session_id = p_session_id)
+      AND (p_visitor IS NULL OR e.user_id = p_visitor)
+      AND (p_type IS NULL OR e.type = p_type)
+      AND (p_path IS NULL OR e.path = p_path)
+      AND (p_from IS NULL OR e.occurred_at >= p_from)
+      AND (p_to IS NULL OR e.occurred_at < p_to)
+    ORDER BY e.occurred_at DESC
+    LIMIT p_limit OFFSET p_offset;
+$$ LANGUAGE sql STABLE;
+
+COMMENT ON FUNCTION claimius.get_analytics_events(UUID, UUID, UUID, UUID, TEXT, TEXT, TIMESTAMPTZ, TIMESTAMPTZ, INTEGER, INTEGER) IS 'Capture read for one person, across every producer app their analytics grant covers. app_id names the producer and never decides access.';
+
+CREATE OR REPLACE FUNCTION claimius.get_analytics_sessions(
+    p_user_id      UUID,
+    p_producer_app UUID DEFAULT NULL,
+    p_visitor      UUID DEFAULT NULL,
+    p_anonymous_id TEXT DEFAULT NULL,
+    p_from         TIMESTAMPTZ DEFAULT NULL,
+    p_to           TIMESTAMPTZ DEFAULT NULL,
+    p_limit        INTEGER DEFAULT 100,
+    p_offset       INTEGER DEFAULT 0
+) RETURNS SETOF claimius.analytics_session AS $$
+    SELECT s.*
+    FROM claimius.analytics_session s
+    WHERE s.app_id IN (SELECT claimius.capture_user_apps(p_user_id))
+      AND (p_producer_app IS NULL OR s.app_id = p_producer_app)
+      AND (p_visitor IS NULL OR s.user_id = p_visitor)
+      AND (p_anonymous_id IS NULL OR s.anonymous_id = p_anonymous_id)
+      AND (p_from IS NULL OR s.started_at >= p_from)
+      AND (p_to IS NULL OR s.started_at < p_to)
+    ORDER BY s.started_at DESC
+    LIMIT p_limit OFFSET p_offset;
+$$ LANGUAGE sql STABLE;
+
+COMMENT ON FUNCTION claimius.get_analytics_sessions(UUID, UUID, UUID, TEXT, TIMESTAMPTZ, TIMESTAMPTZ, INTEGER, INTEGER) IS 'Visit read for one person, scoped exactly like get_analytics_events.';
+
+CREATE OR REPLACE FUNCTION claimius.get_analytics_apps(p_user_id UUID)
+    RETURNS TABLE (
+        id        UUID,
+        slug      TEXT,
+        name      TEXT,
+        app_image TEXT,
+        origin    TEXT,
+        sessions  BIGINT,
+        events    BIGINT,
+        visitors  BIGINT,
+        last_seen TIMESTAMPTZ
+    ) AS $$
+    SELECT a.id,
+           a.slug,
+           a.name,
+           a.app_image,
+           substring(a.redirect_uris[1] FROM '^[a-zA-Z][a-zA-Z0-9+.-]*://[^/]+'),
+           COUNT(DISTINCT s.id),
+           COALESCE(SUM((SELECT COUNT(*) FROM claimius.analytics_event e WHERE e.session_id = s.id)), 0),
+           COUNT(DISTINCT COALESCE(s.user_id::text, s.anonymous_id)),
+           MAX(s.last_seen_at)
+    FROM claimius.samna_app a
+        LEFT JOIN claimius.analytics_session s ON s.app_id = a.id
+    WHERE a.id IN (SELECT claimius.capture_user_apps(p_user_id))
+      AND a.sa_deleted_at IS NULL
+    GROUP BY a.id, a.slug, a.name, a.app_image, a.redirect_uris
+    ORDER BY a.name;
+$$ LANGUAGE sql STABLE;
+
+COMMENT ON FUNCTION claimius.get_analytics_apps(UUID) IS 'The producer apps one person may read, named, with the volume captured against each and the origin its pages are served from. A disciple carries no samna_app replica, so this is where a capture reader learns what an app_id is and where to load the page a heat map overlays.';
+
+CREATE OR REPLACE FUNCTION claimius.upsert_app_client(
+    p_app_id        UUID,
+    p_client_id     UUID,
+    p_secret_hash   TEXT,
+    p_name          TEXT,
+    p_claim_name    TEXT,
+    p_sa_access     INTEGER,
+    p_sa_created_by UUID,
+    p_description   TEXT DEFAULT '',
+    p_scope         JSONB DEFAULT NULL
+) RETURNS JSONB AS $$
+DECLARE
+    v_org_id     UUID;
+    v_claim_id   UUID;
+    v_client_pk  UUID;
+BEGIN
+    SELECT sa_owner_id INTO v_org_id
+    FROM claimius.samna_app
+    WHERE id = p_app_id AND sa_deleted_at IS NULL;
+
+    IF v_org_id IS NULL THEN
+        RAISE EXCEPTION 'app % not found', p_app_id;
+    END IF;
+
+    SELECT id INTO v_claim_id
+    FROM claimius.claim
+    WHERE app_id = p_app_id AND name = p_claim_name AND sa_deleted_at IS NULL
+    LIMIT 1;
+
+    IF v_claim_id IS NULL THEN
+        v_claim_id := (claimius.insert_claim(
+            p_app_id        => p_app_id,
+            p_name          => p_claim_name,
+            p_description   => p_description,
+            p_sa_access     => p_sa_access,
+            p_sa_owner_id   => v_org_id,
+            p_sa_root_id    => v_org_id,
+            p_sa_created_by => p_sa_created_by,
+            p_inherits      => TRUE,
+            p_type          => 'service'
+        ) -> 'claim' ->> 'id')::UUID;
+    END IF;
+
+    IF p_scope IS NOT NULL THEN
+        PERFORM claimius.insert_claim_object(
+            p_app_id        => p_app_id,
+            p_claim_id      => v_claim_id,
+            p_sa_owner_id   => v_org_id,
+            p_sa_root_id    => v_org_id,
+            p_sa_created_by => p_sa_created_by,
+            p_sa_access     => p_sa_access,
+            p_inherits      => FALSE,
+            p_reason        => p_claim_name || ' capability grant',
+            p_scope         => p_scope
+        );
+    END IF;
+
+    SELECT id INTO v_client_pk
+    FROM claimius.samna_client
+    WHERE client_id = p_client_id AND sa_deleted_at IS NULL
+    LIMIT 1;
+
+    IF v_client_pk IS NULL THEN
+        v_client_pk := gen_random_uuid();
+        INSERT INTO claimius.samna_client (
+            id, name, description, app_id, client_id, secret_hash, status,
+            sa_owner_id, sa_created_by
+        ) VALUES (
+            v_client_pk, p_name, p_description, p_app_id, p_client_id, p_secret_hash,
+            'active', v_org_id, p_sa_created_by
+        );
+    ELSE
+        UPDATE claimius.samna_client
+        SET name = p_name, description = p_description, secret_hash = p_secret_hash,
+            sa_updated_at = now()
+        WHERE id = v_client_pk;
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1 FROM claimius.claim_object
+        WHERE app_id = p_app_id AND claim_id = v_claim_id
+          AND object_type = 'claimius.samna_client' AND object_id = v_client_pk
+          AND sa_deleted_at IS NULL
+    ) THEN
+        PERFORM claimius.insert_claim_object(
+            p_app_id        => p_app_id,
+            p_claim_id      => v_claim_id,
+            p_object_id     => v_client_pk,
+            p_object_type   => 'claimius.samna_client',
+            p_sa_owner_id   => v_org_id,
+            p_sa_root_id    => v_org_id,
+            p_sa_created_by => p_sa_created_by,
+            p_inherits      => FALSE,
+            p_reason        => p_claim_name || ' binds to the client row'
+        );
+    END IF;
+
+    PERFORM claimius.upsert_app_user(
+        p_user_id    => p_client_id,
+        p_app_id     => p_app_id,
+        p_first_name => p_name,
+        p_last_name  => 'Client',
+        p_email      => p_name || '@local',
+        p_sa_created_by => p_sa_created_by
+    );
+
+    IF NOT EXISTS (
+        SELECT 1 FROM claimius.user_claim
+        WHERE app_id = p_app_id AND claim_id = v_claim_id AND user_id = p_client_id
+          AND sa_deleted_at IS NULL
+    ) THEN
+        PERFORM claimius.insert_user_claim(
+            p_app_id        => p_app_id,
+            p_claim_id      => v_claim_id,
+            p_user_id       => p_client_id,
+            p_sa_owner_id   => v_org_id,
+            p_sa_created_by => p_sa_created_by,
+            p_reason        => 'Grant ' || p_name || ' its capability claim'
+        );
+    END IF;
+
+    RETURN jsonb_build_object(
+        'samna_client', jsonb_build_object('id', v_client_pk, 'client_id', p_client_id),
+        'claim', jsonb_build_object('id', v_claim_id, 'name', p_claim_name),
+        'organization', jsonb_build_object('id', v_org_id)
+    );
+END;
+$$ LANGUAGE plpgsql;
+
+COMMENT ON FUNCTION claimius.upsert_app_client(uuid, uuid, text, text, text, integer, uuid, text, jsonb) IS 'Idempotently provisions a machine client for an app with one capability claim. p_sa_access is a bitwise mask. p_scope, when given, is bound as an object-less capability payload the consuming service reads through get_access on a scope key, and it is where per operation limits live.';
+
+CREATE OR REPLACE FUNCTION claimius.analytics_bucket_size() RETURNS INTEGER AS $$
+    SELECT 16;
+$$ LANGUAGE sql IMMUTABLE;
+
+COMMENT ON FUNCTION claimius.analytics_bucket_size() IS 'Cell edge in pixels at capture scale. Well under the blur radius the overlay draws with, so the rendered field is unchanged by the fold.';
+
+CREATE OR REPLACE FUNCTION claimius.analytics_event_weight(p_type TEXT) RETURNS INTEGER AS $$
+    SELECT CASE WHEN p_type = 'click' THEN 4 ELSE 1 END;
+$$ LANGUAGE sql IMMUTABLE;
+
+COMMENT ON FUNCTION claimius.analytics_event_weight(TEXT) IS 'What one signal contributes to a cell. Matches the weight the capture script and the overlay already agree on.';
+
+    GET DIAGNOSTICS v_cells = ROW_COUNT;
+    RETURN v_cells;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION claimius.get_analytics_heat(
+    p_app_id         UUID,
+    p_path           TEXT,
+    p_viewport_width INTEGER DEFAULT NULL,
+    p_type           TEXT DEFAULT NULL,
+    p_from           DATE DEFAULT NULL,
+    p_to             DATE DEFAULT NULL
+) RETURNS TABLE (x INTEGER, y INTEGER, weight BIGINT, sessions BIGINT) AS $$
+    SELECT
+        h.bucket_x * claimius.analytics_bucket_size(),
+        h.bucket_y * claimius.analytics_bucket_size(),
+        sum(h.weight)::bigint,
+        max(h.sessions)
+    FROM claimius.analytics_heat h
+    WHERE h.app_id = p_app_id
+      AND h.path = p_path
+      AND (p_viewport_width IS NULL OR h.viewport_width = p_viewport_width)
+      AND (p_type IS NULL OR h.type = p_type)
+      AND (p_from IS NULL OR h.day >= p_from)
+      AND (p_to IS NULL OR h.day <= p_to)
+    GROUP BY 1, 2;
+$$ LANGUAGE sql STABLE;
+
+COMMENT ON FUNCTION claimius.get_analytics_heat(UUID, TEXT, INTEGER, TEXT, DATE, DATE) IS 'The heat field for a page, already in page coordinates at capture scale, so the caller passes the rows straight to the overlay.';
+
+CREATE OR REPLACE FUNCTION claimius.delete_analytics_event(p_keep INTERVAL) RETURNS BIGINT AS $$
+DECLARE
+    v_before DATE;
+    v_rows   BIGINT;
+BEGIN
+    IF p_keep IS NULL OR p_keep < INTERVAL '1 day' THEN
+        RAISE EXCEPTION 'delete_analytics_event keeps at least a day, got %', p_keep USING ERRCODE = '22023';
+    END IF;
+    v_before := ((now() - p_keep) AT TIME ZONE 'UTC')::date;
+
+    DELETE FROM claimius.analytics_event
+    WHERE (occurred_at AT TIME ZONE 'UTC')::date < v_before;
+    GET DIAGNOSTICS v_rows = ROW_COUNT;
+    RETURN v_rows;
+END;
+$$ LANGUAGE plpgsql;
+
+COMMENT ON FUNCTION claimius.delete_analytics_event(INTERVAL) IS 'Drops raw signal from every UTC day before the day p_keep ago, folding those days first so the heat field keeps everything it had. The cutoff is a day boundary at least a day back, because folding an unfinished day would discard the rest of it. The analytics_event retention prune.';
+
+CREATE OR REPLACE FUNCTION claimius.upsert_analytics_heat(
+    p_from   DATE,
+    p_to     DATE,
+    p_app_id UUID DEFAULT NULL
+) RETURNS BIGINT AS $$
+DECLARE
+    v_cells BIGINT;
+BEGIN
+    INSERT INTO claimius.analytics_heat AS h (
+        app_id, path, viewport_width, type, bucket_x, bucket_y, day, weight, sessions
+    )
+    WITH signals AS (
+        SELECT
+            e.app_id,
+            e.path,
+            (e.payload ->> 'viewport_width')::int AS viewport_width,
+            e.type,
+            floor((e.payload ->> 'page_x')::numeric / claimius.analytics_bucket_size())::int AS bucket_x,
+            floor((e.payload ->> 'page_y')::numeric / claimius.analytics_bucket_size())::int AS bucket_y,
+            (e.occurred_at AT TIME ZONE 'UTC')::date AS day,
+            claimius.analytics_event_weight(e.type) AS weight,
+            e.session_id
+        FROM claimius.analytics_event e
+        WHERE (p_from IS NULL OR (e.occurred_at AT TIME ZONE 'UTC')::date >= p_from)
+          AND (p_to IS NULL OR (e.occurred_at AT TIME ZONE 'UTC')::date <= p_to)
+          AND (p_app_id IS NULL OR e.app_id = p_app_id)
+          AND e.type <> 'heat'
+          AND e.payload ? 'page_x'
+          AND e.payload ? 'page_y'
+          AND e.payload ? 'viewport_width'
+        UNION ALL
+        SELECT
+            e.app_id,
+            e.path,
+            (e.payload ->> 'viewport_width')::int,
+            COALESCE(e.payload ->> 'source', 'pointer'),
+            (c ->> 0)::int,
+            (c ->> 1)::int,
+            (e.occurred_at AT TIME ZONE 'UTC')::date,
+            (c ->> 2)::int * claimius.analytics_event_weight(COALESCE(e.payload ->> 'source', 'pointer')),
+            e.session_id
+        FROM claimius.analytics_event e
+            CROSS JOIN LATERAL jsonb_array_elements(e.payload -> 'cells') AS c
+        WHERE (p_from IS NULL OR (e.occurred_at AT TIME ZONE 'UTC')::date >= p_from)
+          AND (p_to IS NULL OR (e.occurred_at AT TIME ZONE 'UTC')::date <= p_to)
+          AND (p_app_id IS NULL OR e.app_id = p_app_id)
+          AND e.type = 'heat'
+          AND jsonb_typeof(e.payload -> 'cells') = 'array'
+          AND e.payload ? 'viewport_width'
+    )
+    SELECT
+        s.app_id,
+        s.path,
+        s.viewport_width,
+        s.type,
+        s.bucket_x,
+        s.bucket_y,
+        s.day,
+        sum(s.weight),
+        count(DISTINCT s.session_id)
+    FROM signals s
+    GROUP BY 1, 2, 3, 4, 5, 6, 7
+    ON CONFLICT (app_id, path, viewport_width, type, day, bucket_x, bucket_y) DO UPDATE SET
+        weight   = EXCLUDED.weight,
+        sessions = EXCLUDED.sessions
+    WHERE h.weight IS DISTINCT FROM EXCLUDED.weight
+       OR h.sessions IS DISTINCT FROM EXCLUDED.sessions;
+
+    GET DIAGNOSTICS v_cells = ROW_COUNT;
+    RETURN v_cells;
+END;
+$$ LANGUAGE plpgsql;
+
+COMMENT ON FUNCTION claimius.upsert_analytics_heat(DATE, DATE, UUID) IS 'Folds every positioned signal and every browser folded heat event on a range of whole days into its cell and returns the cells written. A day is the unit because a cell is replaced rather than added to.';
+
+CREATE OR REPLACE FUNCTION claimius.get_analytics_capture(
+    p_app_id UUID,
+    p_path   TEXT
+) RETURNS SETOF claimius.analytics_capture AS $$
+    SELECT *
+    FROM claimius.analytics_capture
+    WHERE app_id = p_app_id
+      AND path = p_path;
+$$ LANGUAGE sql STABLE;
+
+COMMENT ON FUNCTION claimius.get_analytics_capture(UUID, TEXT) IS 'The snapshot held for a page.';
+
+CREATE OR REPLACE FUNCTION claimius.get_analytics_captured(
+    p_app_id  UUID,
+    p_max_age INTERVAL DEFAULT '7 days'
+) RETURNS SETOF TEXT AS $$
+    SELECT path
+    FROM claimius.analytics_capture
+    WHERE app_id = p_app_id
+      AND captured_at > now() - p_max_age
+    ORDER BY path;
+$$ LANGUAGE sql STABLE;
+
+COMMENT ON FUNCTION claimius.get_analytics_captured(UUID, INTERVAL) IS 'The paths an app holds a fresh snapshot for. The consent answer carries the list so a browser knows which pages need no capture without asking per view.';
+
+CREATE OR REPLACE FUNCTION claimius.get_analytics_summary(
+    p_user_id      UUID,
+    p_producer_app UUID,
+    p_from         TIMESTAMPTZ DEFAULT NULL,
+    p_to           TIMESTAMPTZ DEFAULT NULL
+) RETURNS JSONB AS $$
+    WITH visits AS (
+        SELECT s.id,
+               COALESCE(s.user_id::text, s.anonymous_id) AS actor,
+               s.user_id,
+               s.anonymous_id,
+               s.ip,
+               s.user_agent,
+               s.started_at
+        FROM claimius.analytics_session s
+        WHERE s.app_id = p_producer_app
+          AND p_producer_app IN (SELECT claimius.capture_user_apps(p_user_id))
+          AND (p_from IS NULL OR s.started_at >= p_from)
+          AND (p_to IS NULL OR s.started_at < p_to)
+    ),
+    signals AS (
+        SELECT e.session_id,
+               e.type,
+               e.path,
+               (e.payload ->> 'viewport_width')::int AS viewport_width
+        FROM claimius.analytics_event e
+            JOIN visits v ON v.id = e.session_id
+        WHERE e.type <> 'heat'
+    ),
+    actor_paths AS (
+        SELECT v.actor,
+               g.path,
+               row_number() OVER (PARTITION BY v.actor ORDER BY count(*) DESC, g.path) AS rank
+        FROM signals g
+            JOIN visits v ON v.id = g.session_id
+        GROUP BY v.actor, g.path
+    ),
+    actors AS (
+        SELECT v.actor AS id,
+               max(v.user_id::text) AS user_id,
+               max(v.anonymous_id) AS anonymous_id,
+               max(v.ip::text) AS ip,
+               max(v.user_agent) AS user_agent,
+               count(DISTINCT v.id) AS sessions,
+               count(g.session_id) AS events,
+               max(v.started_at) AS last_seen
+        FROM visits v
+            LEFT JOIN signals g ON g.session_id = v.id
+        GROUP BY v.actor
+    ),
+    paths AS (
+        SELECT g.path,
+               count(*) AS events,
+               count(DISTINCT g.session_id) AS sessions,
+               mode() WITHIN GROUP (ORDER BY g.viewport_width) AS viewport_width
+        FROM signals g
+        GROUP BY g.path
+    )
+    SELECT jsonb_build_object(
+        'actors', COALESCE((
+            SELECT jsonb_agg(jsonb_build_object(
+                'id', a.id,
+                'user_id', a.user_id,
+                'anonymous_id', a.anonymous_id,
+                'ip', a.ip,
+                'user_agent', a.user_agent,
+                'sessions', a.sessions,
+                'events', a.events,
+                'last_seen', a.last_seen,
+                'path', (SELECT ap.path FROM actor_paths ap WHERE ap.actor = a.id AND ap.rank = 1)
+            ) ORDER BY a.events DESC, a.last_seen DESC)
+            FROM actors a
+        ), '[]'::jsonb),
+        'paths', COALESCE((
+            SELECT jsonb_agg(jsonb_build_object(
+                'path', p.path,
+                'events', p.events,
+                'sessions', p.sessions,
+                'viewport_width', p.viewport_width
+            ) ORDER BY p.events DESC, p.path)
+            FROM paths p
+        ), '[]'::jsonb),
+        'types', COALESCE((
+            SELECT jsonb_agg(DISTINCT g.type)
+            FROM signals g
+        ), '[]'::jsonb)
+    );
+$$ LANGUAGE sql STABLE;
+
+COMMENT ON FUNCTION claimius.get_analytics_summary(UUID, UUID, TIMESTAMPTZ, TIMESTAMPTZ) IS 'Who visited a producer app, which paths they touched and at what width, and which signal kinds exist, for one reader, scoped exactly like get_analytics_events.';
+
+CREATE OR REPLACE FUNCTION claimius.upsert_analytics_capture(
+    p_app_id       UUID,
+    p_path         TEXT,
+    p_content_type TEXT,
+    p_body         BYTEA
+) RETURNS claimius.analytics_capture AS $$
+    INSERT INTO claimius.analytics_capture (app_id, path, content_type, body)
+    VALUES (p_app_id, p_path, p_content_type, p_body)
+    ON CONFLICT (app_id, path) DO UPDATE SET
+        content_type = EXCLUDED.content_type,
+        body         = EXCLUDED.body,
+        captured_at  = now()
+    RETURNING *;
+$$ LANGUAGE sql;
+
+COMMENT ON FUNCTION claimius.upsert_analytics_capture(UUID, TEXT, TEXT, BYTEA) IS 'Stores the snapshot of a page, replacing the one held for the same app and path.';
+
+CREATE OR REPLACE FUNCTION claimius.get_sync_events(
+    p_app_id    UUID,
+    p_txid      BIGINT,
+    p_seq       BIGINT,
+    p_limit     INTEGER DEFAULT 1000,
+    p_peer      BOOLEAN DEFAULT FALSE
+) RETURNS TABLE (
+    txid        BIGINT,
+    seq         BIGINT,
+    operation   claimius.sync_operation,
+    event_type  TEXT,
+    payload     JSONB,
+    written_at  TIMESTAMPTZ
+) AS $$
+    SELECT e.txid::TEXT::BIGINT, e.seq, e.operation, e.event_type,
+           CASE WHEN NOT p_peer AND e.event_type = 'claimius.organization' THEN e.payload - 'private_seed'
+                WHEN NOT p_peer AND e.event_type = 'claimius.user_identity' THEN e.payload - 'data'
+                ELSE e.payload END,
+           e.written_at
+    FROM claimius.sync_event e
+    WHERE e.app_id = p_app_id
+      AND (e.txid, e.seq) > (p_txid::TEXT::XID8, p_seq)
+      AND (e.txid < pg_snapshot_xmin(pg_current_snapshot()) OR e.txid = pg_current_xact_id_if_assigned())
+      AND e.event_type NOT IN ('claimius.user_object', 'claimius.user_users', 'claimius.user_users_diff')
+      AND (p_peer OR e.event_type <> 'claimius.app_handover')
+    ORDER BY e.txid ASC, e.seq ASC
+    LIMIT p_limit;
+$$ LANGUAGE sql STABLE;
+
+COMMENT ON FUNCTION claimius.get_sync_events(UUID, BIGINT, BIGINT, INTEGER, BOOLEAN) IS 'Delta feed of source rows for one app after a (txid, seq) cursor, in (txid, seq) order. Serves only events whose transaction is below the xmin of the reading snapshot, or the reader''s own. Every event written later carries a txid at or above that xmin, so the cursor never passes an event still to be served, whatever order sequences commit in. Organization and location events are written once per linked app, so other apps'' shared hierarchy rows never leave the prophet. Handover events travel to peer prophets only, and an organization''s private_seed, the key of its apps'' app_secret, and a user_identity''s data, the claims of the token it was issued from, travel to peer prophets only.';
+
+CREATE OR REPLACE FUNCTION claimius.upsert_profile_item(
+    p_app_id  UUID,
+    p_user_id UUID,
+    p_field   TEXT,
+    p_item    JSONB
+) RETURNS JSONB AS $$
+DECLARE
+    v_slug    TEXT;
+    v_profile JSONB;
+BEGIN
+    SELECT a.slug INTO v_slug FROM claimius.samna_app a WHERE a.id = p_app_id AND a.sa_deleted_at IS NULL;
+    IF v_slug IS NULL OR NOT EXISTS (
+        SELECT 1 FROM claimius.samna_user u
+        WHERE u.user_id = p_user_id AND u.app_id = p_app_id AND u.sa_deleted_at IS NULL
+    ) THEN
+        RAISE EXCEPTION 'user % has no live row in app %', p_user_id, p_app_id USING ERRCODE = 'P0404';
+    END IF;
+    IF p_field !~ '^[a-z][a-z0-9_.]{0,63}$' OR p_item IS NULL OR jsonb_typeof(p_item) <> 'object' THEN
+        RAISE EXCEPTION 'profile item refused: field % must be lower case letters, digits, _ and . starting with a letter, and the item an object', p_field USING ERRCODE = '22023';
+    END IF;
+
+    UPDATE claimius.samna_user
+       SET profile = jsonb_set(profile, ARRAY[v_slug], coalesce(profile -> v_slug, '{}'::jsonb) || jsonb_build_object(p_field, p_item), TRUE),
+           sa_updated_at = now()
+     WHERE user_id = p_user_id AND sa_deleted_at IS NULL;
+
+    SELECT u.profile INTO v_profile FROM claimius.samna_user u WHERE u.user_id = p_user_id AND u.app_id = p_app_id;
+    RETURN v_profile;
+END;
+$$ LANGUAGE plpgsql;
+
+COMMENT ON FUNCTION claimius.upsert_profile_item(UUID, UUID, TEXT, JSONB) IS 'Writes one item of an app into the public profile of one of its users, under the app''s slug and the field, {"<app_slug>": {"<field>": <item>}}, on every row of the user so the sync carries it to every app that sees the user. The item is any object; label, value, link and index are the keys a profile page reads. Returns the profile. P0404 when the user has no live row in the app, 22023 for a malformed field or a non object item.';
+
+CREATE OR REPLACE FUNCTION claimius.delete_profile_item(
+    p_app_id  UUID,
+    p_user_id UUID,
+    p_field   TEXT DEFAULT NULL
+) RETURNS JSONB AS $$
+DECLARE
+    v_slug    TEXT;
+    v_profile JSONB;
+BEGIN
+    SELECT a.slug INTO v_slug FROM claimius.samna_app a WHERE a.id = p_app_id AND a.sa_deleted_at IS NULL;
+    IF v_slug IS NULL OR NOT EXISTS (
+        SELECT 1 FROM claimius.samna_user u
+        WHERE u.user_id = p_user_id AND u.app_id = p_app_id AND u.sa_deleted_at IS NULL
+    ) THEN
+        RAISE EXCEPTION 'user % has no live row in app %', p_user_id, p_app_id USING ERRCODE = 'P0404';
+    END IF;
+
+    UPDATE claimius.samna_user
+       SET profile = CASE
+                         WHEN profile -> v_slug IS NULL THEN profile
+                         WHEN p_field IS NULL OR (profile -> v_slug) - p_field = '{}'::jsonb THEN profile - v_slug
+                         ELSE jsonb_set(profile, ARRAY[v_slug], (profile -> v_slug) - p_field)
+                     END,
+           sa_updated_at = now()
+     WHERE user_id = p_user_id AND sa_deleted_at IS NULL;
+
+    SELECT u.profile INTO v_profile FROM claimius.samna_user u WHERE u.user_id = p_user_id AND u.app_id = p_app_id;
+    RETURN v_profile;
+END;
+$$ LANGUAGE plpgsql;
+
+COMMENT ON FUNCTION claimius.delete_profile_item(UUID, UUID, TEXT) IS 'Removes one field of the app from the public profile of one of its users, or the app''s whole object when no field is given, on every row of the user. Returns the profile. P0404 when the user has no live row in the app.';
+
+CREATE OR REPLACE FUNCTION claimius.get_secret_value(
+    p_user_id    UUID,
+    p_secret_id  UUID
+) RETURNS TABLE (value TEXT, app_id UUID) AS $$
+DECLARE
+    v_secret claimius.samna_secret;
+BEGIN
+    SELECT s.* INTO v_secret
+    FROM claimius.samna_secret s
+    WHERE s.id = p_secret_id
+      AND s.sa_deleted_at IS NULL;
+
+    IF NOT FOUND OR NOT claimius.check_user_active(v_secret.app_id, p_user_id) THEN
+        RETURN;
+    END IF;
+
+    IF NOT EXISTS (SELECT 1 FROM claimius.get_access(p_user_id, v_secret.app_id, p_secret_id, 'claimius.samna_secret', 4)) THEN
+        RETURN;
+    END IF;
+
+    RETURN QUERY SELECT v_secret.value, v_secret.app_id;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = claimius, pg_temp;
+
+COMMENT ON FUNCTION claimius.get_secret_value(p_user_id uuid, p_secret_id uuid) IS 'The stored value of one secret, still ciphertext under the seed of the app that wrote it, with that app''s id, when p_user_id is active in the app and reaches the secret with read through get_access: the claim of its creator that insert_secret bound, or any claim the user holds on it. No row for an inactive user, a user without read, an unknown and a deleted secret. The seed never reaches the database; the service opens the value in process with the seed of app_id.';
+

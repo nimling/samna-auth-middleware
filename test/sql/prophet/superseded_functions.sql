@@ -103,7 +103,6 @@ INSERT INTO superseded VALUES
         ('claimius.delete_exported_audit(text[])'),
         ('claimius.get_expired_consent(interval,text,integer)'),
         ('claimius.delete_exported_consent(text[])'),
-        ('claimius.get_secret_value(uuid,uuid)'),
         ('claimius.upsert_retention(text,claimius.retention_class,integer,text,text)');
 
 SELECT is_empty($$
