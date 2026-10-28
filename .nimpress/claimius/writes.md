@@ -35,10 +35,10 @@ A write changes a source row: a registered row, an organization, a location, a c
 |---|---|---|
 | `tg_enforce_app_home`, `enforce_app_home` | the source tables, before, on the prophet | Refuses a write outside replay to a row of an app another prophet decides, SQLSTATE `P0409` with the home in the hint; an organization or location is refused when any app it is linked to is decided elsewhere |
 | `tg_check_app_scope`, `_check_app_scope` | `claim`, `user_claim`, `claim_object`, before, on the prophet | Refuses with `P0403` a live row whose owning organization, or whose bound organization or location, is not linked to the row's app; an update that keeps app, owner and object passes; bypassed under replay |
-| `tg_check_claim_grant`, `tg_check_claim_level`, `_check_claim_grant` | `user_claim` on insert or a change of claim or user; `claim` when its level increases | Refuses with `P0403` a grant of a claim whose level is not 0, or an increase of a claim's level, unless the actor in `sa_created_by` holds write on the claim and the level is not higher than a deny that actor faces on what the claim is bound to |
+| `tg_check_claim_grant`, `tg_check_claim_level`, `_check_claim_grant` | `user_claim` on insert or a change of claim or user; `claim` when its level increases | Refuses with `P0403` a grant of a claim, or a raise of its level, when the claim gives bits on a bound object that a deny reaching the actor in `sa_created_by` there has taken from the actor's pair; `_check_claim_denies` |
 | `tg_self_root` | `organization`, `location`, before insert | A root self references; a child copies its parent's `sa_root_id` |
 | `tg_update_txid` | `claim`, `user_claim`, `claim_object`, `object_asset`, before | Stamps `txid = pg_current_xact_id()`, under replay too, which the graph cache compares to its snapshot |
-| `tg_check_claim_composition` | `claim_object`, before | Refuses a binding that hands out more than the actor holds or whose claim's level is higher than every level the actor holds on the object, a self link, a reverse link, a link to a claim the actor cannot read, and a link whose higher level the actor does not hold on the target claim |
+| `tg_check_claim_composition` | `claim_object`, before | Refuses a binding that hands out more than the actor holds or a bit a deny reaching the actor has taken, a self link, a reverse link, and a link to a claim the actor cannot read |
 | `tg_calc_access`, `calc_object_access` | registered tables without their own tree, `samna_user`, `samna_client`, `samna_secret`, `claim`, `user_relation`, `object_field`, `user_field`, `user_identity` | Keeps the row's ownership and location closure rows, its `object_info` row with its creator and owner root, the actor's pair, and raises the object area under the owner root when the write is structural |
 | `tg_calc_access`, `calc_hierarchical_access` | `organization`, `location`, registered tables with their own tree | The same, with the table's own tree kept incrementally, the object area raised with `cascade`, and on a soft delete one area per descendant whose closure rows went with it |
 | `tg_calc_trees`, `calc_object_trees` | `samna_app`, `user_claim`, `claim_object` | Their ownership closure rows and, on the prophet, the `object_info` row of a `samna_app`, so every bindable object has one |
@@ -155,9 +155,9 @@ On a disciple a write to a shared type goes to the prophet, and the row the prop
 | `tg_self_root` | one probe |
 | `_retree_object` | `rows(x)` deletes on a delete or move; `d_o + 1` rows for the owner and `d_l + 1` for the location pin on an attach |
 | `_reattach_location_in_ownership` | `d(owner) + 2` rows |
-| Composition, the actor's hold | one range reading `max(sa_access)` and one reading the highest level after settling the actor's pair; the binding passes when `eff(c, b) & ~A(actor, y) & 15 = 0` and the claim's level is not higher than that level |
+| Composition, the actor's hold | one range reading `max(sa_access)` over the actor's pairs on the object after settling the actor's pair, and one range of the actor's deny bindings with a closure probe each; the binding passes when `eff(c, b) & ~A(actor, y) & 15 = 0` and `eff(c, b) & denied(actor, y) & 15 = 0` |
 | Composition, a link | one probe of `idx_claim_object_object`, and the settle and one probe of the actor's pair on the target claim when the higher level of the two is not 0 |
-| `_check_claim_level` | the settle of the actor's pair on the claim, one probe for write on it, and one range over the claim's bindings for the denies the actor faces; only for a claim whose level is not 0 |
+| `_check_claim_denies` | one range of `idx_claim_object_claim_id` for the claim's bindings, one `_denied_access` range per non deny object binding, and the settle and one probe of the actor's pair only on a binding where the denied bits overlap; for every claim |
 | `_actor_user_for_row` | one probe |
 
 ### Closure rows of a hierarchy write
@@ -203,7 +203,7 @@ On a disciple a write to a shared type goes to the prophet, and the row the prop
 
 ```
 source rows  = 2 + k                     outbox rows = 2 + k
-recomputes   = 4 + k, each of one pair, and k more when the claim's level is not 0   pairs written ≤ 2
+recomputes   = 4 + k, each of one pair, and per grant one settle per object binding of the claim where a deny reaching the actor overlaps its bits   pairs written ≤ 2
 area rows    = 2 + k: the object area on the claim, the object area on y, one assignment per assignee
 ```
 

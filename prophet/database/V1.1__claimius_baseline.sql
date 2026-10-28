@@ -315,10 +315,6 @@ CREATE TABLE IF NOT EXISTS claimius.user_claim (
                                                    CONSTRAINT user_claim_app_claim_fkey FOREIGN KEY (app_id, claim_id) REFERENCES claimius.claim (app_id, id)
 );
 
-COMMENT ON CONSTRAINT claim_object_app_claim_fkey ON claimius.claim_object IS 'A binding lives in the app of its claim, so the feed and the snapshot of an app never carry a binding whose claim they do not.';
-
-COMMENT ON CONSTRAINT user_claim_app_claim_fkey ON claimius.user_claim IS 'A grant lives in the app of its claim, so the feed and the snapshot of an app never carry a grant whose claim they do not.';
-
 
 COMMENT ON TABLE claimius.user_claim IS 'Grants a claim to a user in an app. id is referenced as sa_created_by everywhere.';
 COMMENT ON COLUMN claimius.user_claim.user_id IS 'References samna_user.user_id, not samna_user.id.';
@@ -356,6 +352,11 @@ CREATE TABLE IF NOT EXISTS claimius.claim_object (
                                                      ),
                                                      CONSTRAINT claim_object_app_claim_fkey FOREIGN KEY (app_id, claim_id) REFERENCES claimius.claim (app_id, id)
 );
+
+COMMENT ON CONSTRAINT claim_object_app_claim_fkey ON claimius.claim_object IS 'A binding lives in the app of its claim, so the feed and the snapshot of an app never carry a binding whose claim they do not.';
+
+COMMENT ON CONSTRAINT user_claim_app_claim_fkey ON claimius.user_claim IS 'A grant lives in the app of its claim, so the feed and the snapshot of an app never carry a grant whose claim they do not.';
+
 
 COMMENT ON TABLE claimius.claim_object IS 'Binds a claim. With (object_type, object_id) scope keys are field names; without them scope keys are custom.';
 COMMENT ON COLUMN claimius.claim_object.sa_access IS 'Bitwise access mask with bits 0x01 owner, 0x02 write, 0x04 read, 0x08 execute, 0x10 deny, 0x20 member; NULL means inherit the claim sa_access at read time.';

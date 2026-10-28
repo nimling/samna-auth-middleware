@@ -6265,12 +6265,6 @@ CREATE OR REPLACE FUNCTION claimius.analytics_event_weight(p_type TEXT) RETURNS 
 $$ LANGUAGE sql IMMUTABLE;
 
 COMMENT ON FUNCTION claimius.analytics_event_weight(TEXT) IS 'What one signal contributes to a cell. Matches the weight the capture script and the overlay already agree on.';
-
-    GET DIAGNOSTICS v_cells = ROW_COUNT;
-    RETURN v_cells;
-END;
-$$ LANGUAGE plpgsql;
-
 CREATE OR REPLACE FUNCTION claimius.get_analytics_heat(
     p_app_id         UUID,
     p_path           TEXT,

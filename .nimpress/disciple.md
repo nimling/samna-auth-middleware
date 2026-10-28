@@ -83,10 +83,10 @@ Retention is a setting. Each runtime table has its days and its kind has a size,
 ### Cost
 
 ```
-entries(a run) = one pg_total_relation_size per table, and for a table over the limit one range delete on its time column
+entries(a run) = one size call and one delete per table and time column of the list, notification and code twice; a range where an index leads on the column, a scan of the table elsewhere
 ```
 
-No table is read twice. The job is one advisory lock an hour per database, taken by one replica.
+Only `session`, `dpop_jti`, `par_request`, `jwks_cache`, `rate_limit` and `audit` have an index leading on their time column. The job is one advisory lock an hour per database, taken by one replica.
 
 ## Writes
 

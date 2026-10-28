@@ -52,9 +52,9 @@ A grant and a binding live in the app of their claim. On the prophet `user_claim
 `_check_claim_composition`, a before trigger on `claim_object`, bounds what a writer may hand out. It runs outside replay on an insert, or on an update of the mask, claim or object, of a live binding on an object that is not a claim. It resolves the writer from `sa_created_by` and settles the writer's pair on the object first.
 
 1. The binding is refused with `P0403` when its grant bits exceed what the writer holds on the object. A writer who cannot reach an object cannot grant it away, and one who reads it cannot grant write on it. A deny binding is exempt from this test.
-2. The binding is refused with `P0403` when the claim's level is higher than every level the writer holds on the object. This holds for a deny whose level is not 0 as well.
+2. The binding is refused with `P0403` when it hands out a bit a deny reaching the writer on the object has taken from the writer's pair; the claim's level is not judged, and a deny binding is exempt.
 
-Handing a claim out, `insert_user_claim`, and increasing a claim's level run `_check_claim_level` for the actor in `sa_created_by`: a claim whose level is not 0 needs write on the claim, and the level must not be higher than a deny the actor faces on an object the claim is bound to, so an actor never lifts a deny it meets by handing out a stronger claim.
+Handing a claim out, `insert_user_claim`, and raising a claim's level run `_check_claim_denies` for the actor in `sa_created_by`: on no object the claim grants bits on may those bits overlap what a deny reaching the actor there takes from the actor's pair, so an actor never lifts a deny it meets by handing out a claim. It runs for every claim, whatever its level.
 
 Where the writer holds less than the binding hands out, these holds are tried in order before refusing:
 
@@ -83,7 +83,6 @@ A `claim_object` whose `object_type` is `claimius.claim` links claim A to claim 
 1. A link to its own claim is refused.
 2. A link whose reverse is live is refused.
 3. The writer must hold read on B, after its pair on B is settled, or the link is refused with `P0403`. A holder of B reads B, and so does a holder of a claim bound on B; see [the derivations](./index.md#derivations).
-4. When the higher of A's and B's levels is not 0, the writer must hold that level on B, or the link is refused with `P0403`.
 
 The use is reusing a surface at another strength. A Bookings Admin claim binds every meeting room of an organization; an External Vendor claim links to it with mask 4, and every vendor reads the same rooms without a binding copied: one link row, where copying needs a binding row per object of B and stays in step with B only by hand.
 
@@ -181,8 +180,8 @@ At different levels the higher claim's `eff` alone: `eff(A, l)` when A is higher
 | Expansion | once per claim write |
 | Cascade reach of a claim | one range of `idx_claim_object_claim_id` and one range of `idx_inheritance_info_ancestor` per inheriting binding |
 | The bind check | the writer's grant, the point settle of one pair, one range of the writer's pairs on the object, read once more for the highest level the writer holds there |
-| `_check_claim_level` on a grant or a level increase | the settle of the actor's pair on the claim, one probe for write on it, and one range of the claim's bindings for the denies the actor faces, only for a claim whose level is not 0 |
-| A first binding hold, or the system app hold | one pair settle and one probe of the writer's pair, tested only when the plain rule would refuse |
+| The bind check | the writer's grant, the point settle of one pair, one range of the writer's pairs on the object, and one range of the writer's deny bindings with a closure probe each |
+| `_check_claim_denies` on a grant or a level increase | one range of `idx_claim_object_claim_id` for the claim's bindings, one `_denied_access` range per non deny object binding, and the settle and one probe of the actor's pair only on a binding where the denied bits overlap; for every claim |
 | A binding on a foreign row | one extra probe of `object_info` and the settle of one pair |
 | A link | one probe for the reverse link, one settle and one probe of the writer's `user_object` row on `(claimius.claim, B)` |
 | `_best_grant` | nothing beyond the pair |

@@ -107,7 +107,7 @@ An app carries one `connection`, read once at login. It decides where the sessio
 | `bff` | Writes the session cookies itself and redirects the browser to `next` | In cookies the prophet writes for the host the request came in on | A static build or a dev server behind [sauth-bff](../bff.md), the disciple with no tables |
 | `static` | Writes the session cookies on its own host and redirects to the page the login started from | In cookies on the prophet host, read through the prophet's `/api/me/*` with credentials | A site with no server of its own, see [Static sites](../static.md) |
 
-With `bff` on another host than the prophet, the callback stores a `session_handoff` row that lives two minutes and sends the browser to the site's `<base>/session?handoff=<value>`, which the bff proxies to the prophet with the site's host forwarded, so the prophet writes the cookies for the site's domain and redeems the value once. On the same host the callback writes the cookies directly. Nothing else in the model depends on the connection: the claims, bindings, pages and the checks are the same under all three.
+With `bff` on another host than the prophet, the callback hands the browser to the site's `<base>/session` with a one time value, which the bff proxies to the prophet with the site's host forwarded, so the prophet writes the cookies for the site's domain and redeems the value once. On the same host the callback writes the cookies directly. Nothing else in the model depends on the connection: the claims, bindings, pages and the checks are the same under all three.
 
 An Initiate app, below, is a second frontend of the same root under any connection, with its own slug, callback, cookie domain and origins.
 
