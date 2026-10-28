@@ -44,3 +44,23 @@ func DeleteProfileItem(ctx context.Context, appID uuid.UUID, key shared.BodySamP
 	}
 	return json.RawMessage(profile), nil
 }
+
+func PutProfile(ctx context.Context, userID uuid.UUID, items map[string]*shared.ProfileItem) (json.RawMessage, error) {
+	for key, item := range items {
+		if item == nil {
+			continue
+		}
+		if err := item.Validate(); err != nil {
+			return nil, fmt.Errorf("%w: %s", err, key)
+		}
+	}
+	body, err := json.Marshal(items)
+	if err != nil {
+		return nil, err
+	}
+	var profile string
+	if err := instance.NewRaw(`SELECT claimius.update_profile(?, ?::jsonb)::text`, userID, string(body)).Scan(ctx, &profile); err != nil {
+		return nil, profileError(err)
+	}
+	return json.RawMessage(profile), nil
+}

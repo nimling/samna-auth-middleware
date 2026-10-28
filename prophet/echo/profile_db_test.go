@@ -18,16 +18,16 @@ import (
 	"github.com/nimling/samna-auth-middleware/v2/smw"
 )
 
-func readProfile(t *testing.T, raw json.RawMessage) map[string]map[string]shared.ProfileItem {
+func readProfile(t *testing.T, raw json.RawMessage) map[string]shared.ProfileItem {
 	t.Helper()
-	var profile map[string]map[string]shared.ProfileItem
+	var profile map[string]shared.ProfileItem
 	if err := json.Unmarshal(raw, &profile); err != nil {
 		t.Fatalf("profile %s: %v", raw, err)
 	}
 	return profile
 }
 
-func TestProfileItemsAreWrittenByTheDiscipleIntoTheUsersProfile(t *testing.T) {
+func TestProfileEntriesCarryASchemaAndAValue(t *testing.T) {
 	getGrantFixture(t)
 	ctx := context.Background()
 	prophet := psdb.Instance()
@@ -68,32 +68,48 @@ func TestProfileItemsAreWrittenByTheDiscipleIntoTheUsersProfile(t *testing.T) {
 	t.Cleanup(func() { disciple.RouteToProphet = false })
 
 	reader := &shared.AccessClaim{UserID: user, Access: shared.ACCESS_READ}
-	link := "https://example.no/certificate"
-	item := shared.BodySamProfileItem{UserID: user, Field: "certificate", Label: "Certificate", Value: "Solutions Architect", Link: &link}
+	schema := shared.ProfileSchema{Type: "string", Title: "Certificate", Format: "uri"}
+	item := shared.BodySamProfileItem{UserID: user, Field: "certificate", Schema: schema, Value: json.RawMessage(`"https://example.no/certificate"`)}
 
 	first, err := disciple.PutProfileItem(ctx, reader, item)
 	if err != nil {
 		t.Fatalf("put: %v", err)
 	}
-	if got := readProfile(t, first)[app.Slug]["certificate"]; got.Value != "Solutions Architect" || got.Link == nil || *got.Link != link {
-		t.Fatalf("the prophet stores the item under the app's slug and the field, got %s", first)
+	key := app.Slug + ".certificate"
+	if got := readProfile(t, first)[key]; string(got.Value) != `"https://example.no/certificate"` || got.Schema.Type != "string" {
+		t.Fatalf("the prophet stores the entry under the app's slug and the field with its schema and value, got %s", first)
 	}
 
-	item.Value = "Solutions Architect Professional"
+	item.Value = json.RawMessage(`"https://example.no/certificate/2"`)
 	second, err := disciple.PutProfileItem(ctx, reader, item)
 	if err != nil {
 		t.Fatalf("put again: %v", err)
 	}
-	if got := readProfile(t, second)[app.Slug]; len(got) != 1 || got["certificate"].Value != "Solutions Architect Professional" {
-		t.Fatalf("a second put of the same field replaces the item, got %s", second)
+	if got := readProfile(t, second)[key]; string(got.Value) != `"https://example.no/certificate/2"` {
+		t.Fatalf("a second put of the same field replaces the entry, got %s", second)
 	}
 
-	var stored string
-	if err := prophet.NewRaw(`SELECT profile::text FROM claimius.samna_user WHERE user_id = ? AND app_id = ?`, user, app.ID).Scan(ctx, &stored); err != nil {
-		t.Fatalf("read the user row: %v", err)
+	own, err := psdb.PutProfile(ctx, user, map[string]*shared.ProfileItem{
+		"bio": {Schema: shared.ProfileSchema{Type: "string", Format: "multiline"}, Value: json.RawMessage(`"Builds access control"`)},
+	})
+	if err != nil {
+		t.Fatalf("own keys: %v", err)
 	}
-	if readProfile(t, json.RawMessage(stored))[app.Slug]["certificate"].Label != "Certificate" {
-		t.Fatalf("the item sits on the user's row, got %s", stored)
+	if got := readProfile(t, own); string(got["bio"].Value) != `"Builds access control"` || string(got[key].Value) != `"https://example.no/certificate/2"` {
+		t.Fatalf("the user's own keys sit beside the app's entries, got %s", own)
+	}
+	if _, err := psdb.PutProfile(ctx, user, map[string]*shared.ProfileItem{key: {Schema: schema, Value: json.RawMessage(`"x"`)}}); !errors.Is(err, shared.ErrBadProfileItem) {
+		t.Fatalf("the user cannot write an app's key, got %v", err)
+	}
+	if _, err := psdb.PutProfile(ctx, user, map[string]*shared.ProfileItem{"bio": {Schema: shared.ProfileSchema{Title: "no type"}, Value: json.RawMessage(`"x"`)}}); !errors.Is(err, shared.ErrBadProfileItem) {
+		t.Fatalf("a schema without a type is refused, got %v", err)
+	}
+	cleared, err := psdb.PutProfile(ctx, user, map[string]*shared.ProfileItem{"bio": nil})
+	if err != nil {
+		t.Fatalf("remove own key: %v", err)
+	}
+	if _, present := readProfile(t, cleared)["bio"]; present {
+		t.Fatalf("a null entry removes the key, got %s", cleared)
 	}
 
 	bad := item
@@ -101,19 +117,18 @@ func TestProfileItemsAreWrittenByTheDiscipleIntoTheUsersProfile(t *testing.T) {
 	if _, err := disciple.PutProfileItem(ctx, reader, bad); !errors.Is(err, shared.ErrBadProfileItem) {
 		t.Fatalf("a malformed field is refused, got %v", err)
 	}
-	insecure := item
-	plain := "http://example.no"
-	insecure.Link = &plain
-	if _, err := disciple.PutProfileItem(ctx, reader, insecure); !errors.Is(err, shared.ErrBadProfileItem) {
-		t.Fatalf("a link that is not https is refused, got %v", err)
+	noSchema := item
+	noSchema.Schema = shared.ProfileSchema{}
+	if _, err := disciple.PutProfileItem(ctx, reader, noSchema); !errors.Is(err, shared.ErrBadProfileItem) {
+		t.Fatalf("a schema that is not an object is refused, got %v", err)
 	}
 	if _, err := disciple.PutProfileItem(ctx, &shared.AccessClaim{UserID: stranger, Access: shared.ACCESS_READ}, item); !errors.Is(err, shared.ErrNoAccess) {
-		t.Fatalf("only the user the item is for may write it, got %v", err)
+		t.Fatalf("only the user the entry is for may write it, got %v", err)
 	}
 	outsider := item
 	outsider.UserID = stranger
 	if _, err := disciple.PutProfileItem(ctx, &shared.AccessClaim{UserID: stranger, Access: shared.ACCESS_READ}, outsider); !errors.Is(err, shared.ErrNotFound) {
-		t.Fatalf("a user with no row in the app gets no item, got %v", err)
+		t.Fatalf("a user with no row in the app gets no entry, got %v", err)
 	}
 
 	field := "certificate"
@@ -121,7 +136,7 @@ func TestProfileItemsAreWrittenByTheDiscipleIntoTheUsersProfile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("delete: %v", err)
 	}
-	if _, present := readProfile(t, after)[app.Slug]; present {
-		t.Fatalf("the app's object goes with its last field, got %s", after)
+	if _, present := readProfile(t, after)[key]; present {
+		t.Fatalf("the app's entry is gone, got %s", after)
 	}
 }

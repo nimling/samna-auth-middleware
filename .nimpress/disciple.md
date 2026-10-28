@@ -117,7 +117,7 @@ The service's own tables never leave the disciple. The prophet stores the `claim
 
 ## Public profile items
 
-A disciple writes data of its own into the public profile of the user it belongs to: one field with a label, a value, an optional https link and an index, stored by the prophet under the app's slug in `samna_user.profile` on every row of the user, and carried back by the sync. A disciple reads the profile from its own `samna_user` row; nothing is fetched.
+A disciple writes data of its own into the public profile of the user it belongs to: one entry per field, `{"schema": {...}, "value": ...}`, the schema telling the renderer what the value is and how to show it, stored by the prophet under `<app slug>.<field>` in `samna_user.profile` on every row of the user, and carried back by the sync. A disciple reads the profile from its own `samna_user` row; nothing is fetched.
 
 ```go
 ac, err := sdb.Instance().MutationAccess(ctx, userID, certificateID, "public.certificate", sdb.ACCESS_READ)
@@ -125,17 +125,19 @@ if err != nil {
 	return err
 }
 profile, err := sdb.Instance().PutProfileItem(ctx, ac, sdb.BodySamProfileItem{
-	UserID: userID, Field: "certificate", Label: "Certificate", Value: certificate.Name, Link: &certificateURL,
+	UserID: userID, Field: "certificate",
+	Schema: json.RawMessage(`{"type": "string", "title": "Certificate", "format": "uri", "component": "link"}`),
+	Value:  json.RawMessage(`"https://example.no/certificates/` + certificateID.String() + `"`),
 })
 ```
 
-1. `PutProfileItem(ctx, ac, item)` writes the field, or replaces the item of the same field, and answers the whole profile. `DeleteProfileItem(ctx, ac, key)` withdraws one field, or the app's whole object when `Field` is nil, and answers the profile.
+1. `PutProfileItem(ctx, ac, item)` writes the entry, or replaces the entry of the same field, and answers the whole profile. `DeleteProfileItem(ctx, ac, key)` withdraws one field, or every entry of the app when `Field` is nil, and answers the profile.
 2. The `AccessClaim` is the user's own, with READ: a disciple writes only for the user it shows, never for another user. Anything else is `ErrNoAccess`.
-3. The shape is checked on both sides, `ErrBadProfileItem` and `400`: `field` is lower case letters, digits, `_` and `.`, starting with a letter, at most 64 characters; `label` 1 to 80 characters; `value` 1 to 500; `link` an https url of at most 2048.
+3. The shape is checked on both sides, `ErrBadProfileItem` and `400`: `field` is lower case letters, digits, `_` and `.`, starting with a letter; `schema` an object with a `type`; `value` JSON. `shared.ProfileSchema` is a typed struct: a key outside its vocabulary is refused at decode, `Validate` checks the type, format, component, pattern, items, properties and default, `Check` the value against it, on both roles.
 4. The user needs a live row in the app on the prophet, else `ErrNotFound` and `404`.
 5. A disciple without a prophet answers `ErrNoProphet`.
-6. Over the wire: `PUT /sam/profile` with the item, `DELETE /sam/profile` with `user_id` and an optional `field`, each answering the profile.
-7. Whether the page shows an app's items is the user's choice on Samna Auth.
+6. Over the wire: `PUT /sam/profile` with `user_id`, `field`, `schema` and `value`, `DELETE /sam/profile` with `user_id` and an optional `field`, each answering the profile.
+7. Whether the page shows an app's entries is the user's choice on Samna Auth.
 
 ## The pull loop
 

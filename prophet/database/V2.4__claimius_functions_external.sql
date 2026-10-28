@@ -6548,6 +6548,24 @@ $$ LANGUAGE sql STABLE;
 
 COMMENT ON FUNCTION claimius.get_sync_events(UUID, BIGINT, BIGINT, INTEGER, BOOLEAN) IS 'Delta feed of source rows for one app after a (txid, seq) cursor, in (txid, seq) order. Serves only events whose transaction is below the xmin of the reading snapshot, or the reader''s own. Every event written later carries a txid at or above that xmin, so the cursor never passes an event still to be served, whatever order sequences commit in. Organization and location events are written once per linked app, so other apps'' shared hierarchy rows never leave the prophet. Handover events travel to peer prophets only, and an organization''s private_seed, the key of its apps'' app_secret, and a user_identity''s data, the claims of the token it was issued from, travel to peer prophets only.';
 
+CREATE OR REPLACE FUNCTION claimius._check_profile_item(
+    p_key  TEXT,
+    p_item JSONB
+) RETURNS VOID AS $$
+BEGIN
+    IF p_key !~ '^[a-z][a-z0-9_.]{0,127}$' THEN
+        RAISE EXCEPTION 'profile entry refused: key % must be lower case letters, digits, _ and . starting with a letter', p_key USING ERRCODE = '22023';
+    END IF;
+    IF p_item IS NULL OR jsonb_typeof(p_item) <> 'object'
+       OR jsonb_typeof(p_item -> 'schema') <> 'object' OR NOT (p_item -> 'schema') ? 'type'
+       OR NOT p_item ? 'value' THEN
+        RAISE EXCEPTION 'profile entry refused: % must be an object with a schema object carrying a type, and a value', p_key USING ERRCODE = '22023';
+    END IF;
+END;
+$$ LANGUAGE plpgsql IMMUTABLE;
+
+COMMENT ON FUNCTION claimius._check_profile_item(TEXT, JSONB) IS 'The shape of one profile entry: a key of lower case letters, digits, _ and ., and an object {"schema": {"type": ...}, "value": ...}. The schema vocabulary and the value against the schema are checked in Go by shared.ProfileSchema on both roles before the call. Raises 22023 otherwise.';
+
 CREATE OR REPLACE FUNCTION claimius.upsert_profile_item(
     p_app_id  UUID,
     p_user_id UUID,
@@ -6556,6 +6574,7 @@ CREATE OR REPLACE FUNCTION claimius.upsert_profile_item(
 ) RETURNS JSONB AS $$
 DECLARE
     v_slug    TEXT;
+    v_key     TEXT;
     v_profile JSONB;
 BEGIN
     SELECT a.slug INTO v_slug FROM claimius.samna_app a WHERE a.id = p_app_id AND a.sa_deleted_at IS NULL;
@@ -6565,12 +6584,11 @@ BEGIN
     ) THEN
         RAISE EXCEPTION 'user % has no live row in app %', p_user_id, p_app_id USING ERRCODE = 'P0404';
     END IF;
-    IF p_field !~ '^[a-z][a-z0-9_.]{0,63}$' OR p_item IS NULL OR jsonb_typeof(p_item) <> 'object' THEN
-        RAISE EXCEPTION 'profile item refused: field % must be lower case letters, digits, _ and . starting with a letter, and the item an object', p_field USING ERRCODE = '22023';
-    END IF;
+    v_key := v_slug || '.' || p_field;
+    PERFORM claimius._check_profile_item(v_key, p_item);
 
     UPDATE claimius.samna_user
-       SET profile = jsonb_set(profile, ARRAY[v_slug], coalesce(profile -> v_slug, '{}'::jsonb) || jsonb_build_object(p_field, p_item), TRUE),
+       SET profile = profile || jsonb_build_object(v_key, p_item),
            sa_updated_at = now()
      WHERE user_id = p_user_id AND sa_deleted_at IS NULL;
 
@@ -6579,7 +6597,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius.upsert_profile_item(UUID, UUID, TEXT, JSONB) IS 'Writes one item of an app into the public profile of one of its users, under the app''s slug and the field, {"<app_slug>": {"<field>": <item>}}, on every row of the user so the sync carries it to every app that sees the user. The item is any object; label, value, link and index are the keys a profile page reads. Returns the profile. P0404 when the user has no live row in the app, 22023 for a malformed field or a non object item.';
+COMMENT ON FUNCTION claimius.upsert_profile_item(UUID, UUID, TEXT, JSONB) IS 'Writes one entry of an app into the public profile of one of its users under the key <app slug>.<field>, {"schema": {...}, "value": ...}, on every row of the user so the sync carries it to every app that sees the user. The key namespace keeps an app to its own entries. Returns the profile. P0404 when the user has no live row in the app, 22023 for a malformed field or item.';
 
 CREATE OR REPLACE FUNCTION claimius.delete_profile_item(
     p_app_id  UUID,
@@ -6598,21 +6616,59 @@ BEGIN
         RAISE EXCEPTION 'user % has no live row in app %', p_user_id, p_app_id USING ERRCODE = 'P0404';
     END IF;
 
-    UPDATE claimius.samna_user
+    UPDATE claimius.samna_user u
        SET profile = CASE
-                         WHEN profile -> v_slug IS NULL THEN profile
-                         WHEN p_field IS NULL OR (profile -> v_slug) - p_field = '{}'::jsonb THEN profile - v_slug
-                         ELSE jsonb_set(profile, ARRAY[v_slug], (profile -> v_slug) - p_field)
+                         WHEN p_field IS NULL THEN (SELECT coalesce(jsonb_object_agg(e.key, e.value), '{}'::jsonb)
+                                                    FROM jsonb_each(u.profile) e
+                                                    WHERE e.key NOT LIKE v_slug || '.%')
+                         ELSE u.profile - (v_slug || '.' || p_field)
                      END,
            sa_updated_at = now()
-     WHERE user_id = p_user_id AND sa_deleted_at IS NULL;
+     WHERE u.user_id = p_user_id AND u.sa_deleted_at IS NULL;
 
     SELECT u.profile INTO v_profile FROM claimius.samna_user u WHERE u.user_id = p_user_id AND u.app_id = p_app_id;
     RETURN v_profile;
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius.delete_profile_item(UUID, UUID, TEXT) IS 'Removes one field of the app from the public profile of one of its users, or the app''s whole object when no field is given, on every row of the user. Returns the profile. P0404 when the user has no live row in the app.';
+COMMENT ON FUNCTION claimius.delete_profile_item(UUID, UUID, TEXT) IS 'Removes one entry of the app, <app slug>.<field>, from the public profile of one of its users, or every entry of the app when no field is given, on every row of the user. Returns the profile. P0404 when the user has no live row in the app.';
+
+CREATE OR REPLACE FUNCTION claimius.update_profile(
+    p_user_id UUID,
+    p_items   JSONB
+) RETURNS JSONB AS $$
+DECLARE
+    v_entry   RECORD;
+    v_profile JSONB;
+BEGIN
+    IF p_items IS NULL OR jsonb_typeof(p_items) <> 'object' THEN
+        RAISE EXCEPTION 'profile refused: the items must be an object of key to entry' USING ERRCODE = '22023';
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM claimius.samna_user u WHERE u.user_id = p_user_id AND u.sa_deleted_at IS NULL) THEN
+        RAISE EXCEPTION 'user % has no live row', p_user_id USING ERRCODE = 'P0404';
+    END IF;
+    FOR v_entry IN SELECT e.key, e.value FROM jsonb_each(p_items) e LOOP
+        IF position('.' IN v_entry.key) > 0 THEN
+            RAISE EXCEPTION 'profile refused: % is an app''s key, written through upsert_profile_item', v_entry.key USING ERRCODE = '22023';
+        END IF;
+        IF jsonb_typeof(v_entry.value) <> 'null' THEN
+            PERFORM claimius._check_profile_item(v_entry.key, v_entry.value);
+        END IF;
+    END LOOP;
+
+    UPDATE claimius.samna_user u
+       SET profile = (SELECT coalesce(jsonb_object_agg(e.key, e.value), '{}'::jsonb)
+                      FROM jsonb_each(u.profile || p_items) e
+                      WHERE jsonb_typeof(e.value) <> 'null'),
+           sa_updated_at = now()
+     WHERE u.user_id = p_user_id AND u.sa_deleted_at IS NULL;
+
+    SELECT u.profile INTO v_profile FROM claimius.samna_user u WHERE u.user_id = p_user_id AND u.sa_deleted_at IS NULL ORDER BY u.sa_updated_at DESC LIMIT 1;
+    RETURN v_profile;
+END;
+$$ LANGUAGE plpgsql;
+
+COMMENT ON FUNCTION claimius.update_profile(UUID, JSONB) IS 'Writes the user''s own entries of the public profile, keys without a dot, each {"schema": {...}, "value": ...}; a key whose entry is null is removed. Written on every row of the user so the sync carries it. The prophet calls it for the signed in user; an app''s entries are written through upsert_profile_item. Returns the profile. P0404 for a user with no live row, 22023 for a malformed entry.';
 
 CREATE OR REPLACE FUNCTION claimius.get_secret_value(
     p_user_id    UUID,

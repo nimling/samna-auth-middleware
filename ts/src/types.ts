@@ -101,6 +101,35 @@ export interface BodyCode {
   path?: string
 }
 
+export interface ProfileSchema {
+  type: 'string' | 'number' | 'integer' | 'boolean' | 'array' | 'object' | 'null'
+  title?: string
+  description?: string
+  format?: 'multiline' | 'markdown' | 'uri' | 'email' | 'phone' | 'date' | 'time' | 'datetime' | 'image' | 'color' | 'country' | 'currency' | 'percent' | 'duration'
+  component?: 'text' | 'textarea' | 'markdown' | 'link' | 'badge' | 'chip' | 'tag' | 'list' | 'image' | 'avatar' | 'progress' | 'rating' | 'table' | 'keyvalue' | 'date' | 'boolean' | 'number' | 'card' | 'hidden'
+  icon?: string
+  order?: number
+  hidden?: boolean
+  enum?: unknown[]
+  default?: unknown
+  minimum?: number
+  maximum?: number
+  minLength?: number
+  maxLength?: number
+  pattern?: string
+  link?: string
+  items?: ProfileSchema
+  properties?: Record<string, ProfileSchema>
+  required?: string[]
+}
+
+export interface ProfileItem {
+  schema: ProfileSchema
+  value: unknown
+}
+
+export type Profile = Record<string, ProfileItem>
+
 export interface BodyClaimGuest {
   mode: GuestMode
 }

@@ -1,5 +1,5 @@
 BEGIN;
-SELECT plan(9);
+SELECT plan(10);
 
 SELECT has_column('claimius', 'samna_user', 'profile', 'samna_user carries profile');
 SELECT col_type_is('claimius', 'samna_user', 'profile', 'jsonb', 'profile is jsonb');
@@ -28,34 +28,34 @@ BEGIN
     );
 END $$;
 
-UPDATE claimius.samna_user
-SET profile = '{"bio": "Builds access control"}'::jsonb
-WHERE user_id = 'a0000000-0000-4000-8000-000000000e01';
-
 SELECT is(
-    claimius.upsert_profile_item((SELECT id FROM boot WHERE key = 'app'), 'a0000000-0000-4000-8000-000000000e01', 'certificate', '{"label": "Certificate", "value": "Solutions Architect", "index": 0}'::jsonb),
-    '{"bio": "Builds access control", "sqltest_profile": {"certificate": {"label": "Certificate", "value": "Solutions Architect", "index": 0}}}'::jsonb,
-    'an app writes an item under its slug and the field, beside the user''s own keys'
+    claimius.update_profile('a0000000-0000-4000-8000-000000000e01', '{"bio": {"schema": {"type": "string", "format": "multiline"}, "value": "Builds access control"}}'::jsonb),
+    '{"bio": {"schema": {"type": "string", "format": "multiline"}, "value": "Builds access control"}}'::jsonb,
+    'the user writes an own entry with its schema and value'
 );
 
 SELECT is(
-    (SELECT profile -> 'sqltest_profile' -> 'certificate' ->> 'value' FROM claimius.samna_user WHERE user_id = 'a0000000-0000-4000-8000-000000000e01'),
-    'Solutions Architect',
-    'the item sits on the user row'
+    claimius.upsert_profile_item((SELECT id FROM boot WHERE key = 'app'), 'a0000000-0000-4000-8000-000000000e01', 'certificate', '{"schema": {"type": "string", "title": "Certificate"}, "value": "Solutions Architect"}'::jsonb),
+    '{"bio": {"schema": {"type": "string", "format": "multiline"}, "value": "Builds access control"}, "sqltest_profile.certificate": {"schema": {"type": "string", "title": "Certificate"}, "value": "Solutions Architect"}}'::jsonb,
+    'an app writes an entry under its slug and the field, beside the user''s own keys'
 );
 
 SELECT throws_ok($$
-    SELECT claimius.upsert_profile_item((SELECT id FROM boot WHERE key = 'app'), 'a0000000-0000-4000-8000-000000000e01', 'Name!', '{"label": "x", "value": "y"}'::jsonb)
-$$, '22023', NULL, 'a malformed field is refused');
+    SELECT claimius.update_profile('a0000000-0000-4000-8000-000000000e01', '{"sqltest_profile.certificate": {"schema": {"type": "string"}, "value": "x"}}'::jsonb)
+$$, '22023', NULL, 'the user cannot write an app''s key');
 
 SELECT throws_ok($$
-    SELECT claimius.upsert_profile_item((SELECT id FROM boot WHERE key = 'app'), gen_random_uuid(), 'certificate', '{"label": "x", "value": "y"}'::jsonb)
-$$, 'P0404', NULL, 'a user with no live row in the app gets no item');
+    SELECT claimius.upsert_profile_item((SELECT id FROM boot WHERE key = 'app'), 'a0000000-0000-4000-8000-000000000e01', 'certificate', '{"value": "no schema"}'::jsonb)
+$$, '22023', NULL, 'an entry without a schema is refused');
+
+SELECT throws_ok($$
+    SELECT claimius.upsert_profile_item((SELECT id FROM boot WHERE key = 'app'), gen_random_uuid(), 'certificate', '{"schema": {"type": "string"}, "value": "x"}'::jsonb)
+$$, 'P0404', NULL, 'a user with no live row in the app gets no entry');
 
 SELECT is(
-    claimius.delete_profile_item((SELECT id FROM boot WHERE key = 'app'), 'a0000000-0000-4000-8000-000000000e01', 'certificate'),
-    '{"bio": "Builds access control"}'::jsonb,
-    'removing the last field removes the app''s object and leaves the user''s own keys'
+    claimius.delete_profile_item((SELECT id FROM boot WHERE key = 'app'), 'a0000000-0000-4000-8000-000000000e01'),
+    '{"bio": {"schema": {"type": "string", "format": "multiline"}, "value": "Builds access control"}}'::jsonb,
+    'removing the app''s entries leaves the user''s own keys'
 );
 
 SELECT * FROM finish();
