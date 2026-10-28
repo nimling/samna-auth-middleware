@@ -68,6 +68,7 @@ func getPageSeqs(t *testing.T, rec *httptest.ResponseRecorder) []client.SyncCurs
 
 func TestSyncSeqAnswersAWriteWithTheAppsSequence(t *testing.T) {
 	appID, claimID := getGrantFixture(t)
+	grantID, _ := getGrantRows(t, claimID)
 
 	e := echo.New()
 	req := httptest.NewRequest(http.MethodPatch, "/", strings.NewReader(`{"reason":"sequenced"}`))
@@ -75,7 +76,7 @@ func TestSyncSeqAnswersAWriteWithTheAppsSequence(t *testing.T) {
 	rec := httptest.NewRecorder()
 	ctx := e.NewContext(req, rec)
 	ctx.SetParamNames("claim_id", "id")
-	ctx.SetParamValues(claimID.String(), grantUser.String())
+	ctx.SetParamValues(claimID.String(), grantID.String())
 	ctx.Set("app_id", appID)
 	ctx.Set("request_id", uuid.New())
 	if err := smw.SyncSeq(pecho.PatchClaimUser)(ctx); err != nil || rec.Code != http.StatusOK {

@@ -98,24 +98,38 @@ func getPatchStatus(handler echo.HandlerFunc, appID, claimID, id uuid.UUID, body
 	return rec.Code, rec.Body.String()
 }
 
+func getGrantRows(t *testing.T, claimID uuid.UUID) (grantID, bindingID uuid.UUID) {
+	t.Helper()
+	ctx := context.Background()
+	if err := psdb.Instance().NewRaw(`SELECT id FROM claimius.user_claim WHERE claim_id = ? AND user_id = ? AND sa_deleted_at IS NULL`, claimID, grantUser).Scan(ctx, &grantID); err != nil {
+		t.Fatalf("grant row: %v", err)
+	}
+	if err := psdb.Instance().NewRaw(`SELECT id FROM claimius.claim_object WHERE claim_id = ? AND object_id = ? AND sa_deleted_at IS NULL`, claimID, grantObject).Scan(ctx, &bindingID); err != nil {
+		t.Fatalf("binding row: %v", err)
+	}
+	return grantID, bindingID
+}
+
 func TestPatchGrant_AddressesTheGrantTheWayTheDiscipleSendsIt(t *testing.T) {
 	appID, claimID := getGrantFixture(t)
+	grantID, bindingID := getGrantRows(t, claimID)
 
-	if code, body := getPatchStatus(pecho.PatchClaimUser, appID, claimID, grantUser, `{"reason":"renewed"}`); code != http.StatusOK || !strings.Contains(body, "renewed") {
-		t.Fatalf("user grant patch by claim and user id: want 200 with the new reason, got %d %s", code, body)
+	if code, body := getPatchStatus(pecho.PatchClaimUser, appID, claimID, grantID, `{"reason":"renewed"}`); code != http.StatusOK || !strings.Contains(body, "renewed") {
+		t.Fatalf("user grant patch by claim and grant id: want 200 with the new reason, got %d %s", code, body)
 	}
-	if code, body := getPatchStatus(pecho.PatchClaimObject, appID, claimID, grantObject, `{"reason":"narrowed"}`); code != http.StatusOK || !strings.Contains(body, "narrowed") {
-		t.Fatalf("object grant patch by claim and object id: want 200 with the new reason, got %d %s", code, body)
+	if code, body := getPatchStatus(pecho.PatchClaimObject, appID, claimID, bindingID, `{"reason":"narrowed"}`); code != http.StatusOK || !strings.Contains(body, "narrowed") {
+		t.Fatalf("object grant patch by claim and binding id: want 200 with the new reason, got %d %s", code, body)
 	}
 }
 
 func TestPatchGrant_RefusesAnotherAppsGrant(t *testing.T) {
 	_, claimID := getGrantFixture(t)
+	grantID, bindingID := getGrantRows(t, claimID)
 
-	if code, _ := getPatchStatus(pecho.PatchClaimUser, otherApp, claimID, grantUser, `{"reason":"stolen"}`); code != http.StatusNotFound {
+	if code, _ := getPatchStatus(pecho.PatchClaimUser, otherApp, claimID, grantID, `{"reason":"stolen"}`); code != http.StatusNotFound {
 		t.Fatalf("user grant patch from another app: want 404, got %d", code)
 	}
-	if code, _ := getPatchStatus(pecho.PatchClaimObject, otherApp, claimID, grantObject, `{"reason":"stolen"}`); code != http.StatusNotFound {
+	if code, _ := getPatchStatus(pecho.PatchClaimObject, otherApp, claimID, bindingID, `{"reason":"stolen"}`); code != http.StatusNotFound {
 		t.Fatalf("object grant patch from another app: want 404, got %d", code)
 	}
 }

@@ -1019,11 +1019,11 @@ func recordIDFromModel(d *DB, model any) uuid.UUID {
 		}
 	case "claimius.user_claim":
 		if m, ok := embeddedPtr(model, reflect.TypeOf(UserClaim{})).(*UserClaim); ok {
-			return m.UserID
+			return m.ID
 		}
 	case "claimius.claim_object":
-		if m, ok := embeddedPtr(model, reflect.TypeOf(ClaimObject{})).(*ClaimObject); ok && m.ObjectID != nil {
-			return *m.ObjectID
+		if m, ok := embeddedPtr(model, reflect.TypeOf(ClaimObject{})).(*ClaimObject); ok {
+			return m.ID
 		}
 	case "claimius.claim":
 		if m, ok := embeddedPtr(model, reflect.TypeOf(Claim{})).(*Claim); ok {

@@ -225,7 +225,7 @@ func PatchClaimObject(ctx echo.Context) error {
 	if err != nil {
 		return respond.Error(ctx, http.StatusBadRequest, "claim_id must be a uuid")
 	}
-	objectID, err := uuid.Parse(ctx.Param("id"))
+	bindingID, err := uuid.Parse(ctx.Param("id"))
 	if err != nil {
 		return respond.Error(ctx, http.StatusBadRequest, "id must be a uuid")
 	}
@@ -234,7 +234,7 @@ func PatchClaimObject(ctx echo.Context) error {
 		TableExpr("claimius.claim_object").
 		Column("id").
 		Where("claim_id = ?", claimID).
-		Where("object_id = ?", objectID).
+		Where("id = ?", bindingID).
 		Where("app_id = ?", appID).
 		Where("sa_deleted_at IS NULL").
 		OrderExpr("sa_created_at DESC").
@@ -287,7 +287,7 @@ func DeleteClaimObject(ctx echo.Context) error {
 	if err != nil {
 		return respond.Error(ctx, http.StatusBadRequest, "Malformed request")
 	}
-	objectID, err := uuid.Parse(ctx.Param("id"))
+	bindingID, err := uuid.Parse(ctx.Param("id"))
 	if err != nil {
 		return respond.Error(ctx, http.StatusBadRequest, "Malformed request")
 	}
@@ -295,7 +295,7 @@ func DeleteClaimObject(ctx echo.Context) error {
 	res, err := sdb.Instance().NewUpdate().
 		Model(&claimObject).
 		Where("claim_id = ?", claimID).
-		Where("object_id = ?", objectID).
+		Where("id = ?", bindingID).
 		Where("app_id = ?", appID).
 		Where("sa_deleted_at IS NULL").
 		Set("sa_deleted_at = NOW()").
@@ -349,7 +349,7 @@ func PatchClaimUser(ctx echo.Context) error {
 	if err != nil {
 		return respond.Error(ctx, http.StatusBadRequest, "claim_id must be a uuid")
 	}
-	userID, err := uuid.Parse(ctx.Param("id"))
+	grantID, err := uuid.Parse(ctx.Param("id"))
 	if err != nil {
 		return respond.Error(ctx, http.StatusBadRequest, "id must be a uuid")
 	}
@@ -358,7 +358,7 @@ func PatchClaimUser(ctx echo.Context) error {
 		TableExpr("claimius.user_claim").
 		Column("id").
 		Where("claim_id = ?", claimID).
-		Where("user_id = ?", userID).
+		Where("id = ?", grantID).
 		Where("app_id = ?", appID).
 		Where("sa_deleted_at IS NULL").
 		OrderExpr("sa_created_at DESC").
@@ -403,7 +403,7 @@ func DeleteClaimUser(ctx echo.Context) error {
 	if err != nil {
 		return respond.Error(ctx, http.StatusBadRequest, "Malformed request")
 	}
-	userID, err := uuid.Parse(ctx.Param("id"))
+	grantID, err := uuid.Parse(ctx.Param("id"))
 	if err != nil {
 		return respond.Error(ctx, http.StatusBadRequest, "Malformed request")
 	}
@@ -411,7 +411,7 @@ func DeleteClaimUser(ctx echo.Context) error {
 	res, err := sdb.Instance().NewUpdate().
 		Model(&userClaim).
 		Where("claim_id = ?", claimID).
-		Where("user_id = ?", userID).
+		Where("id = ?", grantID).
 		Where("app_id = ?", appID).
 		Where("sa_deleted_at IS NULL").
 		Set("sa_deleted_at = NOW()").

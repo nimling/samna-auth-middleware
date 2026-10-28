@@ -5,6 +5,7 @@ package shared_test
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
@@ -658,5 +659,55 @@ func TestCreatorReachesADraftWithNoOwnerByID(t *testing.T) {
 	}
 	if _, err := db.MutationAccess(ctx, userB, draft, "public.gotest_draft", sdb.ACCESS_READ); !errors.Is(err, sdb.ErrNoAccess) {
 		t.Fatalf("another user is refused the draft, got %v", err)
+	}
+}
+
+func TestLocalDeleteRemovesAScopeBindingAndAGrantByTheirOwnID(t *testing.T) {
+	db := database(t)
+	ctx := context.Background()
+	ac, err := db.MutationAccess(ctx, userA, orgRoot, sdb.OBJECT_TYPE_ORGANIZATION, sdb.ACCESS_WRITE)
+	if err != nil {
+		t.Fatalf("access: %v", err)
+	}
+	claim, err := db.CreateClaim(ctx, nil, ac, sdb.CreateClaimParams{Name: "Local scoped pages", Access: sdb.ACCESS_READ})
+	if err != nil {
+		t.Fatalf("create claim: %v", err)
+	}
+	scope := json.RawMessage(`{"page": {"hr": {"_access": "READ"}}}`)
+	binding, err := claim.AssignObject(&sdb.ClaimObject{Scope: &scope, Inherits: true, OwnerID: orgRoot, RootID: orgRoot})
+	if err != nil {
+		t.Fatalf("scope binding: %v", err)
+	}
+	if binding.ObjectID != nil {
+		t.Fatalf("a scope binding carries no object, got %v", *binding.ObjectID)
+	}
+	grants, err := claim.AssignUser(userB)
+	if err != nil || len(grants) != 1 {
+		t.Fatalf("grant: %+v %v", grants, err)
+	}
+
+	live := func(table string, id uuid.UUID) bool {
+		t.Helper()
+		var found bool
+		if err := db.NewRaw(`SELECT EXISTS (SELECT 1 FROM claimius.`+table+` WHERE id = ? AND sa_deleted_at IS NULL)`, id).Scan(ctx, &found); err != nil {
+			t.Fatalf("%s: %v", table, err)
+		}
+		return found
+	}
+
+	if _, err := db.NewDelete().Model(&sdb.ClaimObject{ID: binding.ID, ClaimID: claim.ID}).Access(ac).Exec(ctx); err != nil {
+		t.Fatalf("delete scope binding: %v", err)
+	}
+	if live("claim_object", binding.ID) {
+		t.Fatal("a scope binding deleted by its id is gone")
+	}
+	if _, err := db.NewDelete().Model(&sdb.UserClaim{ID: grants[0].ID, ClaimID: claim.ID}).Access(ac).Exec(ctx); err != nil {
+		t.Fatalf("delete grant: %v", err)
+	}
+	if live("user_claim", grants[0].ID) {
+		t.Fatal("a grant deleted by its id is gone")
+	}
+	if _, err := db.NewDelete().Model(&sdb.ClaimObject{ID: uuid.New(), ClaimID: claim.ID}).Access(ac).Exec(ctx); !errors.Is(err, sdb.ErrNotFound) {
+		t.Fatalf("a binding id the claim does not hold answers ErrNotFound, got %v", err)
 	}
 }

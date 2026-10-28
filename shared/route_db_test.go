@@ -237,7 +237,7 @@ func TestARefusedWriteIsErrNoAccessRoutedOrLocal(t *testing.T) {
 	defer missing.Close()
 	t.Setenv("SAUTH_ENDPOINT", missing.URL)
 	objectID := uuid.New()
-	if _, err := db.NewDelete().Model(&sdb.ClaimObject{ClaimID: uuid.New(), ObjectID: &objectID}).Access(ac).Exec(ctx); !errors.Is(err, sdb.ErrNotFound) {
+	if _, err := db.NewDelete().Model(&sdb.ClaimObject{ID: objectID, ClaimID: uuid.New()}).Access(ac).Exec(ctx); !errors.Is(err, sdb.ErrNotFound) {
 		t.Fatalf("a delete the prophet answers 404 must be ErrNotFound, got %v", err)
 	}
 
