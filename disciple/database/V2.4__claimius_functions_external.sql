@@ -56,6 +56,23 @@ BEGIN
         END IF;
     END IF;
 
+    IF v_pair.direct_grant AND (v_pair.sa_access & p_required_access) = p_required_access THEN
+        RETURN QUERY
+            SELECT
+                claimius.composite_id(p_user_id::TEXT, p_object_type, p_object_id::TEXT),
+                NULL::UUID,
+                NULL::UUID,
+                'direct'::TEXT,
+                v_pair.sa_access & v_cap,
+                v_pair.scope,
+                v_pair.sa_owner_id,
+                v_pair.sa_owner_root_id,
+                v_pair.sa_location_id,
+                TRUE,
+                0;
+        RETURN;
+    END IF;
+
     IF NOT v_pair.settled THEN
         RETURN QUERY
             SELECT d.user_object_id, d.user_claim_id, d.claim_id, d.claim_name, d.sa_access & v_cap, d.scope, d.sa_owner_id, d.sa_root_id, d.sa_location_id, d.direct_grant, d.level FROM claimius.get_direct_access(p_user_id, p_object_id, p_object_type, p_required_access, FALSE, FALSE) d;
@@ -63,7 +80,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = claimius, pg_temp;
 
-COMMENT ON FUNCTION claimius.get_access(UUID, UUID, TEXT, INTEGER) IS 'Strongest active claim based grant for one (user, object) whose mask covers p_required_access: the user row, then the point settle and the read of the pair with its object_info row in one pass through _settle_pair, and the grant chosen from the pair. Only when the settle was skipped on a lock and the pair gives nothing does it walk the ancestors through get_direct_access. user_claim_id is the actor token for follow-on writes. sa_root_id is the owning organization root, suitable for FK to claimius.organization on follow-on claim and claim_object writes. A user of type guest is capped at READ: a requirement past READ answers nothing and the returned mask keeps the READ bit only.';
+COMMENT ON FUNCTION claimius.get_access(UUID, UUID, TEXT, INTEGER) IS 'Strongest active claim based grant for one (user, object) whose mask covers p_required_access: the user row, then the point settle and the read of the pair with its object_info row in one pass through _settle_pair, and the grant chosen from the pair, or, when no claim grant covers p_required_access, the creator''s direct_grant with no user_claim_id and claim_name direct. Only when the settle was skipped on a lock and the pair gives nothing does it walk the ancestors through get_direct_access. user_claim_id is the actor token for follow-on writes. sa_root_id is the owning organization root, suitable for FK to claimius.organization on follow-on claim and claim_object writes. A user of type guest is capped at READ: a requirement past READ answers nothing and the returned mask keeps the READ bit only.';
 
 DROP FUNCTION IF EXISTS claimius.get_direct_access(UUID, UUID, UUID, TEXT);
 
