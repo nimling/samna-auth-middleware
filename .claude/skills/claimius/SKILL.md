@@ -33,13 +33,13 @@ Claimius has been broken several times by confident changes that bypassed the ar
 ## Reads
 
 1. Never read a claimius table directly for access; use the functions. Full signatures: `references/functions.md` Reads.
-2. `get_access(user_id, app_id, object_id, object_type, min_level)` is the access check: the strongest surviving grant or no row. Gate with `SELECT EXISTS (SELECT 1 FROM claimius.get_access(...))`.
+2. `get_access(user_id, app_id, object_id, object_type, required_access)` is the access check: the strongest surviving grant or no row. Gate with `SELECT EXISTS (SELECT 1 FROM claimius.get_access(...))`.
 3. `get_direct_access(user_id, app_id, object_id, object_type, required?, raise?)` walks the owner, location and parenthood chains for the closest, highest privilege `user_claim` when `get_access` returns nothing. Same row shape.
-4. `get_objects(user_id, app_id, object_type, min_level, after?, limit?)` lists what a user sees in `object_id` order, with the name, description, link, owner and location from `object_info`, the mask, the scope and the actor token; pass the last id as `after` for the next page. Already filtered for active claims, windows and soft delete.
+4. `get_objects(user_id, app_id, object_type, required_access, after?, limit?)` lists what a user sees in `object_id` order, with the name, description, link, owner and location from `object_info`, the mask, the scope and the actor token; pass the last id as `after` for the next page. Already filtered for active claims, windows and soft delete.
 5. `get_organizations`, `get_locations`, `get_secrets` are typed pages with `after` and `limit`; `get_users`, `get_claims`, `get_audit` typed lists.
-6. `get_scope_access(user_id, app_id, jsonpath, min_level)` reads grants with no object, such as page access.
+6. `get_scope_access(user_id, app_id, jsonpath, required_access)` reads grants with no object, such as page access.
 7. `get_owner_graph` and `get_claim_graph` take optional `start_id` and `depth`, and a window `width`, `sort` (`name` or `usage`) and `next_id` bounding the children of each type per parent. Rows are `object_id`, `object_type` schema qualified, `label`, `parent_id`, and `data jsonb` with `access`, `level` and the per type fields with `sa_` stripped.
-8. `search(user_id, app_id, query, types, min_level, limit, offset)` is full text search; the prophet set adds a 12 argument overload with id, owner subtree and parent filters and a `total_count` column. The prophet set also carries `get_ancestors` and `get_descendants(p_object_type, p_object_id)` and the graph link builders `get_graph_links_owner` and `get_graph_links_claim`: `references/functions.md` Reads 14 to 16.
+8. `search(user_id, app_id, query, types, required_access, limit, offset)` is full text search; the prophet set adds a 12 argument overload with id, owner subtree and parent filters and a `total_count` column. The prophet set also carries `get_ancestors` and `get_descendants(p_object_type, p_object_id)` and the graph link builders `get_graph_links_owner` and `get_graph_links_claim`: `references/functions.md` Reads 14 to 16.
 9. On a disciple, the lookups by id with no reader and no access filter, soft deleted rows included, for what an admitted row names: `get_users`, `get_organizations`, `get_locations`, `get_claims`, `get_grants`, `get_bindings` with each binding's `effective_access`, `get_user_identities`, `get_object_types`, and `get_object_usage` for the reader's `used_count`. Also `get_relations(user_id, ids)`, `get_audit(user_id, required, limit, offset, ids)` and `get_descendants(object_id)` for a subtree of unknown type.
 10. A bun select or belongs-to join on `samna_user`, `organization`, `location`, `claim` or `user_claim` reads the views `claimius.get_users`, `get_organizations`, `get_locations`, `get_claims`, `get_grants`; the shared models carry `select:claimius.get_<name>`, so bun reads the view and writes the table. Never join the table itself.
 11. `shared.UserWhere` filters a `samna_user` listing: a user always reads its own row and `type = 'system'` users stay hidden from everyone else.
@@ -51,7 +51,7 @@ Claimius has been broken several times by confident changes that bypassed the ar
 
 ```sql
 SELECT user_claim_id INTO :acting_user_claim
-FROM claimius.get_access($user_id, $app_id, $object_id, $object_type, $required_level);
+FROM claimius.get_access($user_id, $app_id, $object_id, $object_type, $required_access);
 
 UPDATE public.recipe SET name = :new_name, sa_created_by = :acting_user_claim
 WHERE id = :recipe_id;
@@ -110,7 +110,7 @@ WHERE id = :recipe_id;
 
 1. A deny is a claim whose `sa_access` carries `0x10` plus the bits to subtract, stored as given, bound with `insert_claim_object` and granted with `insert_user_claim`.
 2. Bound on the object it subtracts from every grant there; reached through a tree it subtracts only from grants that also arrive through a tree, so a grant bound or composed on the object survives an inherited deny. A field scoped deny subtracts from those fields only. The remainder is closed under implication: denying read drops execute, write and owner.
-3. Levels come first: a deny with `level` above 0 subtracts from every grant below its level whatever the class; a grant above it keeps its bits; at the same level the classes decide; level 0 everywhere is the old rule. Binding or granting a claim above level 0 needs an actor holding that level on the object, or write on the claim and no lower deny of its own lifted. `level` is precedence, never access.
+3. Levels come first: when a grant and a deny meet at different levels the higher level wins, whatever the class; at the same level the classes decide; level 0 everywhere is the old rule. Binding a claim whose level is not 0 needs an actor holding that level on the object; granting it or increasing its level needs write on the claim and must not lift a deny the actor faces. Only `claim.level` compares; the `level` of an organization or location is tree depth. `level` is never an access mask.
 4. The settle stores the result; reads never filter denies.
 5. A path is `tree_type, cascaded_from`: `direct` on the object, `ownership`, `location` or `parenthood` through an ancestor. A composed grant also carries `composed_from` and takes the class of the binding it came through.
 6. `user_object.grants` carries one entry per contributing claim; `sa_access` is the OR of the surviving grants after denies. Each grant carries `claim & expand(coalesce(binding, claim))`, a composed one the bits both link and target binding carry. The row stays while some grant or `direct_grant` survives.

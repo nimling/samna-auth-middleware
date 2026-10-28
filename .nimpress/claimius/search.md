@@ -9,7 +9,7 @@ lastUpdated: true
 
 # Search
 
-Search answers one question: which objects the reader may see that match the query and sit inside the scope, best first. It is the intersection of three sets, each already stored and indexed by claimius, and it reads from the smallest of them.
+Search answers one question: which objects the reader may see that match the query and sit inside the scope, best first. It is the intersection of three sets, each already stored and indexed by claimius, and it reads from the scope when the scope is no larger than the reader's reach, else from the query's postings when the planner expects fewer matches than the reach, else from the reach.
 
 ```
 result = top_p( A ∩ S ∩ Q , rank )
@@ -41,7 +41,7 @@ On a disciple the app argument is absent. `limit` defaults to 20 and `offset` to
 | Path | Chosen when | Reads |
 |---|---|---|
 | The scope's closure rows, each probed for the reader's pair | an owner subtree or a parent is set and `_search_scope_smaller` counts the scope's rows no more than the reader's pairs | `S` closure entries and one pair probe and one `object_info` row per object in scope |
-| The query's postings, each probed for the reader's pair | a query without scope, when `_search_text_smaller` estimates the matches fewer than the reader's pairs | `M_q` postings and one pair probe per match |
+| The query's postings, each probed for the reader's pair | a query, when the scope path was not taken and `_search_text_smaller` estimates the matches fewer than the reader's pairs; the scope and parent filters then apply to each match | `M_q` postings and one pair probe per match |
 | The reader's range | otherwise | two entries per pair of the requested types |
 
 4. `_search_scope_smaller` counts both sets up to `k`, from 64 and four times larger each round, and stops at the first round where one falls short, so the choice costs at most a constant times the smaller set. `_search_text_smaller` compares the planner's estimates of the two and reads no index entry.
@@ -118,7 +118,7 @@ entries     = s + c + min(2V, 3S, 2M_q) + n f
 comparisons = n log₂ n
 ```
 
-with `s` the settle of the reader's share, `c` the choice, at most `4 · min(V, S)` for the scope and nothing for the text, and `f` the closure probe of a source row or of a candidate the scope did not drive. `total_count` needs every candidate ranked, so page `o / p` costs the same `n` as the first.
+with `s` the settle of the reader's share, `c` the choice, and `f` the closure probe of a source row or of a candidate the scope did not drive. The three terms are tried in that order, not by size: `3S` is taken when `S ≤ V`, else `2M_q` when the planner expects `M_q < V`, else `2V`; the scope is never weighed against the postings. The choice `c` is the counting of both sets by rounds of 64, 256, 1,024 and so on until one falls short, at most about `8 · min(V, S)` entries over the rounds and never fewer than 64 per set, and nothing for the text, which reads the planner's estimate. `total_count` needs every candidate ranked, so page `o / p` costs the same `n` as the first.
 
 The floor of any search is `p`, the rows it returns. Reading the reach and filtering it, `2V` whatever the scope, grows with what the reader can reach; this search grows with the smaller of the three sets.
 
@@ -144,7 +144,7 @@ A tuple store derives the reader's set on every read, so it pays at least `V` be
 
 ### The bench
 
-The disciple bench: one reader holding 16,052 organizations through one claim on a root, a branch of 51 organizations under it, index entries counted by `pg_stat_get_xact_tuples_returned` over the claimius indexes:
+The disciple bench, measured on 2026-10-07 before every word matched as a prefix, so the two text rows count whole word postings: one reader holding 16,052 organizations through one claim on a root, a branch of 51 organizations under it, index entries counted by `pg_stat_get_xact_tuples_returned` over the claimius indexes:
 
 | Step | Rows | Fresh tables | Analyzed tables |
 |---|---|---|---|

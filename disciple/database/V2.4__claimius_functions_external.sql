@@ -846,7 +846,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = claimius, pg_temp;
 
-COMMENT ON FUNCTION claimius.get_claims(UUID, INTEGER) IS 'The claims the user holds through a live user_claim, at the required level. The claims the user can see or manage, held or reached through a cascade, are get_objects of type claimius.claim.';
+COMMENT ON FUNCTION claimius.get_claims(UUID, INTEGER) IS 'The claims the user holds through a live user_claim, whose mask covers the required access. The claims the user can see or manage, held or reached through a cascade, are get_objects of type claimius.claim.';
 
 CREATE OR REPLACE FUNCTION claimius.get_claims(
     p_user_id       UUID,
@@ -942,7 +942,7 @@ CREATE OR REPLACE FUNCTION claimius.get_scope_access(
     ORDER BY s.held_claim_id, s.binding_id
 $$;
 
-COMMENT ON FUNCTION claimius.get_scope_access(UUID, JSONPATH, INTEGER) IS 'Object-less bindings of the user''s live grants whose scope matches a jsonpath, one row per binding, each mask the claim mask narrowed by the binding mask, less the bits of the deny bindings matching the same path at the level of its claim or above, closed under implication.';
+COMMENT ON FUNCTION claimius.get_scope_access(UUID, JSONPATH, INTEGER) IS 'Object-less bindings of the user''s live grants whose scope matches a jsonpath, one row per binding, each mask the claim mask narrowed by the binding mask, less the bits of the deny bindings matching the same path whose level is not lower than the claim's, closed under implication.';
 
 CREATE OR REPLACE FUNCTION claimius.get_access(
     p_user_id          UUID,
@@ -2527,7 +2527,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = claimius, pg_temp;
 
-COMMENT ON FUNCTION claimius.search(UUID, TEXT, TEXT[], INTEGER, UUID[], UUID[], UUID[], UUID, TEXT, INTEGER, INTEGER) IS 'Search over accessible objects. An empty query lists every accessible object in scope, ranked by the reader''s decayed usage. A query matches object_info.search_vector and the registered search sources, ranked by text match or source score plus decayed usage. With an owner subtree or a parent the read starts from the smaller of the reader''s pairs and the scope''s closure rows, chosen by _search_scope_smaller, and a query without one from the query''s postings in idx_object_info_search when _search_text_smaller estimates them fewer than the reader''s pairs. Includes claimius.claim rows the user holds, skipped when any subtree or parent filter is set. total_count carries the un-capped match count. Rows tie-break on object_id so offset pagination tiles without overlap or skip.';
+COMMENT ON FUNCTION claimius.search(UUID, TEXT, TEXT[], INTEGER, UUID[], UUID[], UUID[], UUID, TEXT, INTEGER, INTEGER) IS 'Search over accessible objects. An empty query lists every accessible object in scope, ranked by the reader''s decayed usage. A query matches object_info.search_vector and the registered search sources, ranked by text match or source score plus decayed usage. With an owner subtree or a parent the read starts from the smaller of the reader''s pairs and the scope''s closure rows, chosen by _search_scope_smaller, and a query without one from the query''s postings in idx_object_info_search when _search_text_smaller estimates them fewer than the reader''s pairs. Includes claimius.claim rows the user holds, skipped when an owner subtree, or a parent whose type has a tree, is set. total_count carries the un-capped match count. Rows tie-break on object_id so offset pagination tiles without overlap or skip.';
 
 GRANT EXECUTE ON FUNCTION claimius.search(UUID, TEXT, TEXT[], INTEGER, INTEGER, INTEGER) TO claimius_disciple_client, claimius_writer, claimius_admin, claimius_reader;
 GRANT EXECUTE ON FUNCTION claimius.search(UUID, TEXT, TEXT[], INTEGER, UUID[], UUID[], UUID[], UUID, TEXT, INTEGER, INTEGER) TO claimius_disciple_client, claimius_writer, claimius_admin, claimius_reader;

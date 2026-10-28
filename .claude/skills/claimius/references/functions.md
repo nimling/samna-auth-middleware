@@ -50,7 +50,7 @@ Write functions return one jsonb keyed by table: `(v -> 'claim' ->> 'id')::uuid`
 1. Owner 1, write 2, read 4, execute 8, deny 16, member 32; `ACCESS_ALL` is 15. Go constants: `shared.ClaimAccess` in `samna_auth_middleware/shared/models.go`.
 2. On a grant, owner implies write, read, execute; write implies read and execute; execute implies read. Member stands alone.
 3. A binding narrows its claim: `claim & expand(coalesce(binding, claim))`. NULL binding means the claim mask.
-4. `claim.level` is precedence, not access. A deny subtracts from every grant below its level; level 0 everywhere behaves as before levels existed.
+4. `claim.level` decides between a grant and a deny, not access: the higher level wins, equal levels fall to the classes; level 0 everywhere behaves as before levels existed.
 5. Deny: a claim with bit 16 and the bits to subtract. Bound on the object it subtracts from every grant; through a tree only from tree grants. The remainder is closed under implication. Reads never filter denies.
 6. Cascade needs `inherits` on both the claim and the binding.
 

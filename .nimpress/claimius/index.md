@@ -66,13 +66,13 @@ Claimius owns and validates its own types. It reads no more of the implementing 
 
 3. Every object sits in up to three trees: ownership through `sa_owner_id`, location through `sa_location_id` and a location's `sa_parent_id`, and parenthood through a registered table's own `sa_parent_id`. A location is a node of the location tree under its parent and of the ownership tree under its owner. A binding whose claim and binding both inherit reaches every descendant of the bound object in every tree.
 
-4. A binding whose object is another claim composes the two claims: a holder of the first gains the bindings of the second, with only the bits both sides carry, and a deny on either side makes the result a deny. Composition is followed one hop and never further.
+4. A binding whose object is another claim composes the two claims: a holder of the first gains the bindings of the second. At equal levels the composed grant carries only the bits both sides carry, and a deny on either side makes the result a deny; at different levels it takes the higher level and that claim's mask decides. Composition is followed one hop and never further.
 
 5. Holding a claim, or holding a claim bound on it, lets the holder read the claim itself.
 
 6. The creator of a row, the user behind its `sa_created_by` grant, holds full access to it less what a direct deny takes away. A row whose owning organization is held but out of the ownership closure, soft deleted or under a soft deleted organization, keeps nothing by creation. A stamp that names a user directly reads as that user; see [Users](./users.md#one-identity-one-row-per-app).
 
-7. A deny is a claim with bit 16 set; its other bits name what it subtracts. A deny bound directly on the object subtracts from every grant on it; a deny reached through a tree subtracts only from grants reached through a tree. Denies may be scoped to fields. What is left is closed under implication. See [Denials](./denials.md) and [Redaction](./redaction.md).
+7. A deny is a claim with bit 16 set; its other bits name what it subtracts. Every claim carries a level, 0 unless set, and when a grant and a deny meet at different levels the higher level wins: a deny of a higher level subtracts from the grant whatever its class, a deny of a lower level does not touch it. At equal levels the classes decide: a deny bound directly on the object subtracts from every grant on it; a deny reached through a tree subtracts only from grants reached through a tree. Denies may be scoped to fields. What is left is closed under implication. See [Denials](./denials.md) and [Redaction](./redaction.md).
 
 8. The access of a user on an object is the OR of what every surviving grant and the creator rule leave. A nonzero result is one row of `user_object` holding the mask, the surviving derivations in `grants`, the field masks in `scope`, and `direct_grant` for the creator. A grant outside its time window is not counted by the reads; see [Claims](./claims.md#time-windows).
 
@@ -196,9 +196,10 @@ The creator of a row is the user behind its `sa_created_by`, a grant, or the use
 A derivation whose mask carries 16 is a deny of its bits `e & 15`; every other derivation is a grant of `e & 15`. `_apply_denies` settles them, with `X_d` the OR of the unscoped denies of class `direct`, `X_o` the OR of the other unscoped denies, and `F_d(f)`, `F_o(f)` the same for denies scoped to field `f`:
 
 ```
-D_g(f) = X_d | F_d(f) | [k_g ≠ direct] (X_o | F_o(f))           the bits denied to grant g of class k_g on field f
+H_g    = ⋁ { e_d & 15 : deny d, l_d > l_g }                      the bits of every deny of a level higher than the grant's
+D_g(f) = H_g | X_d | F_d(f) | [k_g ≠ direct] (X_o | F_o(f))     the bits denied to grant g of class k_g on field f, X and F over the denies of the same level
 a_g(f) = close(e_g & 15 & ~D_g(f))                              f ∈ s_g for a scoped grant, every field otherwise
-a_c(f) = close(15 & ~(X_d | F_d(f)))                            the creator, when made(u, x)
+a_c(f) = close(15 & ~(H_c | X_d | F_d(f)))                      the creator, a direct grant at level 0, when made(u, x)
 A(u, x) = ⋁_g ⋁_f a_g(f)  |  ⋁_f a_c(f)
 M(u, x, f) = ⋁ over grants and the creator of a(f)               the field mask of redaction
 ```

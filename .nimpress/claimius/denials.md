@@ -22,20 +22,30 @@ A deny is a derivation whose effective mask carries the deny bit, 16: a claim st
 
 ## Levels
 
-Every claim carries `level`, an integer from 0 that defaults to 0, and every derivation carries the level of its claim; a composed derivation carries the higher level of A and B. Levels order the denies before the classes do:
+Every claim carries `level`, an integer from 0 that defaults to 0, and every derivation carries the level of its claim; a composed derivation carries the higher of the two levels. The one rule: when a grant and a deny meet at different levels, the higher level wins; at equal levels the classes decide.
 
-1. A deny subtracts from every grant below its level, whatever the classes of the two. A level 9 deny bound on an organization removes a level 0 grant bound directly on an object below it.
-2. At the same level the classes decide, as below.
-3. A deny below a grant's level does not touch it.
+1. A deny whose level is higher than a grant's subtracts from it whatever the classes of the two, a grant bound on the object itself included. A level 9 deny bound on an organization removes a level 0 grant bound directly on an object below it.
+2. A grant whose level is higher than a deny's keeps its bits; the deny does not touch it.
+3. At the same level the classes decide, as below.
 
-With every claim at level 0 the classes alone decide. `_apply_denies`, the ancestor walk in `get_direct_access` and `get_scope_access` apply the same rule. A derivation's level is stored in `grants` only when it is above 0.
+What each meeting leaves, for a grant `g` and a deny `d` naming bits `B`:
+
+| Levels | `d` bound on the object | `d` inherited from an ancestor |
+|---|---|---|
+| `level(d) > level(g)` | `g` loses `B` | `g` loses `B` |
+| `level(d) = level(g)` | `g` loses `B` | `g` loses `B` only when `g` is inherited too; a grant bound on the object stands |
+| `level(d) < level(g)` | `g` keeps its bits | `g` keeps its bits |
+
+The bits a deny names are owner 1, write 2, read 4 and execute 8; it never names member 32, which no deny subtracts. After the subtraction each grant is closed under implication: losing read takes execute, write and owner with it; losing execute takes write and owner; losing write takes owner; losing owner takes nothing else. A grant left with no bit is dropped. Two grants on one pair add up, so a bit one grant loses stays while another grant at any level still carries it after its own denies.
+
+Only `claim.level` takes part. The `level` of an organization or a location is its depth in its tree and compares with nothing. With every claim at level 0 the classes alone decide, exactly as before levels existed. `_apply_denies`, the ancestor walk in `get_direct_access` and `get_scope_access` apply the same rule. A derivation's level is stored in `grants` only when it is not 0.
 
 ## How a deny subtracts
 
 `_apply_denies` settles the derivations of one pair:
 
-1. A deny of class `direct` subtracts its bits from every grant at or below its level, of every class, and from the creator.
-2. A deny of any other class subtracts its bits, at its own level, from the grants of classes other than `direct` only. A grant bound on the object itself survives it. That is how one object is shared out of a denied subtree.
+1. A deny of class `direct` subtracts its bits from every grant whose level is not higher than its own, of every class, and from the creator.
+2. A deny of any other class subtracts its bits from every grant of a lower level whatever its class, and at its own level from the grants of classes other than `direct` only. A grant bound on the object itself at the same level survives it. That is how one object is shared out of a denied subtree.
 3. What remains of each grant is closed under implication, and a grant left with no bit is dropped.
 
 Closing keeps a bit only when every bit it implies survives: read needs nothing, execute needs read, write needs read and execute, owner needs all three. So denying write to a holder of 15 leaves read and execute, because owner implies write and cannot stand without it; denying read drops the grant, because every other bit implies read; denying execute leaves read. A check tests the bits it needs against a mask where no write stands without read.
@@ -50,7 +60,7 @@ A deny binding with a `scope` subtracts from the fields the scope names only, an
 
 ## What a creator keeps
 
-The creator of a row, the user behind its `sa_created_by`, holds owner, write, read and execute on it through `direct_grant`, less what the denies reaching the creator subtract, ORed with whatever grants survive. This holds while the row's owning organization is in the ownership closure or not held; a row owned under a soft deleted organization keeps nothing by creation. The creator counts as a `direct` grant at level 0: a deny bound on the object itself reaches it, and an inherited deny reaches it only when the deny's level is above 0. So with levels unset an author always reaches what they made inside a denied subtree.
+The creator of a row, the user behind its `sa_created_by`, holds owner, write, read and execute on it through `direct_grant`, less what the denies reaching the creator subtract, ORed with whatever grants survive. This holds while the row's owning organization is in the ownership closure or not held; a row owned under a soft deleted organization keeps nothing by creation. The creator counts as a `direct` grant at level 0: a deny bound on the object itself reaches it, and an inherited deny reaches it only when the deny's level is higher than 0. So with levels unset an author always reaches what they made inside a denied subtree.
 
 ## Why a deny is a claim
 
@@ -98,12 +108,15 @@ Composition behaves by the position of the binding. A Vendor claim, 4, linked to
 With the symbols of [the model](./index.md#the-access-of-a-pair), for one pair at one level, `X_d` the bits of the `direct` denies and `X_o` those of the tree denies:
 
 ```
-D_g     = X_d | [k_g ≠ direct] X_o
+H_g     = ⋁ { e_d & 15 : deny d, l_d > l_g }                       the bits of every deny of a higher level, whatever its class
+X_d(g)  = ⋁ { e_d & 15 : deny d of class direct, l_d = l_g }
+X_o(g)  = ⋁ { e_d & 15 : deny d of a tree class, l_d = l_g }
+D_g     = H_g | X_d(g) | [k_g ≠ direct] X_o(g)
 a_g     = close(e_g & ~16 & ~D_g)
-A(u, x) = ⋁_g a_g | [made(u, x)] close(15 & ~X_d)
+A(u, x) = ⋁_g a_g | [made(u, x)] close(15 & ~(H_c | X_d(c)))
 ```
 
-Across levels, a deny of level `l_d` counts in `D_g` for a grant of level `l_g` when `l_d > l_g`, whatever its class, and by the rule above when `l_d = l_g`. The creator is a grant of class `direct` at level 0.
+The first term is the level rule: a deny of level `l_d` counts for a grant of level `l_g` whenever `l_d > l_g`, whatever its class; at `l_d = l_g` the classes decide; at `l_d < l_g` it does not count. The creator `c` is a grant of class `direct` at level 0, so every deny of a level higher than 0 reaches it and at level 0 only a direct deny does.
 
 `close` on the low four bits: read stays when present; execute needs read; write needs read and execute; owner needs write, read and execute. Bits above 15 pass unchanged. So `close(13) = 12`, `close(11) = 0`, `close(7) = 4`. A grant claim's mask is closed under `X` when stored, `eff` of two such masks is closed too, and `close` keeps it so after a subtraction.
 
