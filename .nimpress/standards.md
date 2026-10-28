@@ -270,7 +270,7 @@ This page covers the Go module `github.com/nimling/samna-auth-middleware/v2` onl
 
 1. Status: `partial`
 
-2. Evidence: secrets AES GCM at rest (`shared/cipher.go:12`, `shared/secret.go:62`), the app and organization keys that seal them wrapped under `SAUTH_MASTER_KEY` (`pkg/encryption/master.go:32`, opened at `pkg/encryption/crypto.go:54`), a secret opened only in process for a user with read through `get_secret_value` (`shared/secret.go:141`, `disciple/database/V2.4__claimius_functions_external.sql:1005`) with the app's own seed from `GET /sam/app` held in memory (`prophet/echo/app.go:11`, `shared/main.go:133`), client secrets bcrypt (`smw/client_auth.go:171`), Postgres `sslmode` defaults to `verify-full` (`shared/main.go:189`).
+2. Evidence: secrets AES GCM at rest (`shared/cipher.go:12`, `shared/secret.go:64`), the app and organization keys that seal them wrapped under `SAUTH_MASTER_KEY` (`pkg/encryption/master.go:32`, opened at `pkg/encryption/crypto.go:54`), a secret opened only in process for a user with read through `get_secret_value` (`shared/secret.go:143`, `disciple/database/V2.4__claimius_functions_external.sql:1030`, on the prophet with the seed of the secret's own app through `prophet/database/V5.24__claimius_secret_value.sql:1`) with the app's own seed from `GET /sam/app` held in memory (`prophet/echo/app.go:11`, `shared/main.go:133`), client secrets bcrypt (`smw/client_auth.go:171`), Postgres `sslmode` defaults to `verify-full` (`shared/main.go:189`).
 
 3. Gap: field level masks are not applied in Go.
 
@@ -318,7 +318,7 @@ Status: `partial`.
 
 15. GDPR Art. 17, right to erasure: `partial`. `DeleteUser` soft deletes `samna_user` and `user_identity` (`shared/user.go:248`, `shared/user.go:271`, `prophet/echo/user.go:307`); no hard delete or anonymisation of the row, `user_field`, `user_relation`, `notification`, `audit.sa_created_by`, `consent` or `analytics_*`, and no hook asks the host to erase its own rows.
 
-16. GDPR Art. 32, security of processing: `partial`. TLS to Postgres by default (`shared/main.go:189`), secrets AES GCM (`shared/cipher.go:12`, `utils/aes.go:12`) under keys wrapped at rest (`pkg/encryption/master.go:32`) and opened only for a reader (`shared/secret.go:141`), DPoP and mTLS binding (`smw/token.go:59`).
+16. GDPR Art. 32, security of processing: `partial`. TLS to Postgres by default (`shared/main.go:189`), secrets AES GCM (`shared/cipher.go:12`, `utils/aes.go:12`) under keys wrapped at rest (`pkg/encryption/master.go:32`) and opened only for a reader (`shared/secret.go:143`), DPoP and mTLS binding (`smw/token.go:59`).
 
 ## Personal data
 

@@ -1,5 +1,5 @@
 BEGIN;
-SELECT plan(6);
+SELECT plan(10);
 
 CREATE TEMP TABLE crew (key TEXT PRIMARY KEY, id UUID);
 
@@ -85,6 +85,20 @@ SELECT is_empty($$
     SELECT 1 FROM claimius.get_secrets('a0000000-0000-4000-8000-000000000e55', (SELECT id FROM claimius.samna_app WHERE slug = 'sqltest_vault'), 4)
     WHERE key = 'api_key'
 $$, 'a user without a claim reaching the secret does not list it');
+
+SELECT is((SELECT value FROM claimius.get_secret_value('a0000000-0000-4000-8000-000000000e51', (SELECT id FROM claimius.samna_secret WHERE key = 'api_key'))),
+    'cipher', 'the creator reads the stored ciphertext through the claim insert_secret bound');
+
+SELECT is((SELECT app_id FROM claimius.get_secret_value('a0000000-0000-4000-8000-000000000e52', (SELECT id FROM claimius.samna_secret WHERE key = 'api_key'))),
+    (SELECT id FROM claimius.samna_app WHERE slug = 'sqltest_vault'), 'a holder of a claim reaching the secret reads it with the app that wrote it');
+
+SELECT is_empty($$
+    SELECT 1 FROM claimius.get_secret_value('a0000000-0000-4000-8000-000000000e55', (SELECT id FROM claimius.samna_secret WHERE key = 'api_key'))
+$$, 'a user without a claim reaching the secret reads nothing');
+
+SELECT is_empty($$
+    SELECT 1 FROM claimius.get_secret_value('a0000000-0000-4000-8000-000000000e51', gen_random_uuid())
+$$, 'an unknown secret reads nothing');
 
 SELECT throws_ok($$
     SELECT claimius.insert_secret((SELECT id FROM claimius.samna_app WHERE slug = 'sqltest_vault'), 'stray', 'cipher', NULL, '10000000-0000-4000-8000-000000000e51', gen_random_uuid())

@@ -4,10 +4,12 @@ import (
 	"context"
 	"database/sql"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/nimling/samna-auth-middleware/v2/pkg/encryption"
 	"github.com/uptrace/bun"
 )
 
@@ -144,6 +146,32 @@ func (s *SamnaSecret) Resolve(ctx context.Context, d *DB, userID uuid.UUID) (str
 	}
 	if s.ExpiresAt != nil && !s.ExpiresAt.After(time.Now()) {
 		return "", ErrSecretExpired
+	}
+	if d.Prophet {
+		var value string
+		var app SamnaApp
+		if err := d.NewRaw("SELECT value, app_id FROM claimius.get_secret_value(?, ?)", userID, s.ID).Scan(ctx, &value, &app.ID); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return "", ErrNoAccess
+			}
+			return "", fmt.Errorf("get_secret_value: %w", err)
+		}
+		if err := d.NewSelect().Model(&app).Column("private_seed").WherePK().Where("sa_deleted_at IS NULL").Scan(ctx); err != nil {
+			return "", fmt.Errorf("secret app: %w", err)
+		}
+		seedHex, err := encryption.UnwrapAtRest(app.PrivateSeed)
+		if err != nil {
+			return "", fmt.Errorf("open app seed: %w", err)
+		}
+		seed, err := hex.DecodeString(seedHex)
+		if err != nil {
+			return "", err
+		}
+		ciphertext, err := hex.DecodeString(value)
+		if err != nil {
+			return "", err
+		}
+		return aesDecrypt(ciphertext, seed)
 	}
 	var value sql.NullString
 	if err := d.NewRaw("SELECT claimius.get_secret_value(?, ?)", userID, s.ID).Scan(ctx, &value); err != nil {
