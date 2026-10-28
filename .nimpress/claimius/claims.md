@@ -19,6 +19,8 @@ Access is three rows. A `claim` says what may be done, a `user_claim` says who h
 
 A user holds at most one live grant per claim and app, enforced by `idx_user_claim_unique`.
 
+A grant and a binding live in the app of their claim. On the prophet `user_claim_app_claim_fkey` and `claim_object_app_claim_fkey` reference `claim (app_id, id)`, so a writer acting through one app that grants or binds a claim of another stamps the claim's app. Each row then travels to the app's consumers with its claim, and a disciple, which holds only its app's claims, never receives a grant or a binding whose claim it lacks; see [Sync](./sync.md).
+
 ## The access bits
 
 `sa_access` is a bitmask, tested with `(stored & required) = required`. The Go constants are `shared.ClaimAccess`.
