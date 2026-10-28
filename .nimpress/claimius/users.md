@@ -38,23 +38,17 @@ A user is who acts. A person and a machine client are both users, and both hold 
 
 ## Profile
 
-A user's profile is one read over three stored parts, all on the prophet, none derived:
+A user's profile is one `jsonb` on the user row, `samna_user.profile`, and nothing else is stored for it. The user writes its own keys on Samna Auth. An app writes under its own slug through `PUT /sam/profile`, one object per field, `{"<app_slug>": {"<field>": {"label", "value", "link", "index"}}}`, and withdraws a field or its whole object through `DELETE /sam/profile`. The write lands on every row of the user, so the sync carries the whole profile to every app that sees the user, and a disciple reads it from its own `samna_user` row. The profile image and other files are `object_asset` links of kind `profile` on the user, as any asset link.
 
-| Part | Stored in | Written by |
-|---|---|---|
-| The user's own fields: name, `bio`, `job_title`, `company`, `website`, `linkedin`, and `user_image` | The user's `samna_user` row | The user, on Samna Auth |
-| Fields an app shares for the user: one field of one object the user can read, with its label, value, link and index | `profile_item`, one row per app, user, object and field | The app, through `PUT /sam/profile` under the user's own grant with read on the object |
-| The profile image and other files | `object_asset` links of kind `profile` on the user | The user or the app, as any asset link |
-
-The public page on Samna Auth reads the user row, `get_profile_items(user)` and `get_object_assets(user)`, and shows the shared fields only when the user's profile is public and shows the `apps` field; whether a disciple shows the image is the user's choice on Samna Auth too, carried on `user_image` by the sync. Consent decisions sit beside the user in `consent`, one live decision per identity and app, and are part of the identity, not of the profile. The Go calls a disciple makes are under [Public profile items](../disciple.md#public-profile-items).
+The public page on Samna Auth reads the user row and `get_object_assets(user)`; what it shows of the apps' objects is the user's choice there. Consent decisions sit beside the user in `consent` and are part of the identity, not of the profile. The Go calls a disciple makes are under [Public profile items](../disciple.md#public-profile-items).
 
 ### Cost
 
 ```
-entries(profile) = 1 + items + assets
+entries(profile) = 1 + assets
 ```
 
-one probe of the user row, one range of `profile_item` by user and one range of `idx_object_asset_object` by user. No join of a derived set, no pair settled: the page shows what was stored, by the user or by an app under the user's own grant, and the access check on each shared field ran when the app wrote it.
+one probe of the user row and one range of `idx_object_asset_object` by user. A write by an app is one update over the user's rows, `apps(user)` of them, each a `jsonb_set` on the row, and one sync event per row. No join, no derived set, no pair settled.
 
 ## Machine clients
 

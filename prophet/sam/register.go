@@ -132,7 +132,6 @@ func RegisterEndpoints(g *echo.Group) {
 	code.DELETE("/:id", h.DeleteCode)
 
 	profile := g.Group("/profile")
-	profile.GET("", h.GetProfileItems)
 	profile.PUT("", h.PutProfileItem)
 	profile.DELETE("", h.DeleteProfileItem)
 

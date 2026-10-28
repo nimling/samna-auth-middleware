@@ -48,3 +48,8 @@ SELECT claimius._grant_disciple_roles();
 SELECT claimius._match_audit_partition_grants(i.inhrelid::REGCLASS)
 FROM pg_inherits i
 WHERE i.inhparent = 'claimius.audit'::REGCLASS;
+
+GRANT SELECT, INSERT, UPDATE, DELETE ON claimius.dpop_jti TO claimius_reader;
+
+GRANT SELECT, INSERT, UPDATE, DELETE ON claimius.dpop_jti TO claimius_disciple_client;
+

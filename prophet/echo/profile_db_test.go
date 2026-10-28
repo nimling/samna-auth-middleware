@@ -4,6 +4,7 @@ package echo_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http/httptest"
 	"testing"
@@ -17,12 +18,20 @@ import (
 	"github.com/nimling/samna-auth-middleware/v2/smw"
 )
 
-func TestProfileItemsAreFlaggedByTheDiscipleAndStoredOnTheProphet(t *testing.T) {
+func readProfile(t *testing.T, raw json.RawMessage) map[string]map[string]shared.ProfileItem {
+	t.Helper()
+	var profile map[string]map[string]shared.ProfileItem
+	if err := json.Unmarshal(raw, &profile); err != nil {
+		t.Fatalf("profile %s: %v", raw, err)
+	}
+	return profile
+}
+
+func TestProfileItemsAreWrittenByTheDiscipleIntoTheUsersProfile(t *testing.T) {
 	getGrantFixture(t)
 	ctx := context.Background()
 	prophet := psdb.Instance()
 	app := postPeerApp(t, grantUser)
-
 	user, stranger := uuid.New(), uuid.New()
 	if _, err := prophet.ExecContext(ctx, `SELECT claimius.upsert_app_user(p_user_id => ?, p_app_id => ?, p_first_name => 'Profile user')`, user, app.ID); err != nil {
 		t.Fatalf("user: %v", err)
@@ -59,65 +68,60 @@ func TestProfileItemsAreFlaggedByTheDiscipleAndStoredOnTheProphet(t *testing.T) 
 	t.Cleanup(func() { disciple.RouteToProphet = false })
 
 	reader := &shared.AccessClaim{UserID: user, Access: shared.ACCESS_READ}
-	certificate := uuid.New()
 	link := "https://example.no/certificate"
-	flag := shared.BodySamProfileItem{
-		UserID: user, ObjectType: "public.certificate", ObjectID: certificate,
-		Field: "name", Label: "Certificate", Value: "Solutions Architect", Link: &link,
-	}
+	item := shared.BodySamProfileItem{UserID: user, Field: "certificate", Label: "Certificate", Value: "Solutions Architect", Link: &link}
 
-	first, err := disciple.PutProfileItem(ctx, reader, flag)
+	first, err := disciple.PutProfileItem(ctx, reader, item)
 	if err != nil {
-		t.Fatalf("flag: %v", err)
+		t.Fatalf("put: %v", err)
 	}
-	if first.AppID != app.ID || first.AppSlug != app.Slug || first.Value != "Solutions Architect" || first.Link == nil || *first.Link != link {
-		t.Fatalf("the prophet stores the flag under the app it came from, got %+v", first)
+	if got := readProfile(t, first)[app.Slug]["certificate"]; got.Value != "Solutions Architect" || got.Link == nil || *got.Link != link {
+		t.Fatalf("the prophet stores the item under the app's slug and the field, got %s", first)
 	}
 
-	flag.Value = "Solutions Architect Professional"
-	second, err := disciple.PutProfileItem(ctx, reader, flag)
+	item.Value = "Solutions Architect Professional"
+	second, err := disciple.PutProfileItem(ctx, reader, item)
 	if err != nil {
-		t.Fatalf("reflag: %v", err)
+		t.Fatalf("put again: %v", err)
 	}
-	if second.ID != first.ID || second.Value != "Solutions Architect Professional" {
-		t.Fatalf("a second flag of the same object and field replaces the first, got %+v after %+v", second, first)
-	}
-
-	listed, err := psdb.GetProfileItems(ctx, user, nil)
-	if err != nil || len(listed) != 1 || listed[0].ID != first.ID || listed[0].AppName == "" {
-		t.Fatalf("the prophet lists the user's flags with the app name, got %+v %v", listed, err)
-	}
-	mine, err := disciple.GetProfileItems(ctx, user)
-	if err != nil || len(mine) != 1 || mine[0].ID != first.ID {
-		t.Fatalf("the disciple reads back its own flags, got %+v %v", mine, err)
+	if got := readProfile(t, second)[app.Slug]; len(got) != 1 || got["certificate"].Value != "Solutions Architect Professional" {
+		t.Fatalf("a second put of the same field replaces the item, got %s", second)
 	}
 
-	bad := flag
+	var stored string
+	if err := prophet.NewRaw(`SELECT profile::text FROM claimius.samna_user WHERE user_id = ? AND app_id = ?`, user, app.ID).Scan(ctx, &stored); err != nil {
+		t.Fatalf("read the user row: %v", err)
+	}
+	if readProfile(t, json.RawMessage(stored))[app.Slug]["certificate"].Label != "Certificate" {
+		t.Fatalf("the item sits on the user's row, got %s", stored)
+	}
+
+	bad := item
 	bad.Field = "Name!"
 	if _, err := disciple.PutProfileItem(ctx, reader, bad); !errors.Is(err, shared.ErrBadProfileItem) {
 		t.Fatalf("a malformed field is refused, got %v", err)
 	}
-	insecure := flag
+	insecure := item
 	plain := "http://example.no"
 	insecure.Link = &plain
 	if _, err := disciple.PutProfileItem(ctx, reader, insecure); !errors.Is(err, shared.ErrBadProfileItem) {
 		t.Fatalf("a link that is not https is refused, got %v", err)
 	}
-	if _, err := disciple.PutProfileItem(ctx, &shared.AccessClaim{UserID: stranger, Access: shared.ACCESS_READ}, flag); !errors.Is(err, shared.ErrNoAccess) {
-		t.Fatalf("only the user the flag is for may flag it, got %v", err)
+	if _, err := disciple.PutProfileItem(ctx, &shared.AccessClaim{UserID: stranger, Access: shared.ACCESS_READ}, item); !errors.Is(err, shared.ErrNoAccess) {
+		t.Fatalf("only the user the item is for may write it, got %v", err)
 	}
-	outsider := flag
+	outsider := item
 	outsider.UserID = stranger
 	if _, err := disciple.PutProfileItem(ctx, &shared.AccessClaim{UserID: stranger, Access: shared.ACCESS_READ}, outsider); !errors.Is(err, shared.ErrNotFound) {
-		t.Fatalf("a user with no row in the app cannot be flagged, got %v", err)
+		t.Fatalf("a user with no row in the app gets no item, got %v", err)
 	}
 
-	field := "name"
-	withdrawn, err := disciple.DeleteProfileItem(ctx, reader, shared.BodySamProfileItemKey{UserID: user, ObjectType: "public.certificate", ObjectID: certificate, Field: &field})
-	if err != nil || len(withdrawn) != 1 || withdrawn[0].ID != first.ID {
-		t.Fatalf("withdraw: %+v %v", withdrawn, err)
+	field := "certificate"
+	after, err := disciple.DeleteProfileItem(ctx, reader, shared.BodySamProfileItemKey{UserID: user, Field: &field})
+	if err != nil {
+		t.Fatalf("delete: %v", err)
 	}
-	if after, err := psdb.GetProfileItems(ctx, user, nil); err != nil || len(after) != 0 {
-		t.Fatalf("a withdrawn flag is gone from the profile, got %+v %v", after, err)
+	if _, present := readProfile(t, after)[app.Slug]; present {
+		t.Fatalf("the app's object goes with its last field, got %s", after)
 	}
 }

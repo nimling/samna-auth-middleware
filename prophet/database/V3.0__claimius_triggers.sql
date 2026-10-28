@@ -373,3 +373,4 @@ CREATE TRIGGER tg_update_timestamp BEFORE UPDATE ON claimius.notification
 DROP TRIGGER IF EXISTS tg_notify_notification ON claimius.notification;
 CREATE TRIGGER tg_notify_notification AFTER INSERT ON claimius.notification
     FOR EACH ROW EXECUTE FUNCTION claimius.notify_notification();
+

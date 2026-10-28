@@ -23,19 +23,6 @@ func respondProfileError(ctx echo.Context, err error) error {
 	return respond.Error(ctx, http.StatusInternalServerError, "Internal server error")
 }
 
-func GetProfileItems(ctx echo.Context) error {
-	appID, _ := ctx.Get("app_id").(uuid.UUID)
-	userID, err := uuid.Parse(ctx.QueryParam("user_id"))
-	if err != nil {
-		return respond.Error(ctx, http.StatusBadRequest, "user_id is required")
-	}
-	items, err := sdb.GetProfileItems(ctx.Request().Context(), userID, &appID)
-	if err != nil {
-		return respondProfileError(ctx, err)
-	}
-	return respond.JSON(ctx, http.StatusOK, items, len(items))
-}
-
 func PutProfileItem(ctx echo.Context) error {
 	appID, _ := ctx.Get("app_id").(uuid.UUID)
 	var body shared.BodySamProfileItem
@@ -45,11 +32,11 @@ func PutProfileItem(ctx echo.Context) error {
 	if err := body.Validate(); err != nil {
 		return respond.Error(ctx, http.StatusBadRequest, err.Error())
 	}
-	item, err := sdb.PutProfileItem(ctx.Request().Context(), appID, body)
+	profile, err := sdb.PutProfileItem(ctx.Request().Context(), appID, body)
 	if err != nil {
 		return respondProfileError(ctx, err)
 	}
-	return respond.JSON(ctx, http.StatusOK, item, 1)
+	return respond.JSON(ctx, http.StatusOK, profile, 1)
 }
 
 func DeleteProfileItem(ctx echo.Context) error {
@@ -61,9 +48,9 @@ func DeleteProfileItem(ctx echo.Context) error {
 	if err := body.Validate(); err != nil {
 		return respond.Error(ctx, http.StatusBadRequest, err.Error())
 	}
-	items, err := sdb.DeleteProfileItem(ctx.Request().Context(), appID, body)
+	profile, err := sdb.DeleteProfileItem(ctx.Request().Context(), appID, body)
 	if err != nil {
 		return respondProfileError(ctx, err)
 	}
-	return respond.JSON(ctx, http.StatusOK, items, len(items))
+	return respond.JSON(ctx, http.StatusOK, profile, 1)
 }

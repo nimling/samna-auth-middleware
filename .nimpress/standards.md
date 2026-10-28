@@ -302,13 +302,13 @@ Status: `partial`.
 
 7. ISO/IEC 27001:2022 A.8.15, logging: `partial`. `claimius.audit` partitioned by month (`disciple/database/V1.1__claimius_baseline.sql:802`, `:814`), written in the caller's transaction by `shared/audit.go:10`, and a month is dropped once it is past the `audit` retention (`disciple/database/V5.6__claimius_retention_age.sql:29`). `audit/audit.go:11` writes in a goroutine with three retries and drops the row on failure, and live rows carry no hash chain.
 
-8. ISO/IEC 27001:2022 A.5.33, protection of records: `missing`. `audit` is deleted by age like every other kind (`prophet/database/V5.26__claimius_retention_age.sql:34`) and `consent` has no retention row and is kept (`prophet/database/V5.26__claimius_retention_age.sql:15`); no record is exported before deletion or written to an append only store.
+8. ISO/IEC 27001:2022 A.5.33, protection of records: `missing`. `audit` is deleted by age like every other runtime table (`claimius.prune`, `prophet/database/V2.4__claimius_functions_external.sql`), and no record is exported before deletion or written to an append only store.
 
 9. ISO/IEC 27001:2022 A.8.16, monitoring: `built`. OpenTelemetry at `smw/telemetry.go:11`, uptime heartbeat at `uptime/uptime.go:42`, health route at `disciple/sam/register.go:36`.
 
 10. GDPR Art. 5(1)(c), data minimisation: `partial`. `user_identity.data` is not carried on the feed (`disciple/database/V1.1__claimius_baseline.sql:325`) and raw analytics events expire after 30 days (`analytics/analytics.go:18`, `analytics/writer.go:106`); every disciple still replicates the full `samna_user` profile, email and phone included, whether it needs them or not.
 
-11. GDPR Art. 5(1)(e), storage limitation: `partial`. Each personal runtime table of claimius but `consent` has a stated period and a daily sweep: `notification` soft deleted or closed (`prophet/database/V5.21__claimius_retention_class.sql:110`), `analytics_session`, `analytics_event`, `analytics_heat` and `analytics_capture` by age, `audit` by monthly partition (`prophet/database/V5.26__claimius_retention_age.sql:34`, `shared/retention.go:66`). `consent` is kept with no retention row (`prophet/database/V5.26__claimius_retention_age.sql:15`), and `user_activity` has no sweep.
+11. GDPR Art. 5(1)(e), storage limitation: `partial`. Each personal runtime table of claimius has a period and an hourly sweep in `claimius.prune` (`prophet/database/V2.4__claimius_functions_external.sql`): `notification` closed or soft deleted, `analytics_session`, `analytics_event`, `analytics_heat`, `analytics_capture` and `audit` by age, `consent` once revoked, the days per table or kind from the app's settings. `user_activity` has no sweep.
 
 12. GDPR Art. 25, data protection by design and by default: `partial`. Deny by default (`shared/access.go:17`), analytics behind consent (`analytics/consent.go:61`); field masks are not enforced by default in Go.
 
@@ -322,7 +322,7 @@ Status: `partial`.
 
 ## Personal data
 
-1. `claimius.samna_user` (`disciple/database/V1.1__claimius_baseline.sql:65`, `prophet/database/V1.1__claimius_baseline.sql:76`): `first_name`, `last_name`, `user_name`, `user_image`, `phone`, `email`, `external_id`, `config`, and `bio`, `job_title`, `company`, `website`, `linkedin` (`disciple/database/V5.2__claimius_user_profile.sql:1`, `prophet/database/V5.16__claimius_user_profile.sql`). Replicated to every disciple.
+1. `claimius.samna_user` (`disciple/database/V1.1__claimius_baseline.sql:65`, `prophet/database/V1.1__claimius_baseline.sql:76`): `first_name`, `last_name`, `user_name`, `user_image`, `phone`, `email`, `external_id`, `config` and `profile`. Replicated to every disciple.
 
 2. `claimius.user_identity` (`disciple/database/V1.1__claimius_baseline.sql:310`): `external_id`, `id_claim`, `data`; `data` stays on the prophet.
 
@@ -336,7 +336,7 @@ Status: `partial`.
 
 7. `claimius.notification` (`disciple/database/V1.2__claimius_notification.sql:1`): `user_id`, `title`, `description`, `link`.
 
-8. Prophet only: `claimius.session.data` (`prophet/database/V5.0__claimius_session.sql:1`); `claimius.consent` with `ip`, `user_agent`, `anonymous_id` (`prophet/database/V5.6__claimius_analytics.sql:1`); `claimius.analytics_session` with `ip`, `user_agent`, `referrer`, `language`, `timezone` (`prophet/database/V5.6__claimius_analytics.sql:31`); `claimius.analytics_event.payload` with click text and input signals (`prophet/database/V5.6__claimius_analytics.sql:63`); `claimius.analytics_capture.image`, a rendered page (`prophet/database/V5.10__claimius_analytics_capture.sql:1`).
+8. Prophet only: `claimius.session.data` (`prophet/database/V1.1__claimius_baseline.sql`); `claimius.consent` with `ip`, `user_agent`, `anonymous_id` (`prophet/database/V1.1__claimius_baseline.sql`); `claimius.analytics_session` with `ip`, `user_agent`, `referrer`, `language`, `timezone` (`prophet/database/V1.1__claimius_baseline.sql`); `claimius.analytics_event.payload` with click text and input signals (`prophet/database/V1.1__claimius_baseline.sql`); `claimius.analytics_capture.image`, a rendered page (`prophet/database/V5.10__claimius_analytics_capture.sql:1`).
 
 10. Export: no contract. The nearest are the `/me` reads at `disciple/sam/register.go:14` and `GetMe` at `shared/me.go:19`.
 
