@@ -1,7 +1,7 @@
 ---
 layout: doc
 title: Static sites
-description: The static edge mode and the nimpress adapter, for a site with no server of its own that logs in against Samna Auth and opens gated pages from the prophet.
+description: The static connection, for a site with no server of its own that logs in against Samna Auth and opens gated pages from the prophet, and the client module a nimpress build exports for it.
 tags: static, static site, nimpress, nimpressAuth, edge mode, login, session, gated pages, github pages
 gate: samna-developer
 lastUpdated: true
@@ -17,7 +17,7 @@ A site served from a static host, such as GitHub Pages, has no `/api/auth/*` of 
 |---|---|---|
 | `static` | Writes the session cookies on the prophet's own host and redirects to the page the login started from | In cookies for the prophet host, `SameSite=None; Secure`, sent with every credentialed request the site makes to the prophet |
 
-There is no handoff and no secret on the site. The login start takes `next` as the absolute URL of the page to return to; the prophet accepts it only when its origin is the origin of one of the app's redirect URIs, and otherwise returns to the origin of the first one.
+The session is never carried to the site's host and no secret sits on the site; the three shapes side by side are [Login shapes](./claimius/apps.md#login-shapes). The login start takes `next` as the absolute URL of the page to return to; the prophet accepts it only when its origin is the origin of one of the app's redirect URIs, and otherwise returns to the origin of the first one.
 
 ## Routes the site calls
 

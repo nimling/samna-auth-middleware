@@ -97,6 +97,24 @@ A disciple reads its root's Initiate apps from `GET /sam/app/initiate` and keeps
 
 The Initiate app's configuration in samna_auth decides how its frontend reaches the disciple. Its registered callback is either the disciple's own `/api/auth/callback?app=<slug>` or the frontend's host with the same path when that host routes `/api` to the disciple. `cookie_domain` and `cookie_same_site` set its session cookies: host only or a shared parent domain, and `none` when the frontend calls the disciple from another site. Every origin among its redirect URIs is allowed by `smw.GetOriginAllowed` in the disciple's CORS, and `smw.InitiateMiddleware` keeps a refresh on the same cookie settings.
 
+## Login shapes
+
+An app carries one `connection`, read once at login. It decides where the session lands once the provider has signed the user in, and it is the only thing that differs between a product service, a site behind the bff binary and a site with no server at all. There is one app model: a root app, its connection, and its Initiate apps.
+
+| `connection` | The provider callback | The session lands | Used by |
+|---|---|---|---|
+| `code` | Mints an auth code and redirects to the app's redirect URI; the app's own callback exchanges it with the app secret, server to server | In cookies the disciple writes for its own host | Every product service |
+| `bff` | Writes the session cookies itself and redirects the browser to `next` | In cookies the prophet writes for the host the request came in on | A static build or a dev server behind [sauth-bff](../bff.md), the disciple with no tables |
+| `static` | Writes the session cookies on its own host and redirects to the page the login started from | In cookies on the prophet host, read through the prophet's `/api/me/*` with credentials | A site with no server of its own, see [Static sites](../static.md) |
+
+With `bff` on another host than the prophet, the callback stores a `session_handoff` row that lives two minutes and sends the browser to the site's `<base>/session?handoff=<value>`, which the bff proxies to the prophet with the site's host forwarded, so the prophet writes the cookies for the site's domain and redeems the value once. On the same host the callback writes the cookies directly. Nothing else in the model depends on the connection: the claims, bindings, pages and the checks are the same under all three.
+
+An Initiate app, below, is a second frontend of the same root under any connection, with its own slug, callback, cookie domain and origins.
+
+### Cost
+
+A check reads nothing for the connection: it is read once at login, with the app row the login already reads. A disciple holds its root's Initiate apps in memory from one `GET /sam/app/initiate` a minute. The cross host session costs one row written and one probe to redeem it, once per login.
+
 ## Which apps a write belongs to
 
 `_app_ids_for_row(object_type, row)` scopes a row for its calc trigger:
