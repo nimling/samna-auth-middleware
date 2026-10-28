@@ -34,7 +34,7 @@ type DB struct {
 	ConnStr             string
 	Usage               *ObjectUsage
 	ColdStorage         ColdStorage
-	ColdStorageResolver ColdStorageResolver
+	ColdStore ColdStore
 	stmts               sync.Map
 	listen              *listen
 
@@ -281,7 +281,7 @@ func Connect(logger echo.Logger) (*DB, error) {
 			return nil, fmt.Errorf("cold storage: %w", err)
 		}
 		db.ColdStorage = cold
-		db.ColdStorageResolver = SharedColdStorage{Storage: cold}
+		db.ColdStore = SharedColdStorage{Storage: cold}
 	}
 
 	db.Usage = startObjectUsage(db.postObjectUsage, func(err error) { logger.Warnf("usage flush: %v", err) }, usageFlushInterval, usageFlushKeys)

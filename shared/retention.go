@@ -40,15 +40,15 @@ type ColdSink struct {
 	Prefix  string
 }
 
-type ColdStorageResolver interface {
-	Resolve(ctx context.Context, rootID uuid.UUID) (ColdSink, error)
+type ColdStore interface {
+	GetColdSink(ctx context.Context, rootID uuid.UUID) (ColdSink, error)
 }
 
 type SharedColdStorage struct {
 	Storage ColdStorage
 }
 
-func (s SharedColdStorage) Resolve(_ context.Context, _ uuid.UUID) (ColdSink, error) {
+func (s SharedColdStorage) GetColdSink(_ context.Context, _ uuid.UUID) (ColdSink, error) {
 	return ColdSink{Storage: s.Storage}, nil
 }
 
@@ -105,7 +105,7 @@ func (d *DB) DeleteExpired(ctx context.Context, kind string) (int64, error) {
 }
 
 func (d *DB) DeleteExported(ctx context.Context, kind string) (int64, error) {
-	if d.ColdStorageResolver == nil {
+	if d.ColdStore == nil {
 		return 0, ErrNoColdStorage
 	}
 	var deleted int64
@@ -146,7 +146,7 @@ func (d *DB) DeleteExported(ctx context.Context, kind string) (int64, error) {
 				} else if id, parseErr := uuid.Parse(root); parseErr != nil {
 					err = parseErr
 				} else {
-					sink, err = d.ColdStorageResolver.Resolve(ctx, id)
+					sink, err = d.ColdStore.GetColdSink(ctx, id)
 				}
 				if err == nil && sink.Storage == nil {
 					err = ErrNoColdStorage
@@ -216,7 +216,7 @@ func (d *DB) DeleteExpiredLoop(ctx context.Context) {
 		}
 		kept := make([]string, 0)
 		for _, row := range rows {
-			if row.Export != nil && d.ColdStorageResolver == nil {
+			if row.Export != nil && d.ColdStore == nil {
 				kept = append(kept, row.Kind)
 				continue
 			}

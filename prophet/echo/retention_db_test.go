@@ -207,10 +207,10 @@ func TestRetentionDeletesWhatEachKindKeepsNoLonger(t *testing.T) {
 	}
 	sink := &coldSink{objects: map[string][]byte{}}
 	db.ColdStorage = sink
-	db.ColdStorageResolver = shared.SharedColdStorage{Storage: sink}
+	db.ColdStore = shared.SharedColdStorage{Storage: sink}
 	t.Cleanup(func() {
 		db.ColdStorage = nil
-		db.ColdStorageResolver = nil
+		db.ColdStore = nil
 	})
 	deleteExported := func(kind string) {
 		t.Helper()
