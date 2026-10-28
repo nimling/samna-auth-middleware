@@ -4546,3 +4546,37 @@ COMMENT ON FUNCTION claimius.get_guest_access(TEXT, UUID) IS 'Access of a reques
 
 GRANT EXECUTE ON FUNCTION claimius.get_guest_access(TEXT, UUID)
     TO claimius_disciple_client, claimius_writer, claimius_admin, claimius_reader;
+
+CREATE OR REPLACE FUNCTION claimius.prune(p_settings JSONB)
+    RETURNS BIGINT AS $$
+DECLARE
+    v_row     RECORD;
+    v_n       BIGINT;
+    v_deleted BIGINT := 0;
+BEGIN
+    FOR v_row IN
+        SELECT t.table_name, t.column_name,
+               coalesce((p_settings ->> (t.table_name || '_days'))::INTEGER, (p_settings ->> (t.kind || '_days'))::INTEGER, t.days) AS days,
+               coalesce((p_settings ->> (t.kind || '_size_mb'))::BIGINT, (p_settings ->> 'size_mb')::BIGINT, 4096) * 1024 * 1024 AS limit_bytes
+        FROM (VALUES
+            ('audit',        'sa_created_at', 'audit',        730),
+            ('notification', 'closed_at',     'notification', 365),
+            ('notification', 'sa_deleted_at', 'notification', 365),
+            ('dpop_jti',     'expires_at',    'token',          7)
+        ) AS t (table_name, column_name, kind, days)
+    LOOP
+        CONTINUE WHEN v_row.days <= 0 OR pg_total_relation_size(('claimius.' || v_row.table_name)::REGCLASS) < v_row.limit_bytes;
+        EXECUTE format('DELETE FROM claimius.%I WHERE %I < now() - make_interval(days => $1)', v_row.table_name, v_row.column_name)
+            USING v_row.days;
+        GET DIAGNOSTICS v_n = ROW_COUNT;
+        v_deleted := v_deleted + v_n;
+    END LOOP;
+    IF to_regproc('public.prune') IS NOT NULL THEN
+        EXECUTE 'SELECT public.prune($1)' INTO v_n USING p_settings;
+        v_deleted := v_deleted + coalesce(v_n, 0);
+    END IF;
+    RETURN v_deleted;
+END;
+$$ LANGUAGE plpgsql;
+
+COMMENT ON FUNCTION claimius.prune(JSONB) IS 'Retention. Every runtime table belongs to a kind, audit, notification or token. p_settings sets days per table (<table>_days) or per kind (<kind>_days), and a size per kind (<kind>_size_mb) or for all (size_mb, 4096). A table under its size is left alone; over it, every row whose time column is older than its days is deleted, and 0 days leaves a table alone. A host with runtime tables of its own defines public.prune(JSONB) of the same shape, and it runs after.';

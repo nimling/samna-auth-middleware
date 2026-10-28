@@ -5594,3 +5594,49 @@ END;
 $$ LANGUAGE plpgsql;
 
 COMMENT ON FUNCTION claimius.redeem_code(UUID, TEXT, UUID) IS 'Redeems an invite code for a signed in user in one transaction, in the app or in any app when p_app_id is NULL: locks the code, takes one use only when it is live and not used up, and grants its claim to the user under the creator''s grant, the code window as the grant window, with an audit row naming the code id, never the value. A user already holding the claim gets the grant back and spends no use. Raises P0404 for no invite code and P0403 for one revoked, outside its window or used up. Returns code and user_claim.';
+
+CREATE OR REPLACE FUNCTION claimius.prune(p_settings JSONB)
+    RETURNS BIGINT AS $$
+DECLARE
+    v_row     RECORD;
+    v_n       BIGINT;
+    v_deleted BIGINT := 0;
+BEGIN
+    FOR v_row IN
+        SELECT t.table_name, t.column_name,
+               coalesce((p_settings ->> (t.table_name || '_days'))::INTEGER, (p_settings ->> (t.kind || '_days'))::INTEGER, t.days) AS days,
+               coalesce((p_settings ->> (t.kind || '_size_mb'))::BIGINT, (p_settings ->> 'size_mb')::BIGINT, 4096) * 1024 * 1024 AS limit_bytes
+        FROM (VALUES
+            ('audit',             'sa_created_at', 'audit',        730),
+            ('analytics_event',   'occurred_at',   'analytics',    365),
+            ('analytics_session', 'last_seen_at',  'analytics',    365),
+            ('analytics_capture', 'captured_at',   'analytics',    365),
+            ('analytics_heat',    'day',           'analytics',    365),
+            ('notification',      'closed_at',     'notification', 365),
+            ('notification',      'sa_deleted_at', 'notification', 365),
+            ('session',           'expires_at',    'token',          7),
+            ('dpop_jti',          'expires_at',    'token',          7),
+            ('jwks_cache',        'expires_at',    'token',          7),
+            ('par_request',       'expires_at',    'token',          7),
+            ('rate_limit',        'tat',           'token',          7),
+            ('code',              'ends_at',       'token',          7),
+            ('code',              'revoked_at',    'token',          7),
+            ('consent',           'revoked_at',    'log',          180),
+            ('peer_collision',    'sa_created_at', 'log',          180)
+        ) AS t (table_name, column_name, kind, days)
+    LOOP
+        CONTINUE WHEN v_row.days <= 0 OR pg_total_relation_size(('claimius.' || v_row.table_name)::REGCLASS) < v_row.limit_bytes;
+        EXECUTE format('DELETE FROM claimius.%I WHERE %I < now() - make_interval(days => $1)', v_row.table_name, v_row.column_name)
+            USING v_row.days;
+        GET DIAGNOSTICS v_n = ROW_COUNT;
+        v_deleted := v_deleted + v_n;
+    END LOOP;
+    IF to_regproc('public.prune') IS NOT NULL THEN
+        EXECUTE 'SELECT public.prune($1)' INTO v_n USING p_settings;
+        v_deleted := v_deleted + coalesce(v_n, 0);
+    END IF;
+    RETURN v_deleted;
+END;
+$$ LANGUAGE plpgsql;
+
+COMMENT ON FUNCTION claimius.prune(JSONB) IS 'Retention. Every runtime table belongs to a kind, audit, analytics, notification, token or log. p_settings sets days per table (<table>_days) or per kind (<kind>_days), and a size per kind (<kind>_size_mb) or for all (size_mb, 4096). A table under its size is left alone; over it, every row whose time column is older than its days is deleted, and 0 days leaves a table alone. A host with runtime tables of its own defines public.prune(JSONB) of the same shape, and it runs after.';

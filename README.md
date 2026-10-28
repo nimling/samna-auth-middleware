@@ -136,6 +136,7 @@ A beat is a check, so the incident state machine is unchanged: three failed beat
 | `SAUTH_PAGE_REDIRECT` | disciple | Where the callback lands the browser |
 | `SAUTH_DEBUG_USER_ID` | both | UUID that bypasses authentication |
 | `SAUTH_DEBUG_CLIENTS` | both | JSON map of debug client credentials |
+| `SAUTH_RETENTION` | both | One JSON object: days per table or per kind (`audit_days`, `analytics_event_days`, ...) and size per kind or for all (`token_size_mb`, `size_mb`); lenient defaults, the app's settings override it, 0 days leaves a table alone |
 | `PGHOST` `PGPORT` `PGUSER` `PGPASSWORD` `PGDATABASE` `PGSSLMODE` | both | Database connection |
 | `SAUTH_REPLICA_DSN` | both | Optional DSN of a hot standby. Reads that never settle, the scope check, the app, client and tree reads, go to it; one the standby refuses with SQLSTATE `25006` runs again on the primary |
 

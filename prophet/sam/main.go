@@ -49,7 +49,9 @@ func Init(ctx context.Context) error {
 		return err
 	}
 	r.run(func() { <-analytics.Done() })
-	r.run(func() { shared.LeadSync(ctx, db, shared.RetentionLockKey, leadInterval, db.DeleteExpiredLoop) })
+	r.run(func() {
+		shared.LeadSync(ctx, db, shared.RetentionLockKey, leadInterval, db.PruneLoop)
+	})
 	if shared.GetDebugMode() != shared.DebugModeNone {
 		return nil
 	}

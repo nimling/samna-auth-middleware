@@ -36,6 +36,7 @@ type DB struct {
 	listen  *listen
 
 	RouteToProphet bool
+	Retention      func(context.Context) Retention
 }
 
 type stmtKey struct {

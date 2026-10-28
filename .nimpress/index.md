@@ -92,6 +92,7 @@ The middleware reads every `SAUTH_` variable itself; `sdb.Init` loads the config
 | `SAUTH_CLIENT_TIMEOUT` | disciple | Seconds before a call to the prophet gives up, default 5 |
 | `SAUTH_DEBUG_USER_ID` | both | Pins one user and skips authentication |
 | `SAUTH_DEBUG_CLIENTS` | both | A static map of client credentials |
+| `SAUTH_RETENTION` | both | One JSON object: days per table or per kind (`audit_days`, `analytics_event_days`, ...) and size per kind or for all (`token_size_mb`, `size_mb`); lenient defaults, the app's settings override it, 0 days leaves a table alone |
 | `SAUTH_DEBUG_PRIVATE_SEED` | disciple | The app seed a debug disciple encrypts local secrets with and `SamnaSecret.Resolve` opens them with; a deployed disciple fetches its seed from `GET /sam/app` and holds it in memory |
 | `SAUTH_MASTER_KEY` | prophet | 32 random bytes in base64 every stored `private_key` and `private_seed` is wrapped under; the prophet refuses to start without it, and a peer prophet mirroring an app holds the same one |
 | `SAUTH_REPLICA_DSN` | both | A standby the pure reads run on; see [Access in Go](./claimius/middleware/access.md) |
