@@ -72,21 +72,21 @@ Each role has one runtime start, `sam.Init(ctx) error`, joined by `sam.Done()`. 
 
 ## Retention
 
-Retention ages out the rows a schema makes while running and keeps everything a person or a product relies on. Each schema prunes its own: the middleware prunes the runtime rows of claimius, a service prunes its own logs, runs, delivery rows and caches with the same shape in its own schema, and nothing registers into another schema or deletes across one. Application data is never aged: no user, organization, claim, grant, booking, reading, provider row or flow goes by age, and consent decisions are kept while they are the live decision.
+Retention is a setting. Each runtime table has its days and its kind has a size, and the job on both roles deletes, once an hour and only from a table over the size limit, every row whose time column is older than its days. Application data is never aged: no user, organization, location, app, client, secret, claim, grant or binding has a lifetime, and the derived tables are rebuilt, not aged.
 
-1. The table. `claimius.retention` has one row per kind of runtime row, its `days` and its `prune` function, `prune(keep INTERVAL) RETURNS BIGINT`, which deletes what is older than `keep` and returns how many. A table partitioned by time drops whole partitions; any other table deletes in batches ordered by its key. There are no classes, no export and no cold storage: a row is kept or it is deleted.
-2. The claimius kinds. On both roles `access_diff`, `audit` (a monthly partition is dropped once its month is past the retention) and `notification` (only a notification soft deleted or closed before the cut goes). On the prophet also `sync_event`, `peer_collision`, superseded `consent` decisions and those of anonymous visitors, `rate_limit` and `par_request`, and the capture kinds `analytics_event`, `analytics_session`, `analytics_heat` and `analytics_capture` for as long as capture lives on the prophet. The kinds are the middleware's own and a host registers none.
-3. The job. `sam.Init` starts it on both roles under `shared.LeadSync` with `shared.RetentionLockKey`, in every mode, debug included, so of N replicas one runs it once a day. Each kind runs `claimius.delete_expired(kind)`.
-4. Reading and editing. `sam.RegisterRetention(group)` mounts `GET /retention` with read and `PUT /retention/:kind` with write on the owner organization of the instance: the root organization running the service decides the days, never a per app admin.
-5. A service's own retention is the same three columns in its own schema, its own `delete_expired`, and its own daily job under its own lock key, so what a service deletes is read in that service's docs and nowhere else.
+1. The settings. One JSON object, `SAUTH_RETENTION` in the service's `.env` as the default, overridden by the same object in the app's settings through `sdb.Instance().Retention`, a function the host sets that returns `shared.Retention`. Every runtime table belongs to a kind. Days are set per table, `<table>_days`, or per kind, `<kind>_days`; the size a table has to reach is set per kind, `<kind>_size_mb`, or for all, `size_mb`. The defaults are lenient: `audit` 730 days, `analytics` 365, `notification` 365, `token` 7, `log` 180, and 4096 MB; 0 days leaves a table alone.
+2. The groups. `audit`: `audit` by `sa_created_at`. `analytics`, prophet only: `analytics_event`, `analytics_session`, `analytics_capture`, `analytics_heat`. `notification`: `notification` by `closed_at` and `sa_deleted_at`. `token`: `dpop_jti` on both roles, and on the prophet `session`, `jwks_cache`, `par_request`, `rate_limit` and `code` by `ends_at` and `revoked_at`. `log`, prophet only: `consent` by `revoked_at` and `peer_collision`.
+3. The job. `claimius.prune(p_settings JSONB)` holds the whole rule in SQL: the groups, the tables, their time columns and the size check. `sam.Init` calls it once an hour on both roles under `shared.LeadSync` with `shared.RetentionLockKey`, so of N replicas one runs it.
+4. A host's own runtime rows. A service defines `public.prune(p_settings JSONB) RETURNS BIGINT` of the same shape in its own base SQL, over its own logs, runs, delivery rows, caches and expired tokens, reading the same settings; `claimius.prune` calls it when it exists. Nothing is registered, mounted or synced.
+5. `sync_event` and `access_diff` are not retention: they are bounded by cursors and trimmed by `trim_sync_event` and `trim_access_diff` once every reader has passed, whatever their age.
 
 ### Cost
 
 ```
-entries(a kind, one run) = one range of the kind's time index up to its cut, deleted in batches of its own size
+entries(a run) = one pg_total_relation_size per table, and for a table over the limit one range delete on its time column
 ```
 
-No kind reads another table. The job is one advisory lock a day per database, taken by one replica.
+No table is read twice. The job is one advisory lock an hour per database, taken by one replica.
 
 ## Writes
 

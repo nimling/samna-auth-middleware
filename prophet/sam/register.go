@@ -185,9 +185,3 @@ func RegisterCaptureRead(g *echo.Group) {
 	analytics.GET("/heat", h.GetAnalyticsHeat)
 	analytics.GET("/summary", h.GetAnalyticsSummary)
 }
-
-func RegisterRetention(g *echo.Group) {
-	retention := g.Group("/retention")
-	retention.GET("", h.GetRetentions)
-	retention.PUT("/:kind", h.PutRetention)
-}

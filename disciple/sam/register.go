@@ -67,9 +67,3 @@ func RegisterCli(g *echo.Group) {
 	cli.POST("/token", h.PostCliToken, limit)
 	cli.POST("/revoke", h.PostCliRevoke, limit)
 }
-
-func RegisterRetention(g *echo.Group) {
-	retention := g.Group("/retention")
-	retention.GET("", h.GetRetentions)
-	retention.PUT("/:kind", h.PutRetention)
-}
