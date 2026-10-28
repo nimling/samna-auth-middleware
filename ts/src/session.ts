@@ -122,7 +122,8 @@ export type ViewerClaim = {
   id: string
   name: string
   access: number
-  claim_objects?: Array<{ scope?: Record<string, unknown> }>
+  level?: number
+  claim_objects?: Array<{ scope?: Record<string, unknown>; sa_access?: number | null }>
 }
 
 export const CLAIM_OBJECT_WITH = 'claim_object'

@@ -113,7 +113,19 @@ func PutClaim(ctx echo.Context) error {
 	}
 	patch.ID = claimID
 	patch.AppID = appID
-	query := sdb.Instance().NewUpdate().
+	tx, err := sdb.Instance().BeginTx(ctx.Request().Context(), nil)
+	if err != nil {
+		ctx.Logger().Errorf("PutClaim: %v", err)
+		return respond.Error(ctx, http.StatusInternalServerError, "Internal server error")
+	}
+	defer tx.Rollback()
+	if patch.HasKey("level") && patch.CreatedBy != nil {
+		if _, err := tx.ExecContext(ctx.Request().Context(), "SELECT set_config('claimius.actor', ?, true)", patch.CreatedBy.String()); err != nil {
+			ctx.Logger().Errorf("PutClaim: %v", err)
+			return respond.Error(ctx, http.StatusInternalServerError, "Internal server error")
+		}
+	}
+	query := tx.NewUpdate().
 		Model(patch).
 		Where("sa_deleted_at IS NULL").
 		Where("id = ?", claimID).
@@ -149,6 +161,10 @@ func PutClaim(ctx echo.Context) error {
 	}
 	if affected == 0 {
 		return respond.Error(ctx, http.StatusNotFound, "claim not found")
+	}
+	if err := tx.Commit(); err != nil {
+		ctx.Logger().Errorf("PutClaim: %v", err)
+		return respond.Error(ctx, errorsx.ErrToHttpCode(err), "claim update failed")
 	}
 	return respond.JSON(ctx, http.StatusOK, patch, 1)
 }

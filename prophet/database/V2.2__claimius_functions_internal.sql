@@ -795,26 +795,32 @@ CREATE OR REPLACE FUNCTION claimius._user_claim_grants(
                     owner_id       UUID,
                     root_id        UUID
                 ) LANGUAGE sql STABLE AS $$
-    SELECT
-        co.object_id,
-        claimius._effective_access(c.sa_access, co.sa_access) & 15,
-        uc.id,
-        c.id,
-        c.name,
-        co.sa_owner_id,
-        co.sa_root_id
-    FROM claimius.user_claim uc
-             JOIN claimius.claim c ON c.id = uc.claim_id AND c.sa_deleted_at IS NULL
-             JOIN claimius.claim_object co ON co.claim_id = c.id
-        AND co.object_type = 'claimius.samna_user'
-        AND co.sa_deleted_at IS NULL
-        AND (p_target_user_id IS NULL OR co.object_id = p_target_user_id)
-    WHERE uc.user_id = p_actor_id
-      AND uc.app_id = p_app_id
-      AND uc.sa_deleted_at IS NULL
-      AND (uc.starts_at IS NULL OR uc.starts_at <= now())
-      AND (uc.ends_at IS NULL OR uc.ends_at > now())
-      AND (claimius._effective_access(c.sa_access, co.sa_access) & 16) = 0
+    WITH held AS (
+        SELECT co.object_id AS target, uc.id AS user_claim_id, c.id AS claim_id, c.name, c.level,
+               co.sa_owner_id, co.sa_root_id,
+               claimius._effective_access(c.sa_access, co.sa_access) AS e
+        FROM claimius.user_claim uc
+                 JOIN claimius.claim c ON c.id = uc.claim_id AND c.sa_deleted_at IS NULL
+                 JOIN claimius.claim_object co ON co.claim_id = c.id
+            AND co.object_type = 'claimius.samna_user'
+            AND co.sa_deleted_at IS NULL
+            AND (p_target_user_id IS NULL OR co.object_id = p_target_user_id)
+        WHERE uc.user_id = p_actor_id
+          AND uc.app_id = p_app_id
+          AND uc.sa_deleted_at IS NULL
+          AND (uc.starts_at IS NULL OR uc.starts_at <= now())
+          AND (uc.ends_at IS NULL OR uc.ends_at > now())
+    ),
+    settled AS (
+        SELECT g.*, claimius._close_access(g.e & 15 & ~coalesce((
+                   SELECT bit_or(x.e & 15) FROM held x
+                   WHERE x.target = g.target AND (x.e & 16) <> 0 AND x.level >= g.level), 0)) AS access
+        FROM held g
+        WHERE (g.e & 16) = 0
+    )
+    SELECT s.target, s.access, s.user_claim_id, s.claim_id, s.name, s.sa_owner_id, s.sa_root_id
+    FROM settled s
+    WHERE s.access <> 0
 $$;
 
 COMMENT ON FUNCTION claimius._user_claim_grants(UUID, UUID, UUID) IS 'The masks the actor holds on the samna_user rows of a target, or of every user without one, through the actor''s live grants bound on claimius.samna_user, each eff(c, b) & 15 of a non deny binding inside the grant''s window. The third branch of get_user_access and get_users.';
