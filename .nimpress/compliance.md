@@ -641,14 +641,13 @@ sed -n 11,35p audit/audit.go
 3. Method:
 
 ```bash
-grep -n "'audit'" disciple/database/V5.3__claimius_retention.sql prophet/database/V5.20__claimius_retention.sql
-grep -n 'delete_expired_audit' disciple/database/V5.6__claimius_retention_age.sql prophet/database/V5.26__claimius_retention_age.sql
+grep -n "'audit'" prophet/database/V2.4__claimius_functions_external.sql disciple/database/V2.4__claimius_functions_external.sql
 grep -rn -i 'prev_hash\|immutab' disciple/database prophet/database audit
 ```
 
 4. Pass: a retention row for `audit` with a sweep, and a chain column or an append only sink.
 
-5. Today: `fails`. The `audit` row keeps 365 days (`disciple/database/V5.3__claimius_retention.sql`), pruned by `delete_expired_audit`, which drops each monthly partition past the retention (`disciple/database/V5.6__claimius_retention_age.sql:29`, `:69`). Live rows carry no hash chain and no sink keeps them.
+5. Today: `fails`. `audit` is aged by `claimius.prune` (`prophet/database/V2.4__claimius_functions_external.sql`, `disciple/database/V2.4__claimius_functions_external.sql`), 730 days by default and `audit_days` in the app's settings, by a plain delete once the table is over its size, and no chain column or append only sink exists.
 
 ### C39, trace context to the prophet
 
@@ -759,17 +758,17 @@ grep -n 'GetConsent' analytics/*.go
 
 1. Standard: GDPR Art. 5(1)(e).
 
-2. Check: raw analytics events older than 30 days are deleted on a schedule.
+2. Check: raw analytics events older than their days are deleted on a schedule.
 
 3. Method:
 
 ```bash
-grep -n "analytics_event" prophet/database/V5.20__claimius_retention.sql
+grep -n "'analytics_event'" prophet/database/V2.4__claimius_functions_external.sql
 ```
 
-4. Pass: an `analytics_event` row in `claimius.retention`, 30 days by default, pruned once a day by `delete_expired` under the retention job.
+4. Pass: an `analytics_event` line in `claimius.prune`, 365 days by default and `analytics_event_days` or `analytics_days` in the app's settings, run once an hour by the retention job.
 
-5. Today: `passes`, `prophet/database/V5.20__claimius_retention.sql`, `shared/retention.go`.
+5. Today: `passes`, `prophet/database/V2.4__claimius_functions_external.sql` `claimius.prune`, `shared/retention.go`.
 
 ### C46, retention for every other personal table
 
@@ -780,12 +779,12 @@ grep -n "analytics_event" prophet/database/V5.20__claimius_retention.sql
 3. Method:
 
 ```bash
-psql -c "SELECT kind, days FROM claimius.get_retention()"
+grep -n "'notification'\|'consent'\|'analytics_session'\|'analytics_capture'" prophet/database/V2.4__claimius_functions_external.sql
 ```
 
-4. Pass: one retention row and prune per table.
+4. Pass: one line per table in `claimius.prune`.
 
-5. Today: `fails`. `notification`, `analytics_session` and `analytics_capture` have a retention row each (`prophet/database/V5.20__claimius_retention.sql`, `disciple/database/V5.3__claimius_retention.sql`), and `usage_diff` is folded by the drain; `consent` has no retention row and is kept (`prophet/database/V5.26__claimius_retention_age.sql:15`), and `user_activity` has no sweep.
+5. Today: `fails`. `notification`, `analytics_session`, `analytics_capture` and revoked `consent` are lines in `claimius.prune` (`prophet/database/V2.4__claimius_functions_external.sql`); `user_activity` and `usage_diff` have no sweep.
 
 ### C47, export contract
 
