@@ -29,16 +29,17 @@ import (
 
 type DB struct {
 	*bun.DB
-	Replica             *bun.DB
-	Logger              echo.Logger
-	ConnStr             string
-	Usage               *ObjectUsage
-	ColdStorage         ColdStorage
-	ColdStore ColdStore
-	stmts               sync.Map
-	listen              *listen
+	Replica     *bun.DB
+	Logger      echo.Logger
+	ConnStr     string
+	Usage       *ObjectUsage
+	ColdStorage ColdStorage
+	ColdStore   ColdStore
+	stmts       sync.Map
+	listen      *listen
 
 	RouteToProphet bool
+	Prophet        bool
 }
 
 type stmtKey struct {

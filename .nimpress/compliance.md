@@ -695,13 +695,13 @@ just test smw
 ```bash
 sed -n 10,30p shared/cipher.go
 sed -n 20,75p pkg/encryption/master.go
-grep -n -A20 'FUNCTION claimius.get_secret_value' disciple/database/V2.4__claimius_functions_external.sql
+grep -n -A20 'FUNCTION claimius.get_secret_value' disciple/database/V2.4__claimius_functions_external.sql prophet/database/V5.24__claimius_secret_value.sql
 just test 'MasterKey|WrapAtRest|UnwrapAtRest|ImportMasterKeyPair|SamApp|GetSecretValue|Resolve'
 ```
 
-4. Pass: `cipher.NewGCM` with a nonce from `crypto/rand`; `WrapAtRest` refuses without a 32 byte `SAUTH_MASTER_KEY` and `UnwrapAtRest` refuses a plain value; `get_secret_value` answers NULL to a user without read; the named tests pass.
+4. Pass: `cipher.NewGCM` with a nonce from `crypto/rand`; `WrapAtRest` refuses without a 32 byte `SAUTH_MASTER_KEY` and `UnwrapAtRest` refuses a plain value; `get_secret_value` answers NULL, or no row on the prophet, to a user without read; the named tests pass.
 
-5. Today: `passes`. Secrets: `shared/cipher.go:12`, `shared/secret.go:62` on a debug disciple, `utils/aes.go:12` from `prophet/echo/secret.go:59` on the prophet, which encrypts every routed write. Keys at rest: `pkg/encryption/master.go:20`, `pkg/encryption/master.go:49`, opened by `ImportMasterKeyPair` at `pkg/encryption/crypto.go:54` and for the organization seed at `smw/app.go:100`. Delivery and opening: `GET /sam/app` answers the calling app its own seed (`prophet/echo/app.go:11`), held in memory (`shared/main.go:133`), and `Resolve` (`shared/secret.go:141`) reads through `get_secret_value` (`disciple/database/V2.4__claimius_functions_external.sql:1005`).
+5. Today: `passes`. Secrets: `shared/cipher.go:12`, `shared/secret.go:64` on a debug disciple, `utils/aes.go:12` from `prophet/echo/secret.go:59` on the prophet, which encrypts every routed write. Keys at rest: `pkg/encryption/master.go:20`, `pkg/encryption/master.go:49`, opened by `ImportMasterKeyPair` at `pkg/encryption/crypto.go:54` and for the organization seed at `smw/app.go:100`. Delivery and opening: `GET /sam/app` answers the calling app its own seed (`prophet/echo/app.go:11`), held in memory (`shared/main.go:133`), and `Resolve` (`shared/secret.go:143`) reads through `get_secret_value` (`disciple/database/V2.4__claimius_functions_external.sql:1030`), on the prophet through the prophet set's (`prophet/database/V5.24__claimius_secret_value.sql:1`), opening the value with the seed of the secret's own app (`shared/secret.go:150`).
 
 ### C42, TLS to Postgres
 
