@@ -46,7 +46,7 @@ type ColdStorage struct {
 
 func GetColdStorage(connectionString, containerName string) (*ColdStorage, error) {
 	if containerName == "" {
-		return nil, errors.New("Missing SAUTH_COLD_STORAGE_CONTAINER_NAME in environment")
+		return nil, errors.New("missing cold storage container name")
 	}
 	serviceClient, err := azblob.NewClientFromConnectionString(connectionString, nil)
 	if err != nil {

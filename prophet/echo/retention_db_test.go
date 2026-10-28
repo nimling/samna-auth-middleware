@@ -207,7 +207,11 @@ func TestRetentionDeletesWhatEachKindKeepsNoLonger(t *testing.T) {
 	}
 	sink := &coldSink{objects: map[string][]byte{}}
 	db.ColdStorage = sink
-	t.Cleanup(func() { db.ColdStorage = nil })
+	db.ColdStorageResolver = shared.SharedColdStorage{Storage: sink}
+	t.Cleanup(func() {
+		db.ColdStorage = nil
+		db.ColdStorageResolver = nil
+	})
 	deleteExported := func(kind string) {
 		t.Helper()
 		if _, err := db.DeleteExported(ctx, kind); err != nil {
@@ -232,6 +236,12 @@ func TestRetentionDeletesWhatEachKindKeepsNoLonger(t *testing.T) {
 	}
 	if n := count(`SELECT count(*) FROM claimius.retention_export WHERE kind IN ('audit', 'consent')`); n != len(sink.objects) || n < 2 {
 		t.Fatalf("each batch written to cold storage has one manifest row, %d rows for %d objects", n, len(sink.objects))
+	}
+	if n := count(`SELECT count(*) FROM claimius.retention_export WHERE kind = 'audit' AND root_id = ? AND object_path LIKE '%/' || ? || '/audit/%'`, grantRoot, grantRoot.String()); n == 0 {
+		t.Fatalf("the audit of a root organization is exported under its root")
+	}
+	if n := count(`SELECT count(*) FROM claimius.retention_export WHERE kind = 'consent' AND root_id IS NULL AND object_path LIKE '%/none/consent/%'`); n == 0 {
+		t.Fatalf("a consent row carries no root and is exported under none")
 	}
 
 	deleteExpired("sync_event")

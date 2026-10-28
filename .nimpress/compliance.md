@@ -648,7 +648,7 @@ grep -rn -i 'prev_hash\|immutab' disciple/database prophet/database audit pkg/az
 
 4. Pass: a retention row of class `audit` whose prune runs only after export, a manifest with a sha256 per object, and a chain column or an append only sink.
 
-5. Today: `fails`. The `audit` row is class `audit`, 365 days (`disciple/database/V5.4__claimius_retention_class.sql:136`); `delete_expired` refuses it (`:153`), and `delete_exported` writes the manifest row with its sha256 and runs `delete_exported_audit`, which drops a partition only once it is empty (`:193`, `:50`), after `shared/retention.go:87` wrote the batch to the sink. Live rows carry no hash chain, and `pkg/azure/storage.go:58` overwrites an object of the same path with no immutability policy.
+5. Today: `fails`. The `audit` row is class `audit`, 365 days (`disciple/database/V5.4__claimius_retention_class.sql:136`); `delete_expired` refuses it (`:153`), and `delete_exported` writes the manifest row with its root and sha256 and runs `delete_exported_audit`, which drops a partition only once it is empty (`disciple/database/V5.5__claimius_retention_root.sql:27`, `disciple/database/V5.4__claimius_retention_class.sql:50`), after `shared/retention.go:199` wrote the batch of one root organization to the sink that root resolves to. Live rows carry no hash chain, and `pkg/azure/storage.go:58` overwrites an object of the same path with no immutability policy.
 
 ### C39, trace context to the prophet
 
@@ -769,7 +769,7 @@ grep -n "analytics_event" prophet/database/V5.21__claimius_retention_class.sql
 
 4. Pass: an `analytics_event` row of class `log` in `claimius.retention`, 30 days by default, pruned once a day by `delete_expired` under the retention job.
 
-5. Today: `passes`, `prophet/database/V5.21__claimius_retention_class.sql:311`, `shared/retention.go:134`.
+5. Today: `passes`, `prophet/database/V5.21__claimius_retention_class.sql:311`, `shared/retention.go:209`.
 
 ### C46, retention for every other personal table
 

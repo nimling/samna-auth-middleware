@@ -1,5 +1,5 @@
 BEGIN;
-SELECT plan(8);
+SELECT plan(9);
 
 SELECT is(
     (SELECT string_agg(r.kind || ':' || r.class, ',' ORDER BY r.kind) FROM claimius.get_retention() r),
@@ -27,21 +27,23 @@ VALUES ('a0000000-0000-4000-8000-0000000e0001', 'update', 'test', 'claimius.orga
         '10000000-0000-4000-8000-0000000e0001', '10000000-0000-4000-8000-0000000e0001', now() - INTERVAL '3 years');
 
 CREATE TEMP TABLE expired AS
-SELECT e.key FROM claimius.get_expired('audit', '', 100) e
+SELECT e.key, e.data->>'sa_root_id' AS root_id FROM claimius.get_expired('audit', '', 100) e
 WHERE e.data->>'id' = 'a0000000-0000-4000-8000-0000000e0001';
 
 SELECT is((SELECT count(*) FROM expired), 1::BIGINT, 'the expired audit row is read for export');
 
+SELECT is((SELECT root_id FROM expired), NULL, 'an audit row whose owner is no organization carries no root');
+
 SELECT is(
-    claimius.delete_exported('audit', 'gotest/audit/2000/01/a-b.ndjson.gz', repeat('0', 64), ARRAY(SELECT key FROM expired), TRUE),
+    claimius.delete_exported('audit', NULL, 'gotest/none/audit/2000/01/a-b.ndjson.gz', repeat('0', 64), ARRAY(SELECT key FROM expired), TRUE),
     1::BIGINT,
     'delete_exported removes exactly the exported keys'
 );
 
 SELECT is(
-    (SELECT row_count FROM claimius.retention_export WHERE object_path = 'gotest/audit/2000/01/a-b.ndjson.gz'),
+    (SELECT row_count FROM claimius.retention_export WHERE object_path = 'gotest/none/audit/2000/01/a-b.ndjson.gz' AND root_id IS NULL),
     1::BIGINT,
-    'the exported batch has its manifest row'
+    'the exported batch has its manifest row under no root'
 );
 
 SELECT * FROM finish();

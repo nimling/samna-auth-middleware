@@ -5,6 +5,7 @@ package shared_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -71,33 +72,64 @@ func TestDiscipleRetentionDeletesExpiredRowsAndTrimsWithNoActiveReader(t *testin
 	}
 
 	exec(`SELECT claimius.upsert_audit_partition(now() - INTERVAL '3 years')`)
+	kept, loose := uuid.New(), uuid.New()
 	exec(`INSERT INTO claimius.audit (id, operation, type, object_type, object_id, sa_owner_id, sa_created_at) VALUES
 		(?, 'update', 'test', 'claimius.organization', ?, ?, now() - INTERVAL '3 years'),
-		(?, 'update', 'test', 'claimius.organization', ?, ?, now())`, old, orgRoot, orgRoot, fresh, orgRoot, orgRoot)
+		(?, 'update', 'test', 'claimius.organization', ?, ?, now() - INTERVAL '3 years'),
+		(?, 'update', 'test', 'claimius.user', ?, ?, now() - INTERVAL '3 years'),
+		(?, 'update', 'test', 'claimius.organization', ?, ?, now())`,
+		old, orgAlpha, orgAlpha, kept, orgKept, orgKept, loose, userA, userA, fresh, orgRoot, orgRoot)
+	ids := []any{old, kept, loose, fresh}
 	if _, err := db.DeleteExpired(ctx, "audit"); err == nil {
 		t.Fatalf("audit is never deleted by age")
 	}
-	db.ColdStorage = nil
+	db.ColdStorageResolver = nil
 	if _, err := db.DeleteExported(ctx, "audit"); !errors.Is(err, sdb.ErrNoColdStorage) {
 		t.Fatalf("audit is kept with no cold storage: %v", err)
 	}
-	if n := count(`SELECT count(*) FROM claimius.audit WHERE id IN (?, ?)`, old, fresh); n != 2 {
+	if n := count(`SELECT count(*) FROM claimius.audit WHERE id IN (?, ?, ?, ?)`, ids...); n != 4 {
 		t.Fatalf("audit with no cold storage keeps every row, found %d", n)
 	}
-	sink := &coldSink{objects: map[string][]byte{}}
-	db.ColdStorage = sink
-	t.Cleanup(func() { db.ColdStorage = nil })
+	shared := &coldSink{objects: map[string][]byte{}}
+	dedicated := &coldSink{objects: map[string][]byte{}}
+	resolver := rootSinks{orgRoot: {Storage: dedicated}}
+	db.ColdStorage = shared
+	db.ColdStorageResolver = resolver
+	t.Cleanup(func() {
+		db.ColdStorage = nil
+		db.ColdStorageResolver = nil
+	})
 	if _, err := db.DeleteExported(ctx, "audit"); err != nil {
 		t.Fatalf("audit: %v", err)
 	}
-	if n := count(`SELECT count(*) FROM claimius.audit WHERE id IN (?, ?)`, old, fresh); n != 1 {
-		t.Fatalf("audit keeps only the months within the retention, found %d", n)
+	if n := count(`SELECT count(*) FROM claimius.audit WHERE id IN (?, ?, ?, ?)`, ids...); n != 2 {
+		t.Fatalf("audit keeps the months within the retention and the root with no sink, found %d", n)
 	}
-	if len(sink.objects) == 0 {
-		t.Fatalf("the expired audit is written to cold storage before it is deleted")
+	if n := count(`SELECT count(*) FROM claimius.audit WHERE id = ?`, kept); n != 1 {
+		t.Fatalf("the rows of a root whose cold storage is not resolved are skipped, not deleted")
 	}
-	if n := count(`SELECT count(*) FROM claimius.retention_export WHERE kind = 'audit' AND row_count > 0`); n != len(sink.objects) {
-		t.Fatalf("each object written has one manifest row, %d rows for %d objects", n, len(sink.objects))
+	if len(dedicated.GetPaths("", "/"+orgRoot.String()+"/audit/")) == 0 {
+		t.Fatalf("a row of a child organization is written under its root to the root's sink, got %v", dedicated.GetPaths("", ""))
+	}
+	if len(shared.GetPaths("", "/none/audit/")) == 0 {
+		t.Fatalf("a row with no root is written to the shared sink under none, got %v", shared.GetPaths("", ""))
+	}
+	if n := count(`SELECT count(*) FROM claimius.retention_export WHERE kind = 'audit' AND root_id = ?`, orgRoot); n != len(dedicated.objects) {
+		t.Fatalf("each object of the root has one manifest row with its root, %d rows for %d objects", n, len(dedicated.objects))
+	}
+	if n := count(`SELECT count(*) FROM claimius.retention_export WHERE kind = 'audit' AND root_id IS NULL`); n != len(shared.objects) {
+		t.Fatalf("each object with no root has one manifest row with no root, %d rows for %d objects", n, len(shared.objects))
+	}
+
+	resolver[orgKept] = sdb.ColdSink{Storage: shared, Prefix: sdb.ColdExportPrefix}
+	if _, err := db.DeleteExported(ctx, "audit"); err != nil {
+		t.Fatalf("audit export: %v", err)
+	}
+	if n := count(`SELECT count(*) FROM claimius.audit WHERE id = ?`, kept); n != 0 {
+		t.Fatalf("the skipped root is exported once its sink resolves")
+	}
+	if len(shared.GetPaths(sdb.ColdExportPrefix, "/"+orgKept.String()+"/audit/")) == 0 {
+		t.Fatalf("a root that collects its own rows is written to the shared sink under export/, got %v", shared.GetPaths("", ""))
 	}
 
 	before := count(`SELECT count(*) FROM claimius.get_organizations(?::UUID, 4)`, userA)
@@ -123,4 +155,23 @@ type coldSink struct {
 func (s *coldSink) PutObject(_ context.Context, path string, body []byte) error {
 	s.objects[path] = body
 	return nil
+}
+
+type rootSinks map[uuid.UUID]sdb.ColdSink
+
+func (r rootSinks) Resolve(_ context.Context, rootID uuid.UUID) (sdb.ColdSink, error) {
+	if s, ok := r[rootID]; ok {
+		return s, nil
+	}
+	return sdb.ColdSink{}, errors.New("no sink for root")
+}
+
+func (s *coldSink) GetPaths(prefix, part string) []string {
+	paths := make([]string, 0, len(s.objects))
+	for path := range s.objects {
+		if strings.HasPrefix(path, prefix) && strings.Contains(path, part) {
+			paths = append(paths, path)
+		}
+	}
+	return paths
 }
