@@ -25,6 +25,18 @@ Five systems stand where claimius stands. Zanzibar is Google's; SpiceDB, OpenFGA
 
 **Claimius wins** whenever the request reads the service's database anyway, which every request that touches data does: it adds a few index entries and no round trip. It does not win for a request that touches no data, where a token check reads nothing.
 
+### A deny meeting a grant
+
+1. Claimius settles it once, when the pair is recomputed: every deny of a higher level subtracts whatever its class, equal levels fall to the classes, and the closed remainder is stored. The check reads the same pair as any other, so a deny costs a check nothing and a level comparison costs it nothing; the `G_x × X` mask operations of [Denials](./denials.md#cost) are paid at the recompute.
+
+2. SpiceDB and OpenFGA express a deny as an exclusion in the model, `a - b` and `but not`, evaluated on every check as one more subtree to resolve and subtract, with no order between two exclusions beyond the model's nesting.
+
+3. Ory Keto's permission language has no negation; a deny is modelled by removing the relation.
+
+4. Entra ID evaluates deny assignments per request against the token's claims, with no answer per object.
+
+**Claimius wins** on every check after the first, and on the one question the others cannot order: which of two conflicting rules stands, answered by the level and then by the class, stated once in the schema instead of once per model.
+
 ### First check after a grant
 
 A grant raises one assignment area for the one user it names. The grantee's next check finds that area at or after its pair's mark and recomputes the one pair before it answers, the point settle of [Materialization](./materialization.md#a-check-settles-one-pair). The check after it reads the pair after its mark and nothing more. A tuple store pays nothing extra: the check after a grant is the same check, given a token at least as fresh as the write.
