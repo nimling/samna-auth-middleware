@@ -36,6 +36,26 @@ A user is who acts. A person and a machine client are both users, and both hold 
 
 7. Soft deleting a `samna_user` fires `tg_cascade_user_soft_delete` on the transition of `sa_deleted_at` from NULL, which runs `cascade_user_soft_delete`: it soft deletes the user's live grants, relations and field values in the app. Each grant it ends raises the assignment area of that user for that claim; see [Materialization](./materialization.md). The cascade lives in the write, so every read stays a pure predicate.
 
+## Profile
+
+A user's profile is one read over three stored parts, all on the prophet, none derived:
+
+| Part | Stored in | Written by |
+|---|---|---|
+| The user's own fields: name, `bio`, `job_title`, `company`, `website`, `linkedin`, and `user_image` | The user's `samna_user` row | The user, on Samna Auth |
+| Fields an app shares for the user: one field of one object the user can read, with its label, value, link and index | `profile_item`, one row per app, user, object and field | The app, through `PUT /sam/profile` under the user's own grant with read on the object |
+| The profile image and other files | `object_asset` links of kind `profile` on the user | The user or the app, as any asset link |
+
+The public page on Samna Auth reads the user row, `get_profile_items(user)` and `get_object_assets(user)`, and shows the shared fields only when the user's profile is public and shows the `apps` field; whether a disciple shows the image is the user's choice on Samna Auth too, carried on `user_image` by the sync. Consent decisions sit beside the user in `consent`, one live decision per identity and app, and are part of the identity, not of the profile. The Go calls a disciple makes are under [Public profile items](../disciple.md#public-profile-items).
+
+### Cost
+
+```
+entries(profile) = 1 + items + assets
+```
+
+one probe of the user row, one range of `profile_item` by user and one range of `idx_object_asset_object` by user. No join of a derived set, no pair settled: the page shows what was stored, by the user or by an app under the user's own grant, and the access check on each shared field ran when the app wrote it.
+
 ## Machine clients
 
 1. A client is a `samna_client` row with a unique `client_id`, a bcrypt `secret_hash`, a `status` and an optional `expires_at`.

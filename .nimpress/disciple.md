@@ -72,13 +72,21 @@ Each role has one runtime start, `sam.Init(ctx) error`, joined by `sam.Done()`. 
 
 ## Retention
 
-The middleware holds the one retention mechanism of every Samna and Nimtech service. `claimius.retention` has one row per kind of runtime row, its `class`, its `days` and its `prune` function. Application data has no kind and is never age pruned.
+Retention ages out the rows a schema makes while running and keeps everything a person or a product relies on. Each schema prunes its own: the middleware prunes the runtime rows of claimius, a service prunes its own logs, runs, delivery rows and caches with the same shape in its own schema, and nothing registers into another schema or deletes across one. Application data is never aged: no user, organization, claim, grant, booking, reading, provider row or flow goes by age, and consent decisions are kept while they are the live decision.
 
-1. Classes, `claimius.retention_class`: `log`, `run`, `token`, `cache`, `queue` and `audit`, logs, run history, delivery logs, caches, processed queue rows, expired tokens and the audit trail. Every class is deleted by age.
-2. The claimius kinds. On both roles `access_diff` (`log`), `audit` (`audit`, a monthly partition is dropped once its month is past the retention) and `notification` (`log`, only a notification soft deleted or closed before the cut goes). On the prophet also `sync_event`, `peer_collision`, `analytics_event`, `analytics_session` and `analytics_heat` (`log`), `analytics_capture` (`cache`), `rate_limit` and `par_request` (`token`). `consent` has no kind and is kept.
-3. Registering a kind. A host registers its own runtime tables from its own migration with `claimius.upsert_retention(kind, class, days, prune)`, the only way a kind enters the table. A kind already registered keeps the days it was given and takes the rest. `prune(keep INTERVAL) RETURNS BIGINT` must exist, or the call fails; it deletes the rows older than `keep` and returns how many. A table partitioned by time drops whole partitions; any other table deletes in batches ordered by its key.
-4. The job. `sam.Init` starts it on both roles under `shared.LeadSync` with `shared.RetentionLockKey`, in every mode, debug included, so of N replicas one runs it once a day. Each kind runs `claimius.delete_expired(kind)`.
-5. Reading and editing. `sam.RegisterRetention(group)` mounts `GET /retention` with read and `PUT /retention/:kind` with write on the owner organization of the app; a row answers `class` beside the days.
+1. The table. `claimius.retention` has one row per kind of runtime row, its `days` and its `prune` function, `prune(keep INTERVAL) RETURNS BIGINT`, which deletes what is older than `keep` and returns how many. A table partitioned by time drops whole partitions; any other table deletes in batches ordered by its key. There are no classes, no export and no cold storage: a row is kept or it is deleted.
+2. The claimius kinds. On both roles `access_diff`, `audit` (a monthly partition is dropped once its month is past the retention) and `notification` (only a notification soft deleted or closed before the cut goes). On the prophet also `sync_event`, `peer_collision`, superseded `consent` decisions and those of anonymous visitors, `rate_limit` and `par_request`, and the capture kinds `analytics_event`, `analytics_session`, `analytics_heat` and `analytics_capture` for as long as capture lives on the prophet. The kinds are the middleware's own and a host registers none.
+3. The job. `sam.Init` starts it on both roles under `shared.LeadSync` with `shared.RetentionLockKey`, in every mode, debug included, so of N replicas one runs it once a day. Each kind runs `claimius.delete_expired(kind)`.
+4. Reading and editing. `sam.RegisterRetention(group)` mounts `GET /retention` with read and `PUT /retention/:kind` with write on the owner organization of the instance: the root organization running the service decides the days, never a per app admin.
+5. A service's own retention is the same three columns in its own schema, its own `delete_expired`, and its own daily job under its own lock key, so what a service deletes is read in that service's docs and nowhere else.
+
+### Cost
+
+```
+entries(a kind, one run) = one range of the kind's time index up to its cut, deleted in batches of its own size
+```
+
+No kind reads another table. The job is one advisory lock a day per database, taken by one replica.
 
 ## Writes
 
@@ -109,7 +117,7 @@ The service's own tables never leave the disciple. The prophet stores the `claim
 
 ## Public profile items
 
-A disciple flags data of its own, one field of one object, that Samna Auth may show on the public profile page of the user it belongs to. The prophet stores what the disciple sends in `claimius.profile_item`; it reads nothing of the disciple's tables and never syncs the rows back.
+A disciple flags data of its own, one field of one object, that Samna Auth may show on the public profile page of the user it belongs to. The prophet stores what the disciple sends in `claimius.profile_item`; it reads nothing of the disciple's tables and never syncs the rows back. The profile as one read, the user's own fields, the shared fields and the assets, is [Profile](./claimius/users.md#profile).
 
 ```go
 ac, err := sdb.Instance().MutationAccess(ctx, userID, certificateID, "public.certificate", sdb.ACCESS_READ)
