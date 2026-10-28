@@ -2,7 +2,7 @@
 
 The library every Samna service embeds to authenticate and authorize through the prophet: JWT and session validation, client credentials, sync, notifications, and the `claimius` schema for both roles. Go module `github.com/nimling/samna-auth-middleware/v2` and the `@nimling` package in `ts/`, released together. GitHub `nimling/samna-auth-middleware`, on the Samna Ecosystem board (`../.claude/rules/github_project.md`). Shared platform facts: `../.claude/rules/platform.md`.
 
-Design and walkthroughs: `README.md`, `docs/`, `.nimpress/claimius/`.
+Design and walkthroughs: `.nimpress/claimius/` is the source of truth for the access model, its math and its measured costs, read on disk or through `samna ask` once published; `README.md` and `docs/` describe the repo for a developer. The claim level rule, stated once: the higher level wins, equal levels fall to the classes; see `.nimpress/claimius/denials.md` Levels.
 
 ## Index
 
@@ -14,4 +14,4 @@ Design and walkthroughs: `README.md`, `docs/`, `.nimpress/claimius/`.
 6. `.claude/skills/deploy`: use when the user says deploy, release or ship in this repo.
 7. `.claude/skills/test`: use when testing a change: `just test`, one test with `just test <TestName>`, `just test-hurl`, `just verify`, the ts tests and `just bench`.
 8. `.claude/skills/run`: use when starting a role database, the example disciple or the bff locally.
-9. `.claude/plans/`: the handoff plans `v2.md`, `v2.1.md`, `v3.md`, `claimius.md` and the working `notes.md`; `../.claude/rules/middleware_v2.md` rules over `v2.md` where they disagree.
+9. `.claude/plans/` holds the plans the v2 rebuild was built from. They are history: the pages under `.nimpress/claimius/` and the SQL carry the design now, and nothing in a plan overrides them.
