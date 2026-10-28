@@ -254,7 +254,7 @@ func (d *DB) updateClaim(ctx context.Context, conn bun.IConn, ac *AccessClaim, c
 	}
 	var payload []byte
 	err := d.NewRaw(`
-		SELECT (claimius.update_claim(?, ?, ?, ?, ?, ?, ?::claimius.claim_type) -> 'claim')::jsonb
+		SELECT (claimius.update_claim(?, ?, ?, ?, ?, ?, ?::claimius.claim_type, ?::uuid) -> 'claim')::jsonb
 	`,
 		claimID,
 		name,
@@ -263,6 +263,7 @@ func (d *DB) updateClaim(ctx context.Context, conn bun.IConn, ac *AccessClaim, c
 		inherits,
 		level,
 		claimType,
+		ac.UserClaimID,
 	).Conn(conn).Scan(ctx, &payload)
 	if err != nil {
 		return nil, err

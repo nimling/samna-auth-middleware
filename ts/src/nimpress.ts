@@ -8,7 +8,7 @@ import {
   type EdgeMode,
   type ViewerClaim
 } from './session'
-import type { UserType } from './types'
+import { ACCESS_DENY, ACCESS_EXECUTE, ACCESS_OWNER, ACCESS_READ, ACCESS_WRITE, type UserType } from './types'
 
 export const PAGE_SCOPE_KEY = 'page'
 
@@ -41,18 +41,38 @@ export interface NimpressAuthConfig {
   mode?: EdgeMode
 }
 
+function expandAccess(mask: number): number {
+  let out = mask
+  if (out & ACCESS_OWNER) out |= ACCESS_WRITE | ACCESS_READ | ACCESS_EXECUTE
+  if (out & ACCESS_WRITE) out |= ACCESS_READ | ACCESS_EXECUTE
+  if (out & ACCESS_EXECUTE) out |= ACCESS_READ
+  return out
+}
+
 export function scopePages(claims: ViewerClaim[]): string[] {
-  const found = new Set<string>()
+  const grants = new Map<string, number>()
+  const denies = new Map<string, number>()
   for (const claim of claims) {
+    const level = claim.level ?? 0
     for (const object of claim.claim_objects ?? []) {
       const page = object.scope?.[PAGE_SCOPE_KEY]
-      if (typeof page === 'string') found.add(page)
-      else if (page && typeof page === 'object') {
-        for (const key of Object.keys(page)) found.add(key)
-      }
+      const pages = typeof page === 'string' ? [page] : page && typeof page === 'object' ? Object.keys(page) : []
+      if (pages.length === 0) continue
+      const binding = object.sa_access ?? null
+      const effective = claim.access & expandAccess(binding ?? claim.access)
+      const deny = (effective & ACCESS_DENY) !== 0
+      if (!deny && (effective & ACCESS_READ) === 0) continue
+      if (deny && (effective & ACCESS_READ) === 0) continue
+      const into = deny ? denies : grants
+      for (const key of pages) into.set(key, Math.max(into.get(key) ?? -1, level))
     }
   }
-  return [...found]
+  const found: string[] = []
+  for (const [key, level] of grants) {
+    const denied = denies.get(key)
+    if (denied === undefined || denied < level) found.push(key)
+  }
+  return found
 }
 
 export function nimpressAuth(config: NimpressAuthConfig): NimpressAuthFunctions {

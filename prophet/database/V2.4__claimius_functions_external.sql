@@ -213,36 +213,42 @@ BEGIN
               AND p_object_type <> 'claimius.claim'
         ),
         settled AS (
-            SELECT d.*,
-                   claimius._close_access(d.e & 15 & ~coalesce((
-                       SELECT bit_or(x.e & 15)
-                       FROM derivations x
-                       WHERE (x.e & 16) <> 0
-                         AND x.scope IS NULL
-                         AND (x.lvl > d.lvl OR (x.lvl = d.lvl AND (x.hop = 0 OR d.hop > 0)))
-                   ), 0)) AS access
-            FROM derivations d
-            WHERE (d.e & 16) = 0
+            SELECT g.grant,
+                   (g.grant ->> 'access')::INTEGER AS access,
+                   (g.grant ->> 'hop')::INTEGER AS hop,
+                   (g.grant ->> 'user_claim_id')::UUID AS user_claim_id
+            FROM (
+                SELECT jsonb_array_elements(claimius._apply_denies(
+                    (SELECT coalesce(jsonb_agg(jsonb_build_object(
+                        'user_claim_id', d.user_claim_id, 'claim_id', d.claim_id, 'claim_name', d.name, 'hop', d.hop,
+                        'sa_owner_id', d.sa_owner_id, 'sa_root_id', d.sa_root_id, 'level', d.lvl,
+                        'access', d.e & ~16, 'scope', d.scope,
+                        'tree_type', CASE WHEN d.hop = 0 THEN 'direct' ELSE 'tree' END)), '[]'::JSONB)
+                     FROM derivations d WHERE (d.e & 16) = 0),
+                    (SELECT coalesce(jsonb_agg(jsonb_build_object(
+                        'level', d.lvl, 'access', d.e & 15, 'scope', d.scope,
+                        'tree_type', CASE WHEN d.hop = 0 THEN 'direct' ELSE 'tree' END)), '[]'::JSONB)
+                     FROM derivations d WHERE (d.e & 16) <> 0),
+                    FALSE,
+                    (SELECT f.names FROM fields f)
+                ) -> 'grants') AS grant
+            ) g
         )
         SELECT
             claimius.composite_id(p_app_id::TEXT, p_user_id::TEXT, p_object_type, p_object_id::TEXT),
             s.user_claim_id,
-            s.claim_id,
-            s.name,
+            (s.grant ->> 'claim_id')::UUID,
+            s.grant ->> 'claim_name',
             s.access,
-            s.scope,
-            s.sa_owner_id,
-            s.sa_root_id,
+            s.grant -> 'scope',
+            (s.grant ->> 'sa_owner_id')::UUID,
+            (s.grant ->> 'sa_root_id')::UUID,
             NULL::UUID,
             FALSE,
-            s.lvl
+            coalesce((s.grant ->> 'level')::INTEGER, 0)
         FROM settled s
         WHERE s.access <> 0
           AND (s.access & p_required) = p_required
-          AND (jsonb_typeof(s.scope) IS DISTINCT FROM 'object' OR EXISTS (
-              SELECT 1
-              FROM jsonb_object_keys(s.scope) AS k(field), fields f
-              WHERE k.field = ANY(f.names)))
         ORDER BY s.hop ASC, claimius._popcount(s.access) DESC, s.user_claim_id ASC
         LIMIT 1;
 
@@ -958,6 +964,44 @@ CREATE OR REPLACE FUNCTION claimius.get_scope_access(
                  JOIN claimius.claim c ON c.id = uc.claim_id
                  JOIN claimius.claim_object co
                       ON co.claim_id = uc.claim_id
+                     AND co.app_id = uc.app_id
+        WHERE uc.user_id = p_user_id
+          AND uc.app_id = p_app_id
+          AND uc.sa_deleted_at IS NULL
+          AND c.sa_deleted_at IS NULL
+          AND co.sa_deleted_at IS NULL
+          AND (uc.starts_at IS NULL OR uc.starts_at <= now())
+          AND (uc.ends_at  IS NULL OR uc.ends_at  >  now())
+          AND co.object_id IS NULL
+          AND jsonb_path_exists(co.scope, p_path)
+        UNION ALL
+        SELECT uc.id,
+               c.id,
+               c.name,
+               CASE WHEN c.level > cb.level THEN claimius._effective_access(c.sa_access, link.sa_access)
+                    WHEN cb.level > c.level THEN claimius._effective_access(cb.sa_access, co.sa_access)
+                    ELSE (claimius._effective_access(c.sa_access, link.sa_access)
+                            & claimius._effective_access(cb.sa_access, co.sa_access) & ~16)
+                         | ((claimius._effective_access(c.sa_access, link.sa_access)
+                            | claimius._effective_access(cb.sa_access, co.sa_access)) & 16) END,
+               co.sa_owner_id,
+               co.sa_root_id,
+               co.id,
+               co.scope,
+               co.sa_access,
+               co.inherits,
+               greatest(c.level, cb.level)
+        FROM claimius.user_claim uc
+                 JOIN claimius.claim c ON c.id = uc.claim_id
+                 JOIN claimius.claim_object link
+                      ON link.claim_id = c.id
+                     AND link.app_id = uc.app_id
+                     AND link.object_type = 'claimius.claim'
+                     AND link.inherits
+                     AND link.sa_deleted_at IS NULL
+                 JOIN claimius.claim cb ON cb.id = link.object_id AND cb.inherits AND cb.sa_deleted_at IS NULL
+                 JOIN claimius.claim_object co
+                      ON co.claim_id = cb.id
                      AND co.app_id = uc.app_id
         WHERE uc.user_id = p_user_id
           AND uc.app_id = p_app_id
@@ -2481,6 +2525,8 @@ DROP FUNCTION IF EXISTS claimius.update_claim(UUID, TEXT, TEXT, INTEGER, BOOLEAN
 DROP FUNCTION IF EXISTS claimius.update_claim(uuid,text,text,integer,boolean);
 
 DROP FUNCTION IF EXISTS claimius.update_claim(UUID, TEXT, TEXT, INTEGER, BOOLEAN, INTEGER);
+DROP FUNCTION IF EXISTS claimius.update_claim(UUID, TEXT, TEXT, INTEGER, BOOLEAN, INTEGER, claimius.claim_type);
+
 CREATE OR REPLACE FUNCTION claimius.update_claim(
     p_claim_id          UUID,
     p_name              TEXT DEFAULT NULL,
@@ -2488,7 +2534,8 @@ CREATE OR REPLACE FUNCTION claimius.update_claim(
     p_sa_access         INTEGER DEFAULT NULL,
     p_inherits          BOOLEAN DEFAULT NULL,
     p_level             INTEGER DEFAULT NULL,
-    p_type              claimius.claim_type DEFAULT NULL
+    p_type              claimius.claim_type DEFAULT NULL,
+    p_actor_user_claim_id UUID DEFAULT NULL
 ) RETURNS JSONB AS $$
 DECLARE
     v_row    claimius.claim;
@@ -2510,6 +2557,7 @@ BEGIN
         END IF;
     END IF;
 
+    PERFORM set_config('claimius.actor', coalesce(p_actor_user_claim_id::TEXT, ''), TRUE);
     UPDATE claimius.claim SET
                               name        = coalesce(NULLIF(p_name, ''), name),
                               description = coalesce(p_description, description),
@@ -2519,11 +2567,12 @@ BEGIN
                               , type        = coalesce(p_type, type)
     WHERE id = p_claim_id
     RETURNING * INTO v_row;
+    PERFORM set_config('claimius.actor', '', TRUE);
     RETURN jsonb_build_object('claim', to_jsonb(v_row));
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius.update_claim(p_claim_id uuid, p_name text, p_description text, p_sa_access integer, p_inherits boolean, p_level integer, p_type claimius.claim_type) IS 'Patches selected fields on a claim, type included. p_sa_access is expanded on grant claims so owner implies write+read+execute, write implies read+execute, execute implies read. Member bit 0x20 stands alone. Deny claims keep the supplied bits verbatim. Empty p_name and zero p_sa_access are treated as preserve so PATCH callers that send only one field do not wipe the others. A mask with no bit besides deny is refused with SQLSTATE 22023.';
+COMMENT ON FUNCTION claimius.update_claim(p_claim_id uuid, p_name text, p_description text, p_sa_access integer, p_inherits boolean, p_level integer, p_type claimius.claim_type, p_actor_user_claim_id uuid) IS 'Patches selected fields on a claim, type included. p_sa_access is expanded on grant claims so owner implies write+read+execute, write implies read+execute, execute implies read. Member bit 0x20 stands alone. Deny claims keep the supplied bits verbatim. Empty p_name and zero p_sa_access are treated as preserve so PATCH callers that send only one field do not wipe the others. A mask with no bit besides deny is refused with SQLSTATE 22023.';
 
 DROP FUNCTION IF EXISTS claimius.remove_claim(UUID, UUID);
 
