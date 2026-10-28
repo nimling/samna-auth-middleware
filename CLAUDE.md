@@ -2,7 +2,7 @@
 
 The library every Samna service embeds to authenticate and authorize through the prophet: JWT and session validation, client credentials, sync, notifications, and the `claimius` schema for both roles. Go module `github.com/nimling/samna-auth-middleware/v2` and the `@nimling` package in `ts/`, released together. GitHub `nimling/samna-auth-middleware`, on the Samna Ecosystem board (`../.claude/rules/github_project.md`). Shared platform facts: `../.claude/rules/platform.md`.
 
-Design and walkthroughs: `.nimpress/claimius/` is the source of truth for the access model, its math and its measured costs, read on disk or through `samna ask` once published; `README.md` and `docs/` describe the repo for a developer. The claim level rule, stated once: the higher level wins, equal levels fall to the classes; see `.nimpress/claimius/denials.md` Levels.
+Design and walkthroughs: `.nimpress/claimius/` is the source of truth for the access model, its math and its measured costs, read on disk; `README.md` and `docs/` describe the repo for a developer. The claim level rule, stated once: the higher level wins, equal levels fall to the classes; see `.nimpress/claimius/denials.md` Levels.
 
 ## Index
 
