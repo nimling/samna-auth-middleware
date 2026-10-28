@@ -21,7 +21,6 @@ var ErrBadRetention = errors.New("bad retention request")
 type Retention struct {
 	bun.BaseModel `bun:"table:claimius.retention" json:"-"`
 	Kind          string     `bun:"kind,pk" json:"kind"`
-	Class         string     `bun:"class" json:"class"`
 	Days          int        `bun:"days" json:"days"`
 	Prune         string     `bun:"prune" json:"prune"`
 	Pruned        *int64     `bun:"pruned" json:"pruned"`
