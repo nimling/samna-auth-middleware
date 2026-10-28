@@ -18,6 +18,9 @@ type (
 	CodeKind                 = shared.CodeKind
 	BodyCode                 = shared.BodyCode
 	BodyClaimGuest           = shared.BodyClaimGuest
+	BodySamProfileItem       = shared.BodySamProfileItem
+	BodySamProfileItemKey    = shared.BodySamProfileItemKey
+	ProfileItem              = shared.ProfileItem
 	CreateClaimParams        = shared.CreateClaimParams
 	CreateVirtualClaimParams = shared.CreateVirtualClaimParams
 	Creator                  = shared.Creator
@@ -85,6 +88,8 @@ var (
 	ClaimWhere           = shared.ClaimWhere
 	AnonymousUserID      = shared.AnonymousUserID
 	ErrBadCode           = shared.ErrBadCode
+	ErrBadProfileItem    = shared.ErrBadProfileItem
+	ErrNoProphet         = shared.ErrNoProphet
 	ErrCodeInvalid       = shared.ErrCodeInvalid
 	GetCodeHash          = shared.GetCodeHash
 	GetCodeURL           = shared.GetCodeURL

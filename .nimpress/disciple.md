@@ -111,6 +111,29 @@ A routed write stamps `sa_created_by` and `sa_owner_id` from the `AccessClaim`, 
 
 The service's own tables never leave the disciple. The prophet stores the `claim_object` rows that bind a claim to them, addressed by `object_type` and `object_id`, and the disciple settles `user_object` for them locally.
 
+## Public profile items
+
+A disciple flags data of its own, one field of one object, that Samna Auth may show on the public profile page of the user it belongs to. The prophet stores what the disciple sends in `claimius.profile_item`; it reads nothing of the disciple's tables and never syncs the rows back.
+
+```go
+ac, err := sdb.Instance().MutationAccess(ctx, userID, certificateID, "public.certificate", sdb.ACCESS_READ)
+if err != nil {
+	return err
+}
+item, err := sdb.Instance().PutProfileItem(ctx, ac, sdb.BodySamProfileItem{
+	UserID: userID, ObjectType: "public.certificate", ObjectID: certificateID,
+	Field: "name", Label: "Certificate", Value: certificate.Name, Link: &certificateURL,
+})
+```
+
+1. `PutProfileItem(ctx, ac, item)` flags the field, or replaces the label, value, link and index of the live flag with the same app, user, object and field. `DeleteProfileItem(ctx, ac, key)` withdraws one field, or with no `field` every field of the object. `GetProfileItems(ctx, userID)` reads back the app's own flags for the user.
+2. The `AccessClaim` is the flagged user's own, with READ on the object: a disciple flags only what the user it shows can read, and never for another user. Anything else is `ErrNoAccess`.
+3. The shape is checked on both sides, `ErrBadProfileItem` and `400`: `field` is lower case letters, digits, `_` and `.`, starting with a letter, at most 64 characters; `label` 1 to 80 characters; `value` 1 to 500; `link`, when set, an `https://` url of at most 2048 characters; `object_type` at most 120 characters.
+4. The user needs a live row in the app on the prophet, else `ErrNotFound` and `404`.
+5. A disciple without a prophet answers `ErrNoProphet`: there is no public profile to show the item on.
+6. Over the wire: `PUT /sam/profile` with the item, `DELETE /sam/profile` with `user_id`, `object_type`, `object_id` and an optional `field`, `GET /sam/profile?user_id=`, each answering the stored rows with `app_slug` and `app_name`. On the prophet, `claimius.upsert_profile_item`, `delete_profile_item` and `get_profile_items(user, app?)`.
+7. Whether the page shows the items is the user's choice on Samna Auth: their profile must be public and show the `apps` field.
+
 ## The pull loop
 
 The disciple pulls. There is no inbound sync endpoint on a disciple and none on the prophet; the prophet serves `GET /sam/sync/snapshot` and `GET /sam/sync/:cursor` and nothing pushes. The cursor is a `client.SyncCursor`, a `(txid, seq)` position on the prophet's feed written `<txid>.<seq>`, kept in `disciple_state.last_applied_txid` and `last_applied_seq`.

@@ -131,6 +131,11 @@ func RegisterEndpoints(g *echo.Group) {
 	code.POST("/redeem", h.PostCodeRedeem)
 	code.DELETE("/:id", h.DeleteCode)
 
+	profile := g.Group("/profile")
+	profile.GET("", h.GetProfileItems)
+	profile.PUT("", h.PutProfileItem)
+	profile.DELETE("", h.DeleteProfileItem)
+
 	field := g.Group("/field")
 	field.GET("", h.GetObjectFields)
 	field.GET("/:id", h.GetObjectField)
