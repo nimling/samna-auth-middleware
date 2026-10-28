@@ -127,15 +127,15 @@ func TestALevelHandOutSeesADenyThroughALink(t *testing.T) {
 	f := getLevelFixture(t)
 	linker := postLevelClaim(t, f.app, "Linker", 4, 0)
 	postLevelGrant(t, f.app, linker, f.writer, grantUser)
-	deny := postLevelClaim(t, f.app, "No read level 1", 20, 1)
+	deny := postLevelClaim(t, f.app, "No read through a link", 20, 0)
 	postLevelBinding(t, f.app, deny, &f.child, "claimius.organization", true, "", grantUser)
-	postLevelBinding(t, f.app, linker, &deny, "claimius.claim", true, "", grantUser)
+	postLevelBinding(t, f.app, linker, &deny, "claimius.claim", true, "", f.writerGrant)
 	read := postLevelClaim(t, f.app, "Read level 3", 4, 3)
 	postLevelBinding(t, f.app, read, &f.child, "claimius.organization", true, "", grantUser)
 	other := uuid.New()
 	postLevelUser(t, f.app, other, "Other")
 	if _, err := getLevelGrant(f.app, read, other, f.writerGrant); getSQLState(err) != "P0403" {
-		t.Fatalf("a level 3 grant must not lift the level 1 deny the writer faces through a link, got %v", err)
+		t.Fatalf("a level 3 grant must not lift the deny the writer faces through a link, got %v", err)
 	}
 }
 
@@ -186,7 +186,7 @@ func TestCapabilitiesFollowALink(t *testing.T) {
 	postLevelGrant(t, f.app, linker, viewer, grantUser)
 	pages := postLevelClaim(t, f.app, "Pages", 4, 0)
 	postLevelBinding(t, f.app, pages, nil, "", true, `{"page": {"docs": {"_access": "READ"}}}`, grantUser)
-	postLevelBinding(t, f.app, linker, &pages, "claimius.claim", true, "", grantUser)
+	postLevelBinding(t, f.app, linker, &pages, "claimius.claim", true, "", f.writerGrant)
 	var access int
 	if err := psdb.Instance().NewRaw(`SELECT sa_access FROM claimius.get_scope_access(?, ?, '$.page.docs', 0)`, viewer, f.app.ID).Scan(ctx, &access); err != nil {
 		t.Fatalf("a scope grant reached through a link must answer: %v", err)
