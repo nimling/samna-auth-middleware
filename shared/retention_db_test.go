@@ -83,7 +83,7 @@ func TestDiscipleRetentionDeletesExpiredRowsAndTrimsWithNoActiveReader(t *testin
 	if _, err := db.DeleteExpired(ctx, "audit"); err == nil {
 		t.Fatalf("audit is never deleted by age")
 	}
-	db.ColdStorageResolver = nil
+	db.ColdStore = nil
 	if _, err := db.DeleteExported(ctx, "audit"); !errors.Is(err, sdb.ErrNoColdStorage) {
 		t.Fatalf("audit is kept with no cold storage: %v", err)
 	}
@@ -92,12 +92,12 @@ func TestDiscipleRetentionDeletesExpiredRowsAndTrimsWithNoActiveReader(t *testin
 	}
 	shared := &coldSink{objects: map[string][]byte{}}
 	dedicated := &coldSink{objects: map[string][]byte{}}
-	resolver := rootSinks{orgRoot: {Storage: dedicated}}
+	sinks := rootSinks{orgRoot: {Storage: dedicated}}
 	db.ColdStorage = shared
-	db.ColdStorageResolver = resolver
+	db.ColdStore = sinks
 	t.Cleanup(func() {
 		db.ColdStorage = nil
-		db.ColdStorageResolver = nil
+		db.ColdStore = nil
 	})
 	if _, err := db.DeleteExported(ctx, "audit"); err != nil {
 		t.Fatalf("audit: %v", err)
@@ -121,7 +121,7 @@ func TestDiscipleRetentionDeletesExpiredRowsAndTrimsWithNoActiveReader(t *testin
 		t.Fatalf("each object with no root has one manifest row with no root, %d rows for %d objects", n, len(shared.objects))
 	}
 
-	resolver[orgKept] = sdb.ColdSink{Storage: shared, Prefix: sdb.ColdExportPrefix}
+	sinks[orgKept] = sdb.ColdSink{Storage: shared, Prefix: sdb.ColdExportPrefix}
 	if _, err := db.DeleteExported(ctx, "audit"); err != nil {
 		t.Fatalf("audit export: %v", err)
 	}
@@ -159,7 +159,7 @@ func (s *coldSink) PutObject(_ context.Context, path string, body []byte) error 
 
 type rootSinks map[uuid.UUID]sdb.ColdSink
 
-func (r rootSinks) Resolve(_ context.Context, rootID uuid.UUID) (sdb.ColdSink, error) {
+func (r rootSinks) GetColdSink(_ context.Context, rootID uuid.UUID) (sdb.ColdSink, error) {
 	if s, ok := r[rootID]; ok {
 		return s, nil
 	}
