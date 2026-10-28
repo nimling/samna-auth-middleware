@@ -336,7 +336,7 @@ func (d *DB) insertClaimObject(ctx context.Context, conn bun.IConn, ac *AccessCl
 	return co, nil
 }
 
-func (d *DB) deleteClaimObject(ctx context.Context, conn bun.IConn, ac *AccessClaim, claimID, objectID uuid.UUID) (*ClaimObject, error) {
+func (d *DB) deleteClaimObject(ctx context.Context, conn bun.IConn, ac *AccessClaim, claimID, bindingID uuid.UUID) (*ClaimObject, error) {
 	if ac == nil || ac.UserClaimID == nil {
 		return nil, ErrNoAccess
 	}
@@ -345,10 +345,13 @@ func (d *DB) deleteClaimObject(ctx context.Context, conn bun.IConn, ac *AccessCl
 		ColumnExpr("id").
 		Table("claimius.claim_object").
 		Where("claim_id = ?", claimID).
-		Where("object_id = ?", objectID).
+		Where("id = ?", bindingID).
 		Where("sa_deleted_at IS NULL").
 		Scan(ctx, &rowID)
 	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNotFound
+		}
 		return nil, err
 	}
 	var co ClaimObject
@@ -391,7 +394,7 @@ func (d *DB) insertClaimUser(ctx context.Context, conn bun.IConn, ac *AccessClai
 	return uc, nil
 }
 
-func (d *DB) deleteClaimUser(ctx context.Context, conn bun.IConn, ac *AccessClaim, claimID, userID uuid.UUID) (*UserClaim, error) {
+func (d *DB) deleteClaimUser(ctx context.Context, conn bun.IConn, ac *AccessClaim, claimID, grantID uuid.UUID) (*UserClaim, error) {
 	if ac == nil || ac.UserClaimID == nil {
 		return nil, ErrNoAccess
 	}
@@ -400,10 +403,13 @@ func (d *DB) deleteClaimUser(ctx context.Context, conn bun.IConn, ac *AccessClai
 		ColumnExpr("id").
 		Table("claimius.user_claim").
 		Where("claim_id = ?", claimID).
-		Where("user_id = ?", userID).
+		Where("id = ?", grantID).
 		Where("sa_deleted_at IS NULL").
 		Scan(ctx, &rowID)
 	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNotFound
+		}
 		return nil, err
 	}
 	var uc UserClaim
