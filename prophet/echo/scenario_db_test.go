@@ -282,6 +282,11 @@ func TestEveryScenarioResolvesTheSameOnTheProphetAndItsDisciple(t *testing.T) {
 	if _, err := disciple.ExecContext(ctx, `SELECT claimius.upsert_disciple_state(?)`, app.Slug); err != nil {
 		t.Fatalf("disciple state: %v", err)
 	}
+	t.Cleanup(func() {
+		if _, err := disciple.ExecContext(context.Background(), `UPDATE claimius.disciple_state SET prophet = NULL, endpoint = NULL`); err != nil {
+			t.Errorf("unbind the disciple: %v", err)
+		}
+	})
 	t.Setenv("SAUTH_ENDPOINT", server.URL)
 	t.Setenv("SAUTH_APP_SLUG", app.Slug)
 	t.Setenv("SAUTH_APP_SECRET", app.Secret)
@@ -327,4 +332,135 @@ func TestEveryScenarioResolvesTheSameOnTheProphetAndItsDisciple(t *testing.T) {
 		getScenarioUsers(t, prophet, disciple, app.ID, u, "after the feed")
 	}
 	getDisciplePairCounts(t, disciple, "after the feed")
+}
+
+func TestScenarioAClaimBindsAndGrantsOnlyInItsOwnApp(t *testing.T) {
+	getGrantFixture(t)
+	ctx := context.Background()
+	prophet := psdb.Instance()
+	app := postPeerApp(t, grantUser)
+	other := postPeerApp(t, grantUser)
+	team := uuid.New()
+	if _, err := prophet.ExecContext(ctx, `
+		INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
+		VALUES (?, 'Scenario team', 'company', ?, ?, 1, ?)
+	`, team, app.Org, app.Org, grantUser); err != nil {
+		t.Fatalf("team: %v", err)
+	}
+	if _, err := prophet.ExecContext(ctx, `SELECT claimius.upsert_app_organization(?, ?, TRUE, ?)`, app.ID, app.Org, grantUser); err != nil {
+		t.Fatalf("link tree: %v", err)
+	}
+	if _, err := prophet.ExecContext(ctx, `SELECT claimius.upsert_app_object(?, 'claimius.organization', ?, ?)`, other.ID, app.Org, grantUser); err != nil {
+		t.Fatalf("link the root to the other app: %v", err)
+	}
+	member := uuid.New()
+	if _, err := prophet.ExecContext(ctx, `
+		SELECT claimius.upsert_app_user(p_user_id => ?, p_app_id => ?, p_first_name => 'Member'),
+		       claimius.upsert_app_user(p_user_id => ?, p_app_id => ?, p_first_name => 'Member')
+	`, member, app.ID, member, other.ID); err != nil {
+		t.Fatalf("member: %v", err)
+	}
+
+	foreign := postPeerClaim(t, prophet, other.ID, app.Org, grantUser, "Approver of the other app")
+	if _, err := prophet.ExecContext(ctx, `
+		SELECT claimius.insert_claim_object(p_app_id => ?, p_claim_id => ?, p_sa_owner_id => ?, p_sa_root_id => ?,
+		       p_sa_created_by => ?, p_object_id => ?, p_object_type => 'claimius.organization', p_inherits => TRUE)
+	`, app.ID, foreign, app.Org, app.Org, grantUser, app.Org); err == nil {
+		t.Errorf("a binding stamped with an app other than its claim's must be refused")
+	}
+	if _, err := prophet.ExecContext(ctx, `
+		SELECT claimius.insert_user_claim(p_app_id => ?, p_claim_id => ?, p_user_id => ?, p_sa_owner_id => ?, p_sa_created_by => ?)
+	`, app.ID, foreign, member, app.Org, grantUser); err == nil {
+		t.Errorf("a grant stamped with an app other than its claim's must be refused")
+	}
+
+	moved := postPeerClaim(t, prophet, app.ID, team, grantUser, "Moved")
+	var oldBinding uuid.UUID
+	if err := prophet.NewRaw(`
+		SELECT (claimius.insert_claim_object(p_app_id => ?, p_claim_id => ?, p_sa_owner_id => ?, p_sa_root_id => ?,
+		       p_sa_created_by => ?, p_object_id => ?, p_object_type => 'claimius.organization', p_inherits => TRUE) -> 'claim_object' ->> 'id')::UUID
+	`, app.ID, moved, team, app.Org, grantUser, team).Scan(ctx, &oldBinding); err != nil {
+		t.Fatalf("bind on the team: %v", err)
+	}
+
+	e := echo.New()
+	e.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c echo.Context) error {
+			c.Set("request_id", uuid.New())
+			return next(c)
+		}
+	})
+	psam.RegisterEndpoints(e.Group("/sam", smw.AppMiddleware))
+	server := httptest.NewServer(e)
+	defer server.Close()
+
+	disciple := getDiscipleDB(t)
+	if _, err := disciple.ExecContext(ctx, `SELECT claimius.upsert_disciple_state(?)`, app.Slug); err != nil {
+		t.Fatalf("disciple state: %v", err)
+	}
+	t.Cleanup(func() {
+		if _, err := disciple.ExecContext(context.Background(), `UPDATE claimius.disciple_state SET prophet = NULL, endpoint = NULL`); err != nil {
+			t.Errorf("unbind the disciple: %v", err)
+		}
+	})
+	t.Setenv("SAUTH_ENDPOINT", server.URL)
+	t.Setenv("SAUTH_APP_SLUG", app.Slug)
+	t.Setenv("SAUTH_APP_SECRET", app.Secret)
+	replica := &sam.Replica{DB: disciple}
+	if err := replica.PullSnapshot(ctx, "", ""); err != nil {
+		t.Fatalf("snapshot: %v", err)
+	}
+
+	var newBinding, manager, scope uuid.UUID
+	if err := prophet.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
+		if _, err := tx.ExecContext(ctx, `UPDATE claimius.claim SET sa_owner_id = ? WHERE id = ?`, app.Org, moved); err != nil {
+			return fmt.Errorf("move owner: %w", err)
+		}
+		if err := tx.NewRaw(`
+			SELECT (claimius.insert_claim_object(p_app_id => ?, p_claim_id => ?, p_sa_owner_id => ?, p_sa_root_id => ?,
+			       p_sa_created_by => ?, p_object_id => ?, p_object_type => 'claimius.organization', p_inherits => TRUE) -> 'claim_object' ->> 'id')::UUID
+		`, app.ID, moved, app.Org, app.Org, grantUser, app.Org).Scan(ctx, &newBinding); err != nil {
+			return fmt.Errorf("rebind: %w", err)
+		}
+		if _, err := tx.ExecContext(ctx, `SELECT * FROM claimius.delete_claim_object(?, ?)`, oldBinding, grantUser); err != nil {
+			return fmt.Errorf("unbind the team: %w", err)
+		}
+		if err := tx.NewRaw(`
+			SELECT (claimius.insert_claim(p_app_id => ?, p_name => 'Employee Manager', p_description => NULL, p_sa_access => 14,
+			        p_sa_owner_id => ?, p_sa_root_id => ?, p_sa_created_by => ?) -> 'claim' ->> 'id')::UUID
+		`, app.ID, app.Org, app.Org, grantUser).Scan(ctx, &manager); err != nil {
+			return fmt.Errorf("manager: %w", err)
+		}
+		if err := tx.NewRaw(`
+			SELECT (claimius.insert_claim_object(p_app_id => ?, p_claim_id => ?, p_sa_owner_id => ?, p_sa_root_id => ?,
+			       p_sa_created_by => ?, p_sa_access => 6, p_scope => '{"employee": {"_access": "READ|WRITE"}}'::JSONB) -> 'claim_object' ->> 'id')::UUID
+		`, app.ID, manager, app.Org, app.Org, grantUser).Scan(ctx, &scope); err != nil {
+			return fmt.Errorf("manager scope: %w", err)
+		}
+		_, err := tx.ExecContext(ctx, `
+			SELECT claimius.insert_user_claim(p_app_id => ?, p_claim_id => ?, p_user_id => ?, p_sa_owner_id => ?, p_sa_created_by => ?)
+		`, app.ID, manager, member, app.Org, grantUser)
+		return err
+	}); err != nil {
+		t.Fatalf("move, rebind and the new claim: %v", err)
+	}
+	if n, err := replica.PullSync(ctx); err != nil || n == 0 {
+		t.Fatalf("the feed must bring the move, the rebind and the new claim, got %d %v", n, err)
+	}
+	var owner uuid.UUID
+	if err := disciple.NewRaw(`SELECT sa_owner_id FROM claimius.claim WHERE id = ?`, moved).Scan(ctx, &owner); err != nil || owner != app.Org {
+		t.Errorf("the moved claim is owned by %s on the disciple, want %s: %v", owner, app.Org, err)
+	}
+	var live int
+	if err := disciple.NewRaw(`
+		SELECT count(*) FROM claimius.claim_object WHERE id IN (?, ?) AND sa_deleted_at IS NULL
+	`, newBinding, scope).Scan(ctx, &live); err != nil || live != 2 {
+		t.Errorf("the new binding and the scope binding are live on the disciple %d times, want 2: %v", live, err)
+	}
+	var granted bool
+	if err := disciple.NewRaw(`
+		SELECT EXISTS (SELECT 1 FROM claimius.user_claim WHERE claim_id = ? AND user_id = ? AND sa_deleted_at IS NULL)
+	`, manager, member).Scan(ctx, &granted); err != nil || !granted {
+		t.Errorf("the grant after the move must reach the disciple: %v", err)
+	}
 }

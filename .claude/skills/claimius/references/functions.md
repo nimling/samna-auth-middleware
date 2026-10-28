@@ -59,9 +59,10 @@ Write functions return one jsonb keyed by table: `(v -> 'claim' ->> 'id')::uuid`
 1. `app_id` column: `samna_user`, `claim`, `user_claim`, `claim_object`, `user_object`, `user_users`, `user_relation`, `user_field`, `object_field`, `samna_client`, `samna_secret`, `audit`, `access_diff`. Always filter on it.
 2. `organization` and `location` have no `app_id`; scope through `app_object_ids`, `app_has_object`, `apps_for_object` on the prophet.
 3. The prophet refuses with P0403 a `claim`, `user_claim` or `claim_object` whose owning organization, or whose bound organization or location, is not linked to the row's app: `_check_app_scope` over `app_has_scope`. Link the organization first; an update that keeps app, owner and object passes.
-4. Disciples carry no `app_object`: a disciple mirrors one app, the sync layer strips `app_id`, and the disciple's read functions take no app argument. Write the app filter on the prophet side only.
-5. A registered table may omit `app_id`; it is inferred from `get_app_id()`. On a multi app prophet the column is required.
-6. `get_app()` returns the system app and raises on a pure disciple; `get_disciple_app()` raises on a prophet and a hybrid. On a hybrid use `get_app_id()`. These helpers ship in the prophet set only.
+4. A `user_claim` and a `claim_object` live in the app of their claim: the prophet refuses any other `app_id` with 23503 on `user_claim_app_claim_fkey` and `claim_object_app_claim_fkey`, over `claim_app_id_id_key`. Grant or bind a claim of another app with that app's id, never the calling app's.
+5. Disciples carry no `app_object`: a disciple mirrors one app, the sync layer strips `app_id`, and the disciple's read functions take no app argument. Write the app filter on the prophet side only.
+6. A registered table may omit `app_id`; it is inferred from `get_app_id()`. On a multi app prophet the column is required.
+7. `get_app()` returns the system app and raises on a pure disciple; `get_disciple_app()` raises on a prophet and a hybrid. On a hybrid use `get_app_id()`. These helpers ship in the prophet set only.
 
 ## Asset links
 
