@@ -20,7 +20,7 @@ The Go access calls on `shared.DB`, `samna_auth_middleware/shared/access.go`, re
 
 ## Level
 
-Every `AccessClaim` carries `Level`, the level of the claim its grant came through. A composed grant carries the higher level of its two claims; `selfAccessClaim` carries 0. `Level` is precedence, never an access mask.
+Every `AccessClaim` carries `Level`, the level of the claim its grant came through. A composed grant carries the higher level of its two claims; `selfAccessClaim` carries 0. `Level` is the claim level that decides between a grant and a deny, the higher one winning, never an access mask.
 
 ## ScopeAccess
 

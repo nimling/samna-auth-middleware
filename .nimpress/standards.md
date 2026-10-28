@@ -256,7 +256,7 @@ This page covers the Go module `github.com/nimling/samna-auth-middleware/v2` onl
 
 1. Status: `partial`
 
-2. Evidence: claims are roles assigned through `user_claim`, permissions through `claim_object`, hierarchy through `inherits` and composition with `_check_claim_composition` (`disciple/database/V2.3__claimius_functions_access.sql:423`), levels as precedence.
+2. Evidence: claims are roles assigned through `user_claim`, permissions through `claim_object`, hierarchy through `inherits` and composition with `_check_claim_composition` (`disciple/database/V2.3__claimius_functions_access.sql:423`), levels, the higher of which wins.
 
 3. Gap: no static or dynamic separation of duty constraints.
 

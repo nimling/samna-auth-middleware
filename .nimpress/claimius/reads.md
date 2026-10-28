@@ -194,6 +194,7 @@ PL/pgSQL caches a plan per statement and, under `plan_cache_mode = auto`, switch
 | Step | Entries |
 |---|---|
 | `check_user_active`, one probe of `samna_user` by `(user_id, app_id)` | 1 |
+| The guest probe of the same row, which caps a guest at read | 1 |
 | The pair, one probe of the `user_object` primary key, with its mark | 1 |
 | The object's `object_info` row, for owner, location and owner root | 1 |
 | The trimmed position of the app | 1 |
@@ -201,7 +202,7 @@ PL/pgSQL caches a plan per statement and, under `plan_cache_mode = auto`, switch
 | `_best_grant` over the pair's `G_x` derivations | 0 |
 
 ```
-entries(get_access) = 7                                   rows written = 0
+entries(get_access) = 8                                   rows written = 0
 ```
 
 When something was raised in the object's root since the mark, the ranges return the areas, at most 16, and the check reads the object's closure range, `a_x + t_x` entries, to test them; the mark then moves to the snapshot `xmin` as a heap only update, so the next check is the quiet one again. An area on the object, with cascade on an ancestor, or an assignment of the reader recomputes the one pair, once.

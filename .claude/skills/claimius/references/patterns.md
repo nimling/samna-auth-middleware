@@ -63,7 +63,7 @@ SELECT * FROM public.recipe WHERE kitchen_id = $kitchen_id;
 SELECT r.*
 FROM public.recipe r
 WHERE r.id IN (
-    SELECT object_id FROM claimius.get_objects($user_id, $app_id, 'public.recipe', $min_level)
+    SELECT object_id FROM claimius.get_objects($user_id, $app_id, 'public.recipe', $required_access)
 )
   AND r.kitchen_id = $kitchen_id;
 ```
@@ -72,5 +72,5 @@ For the basics use the rendering columns `get_objects` joins from `object_info`:
 
 ```sql
 SELECT object_id, sa_name, sa_description, sa_access
-FROM claimius.get_objects($user_id, $app_id, 'public.recipe', $min_level);
+FROM claimius.get_objects($user_id, $app_id, 'public.recipe', $required_access);
 ```

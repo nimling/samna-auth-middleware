@@ -232,7 +232,7 @@ DO $$ BEGIN
     ALTER TABLE claimius.claim ADD CONSTRAINT claim_level_not_negative CHECK (level >= 0);
 EXCEPTION WHEN duplicate_object THEN NULL;
 END $$;
-COMMENT ON COLUMN claimius.claim.level IS 'Precedence of the claim. A deny subtracts from every grant below its level whatever their classes; at the same level a direct deny subtracts from every grant and a tree deny from inherited grants. A link takes the higher level of the two claims, and the claim of that level decides its mask. 0 for every claim resolves as before levels existed.';
+COMMENT ON COLUMN claimius.claim.level IS 'The level of the claim, 0 unless set. When a grant and a deny meet at different levels the higher level wins whatever their classes; at the same level a direct deny subtracts from every grant and a tree deny from inherited grants. A link takes the higher level of the two claims, and the claim of that level decides its mask. 0 for every claim resolves as before levels existed.';
 DROP INDEX IF EXISTS claimius.idx_claim_sa_deleted_at;
 ALTER TABLE claimius.claim ADD COLUMN IF NOT EXISTS txid XID8 NOT NULL DEFAULT pg_current_xact_id();
 COMMENT ON COLUMN claimius.claim.txid IS 'Local transaction that last wrote the row, stamped by tg_update_txid on every insert and update, a replayed one included. get_claim_graph compares it to the snapshot a cached graph was built under.';

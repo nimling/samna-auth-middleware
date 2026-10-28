@@ -76,7 +76,7 @@ M(u, x, f) = ⋁ over surviving grants and the creator of a(f)
 
 with `a_g(f)` of [the model](./index.md#the-access-of-a-pair). Per derivation:
 
-1. An unscoped grant carries `close(e_g & 15 & ~D_g)` on every field, and `close(e_g & 15 & ~D_g(f))` on each field a scoped deny reaches.
+1. An unscoped grant carries `close(e_g & 15 & ~D_g)` on every field, and `close(e_g & 15 & ~D_g(f))` on each field a scoped deny reaches. `D_g` carries the bits of every deny of a higher level first, whatever its class, so a tree deny of a level higher than 0 reaches the creator too.
 
 2. A scoped grant carries `close(e_g & 15 & ~D_g(f))` on each field `f` its scope names and nothing on any other field.
 

@@ -608,7 +608,7 @@ A deny that arrives by cascade subtracts its bits from inherited grants in any t
 
 A grant whose mask reaches `0` after subtraction is dropped. What remains of a grant is closed under implication: a bit whose implied bits were taken goes too, so denying read to an owner leaves nothing. A deny scoped to fields subtracts on those fields only. Denies are computed when a pair is settled (`_build_grants_for_objects`, `_apply_denies`); the resulting `user_object` row reflects only surviving grants, so reads never filter for denies.
 
-`claim.level` is precedence, not access. A deny subtracts from every grant below its level whatever their classes; at the same level the direct and tree rules above decide. A link takes the higher level of its two claims. Binding or granting a claim above level 0 needs an actor that could hand it out: `_check_claim_level` requires write on the claim and refuses to lift a deny of a lower level the actor faces. Every grant and every `AccessClaim` carries the level of the claim it came through. Level 0 everywhere resolves as before levels existed.
+`claim.level` decides between a grant and a deny, not access: the higher level wins whatever their classes, and at the same level the direct and tree rules above decide. A link takes the higher level of its two claims. Binding or granting a claim whose level is not 0 needs an actor that could hand it out: `_check_claim_level` requires write on the claim and refuses to lift a deny the actor faces. Every grant and every `AccessClaim` carries the level of the claim it came through. Level 0 everywhere resolves as before levels existed.
 
 ## Sync model
 

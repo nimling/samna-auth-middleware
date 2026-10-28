@@ -42,7 +42,7 @@ Every claimius table falls in one of three groups: the model, the rows a writer 
 | `usage_diff` | primary key `(app_id, user_id, id)` |
 | `user_activity` | primary key `(user_id, app_id)`; `(app_id, directory_at)` partial for viewers |
 | `sync_event` | primary key `seq`; `(app_id, txid, seq)`; BRIN on `written_at` |
-| `claim` | primary key; `app_id`; `sa_owner_id`; `sa_root_id`; `(sa_access & 16)` partial for denies |
+| `claim` | primary key; `app_id`; `sa_owner_id`; `sa_root_id`; `(sa_access & 16)` partial for denies; on a prophet `(app_id, id)` unique, which the app scoped grants and bindings reference |
 | `user_claim` | primary key; live unique `(claim_id, user_id, app_id)`; `(user_id, app_id)`; `claim_id`; `sa_owner_id` |
 | `claim_object` | primary key; `app_id`; `claim_id`; `sa_owner_id`; `(object_type, object_id)` partial; `(claim_id, object_type, object_id)` partial and live; `(claim_id)` partial for live scope grants |
 | `audit` | primary key `(id, sa_created_at)`; `app_id` on a prophet; `sa_owner_id`; `(object_type, object_id)`; BRIN on `sa_created_at`, per month partition |
@@ -114,7 +114,7 @@ A closure row is two object pairs, a root, a depth and two timestamps: about 140
 | `usage_diff` | 1 |
 | `user_activity` | 1, 2 for a viewer; 0 for a cursor move |
 | `sync_event` | 2, and a BRIN summary per range of pages |
-| `claim` | 4, or 5 for a deny |
+| `claim` | 5 on a prophet, 6 for a deny; 4 and 5 on a disciple |
 | `user_claim` | 5 |
 | `claim_object` | 6 for a live object binding, 5 for a live scope grant |
 | `audit` | 4 on a prophet, 3 on a disciple, and a BRIN summary |

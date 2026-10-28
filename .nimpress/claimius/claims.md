@@ -52,7 +52,9 @@ A grant and a binding live in the app of their claim. On the prophet `user_claim
 `_check_claim_composition`, a before trigger on `claim_object`, bounds what a writer may hand out. It runs outside replay on an insert, or on an update of the mask, claim or object, of a live binding on an object that is not a claim. It resolves the writer from `sa_created_by` and settles the writer's pair on the object first.
 
 1. The binding is refused with `P0403` when its grant bits exceed what the writer holds on the object. A writer who cannot reach an object cannot grant it away, and one who reads it cannot grant write on it. A deny binding is exempt from this test.
-2. The binding is refused with `P0403` when the claim's level is above the highest level among the writer's grants on the object. This holds for a deny of level above 0 as well.
+2. The binding is refused with `P0403` when the claim's level is higher than every level the writer holds on the object. This holds for a deny whose level is not 0 as well.
+
+Handing a claim out, `insert_user_claim`, and increasing a claim's level run `_check_claim_level` for the actor in `sa_created_by`: a claim whose level is not 0 needs write on the claim, and the level must not be higher than a deny the actor faces on an object the claim is bound to, so an actor never lifts a deny it meets by handing out a stronger claim.
 
 Where the writer holds less than the binding hands out, these holds are tried in order before refusing:
 
@@ -81,7 +83,7 @@ A `claim_object` whose `object_type` is `claimius.claim` links claim A to claim 
 1. A link to its own claim is refused.
 2. A link whose reverse is live is refused.
 3. The writer must hold read on B, after its pair on B is settled, or the link is refused with `P0403`. A holder of B reads B, and so does a holder of a claim bound on B; see [the derivations](./index.md#derivations).
-4. When the higher level of A and B is above 0, the writer must hold that level on B, or the link is refused with `P0403`.
+4. When the higher of A's and B's levels is not 0, the writer must hold that level on B, or the link is refused with `P0403`.
 
 The use is reusing a surface at another strength. A Bookings Admin claim binds every meeting room of an organization; an External Vendor claim links to it with mask 4, and every vendor reads the same rooms without a binding copied: one link row, where copying needs a binding row per object of B and stays in step with B only by hand.
 
@@ -178,7 +180,8 @@ At different levels the higher claim's `eff` alone: `eff(A, l)` when A is higher
 |---|---|
 | Expansion | once per claim write |
 | Cascade reach of a claim | one range of `idx_claim_object_claim_id` and one range of `idx_inheritance_info_ancestor` per inheriting binding |
-| The bind check | the writer's grant, the point settle of one pair, one range of the writer's pairs on the object |
+| The bind check | the writer's grant, the point settle of one pair, one range of the writer's pairs on the object, read once more for the highest level the writer holds there |
+| `_check_claim_level` on a grant or a level increase | the settle of the actor's pair on the claim, one probe for write on it, and one range of the claim's bindings for the denies the actor faces, only for a claim whose level is not 0 |
 | A first binding hold, or the system app hold | one pair settle and one probe of the writer's pair, tested only when the plain rule would refuse |
 | A binding on a foreign row | one extra probe of `object_info` and the settle of one pair |
 | A link | one probe for the reverse link, one settle and one probe of the writer's `user_object` row on `(claimius.claim, B)` |
@@ -191,10 +194,10 @@ At different levels the higher claim's `eff` alone: `eff(A, l)` when A is higher
 With nothing raised in the object's root since the mark:
 
 ```
-entries(get_access) = 1 + 1 + 1 + 1 + 2 + 0 = 7
+entries(get_access) = 1 + 1 + 1 + 1 + 1 + 2 + 0 = 8
 ```
 
-one `check_user_active`, one pair on the `user_object` primary key with its mark, one `object_info` row with the owner, location and owner root, the trimmed position, the two empty ranges of the areas of the root and of the reader's assignments since the mark, and the grant chosen from the pair with no probe. With something raised in the root since the mark the check also reads the areas and the object's closure range, and moves the mark; only an area on the object, with cascade on an ancestor, or an assignment of the reader recomputes the pair.
+one `check_user_active`, one probe of the reader's `samna_user` row for the guest type that caps a guest at read, one pair on the `user_object` primary key with its mark, one `object_info` row with the owner, location and owner root, the trimmed position, the two empty ranges of the areas of the root and of the reader's assignments since the mark, and the grant chosen from the pair with no probe. With something raised in the root since the mark the check also reads the areas and the object's closure range, and moves the mark; only an area on the object, with cascade on an ancestor, or an assignment of the reader recomputes the pair.
 
 With `a'_x` ancestors on the chains of the walk and `B'_x` bindings on them:
 

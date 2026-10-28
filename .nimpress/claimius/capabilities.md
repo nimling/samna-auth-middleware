@@ -28,7 +28,7 @@ It is written like any binding: `insert_claim`, then `insert_claim_object` with 
 1. It takes the user's live grants in the app inside their window, joined to their live claims.
 2. It takes each claim's live scope bindings and keeps those where `jsonb_path_exists(scope, path)`. The argument is a jsonpath and starts with `$`: `$.page` matches any page grant, `$.page."time-report"` one page, `$.page.keyvalue() ? (@.key like_regex "report")` a pattern ([PostgreSQL, SQL/JSON path language](https://www.postgresql.org/docs/17/functions-json.html#FUNCTIONS-SQLJSON-PATH)).
 3. Each matching binding carries the claim mask narrowed by the binding mask; a NULL binding mask is the claim mask.
-4. Each matching deny binding subtracts its bits from every matching grant binding whose claim level is at or below the deny's level. What remains is closed under implication.
+4. Each matching deny binding subtracts its bits from every matching grant binding whose claim level is not higher than the deny's. What remains is closed under implication. Composition links are not followed here: a scope binding on a claim the user reaches only through a link does not match.
 5. A binding left with no bit, or whose bits do not cover `required`, is dropped.
 
 The answer is one row per surviving binding, with its grant, its claim, its settled mask and level, and the binding's own id, `scope`, mask and `inherits`, ordered by claim and binding. Deny bindings are never returned. An empty answer is a normal no.
@@ -46,7 +46,7 @@ Claimius matches the path and the mask. It never interprets the keys. What lives
 1. Page gating. Each page slug is a key under `page`, with `_access` at each node and sub functions nested below. One call with `$.page` returns every page grant of the user, which the implementing side merges into a slug map for navigation and routing.
 2. Server side functional checks. A handler that performs a gated function asks for the specific path at the bits it needs, for example `$.page."time-approve"` at execute before approving a timesheet.
 3. Machine clients. A client's capability, such as reading only the public subset of a resource, is a scope grant on a claim the client holds, matched the same way.
-4. Denying a capability. A deny claim bound with a scope under the same path removes its bits from every grant that path matches, at or below its level, for the users who hold it.
+4. Denying a capability. A deny claim bound with a scope under the same path removes its bits from every grant that path matches whose level is not higher than the deny's, for the users who hold it.
 
 ## Math
 
