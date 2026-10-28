@@ -636,18 +636,19 @@ sed -n 11,35p audit/audit.go
 
 1. Standard: ISO/IEC 27001:2022 A.8.15, A.5.33; GDPR Art. 5(1)(e).
 
-2. Check: monthly partitions are kept for a stated period and dropped after, and rows are hash chained or written to an append only sink.
+2. Check: monthly partitions are kept for a stated period, exported to cold storage and dropped only after, and rows are hash chained or written to an append only sink.
 
 3. Method:
 
 ```bash
-grep -n 'PARTITION' disciple/database/V1.1__claimius_baseline.sql
-grep -rn -i 'retention\|prev_hash' disciple/database prophet/database audit
+grep -n "'audit', 'audit'" disciple/database/V5.4__claimius_retention_class.sql prophet/database/V5.21__claimius_retention_class.sql
+grep -n 'delete_exported_audit\|retention_export' disciple/database/V5.4__claimius_retention_class.sql
+grep -rn -i 'prev_hash\|immutab' disciple/database prophet/database audit pkg/azure
 ```
 
-4. Pass: a retention sweep and a chain column or sink.
+4. Pass: a retention row of class `audit` whose prune runs only after export, a manifest with a sha256 per object, and a chain column or an append only sink.
 
-5. Today: `fails`, partitions at `disciple/database/V1.1__claimius_baseline.sql:849` with neither.
+5. Today: `fails`. The `audit` row is class `audit`, 365 days (`disciple/database/V5.4__claimius_retention_class.sql:136`); `delete_expired` refuses it (`:153`), and `delete_exported` writes the manifest row with its sha256 and runs `delete_exported_audit`, which drops a partition only once it is empty (`:193`, `:50`), after `shared/retention.go:87` wrote the batch to the sink. Live rows carry no hash chain, and `pkg/azure/storage.go:58` overwrites an object of the same path with no immutability policy.
 
 ### C39, trace context to the prophet
 
@@ -763,28 +764,28 @@ grep -n 'GetConsent' analytics/*.go
 3. Method:
 
 ```bash
-grep -n "analytics_event" prophet/database/V5.20__claimius_retention.sql
+grep -n "analytics_event" prophet/database/V5.21__claimius_retention_class.sql
 ```
 
-4. Pass: an `analytics_event` row in `claimius.retention`, 30 days by default, pruned once a day by `delete_expired` under the retention job.
+4. Pass: an `analytics_event` row of class `log` in `claimius.retention`, 30 days by default, pruned once a day by `delete_expired` under the retention job.
 
-5. Today: `passes`, `prophet/database/V5.20__claimius_retention.sql`, `shared/retention.go`.
+5. Today: `passes`, `prophet/database/V5.21__claimius_retention_class.sql:311`, `shared/retention.go:134`.
 
 ### C46, retention for every other personal table
 
 1. Standard: GDPR Art. 5(1)(e); ISO/IEC 27001:2022 A.8.10.
 
-2. Check: `audit`, `notification`, `consent`, `analytics_session`, `analytics_capture`, `user_activity` and `usage_diff` each have a stated period and a sweep.
+2. Check: `notification`, `consent`, `analytics_session`, `analytics_capture`, `user_activity` and `usage_diff` each have a stated period and a sweep; `audit` is C38.
 
 3. Method:
 
 ```bash
-psql -c "SELECT kind, days FROM claimius.get_retention()"
+psql -c "SELECT kind, class, days FROM claimius.get_retention()"
 ```
 
 4. Pass: one retention row and prune per table.
 
-5. Today: `fails`, `audit`, `notification`, `consent`, `analytics_session` and `analytics_capture` have a retention row each, `prophet/database/V5.20__claimius_retention.sql` and `disciple/database/V5.3__claimius_retention.sql`, and `usage_diff` is folded by the drain; `user_activity` has no sweep.
+5. Today: `fails`. `notification` (`log`), `consent` (`record`, exported before it is deleted), `analytics_session` (`log`) and `analytics_capture` (`cache`) have a retention row each (`prophet/database/V5.21__claimius_retention_class.sql:304`, `disciple/database/V5.4__claimius_retention_class.sql:133`), and `usage_diff` is folded by the drain; `user_activity` has no sweep.
 
 ### C47, export contract
 

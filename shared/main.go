@@ -19,6 +19,7 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/lib/pq"
 	"github.com/nimling/samna-auth-middleware/v2/client"
+	"github.com/nimling/samna-auth-middleware/v2/pkg/azure"
 	"github.com/nimling/samna-auth-middleware/v2/pkg/encryption"
 	"github.com/nimling/samna-auth-middleware/v2/utils"
 	"github.com/uptrace/bun"
@@ -28,12 +29,13 @@ import (
 
 type DB struct {
 	*bun.DB
-	Replica *bun.DB
-	Logger  echo.Logger
-	ConnStr string
-	Usage   *ObjectUsage
-	stmts   sync.Map
-	listen  *listen
+	Replica     *bun.DB
+	Logger      echo.Logger
+	ConnStr     string
+	Usage       *ObjectUsage
+	ColdStorage ColdStorage
+	stmts       sync.Map
+	listen      *listen
 
 	RouteToProphet bool
 }
@@ -270,6 +272,14 @@ func Connect(logger echo.Logger) (*DB, error) {
 			return nil, fmt.Errorf("ping replica: %w", err)
 		}
 		logger.Info("reads route to the replica")
+	}
+
+	if c := utils.Cfg(); c.ColdStorageConnectionString != "" {
+		cold, err := azure.GetColdStorage(c.ColdStorageConnectionString, c.ColdStorageContainerName)
+		if err != nil {
+			return nil, fmt.Errorf("cold storage: %w", err)
+		}
+		db.ColdStorage = cold
 	}
 
 	db.Usage = startObjectUsage(db.postObjectUsage, func(err error) { logger.Warnf("usage flush: %v", err) }, usageFlushInterval, usageFlushKeys)

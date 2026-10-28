@@ -298,21 +298,27 @@ Status: `partial`.
 
 5. ISO/IEC 27001:2022 A.8.11, data masking: `partial`. See Redaction.
 
-6. ISO/IEC 27001:2022 A.8.15, logging: `partial`. `claimius.audit` partitioned by month (`disciple/database/V1.1__claimius_baseline.sql:779`, `:849`), written in the caller's transaction by `shared/audit.go:10`; `audit/audit.go:11` writes in a goroutine with three retries and drops the row on failure, and no retention or tamper evidence exists.
+6. ISO/IEC 27001:2022 A.8.10, information deletion: `partial`. Every claimius runtime table has a retention row with a class (`prophet/database/V5.21__claimius_retention_class.sql:304`, `disciple/database/V5.4__claimius_retention_class.sql:133`); `log`, `run`, `token`, `cache` and `queue` kinds are deleted by age in key ordered batches (`prophet/database/V5.21__claimius_retention_class.sql:110`) once a day by one leader in every mode (`prophet/sam/main.go:52`, `disciple/sam/main.go:74`), and `upsert_retention` is the one way a host registers its own (`prophet/database/V5.21__claimius_retention_class.sql:281`). `user_activity` has no sweep, and a host's application data is never age pruned by design.
 
-7. ISO/IEC 27001:2022 A.8.16, monitoring: `built`. OpenTelemetry at `smw/telemetry.go:11`, uptime heartbeat at `uptime/uptime.go:42`, health route at `disciple/sam/register.go:36`.
+7. ISO/IEC 27001:2022 A.8.15, logging: `partial`. `claimius.audit` partitioned by month (`disciple/database/V1.1__claimius_baseline.sql:802`, `:814`), written in the caller's transaction by `shared/audit.go:10`; expired audit is exported to cold storage before it is deleted (`disciple/database/V5.4__claimius_retention_class.sql:35`, `:50`, `shared/retention.go:87`). `audit/audit.go:11` writes in a goroutine with three retries and drops the row on failure, and live rows carry no hash chain.
 
-8. GDPR Art. 5(1)(c), data minimisation: `partial`. `user_identity.data` is not carried on the feed (`disciple/database/V1.1__claimius_baseline.sql:325`) and raw analytics events expire after 30 days (`analytics/analytics.go:18`, `analytics/writer.go:106`); every disciple still replicates the full `samna_user` profile, email and phone included, whether it needs them or not.
+8. ISO/IEC 27001:2022 A.5.33, protection of records: `partial`. Kinds of class `audit` and `record`, `audit` and `consent`, are refused by `delete_expired` (`prophet/database/V5.21__claimius_retention_class.sql:334`) and deleted only by `delete_exported` after the batch is written as gzip NDJSON to the sink (`shared/retention.go:87`, `pkg/azure/storage.go:58`), each batch with a manifest row holding its key range, row count and sha256 (`prophet/database/V5.21__claimius_retention_class.sql:18`, `:374`). With no sink both are kept and the job logs it (`shared/retention.go:166`). The sink overwrites an object of the same path and code sets no immutability policy on the container.
 
-9. GDPR Art. 25, data protection by design and by default: `partial`. Deny by default (`shared/access.go:17`), analytics behind consent (`analytics/consent.go:61`); field masks are not enforced by default in Go.
+9. ISO/IEC 27001:2022 A.8.16, monitoring: `built`. OpenTelemetry at `smw/telemetry.go:11`, uptime heartbeat at `uptime/uptime.go:42`, health route at `disciple/sam/register.go:36`.
 
-10. GDPR Art. 30, records of processing: `missing`. No register of processing in code; the audit trail records claimius writes, not processing purposes.
+10. GDPR Art. 5(1)(c), data minimisation: `partial`. `user_identity.data` is not carried on the feed (`disciple/database/V1.1__claimius_baseline.sql:325`) and raw analytics events expire after 30 days (`analytics/analytics.go:18`, `analytics/writer.go:106`); every disciple still replicates the full `samna_user` profile, email and phone included, whether it needs them or not.
 
-11. GDPR Art. 15, right of access: `partial`. A user reads its own profile, claims, relations, organizations, locations, assets and audit through `/me` (`disciple/sam/register.go:14`); no export contract gathers `user_field`, `notification`, `consent`, `analytics_*` and the host's own tables into one answer.
+11. GDPR Art. 5(1)(e), storage limitation: `partial`. Each personal runtime table of claimius has a stated period and a daily sweep: `notification` soft deleted or closed (`prophet/database/V5.21__claimius_retention_class.sql:110`), `analytics_session`, `analytics_event`, `analytics_heat` and `analytics_capture` by age, `audit` and `consent` exported to cold storage and then deleted (`prophet/database/V5.21__claimius_retention_class.sql:304`, `shared/retention.go:134`). `user_activity` has no sweep.
 
-12. GDPR Art. 17, right to erasure: `partial`. `DeleteUser` soft deletes `samna_user` and `user_identity` (`shared/user.go:248`, `shared/user.go:271`, `prophet/echo/user.go:307`); no hard delete or anonymisation of the row, `user_field`, `user_relation`, `notification`, `audit.sa_created_by`, `consent` or `analytics_*`, and no hook asks the host to erase its own rows.
+12. GDPR Art. 25, data protection by design and by default: `partial`. Deny by default (`shared/access.go:17`), analytics behind consent (`analytics/consent.go:61`); field masks are not enforced by default in Go.
 
-13. GDPR Art. 32, security of processing: `partial`. TLS to Postgres by default (`shared/main.go:189`), secrets AES GCM (`shared/cipher.go:12`, `utils/aes.go:12`) under keys wrapped at rest (`pkg/encryption/master.go:32`) and opened only for a reader (`shared/secret.go:141`), DPoP and mTLS binding (`smw/token.go:59`).
+13. GDPR Art. 30, records of processing: `missing`. No register of processing in code; the audit trail records claimius writes, not processing purposes.
+
+14. GDPR Art. 15, right of access: `partial`. A user reads its own profile, claims, relations, organizations, locations, assets and audit through `/me` (`disciple/sam/register.go:14`); no export contract gathers `user_field`, `notification`, `consent`, `analytics_*` and the host's own tables into one answer.
+
+15. GDPR Art. 17, right to erasure: `partial`. `DeleteUser` soft deletes `samna_user` and `user_identity` (`shared/user.go:248`, `shared/user.go:271`, `prophet/echo/user.go:307`); no hard delete or anonymisation of the row, `user_field`, `user_relation`, `notification`, `audit.sa_created_by`, `consent` or `analytics_*`, and no hook asks the host to erase its own rows.
+
+16. GDPR Art. 32, security of processing: `partial`. TLS to Postgres by default (`shared/main.go:189`), secrets AES GCM (`shared/cipher.go:12`, `utils/aes.go:12`) under keys wrapped at rest (`pkg/encryption/master.go:32`) and opened only for a reader (`shared/secret.go:141`), DPoP and mTLS binding (`smw/token.go:59`).
 
 ## Personal data
 
@@ -334,4 +340,4 @@ Status: `partial`.
 
 10. Export: no contract. The nearest are the `/me` reads at `disciple/sam/register.go:14` and `GetMe` at `shared/me.go:19`.
 
-11. Erase: soft delete only, `shared/user.go:271` sets `sa_deleted_at` on `samna_user` and `user_identity`; `merge_user` (`prophet/database/V2.4__claimius_functions_external.sql:2429`) is the only path that removes a `samna_user` row. Only raw analytics events are expired on a schedule (`analytics/writer.go:106`).
+11. Erase: soft delete only, `shared/user.go:271` sets `sa_deleted_at` on `samna_user` and `user_identity`; `merge_user` (`prophet/database/V2.4__claimius_functions_external.sql:2429`) is the only path that removes a `samna_user` row. The runtime tables expire under the retention job by class, `audit` and `consent` only after export to cold storage (`shared/retention.go:134`).

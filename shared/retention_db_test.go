@@ -74,11 +74,30 @@ func TestDiscipleRetentionDeletesExpiredRowsAndTrimsWithNoActiveReader(t *testin
 	exec(`INSERT INTO claimius.audit (id, operation, type, object_type, object_id, sa_owner_id, sa_created_at) VALUES
 		(?, 'update', 'test', 'claimius.organization', ?, ?, now() - INTERVAL '3 years'),
 		(?, 'update', 'test', 'claimius.organization', ?, ?, now())`, old, orgRoot, orgRoot, fresh, orgRoot, orgRoot)
-	if _, err := db.DeleteExpired(ctx, "audit"); err != nil {
+	if _, err := db.DeleteExpired(ctx, "audit"); err == nil {
+		t.Fatalf("audit is never deleted by age")
+	}
+	db.ColdStorage = nil
+	if _, err := db.DeleteExported(ctx, "audit"); !errors.Is(err, sdb.ErrNoColdStorage) {
+		t.Fatalf("audit is kept with no cold storage: %v", err)
+	}
+	if n := count(`SELECT count(*) FROM claimius.audit WHERE id IN (?, ?)`, old, fresh); n != 2 {
+		t.Fatalf("audit with no cold storage keeps every row, found %d", n)
+	}
+	sink := &coldSink{objects: map[string][]byte{}}
+	db.ColdStorage = sink
+	t.Cleanup(func() { db.ColdStorage = nil })
+	if _, err := db.DeleteExported(ctx, "audit"); err != nil {
 		t.Fatalf("audit: %v", err)
 	}
 	if n := count(`SELECT count(*) FROM claimius.audit WHERE id IN (?, ?)`, old, fresh); n != 1 {
 		t.Fatalf("audit keeps only the months within the retention, found %d", n)
+	}
+	if len(sink.objects) == 0 {
+		t.Fatalf("the expired audit is written to cold storage before it is deleted")
+	}
+	if n := count(`SELECT count(*) FROM claimius.retention_export WHERE kind = 'audit' AND row_count > 0`); n != len(sink.objects) {
+		t.Fatalf("each object written has one manifest row, %d rows for %d objects", n, len(sink.objects))
 	}
 
 	before := count(`SELECT count(*) FROM claimius.get_organizations(?::UUID, 4)`, userA)
@@ -95,4 +114,13 @@ func TestDiscipleRetentionDeletesExpiredRowsAndTrimsWithNoActiveReader(t *testin
 	if after := count(`SELECT count(*) FROM claimius.get_organizations(?::UUID, 4)`, userA); after != before {
 		t.Fatalf("a reader below the trimmed position resettles to the same answer, %d before and %d after", before, after)
 	}
+}
+
+type coldSink struct {
+	objects map[string][]byte
+}
+
+func (s *coldSink) PutObject(_ context.Context, path string, body []byte) error {
+	s.objects[path] = body
+	return nil
 }

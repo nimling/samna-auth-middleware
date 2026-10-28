@@ -3,7 +3,7 @@ gate: samna-developer
 layout: doc
 title: Disciple
 description: How a disciple writes through to the prophet, what it owns itself, and how the pull loop keeps its copy current.
-tags: disciple, prophet, sync, write through, sync_event, access_diff, replay mode
+tags: disciple, prophet, sync, write through, sync_event, access_diff, replay mode, retention, cold storage
 lastUpdated: true
 ---
 
@@ -64,11 +64,25 @@ Each role has one runtime start, `sam.Init(ctx) error`, joined by `sam.Done()`. 
 7. Order. The pool first, then `sam.Init` and `uptime.Init`, then the routes and their `RegisterOnShutdown`, then serve. On the signal: shut the http server down, cancel the run context, wait on `sam.Done()` and `uptime.Done()`, and close the database last. `(*shared.DB).Close` writes the usage counts still held before it closes the pool.
 8. No hidden state. Before `sam.Init`, `notification.Write` and `WriteUser` and `analytics.Post` log the drop, `notification.Stream`, `analytics.PostSession`, `GetConsent` and `PostConsent` return `ErrNotStarted`, and `Done()` logs it and answers a closed channel.
 9. One replica folds. The hourly analytics fold and expiry run under `shared.LeadSync` with the lock key `claimius.analytics_fold`, so of N prophet replicas one folds.
-10. Debug mode. `sam.Init` starts notification, and on the prophet analytics, in debug mode too; the sync, seed, Initiate apps and peer sync start only outside it. `sam.Done()` closes once the context ends. `uptime.Init` starts nothing in debug mode, returns `nil` and its `Done()` is closed at once.
+10. Debug mode. `sam.Init` starts notification, the retention job, and on the prophet analytics, in debug mode too; the sync, seed, Initiate apps and peer sync start only outside it. `sam.Done()` closes once the context ends. `uptime.Init` starts nothing in debug mode, returns `nil` and its `Done()` is closed at once.
 
 `UserAuthMiddleware` also holds the answer of a request that made routed writes until the pull has applied them, so the client's next request reads them back. A route outside it gets the same with `smw.WaitForSeq(timeout)`.
 
 `RegisterEndpoints` mounts `login`, `callback` and `logout` under the group. `login?next=<path>` returns the visitor to that same origin path after the callback. The path travels in the OAuth `state` as well as in a cookie, so a callback that reaches a browser without the flow cookies, a login link opened in another browser, starts the login again with the same `next` and still lands on it, a cli approval page included.
+
+## Retention
+
+The middleware holds the one retention mechanism of every Samna and Nimtech service. `claimius.retention` has one row per kind of runtime row, its `class`, its `days`, its `prune` function and, for a kept class, its `export` function. Application data has no kind and is never age pruned.
+
+1. Classes, `claimius.retention_class`. `log`, `run`, `token`, `cache` and `queue` are deleted by age: logs, run history, delivery logs, caches, processed queue rows and expired tokens. `audit` and `record` are audit and legal records, exported to cold storage before they are deleted and never deleted otherwise.
+2. The claimius kinds. On both roles `access_diff` (`log`), `audit` (`audit`) and `notification` (`log`, only a notification soft deleted or closed before the cut goes). On the prophet also `sync_event`, `peer_collision`, `analytics_event`, `analytics_session` and `analytics_heat` (`log`), `analytics_capture` (`cache`), `consent` (`record`), `rate_limit` and `par_request` (`token`).
+3. Registering a kind. A host registers its own runtime tables from its own migration with `claimius.upsert_retention(kind, class, days, prune, export)`, the only way a kind enters the table. A kind already registered keeps the days it was given and takes the rest. Each function must exist with the arguments its class calls it with, or the call fails:
+   1. A `log`, `run`, `token`, `cache` or `queue` kind passes `export` as `NULL` and a `prune(keep INTERVAL) RETURNS BIGINT` that deletes the rows older than `keep` and returns how many. A table partitioned by time drops whole partitions; any other table deletes in batches ordered by its key.
+   2. An `audit` or `record` kind passes an `export(keep INTERVAL, after TEXT, lim INTEGER) RETURNS TABLE (key TEXT, data JSONB)` that answers at most `lim` expired rows with a key greater than `after`, an empty `after` the first batch, in key order, each row as `to_jsonb`, and a `prune(keys TEXT[]) RETURNS BIGINT` that deletes exactly the rows of those keys. A key sorts as text in the order of the rows and carries no hyphen.
+4. The job. `sam.Init` starts it on both roles under `shared.LeadSync` with `shared.RetentionLockKey`, in every mode, debug included, so of N replicas one runs it once a day. A deleted by age kind runs `claimius.delete_expired(kind)`, which refuses an `audit` or `record` kind with `22023`.
+5. Export. For an `audit` or `record` kind the job reads a batch of 5,000 through `claimius.get_expired(kind, after, lim)`, writes it as gzip NDJSON to `<app_slug>/<kind>/<yyyy>/<mm>/<first key>-<last key>.ndjson.gz`, and only then calls `claimius.delete_exported(kind, path, sha256, keys, first)`, which writes the manifest row in `claimius.retention_export` (kind, object path, first and last key, row count, sha256, exported_at) and runs the prune for exactly those keys, in the same order, in one transaction. A failed write deletes nothing and is logged. The `audit` prune deletes the exported rows and drops a monthly partition only once its month is past the retention and it holds no row, so every partition is exported before it is dropped.
+6. The sink. `shared.ColdStorage`, one method `PutObject(ctx, path, body) error`, held by the job as `(*shared.DB).ColdStorage`. `shared.Connect` wires an Azure Blob container when `SAUTH_COLD_STORAGE_CONNECTION_STRING` is set, into `SAUTH_COLD_STORAGE_CONTAINER_NAME`; a host supplies its own by setting `sdb.Instance().ColdStorage` before `sam.Init`. With no sink the `audit` and `record` kinds are kept, never deleted, and the job logs that once per run.
+7. Reading and editing. `sam.RegisterRetention(group)` mounts `GET /retention` with read and `PUT /retention/:kind` with write on the owner organization of the app; a row answers `class` and `export` beside the days.
 
 ## Writes
 

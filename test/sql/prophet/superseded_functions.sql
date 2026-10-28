@@ -93,7 +93,10 @@ INSERT INTO superseded VALUES
         ('claimius._cascade_recompute(uuid,uuid,text,uuid)'),
         ('claimius.recompute_user_object(uuid,uuid,text,uuid[])'),
         ('claimius._build_grants_for_objects(uuid,uuid,text,uuid[],uuid[])'),
-        ('claimius._best_grant(jsonb,uuid,uuid,integer)');
+        ('claimius._best_grant(jsonb,uuid,uuid,integer)'),
+        ('claimius.upsert_retention(text,integer,text)'),
+        ('claimius.delete_expired_audit(interval)'),
+        ('claimius.delete_expired_consent(interval)');
 
 SELECT is_empty($$
     SELECT s.signature FROM superseded s

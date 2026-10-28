@@ -22,7 +22,7 @@ BEGIN
              claimius.insert_app_handover, claimius.update_app_handover, claimius.apply_peer_event, claimius.insert_secret, claimius.upsert_peer_grant, claimius.upsert_guest_user,
              claimius.update_claim_guest, claimius.insert_code, claimius.delete_code, claimius.update_code_used, claimius.redeem_code,
              claimius.upsert_table_info, claimius.delete_table_info, claimius.upsert_internal_table_info,
-             claimius.recompute_state, claimius.delete_expired, claimius.update_retention, claimius.upsert_retention,
+             claimius.recompute_state, claimius.delete_expired, claimius.get_expired, claimius.delete_exported, claimius.update_retention, claimius.upsert_retention,
              claimius.upsert_search_source, claimius.delete_search_source
              FROM claimius_reader';
 
@@ -54,7 +54,7 @@ BEGIN
              claimius.insert_app_handover, claimius.update_app_handover, claimius.apply_peer_event, claimius.insert_secret, claimius.upsert_peer_grant, claimius.upsert_guest_user,
              claimius.update_claim_guest, claimius.insert_code, claimius.delete_code, claimius.update_code_used, claimius.redeem_code,
              claimius.upsert_table_info, claimius.delete_table_info, claimius.upsert_internal_table_info,
-             claimius.recompute_state, claimius.delete_expired, claimius.update_retention, claimius.upsert_retention,
+             claimius.recompute_state, claimius.delete_expired, claimius.get_expired, claimius.delete_exported, claimius.update_retention, claimius.upsert_retention,
              claimius.upsert_search_source, claimius.delete_search_source
              FROM claimius_reader';
     EXECUTE 'GRANT INSERT, UPDATE, DELETE ON claimius.user_object, claimius.object_info, claimius.user_users,
