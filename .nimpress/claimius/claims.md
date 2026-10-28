@@ -180,8 +180,8 @@ At different levels the higher claim's `eff` alone: `eff(A, l)` when A is higher
 | Expansion | once per claim write |
 | Cascade reach of a claim | one range of `idx_claim_object_claim_id` and one range of `idx_inheritance_info_ancestor` per inheriting binding |
 | The bind check | the writer's grant, the point settle of one pair, one range of the writer's pairs on the object, read once more for the highest level the writer holds there |
-| The bind check | the writer's grant, the point settle of one pair, one range of the writer's pairs on the object, and one range of the writer's deny bindings with a closure probe each |
-| `_check_claim_denies` on a grant or a level increase | one range of `idx_claim_object_claim_id` for the claim's bindings, one `_denied_access` range per non deny object binding, and the settle and one probe of the actor's pair only on a binding where the denied bits overlap; for every claim |
+| The bind check | the writer's grant, the point settle of one pair, one range of the writer's pairs on the object, and one range of the writer's grants and one of the links of its inheriting claims for the denies reaching it, with a closure probe each |
+| `_check_claim_denies` on a grant or a level increase | one range of `idx_claim_object_claim_id` for the claim's bindings, one `_denied_access` pass per non deny object binding, a range of the actor's grants and one of the links of its inheriting claims with a closure probe per deny binding found, and the settle and one probe of the actor's pair only on a binding where the denied bits overlap; for every claim |
 | A binding on a foreign row | one extra probe of `object_info` and the settle of one pair |
 | A link | one probe for the reverse link, one settle and one probe of the writer's `user_object` row on `(claimius.claim, B)` |
 | `_best_grant` | nothing beyond the pair |
