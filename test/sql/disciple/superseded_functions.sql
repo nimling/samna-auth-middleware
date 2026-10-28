@@ -73,8 +73,12 @@ INSERT INTO superseded VALUES
         ('claimius._build_grants_for_objects(uuid,text,uuid[],uuid[])'),
         ('claimius._best_grant(jsonb,uuid,integer)'),
         ('claimius.upsert_retention(text,integer,text)'),
-        ('claimius.delete_expired_audit(interval)'),
-        ('claimius.delete_exported(text,text,text,text[],boolean)');
+        ('claimius.delete_exported(text,text,text,text[],boolean)'),
+        ('claimius.delete_exported(text,uuid,text,text,text[],boolean)'),
+        ('claimius.get_expired(text,text,integer)'),
+        ('claimius.get_expired_audit(interval,text,integer)'),
+        ('claimius.delete_exported_audit(text[])'),
+        ('claimius.upsert_retention(text,claimius.retention_class,integer,text,text)');
 
 SELECT is_empty($$
     SELECT s.signature FROM superseded s

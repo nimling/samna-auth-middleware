@@ -95,7 +95,7 @@ func TestRetentionIsReadAndEditedThroughAccessOnTheOwnerOrganization(t *testing.
 		kinds[r.Kind] = true
 	}
 	for _, kind := range []string{"access_diff", "sync_event", "audit", "notification", "peer_collision", "analytics_event",
-		"analytics_session", "analytics_heat", "analytics_capture", "consent", "rate_limit", "par_request"} {
+		"analytics_session", "analytics_heat", "analytics_capture", "rate_limit", "par_request"} {
 		if !kinds[kind] {
 			t.Fatalf("the prophet keeps no retention for %s: %v", kind, kinds)
 		}
@@ -200,48 +200,16 @@ func TestRetentionDeletesWhatEachKindKeepsNoLonger(t *testing.T) {
 		t.Fatalf("analytics_capture keeps only the recent snapshot, found %d", n)
 	}
 
-	exec(`INSERT INTO claimius.consent (id, app_id, anonymous_id, policy_version, revoked_at) VALUES
-		(?, ?, ?, '1', now() - INTERVAL '400 days'), (?, ?, ?, '1', NULL)`, old, appID, old.String(), fresh, appID, fresh.String())
-	if _, err := db.DeleteExpired(ctx, "consent"); err == nil {
-		t.Fatalf("consent is never deleted by age")
-	}
-	sink := &coldSink{objects: map[string][]byte{}}
-	db.ColdStorage = sink
-	db.ColdStore = shared.SharedColdStorage{Storage: sink}
-	t.Cleanup(func() {
-		db.ColdStorage = nil
-		db.ColdStore = nil
-	})
-	deleteExported := func(kind string) {
-		t.Helper()
-		if _, err := db.DeleteExported(ctx, kind); err != nil {
-			t.Fatalf("delete exported %s: %v", kind, err)
-		}
-	}
-	deleteExported("consent")
-	if n := count(`SELECT count(*) FROM claimius.consent WHERE id IN (?, ?)`, old, fresh); n != 1 {
-		t.Fatalf("consent keeps only the live decision, found %d", n)
-	}
-
 	exec(`SELECT claimius.upsert_audit_partition(now() - INTERVAL '3 years')`)
 	exec(`INSERT INTO claimius.audit (id, app_id, operation, type, object_type, object_id, sa_owner_id, sa_created_at) VALUES
 		(?, ?, 'update', 'test', 'claimius.organization', ?, ?, now() - INTERVAL '3 years'),
 		(?, ?, 'update', 'test', 'claimius.organization', ?, ?, now())`, old, appID, grantRoot, grantRoot, fresh, appID, grantRoot, grantRoot)
-	deleteExported("audit")
+	deleteExpired("audit")
 	if n := count(`SELECT count(*) FROM claimius.audit WHERE id IN (?, ?)`, old, fresh); n != 1 {
 		t.Fatalf("audit keeps only the months within the retention, found %d", n)
 	}
 	if n := count(`SELECT count(*) FROM pg_class WHERE relname = 'audit_' || to_char((now() - INTERVAL '3 years') AT TIME ZONE 'UTC', 'YYYYMM')`); n != 0 {
 		t.Fatalf("the expired audit month is dropped as a partition")
-	}
-	if n := count(`SELECT count(*) FROM claimius.retention_export WHERE kind IN ('audit', 'consent')`); n != len(sink.objects) || n < 2 {
-		t.Fatalf("each batch written to cold storage has one manifest row, %d rows for %d objects", n, len(sink.objects))
-	}
-	if n := count(`SELECT count(*) FROM claimius.retention_export WHERE kind = 'audit' AND root_id = ? AND object_path LIKE '%/' || ? || '/audit/%'`, grantRoot, grantRoot.String()); n == 0 {
-		t.Fatalf("the audit of a root organization is exported under its root")
-	}
-	if n := count(`SELECT count(*) FROM claimius.retention_export WHERE kind = 'consent' AND root_id IS NULL AND object_path LIKE '%/none/consent/%'`); n == 0 {
-		t.Fatalf("a consent row carries no root and is exported under none")
 	}
 
 	deleteExpired("sync_event")
@@ -339,13 +307,4 @@ func TestAnEventTimeOutsideTheLastDayIsClampedToIt(t *testing.T) {
 	if outside != 0 {
 		t.Fatalf("%d events kept a time outside the last day", outside)
 	}
-}
-
-type coldSink struct {
-	objects map[string][]byte
-}
-
-func (s *coldSink) PutObject(_ context.Context, path string, body []byte) error {
-	s.objects[path] = body
-	return nil
 }

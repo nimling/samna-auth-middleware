@@ -105,14 +105,13 @@ export interface BodyClaimGuest {
   mode: GuestMode
 }
 
-export type RetentionClass = 'log' | 'run' | 'token' | 'cache' | 'queue' | 'audit' | 'record'
+export type RetentionClass = 'log' | 'run' | 'token' | 'cache' | 'queue' | 'audit'
 
 export interface Retention {
   kind: string
   class: RetentionClass
   days: number
   prune: string
-  export: string | null
   pruned: number | null
   pruned_at: string | null
   updated_at: string
