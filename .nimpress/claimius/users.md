@@ -38,9 +38,9 @@ A user is who acts. A person and a machine client are both users, and both hold 
 
 ## Profile
 
-A user's profile is one `jsonb` on the user row, `samna_user.profile`, and nothing else is stored for it. The user writes its own keys on Samna Auth. An app writes under its own slug through `PUT /sam/profile`, one object per field, `{"<app_slug>": {"<field>": {"label", "value", "link", "index"}}}`, and withdraws a field or its whole object through `DELETE /sam/profile`. The write lands on every row of the user, so the sync carries the whole profile to every app that sees the user, and a disciple reads it from its own `samna_user` row. The profile image and other files are `object_asset` links of kind `profile` on the user, as any asset link.
+A user's profile is one `jsonb` on the user row, `samna_user.profile`: an object of key to entry, and every entry `{"schema": {...}, "value": ...}`. The schema is a JSON Schema fragment the renderer reads, `type`, `title`, `format`, `component`, `icon`, `order`, `enum`, limits, `items`, `properties`; the value is what it describes. The user writes its own keys, without a dot, on Samna Auth through `update_profile`. An app writes `<app slug>.<field>` through `PUT /sam/profile` and withdraws through `DELETE /sam/profile`; the slug namespace keeps an app to its own entries. Every write checks the entry in Go first, `shared.ProfileSchema`, a typed struct that refuses any key outside its vocabulary at decode, `Validate` for the schema and `Check` for the value against it, on the disciple before the call and on the prophet in the handler; SQL keeps the key namespace and the entry shape in `_check_profile_item`, `22023`. The write lands on every row of the user, so the sync carries the whole object to every app that sees the user, and a disciple reads it from its own `samna_user` row. The profile image and other files are `object_asset` links of kind `profile` on the user, as any asset link.
 
-The public page on Samna Auth reads the user row and `get_object_assets(user)`; what it shows of the apps' objects is the user's choice there. Consent decisions sit beside the user in `consent` and are part of the identity, not of the profile. The Go calls a disciple makes are under [Public profile items](../disciple.md#public-profile-items).
+The public page on Samna Auth reads the user row and `get_object_assets(user)` and renders each entry by its schema; what it shows of the apps' entries is the user's choice there. Consent decisions sit beside the user in `consent` and are part of the identity, not of the profile. The Go calls a disciple makes are under [Public profile items](../disciple.md#public-profile-items).
 
 ### Cost
 
@@ -48,7 +48,7 @@ The public page on Samna Auth reads the user row and `get_object_assets(user)`; 
 entries(profile) = 1 + assets
 ```
 
-one probe of the user row and one range of `idx_object_asset_object` by user. A write by an app is one update over the user's rows, `apps(user)` of them, each a `jsonb_set` on the row, and one sync event per row. No join, no derived set, no pair settled.
+one probe of the user row and one range of `idx_object_asset_object` by user. A write is one update over the user's rows, `apps(user)` of them, each a jsonb merge on the row after the checks, which walk the entry once, and one sync event per row. No join, no derived set, no pair settled.
 
 ## Machine clients
 

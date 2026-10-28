@@ -110,7 +110,7 @@ CREATE TABLE IF NOT EXISTS claimius.samna_user (
                                                    profile         JSONB NOT NULL DEFAULT '{}'::jsonb
 );
 
-COMMENT ON COLUMN claimius.samna_user.profile IS 'The user''s public profile, free form. The user writes its own keys on Samna Auth; an app writes under its own slug through PUT /sam/profile, {"<app_slug>": {"<field>": {"label", "value", "link", "index"}}}; the sync carries the whole object to every app that sees the user. The keys a product shows are its own.';
+COMMENT ON COLUMN claimius.samna_user.profile IS 'The user''s public profile: one object of key to entry, every entry {"schema": {"type": ...}, "value": ...}, the schema a JSON Schema fragment a renderer reads and the value what it describes. The user''s own keys carry no dot and are written on Samna Auth through update_profile; an app writes <app slug>.<field> through upsert_profile_item. Written on every row of the user, so the sync carries the whole object to every app that sees the user.';
 
 
 COMMENT ON TABLE claimius.samna_user IS 'User record. One row per (user_id, app_id) pair.';
