@@ -8,7 +8,7 @@ A write settles only the acting user on the rows it names and raises the area in
 
 ## Reads
 
-1. `get_access(user, app, object_id, object_type, min)`: strongest grant, at most one row, carries `user_claim_id`, the actor token for `sa_created_by` on follow on writes.
+1. `get_access(user, app, object_id, object_type, min)`: strongest grant, at most one row, carries `user_claim_id`, the actor token for `sa_created_by` on follow on writes. When only the creator's `direct_grant` covers `min`, the row is `direct_grant` true, `claim_name` `direct` and no `user_claim_id`, the same verdict `get_objects` lists, so a row with no owner stays reachable by id to its creator.
 2. `get_direct_access(user, app, object_id, object_type, required?, raise?)`: closest ancestor grant over owner, location and parenthood chains; same row shape.
 3. `get_objects(user, app, type, min, after?, limit?)`; `get_organizations`, `get_locations`, `get_secrets` are one `get_objects` page. `get_users`, `get_claims`, `get_audit`.
 4. `get_user_access(actor, app, target, min)`: target as external_id, user_id or row id, resolved in that order.

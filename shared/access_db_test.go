@@ -606,3 +606,57 @@ func TestClaimUnderSoftDeletedOrganizationAgreesWithItsGate(t *testing.T) {
 	}
 	agree("after the owner's soft delete", false)
 }
+
+func TestCreatorReachesADraftWithNoOwnerByID(t *testing.T) {
+	db := database(t)
+	ctx := context.Background()
+	if _, err := db.ExecContext(ctx, `
+		CREATE TABLE IF NOT EXISTS public.gotest_draft (
+			id UUID PRIMARY KEY, name TEXT, sa_owner_id UUID, sa_created_by UUID,
+			sa_deleted_at TIMESTAMPTZ, sa_created_at TIMESTAMPTZ NOT NULL DEFAULT now(), sa_updated_at TIMESTAMPTZ NOT NULL DEFAULT now())
+	`); err != nil {
+		t.Fatalf("draft table: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		SELECT claimius.upsert_table_info(VARIADIC (SELECT coalesce(array_agg(object_type), '{}') FROM claimius.table_info WHERE NOT is_internal AND object_type <> 'public.gotest_draft') || 'public.gotest_draft'::TEXT)
+	`); err != nil {
+		t.Fatalf("register draft table: %v", err)
+	}
+	var grant uuid.UUID
+	if err := db.NewRaw(`SELECT id FROM claimius.user_claim WHERE user_id = ? AND sa_deleted_at IS NULL ORDER BY sa_created_at LIMIT 1`, userA).Scan(ctx, &grant); err != nil {
+		t.Fatalf("creator grant: %v", err)
+	}
+	draft := uuid.New()
+	if _, err := db.ExecContext(ctx, `INSERT INTO public.gotest_draft (id, name, sa_owner_id, sa_created_by) VALUES (?, 'Draft', NULL, ?)`, draft, grant); err != nil {
+		t.Fatalf("insert draft: %v", err)
+	}
+
+	var listed []struct {
+		ObjectID    uuid.UUID `bun:"object_id"`
+		SaAccess    int       `bun:"sa_access"`
+		DirectGrant bool      `bun:"direct_grant"`
+	}
+	if err := db.NewRaw(`SELECT object_id, sa_access, direct_grant FROM claimius.get_objects(?, 'public.gotest_draft', 15) WHERE object_id = ?`, userA, draft).Scan(ctx, &listed); err != nil {
+		t.Fatalf("get_objects: %v", err)
+	}
+	if len(listed) != 1 || !listed[0].DirectGrant || listed[0].SaAccess&15 != 15 {
+		t.Fatalf("the creator lists the draft through direct_grant at 15, got %+v", listed)
+	}
+
+	for _, required := range []sdb.ClaimAccess{sdb.ACCESS_READ, sdb.ACCESS_WRITE, sdb.ACCESS_OWNER} {
+		ac, err := db.MutationAccess(ctx, userA, draft, "public.gotest_draft", required)
+		if err != nil {
+			t.Fatalf("mutation_access at %d: the creator keeps the draft by id, got %v", required, err)
+		}
+		if !ac.DirectGrant || ac.UserClaimID != nil || int(ac.Access)&int(required) != int(required) {
+			t.Fatalf("mutation_access at %d answers the direct grant, got %+v", required, ac)
+		}
+		got, err := db.GetAccess(ctx, userA, draft, "public.gotest_draft", required)
+		if err != nil || got == nil || !got.DirectGrant {
+			t.Fatalf("get_access at %d answers the direct grant, got %+v %v", required, got, err)
+		}
+	}
+	if _, err := db.MutationAccess(ctx, userB, draft, "public.gotest_draft", sdb.ACCESS_READ); !errors.Is(err, sdb.ErrNoAccess) {
+		t.Fatalf("another user is refused the draft, got %v", err)
+	}
+}
