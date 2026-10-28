@@ -6,21 +6,19 @@ import (
 )
 
 type Config struct {
-	Endpoint                    string
-	AppSlug                     string
-	AppSecret                   string
-	ClientID                    string
-	ClientSecret                string
-	RedirectURI                 string
-	PageRedirect                string
-	ClientTimeout               string
-	DebugUserID                 string
-	DebugClients                string
-	DebugSeed                   string
-	DebugInitiateApps           string
-	ReplicaDSN                  string
-	ColdStorageConnectionString string
-	ColdStorageContainerName    string
+	Endpoint          string
+	AppSlug           string
+	AppSecret         string
+	ClientID          string
+	ClientSecret      string
+	RedirectURI       string
+	PageRedirect      string
+	ClientTimeout     string
+	DebugUserID       string
+	DebugClients      string
+	DebugSeed         string
+	DebugInitiateApps string
+	ReplicaDSN        string
 
 	Issuer       string
 	TokenURL     url.URL
@@ -44,8 +42,6 @@ func loadConfig() {
 	cfg.DebugSeed = os.Getenv("SAUTH_DEBUG_PRIVATE_SEED")
 	cfg.DebugInitiateApps = os.Getenv("SAUTH_DEBUG_INITIATE_APPS")
 	cfg.ReplicaDSN = os.Getenv("SAUTH_REPLICA_DSN")
-	cfg.ColdStorageConnectionString = os.Getenv("SAUTH_COLD_STORAGE_CONNECTION_STRING")
-	cfg.ColdStorageContainerName = os.Getenv("SAUTH_COLD_STORAGE_CONTAINER_NAME")
 }
 
 func Cfg() *Config {

@@ -636,19 +636,19 @@ sed -n 11,35p audit/audit.go
 
 1. Standard: ISO/IEC 27001:2022 A.8.15, A.5.33; GDPR Art. 5(1)(e).
 
-2. Check: monthly partitions are kept for a stated period, exported to cold storage and dropped only after, and rows are hash chained or written to an append only sink.
+2. Check: monthly partitions are kept for a stated period and dropped after, and rows are hash chained or written to an append only sink.
 
 3. Method:
 
 ```bash
 grep -n "'audit', 'audit'" disciple/database/V5.4__claimius_retention_class.sql prophet/database/V5.21__claimius_retention_class.sql
-grep -n 'delete_exported_audit\|retention_export' disciple/database/V5.4__claimius_retention_class.sql
-grep -rn -i 'prev_hash\|immutab' disciple/database prophet/database audit pkg/azure
+grep -n 'delete_expired_audit' disciple/database/V5.6__claimius_retention_age.sql prophet/database/V5.26__claimius_retention_age.sql
+grep -rn -i 'prev_hash\|immutab' disciple/database prophet/database audit
 ```
 
-4. Pass: a retention row of class `audit` whose prune runs only after export, a manifest with a sha256 per object, and a chain column or an append only sink.
+4. Pass: a retention row of class `audit` with a sweep, and a chain column or an append only sink.
 
-5. Today: `fails`. The `audit` row is class `audit`, 365 days (`disciple/database/V5.4__claimius_retention_class.sql:136`); `delete_expired` refuses it (`:153`), and `delete_exported` writes the manifest row with its root and sha256 and runs `delete_exported_audit`, which drops a partition only once it is empty (`disciple/database/V5.5__claimius_retention_root.sql:27`, `disciple/database/V5.4__claimius_retention_class.sql:50`), after `shared/retention.go:199` wrote the batch of one root organization to the sink that root resolves to. Live rows carry no hash chain, and `pkg/azure/storage.go:58` overwrites an object of the same path with no immutability policy.
+5. Today: `fails`. The `audit` row is class `audit`, 365 days (`disciple/database/V5.4__claimius_retention_class.sql:136`), pruned by `delete_expired_audit`, which drops each monthly partition past the retention (`disciple/database/V5.6__claimius_retention_age.sql:29`, `:69`). Live rows carry no hash chain and no sink keeps them.
 
 ### C39, trace context to the prophet
 
@@ -695,13 +695,13 @@ just test smw
 ```bash
 sed -n 10,30p shared/cipher.go
 sed -n 20,75p pkg/encryption/master.go
-grep -n -A20 'FUNCTION claimius.get_secret_value' disciple/database/V2.4__claimius_functions_external.sql prophet/database/V5.24__claimius_secret_value.sql
+grep -n -A20 'FUNCTION claimius.get_secret_value' disciple/database/V2.4__claimius_functions_external.sql
 just test 'MasterKey|WrapAtRest|UnwrapAtRest|ImportMasterKeyPair|SamApp|GetSecretValue|Resolve'
 ```
 
-4. Pass: `cipher.NewGCM` with a nonce from `crypto/rand`; `WrapAtRest` refuses without a 32 byte `SAUTH_MASTER_KEY` and `UnwrapAtRest` refuses a plain value; `get_secret_value` answers NULL, or no row on the prophet, to a user without read; the named tests pass.
+4. Pass: `cipher.NewGCM` with a nonce from `crypto/rand`; `WrapAtRest` refuses without a 32 byte `SAUTH_MASTER_KEY` and `UnwrapAtRest` refuses a plain value; `get_secret_value` answers NULL to a user without read; the named tests pass.
 
-5. Today: `passes`. Secrets: `shared/cipher.go:12`, `shared/secret.go:64` on a debug disciple, `utils/aes.go:12` from `prophet/echo/secret.go:59` on the prophet, which encrypts every routed write. Keys at rest: `pkg/encryption/master.go:20`, `pkg/encryption/master.go:49`, opened by `ImportMasterKeyPair` at `pkg/encryption/crypto.go:54` and for the organization seed at `smw/app.go:100`. Delivery and opening: `GET /sam/app` answers the calling app its own seed (`prophet/echo/app.go:11`), held in memory (`shared/main.go:133`), and `Resolve` (`shared/secret.go:143`) reads through `get_secret_value` (`disciple/database/V2.4__claimius_functions_external.sql:1030`), on the prophet through the prophet set's (`prophet/database/V5.24__claimius_secret_value.sql:1`), opening the value with the seed of the secret's own app (`shared/secret.go:150`).
+5. Today: `passes`. Secrets: `shared/cipher.go:12`, `shared/secret.go:62` on a debug disciple, `utils/aes.go:12` from `prophet/echo/secret.go:59` on the prophet, which encrypts every routed write. Keys at rest: `pkg/encryption/master.go:20`, `pkg/encryption/master.go:49`, opened by `ImportMasterKeyPair` at `pkg/encryption/crypto.go:54` and for the organization seed at `smw/app.go:100`. Delivery and opening: `GET /sam/app` answers the calling app its own seed (`prophet/echo/app.go:11`), held in memory (`shared/main.go:133`), and `Resolve` (`shared/secret.go:141`) reads through `get_secret_value` (`disciple/database/V2.4__claimius_functions_external.sql:1030`).
 
 ### C42, TLS to Postgres
 
@@ -769,7 +769,7 @@ grep -n "analytics_event" prophet/database/V5.21__claimius_retention_class.sql
 
 4. Pass: an `analytics_event` row of class `log` in `claimius.retention`, 30 days by default, pruned once a day by `delete_expired` under the retention job.
 
-5. Today: `passes`, `prophet/database/V5.21__claimius_retention_class.sql:311`, `shared/retention.go:209`.
+5. Today: `passes`, `prophet/database/V5.21__claimius_retention_class.sql:311`, `shared/retention.go:66`.
 
 ### C46, retention for every other personal table
 
@@ -785,7 +785,7 @@ psql -c "SELECT kind, class, days FROM claimius.get_retention()"
 
 4. Pass: one retention row and prune per table.
 
-5. Today: `fails`. `notification` (`log`), `consent` (`record`, exported before it is deleted), `analytics_session` (`log`) and `analytics_capture` (`cache`) have a retention row each (`prophet/database/V5.21__claimius_retention_class.sql:304`, `disciple/database/V5.4__claimius_retention_class.sql:133`), and `usage_diff` is folded by the drain; `user_activity` has no sweep.
+5. Today: `fails`. `notification` (`log`), `analytics_session` (`log`) and `analytics_capture` (`cache`) have a retention row each (`prophet/database/V5.21__claimius_retention_class.sql:304`, `disciple/database/V5.4__claimius_retention_class.sql:133`), and `usage_diff` is folded by the drain; `consent` has no retention row and is kept (`prophet/database/V5.26__claimius_retention_age.sql:15`), and `user_activity` has no sweep.
 
 ### C47, export contract
 

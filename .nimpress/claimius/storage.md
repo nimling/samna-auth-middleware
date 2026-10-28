@@ -69,7 +69,7 @@ Every claimius table falls in one of three groups: the model, the rows a writer 
 
 6. A usage flush leaves one `usage_diff` row per pair counted, dead once folded, and one dead version per `user_activity` row it moves. A share settle leaves one heap only version of the cursor; the fold leaves one dead version per pair it moves.
 
-7. `trim_sync_event` deletes the outbox rows owed to nobody in one statement per pass. Audit is never deleted by age alone: the retention job exports each expired batch to the cold storage of its root organization, under `<app_slug>/<root_id>/audit/`, then deletes exactly those rows and drops a monthly partition once its month is older than the `audit` retention and it holds no row, [Retention](../disciple.md#retention).
+7. `trim_sync_event` deletes the outbox rows owed to nobody in one statement per pass. A month of audit is retired by dropping its partition once the month is older than the `audit` retention, never by deleting rows; only `audit_default` is deleted from by row.
 
 `user_object`, `access_diff`, `user_users_diff` and `usage_diff` set `autovacuum_vacuum_scale_factor` and `autovacuum_analyze_scale_factor` to 0.02. Each turns over a small share of its rows on every settle or flush, and at the default scale factor a large table would carry a fifth of its size in dead versions before a vacuum ran.
 
