@@ -5,9 +5,10 @@ jsonpath "$.claim_name" == "Root writer"
 jsonpath "$.root_id" == "{{root}}"
 
 GET {{base}}/api/access/organization/{{grand}}?required=1
-HTTP 403
+HTTP 200
 [Asserts]
-jsonpath "$.error" == "no access"
+jsonpath "$.claim_name" == "direct"
+jsonpath "$.user_claim_id" == null
 
 GET {{base}}/api/access/organization/{{missing}}?required=4
 HTTP 404
@@ -25,7 +26,8 @@ jsonpath "$[0].object_id" == "{{grand}}"
 jsonpath "$[0].granted" == true
 jsonpath "$[0].claim_name" == "Root writer"
 jsonpath "$[1].object_id" == "{{alpha}}"
-jsonpath "$[1].granted" == false
+jsonpath "$[1].granted" == true
+jsonpath "$[1].claim_name" == "direct"
 
 GET {{base}}/api/user/ext-a
 HTTP 200
