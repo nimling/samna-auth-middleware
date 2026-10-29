@@ -2,7 +2,7 @@
 
 The library every Samna service embeds to authenticate and authorize through the prophet: JWT and session validation, client credentials, the sync, notifications, and the `claimius` schema for both roles. Go module `github.com/nimling/samna-auth-middleware/v2` and the `@nimling` package in `ts/`, released together. GitHub `nimling/samna-auth-middleware`, on the Samna Ecosystem board (`../.claude/rules/github_project.md`). Shared platform facts: `../.claude/rules/platform.md`.
 
-The SQL under `prophet/database` and `disciple/database` is the truth of the schema; `.nimpress/claimius/` is the design, its math and its measured costs, read on disk; `README.md` and `docs/` describe the repo for a developer.
+The SQL under `prophet/database` and `disciple/database` is the truth of the schema; `.nimpress/claimius/` is the design, its math and its measured costs, read on disk.
 
 ## Commands
 
