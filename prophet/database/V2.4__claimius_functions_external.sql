@@ -1,3 +1,24 @@
+DROP FUNCTION IF EXISTS claimius.get_retention();
+DROP FUNCTION IF EXISTS claimius.update_retention(TEXT, INTEGER);
+DROP FUNCTION IF EXISTS claimius.upsert_retention(TEXT, INTEGER, TEXT);
+DROP FUNCTION IF EXISTS claimius.delete_expired(TEXT);
+DROP FUNCTION IF EXISTS claimius.delete_expired_audit(INTERVAL);
+DROP FUNCTION IF EXISTS claimius.delete_expired_notification(INTERVAL);
+DROP FUNCTION IF EXISTS claimius.delete_expired_analytics_capture(INTERVAL);
+DROP FUNCTION IF EXISTS claimius.delete_expired_analytics_heat(INTERVAL);
+DROP FUNCTION IF EXISTS claimius.delete_expired_analytics_session(INTERVAL);
+DROP FUNCTION IF EXISTS claimius.delete_expired_par_request(INTERVAL);
+DROP FUNCTION IF EXISTS claimius.delete_expired_peer_collision(INTERVAL);
+DROP FUNCTION IF EXISTS claimius.delete_expired_rate_limit(INTERVAL);
+DROP FUNCTION IF EXISTS claimius.get_expired(TEXT, TEXT, INTEGER);
+DROP FUNCTION IF EXISTS claimius.get_expired_audit(INTERVAL, TEXT, INTEGER);
+DROP FUNCTION IF EXISTS claimius.delete_exported(TEXT, UUID, TEXT, TEXT, TEXT[], BOOLEAN);
+DROP FUNCTION IF EXISTS claimius.delete_exported_audit(TEXT[]);
+DROP FUNCTION IF EXISTS claimius.get_profile_items(UUID, UUID);
+DROP FUNCTION IF EXISTS claimius.upsert_profile_item(UUID, UUID, TEXT, UUID, TEXT, TEXT, TEXT, TEXT, INTEGER);
+DROP FUNCTION IF EXISTS claimius.delete_profile_item(UUID, UUID, TEXT, UUID, TEXT);
+DROP FUNCTION IF EXISTS claimius.get_locations(UUID, INTEGER);
+
 DROP FUNCTION IF EXISTS claimius.get_access(UUID, UUID, UUID, TEXT, INTEGER);
 CREATE OR REPLACE FUNCTION claimius.get_access(
     p_user_id          UUID,

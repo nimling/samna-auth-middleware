@@ -81,6 +81,20 @@ CREATE TABLE IF NOT EXISTS claimius.samna_user (
                                                    profile         JSONB NOT NULL DEFAULT '{}'::jsonb
 );
 
+DROP VIEW IF EXISTS claimius.get_users;
+ALTER TABLE claimius.samna_user
+    DROP COLUMN IF EXISTS bio,
+    DROP COLUMN IF EXISTS company,
+    DROP COLUMN IF EXISTS job_title,
+    DROP COLUMN IF EXISTS linkedin,
+    DROP COLUMN IF EXISTS website,
+    ADD COLUMN IF NOT EXISTS profile JSONB NOT NULL DEFAULT '{}'::jsonb;
+DROP TABLE IF EXISTS claimius.profile_item CASCADE;
+DROP TABLE IF EXISTS claimius.retention_export CASCADE;
+DROP TABLE IF EXISTS claimius.retention CASCADE;
+DROP TYPE IF EXISTS claimius.retention_class CASCADE;
+DROP TABLE IF EXISTS claimius.cli_login CASCADE;
+
 COMMENT ON COLUMN claimius.samna_user.profile IS 'The user''s public profile: one object of key to entry, every entry {"schema": {"type": ...}, "value": ...}, the schema a JSON Schema fragment a renderer reads and the value what it describes. The user''s own keys carry no dot and are written on Samna Auth through update_profile; an app writes <app slug>.<field> through upsert_profile_item. Written on every row of the user, so the sync carries the whole object to every app that sees the user.';
 
 
@@ -333,6 +347,17 @@ CREATE TABLE IF NOT EXISTS claimius.user_identity (
 );
 
 COMMENT ON TABLE claimius.user_identity IS 'Bridge from an external identity, a token''s claim named by id_claim or a direct external_id, to claimius.samna_user.user_id. Applied from the prophet''s feed without data; written locally in debug mode.';
+
+DROP INDEX IF EXISTS claimius.idx_user_token_app_owner_external;
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'user_token_pkey' AND conrelid = 'claimius.user_identity'::regclass) THEN
+        ALTER TABLE claimius.user_identity RENAME CONSTRAINT user_token_pkey TO user_identity_pkey;
+    END IF;
+    IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'user_token_claim_id_fkey' AND conrelid = 'claimius.user_identity'::regclass) THEN
+        ALTER TABLE claimius.user_identity RENAME CONSTRAINT user_token_claim_id_fkey TO user_identity_claim_id_fkey;
+    END IF;
+END $$;
 
 ALTER TABLE claimius.user_identity ADD COLUMN IF NOT EXISTS type TEXT NOT NULL DEFAULT 'token';
 COMMENT ON COLUMN claimius.user_identity.type IS 'Binding kind: token for JWT derived, external for direct external_id.';

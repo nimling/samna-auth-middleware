@@ -1,3 +1,6 @@
+DROP FUNCTION IF EXISTS claimius._check_claim_level(UUID, UUID, INTEGER);
+DROP FUNCTION IF EXISTS claimius._denormalize_object(TEXT, UUID);
+
 DROP FUNCTION IF EXISTS claimius.build_ownership_tree(UUID);
 CREATE OR REPLACE FUNCTION claimius.build_ownership_tree(p_root_id UUID, p_node_id UUID DEFAULT NULL)
     RETURNS VOID AS $$

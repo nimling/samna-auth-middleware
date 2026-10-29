@@ -1,3 +1,15 @@
+DROP FUNCTION IF EXISTS claimius.get_retention();
+DROP FUNCTION IF EXISTS claimius.update_retention(TEXT, INTEGER);
+DROP FUNCTION IF EXISTS claimius.upsert_retention(TEXT, INTEGER, TEXT);
+DROP FUNCTION IF EXISTS claimius.delete_expired(TEXT);
+DROP FUNCTION IF EXISTS claimius.delete_expired_audit(INTERVAL);
+DROP FUNCTION IF EXISTS claimius.delete_expired_notification(INTERVAL);
+DROP FUNCTION IF EXISTS claimius.get_expired(TEXT, TEXT, INTEGER);
+DROP FUNCTION IF EXISTS claimius.get_expired_audit(INTERVAL, TEXT, INTEGER);
+DROP FUNCTION IF EXISTS claimius.delete_exported(TEXT, UUID, TEXT, TEXT, TEXT[], BOOLEAN);
+DROP FUNCTION IF EXISTS claimius.delete_exported_audit(TEXT[]);
+DROP FUNCTION IF EXISTS claimius.get_locations(UUID, INTEGER);
+
 DROP FUNCTION IF EXISTS claimius.get_access(UUID, UUID, UUID, TEXT, INTEGER);
 
 DROP FUNCTION IF EXISTS claimius.get_access(UUID, UUID, TEXT, INTEGER);
