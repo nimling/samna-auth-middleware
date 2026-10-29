@@ -53,6 +53,9 @@ $$ LANGUAGE plpgsql;
 
 COMMENT ON FUNCTION claimius.calc_object_access() IS 'Trigger on regular registered tables. Maintains tree memberships, the object_info row and the actor''s pair, and raises the object area under the row''s owner root on a structural write.';
 
+GRANT EXECUTE ON FUNCTION claimius.calc_object_access()
+    TO claimius_disciple_client, claimius_reader;
+
 DROP FUNCTION IF EXISTS claimius._attach_object_to_trees(TEXT, UUID, RECORD);
 CREATE OR REPLACE FUNCTION claimius._attach_object_to_trees(
     p_object_type TEXT,
@@ -122,6 +125,9 @@ $$ LANGUAGE plpgsql;
 
 COMMENT ON FUNCTION claimius._attach_object_to_trees(TEXT, UUID, JSONB) IS 'Splices a row that is not a node of its own tree into its ownership tree and, when it carries one, its location tree: the self edge and the parent''s ancestor rows copied with depth + 1. A parent outside the closure leaves the row out. An organization attaches only its location pin.';
 
+GRANT EXECUTE ON FUNCTION claimius._attach_object_to_trees(TEXT, UUID, JSONB)
+    TO claimius_disciple_client, claimius_reader;
+
 DROP FUNCTION IF EXISTS claimius._detach_object_from_trees(TEXT, UUID, RECORD);
 CREATE OR REPLACE FUNCTION claimius._detach_object_from_trees(
     p_object_type TEXT,
@@ -137,6 +143,9 @@ END;
 $$ LANGUAGE plpgsql;
 
 COMMENT ON FUNCTION claimius._detach_object_from_trees(TEXT, UUID) IS 'Removes every closure row where a row that is not a node of its own tree is the descendant. An organization detaches only its location pin.';
+
+GRANT EXECUTE ON FUNCTION claimius._detach_object_from_trees(TEXT, UUID)
+    TO claimius_disciple_client, claimius_reader;
 
 CREATE OR REPLACE FUNCTION claimius._retree_object(
     p_object_type TEXT,
@@ -162,6 +171,9 @@ $$ LANGUAGE plpgsql;
 
 COMMENT ON FUNCTION claimius._retree_object(TEXT, UUID, JSONB, JSONB) IS 'Moves one row''s ownership and location closure rows with a write. True when the write is structural.';
 
+GRANT EXECUTE ON FUNCTION claimius._retree_object(TEXT, UUID, JSONB, JSONB)
+    TO claimius_disciple_client, claimius_reader;
+
 CREATE OR REPLACE FUNCTION claimius.calc_object_trees()
     RETURNS TRIGGER AS $$
 BEGIN
@@ -172,6 +184,9 @@ END;
 $$ LANGUAGE plpgsql;
 
 COMMENT ON FUNCTION claimius.calc_object_trees() IS 'Trigger on owned tables outside the access targets. Maintains their closure rows.';
+
+GRANT EXECUTE ON FUNCTION claimius.calc_object_trees()
+    TO claimius_disciple_client, claimius_reader;
 
 CREATE OR REPLACE FUNCTION claimius.calc_hierarchical_access()
     RETURNS TRIGGER AS $$
@@ -309,6 +324,9 @@ $$ LANGUAGE plpgsql;
 
 COMMENT ON FUNCTION claimius.calc_hierarchical_access() IS 'Trigger on hierarchical tables. Maintains the closure incrementally, the object_info row and the actor''s pair, raises the cascade area of the node under its owner root, and on a soft delete one area per descendant whose closure rows went with it, so every holder''s next read recomputes its pairs on them.';
 
+GRANT EXECUTE ON FUNCTION claimius.calc_hierarchical_access()
+    TO claimius_disciple_client, claimius_reader;
+
 CREATE OR REPLACE FUNCTION claimius._reattach_location_in_ownership(
     p_obj_id UUID, p_new RECORD, p_old RECORD, p_op TEXT
 ) RETURNS VOID AS $$
@@ -365,6 +383,9 @@ $$ LANGUAGE plpgsql;
 
 COMMENT ON FUNCTION claimius._reattach_location_in_ownership(UUID, RECORD, RECORD, TEXT) IS 'A location is also a node of its owner''s ownership tree: when the owner changes or the location is deleted or restored, drops its ownership rows and inserts its self edge and its live owner''s chain.';
 
+GRANT EXECUTE ON FUNCTION claimius._reattach_location_in_ownership(UUID, RECORD, RECORD, TEXT)
+    TO claimius_disciple_client, claimius_reader;
+
 CREATE OR REPLACE FUNCTION claimius.calc_claim_access()
     RETURNS TRIGGER AS $$
 DECLARE
@@ -420,6 +441,9 @@ $$ LANGUAGE plpgsql;
 
 COMMENT ON FUNCTION claimius.calc_claim_access() IS 'Trigger on claim, claim_object, user_claim. A claim whose name, mask, level, inherit flag or deletion changed raises an object area on every live binding of it and of the claims it links to, cascade where the binding inherits and the claim did before or after, and one on the claim object; a grant raises its assignee''s assignment area; a link raises both claims the same way; a binding on an object raises that object''s area; a scope binding raises nothing, since no pair carries it. Then settles the actor''s pairs on the claim and on a binding''s object.';
 
+GRANT EXECUTE ON FUNCTION claimius.calc_claim_access()
+    TO claimius_disciple_client, claimius_reader;
+
 CREATE OR REPLACE FUNCTION claimius._denied_access(
     p_user_id     UUID,
     p_object_type TEXT,
@@ -457,6 +481,9 @@ CREATE OR REPLACE FUNCTION claimius._denied_access(
 $$ LANGUAGE sql STABLE;
 
 COMMENT ON FUNCTION claimius._denied_access(UUID, TEXT, UUID) IS 'The bits, owner, write, read and execute, of every live deny binding reaching the user on the object: through a grant the user holds, or through one inheriting link of a held inheriting claim, capped by the link''s mask; bound on the object itself, or on an ancestor in any tree where the claim and the binding inherit. Levels and classes are not applied; a caller masks the result with the user''s settled pair to keep only what the denies took away.';
+
+GRANT EXECUTE ON FUNCTION claimius._denied_access(UUID, TEXT, UUID)
+    TO claimius_disciple_client, claimius_reader;
 
 CREATE OR REPLACE FUNCTION claimius._check_claim_composition()
     RETURNS TRIGGER AS $$
@@ -586,6 +613,9 @@ $$ LANGUAGE plpgsql;
 
 COMMENT ON FUNCTION claimius._check_claim_composition() IS 'BEFORE INSERT/UPDATE trigger on claim_object. Rejects a grant whose effective mask gives bits that a deny reaching the actor on the object removes from the actor''s settled pair, whatever the level of either claim, and a grant that hands out more access than the actor holds on the object; denies and removals are exempt and the claim''s level is never judged. The first binding on a samna_user holding a claim assigned under the binding''s owning organization may come from an actor holding owner on that organization. Enforces composition link invariants: no self loop, no reverse link cycle, caller has read on target claim. Bypassed during disciple replay.';
 
+GRANT EXECUTE ON FUNCTION claimius._check_claim_composition()
+    TO claimius_disciple_client, claimius_reader;
+
 DROP TRIGGER IF EXISTS tg_check_claim_composition ON claimius.claim_object;
 CREATE TRIGGER tg_check_claim_composition
     BEFORE INSERT OR UPDATE ON claimius.claim_object
@@ -642,6 +672,9 @@ $$ LANGUAGE plpgsql;
 
 COMMENT ON FUNCTION claimius._check_claim_denies(UUID, UUID) IS 'Refuses to hand out a claim that gives what is denied to the actor, the user of p_actor_uc: on no object the claim grants bits on may those bits overlap what a deny reaching the actor there removes from the actor''s settled pair. The level of the claim plays no part. An actor that is not a live user_claim passes.';
 
+GRANT EXECUTE ON FUNCTION claimius._check_claim_denies(UUID, UUID)
+    TO claimius_disciple_client, claimius_reader;
+
 CREATE OR REPLACE FUNCTION claimius._check_claim_grant()
     RETURNS TRIGGER AS $$
 BEGIN
@@ -658,6 +691,9 @@ END;
 $$ LANGUAGE plpgsql;
 
 COMMENT ON FUNCTION claimius._check_claim_grant() IS 'Trigger on user_claim, and on claim when its level rises: runs _check_claim_denies for the actor in sa_created_by, so a grant of a claim, or a raise of its level, that gives what a deny removes from the actor is refused with SQLSTATE P0403.';
+
+GRANT EXECUTE ON FUNCTION claimius._check_claim_grant()
+    TO claimius_disciple_client, claimius_reader;
 
 DROP TRIGGER IF EXISTS tg_check_claim_grant ON claimius.user_claim;
 CREATE TRIGGER tg_check_claim_grant
@@ -704,6 +740,9 @@ END;
 $$ LANGUAGE plpgsql;
 
 COMMENT ON FUNCTION claimius.emit_sync_event() IS 'Trigger on the source tables. Publishes into sync_event.';
+
+GRANT EXECUTE ON FUNCTION claimius.emit_sync_event()
+    TO claimius_disciple_client, claimius_reader;
 
 CREATE OR REPLACE FUNCTION claimius._settle_pair(
     p_user_id       UUID,
@@ -862,6 +901,9 @@ $$ LANGUAGE plpgsql;
 
 COMMENT ON FUNCTION claimius._settle_pair(UUID, TEXT, UUID) IS 'The point settle and the read of one pair in one pass: reads the pair and the object''s object_info row, takes the mark from the pair or the cursor when there is no pair, and recomputes the pair when an area of the object''s root or an assignment of the user was raised at or after the mark on the object, with cascade on an ancestor, or when the mark is below the trimmed position; otherwise moves the mark to the snapshot xmin as a heap only update. An object with no object_info row loses its pair. Returns one row: whether the settle ran, false when a lock wait past the settle timeout or a deadlock left the pair as it stands, with the pair''s mask, grants, scope and creator flag, NULL when the user holds no pair, and the object''s owner, location and owner root.';
 
+GRANT EXECUTE ON FUNCTION claimius._settle_pair(UUID, TEXT, UUID)
+    TO claimius_disciple_client, claimius_reader;
+
 DROP FUNCTION IF EXISTS claimius.reconcile_if_pending(UUID, TEXT, UUID);
 CREATE OR REPLACE FUNCTION claimius.reconcile_if_pending(
     p_user_id       UUID,
@@ -892,6 +934,9 @@ END;
 $$ LANGUAGE plpgsql;
 
 COMMENT ON FUNCTION claimius.reconcile_if_pending(UUID, TEXT, UUID) IS 'Settles what a read meets. With a target it settles the one pair through _settle_pair. Without a target it settles the reader''s share through _settle_diff_share under the share lock and folds its usage. Returns whether the settle ran: false when the share lock was held by another read or a lock wait past the settle timeout or a deadlock left the pair as it stands. Called at read entry points.';
+
+GRANT EXECUTE ON FUNCTION claimius.reconcile_if_pending(UUID, TEXT, UUID)
+    TO claimius_disciple_client, claimius_reader;
 
 DROP FUNCTION IF EXISTS claimius.drain_access_diff(INTEGER);
 CREATE OR REPLACE FUNCTION claimius.drain_access_diff(
@@ -954,6 +999,9 @@ $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = claimius, pg_temp;
 
 COMMENT ON FUNCTION claimius.drain_access_diff(INTEGER) IS 'Settles shares ahead of their reads, off the request path: takes the users whose cursor is below the newest area, most recently used first and at most 64, and settles each whose read rate 1 / (now - last_used_at) is at least the raise rate n / (now - settled_at) of the n areas since its cursor, under its own share lock. Then folds the usage_diff and user_users_diff rows of the oldest p_limit_pairs objects. Each of the three steps runs in its own subtransaction, so a failing step leaves the others to run: returns the shares settled and one message per failed step, which the caller logs. Trimming is trim_access_diff, run by the retention job.';
 
+GRANT EXECUTE ON FUNCTION claimius.drain_access_diff(INTEGER)
+    TO claimius_disciple_client, claimius_reader;
+
 CREATE OR REPLACE FUNCTION claimius.trim_access_diff(
     p_keep  INTERVAL DEFAULT INTERVAL '7 days'
 ) RETURNS BIGINT AS $$
@@ -982,6 +1030,9 @@ $$ LANGUAGE plpgsql;
 
 COMMENT ON FUNCTION claimius.trim_access_diff(INTERVAL) IS 'Trims every area below the lowest cursor among the users used within p_keep, or below the oldest running transaction when no user was, and records that position as access_trimmed_txid on disciple_state. A reader whose cursor is below it resettles its whole reach. Returns the areas removed. The access_diff retention prune.';
 
+GRANT EXECUTE ON FUNCTION claimius.trim_access_diff(INTERVAL)
+    TO claimius_disciple_client, claimius_reader;
+
 CREATE OR REPLACE FUNCTION claimius.cascade_user_soft_delete(p_user_id UUID)
     RETURNS VOID AS $$
 BEGIN
@@ -1000,6 +1051,9 @@ END;
 $$ LANGUAGE plpgsql;
 
 COMMENT ON FUNCTION claimius.cascade_user_soft_delete(p_user_id uuid) IS 'Propagates soft delete from samna_user to dependent rows.';
+
+GRANT EXECUTE ON FUNCTION claimius.cascade_user_soft_delete(p_user_id uuid)
+    TO claimius_disciple_client, claimius_reader;
 
 CREATE OR REPLACE FUNCTION claimius.check_user_active(p_user_id UUID)
     RETURNS BOOLEAN AS $$
@@ -1025,6 +1079,9 @@ $$ LANGUAGE plpgsql STABLE;
 
 COMMENT ON FUNCTION claimius.check_user_active(p_user_id uuid) IS 'Predicate: returns true when the user row exists, has status=active, and is not soft deleted.';
 
+GRANT EXECUTE ON FUNCTION claimius.check_user_active(p_user_id uuid)
+    TO claimius_disciple_client, claimius_reader;
+
 CREATE OR REPLACE FUNCTION claimius._cascade_user_soft_delete_trg()
     RETURNS TRIGGER AS $$
 BEGIN
@@ -1039,6 +1096,9 @@ END;
 $$ LANGUAGE plpgsql;
 
 COMMENT ON FUNCTION claimius._cascade_user_soft_delete_trg() IS 'Trigger wrapper: fires cascade_user_soft_delete once on samna_user soft delete transition. Inert under replay_mode, where the cascaded rows arrive in the feed.';
+
+GRANT EXECUTE ON FUNCTION claimius._cascade_user_soft_delete_trg()
+    TO claimius_disciple_client, claimius_reader;
 
 CREATE OR REPLACE FUNCTION claimius._set_self_owner_on_insert()
     RETURNS TRIGGER AS $$
@@ -1079,6 +1139,9 @@ $$ LANGUAGE plpgsql;
 
 COMMENT ON FUNCTION claimius._set_self_owner_on_insert() IS 'BEFORE INSERT for organizations. Self references on root creation; copies parent org sa_root_id otherwise.';
 
+GRANT EXECUTE ON FUNCTION claimius._set_self_owner_on_insert()
+    TO claimius_disciple_client, claimius_reader;
+
 CREATE OR REPLACE FUNCTION claimius._set_self_root_on_insert()
     RETURNS TRIGGER AS $$
 DECLARE
@@ -1109,6 +1172,9 @@ $$ LANGUAGE plpgsql;
 
 COMMENT ON FUNCTION claimius._set_self_root_on_insert() IS 'BEFORE INSERT for locations. Self references on root creation; copies parent location sa_root_id otherwise.';
 
+GRANT EXECUTE ON FUNCTION claimius._set_self_root_on_insert()
+    TO claimius_disciple_client, claimius_reader;
+
 CREATE OR REPLACE FUNCTION claimius._set_self_parent_on_insert()
     RETURNS TRIGGER AS $$
 DECLARE
@@ -1138,6 +1204,9 @@ END;
 $$ LANGUAGE plpgsql;
 
 COMMENT ON FUNCTION claimius._set_self_parent_on_insert() IS 'BEFORE INSERT for parenthood tables. Self references on root creation; copies parent sa_root_id from the same table otherwise.';
+
+GRANT EXECUTE ON FUNCTION claimius._set_self_parent_on_insert()
+    TO claimius_disciple_client, claimius_reader;
 CREATE OR REPLACE FUNCTION claimius.recompute_external_access(
     p_user_id UUID
 ) RETURNS INTEGER AS $$
@@ -1169,3 +1238,6 @@ END;
 $$ LANGUAGE plpgsql;
 
 COMMENT ON FUNCTION claimius.recompute_external_access(p_user_id uuid) IS 'Rebuilds user_object for one user over every external registered table, one set based recompute per table. Not called by the sync, which raises the areas each applied row moves for the reads to settle; a manual rebuild for tables that exist only on the disciple.';
+
+GRANT EXECUTE ON FUNCTION claimius.recompute_external_access(p_user_id uuid)
+    TO claimius_disciple_client, claimius_reader;

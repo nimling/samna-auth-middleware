@@ -5,6 +5,9 @@ $$ LANGUAGE sql IMMUTABLE;
 
 COMMENT ON FUNCTION claimius.composite_id(TEXT[]) IS 'Deterministic UUID hash of the joined parts. Same inputs always produce same id.';
 
+GRANT EXECUTE ON FUNCTION claimius.composite_id(TEXT[])
+    TO claimius_disciple_client, claimius_reader;
+
 CREATE OR REPLACE FUNCTION claimius.split_object_type(p_object_type TEXT)
     RETURNS TEXT[] AS $$
 SELECT CASE
@@ -14,6 +17,9 @@ SELECT CASE
 $$ LANGUAGE sql IMMUTABLE;
 
 COMMENT ON FUNCTION claimius.split_object_type(TEXT) IS 'Splits a schema.table string into [schema, table]. Defaults to public schema.';
+
+GRANT EXECUTE ON FUNCTION claimius.split_object_type(TEXT)
+    TO claimius_disciple_client, claimius_reader;
 
 CREATE OR REPLACE FUNCTION claimius.update_timestamp()
     RETURNS TRIGGER AS $$
@@ -28,6 +34,9 @@ $$ LANGUAGE plpgsql;
 
 COMMENT ON FUNCTION claimius.update_timestamp() IS 'Trigger function. Sets sa_updated_at = now() on UPDATE. Under replay_mode a row applied from the prophet keeps the sa_updated_at it carries, so the replica matches its source and an unchanged row compares equal.';
 
+GRANT EXECUTE ON FUNCTION claimius.update_timestamp()
+    TO claimius_disciple_client, claimius_reader;
+
 CREATE OR REPLACE FUNCTION claimius.update_txid()
     RETURNS TRIGGER AS $$
 BEGIN
@@ -37,6 +46,9 @@ END;
 $$ LANGUAGE plpgsql;
 
 COMMENT ON FUNCTION claimius.update_txid() IS 'Trigger function. Sets txid = pg_current_xact_id() on INSERT and UPDATE, under replay_mode too, so txid always names the local transaction that last wrote the row.';
+
+GRANT EXECUTE ON FUNCTION claimius.update_txid()
+    TO claimius_disciple_client, claimius_reader;
 
 CREATE OR REPLACE FUNCTION claimius.get_table_columns(p_object_type TEXT)
     RETURNS TABLE(column_name TEXT) AS $$
@@ -57,6 +69,9 @@ $$ LANGUAGE plpgsql STABLE;
 
 COMMENT ON FUNCTION claimius.get_table_columns(TEXT) IS 'Returns column names for a schema qualified table.';
 
+GRANT EXECUTE ON FUNCTION claimius.get_table_columns(TEXT)
+    TO claimius_disciple_client, claimius_reader;
+
 CREATE OR REPLACE FUNCTION claimius.table_has_column(p_object_type TEXT, p_column TEXT)
     RETURNS BOOLEAN AS $$
 BEGIN
@@ -68,12 +83,18 @@ $$ LANGUAGE plpgsql STABLE;
 
 COMMENT ON FUNCTION claimius.table_has_column(TEXT, TEXT) IS 'True if the given table has the given column.';
 
+GRANT EXECUTE ON FUNCTION claimius.table_has_column(TEXT, TEXT)
+    TO claimius_disciple_client, claimius_reader;
+
 CREATE OR REPLACE FUNCTION claimius.ensure_uuid_null(p UUID) RETURNS UUID
     LANGUAGE sql IMMUTABLE PARALLEL SAFE AS $$
 SELECT NULLIF(p, '00000000-0000-0000-0000-000000000000'::uuid);
 $$;
 
 COMMENT ON FUNCTION claimius.ensure_uuid_null(p uuid) IS 'Returns NULL when input is NULL or the zero UUID; otherwise the UUID unchanged.';
+
+GRANT EXECUTE ON FUNCTION claimius.ensure_uuid_null(p uuid)
+    TO claimius_disciple_client, claimius_reader;
 
 DROP FUNCTION IF EXISTS claimius.write_audit(UUID, TEXT, TEXT, TEXT, UUID, UUID, UUID, TEXT);
 
@@ -105,6 +126,9 @@ $$ LANGUAGE plpgsql;
 
 COMMENT ON FUNCTION claimius.insert_audit(p_operation text, p_type text, p_object_type text, p_object_id uuid, p_sa_owner_id uuid, p_sa_created_by uuid, p_message text) IS 'Inserts a row into the audit log and returns it.';
 
+GRANT EXECUTE ON FUNCTION claimius.insert_audit(p_operation text, p_type text, p_object_type text, p_object_id uuid, p_sa_owner_id uuid, p_sa_created_by uuid, p_message text)
+    TO claimius_disciple_client, claimius_reader;
+
 CREATE OR REPLACE FUNCTION claimius.in_replay_mode()
     RETURNS BOOLEAN AS $$
 BEGIN
@@ -113,6 +137,9 @@ END;
 $$ LANGUAGE plpgsql STABLE;
 
 COMMENT ON FUNCTION claimius.in_replay_mode() IS 'True when claimius.replay_mode session GUC is "true". Triggers short circuit.';
+
+GRANT EXECUTE ON FUNCTION claimius.in_replay_mode()
+    TO claimius_disciple_client, claimius_reader;
 
 CREATE OR REPLACE FUNCTION claimius.get_subtree(
     p_tree_type     claimius.tree_type,
@@ -133,6 +160,9 @@ $$ LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = claimius, pg_temp;
 
 COMMENT ON FUNCTION claimius.get_subtree(p_tree_type claimius.tree_type, p_root_id uuid, p_start_type text, p_start_id uuid) IS 'Returns (object_type, object_id) descendants under a start node in a tree, self-edge included.';
 
+GRANT EXECUTE ON FUNCTION claimius.get_subtree(p_tree_type claimius.tree_type, p_root_id uuid, p_start_type text, p_start_id uuid)
+    TO claimius_disciple_client, claimius_reader;
+
 CREATE OR REPLACE FUNCTION claimius._popcount(p INTEGER)
     RETURNS INTEGER AS $$
 DECLARE
@@ -149,6 +179,9 @@ $$ LANGUAGE plpgsql IMMUTABLE PARALLEL SAFE;
 
 COMMENT ON FUNCTION claimius._popcount(INTEGER) IS 'Bit count of an integer access mask. Used for ranking grants.';
 
+GRANT EXECUTE ON FUNCTION claimius._popcount(INTEGER)
+    TO claimius_disciple_client, claimius_reader;
+
 CREATE OR REPLACE FUNCTION claimius._expand_access(p INTEGER)
     RETURNS INTEGER LANGUAGE sql IMMUTABLE PARALLEL SAFE AS $$
     SELECT p
@@ -159,12 +192,18 @@ $$;
 
 COMMENT ON FUNCTION claimius._expand_access(INTEGER) IS 'The mask with the bits it implies added: owner implies write, read and execute, write implies read and execute, execute implies read.';
 
+GRANT EXECUTE ON FUNCTION claimius._expand_access(INTEGER)
+    TO claimius_disciple_client, claimius_reader;
+
 CREATE OR REPLACE FUNCTION claimius._effective_access(p_claim INTEGER, p_binding INTEGER)
     RETURNS INTEGER LANGUAGE sql IMMUTABLE PARALLEL SAFE AS $$
     SELECT p_claim & claimius._expand_access(coalesce(p_binding, p_claim))
 $$;
 
 COMMENT ON FUNCTION claimius._effective_access(INTEGER, INTEGER) IS 'Effective mask of a binding: claim & expand(coalesce(binding, claim)).';
+
+GRANT EXECUTE ON FUNCTION claimius._effective_access(INTEGER, INTEGER)
+    TO claimius_disciple_client, claimius_reader;
 
 CREATE OR REPLACE FUNCTION claimius._close_access(p INTEGER)
     RETURNS INTEGER LANGUAGE sql IMMUTABLE PARALLEL SAFE AS $$
@@ -177,6 +216,9 @@ $$;
 
 COMMENT ON FUNCTION claimius._close_access(INTEGER) IS 'The mask closed under implication: a bit whose implied bits are not all present is dropped.';
 
+GRANT EXECUTE ON FUNCTION claimius._close_access(INTEGER)
+    TO claimius_disciple_client, claimius_reader;
+
 CREATE OR REPLACE FUNCTION claimius._decayed_usage(p_used_count BIGINT, p_last_used_at TIMESTAMPTZ)
     RETURNS DOUBLE PRECISION LANGUAGE sql STABLE PARALLEL SAFE AS $$
     SELECT CASE
@@ -187,3 +229,6 @@ CREATE OR REPLACE FUNCTION claimius._decayed_usage(p_used_count BIGINT, p_last_u
 $$;
 
 COMMENT ON FUNCTION claimius._decayed_usage(BIGINT, TIMESTAMPTZ) IS 'used_count * 2^(-age / 14 days), age since last_used_at. 0 for a pair never used.';
+
+GRANT EXECUTE ON FUNCTION claimius._decayed_usage(BIGINT, TIMESTAMPTZ)
+    TO claimius_disciple_client, claimius_reader;

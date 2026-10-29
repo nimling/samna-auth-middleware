@@ -105,6 +105,12 @@ ALTER TABLE claimius.samna_user ADD COLUMN IF NOT EXISTS user_image TEXT;
 
 COMMENT ON COLUMN claimius.samna_user.user_image IS 'Optional user image. URL, string, or id that the implementing system recognizes.';
 
+CREATE OR REPLACE VIEW claimius.get_users AS SELECT * FROM claimius.samna_user;
+
+GRANT SELECT ON claimius.get_users TO claimius_reader;
+
+GRANT SELECT ON claimius.get_users TO claimius_disciple_client;
+
 CREATE UNIQUE INDEX IF NOT EXISTS idx_samna_user_user_app
     ON claimius.samna_user (user_id) WHERE sa_deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_samna_user_user_id ON claimius.samna_user (user_id);
@@ -866,6 +872,9 @@ $$ LANGUAGE plpgsql;
 
 COMMENT ON FUNCTION claimius._match_audit_partition_grants(REGCLASS) IS 'Makes one audit partition hold exactly the grants of the partitioned table, owner and PUBLIC aside.';
 
+GRANT EXECUTE ON FUNCTION claimius._match_audit_partition_grants(REGCLASS)
+    TO claimius_disciple_client, claimius_reader;
+
 DO $$
 DECLARE
     v_acl RECORD;
@@ -923,6 +932,9 @@ END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = claimius, pg_temp;
 
 COMMENT ON FUNCTION claimius.upsert_audit_partition(TIMESTAMPTZ) IS 'Creates the audit partition of the UTC month holding p_at when it is missing, moving that month''s rows out of audit_default. Owner rights, so a writer that only inserts audit rows can open a month.';
+
+GRANT EXECUTE ON FUNCTION claimius.upsert_audit_partition(TIMESTAMPTZ)
+    TO claimius_disciple_client, claimius_reader;
 
 DO $$
 DECLARE
