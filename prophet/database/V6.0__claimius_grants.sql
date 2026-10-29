@@ -104,10 +104,6 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON claimius.rate_limit TO claimius_writer;
 
 GRANT SELECT, INSERT, UPDATE, DELETE ON claimius.rate_limit TO claimius_reader;
 
-GRANT EXECUTE ON FUNCTION claimius.rate_limit_gcra(text, double precision, double precision, double precision, double precision) TO claimius_writer;
-
-GRANT EXECUTE ON FUNCTION claimius.rate_limit_gcra(text, double precision, double precision, double precision, double precision) TO claimius_reader;
-
 GRANT SELECT, INSERT, UPDATE, DELETE ON claimius.par_request TO claimius_writer;
 
 GRANT SELECT, INSERT, UPDATE, DELETE ON claimius.par_request TO claimius_reader;
@@ -128,40 +124,6 @@ GRANT SELECT, INSERT ON claimius.analytics_event TO claimius_writer;
 
 GRANT SELECT ON claimius.analytics_event TO claimius_reader;
 
-GRANT EXECUTE ON FUNCTION claimius.get_consent(UUID, UUID, TEXT) TO claimius_writer;
-
-GRANT EXECUTE ON FUNCTION claimius.get_consent(UUID, UUID, TEXT) TO claimius_reader;
-
-GRANT EXECUTE ON FUNCTION claimius.insert_consent(UUID, TEXT, JSONB, TEXT, UUID, INET, TEXT) TO claimius_writer;
-
-GRANT EXECUTE ON FUNCTION claimius.consent_allows(UUID, TEXT, UUID, TEXT) TO claimius_writer;
-
-GRANT EXECUTE ON FUNCTION claimius.consent_allows(UUID, TEXT, UUID, TEXT) TO claimius_reader;
-
-GRANT EXECUTE ON FUNCTION claimius.upsert_analytics_session(UUID, TEXT, TEXT, JSONB, UUID, INET, TEXT) TO claimius_writer;
-
-GRANT EXECUTE ON FUNCTION claimius.insert_analytics_events(UUID, TEXT, JSONB) TO claimius_writer;
-
-GRANT EXECUTE ON FUNCTION claimius.capture_user_apps(UUID) TO claimius_writer;
-
-GRANT EXECUTE ON FUNCTION claimius.capture_user_apps(UUID) TO claimius_reader;
-
-GRANT EXECUTE ON FUNCTION claimius.analytics_enabled(UUID) TO claimius_writer;
-
-GRANT EXECUTE ON FUNCTION claimius.analytics_enabled(UUID) TO claimius_reader;
-
-GRANT EXECUTE ON FUNCTION claimius.get_analytics_events(UUID, UUID, UUID, UUID, TEXT, TEXT, TIMESTAMPTZ, TIMESTAMPTZ, INTEGER, INTEGER) TO claimius_writer;
-
-GRANT EXECUTE ON FUNCTION claimius.get_analytics_events(UUID, UUID, UUID, UUID, TEXT, TEXT, TIMESTAMPTZ, TIMESTAMPTZ, INTEGER, INTEGER) TO claimius_reader;
-
-GRANT EXECUTE ON FUNCTION claimius.get_analytics_sessions(UUID, UUID, UUID, TEXT, TIMESTAMPTZ, TIMESTAMPTZ, INTEGER, INTEGER) TO claimius_writer;
-
-GRANT EXECUTE ON FUNCTION claimius.get_analytics_sessions(UUID, UUID, UUID, TEXT, TIMESTAMPTZ, TIMESTAMPTZ, INTEGER, INTEGER) TO claimius_reader;
-
-GRANT EXECUTE ON FUNCTION claimius.get_analytics_apps(UUID) TO claimius_writer;
-
-GRANT EXECUTE ON FUNCTION claimius.get_analytics_apps(UUID) TO claimius_reader;
-
 GRANT SELECT, INSERT, UPDATE ON claimius.analytics_capture TO claimius_writer;
 
 GRANT SELECT ON claimius.analytics_capture TO claimius_reader;
@@ -169,18 +131,4 @@ GRANT SELECT ON claimius.analytics_capture TO claimius_reader;
 GRANT SELECT, INSERT, UPDATE, DELETE ON claimius.analytics_heat TO claimius_writer;
 
 GRANT SELECT ON claimius.analytics_heat TO claimius_reader;
-
-GRANT EXECUTE ON FUNCTION claimius.get_analytics_capture(UUID, TEXT) TO claimius_writer;
-
-GRANT EXECUTE ON FUNCTION claimius.get_analytics_capture(UUID, TEXT) TO claimius_reader;
-
-GRANT EXECUTE ON FUNCTION claimius.get_analytics_captured(UUID, INTERVAL) TO claimius_writer;
-
-GRANT EXECUTE ON FUNCTION claimius.get_analytics_captured(UUID, INTERVAL) TO claimius_reader;
-
-GRANT EXECUTE ON FUNCTION claimius.get_analytics_summary(UUID, UUID, TIMESTAMPTZ, TIMESTAMPTZ) TO claimius_writer;
-
-GRANT EXECUTE ON FUNCTION claimius.get_analytics_summary(UUID, UUID, TIMESTAMPTZ, TIMESTAMPTZ) TO claimius_reader;
-
-GRANT EXECUTE ON FUNCTION claimius.upsert_analytics_capture(UUID, TEXT, TEXT, BYTEA) TO claimius_writer;
 

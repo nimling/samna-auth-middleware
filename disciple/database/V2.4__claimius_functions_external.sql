@@ -414,6 +414,9 @@ $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = claimius, pg_temp;
 
 COMMENT ON FUNCTION claimius.get_organizations(p_user_id uuid, p_required_access integer, p_after uuid, p_limit integer) IS 'Organizations whose effective mask covers p_required_access, in id order after p_after, at most p_limit of them: the reader''s range from get_objects, which settles once, each row kept when live and before the page is cut.';
 
+GRANT EXECUTE ON FUNCTION claimius.get_organizations(p_user_id uuid, p_required_access integer, p_after uuid, p_limit integer)
+    TO claimius_disciple_client, claimius_reader;
+
 DROP FUNCTION IF EXISTS claimius.get_locations(UUID, UUID, INTEGER);
 
 CREATE OR REPLACE FUNCTION claimius.get_locations(
@@ -459,6 +462,9 @@ END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = claimius, pg_temp;
 
 COMMENT ON FUNCTION claimius.get_locations(p_user_id uuid, p_required_access integer, p_after uuid, p_limit integer) IS 'Locations whose effective mask covers p_required_access, in id order after p_after, at most p_limit of them: the reader''s range from get_objects, which settles once, each row kept when live and before the page is cut.';
+
+GRANT EXECUTE ON FUNCTION claimius.get_locations(p_user_id uuid, p_required_access integer, p_after uuid, p_limit integer)
+    TO claimius_disciple_client, claimius_reader;
 
 DO $$
 BEGIN
@@ -866,6 +872,9 @@ $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = claimius, pg_temp;
 
 COMMENT ON FUNCTION claimius.get_claims(UUID, INTEGER) IS 'The claims the user holds through a live user_claim, whose mask covers the required access. The claims the user can see or manage, held or reached through a cascade, are get_objects of type claimius.claim.';
 
+GRANT EXECUTE ON FUNCTION claimius.get_claims(UUID, INTEGER)
+    TO claimius_disciple_client, claimius_reader;
+
 CREATE OR REPLACE FUNCTION claimius.get_claims(
     p_user_id       UUID,
     p_object_id     UUID,
@@ -898,6 +907,9 @@ END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = claimius, pg_temp;
 
 COMMENT ON FUNCTION claimius.get_claims(UUID, UUID, TEXT) IS 'All claims the user holds against one object.';
+
+GRANT EXECUTE ON FUNCTION claimius.get_claims(UUID, UUID, TEXT)
+    TO claimius_disciple_client, claimius_reader;
 
 DROP FUNCTION IF EXISTS claimius.get_scope_access(UUID, JSONPATH, INTEGER);
 CREATE OR REPLACE FUNCTION claimius.get_scope_access(
@@ -996,6 +1008,9 @@ $$;
 
 COMMENT ON FUNCTION claimius.get_scope_access(UUID, JSONPATH, INTEGER) IS 'Object-less bindings of the user''s live grants whose scope matches a jsonpath, one row per binding, each mask the claim mask narrowed by the binding mask, less the bits of the deny bindings matching the same path whose level is not lower than the claim''s, closed under implication.';
 
+GRANT EXECUTE ON FUNCTION claimius.get_scope_access(UUID, JSONPATH, INTEGER)
+    TO claimius_disciple_client, claimius_reader;
+
 CREATE OR REPLACE FUNCTION claimius.get_access(
     p_user_id          UUID,
     p_scope_key        TEXT,
@@ -1020,6 +1035,9 @@ END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = claimius, pg_temp;
 
 COMMENT ON FUNCTION claimius.get_access(UUID, TEXT, INTEGER) IS 'Strongest active object-less binding whose scope contains p_scope_key and whose mask covers p_required_access. A NULL binding mask inherits the claim mask, and a deny binding carrying the key subtracts its bits.';
+
+GRANT EXECUTE ON FUNCTION claimius.get_access(UUID, TEXT, INTEGER)
+    TO claimius_disciple_client, claimius_reader;
 
 DROP FUNCTION IF EXISTS claimius.get_audit(UUID, UUID, INTEGER, INTEGER, INTEGER);
 DROP FUNCTION IF EXISTS claimius.get_audit(UUID, INTEGER, INTEGER, INTEGER);
@@ -1052,6 +1070,9 @@ $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = claimius, pg_temp;
 
 COMMENT ON FUNCTION claimius.get_audit(p_user_id uuid, p_required_access integer, p_limit integer, p_offset integer, p_ids uuid[]) IS 'Audit rows owned by an organization the user reaches with p_required_access, newest first, after p_offset, at most p_limit. With p_ids only the rows named there, so one row by id is get_audit(user, required, p_ids => ARRAY[id]).';
 
+GRANT EXECUTE ON FUNCTION claimius.get_audit(p_user_id uuid, p_required_access integer, p_limit integer, p_offset integer, p_ids uuid[])
+    TO claimius_disciple_client, claimius_reader;
+
 DROP FUNCTION IF EXISTS claimius.get_secrets(UUID, UUID, INTEGER);
 DROP FUNCTION IF EXISTS claimius.get_secrets(UUID, INTEGER);
 
@@ -1079,6 +1100,9 @@ $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = claimius, pg_temp;
 
 COMMENT ON FUNCTION claimius.get_secrets(p_user_id uuid, p_required_access integer, p_after uuid, p_limit integer) IS 'Secrets whose effective mask covers p_required_access, one get_objects page in id order.';
 
+GRANT EXECUTE ON FUNCTION claimius.get_secrets(p_user_id uuid, p_required_access integer, p_after uuid, p_limit integer)
+    TO claimius_disciple_client, claimius_reader;
+
 CREATE OR REPLACE FUNCTION claimius.get_secret_value(
     p_user_id    UUID,
     p_secret_id  UUID
@@ -1104,6 +1128,9 @@ END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = claimius, pg_temp;
 
 COMMENT ON FUNCTION claimius.get_secret_value(p_user_id uuid, p_secret_id uuid) IS 'The stored value of one secret, still ciphertext under the app seed, when p_user_id reaches it with read through get_access: the claim of its creator that insert_secret bound, or any claim the user holds on it. NULL for an inactive user, a user without read, and a deleted secret. The seed never reaches the database; the service opens the value in process.';
+
+GRANT EXECUTE ON FUNCTION claimius.get_secret_value(p_user_id uuid, p_secret_id uuid)
+    TO claimius_disciple_client, claimius_reader;
 
 CREATE OR REPLACE FUNCTION claimius.get_object_assets(
     p_user_id      UUID,
@@ -1464,6 +1491,9 @@ $$ LANGUAGE sql STABLE;
 
 COMMENT ON FUNCTION claimius._window_graph(JSONB, UUID, INTEGER, TEXT, UUID) IS 'The nodes of a graph kept when each parent shows at most p_width children of each type, 0 meaning all, in name order or by the reader''s decayed usage with p_sort ''usage'', continuing after p_next_id when given.';
 
+GRANT EXECUTE ON FUNCTION claimius._window_graph(JSONB, UUID, INTEGER, TEXT, UUID)
+    TO claimius_disciple_client, claimius_reader;
+
 DROP FUNCTION IF EXISTS claimius._window_links(JSONB, UUID, INTEGER, TEXT, UUID);
 CREATE OR REPLACE FUNCTION claimius._window_links(
     p_links     JSONB,
@@ -1529,6 +1559,9 @@ CREATE OR REPLACE FUNCTION claimius._window_links(
 $$ LANGUAGE sql STABLE;
 
 COMMENT ON FUNCTION claimius._window_links(JSONB, JSONB, UUID, INTEGER, TEXT, UUID) IS 'The links of a link graph kept by the window _window_graph gives its nodes, a link staying when its target is kept under its source, with node_ids, the ids of every kept node, p_nodes no link targets windowed as top nodes.';
+
+GRANT EXECUTE ON FUNCTION claimius._window_links(JSONB, JSONB, UUID, INTEGER, TEXT, UUID)
+    TO claimius_disciple_client, claimius_reader;
 
 DROP FUNCTION IF EXISTS claimius.get_owner_graph(UUID, UUID, INTEGER, INTEGER);
 CREATE OR REPLACE FUNCTION claimius.get_owner_graph(
@@ -1747,6 +1780,9 @@ END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = claimius, pg_temp SET plan_cache_mode = force_custom_plan;
 
 COMMENT ON FUNCTION claimius.get_owner_graph(UUID, UUID, INTEGER, INTEGER, INTEGER, TEXT, UUID) IS 'Ownership graph (orgs, locations, registered tables with sa_owner_id or sa_location_id) for the user. Optional start org and depth limit, and a window of p_width children of each type per parent in name or usage order continuing after p_next_id.';
+
+GRANT EXECUTE ON FUNCTION claimius.get_owner_graph(UUID, UUID, INTEGER, INTEGER, INTEGER, TEXT, UUID)
+    TO claimius_disciple_client, claimius_reader;
 
 DROP FUNCTION IF EXISTS claimius.get_claim_graph(UUID, UUID, INTEGER, INTEGER);
 CREATE OR REPLACE FUNCTION claimius.get_claim_graph(
@@ -2091,6 +2127,9 @@ $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = claimius, pg_temp SET pla
 
 COMMENT ON FUNCTION claimius.get_claim_graph(UUID, UUID, INTEGER, INTEGER, INTEGER, TEXT, UUID) IS 'Access graph: user, other users seen, claims, user_claims, claim_object bindings, reachable objects. Optional start claim and depth limit, and a window of p_width children of each type per parent in name or usage order continuing after p_next_id. Default shape served from claimius.claim_graph_cache while every grant, claim and binding of the user was written by a transaction visible in the snapshot taken before the cached graph was built. The cache row is written under the settle lock_timeout and skipped when a writer holds it, so a read never waits on a writer.';
 
+GRANT EXECUTE ON FUNCTION claimius.get_claim_graph(UUID, UUID, INTEGER, INTEGER, INTEGER, TEXT, UUID)
+    TO claimius_disciple_client, claimius_reader;
+
 CREATE OR REPLACE FUNCTION claimius._invalidate_claim_graph_cache()
     RETURNS TRIGGER AS $$
 DECLARE
@@ -2131,6 +2170,9 @@ END;
 $$ LANGUAGE plpgsql;
 
 COMMENT ON FUNCTION claimius._invalidate_claim_graph_cache() IS 'Trigger function. Drops claim_graph_cache rows affected by writes to user_object and user_users, once per statement over its transition table, and by writes to object_info and samna_user, per row. A claim or binding change is caught on read by get_claim_graph.';
+
+GRANT EXECUTE ON FUNCTION claimius._invalidate_claim_graph_cache()
+    TO claimius_disciple_client, claimius_reader;
 
 DROP FUNCTION IF EXISTS claimius.search_objects(UUID, UUID, TEXT, TEXT[], INTEGER, INTEGER, INTEGER);
 DROP FUNCTION IF EXISTS claimius.search(UUID, UUID, TEXT, TEXT[], INTEGER, UUID[], UUID[], INTEGER, INTEGER);
@@ -2240,6 +2282,9 @@ $$ LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = claimius, pg_temp;
 
 COMMENT ON FUNCTION claimius._search_scope_smaller(UUID, TEXT[], claimius.tree_type, TEXT, UUID[]) IS 'True when the scope''s closure rows are no more than the reader''s pairs of the types. Counts both up to k, from 64 and four times larger per round, and stops at the first round where one falls short, so the cost is linear in the smaller of the two.';
 
+GRANT EXECUTE ON FUNCTION claimius._search_scope_smaller(UUID, TEXT[], claimius.tree_type, TEXT, UUID[])
+    TO claimius_disciple_client, claimius_reader;
+
 CREATE OR REPLACE FUNCTION claimius._search_text_smaller(
     p_user_id      UUID,
     p_object_types TEXT[],
@@ -2261,6 +2306,9 @@ END;
 $$ LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path = claimius, pg_temp;
 
 COMMENT ON FUNCTION claimius._search_text_smaller(UUID, TEXT[], TSQUERY) IS 'True when the planner''s estimate of the objects matching the query is below its estimate of the reader''s pairs of the types, so search reads the query''s postings in idx_object_info_search and probes the reader''s pair per match instead of reading the reader''s range. Both are plan estimates, so the choice reads no index entry.';
+
+GRANT EXECUTE ON FUNCTION claimius._search_text_smaller(UUID, TEXT[], TSQUERY)
+    TO claimius_disciple_client, claimius_reader;
 
 CREATE OR REPLACE FUNCTION claimius._search_source_hits(
     p_query        TEXT,
@@ -2289,6 +2337,9 @@ END;
 $$ LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = claimius, pg_temp;
 
 COMMENT ON FUNCTION claimius._search_source_hits(TEXT, TEXT[], UUID[]) IS 'The rows every registered search source of the requested types returns for the query and the scope ids, each score clamped to [0, 1]. The caller keeps a row only where the reader holds a pair on it.';
+
+GRANT EXECUTE ON FUNCTION claimius._search_source_hits(TEXT, TEXT[], UUID[])
+    TO claimius_disciple_client, claimius_reader;
 
 CREATE OR REPLACE FUNCTION claimius.upsert_search_source(
     p_object_type TEXT,
@@ -2321,7 +2372,7 @@ $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = claimius, pg_temp;
 
 COMMENT ON FUNCTION claimius.delete_search_source(TEXT) IS 'Removes the search source of an object type.';
 
-GRANT EXECUTE ON FUNCTION claimius.upsert_search_source(TEXT, REGPROCEDURE), claimius.delete_search_source(TEXT) TO claimius_admin;
+GRANT EXECUTE ON FUNCTION claimius.upsert_search_source(TEXT, REGPROCEDURE), claimius.delete_search_source(TEXT) TO claimius_admin, claimius_disciple_client;
 
 CREATE OR REPLACE FUNCTION claimius.search(
     p_user_id            UUID,
@@ -2693,6 +2744,9 @@ $$ LANGUAGE plpgsql;
 
 COMMENT ON FUNCTION claimius.insert_claim(p_name text, p_description text, p_sa_access integer, p_sa_owner_id uuid, p_sa_root_id uuid, p_sa_created_by uuid, p_inherits boolean, p_type claimius.claim_type, p_level integer) IS 'Creates a new claim. p_sa_access is a bitwise mask: 0x01 owner, 0x02 write, 0x04 read, 0x08 execute, 0x10 deny, 0x20 member. On grant claims with the deny bit unset owner implies write+read+execute, write implies read+execute, execute implies read. Member bit 0x20 stands alone. Deny claims store the supplied bits verbatim so callers can deny any subset of read, write, execute, owner. A mask with no bit besides deny is refused with SQLSTATE 22023.';
 
+GRANT EXECUTE ON FUNCTION claimius.insert_claim(p_name text, p_description text, p_sa_access integer, p_sa_owner_id uuid, p_sa_root_id uuid, p_sa_created_by uuid, p_inherits boolean, p_type claimius.claim_type, p_level integer)
+    TO claimius_disciple_client;
+
 DROP FUNCTION IF EXISTS claimius.update_claim(UUID, TEXT, TEXT, INTEGER, BOOLEAN, BOOLEAN);
 DROP FUNCTION IF EXISTS claimius.update_claim(UUID, TEXT, TEXT, INTEGER, BOOLEAN);
 DROP FUNCTION IF EXISTS claimius.update_claim(uuid,text,text,integer,boolean);
@@ -2747,6 +2801,9 @@ $$ LANGUAGE plpgsql;
 
 COMMENT ON FUNCTION claimius.update_claim(p_claim_id uuid, p_name text, p_description text, p_sa_access integer, p_inherits boolean, p_level integer, p_type claimius.claim_type, p_actor_user_claim_id uuid) IS 'Patches selected fields on a claim, type included. p_sa_access is expanded on grant claims so owner implies write+read+execute, write implies read+execute, execute implies read. Member bit 0x20 stands alone. Deny claims keep the supplied bits verbatim. Empty p_name and zero p_sa_access are treated as preserve so PATCH callers that send only one field do not wipe the others. A mask with no bit besides deny is refused with SQLSTATE 22023.';
 
+GRANT EXECUTE ON FUNCTION claimius.update_claim(p_claim_id uuid, p_name text, p_description text, p_sa_access integer, p_inherits boolean, p_level integer, p_type claimius.claim_type, p_actor_user_claim_id uuid)
+    TO claimius_disciple_client;
+
 DROP FUNCTION IF EXISTS claimius.remove_claim(UUID, UUID);
 
 DROP FUNCTION IF EXISTS claimius.remove_claim(uuid,uuid);
@@ -2771,6 +2828,9 @@ END;
 $$ LANGUAGE plpgsql;
 
 COMMENT ON FUNCTION claimius.delete_claim(p_claim_id uuid, p_deleted_by uuid) IS 'Soft deletes a claim, its user_claim, its claim_object, and any inbound composition links pointing at it. Returns the deleted claim row.';
+
+GRANT EXECUTE ON FUNCTION claimius.delete_claim(p_claim_id uuid, p_deleted_by uuid)
+    TO claimius_disciple_client;
 
 DROP FUNCTION IF EXISTS claimius.assign_claim_user(uuid,uuid,uuid,uuid,text,timestamp with time zone,timestamp with time zone);
 CREATE OR REPLACE FUNCTION claimius.insert_user_claim(
@@ -2798,6 +2858,9 @@ $$ LANGUAGE plpgsql;
 
 COMMENT ON FUNCTION claimius.insert_user_claim(p_claim_id uuid, p_user_id uuid, p_sa_owner_id uuid, p_sa_created_by uuid, p_reason text, p_starts_at timestamp with time zone, p_ends_at timestamp with time zone) IS 'Grants a claim to a user in an app.';
 
+GRANT EXECUTE ON FUNCTION claimius.insert_user_claim(p_claim_id uuid, p_user_id uuid, p_sa_owner_id uuid, p_sa_created_by uuid, p_reason text, p_starts_at timestamp with time zone, p_ends_at timestamp with time zone)
+    TO claimius_disciple_client;
+
 DROP FUNCTION IF EXISTS claimius.update_claim_user(uuid,text,timestamp with time zone,timestamp with time zone);
 CREATE OR REPLACE FUNCTION claimius.update_user_claim(
     p_user_claim_id UUID,
@@ -2820,6 +2883,9 @@ $$ LANGUAGE plpgsql;
 
 COMMENT ON FUNCTION claimius.update_user_claim(p_user_claim_id uuid, p_reason text, p_starts_at timestamp with time zone, p_ends_at timestamp with time zone) IS 'Patches selected fields on a user_claim.';
 
+GRANT EXECUTE ON FUNCTION claimius.update_user_claim(p_user_claim_id uuid, p_reason text, p_starts_at timestamp with time zone, p_ends_at timestamp with time zone)
+    TO claimius_disciple_client;
+
 DROP FUNCTION IF EXISTS claimius.remove_user_claim(UUID, UUID);
 
 DROP FUNCTION IF EXISTS claimius.remove_user_claim(uuid,uuid);
@@ -2836,6 +2902,9 @@ END;
 $$ LANGUAGE plpgsql;
 
 COMMENT ON FUNCTION claimius.delete_user_claim(p_user_claim_id uuid, p_deleted_by uuid) IS 'Soft deletes a user_claim row. Returns the deleted user_claim row.';
+
+GRANT EXECUTE ON FUNCTION claimius.delete_user_claim(p_user_claim_id uuid, p_deleted_by uuid)
+    TO claimius_disciple_client;
 
 DROP FUNCTION IF EXISTS claimius.assign_claim_object(UUID, UUID, UUID, TEXT, UUID, UUID, UUID, INTEGER, BOOLEAN, TEXT, UUID, TEXT);
 
@@ -2869,6 +2938,9 @@ $$ LANGUAGE plpgsql;
 
 COMMENT ON FUNCTION claimius.insert_claim_object(p_claim_id uuid, p_sa_owner_id uuid, p_sa_root_id uuid, p_sa_created_by uuid, p_object_id uuid, p_object_type text, p_sa_access integer, p_inherits boolean, p_reason text, p_ref_id uuid, p_scope jsonb) IS 'Binds a claim. With (object_type, object_id) p_scope keys are field names; without them p_scope keys are custom. p_sa_access is a bitwise mask.';
 
+GRANT EXECUTE ON FUNCTION claimius.insert_claim_object(p_claim_id uuid, p_sa_owner_id uuid, p_sa_root_id uuid, p_sa_created_by uuid, p_object_id uuid, p_object_type text, p_sa_access integer, p_inherits boolean, p_reason text, p_ref_id uuid, p_scope jsonb)
+    TO claimius_disciple_client;
+
 DROP FUNCTION IF EXISTS claimius.update_claim_object(UUID, TEXT, BOOLEAN);
 
 CREATE OR REPLACE FUNCTION claimius.update_claim_object(
@@ -2894,6 +2966,9 @@ $$ LANGUAGE plpgsql;
 
 COMMENT ON FUNCTION claimius.update_claim_object(p_claim_object_id uuid, p_reason text, p_inherits boolean, p_sa_access integer, p_scope jsonb) IS 'Patches selected fields on a claim_object.';
 
+GRANT EXECUTE ON FUNCTION claimius.update_claim_object(p_claim_object_id uuid, p_reason text, p_inherits boolean, p_sa_access integer, p_scope jsonb)
+    TO claimius_disciple_client;
+
 DROP FUNCTION IF EXISTS claimius.remove_claim_object(UUID, UUID);
 
 DROP FUNCTION IF EXISTS claimius.remove_claim_object(uuid,uuid);
@@ -2910,6 +2985,9 @@ END;
 $$ LANGUAGE plpgsql;
 
 COMMENT ON FUNCTION claimius.delete_claim_object(p_claim_object_id uuid, p_deleted_by uuid) IS 'Soft deletes a claim_object row. Returns the deleted claim_object row.';
+
+GRANT EXECUTE ON FUNCTION claimius.delete_claim_object(p_claim_object_id uuid, p_deleted_by uuid)
+    TO claimius_disciple_client;
 
 DROP FUNCTION IF EXISTS claimius.merge_user(uuid, uuid, uuid);
 
@@ -2980,6 +3058,9 @@ $$ LANGUAGE plpgsql;
 
 COMMENT ON FUNCTION claimius.migrate_root(p_object_type text, p_object_id uuid, p_new_root_id uuid) IS 'Admin function: hangs an object with its subtree under a root of another tree, walking organizations through sa_owner_id, moving the closure incrementally, rerooting the owned rows without parenthood and raising the areas it moves. Use only when absolutely required.';
 
+GRANT EXECUTE ON FUNCTION claimius.migrate_root(p_object_type text, p_object_id uuid, p_new_root_id uuid)
+    TO claimius_disciple_client;
+
 DROP FUNCTION IF EXISTS claimius.init_claimius_tables(text[]);
 CREATE OR REPLACE FUNCTION claimius.upsert_table_info(
     VARIADIC p_object_types TEXT[]
@@ -3010,6 +3091,9 @@ $$ LANGUAGE plpgsql;
 
 COMMENT ON FUNCTION claimius.upsert_table_info(VARIADIC p_object_types text[]) IS 'Registers the named external tables: validates their sa_ columns, attaches the calc and self root triggers and seeds their object_info and user_object rows. Idempotent. Called by implementer migrations.';
 
+GRANT EXECUTE ON FUNCTION claimius.upsert_table_info(VARIADIC p_object_types text[])
+    TO claimius_disciple_client;
+
 CREATE OR REPLACE FUNCTION claimius.delete_table_info(
     VARIADIC p_object_types TEXT[]
 ) RETURNS VOID AS $$
@@ -3037,6 +3121,9 @@ END;
 $$ LANGUAGE plpgsql;
 
 COMMENT ON FUNCTION claimius.delete_table_info(VARIADIC p_object_types text[]) IS 'Deregisters the named external tables: detaches their triggers and deletes their table_info, inheritance_info, user_object and object_info rows. Raises on a table that is not registered. Called by implementer migrations when a table leaves claimius.';
+
+GRANT EXECUTE ON FUNCTION claimius.delete_table_info(VARIADIC p_object_types text[])
+    TO claimius_disciple_client;
 
 
 CREATE OR REPLACE FUNCTION claimius._bulk_seed_user_object(p_object_type TEXT)
@@ -3069,6 +3156,9 @@ END;
 $$ LANGUAGE plpgsql;
 
 COMMENT ON FUNCTION claimius._bulk_seed_user_object(p_object_type text) IS 'Seeds object_info and user_object for an existing table at registration time.';
+
+GRANT EXECUTE ON FUNCTION claimius._bulk_seed_user_object(p_object_type text)
+    TO claimius_disciple_client, claimius_reader;
 
 CREATE OR REPLACE FUNCTION claimius.recompute_state()
     RETURNS VOID AS $$
@@ -3129,6 +3219,9 @@ $$ LANGUAGE plpgsql;
 
 COMMENT ON FUNCTION claimius.recompute_state() IS 'Rebuilds inheritance_info and user_object for every registered table from live data. Idempotent. Run after bulk writes that bypassed calc triggers.';
 
+GRANT EXECUTE ON FUNCTION claimius.recompute_state()
+    TO claimius_disciple_client;
+
 DROP FUNCTION IF EXISTS claimius.init_claimius_internal();
 CREATE OR REPLACE FUNCTION claimius.upsert_internal_table_info()
     RETURNS VOID AS $$
@@ -3157,6 +3250,9 @@ END;
 $$ LANGUAGE plpgsql;
 
 COMMENT ON FUNCTION claimius.upsert_internal_table_info() IS 'Registers internal claimius.* tables in table_info. Called once at schema bootstrap.';
+
+GRANT EXECUTE ON FUNCTION claimius.upsert_internal_table_info()
+    TO claimius_disciple_client;
 
 CREATE OR REPLACE FUNCTION claimius._restamp_created_by()
     RETURNS INTEGER AS $$
@@ -3202,6 +3298,9 @@ $$ LANGUAGE plpgsql;
 
 COMMENT ON FUNCTION claimius._restamp_created_by() IS 'Rewrites each sa_created_by that is the user_id of a samna_user holding exactly one live user_claim to that user_claim.id, under replay_mode, and leaves every other stamp. audit keeps its own. Idempotent. Run by the base set. Returns the rows rewritten.';
 
+GRANT EXECUTE ON FUNCTION claimius._restamp_created_by()
+    TO claimius_disciple_client, claimius_reader;
+
 DROP FUNCTION IF EXISTS claimius.create_root_organization(text,uuid,text,text,uuid,text);
 CREATE OR REPLACE FUNCTION claimius.upsert_root_organization(
     p_name              TEXT,
@@ -3243,6 +3342,9 @@ $$ LANGUAGE plpgsql;
 
 COMMENT ON FUNCTION claimius.upsert_root_organization(TEXT, UUID, TEXT, TEXT, UUID, TEXT) IS 'Creates a new root organization with self referencing sa_owner_id and sa_root_id. Idempotent on (name).';
 
+GRANT EXECUTE ON FUNCTION claimius.upsert_root_organization(TEXT, UUID, TEXT, TEXT, UUID, TEXT)
+    TO claimius_disciple_client, claimius_reader;
+
 DROP FUNCTION IF EXISTS claimius.init(text);
 CREATE OR REPLACE FUNCTION claimius.upsert_disciple_state(
     p_disciple_app_slug TEXT DEFAULT NULL
@@ -3263,6 +3365,9 @@ END;
 $$ LANGUAGE plpgsql;
 
 COMMENT ON FUNCTION claimius.upsert_disciple_state(p_disciple_app_slug text) IS 'Bootstrap as a disciple. Ensures the sync cursor row and grants disciple roles. App identity comes from env. State arrives from prophet via sync.';
+
+GRANT EXECUTE ON FUNCTION claimius.upsert_disciple_state(p_disciple_app_slug text)
+    TO claimius_disciple_client;
 
 DROP FUNCTION IF EXISTS claimius.ensure_app_user(UUID, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT);
 DROP FUNCTION IF EXISTS claimius.ensure_app_user(uuid,text,text,text,text,text,text,text);
@@ -3302,6 +3407,9 @@ END;
 $$ LANGUAGE plpgsql;
 
 COMMENT ON FUNCTION claimius.upsert_app_user(p_user_id uuid, p_first_name text, p_last_name text, p_user_name text, p_email text, p_phone text, p_external_id text, p_user_image text) IS 'Upserts the samna_user row. Idempotent. Claim grants arrive via sync on the disciple.';
+
+GRANT EXECUTE ON FUNCTION claimius.upsert_app_user(p_user_id uuid, p_first_name text, p_last_name text, p_user_name text, p_email text, p_phone text, p_external_id text, p_user_image text)
+    TO claimius_disciple_client, claimius_reader;
 
 DROP FUNCTION IF EXISTS claimius.get_access(UUID, TEXT, INTEGER);
 
@@ -3398,10 +3506,10 @@ $$ LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = claimius, pg_temp;
 
 COMMENT ON FUNCTION claimius.get_descendants(p_object_type text, p_object_id uuid) IS 'Combined descendant walk across owner, location, and parenthood trees.';
 
-GRANT EXECUTE ON FUNCTION claimius.get_owner_descendants(TEXT, UUID)       TO claimius_reader;
-GRANT EXECUTE ON FUNCTION claimius.get_location_descendants(TEXT, UUID)    TO claimius_reader;
-GRANT EXECUTE ON FUNCTION claimius.get_parenthood_descendants(TEXT, UUID)  TO claimius_reader;
-GRANT EXECUTE ON FUNCTION claimius.get_descendants(TEXT, UUID)             TO claimius_reader;
+GRANT EXECUTE ON FUNCTION claimius.get_owner_descendants(TEXT, UUID)       TO claimius_reader, claimius_disciple_client;
+GRANT EXECUTE ON FUNCTION claimius.get_location_descendants(TEXT, UUID)    TO claimius_reader, claimius_disciple_client;
+GRANT EXECUTE ON FUNCTION claimius.get_parenthood_descendants(TEXT, UUID)  TO claimius_reader, claimius_disciple_client;
+GRANT EXECUTE ON FUNCTION claimius.get_descendants(TEXT, UUID)             TO claimius_reader, claimius_disciple_client;
 
 CREATE OR REPLACE FUNCTION claimius.get_descendants(
     p_object_id  UUID
@@ -3422,7 +3530,7 @@ $$;
 
 COMMENT ON FUNCTION claimius.get_descendants(UUID) IS 'get_descendants(type, id) for the start object alone: the walk runs for each registered type the id is an object or an ancestor of, so a caller that knows only the id walks its owner, location and parenthood subtrees without trying every registered type.';
 
-GRANT EXECUTE ON FUNCTION claimius.get_descendants(UUID) TO claimius_reader;
+GRANT EXECUTE ON FUNCTION claimius.get_descendants(UUID) TO claimius_reader, claimius_disciple_client;
 
 CREATE OR REPLACE FUNCTION claimius.get_claim_for_user(
     p_user_claim_id UUID
@@ -3440,6 +3548,9 @@ $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = claimius, pg_temp;
 
 COMMENT ON FUNCTION claimius.get_claim_for_user(UUID) IS 'The claim a user_claim grants, when both are live.';
 
+GRANT EXECUTE ON FUNCTION claimius.get_claim_for_user(UUID)
+    TO claimius_disciple_client, claimius_reader;
+
 CREATE OR REPLACE FUNCTION claimius.normalize_object_type(p_object_type TEXT)
 RETURNS TEXT AS $$
     SELECT CASE
@@ -3451,7 +3562,7 @@ $$ LANGUAGE sql IMMUTABLE;
 
 COMMENT ON FUNCTION claimius.normalize_object_type(TEXT) IS 'The wire form of an object type: the claimius schema prefix stripped, any other kept.';
 
-GRANT EXECUTE ON FUNCTION claimius.normalize_object_type(TEXT) TO claimius_reader, claimius_writer, claimius_admin;
+GRANT EXECUTE ON FUNCTION claimius.normalize_object_type(TEXT) TO claimius_reader, claimius_writer, claimius_admin, claimius_disciple_client;
 
 CREATE OR REPLACE FUNCTION claimius.graph_type_passes(
     p_object_type     TEXT,
@@ -3477,7 +3588,7 @@ $$ LANGUAGE plpgsql IMMUTABLE;
 
 COMMENT ON FUNCTION claimius.graph_type_passes(TEXT, TEXT[], TEXT[]) IS 'True when an object type passes the include and exclude filters of a graph call.';
 
-GRANT EXECUTE ON FUNCTION claimius.graph_type_passes(TEXT, TEXT[], TEXT[]) TO claimius_reader, claimius_writer, claimius_admin;
+GRANT EXECUTE ON FUNCTION claimius.graph_type_passes(TEXT, TEXT[], TEXT[]) TO claimius_reader, claimius_writer, claimius_admin, claimius_disciple_client;
 
 CREATE OR REPLACE FUNCTION claimius.merge_graphs(p_a JSONB, p_b JSONB)
 RETURNS JSONB AS $$
@@ -3511,7 +3622,7 @@ $$ LANGUAGE plpgsql IMMUTABLE;
 
 COMMENT ON FUNCTION claimius.merge_graphs(JSONB, JSONB) IS 'Merges two graph documents: the objects maps per type, and the union of the two link lists.';
 
-GRANT EXECUTE ON FUNCTION claimius.merge_graphs(JSONB, JSONB) TO claimius_reader, claimius_writer, claimius_admin;
+GRANT EXECUTE ON FUNCTION claimius.merge_graphs(JSONB, JSONB) TO claimius_reader, claimius_writer, claimius_admin, claimius_disciple_client;
 
 DROP FUNCTION IF EXISTS claimius.get_graph_links_owner(UUID, UUID, INTEGER, TEXT[], TEXT[], UUID, INTEGER);
 DROP FUNCTION IF EXISTS claimius.get_graph_links_owner(UUID, INTEGER, TEXT[], TEXT[], UUID, INTEGER);
@@ -3631,7 +3742,7 @@ $$ LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = claimius, pg_temp 
 
 COMMENT ON FUNCTION claimius.get_graph_links_owner(UUID, INTEGER, TEXT[], TEXT[], UUID, INTEGER, INTEGER, TEXT, UUID) IS 'The ownership graph of the objects the user reaches as links: for every object in scope its closest ancestor the user also reaches, tested against the user''s pairs read once into a hashed set, with an optional window of p_width children per parent. Settles nothing.';
 
-GRANT EXECUTE ON FUNCTION claimius.get_graph_links_owner(UUID, INTEGER, TEXT[], TEXT[], UUID, INTEGER, INTEGER, TEXT, UUID) TO claimius_reader, claimius_writer, claimius_admin;
+GRANT EXECUTE ON FUNCTION claimius.get_graph_links_owner(UUID, INTEGER, TEXT[], TEXT[], UUID, INTEGER, INTEGER, TEXT, UUID) TO claimius_reader, claimius_writer, claimius_admin, claimius_disciple_client;
 
 DROP FUNCTION IF EXISTS claimius.get_graph_links_claim(UUID, UUID, INTEGER, TEXT[], TEXT[], UUID, INTEGER);
 DROP FUNCTION IF EXISTS claimius.get_graph_links_claim(UUID, INTEGER, TEXT[], TEXT[], UUID, INTEGER);
@@ -3825,7 +3936,7 @@ $$ LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = claimius, pg_temp 
 
 COMMENT ON FUNCTION claimius.get_graph_links_claim(UUID, INTEGER, TEXT[], TEXT[], UUID, INTEGER, INTEGER, TEXT, UUID) IS 'The claim graph as links: the user''s grants, the bindings of the claims, the cascades of inheriting bindings, the users the user sees through _user_users_for_viewer after folding its user_users_diff rows, and the user''s relations, with an optional window of p_width children per parent.';
 
-GRANT EXECUTE ON FUNCTION claimius.get_graph_links_claim(UUID, INTEGER, TEXT[], TEXT[], UUID, INTEGER, INTEGER, TEXT, UUID) TO claimius_reader, claimius_writer, claimius_admin;
+GRANT EXECUTE ON FUNCTION claimius.get_graph_links_claim(UUID, INTEGER, TEXT[], TEXT[], UUID, INTEGER, INTEGER, TEXT, UUID) TO claimius_reader, claimius_writer, claimius_admin, claimius_disciple_client;
 
 DROP FUNCTION IF EXISTS claimius.create_organization_user(UUID, UUID, UUID, JSONB);
 DROP FUNCTION IF EXISTS claimius.create_organization_user(UUID, UUID, UUID, JSONB, BOOLEAN);
@@ -4098,7 +4209,7 @@ COMMENT ON FUNCTION claimius.insert_organization_user(UUID, UUID, JSONB, BOOLEAN
     'Adds a user to an organization of the app this disciple mirrors: inserts or upserts the samna_user, grants the supplied claim with p_reason, ensures a per-user virtual claim with full access bound to the user, and when p_caller_uc is not null grants that virtual claim to the caller. The caller must be a live user_claim. With p_identity, an outside identity {id_claim, external_id, type, data} names the user: a user_identity of the owner and external_id reuses its user, the call upserts, and the user_identity is written. Without p_identity and with p_upsert=FALSE, raises 23505 when user_id or external_id already exists. Returns samna_user, created, user_claim, virtual_claim, claim_object, caller_user_claim and user_identity.';
 
 GRANT EXECUTE ON FUNCTION claimius.insert_organization_user(UUID, UUID, JSONB, BOOLEAN, JSONB, TEXT)
-    TO claimius_disciple_client, claimius_writer, claimius_admin;
+    TO claimius_disciple_client, claimius_writer, claimius_admin, claimius_reader;
 
 CREATE OR REPLACE FUNCTION claimius.notify_notification() RETURNS trigger AS $$
 BEGIN
@@ -4109,6 +4220,9 @@ END;
 $$ LANGUAGE plpgsql;
 
 COMMENT ON FUNCTION claimius.notify_notification() IS 'Trigger function. Wakes the live layer with the recipient and row id on the claimius_notification channel after an insert.';
+
+GRANT EXECUTE ON FUNCTION claimius.notify_notification()
+    TO claimius_disciple_client, claimius_reader;
 
 CREATE OR REPLACE FUNCTION claimius.notify_object(
     p_app_id UUID, p_title TEXT, p_description TEXT, p_style JSONB, p_type TEXT,
@@ -4139,7 +4253,7 @@ $$ LANGUAGE sql;
 COMMENT ON FUNCTION claimius.notify_object(UUID, TEXT, TEXT, JSONB, TEXT, TEXT, TEXT, UUID, UUID, UUID, INTERVAL) IS 'Fans a notification out to every user holding read access on the object, excluding the triggering user. Settles first the pair of every user who may hold the object, so a reader who has not read it since the last write is reached. Returns the number of rows inserted.';
 
 GRANT EXECUTE ON FUNCTION claimius.notify_object(UUID, TEXT, TEXT, JSONB, TEXT, TEXT, TEXT, UUID, UUID, UUID, INTERVAL)
-    TO claimius_disciple_client, claimius_writer, claimius_admin;
+    TO claimius_disciple_client, claimius_writer, claimius_admin, claimius_reader;
 
 CREATE OR REPLACE FUNCTION claimius.notify_user(
     p_app_id UUID, p_title TEXT, p_description TEXT, p_style JSONB, p_type TEXT,
@@ -4165,7 +4279,7 @@ $$ LANGUAGE sql;
 COMMENT ON FUNCTION claimius.notify_user(UUID, TEXT, TEXT, JSONB, TEXT, TEXT, TEXT, UUID, UUID, UUID, INTERVAL, UUID[]) IS 'Writes a notification straight to each named active user. Returns the number of rows inserted.';
 
 GRANT EXECUTE ON FUNCTION claimius.notify_user(UUID, TEXT, TEXT, JSONB, TEXT, TEXT, TEXT, UUID, UUID, UUID, INTERVAL, UUID[])
-    TO claimius_disciple_client, claimius_writer, claimius_admin;
+    TO claimius_disciple_client, claimius_writer, claimius_admin, claimius_reader;
 
 CREATE OR REPLACE FUNCTION claimius.insert_secret(
     p_key           TEXT,
@@ -4220,6 +4334,9 @@ $$ LANGUAGE plpgsql;
 
 COMMENT ON FUNCTION claimius.insert_secret(TEXT, TEXT, TIMESTAMPTZ, UUID, UUID) IS 'Stores a secret of an app, its value already encrypted under the app seed, owned by an organization, and binds it to the claim of the actor p_sa_created_by with owner, write and read, so the secret is reached through the actor''s claim as on the prophet. Returns samna_secret and claim_object.';
 
+GRANT EXECUTE ON FUNCTION claimius.insert_secret(TEXT, TEXT, TIMESTAMPTZ, UUID, UUID)
+    TO claimius_disciple_client;
+
 CREATE OR REPLACE FUNCTION claimius.get_orphan_bindings(
     p_grace  INTERVAL DEFAULT '10 minutes'
 ) RETURNS SETOF claimius.claim_object
@@ -4248,6 +4365,9 @@ $$;
 
 COMMENT ON FUNCTION claimius.get_orphan_bindings(INTERVAL) IS 'Live bindings on a registered table of the host whose object does not exist there, older than p_grace so a binding copied ahead of the transaction that creates its object is never taken: what a routed write left on the prophet when the host''s own transaction failed after it.';
 
+GRANT EXECUTE ON FUNCTION claimius.get_orphan_bindings(INTERVAL)
+    TO claimius_disciple_client, claimius_reader;
+
 CREATE OR REPLACE FUNCTION claimius.get_orphan_claims(
     p_grace  INTERVAL DEFAULT '10 minutes'
 ) RETURNS SETOF claimius.claim
@@ -4262,6 +4382,9 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = claimius, pg_temp AS $$
 $$;
 
 COMMENT ON FUNCTION claimius.get_orphan_claims(INTERVAL) IS 'Live virtual claims older than p_grace with no live binding left: the claim a routed write made for an object the host never committed, once its binding is gone.';
+
+GRANT EXECUTE ON FUNCTION claimius.get_orphan_claims(INTERVAL)
+    TO claimius_disciple_client, claimius_reader;
 
 CREATE OR REPLACE FUNCTION claimius._check_code_owner(
     p_claim_id      UUID,
@@ -4290,6 +4413,9 @@ END;
 $$ LANGUAGE plpgsql;
 
 COMMENT ON FUNCTION claimius._check_code_owner(UUID, UUID) IS 'The grant by which the actor owns a claim, the check every local code and guest write runs. Raises P0404 for an unknown claim and P0403 when the actor does not own it.';
+
+GRANT EXECUTE ON FUNCTION claimius._check_code_owner(UUID, UUID)
+    TO claimius_disciple_client, claimius_reader;
 
 CREATE OR REPLACE FUNCTION claimius.update_claim_guest(
     p_claim_id      UUID,
@@ -4340,6 +4466,9 @@ $$ LANGUAGE plpgsql;
 
 COMMENT ON FUNCTION claimius.update_claim_guest(UUID, UUID, TEXT) IS 'The local write of a disciple running without a prophet: ensures the guest of a claim and its grant and sets guest_mode. A deployed disciple routes the write to the prophet, which alone writes guests. Raises P0404, P0403 and 22023 as the prophet does. Returns claim, samna_user and user_claim.';
 
+GRANT EXECUTE ON FUNCTION claimius.update_claim_guest(UUID, UUID, TEXT)
+    TO claimius_disciple_client;
+
 CREATE OR REPLACE FUNCTION claimius.insert_code(
     p_actor_user_id UUID,
     p_claim_id      UUID,
@@ -4386,6 +4515,9 @@ $$ LANGUAGE plpgsql;
 
 COMMENT ON FUNCTION claimius.insert_code(UUID, UUID, TEXT, TEXT, UUID, TEXT, JSONB, TIMESTAMPTZ, TIMESTAMPTZ, INTEGER) IS 'The local write of a disciple running without a prophet: stores a code by the SHA-256 of its value under the grant by which the actor owns the claim. A deployed disciple routes the write to the prophet. Raises as the prophet does. Returns code.';
 
+GRANT EXECUTE ON FUNCTION claimius.insert_code(UUID, UUID, TEXT, TEXT, UUID, TEXT, JSONB, TIMESTAMPTZ, TIMESTAMPTZ, INTEGER)
+    TO claimius_disciple_client;
+
 CREATE OR REPLACE FUNCTION claimius.delete_code(
     p_actor_user_id UUID,
     p_code_id       UUID
@@ -4414,6 +4546,9 @@ $$ LANGUAGE plpgsql;
 
 COMMENT ON FUNCTION claimius.delete_code(UUID, UUID) IS 'The local revoke of a disciple running without a prophet: sets revoked_at. A deployed disciple routes the revoke to the prophet. Returns code.';
 
+GRANT EXECUTE ON FUNCTION claimius.delete_code(UUID, UUID)
+    TO claimius_disciple_client;
+
 CREATE OR REPLACE FUNCTION claimius.get_codes(
     p_claim_id UUID
 ) RETURNS SETOF claimius.code AS $$
@@ -4425,6 +4560,9 @@ CREATE OR REPLACE FUNCTION claimius.get_codes(
 $$ LANGUAGE sql STABLE;
 
 COMMENT ON FUNCTION claimius.get_codes(UUID) IS 'The codes of one claim, revoked ones included, newest first. The caller checks the reader owns the claim.';
+
+GRANT EXECUTE ON FUNCTION claimius.get_codes(UUID)
+    TO claimius_disciple_client, claimius_reader;
 
 CREATE OR REPLACE FUNCTION claimius.get_code(
     p_hash TEXT
@@ -4452,6 +4590,9 @@ $$ LANGUAGE sql STABLE;
 
 COMMENT ON FUNCTION claimius.get_code(TEXT) IS 'The code whose value hashes to p_hash as JSON, with guest_mode, the mode of its claim, and guest_user_id and guest_user_claim_id, the guest holding the claim and its grant, or NULL. Read by the guard of smw.UserAuthMiddleware, which checks the window, the count and revoked_at.';
 
+GRANT EXECUTE ON FUNCTION claimius.get_code(TEXT)
+    TO claimius_disciple_client, claimius_reader;
+
 CREATE OR REPLACE FUNCTION claimius.update_code_used(
     p_hash TEXT
 ) RETURNS SETOF claimius.code AS $$
@@ -4467,6 +4608,9 @@ CREATE OR REPLACE FUNCTION claimius.update_code_used(
 $$ LANGUAGE sql;
 
 COMMENT ON FUNCTION claimius.update_code_used(TEXT) IS 'The local use of a disciple running without a prophet: takes one use of a live code in one statement, no row when the code is unknown, revoked, outside its window or used up. A deployed disciple takes a counted use on the prophet.';
+
+GRANT EXECUTE ON FUNCTION claimius.update_code_used(TEXT)
+    TO claimius_disciple_client, claimius_reader;
 
 CREATE OR REPLACE FUNCTION claimius.redeem_code(
     p_hash    TEXT,
@@ -4521,6 +4665,9 @@ END;
 $$ LANGUAGE plpgsql;
 
 COMMENT ON FUNCTION claimius.redeem_code(TEXT, UUID) IS 'The local redeem of a disciple running without a prophet, the same transaction as the prophet''s: locks the code, takes one use when it is live, grants its claim to the user under the creator''s grant with the code window, and audits the code id, never the value. A deployed disciple redeems on the prophet. Returns code and user_claim.';
+
+GRANT EXECUTE ON FUNCTION claimius.redeem_code(TEXT, UUID)
+    TO claimius_disciple_client;
 
 CREATE OR REPLACE FUNCTION claimius.get_guest_access(
     p_object_type TEXT,
@@ -4592,3 +4739,6 @@ END;
 $$ LANGUAGE plpgsql;
 
 COMMENT ON FUNCTION claimius.prune(JSONB) IS 'Retention. Every runtime table belongs to a kind, audit, notification or token. p_settings sets days per table (<table>_days) or per kind (<kind>_days), and a size per kind (<kind>_size_mb) or for all (size_mb, 4096). A table under its size is left alone; over it, every row whose time column is older than its days is deleted, and 0 days leaves a table alone. A host with runtime tables of its own defines public.prune(JSONB) of the same shape, and it runs after.';
+
+GRANT EXECUTE ON FUNCTION claimius.prune(JSONB)
+    TO claimius_disciple_client;

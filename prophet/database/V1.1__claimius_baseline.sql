@@ -135,6 +135,10 @@ ALTER TABLE claimius.samna_user ADD COLUMN IF NOT EXISTS user_image TEXT;
 
 COMMENT ON COLUMN claimius.samna_user.user_image IS 'Optional user image. URL, string, or id that the implementing system recognizes.';
 
+CREATE OR REPLACE VIEW claimius.get_users AS SELECT * FROM claimius.samna_user;
+
+GRANT SELECT ON claimius.get_users TO claimius_writer;
+
 CREATE UNIQUE INDEX IF NOT EXISTS idx_samna_user_user_app
     ON claimius.samna_user (user_id, app_id) WHERE sa_deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_samna_user_user_id ON claimius.samna_user (user_id);
@@ -1029,6 +1033,9 @@ $$ LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = claimius, pg_temp;
 
 COMMENT ON FUNCTION claimius.get_app() IS 'Returns the system app row for this deployment (prophet or hybrid). Raises on pure disciple.';
 
+GRANT EXECUTE ON FUNCTION claimius.get_app()
+    TO claimius_writer, claimius_reader;
+
 CREATE OR REPLACE FUNCTION claimius.get_disciple_app()
     RETURNS SETOF claimius.samna_app AS $$
 DECLARE
@@ -1050,6 +1057,9 @@ $$ LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = claimius, pg_temp;
 
 COMMENT ON FUNCTION claimius.get_disciple_app() IS 'Returns the upstream prophet app this disciple mirrors. Raises on a prophet and on a hybrid, which carry no disciple_state row.';
 
+GRANT EXECUTE ON FUNCTION claimius.get_disciple_app()
+    TO claimius_writer, claimius_reader;
+
 CREATE OR REPLACE FUNCTION claimius.get_prophet_app_id()
     RETURNS UUID AS $$
 SELECT id FROM claimius.get_app();
@@ -1057,12 +1067,18 @@ $$ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = claimius, pg_temp;
 
 COMMENT ON FUNCTION claimius.get_prophet_app_id() IS 'Scalar wrapper over get_app. Returns the system app id; raises on pure disciple.';
 
+GRANT EXECUTE ON FUNCTION claimius.get_prophet_app_id()
+    TO claimius_writer, claimius_reader;
+
 CREATE OR REPLACE FUNCTION claimius.get_disciple_app_id()
     RETURNS UUID AS $$
 SELECT id FROM claimius.get_disciple_app();
 $$ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = claimius, pg_temp;
 
 COMMENT ON FUNCTION claimius.get_disciple_app_id() IS 'Scalar wrapper over get_disciple_app. Returns the upstream prophet app id; raises on a prophet and on a hybrid.';
+
+GRANT EXECUTE ON FUNCTION claimius.get_disciple_app_id()
+    TO claimius_writer, claimius_reader;
 
 CREATE OR REPLACE FUNCTION claimius.get_app_id()
     RETURNS UUID AS $$
@@ -1095,6 +1111,9 @@ END;
 $$ LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = claimius, pg_temp;
 
 COMMENT ON FUNCTION claimius.get_app_id() IS 'Returns the deployment own app id. Prophet/hybrid: system app. Pure disciple: upstream app.';
+
+GRANT EXECUTE ON FUNCTION claimius.get_app_id()
+    TO claimius_writer, claimius_reader;
 
 DO $$
 DECLARE
@@ -1150,6 +1169,9 @@ END;
 $$ LANGUAGE plpgsql;
 
 COMMENT ON FUNCTION claimius._match_audit_partition_grants(REGCLASS) IS 'Makes one audit partition hold exactly the grants of the partitioned table, owner and PUBLIC aside.';
+
+GRANT EXECUTE ON FUNCTION claimius._match_audit_partition_grants(REGCLASS)
+    TO claimius_writer, claimius_reader;
 
 DO $$
 DECLARE
@@ -1209,6 +1231,9 @@ END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = claimius, pg_temp;
 
 COMMENT ON FUNCTION claimius.upsert_audit_partition(TIMESTAMPTZ) IS 'Creates the audit partition of the UTC month holding p_at when it is missing, moving that month''s rows out of audit_default. Owner rights, so a writer that only inserts audit rows can open a month.';
+
+GRANT EXECUTE ON FUNCTION claimius.upsert_audit_partition(TIMESTAMPTZ)
+    TO claimius_writer, claimius_reader;
 
 DO $$
 DECLARE
