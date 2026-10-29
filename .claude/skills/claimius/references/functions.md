@@ -1,6 +1,6 @@
 # Claimius functions
 
-The function surface of the `claimius` schema `samna_auth_middleware` ships: `prophet/database` for samna_auth, `disciple/database` for every disciple. Function names here follow the SQL; where the workspace rule `.claude/rules/claimius.md` disagrees, this file wins. Long form design: `samna_auth_middleware/.nimpress/claimius/`.
+The function surface of the `claimius` schema `samna_auth_middleware` ships: `prophet/database` for samna_auth, `disciple/database` for every disciple. Function names here follow the SQL; where `~/.claude/rules/claimius.md` disagrees, this file wins. Long form design: `samna_auth_middleware/.nimpress/claimius/`.
 
 ## Materialization is paid on read
 

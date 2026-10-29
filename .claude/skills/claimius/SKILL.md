@@ -96,12 +96,12 @@ WHERE id = :recipe_id;
 
 1. It calls no claimius write function from its own SQL or Go.
 2. It checks with `sdb.Instance().MutationAccess`, filters listings with `sdb.ObjectWhere`, and writes `claim`, `claim_object` and `user_claim` through the builder, which routes them to the prophet. Which call when: `references/access.md`.
-3. The handler shape, the way `bookable_server` does it: the workspace rule `.claude/rules/claimius.md`.
+3. The handler shape, the way `bookable_server` does it: `~/.claude/rules/claimius.md` A disciple service.
 4. On a disciple only the sync layer writes claimius tables.
 
 ## Binding and cascade
 
-1. Every resource in the access model has at least one direct `claim_object` row. After inserting an organization, location, app or registered row, call `insert_claim_object` before any read looks for it. The claim is normally the one behind the actor's `user_claim_id`; pass another claim id for a different binding.
+1. Every resource in the access model has at least one direct `claim_object` row. Prophet side and middleware only: after inserting an organization, location, app or registered row, call `insert_claim_object` before any read looks for it. The claim is normally the one behind the actor's `user_claim_id`; pass another claim id for a different binding. A disciple service never does this; it binds through the builder, `~/.claude/rules/claimius.md` A disciple service.
 2. Exempt: `samna_user` rows, handled by `user_users` and `upsert_app_user`, and claims themselves.
 3. A cascade fires only when both `claim.inherits` and that binding's `claim_object.inherits` are TRUE. A claim with `inherits = FALSE` blocks all its cascades.
 
@@ -161,7 +161,7 @@ SELECT claimius.upsert_table_info('public.my_table');
 1. The tables reference each other in a circle: app and org, claim to org, user_claim to claim, claim_object to claim and object. Out of order, FKs fail or calc triggers misfire.
 2. Fresh prophet: `upsert_system_app`; never replicate its body.
 3. A new app on an existing prophet: the owning org exists and the actor holds owner on it in its own app; `upsert_app` with the actor's `user_claim.id` creates the app, its `prophet_state`, the actor's `samna_user`, the organization links, the owner claim bound and granted, and the default claim bound and set as `claim_id`; then `upsert_table_info` for any external tables.
-4. A new org, location or registered row inside an app: direct INSERT with every `sa_*` column, then `insert_claim`, `insert_claim_object`, `insert_user_claim` to grant access.
+4. A new org, location or registered row inside an app, prophet side and middleware only: direct INSERT with every `sa_*` column, then `insert_claim`, `insert_claim_object`, `insert_user_claim` to grant access. A disciple service never does this; it inserts its row and binds through the builder, `~/.claude/rules/claimius.md` A disciple service.
 5. When the order is not obvious, lay out the steps before writing SQL and ask.
 
 ## Ask when unsure
@@ -186,5 +186,5 @@ SELECT claimius.upsert_table_info('public.my_table');
 1. `references/functions.md`: every public function of both role sets with its arguments and what it settles, the tables written directly and never, the access mask, app scoping, asset links, types and trees, and the traps.
 2. `references/access.md`: the Go calls on `shared.DB`, `MutationAccess`, `MutationAccessMany`, `GetAccess`, `GetDirectAccess`, `UserAccess`, `RootAccess`, `ScopeAccess`, which one a handler uses, where each runs, and actor stamping.
 3. `references/patterns.md`: the SQL for a user logging in, granting a permission and gating a query on an own table.
-4. A disciple service in Go, the way `bookable_server` does it: the workspace rule `.claude/rules/claimius.md`.
+4. A disciple service in Go, the way `bookable_server` does it: `~/.claude/rules/claimius.md` A disciple service.
 5. The SQL in `samna_auth_middleware/prophet/database` and `samna_auth_middleware/disciple/database` is the truth; the long form design is `samna_auth_middleware/.nimpress/claimius/`.
