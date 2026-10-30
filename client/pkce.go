@@ -14,6 +14,7 @@ const (
 	OAuthStateCookie   = "sauth_oauth_state"
 	LoginNextCookie    = "sauth_login_next"
 	CliTargetCookie    = "sauth_cli_target"
+	LoginRetryCookie   = "sauth_login_retry"
 )
 
 func GenerateVerifier() (string, error) {
@@ -29,7 +30,7 @@ func ChallengeS256(verifier string) string {
 	return base64.RawURLEncoding.EncodeToString(sum[:])
 }
 
-func AuthorizeURL(slug string, redirectURI string, state string, challenge string) (string, error) {
+func AuthorizeURL(slug string, redirectURI string, state string, challenge string, params url.Values) (string, error) {
 	endpoint := utils.Cfg().Endpoint
 	joined, err := joinURL(endpoint, fmt.Sprintf("api/app/%s/oauth/authorize", slug))
 	if err != nil {
@@ -46,6 +47,9 @@ func AuthorizeURL(slug string, redirectURI string, state string, challenge strin
 	q.Set("state", state)
 	q.Set("code_challenge", challenge)
 	q.Set("code_challenge_method", "S256")
+	for key := range params {
+		q.Set(key, params.Get(key))
+	}
 	parsed.RawQuery = q.Encode()
 	return parsed.String(), nil
 }

@@ -159,8 +159,11 @@ func TestGetCallbackRefusesACliLoginWithAForeignState(t *testing.T) {
 	cookies := []*http.Cookie{{Name: client.OAuthStateCookie, Value: "st1"}, {Name: client.CliTargetCookie, Value: "paste"}}
 	rec := callCli(t, http.MethodGet, "/api/auth/callback?code=thecode&state=other", nil, cookies, saecho.GetCallback)
 
-	if rec.Code != http.StatusFound || strings.Contains(rec.Body.String(), "thecode") {
-		t.Errorf("status = %d, want the login started over without showing the code", rec.Code)
+	if rec.Code != http.StatusTemporaryRedirect || strings.Contains(rec.Body.String(), "thecode") {
+		t.Errorf("status = %d, want the login asked for afresh without showing the code", rec.Code)
+	}
+	if location := rec.Header().Get("Location"); !strings.HasPrefix(location, "/api/auth/login?") || !strings.Contains(location, "prompt=login") {
+		t.Errorf("location = %q, want the disciple's login with prompt=login", location)
 	}
 }
 
