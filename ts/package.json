@@ -1,6 +1,6 @@
 {
   "name": "@nimling/samna-auth-middleware",
-  "version": "2.0.0-alpha0107",
+  "version": "2.0.0-alpha0108",
   "description": "TypeScript caller for samna_auth. Reads OIDC discovery, builds login and logout redirect URLs, validates session tokens. Confidential flows are server-only.",
   "author": "nimling",
   "license": "MIT",
