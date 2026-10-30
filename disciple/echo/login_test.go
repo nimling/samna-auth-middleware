@@ -159,3 +159,54 @@ func TestGetLoginIgnoresABackslashNext(t *testing.T) {
 		t.Errorf("sauth_login_next = %q, want empty", got)
 	}
 }
+
+func TestGetLoginForwardsPromptLoginToTheAuthorizeURL(t *testing.T) {
+	t.Setenv("SAUTH_ENDPOINT", "http://auth.example")
+	t.Setenv("SAUTH_APP_SLUG", "testapp")
+	t.Setenv("SAUTH_REDIRECT_URI", "http://localhost:4200/api/auth/callback")
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/api/auth/login?prompt=login&error=invalid_grant&error_description=The+code+was+refused", nil)
+	rec := httptest.NewRecorder()
+	ctx := e.NewContext(req, rec)
+
+	if err := saecho.GetLogin(ctx); err != nil {
+		t.Fatalf("GetLogin: %v", err)
+	}
+	if rec.Code != http.StatusTemporaryRedirect {
+		t.Fatalf("status = %d, want 307", rec.Code)
+	}
+	location, err := url.Parse(rec.Header().Get("Location"))
+	if err != nil || location.Path != "/api/app/testapp/oauth/authorize" {
+		t.Fatalf("Location = %q, want the prophet's authorize", rec.Header().Get("Location"))
+	}
+	q := location.Query()
+	if q.Get("prompt") != "login" || q.Get("error") != "invalid_grant" || q.Get("error_description") != "The code was refused" {
+		t.Errorf("authorize query = %q, want prompt, error and error_description forwarded", location.RawQuery)
+	}
+	if q.Get("response_type") != "code" || q.Get("code_challenge_method") != "S256" || q.Get("state") == "" {
+		t.Errorf("authorize query = %q, want the PKCE parameters kept", location.RawQuery)
+	}
+}
+
+func TestGetLoginSendsNoPromptUnlessAsked(t *testing.T) {
+	t.Setenv("SAUTH_ENDPOINT", "http://auth.example")
+	t.Setenv("SAUTH_APP_SLUG", "testapp")
+	t.Setenv("SAUTH_REDIRECT_URI", "http://localhost:4200/api/auth/callback")
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/api/auth/login", nil)
+	rec := httptest.NewRecorder()
+	ctx := e.NewContext(req, rec)
+
+	if err := saecho.GetLogin(ctx); err != nil {
+		t.Fatalf("GetLogin: %v", err)
+	}
+	location, err := url.Parse(rec.Header().Get("Location"))
+	if err != nil {
+		t.Fatalf("Location: %v", err)
+	}
+	if q := location.Query(); q.Has("prompt") || q.Has("error") || q.Has("error_description") {
+		t.Errorf("authorize query = %q, want no prompt or error on a plain login", location.RawQuery)
+	}
+}

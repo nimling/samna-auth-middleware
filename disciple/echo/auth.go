@@ -1,10 +1,14 @@
 package echo
 
 import (
+	_ "embed"
 	"encoding/base64"
+	"errors"
+	"html/template"
 	"net/http"
 	"net/url"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/labstack/echo/v4"
@@ -13,6 +17,33 @@ import (
 	"github.com/nimling/samna-auth-middleware/v2/smw"
 	"github.com/nimling/samna-auth-middleware/v2/utils"
 )
+
+const (
+	loginPromptLogin       = "login"
+	loginRetryWindow       = 60
+	oauthErrInvalidRequest = "invalid_request"
+	oauthErrInvalidClient  = "invalid_client"
+	oauthErrServerError    = "server_error"
+	loginErrNoCode         = "The sign in came back without an authorization code."
+	loginErrState          = "The sign in state does not match this browser."
+	loginErrVerifier       = "This browser holds no verifier for the sign in."
+	loginErrExchange       = "The authorization code was refused."
+	loginErrProphet        = "The sign in could not be completed."
+	loginErrRefused        = "The sign in was refused."
+	loginErrRetryExhausted = "It failed twice within a minute, so it stops here instead of trying again."
+)
+
+//go:embed login/error.html
+var loginErrorSource string
+
+var loginErrorTemplate = template.Must(template.New("error").Parse(loginErrorSource))
+
+type TemplateLoginError struct {
+	App         string
+	Error       string
+	Description string
+	Logout      string
+}
 
 func GetLogin(ctx echo.Context) error {
 	slug := utils.Cfg().AppSlug
@@ -65,7 +96,13 @@ func GetLogin(ctx echo.Context) error {
 	if initiate != nil {
 		redirectURI = initiate.GetCallbackURI()
 	}
-	authURL, err := client.AuthorizeURL(slug, redirectURI, state, challenge)
+	params := url.Values{}
+	for _, key := range []string{"prompt", "error", "error_description"} {
+		if value := ctx.QueryParam(key); value != "" {
+			params.Set(key, value)
+		}
+	}
+	authURL, err := client.AuthorizeURL(slug, redirectURI, state, challenge, params)
 	if err != nil {
 		ctx.Logger().Errorf("GetLogin authorize url: %v", err)
 		return respondError(ctx, http.StatusInternalServerError, "Internal Server Error")
@@ -84,11 +121,6 @@ func GetLogin(ctx echo.Context) error {
 }
 
 func GetCallback(ctx echo.Context) error {
-	code := ctx.QueryParam("code")
-	if code == "" {
-		return respondError(ctx, http.StatusBadRequest, "missing code")
-	}
-
 	redirectURI := utils.Cfg().RedirectURI
 	startOver := utils.Cfg().PageRedirect
 	var initiate *shared.SamnaApp
@@ -106,6 +138,11 @@ func GetCallback(ctx echo.Context) error {
 		startOver = "/"
 	}
 
+	authPath := strings.TrimSuffix(ctx.Request().URL.Path, "callback")
+	if initiate != nil {
+		authPath += url.PathEscape(initiate.Slug) + "/"
+	}
+
 	landing, origins := getReturnScope(initiate)
 	stateParam := ctx.QueryParam("state")
 	stateNext := ""
@@ -114,20 +151,22 @@ func GetCallback(ctx echo.Context) error {
 			stateNext = string(raw)
 		}
 	}
-	resume := startOver
-	if stateNext != "" {
-		loginPath := strings.TrimSuffix(ctx.Request().URL.Path, "callback") + "login"
-		if initiate != nil {
-			loginPath = strings.TrimSuffix(ctx.Request().URL.Path, "callback") + url.PathEscape(initiate.Slug) + "/login"
+
+	if refused := ctx.QueryParam("error"); refused != "" {
+		description := ctx.QueryParam("error_description")
+		if description == "" {
+			description = loginErrRefused
 		}
-		resume = loginPath + "?next=" + url.QueryEscape(stateNext)
+		return respondLoginError(ctx, authPath, stateNext, refused, description, errors.New("the authorize request was answered with an error"))
 	}
+	code := ctx.QueryParam("code")
+	if code == "" {
+		return respondLoginError(ctx, authPath, stateNext, oauthErrInvalidRequest, loginErrNoCode, errors.New("no code in the callback"))
+	}
+
 	stateCookie, stateErr := ctx.Cookie(client.OAuthStateCookie)
 	if stateErr != nil || stateCookie.Value == "" || stateParam == "" || stateParam != stateCookie.Value {
-		ctx.Logger().Warnf("GetCallback invalid state, clearing the flow cookies and sending the visitor back to start over")
-		utils.ClearCookie(ctx, client.PKCEVerifierCookie)
-		utils.ClearCookie(ctx, client.OAuthStateCookie)
-		return Redirect(ctx, http.StatusFound, resume)
+		return respondLoginError(ctx, authPath, stateNext, oauthErrInvalidRequest, loginErrState, errors.New("state cookie missing or not equal to the state parameter"))
 	}
 
 	if cliCookie, cliErr := ctx.Cookie(client.CliTargetCookie); cliErr == nil && cliCookie.Value != "" {
@@ -139,10 +178,7 @@ func GetCallback(ctx echo.Context) error {
 
 	verifierCookie, verifierErr := ctx.Cookie(client.PKCEVerifierCookie)
 	if verifierErr != nil || verifierCookie.Value == "" {
-		ctx.Logger().Warnf("GetCallback missing verifier, clearing the flow cookies and sending the visitor back to start over")
-		utils.ClearCookie(ctx, client.PKCEVerifierCookie)
-		utils.ClearCookie(ctx, client.OAuthStateCookie)
-		return Redirect(ctx, http.StatusFound, resume)
+		return respondLoginError(ctx, authPath, stateNext, oauthErrInvalidRequest, loginErrVerifier, errors.New("verifier cookie missing"))
 	}
 
 	rootSlug := utils.Cfg().AppSlug
@@ -154,14 +190,20 @@ func GetCallback(ctx echo.Context) error {
 
 	tokens, err := client.PostAuthCode(ctx.Request().Context(), tokenURL, rootSlug, utils.Cfg().AppSecret, code, redirectURI, verifierCookie.Value)
 	if err != nil {
-		ctx.Logger().Warnf("GetCallback exchange refused, clearing the flow cookies and sending the visitor back to start over: %v", err)
-		utils.ClearCookie(ctx, client.PKCEVerifierCookie)
-		utils.ClearCookie(ctx, client.OAuthStateCookie)
-		return Redirect(ctx, http.StatusFound, startOver)
+		var tokenErr *client.TokenError
+		if errors.As(err, &tokenErr) && tokenErr.Status < http.StatusInternalServerError && tokenErr.Code != "" && tokenErr.Code != oauthErrInvalidClient {
+			description := tokenErr.Description
+			if description == "" {
+				description = loginErrExchange
+			}
+			return respondLoginError(ctx, authPath, stateNext, tokenErr.Code, description, err)
+		}
+		return respondLoginError(ctx, authPath, stateNext, oauthErrServerError, loginErrProphet, err)
 	}
 
 	utils.ClearCookie(ctx, client.PKCEVerifierCookie)
 	utils.ClearCookie(ctx, client.OAuthStateCookie)
+	utils.ClearCookie(ctx, client.LoginRetryCookie)
 
 	utils.WriteCookie(ctx, &http.Cookie{Name: "sauth_access_token", Value: tokens.AccessToken, Path: "/", MaxAge: tokens.AccessExpiresIn})
 	if tokens.RefreshToken != "" {
@@ -180,6 +222,38 @@ func GetCallback(ctx echo.Context) error {
 	}
 	utils.ClearCookie(ctx, client.LoginNextCookie)
 	return Redirect(ctx, http.StatusFound, pageRedirect)
+}
+
+func respondLoginError(ctx echo.Context, authPath string, next string, code string, description string, cause error) error {
+	ctx.Logger().Warnf("GetCallback %s: %s: %v", code, description, cause)
+	for _, name := range []string{client.PKCEVerifierCookie, client.OAuthStateCookie, client.CliTargetCookie, client.LoginNextCookie, "sauth_csrf_token", "sauth_refresh_token", "sauth_access_token"} {
+		utils.ClearCookie(ctx, name)
+	}
+	setNoStore(ctx)
+
+	retries := 0
+	if cookie, err := ctx.Cookie(client.LoginRetryCookie); err == nil {
+		retries, _ = strconv.Atoi(cookie.Value)
+	}
+	if retries > 0 {
+		header := ctx.Response().Header()
+		header.Set(echo.HeaderContentType, echo.MIMETextHTMLCharsetUTF8)
+		header.Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'")
+		header.Set("X-Frame-Options", "DENY")
+		header.Set("Referrer-Policy", "no-referrer")
+		ctx.Response().WriteHeader(http.StatusBadRequest)
+		return loginErrorTemplate.Execute(ctx.Response(), TemplateLoginError{App: utils.Cfg().AppSlug, Error: code, Description: description + " " + loginErrRetryExhausted, Logout: authPath + "logout"})
+	}
+	utils.WriteCookie(ctx, &http.Cookie{Name: client.LoginRetryCookie, Value: strconv.Itoa(retries + 1), Path: "/", MaxAge: loginRetryWindow})
+
+	params := url.Values{}
+	params.Set("prompt", loginPromptLogin)
+	params.Set("error", code)
+	params.Set("error_description", description)
+	if next != "" {
+		params.Set("next", next)
+	}
+	return Redirect(ctx, http.StatusTemporaryRedirect, authPath+"login?"+params.Encode())
 }
 
 func GetLogout(ctx echo.Context) error {

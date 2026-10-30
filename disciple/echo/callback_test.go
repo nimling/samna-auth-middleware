@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -74,11 +75,15 @@ func TestGetCallbackRejectsStateMismatch(t *testing.T) {
 	if err := saecho.GetCallback(ctx); err != nil {
 		t.Fatalf("GetCallback: %v", err)
 	}
-	if rec.Code != http.StatusFound {
-		t.Fatalf("status = %d, want 302 on state mismatch", rec.Code)
+	if rec.Code != http.StatusTemporaryRedirect {
+		t.Fatalf("status = %d, want 307 on state mismatch", rec.Code)
 	}
-	if location := rec.Header().Get("Location"); location != "http://localhost:4200/" {
-		t.Fatalf("Location = %q, want the page redirect so the visitor starts over", location)
+	location, err := url.Parse(rec.Header().Get("Location"))
+	if err != nil || location.Path != "/api/auth/login" {
+		t.Fatalf("Location = %q, want the disciple's own login", rec.Header().Get("Location"))
+	}
+	if q := location.Query(); q.Get("prompt") != "login" || q.Get("error") != "invalid_request" || q.Get("error_description") == "" {
+		t.Fatalf("Location = %q, want prompt=login with the error and its description", rec.Header().Get("Location"))
 	}
 
 	cleared := map[string]int{}
@@ -91,6 +96,155 @@ func TestGetCallbackRejectsStateMismatch(t *testing.T) {
 	if cleared["sauth_pkce_verifier"] != -1 {
 		t.Errorf("sauth_pkce_verifier MaxAge = %d, want -1 so the stale pair cannot fail again", cleared["sauth_pkce_verifier"])
 	}
+}
+
+func getFailedCallback(t *testing.T, retry string) *httptest.ResponseRecorder {
+	t.Helper()
+	tokenServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte(`{"error":"invalid_grant","error_description":"the code was already used"}`))
+	}))
+	t.Cleanup(tokenServer.Close)
+
+	t.Setenv("SAUTH_ENDPOINT", tokenServer.URL)
+	t.Setenv("SAUTH_APP_SLUG", "testapp")
+	t.Setenv("SAUTH_APP_SECRET", "secret")
+	t.Setenv("SAUTH_REDIRECT_URI", "http://localhost:4200/api/auth/callback")
+	t.Setenv("SAUTH_PAGE_REDIRECT", "http://localhost:4200/")
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/api/auth/callback?code=used&state=st1", nil)
+	req.AddCookie(&http.Cookie{Name: "sauth_oauth_state", Value: "st1"})
+	req.AddCookie(&http.Cookie{Name: "sauth_pkce_verifier", Value: "ver1"})
+	req.AddCookie(&http.Cookie{Name: "sauth_access_token", Value: "stale"})
+	if retry != "" {
+		req.AddCookie(&http.Cookie{Name: "sauth_login_retry", Value: retry})
+	}
+	rec := httptest.NewRecorder()
+	ctx := e.NewContext(req, rec)
+
+	if err := saecho.GetCallback(ctx); err != nil {
+		t.Fatalf("GetCallback: %v", err)
+	}
+	return rec
+}
+
+func TestGetCallbackAsksForAFreshLoginWhenTheCodeExchangeIsRefused(t *testing.T) {
+	rec := getFailedCallback(t, "")
+	if rec.Code != http.StatusTemporaryRedirect {
+		t.Fatalf("status = %d, want 307 to the disciple's own login", rec.Code)
+	}
+	location, err := url.Parse(rec.Header().Get("Location"))
+	if err != nil || location.Path != "/api/auth/login" {
+		t.Fatalf("Location = %q, want /api/auth/login", rec.Header().Get("Location"))
+	}
+	if q := location.Query(); q.Get("prompt") != "login" || q.Get("error") != "invalid_grant" || q.Get("error_description") != "the code was already used" {
+		t.Fatalf("Location = %q, want prompt=login with the prophet's error and description", rec.Header().Get("Location"))
+	}
+	cookies := map[string]*http.Cookie{}
+	for _, c := range rec.Result().Cookies() {
+		cookies[c.Name] = c
+	}
+	for _, name := range []string{"sauth_oauth_state", "sauth_pkce_verifier", "sauth_cli_target", "sauth_login_next", "sauth_access_token", "sauth_refresh_token", "sauth_csrf_token"} {
+		if c := cookies[name]; c == nil || c.MaxAge != -1 {
+			t.Errorf("cookie %s not cleared on a failed callback", name)
+		}
+	}
+	if c := cookies["sauth_login_retry"]; c == nil || c.Value != "1" || c.MaxAge != 60 {
+		t.Errorf("sauth_login_retry = %v, want 1 for 60 seconds", c)
+	}
+	if rec.Header().Get("Cache-Control") != "no-store" {
+		t.Errorf("Cache-Control = %q, want no-store", rec.Header().Get("Cache-Control"))
+	}
+}
+
+func TestGetCallbackAnswersAnErrorPageOnTheSecondFailureWithinTheMinute(t *testing.T) {
+	rec := getFailedCallback(t, "1")
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 instead of another redirect", rec.Code)
+	}
+	if location := rec.Header().Get("Location"); location != "" {
+		t.Fatalf("Location = %q, want none so no loop is possible", location)
+	}
+	if ct := rec.Header().Get("Content-Type"); !strings.HasPrefix(ct, "text/html") {
+		t.Fatalf("Content-Type = %q, want html", ct)
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "invalid_grant") || !strings.Contains(body, "the code was already used") {
+		t.Errorf("body does not name the error: %s", body)
+	}
+	if !strings.Contains(body, `href="/api/auth/logout"`) {
+		t.Errorf("body carries no sign out link: %s", body)
+	}
+	cleared := map[string]bool{}
+	for _, c := range rec.Result().Cookies() {
+		if c.MaxAge < 0 {
+			cleared[c.Name] = true
+		}
+	}
+	if !cleared["sauth_oauth_state"] || !cleared["sauth_pkce_verifier"] || !cleared["sauth_access_token"] {
+		t.Errorf("the flow and session cookies must be cleared, got %v", rec.Result().Cookies())
+	}
+}
+
+func TestGetCallbackPassesTheRefusalOfTheAuthorizeRequestOn(t *testing.T) {
+	t.Setenv("SAUTH_PAGE_REDIRECT", "http://localhost:4200/")
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/api/auth/callback?error=access_denied&error_description=The+user+declined&state=st1", nil)
+	req.AddCookie(&http.Cookie{Name: "sauth_oauth_state", Value: "st1"})
+	rec := httptest.NewRecorder()
+	ctx := e.NewContext(req, rec)
+
+	if err := saecho.GetCallback(ctx); err != nil {
+		t.Fatalf("GetCallback: %v", err)
+	}
+	if rec.Code != http.StatusTemporaryRedirect {
+		t.Fatalf("status = %d, want 307", rec.Code)
+	}
+	location, err := url.Parse(rec.Header().Get("Location"))
+	if err != nil || location.Path != "/api/auth/login" {
+		t.Fatalf("Location = %q, want /api/auth/login", rec.Header().Get("Location"))
+	}
+	if q := location.Query(); q.Get("prompt") != "login" || q.Get("error") != "access_denied" || q.Get("error_description") != "The user declined" {
+		t.Fatalf("Location = %q, want the prophet's error passed on with prompt=login", rec.Header().Get("Location"))
+	}
+}
+
+func TestGetCallbackClearsTheRetryCounterOnSuccess(t *testing.T) {
+	tokenServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"access_token":"tok","refresh_token":"ref","token_type":"Bearer","expires_in":3600,"refresh_expires_in":2592000}`))
+	}))
+	defer tokenServer.Close()
+
+	t.Setenv("SAUTH_ENDPOINT", tokenServer.URL)
+	t.Setenv("SAUTH_APP_SLUG", "testapp")
+	t.Setenv("SAUTH_APP_SECRET", "secret")
+	t.Setenv("SAUTH_REDIRECT_URI", "http://localhost:4200/api/auth/callback")
+	t.Setenv("SAUTH_PAGE_REDIRECT", "http://localhost:4200/")
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/api/auth/callback?code=abc&state=st1", nil)
+	req.AddCookie(&http.Cookie{Name: "sauth_oauth_state", Value: "st1"})
+	req.AddCookie(&http.Cookie{Name: "sauth_pkce_verifier", Value: "ver1"})
+	req.AddCookie(&http.Cookie{Name: "sauth_login_retry", Value: "1"})
+	rec := httptest.NewRecorder()
+	ctx := e.NewContext(req, rec)
+
+	if err := saecho.GetCallback(ctx); err != nil {
+		t.Fatalf("GetCallback: %v", err)
+	}
+	if rec.Code != http.StatusFound {
+		t.Fatalf("status = %d, want 302", rec.Code)
+	}
+	for _, c := range rec.Result().Cookies() {
+		if c.Name == "sauth_login_retry" && c.MaxAge == -1 {
+			return
+		}
+	}
+	t.Errorf("sauth_login_retry not cleared on a completed callback")
 }
 
 func TestGetLogoutForwardsTokenAndClearsCookies(t *testing.T) {
@@ -183,47 +337,6 @@ func TestGetLogoutWithoutTokenRedirectsToEndSession(t *testing.T) {
 	}
 }
 
-func TestGetCallbackStartsOverWhenTheCodeExchangeIsRefused(t *testing.T) {
-	tokenServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusBadRequest)
-		w.Write([]byte(`{"error":"invalid_grant"}`))
-	}))
-	defer tokenServer.Close()
-
-	t.Setenv("SAUTH_ENDPOINT", tokenServer.URL)
-	t.Setenv("SAUTH_APP_SLUG", "testapp")
-	t.Setenv("SAUTH_APP_SECRET", "secret")
-	t.Setenv("SAUTH_REDIRECT_URI", "http://localhost:4200/api/auth/callback")
-	t.Setenv("SAUTH_PAGE_REDIRECT", "http://localhost:4200/")
-
-	e := echo.New()
-	req := httptest.NewRequest(http.MethodGet, "/api/auth/callback?code=used&state=st1", nil)
-	req.AddCookie(&http.Cookie{Name: "sauth_oauth_state", Value: "st1"})
-	req.AddCookie(&http.Cookie{Name: "sauth_pkce_verifier", Value: "ver1"})
-	rec := httptest.NewRecorder()
-	ctx := e.NewContext(req, rec)
-
-	if err := saecho.GetCallback(ctx); err != nil {
-		t.Fatalf("GetCallback: %v", err)
-	}
-	if rec.Code != http.StatusFound {
-		t.Fatalf("status = %d, want 302 so the visitor starts over instead of reading a json error", rec.Code)
-	}
-	if location := rec.Header().Get("Location"); location != "http://localhost:4200/" {
-		t.Fatalf("Location = %q, want the page redirect", location)
-	}
-	cleared := map[string]bool{}
-	for _, c := range rec.Result().Cookies() {
-		if c.MaxAge < 0 {
-			cleared[c.Name] = true
-		}
-	}
-	if !cleared["sauth_oauth_state"] || !cleared["sauth_pkce_verifier"] {
-		t.Fatalf("the flow cookies must be cleared, got %v", rec.Result().Cookies())
-	}
-}
-
 func TestGetCallbackResumesTheLoginFromTheStateInAnotherBrowser(t *testing.T) {
 	t.Setenv("SAUTH_PAGE_REDIRECT", "http://localhost:4200/")
 
@@ -235,8 +348,12 @@ func TestGetCallbackResumesTheLoginFromTheStateInAnotherBrowser(t *testing.T) {
 	if err := saecho.GetCallback(ctx); err != nil {
 		t.Fatalf("GetCallback: %v", err)
 	}
-	if location := rec.Header().Get("Location"); location != "/api/auth/login?next=%2Fsettings%3Ftab%3Dkeys" {
-		t.Fatalf("Location = %q, want the login restarted with the next path from the state", location)
+	location, err := url.Parse(rec.Header().Get("Location"))
+	if err != nil || location.Path != "/api/auth/login" {
+		t.Fatalf("Location = %q, want the login restarted", rec.Header().Get("Location"))
+	}
+	if q := location.Query(); q.Get("next") != "/settings?tab=keys" || q.Get("prompt") != "login" || q.Get("error") != "invalid_request" {
+		t.Fatalf("Location = %q, want the next path from the state with prompt=login and the error", rec.Header().Get("Location"))
 	}
 }
 
@@ -251,8 +368,9 @@ func TestGetCallbackIgnoresAProtocolRelativeNextInTheState(t *testing.T) {
 	if err := saecho.GetCallback(ctx); err != nil {
 		t.Fatalf("GetCallback: %v", err)
 	}
-	if location := rec.Header().Get("Location"); location != "http://localhost:4200/" {
-		t.Fatalf("Location = %q, want the page redirect", location)
+	location, err := url.Parse(rec.Header().Get("Location"))
+	if err != nil || location.Path != "/api/auth/login" || location.Query().Has("next") {
+		t.Fatalf("Location = %q, want the login restarted without the foreign next", rec.Header().Get("Location"))
 	}
 }
 
