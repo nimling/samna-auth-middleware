@@ -146,6 +146,11 @@ func GetSyncSnapshot(ctx echo.Context) error {
 						q = q.Where("? IN (SELECT claimius.apps_for_object(?TableAlias.object_type, ?TableAlias.object_id, ?TableAlias.app_id))", appID)
 					}
 					q = q.Order("sa_created_at", "id")
+				} else if t.eventType == shared.OBJECT_TYPE_APP_COST {
+					if appID != uuid.Nil {
+						q = q.Where("app_id = ?", appID)
+					}
+					q = q.Order("sa_created_at", "id")
 				} else if t.filterApp && appID != uuid.Nil {
 					q = q.Where("app_id = ?", appID)
 				}
