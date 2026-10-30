@@ -69,6 +69,7 @@ var claimiusObjectTypes = map[string]ObjectType{
 	StripObjectSchema(OBJECT_TYPE_USER_FIELD):    OBJECT_TYPE_USER_FIELD,
 	StripObjectSchema(OBJECT_TYPE_USER_TOKEN):    OBJECT_TYPE_USER_TOKEN,
 	StripObjectSchema(OBJECT_TYPE_OBJECT_ASSET):  OBJECT_TYPE_OBJECT_ASSET,
+	StripObjectSchema(OBJECT_TYPE_APP_COST):      OBJECT_TYPE_APP_COST,
 	StripObjectSchema(OBJECT_TYPE_CODE):          OBJECT_TYPE_CODE,
 }
 
@@ -311,6 +312,7 @@ const (
 	OBJECT_TYPE_USER_FIELD    = "claimius.user_field"
 	OBJECT_TYPE_USER_TOKEN    = "claimius.user_identity"
 	OBJECT_TYPE_OBJECT_ASSET  = "claimius.object_asset"
+	OBJECT_TYPE_APP_COST      = "claimius.app_cost"
 	OBJECT_TYPE_CODE          = "claimius.code"
 )
 
@@ -846,6 +848,26 @@ type ObjectAsset struct {
 	CreatedAt   time.Time  `bun:"sa_created_at,default:now()" json:"created_at"`
 	UpdatedAt   time.Time  `bun:"sa_updated_at,default:now()" json:"updated_at"`
 	Txid        uint64     `bun:"txid,scanonly" json:"-"`
+}
+
+type AppCost struct {
+	bun.BaseModel `bun:"table:claimius.app_cost" json:"-"`
+	nimbody.Body  `bun:"-" json:"-"`
+
+	ID          uuid.UUID       `bun:"id,pk,default:gen_random_uuid()" json:"id"`
+	Module      string          `bun:"module" json:"module"`
+	PeriodStart time.Time       `bun:"period_start" json:"period_start"`
+	Quantity    float64         `bun:"quantity" json:"quantity"`
+	Unit        string          `bun:"unit" json:"unit"`
+	Amount      float64         `bun:"amount" json:"amount"`
+	Currency    string          `bun:"currency" json:"currency"`
+	Detail      json.RawMessage `bun:"detail,type:jsonb,default:'{}'" json:"detail"`
+	OwnerID     uuid.UUID       `bun:"sa_owner_id" json:"owner_id"`
+	CreatedBy   *uuid.UUID      `bun:"sa_created_by" json:"created_by"`
+	DeletedAt   *time.Time      `bun:"sa_deleted_at" json:"deleted_at,omitzero"`
+	CreatedAt   time.Time       `bun:"sa_created_at,default:now()" json:"created_at"`
+	UpdatedAt   time.Time       `bun:"sa_updated_at,default:now()" json:"updated_at"`
+	Txid        uint64          `bun:"txid,scanonly" json:"-"`
 }
 
 type Audit struct {

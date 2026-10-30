@@ -163,3 +163,7 @@ func (co *ClaimObject) Bind(ctx echo.Context) error {
 func (a *ObjectAsset) Bind(ctx echo.Context) error {
 	return a.Body.Bound(ctx, a)
 }
+
+func (c *AppCost) Bind(ctx echo.Context) error {
+	return c.Body.Bound(ctx, c)
+}

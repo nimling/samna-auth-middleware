@@ -1048,6 +1048,42 @@ DROP INDEX IF EXISTS claimius.idx_object_asset_asset;
 CREATE UNIQUE INDEX IF NOT EXISTS idx_object_asset_asset_object ON claimius.object_asset (asset_id, object_type, object_id) WHERE sa_deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_object_asset_object ON claimius.object_asset (object_type, object_id);
 
+CREATE TABLE IF NOT EXISTS claimius.app_cost (
+                                                 id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                                                 module          TEXT NOT NULL CHECK (module <> ''),
+                                                 period_start    TIMESTAMPTZ NOT NULL CHECK (date_trunc('hour', period_start AT TIME ZONE 'UTC') = period_start AT TIME ZONE 'UTC'),
+                                                 quantity        NUMERIC NOT NULL DEFAULT 0,
+                                                 unit            TEXT NOT NULL CHECK (unit <> ''),
+                                                 amount          NUMERIC NOT NULL DEFAULT 0,
+                                                 currency        TEXT NOT NULL CHECK (currency ~ '^[A-Z]{3}$'),
+                                                 detail          JSONB NOT NULL DEFAULT '{}'::jsonb,
+                                                 sa_owner_id     UUID NOT NULL,
+                                                 sa_created_by   UUID NOT NULL,
+                                                 sa_deleted_at   TIMESTAMPTZ,
+                                                 sa_created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+                                                 sa_updated_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+                                                 txid            XID8 NOT NULL DEFAULT pg_current_xact_id()
+);
+
+COMMENT ON TABLE claimius.app_cost IS 'One hour of cost this app reported for itself or for a built in module that did work on its behalf, replicated from the prophet. The app writes it through the builder, which routes it to the prophet; the feed carries it back. Upserted on (module, period_start) among live rows. Application data: never aged by prune.';
+COMMENT ON COLUMN claimius.app_cost.id IS 'Row id, kept across the upserts of one hour.';
+COMMENT ON COLUMN claimius.app_cost.module IS 'The app''s own slug for its own usage, or the slug of the built in module that did the work for the app: uptime, subscription, storage and so on.';
+COMMENT ON COLUMN claimius.app_cost.period_start IS 'The hour the row covers, truncated to the hour.';
+COMMENT ON COLUMN claimius.app_cost.quantity IS 'What was counted in the hour, in unit.';
+COMMENT ON COLUMN claimius.app_cost.unit IS 'What quantity counts: request, check, mail, byte, row, or the app''s own word.';
+COMMENT ON COLUMN claimius.app_cost.amount IS 'What the hour costs, in currency; the app decides how it prices itself.';
+COMMENT ON COLUMN claimius.app_cost.currency IS 'ISO 4217 code of amount.';
+COMMENT ON COLUMN claimius.app_cost.detail IS 'The app''s own breakdown of the hour, free form.';
+COMMENT ON COLUMN claimius.app_cost.sa_owner_id IS 'The app''s owning organization, as the prophet stamped it.';
+COMMENT ON COLUMN claimius.app_cost.sa_created_by IS 'user_claim.id of the app actor that reported the hour.';
+COMMENT ON COLUMN claimius.app_cost.sa_deleted_at IS 'Soft delete timestamp. A deleted hour is never read.';
+COMMENT ON COLUMN claimius.app_cost.sa_created_at IS 'Creation timestamp.';
+COMMENT ON COLUMN claimius.app_cost.sa_updated_at IS 'Last update timestamp.';
+COMMENT ON COLUMN claimius.app_cost.txid IS 'Local transaction that last wrote the row, stamped by tg_update_txid on every insert and update, a replayed one included.';
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_app_cost_module_period ON claimius.app_cost (module, period_start) WHERE sa_deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_app_cost_period ON claimius.app_cost (period_start);
+
 UPDATE claimius.table_info SET table_name = 'user_identity' WHERE schema_name = 'claimius' AND table_name = 'user_token';
 UPDATE claimius.object_info SET object_type = 'claimius.user_identity' WHERE object_type = 'claimius.user_token';
 UPDATE claimius.inheritance_info SET ancestor_type = 'claimius.user_identity' WHERE ancestor_type = 'claimius.user_token';

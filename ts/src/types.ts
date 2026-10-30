@@ -39,6 +39,7 @@ export const OBJECT_TYPE_SAMNA_APP = 'claimius.samna_app'
 export const OBJECT_TYPE_SAMNA_CLIENT = 'claimius.samna_client'
 export const OBJECT_TYPE_SAMNA_SECRET = 'claimius.samna_secret'
 export const OBJECT_TYPE_CODE = 'claimius.code'
+export const OBJECT_TYPE_APP_COST = 'claimius.app_cost'
 
 export const USER_ID_KEY = 'user_id'
 export const ACCESS_TOKEN_KEY = 'access_token'
@@ -241,3 +242,42 @@ export const ErrBadRequest = new AuthError('bad request')
 export const ErrForbidden = new AuthError('forbidden')
 export const ErrNotFound = new AuthError('not found')
 export const ErrUnauthorized = new AuthError('unauthorized')
+
+export type CostGranularity = 'hour' | 'day'
+
+export const COST_GRANULARITY_HOUR: CostGranularity = 'hour'
+export const COST_GRANULARITY_DAY: CostGranularity = 'day'
+
+export interface AppCost {
+  id: string
+  module: string
+  period_start: string
+  quantity: number
+  unit: string
+  amount: number
+  currency: string
+  detail: Record<string, unknown>
+  owner_id: string
+  created_by: string
+  deleted_at?: string
+  created_at: string
+  updated_at: string
+}
+
+export interface AppCostBucket {
+  app_id?: string
+  module: string
+  period_start: string
+  unit: string
+  currency: string
+  quantity: number
+  amount: number
+  hours: number
+}
+
+export interface AppCostQuery {
+  module?: string
+  from?: string
+  to?: string
+  granularity?: CostGranularity
+}

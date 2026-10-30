@@ -116,6 +116,7 @@ func GetSyncSnapshot(ctx echo.Context) error {
 		{"claimius.user_field", &[]UserField{}, true},
 		{"claimius.user_relation", &[]UserRelation{}, true},
 		{"claimius.object_asset", &[]shared.ObjectAsset{}, true},
+		{shared.OBJECT_TYPE_APP_COST, &[]shared.AppCost{}, true},
 		{shared.OBJECT_TYPE_CODE, &[]shared.Code{}, true},
 		{"claimius.user_identity", &[]UserIdentity{}, false},
 		{"claimius.audit", &[]shared.Audit{}, true},

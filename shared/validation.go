@@ -3,6 +3,7 @@ package shared
 import (
 	"errors"
 	"net/mail"
+	"regexp"
 	"strings"
 
 	"github.com/google/uuid"
@@ -813,6 +814,51 @@ func (a *ObjectAsset) ValidatePatch() error {
 	}
 	if a.HasKey("mime_type") && a.MimeType == "" {
 		return errors.New("mime_type required")
+	}
+	return nil
+}
+
+var appCostCurrency = regexp.MustCompile(`^[A-Z]{3}$`)
+
+func (c *AppCost) ValidatePost() error {
+	if unknown := c.GetUnknown(); len(unknown) > 0 {
+		return errors.New(unknown[0] + " not allowed")
+	}
+	if c.Module == "" {
+		return errors.New("module required")
+	}
+	if c.PeriodStart.IsZero() {
+		return errors.New("period_start required")
+	}
+	if c.PeriodStart.Minute() != 0 || c.PeriodStart.Second() != 0 || c.PeriodStart.Nanosecond() != 0 {
+		return errors.New("period_start must be the start of an hour")
+	}
+	if c.Unit == "" {
+		return errors.New("unit required")
+	}
+	if !appCostCurrency.MatchString(c.Currency) {
+		return errors.New("currency must be an ISO 4217 code")
+	}
+	return nil
+}
+
+func (c *AppCost) ValidatePatch() error {
+	if c.IsEmpty() {
+		return errors.New("no fields to update")
+	}
+	if unknown := c.GetUnknown(); len(unknown) > 0 {
+		return errors.New(unknown[0] + " not allowed")
+	}
+	for _, key := range []string{"id", "app_id", "module", "period_start", "owner_id", "created_by", "created_at", "updated_at", "deleted_at"} {
+		if c.HasKey(key) {
+			return errors.New(key + " not allowed")
+		}
+	}
+	if c.HasKey("unit") && c.Unit == "" {
+		return errors.New("unit required")
+	}
+	if c.HasKey("currency") && !appCostCurrency.MatchString(c.Currency) {
+		return errors.New("currency must be an ISO 4217 code")
 	}
 	return nil
 }

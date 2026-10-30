@@ -123,6 +123,8 @@ func applyUpsert(ctx context.Context, idb bun.IDB, conn bun.IConn, eventType str
 		return upsertEntity[UserRelation](ctx, idb, conn, raw)
 	case "claimius.object_asset":
 		return upsertEntity[ObjectAsset](ctx, idb, conn, raw)
+	case "claimius.app_cost":
+		return upsertEntity[AppCost](ctx, idb, conn, raw)
 	case "claimius.user_identity":
 		return upsertEntity[UserIdentity](ctx, idb, conn, raw)
 	case OBJECT_TYPE_CODE:
@@ -185,6 +187,8 @@ func applyDelete(ctx context.Context, idb bun.IDB, conn bun.IConn, eventType str
 		return deleteEntity[UserRelation](ctx, idb, conn, env.ID)
 	case "claimius.object_asset":
 		return deleteEntity[ObjectAsset](ctx, idb, conn, env.ID)
+	case "claimius.app_cost":
+		return deleteEntity[AppCost](ctx, idb, conn, env.ID)
 	case "claimius.user_identity":
 		return deleteEntity[UserIdentity](ctx, idb, conn, env.ID)
 	case OBJECT_TYPE_CODE:
