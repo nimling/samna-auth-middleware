@@ -290,6 +290,7 @@ func Connect(logger echo.Logger) (*DB, error) {
 		(*UserField)(nil),
 		(*UserRelation)(nil),
 		(*ObjectAsset)(nil),
+		(*AppCost)(nil),
 		(*UserObject)(nil),
 		(*UserUsers)(nil),
 		(*Notification)(nil),

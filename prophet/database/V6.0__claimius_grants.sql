@@ -30,7 +30,7 @@ BEGIN
     EXECUTE 'GRANT INSERT, UPDATE ON
              claimius.samna_app, claimius.samna_user, claimius.samna_client, claimius.samna_secret,
              claimius.organization, claimius.location,
-             claimius.object_field, claimius.user_field, claimius.user_relation, claimius.object_asset,
+             claimius.object_field, claimius.user_field, claimius.user_relation, claimius.object_asset, claimius.app_cost,
              claimius.notification, claimius.prophet_state, claimius.sync_consumer, claimius.peer_grant, claimius.code
              TO claimius_writer';
     EXECUTE 'GRANT INSERT, UPDATE, DELETE ON claimius.claim_graph_cache TO claimius_writer';
@@ -61,7 +61,7 @@ BEGIN
              claimius.disciple_state, claimius.samna_user, claimius.samna_client,
              claimius.samna_secret, claimius.samna_app, claimius.organization, claimius.location,
              claimius.claim, claimius.user_claim, claimius.claim_object,
-             claimius.object_field, claimius.user_field, claimius.user_relation, claimius.object_asset,
+             claimius.object_field, claimius.user_field, claimius.user_relation, claimius.object_asset, claimius.app_cost,
              claimius.audit, claimius.inheritance_info, claimius.table_info,
              claimius.notification, claimius.claim_graph_cache
              TO claimius_disciple_client';

@@ -1229,6 +1229,57 @@ COMMENT ON FUNCTION claimius.get_object_assets(UUID, UUID, TEXT, UUID, TEXT) IS 
 GRANT EXECUTE ON FUNCTION claimius.get_object_assets(UUID, UUID, TEXT, UUID, TEXT)
     TO claimius_disciple_client, claimius_writer, claimius_admin, claimius_reader;
 
+CREATE OR REPLACE FUNCTION claimius.get_app_cost(
+    p_user_id      UUID,
+    p_app_id       UUID,
+    p_module       TEXT DEFAULT NULL,
+    p_from         TIMESTAMPTZ DEFAULT NULL,
+    p_to           TIMESTAMPTZ DEFAULT NULL,
+    p_granularity  TEXT DEFAULT 'hour'
+) RETURNS TABLE (
+    app_id        UUID,
+    module        TEXT,
+    period_start  TIMESTAMPTZ,
+    unit          TEXT,
+    currency      TEXT,
+    quantity      NUMERIC,
+    amount        NUMERIC,
+    hours         BIGINT
+) AS $$
+DECLARE
+    v_reader_app UUID := claimius.get_app_id();
+BEGIN
+    IF p_granularity NOT IN ('hour', 'day') THEN
+        RAISE EXCEPTION 'get_app_cost: granularity must be hour or day, got %', p_granularity USING ERRCODE = '22023';
+    END IF;
+
+    IF NOT EXISTS (SELECT 1 FROM claimius.get_access(p_user_id, p_app_id, p_app_id, 'claimius.samna_app', 4))
+        AND (v_reader_app IS NOT DISTINCT FROM p_app_id
+             OR NOT EXISTS (SELECT 1 FROM claimius.get_access(p_user_id, v_reader_app, p_app_id, 'claimius.samna_app', 4)))
+    THEN
+        RETURN;
+    END IF;
+
+    RETURN QUERY
+        SELECT c.app_id, c.module,
+               date_trunc(p_granularity, c.period_start AT TIME ZONE 'UTC') AT TIME ZONE 'UTC',
+               c.unit, c.currency, sum(c.quantity), sum(c.amount), count(*)
+        FROM claimius.app_cost c
+        WHERE c.app_id = p_app_id
+          AND c.sa_deleted_at IS NULL
+          AND (p_module IS NULL OR c.module = p_module)
+          AND (p_from IS NULL OR c.period_start >= p_from)
+          AND (p_to IS NULL OR c.period_start < p_to)
+        GROUP BY c.app_id, c.module, date_trunc(p_granularity, c.period_start AT TIME ZONE 'UTC'), c.unit, c.currency
+        ORDER BY 3, 2, 4, 5;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = claimius, pg_temp;
+
+COMMENT ON FUNCTION claimius.get_app_cost(UUID, UUID, TEXT, TIMESTAMPTZ, TIMESTAMPTZ, TEXT) IS 'The live cost rows of one app summed per bucket, one row per module, unit and currency per hour or per UTC day, with the number of hours each bucket folds; p_module narrows to one module, p_from is inclusive and p_to exclusive on period_start. Answers a reader holding READ on the app through get_access, in the app itself or in this prophet''s own app; a reader without it, and an inactive reader, gets no rows. A granularity other than hour or day raises 22023.';
+
+GRANT EXECUTE ON FUNCTION claimius.get_app_cost(UUID, UUID, TEXT, TIMESTAMPTZ, TIMESTAMPTZ, TEXT)
+    TO claimius_disciple_client, claimius_writer, claimius_admin, claimius_reader;
+
 DROP FUNCTION IF EXISTS claimius.get_owner_graph(UUID, UUID, INTEGER);
 DROP FUNCTION IF EXISTS claimius.get_claim_graph(UUID, UUID, INTEGER);
 
@@ -3184,7 +3235,8 @@ DECLARE
         'claimius.object_field',
         'claimius.user_field',
         'claimius.user_relation',
-        'claimius.user_identity'
+        'claimius.user_identity',
+        'claimius.app_cost'
         ];
     v_t TEXT;
 BEGIN
@@ -4921,7 +4973,7 @@ DECLARE
     v_n     BIGINT;
 BEGIN
     FOREACH v_table IN ARRAY ARRAY['samna_user', 'claim', 'user_claim', 'claim_object', 'samna_client',
-                                   'samna_secret', 'object_field', 'user_field', 'user_relation', 'code'] LOOP
+                                   'samna_secret', 'object_field', 'user_field', 'user_relation', 'code', 'app_cost'] LOOP
         EXIT WHEN p_limit IS NOT NULL AND v_total >= p_limit;
         EXECUTE format('SELECT count(*) FROM (SELECT 1 FROM claimius.%I WHERE app_id = $1 LIMIT $2) t', v_table)
             INTO v_n USING p_app_id, p_limit - v_total;
@@ -4950,7 +5002,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql STABLE;
 
-COMMENT ON FUNCTION claimius.count_sync_source_rows(UUID, BIGINT) IS 'Source rows of one app the sync snapshot ships, object_asset links published to it included, counted up to p_limit when given.';
+COMMENT ON FUNCTION claimius.count_sync_source_rows(UUID, BIGINT) IS 'Source rows of one app the sync snapshot ships, object_asset links published to it and app_cost rows included, counted up to p_limit when given.';
 
 GRANT EXECUTE ON FUNCTION claimius.count_sync_source_rows(UUID, BIGINT)
     TO claimius_writer, claimius_reader;
@@ -5234,7 +5286,8 @@ BEGIN
     IF p_event_type NOT IN ('claimius.samna_app', 'claimius.app_handover', 'claimius.organization', 'claimius.location',
                             'claimius.samna_user', 'claimius.claim', 'claimius.user_claim', 'claimius.claim_object',
                             'claimius.samna_client', 'claimius.samna_secret', 'claimius.object_field',
-                            'claimius.user_field', 'claimius.user_relation', 'claimius.object_asset', 'claimius.code') THEN
+                            'claimius.user_field', 'claimius.user_relation', 'claimius.object_asset', 'claimius.code',
+                            'claimius.app_cost') THEN
         RAISE EXCEPTION 'apply_peer_event: unknown event type %', p_event_type;
     END IF;
     IF p_operation NOT IN ('upsert', 'delete') THEN
@@ -6050,11 +6103,14 @@ CREATE OR REPLACE FUNCTION claimius.get_peer_snapshot(p_app_id UUID)
         UNION ALL
         SELECT 15, 0, 'claimius.code', to_jsonb(cd), cd.sa_created_at
         FROM claimius.code cd WHERE cd.app_id = p_app_id
+        UNION ALL
+        SELECT 16, 0, 'claimius.app_cost', to_jsonb(ac) - 'txid', ac.sa_created_at
+        FROM claimius.app_cost ac WHERE ac.app_id = p_app_id
     ) s
     ORDER BY s.step, s.level, s.created;
 $$ LANGUAGE sql STABLE;
 
-COMMENT ON FUNCTION claimius.get_peer_snapshot(UUID) IS 'Every source row of one app in the shape its feed events carry, for a peer prophet mirroring the app: the app row and its handovers first, parents before children, so each row applies against rows already applied. The object_asset links follow, every link apps_for_object publishes to the app, and the codes of the app come last, after the claims they open.';
+COMMENT ON FUNCTION claimius.get_peer_snapshot(UUID) IS 'Every source row of one app in the shape its feed events carry, for a peer prophet mirroring the app: the app row and its handovers first, parents before children, so each row applies against rows already applied. The object_asset links follow, every link apps_for_object publishes to the app, and the codes of the app follow, after the claims they open, then the app''s cost rows.';
 
 GRANT EXECUTE ON FUNCTION claimius.get_peer_snapshot(UUID)
     TO claimius_writer, claimius_reader;

@@ -50,6 +50,10 @@ DROP TRIGGER IF EXISTS tg_update_timestamp ON claimius.object_asset;
 CREATE TRIGGER tg_update_timestamp BEFORE UPDATE ON claimius.object_asset
     FOR EACH ROW EXECUTE FUNCTION claimius.update_timestamp();
 
+DROP TRIGGER IF EXISTS tg_update_timestamp ON claimius.app_cost;
+CREATE TRIGGER tg_update_timestamp BEFORE UPDATE ON claimius.app_cost
+    FOR EACH ROW EXECUTE FUNCTION claimius.update_timestamp();
+
 DROP TRIGGER IF EXISTS tg_update_timestamp ON claimius.prophet_peer;
 CREATE TRIGGER tg_update_timestamp BEFORE UPDATE ON claimius.prophet_peer
     FOR EACH ROW EXECUTE FUNCTION claimius.update_timestamp();
@@ -84,6 +88,10 @@ CREATE TRIGGER tg_update_txid BEFORE INSERT OR UPDATE ON claimius.claim_object
 
 DROP TRIGGER IF EXISTS tg_update_txid ON claimius.object_asset;
 CREATE TRIGGER tg_update_txid BEFORE INSERT OR UPDATE ON claimius.object_asset
+    FOR EACH ROW EXECUTE FUNCTION claimius.update_txid();
+
+DROP TRIGGER IF EXISTS tg_update_txid ON claimius.app_cost;
+CREATE TRIGGER tg_update_txid BEFORE INSERT OR UPDATE ON claimius.app_cost
     FOR EACH ROW EXECUTE FUNCTION claimius.update_txid();
 
 DROP TRIGGER IF EXISTS tg_calc_claim_access ON claimius.claim;
@@ -133,6 +141,10 @@ CREATE TRIGGER tg_calc_access AFTER INSERT OR UPDATE OR DELETE ON claimius.samna
 
 DROP TRIGGER IF EXISTS tg_calc_access ON claimius.user_relation;
 CREATE TRIGGER tg_calc_access AFTER INSERT OR UPDATE OR DELETE ON claimius.user_relation
+    FOR EACH ROW EXECUTE FUNCTION claimius.calc_object_access();
+
+DROP TRIGGER IF EXISTS tg_calc_access ON claimius.app_cost;
+CREATE TRIGGER tg_calc_access AFTER INSERT OR UPDATE OR DELETE ON claimius.app_cost
     FOR EACH ROW EXECUTE FUNCTION claimius.calc_object_access();
 
 DROP TRIGGER IF EXISTS tg_calc_access ON claimius.user_field;
@@ -253,6 +265,10 @@ DROP TRIGGER IF EXISTS tg_emit_sync_event ON claimius.object_asset;
 CREATE TRIGGER tg_emit_sync_event AFTER INSERT OR UPDATE OR DELETE ON claimius.object_asset
     FOR EACH ROW EXECUTE FUNCTION claimius.emit_sync_event();
 
+DROP TRIGGER IF EXISTS tg_emit_sync_event ON claimius.app_cost;
+CREATE TRIGGER tg_emit_sync_event AFTER INSERT OR UPDATE OR DELETE ON claimius.app_cost
+    FOR EACH ROW EXECUTE FUNCTION claimius.emit_sync_event();
+
 DROP TRIGGER IF EXISTS tg_emit_sync_event ON claimius.app_handover;
 CREATE TRIGGER tg_emit_sync_event AFTER INSERT OR UPDATE OR DELETE ON claimius.app_handover
     FOR EACH ROW EXECUTE FUNCTION claimius.emit_sync_event();
@@ -307,6 +323,10 @@ CREATE TRIGGER tg_enforce_app_home BEFORE INSERT OR UPDATE OR DELETE ON claimius
 
 DROP TRIGGER IF EXISTS tg_enforce_app_home ON claimius.object_asset;
 CREATE TRIGGER tg_enforce_app_home BEFORE INSERT OR UPDATE OR DELETE ON claimius.object_asset
+    FOR EACH ROW EXECUTE FUNCTION claimius.enforce_app_home();
+
+DROP TRIGGER IF EXISTS tg_enforce_app_home ON claimius.app_cost;
+CREATE TRIGGER tg_enforce_app_home BEFORE INSERT OR UPDATE OR DELETE ON claimius.app_cost
     FOR EACH ROW EXECUTE FUNCTION claimius.enforce_app_home();
 
 DROP TRIGGER IF EXISTS tg_enforce_app_home ON claimius.app_object;

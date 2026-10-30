@@ -1171,6 +1171,57 @@ COMMENT ON FUNCTION claimius.get_object_assets(UUID, TEXT, UUID, TEXT) IS 'Live 
 GRANT EXECUTE ON FUNCTION claimius.get_object_assets(UUID, TEXT, UUID, TEXT)
     TO claimius_disciple_client, claimius_writer, claimius_admin, claimius_reader;
 
+CREATE OR REPLACE FUNCTION claimius.get_app_cost(
+    p_user_id      UUID,
+    p_module       TEXT DEFAULT NULL,
+    p_from         TIMESTAMPTZ DEFAULT NULL,
+    p_to           TIMESTAMPTZ DEFAULT NULL,
+    p_granularity  TEXT DEFAULT 'hour'
+) RETURNS TABLE (
+    module        TEXT,
+    period_start  TIMESTAMPTZ,
+    unit          TEXT,
+    currency      TEXT,
+    quantity      NUMERIC,
+    amount        NUMERIC,
+    hours         BIGINT
+) AS $$
+BEGIN
+    IF p_granularity NOT IN ('hour', 'day') THEN
+        RAISE EXCEPTION 'get_app_cost: granularity must be hour or day, got %', p_granularity USING ERRCODE = '22023';
+    END IF;
+
+    PERFORM claimius.reconcile_if_pending(p_user_id);
+
+    IF NOT claimius.check_user_active(p_user_id) THEN
+        RETURN;
+    END IF;
+
+    RETURN QUERY
+        WITH readable AS (
+            SELECT o.sa_owner_id
+            FROM (SELECT DISTINCT c.sa_owner_id FROM claimius.app_cost c WHERE c.sa_deleted_at IS NULL) o
+            WHERE EXISTS (SELECT 1 FROM claimius.get_access(p_user_id, o.sa_owner_id, 'claimius.organization', 4))
+        )
+        SELECT c.module,
+               date_trunc(p_granularity, c.period_start AT TIME ZONE 'UTC') AT TIME ZONE 'UTC',
+               c.unit, c.currency, sum(c.quantity), sum(c.amount), count(*)
+        FROM claimius.app_cost c
+        WHERE c.sa_deleted_at IS NULL
+          AND c.sa_owner_id IN (SELECT r.sa_owner_id FROM readable r)
+          AND (p_module IS NULL OR c.module = p_module)
+          AND (p_from IS NULL OR c.period_start >= p_from)
+          AND (p_to IS NULL OR c.period_start < p_to)
+        GROUP BY c.module, date_trunc(p_granularity, c.period_start AT TIME ZONE 'UTC'), c.unit, c.currency
+        ORDER BY 2, 1, 3, 4;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = claimius, pg_temp;
+
+COMMENT ON FUNCTION claimius.get_app_cost(UUID, TEXT, TIMESTAMPTZ, TIMESTAMPTZ, TEXT) IS 'The live cost rows of this app summed per bucket, one row per module, unit and currency per hour or per UTC day, with the number of hours each bucket folds; p_module narrows to one module, p_from is inclusive and p_to exclusive on period_start. Answers a reader holding READ through get_access on the organization owning the rows, the app''s own organization; a reader without it, and an inactive reader, gets no rows. A granularity other than hour or day raises 22023.';
+
+GRANT EXECUTE ON FUNCTION claimius.get_app_cost(UUID, TEXT, TIMESTAMPTZ, TIMESTAMPTZ, TEXT)
+    TO claimius_disciple_client, claimius_writer, claimius_admin, claimius_reader;
+
 DROP FUNCTION IF EXISTS claimius.get_users(UUID[], UUID[]);
 
 CREATE OR REPLACE FUNCTION claimius.get_users(
@@ -3239,7 +3290,8 @@ DECLARE
         'claimius.object_field',
         'claimius.user_field',
         'claimius.user_relation',
-        'claimius.user_identity'
+        'claimius.user_identity',
+        'claimius.app_cost'
         ];
     v_t TEXT;
 BEGIN

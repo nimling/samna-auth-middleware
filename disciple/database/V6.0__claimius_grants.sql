@@ -28,7 +28,7 @@ BEGIN
              claimius.disciple_state, claimius.samna_user, claimius.samna_client,
              claimius.samna_secret, claimius.organization, claimius.location,
              claimius.claim, claimius.user_claim, claimius.claim_object,
-             claimius.object_field, claimius.user_field, claimius.user_relation, claimius.object_asset,
+             claimius.object_field, claimius.user_field, claimius.user_relation, claimius.object_asset, claimius.app_cost,
              claimius.audit, claimius.inheritance_info, claimius.table_info,
              claimius.notification, claimius.claim_graph_cache, claimius.code
              TO claimius_disciple_client';

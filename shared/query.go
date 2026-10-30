@@ -181,6 +181,7 @@ var endpointSpecs = map[ObjectType]endpointSpec{
 	OBJECT_TYPE_SAMNA_SECRET:  {base: "secret"},
 	OBJECT_TYPE_USER_RELATION: {base: "relation"},
 	OBJECT_TYPE_OBJECT_ASSET:  {base: "object_asset"},
+	OBJECT_TYPE_APP_COST:      {base: "cost"},
 }
 
 var payloadEndpoints = map[reflect.Type]string{
@@ -1049,6 +1050,10 @@ func recordIDFromModel(d *DB, model any) uuid.UUID {
 		if m, ok := embeddedPtr(model, reflect.TypeOf(ObjectAsset{})).(*ObjectAsset); ok {
 			return m.ID
 		}
+	case "claimius.app_cost":
+		if m, ok := embeddedPtr(model, reflect.TypeOf(AppCost{})).(*AppCost); ok {
+			return m.ID
+		}
 	case "claimius.samna_client":
 		if m, ok := embeddedPtr(model, reflect.TypeOf(SamnaClient{})).(*SamnaClient); ok {
 			return m.ID
@@ -1225,6 +1230,17 @@ func (q *DeleteQuery) execClaimius(ctx context.Context, dest ...any) (handled bo
 			return false, nil
 		}
 		result, err := q.db.deleteObjectAsset(ctx, q.conn, q.accessClaim, q.recordID)
+		if err != nil {
+			return true, err
+		}
+		*m = *result
+		return true, dispatchScan(q.model, dest...)
+	case "claimius.app_cost":
+		m, ok := embeddedPtr(q.model, reflect.TypeOf(AppCost{})).(*AppCost)
+		if !ok {
+			return false, nil
+		}
+		result, err := q.db.deleteAppCost(ctx, q.conn, q.accessClaim, q.recordID)
 		if err != nil {
 			return true, err
 		}

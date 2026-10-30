@@ -7,7 +7,9 @@ export {
   getLogin,
   getLogout,
   postAuthCode,
-  postRefreshToken
+  postRefreshToken,
+  appCostUrl,
+  getAppCost
 } from './client'
 export { parseCookies, readAccessTokenFromDocument } from './cookies'
 export {

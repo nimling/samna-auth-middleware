@@ -1,5 +1,5 @@
-import { ErrNotFound, ErrUnauthorized } from './types'
-import type { OpenIDConfiguration, ResponseToken, JWKSLike } from './types'
+import { ErrForbidden, ErrNotFound, ErrUnauthorized } from './types'
+import type { AppCostBucket, AppCostQuery, OpenIDConfiguration, ResponseToken, JWKSLike } from './types'
 
 function joinURL(base: string, path: string): string {
   const cleanBase = base.replace(/\/$/, '')
@@ -139,4 +139,23 @@ export async function postRefreshToken(
   form.set('grant_type', 'refresh_token')
   form.set('refresh_token', refreshToken)
   return postToken(tokenURL, slug, secret, form)
+}
+
+export function appCostUrl(url: string, query?: AppCostQuery): string {
+  const target = new URL(url, typeof location === 'undefined' ? 'http://localhost' : location.origin)
+  if (query?.module) target.searchParams.set('module', query.module)
+  if (query?.from) target.searchParams.set('from', query.from)
+  if (query?.to) target.searchParams.set('to', query.to)
+  if (query?.granularity) target.searchParams.set('granularity', query.granularity)
+  return url.startsWith('/') ? `${target.pathname}${target.search}` : target.toString()
+}
+
+export async function getAppCost(url: string, query?: AppCostQuery): Promise<AppCostBucket[]> {
+  const res = await fetch(appCostUrl(url, query), { credentials: 'include', headers: { Accept: 'application/json' } })
+  if (res.status === 401) throw ErrUnauthorized
+  if (res.status === 403) throw ErrForbidden
+  if (res.status === 404) throw ErrNotFound
+  if (!res.ok) throw new Error(`cost returned status ${res.status}`)
+  const body = (await res.json()) as { data?: AppCostBucket[] }
+  return body.data ?? []
 }

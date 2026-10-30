@@ -138,3 +138,12 @@ func (m *ObjectAsset) PatchBody() map[string]any {
 	}
 	return nil
 }
+
+func (m *AppCost) MarshalWrite() ([]byte, error)   { return sauth.Marshal(m) }
+func (m *AppCost) UnmarshalWrite(raw []byte) error { return sauth.Unmarshal(raw, m) }
+func (m *AppCost) PatchBody() map[string]any {
+	if bv := m.Validator(); bv != nil {
+		return bv.Body
+	}
+	return nil
+}
