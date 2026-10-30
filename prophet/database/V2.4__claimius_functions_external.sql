@@ -1229,28 +1229,39 @@ COMMENT ON FUNCTION claimius.get_object_assets(UUID, UUID, TEXT, UUID, TEXT) IS 
 GRANT EXECUTE ON FUNCTION claimius.get_object_assets(UUID, UUID, TEXT, UUID, TEXT)
     TO claimius_disciple_client, claimius_writer, claimius_admin, claimius_reader;
 
+DROP FUNCTION IF EXISTS claimius.get_app_cost(UUID, UUID, TEXT, TIMESTAMPTZ, TIMESTAMPTZ, TEXT);
+
 CREATE OR REPLACE FUNCTION claimius.get_app_cost(
-    p_user_id      UUID,
-    p_app_id       UUID,
-    p_module       TEXT DEFAULT NULL,
-    p_from         TIMESTAMPTZ DEFAULT NULL,
-    p_to           TIMESTAMPTZ DEFAULT NULL,
-    p_granularity  TEXT DEFAULT 'hour'
+    p_user_id       UUID,
+    p_app_id        UUID,
+    p_module        TEXT DEFAULT NULL,
+    p_from          TIMESTAMPTZ DEFAULT NULL,
+    p_to            TIMESTAMPTZ DEFAULT NULL,
+    p_granularity   TEXT DEFAULT 'hour',
+    p_status        TEXT DEFAULT NULL,
+    p_subject_type  TEXT DEFAULT NULL,
+    p_subject_id    UUID DEFAULT NULL
 ) RETURNS TABLE (
     app_id        UUID,
     module        TEXT,
+    kind          TEXT,
+    schema_id     TEXT,
+    group_key     JSONB,
     period_start  TIMESTAMPTZ,
     unit          TEXT,
     currency      TEXT,
     quantity      NUMERIC,
     amount        NUMERIC,
-    hours         BIGINT
+    hours         NUMERIC,
+    rows          BIGINT
 ) AS $$
 DECLARE
     v_reader_app UUID := claimius.get_app_id();
+    v_step       INTERVAL;
 BEGIN
-    IF p_granularity NOT IN ('hour', 'day') THEN
-        RAISE EXCEPTION 'get_app_cost: granularity must be hour or day, got %', p_granularity USING ERRCODE = '22023';
+    v_step := CASE p_granularity WHEN 'hour' THEN interval '1 hour' WHEN 'day' THEN interval '1 day' WHEN 'month' THEN interval '1 month' END;
+    IF v_step IS NULL THEN
+        RAISE EXCEPTION 'get_app_cost: granularity must be hour, day or month, got %', p_granularity USING ERRCODE = '22023';
     END IF;
 
     IF NOT EXISTS (SELECT 1 FROM claimius.get_access(p_user_id, p_app_id, p_app_id, 'claimius.samna_app', 4))
@@ -1261,23 +1272,65 @@ BEGIN
     END IF;
 
     RETURN QUERY
-        SELECT c.app_id, c.module,
-               date_trunc(p_granularity, c.period_start AT TIME ZONE 'UTC') AT TIME ZONE 'UTC',
-               c.unit, c.currency, sum(c.quantity), sum(c.amount), count(*)
-        FROM claimius.app_cost c
-        WHERE c.app_id = p_app_id
-          AND c.sa_deleted_at IS NULL
-          AND (p_module IS NULL OR c.module = p_module)
-          AND (p_from IS NULL OR c.period_start >= p_from)
-          AND (p_to IS NULL OR c.period_start < p_to)
-        GROUP BY c.app_id, c.module, date_trunc(p_granularity, c.period_start AT TIME ZONE 'UTC'), c.unit, c.currency
-        ORDER BY 3, 2, 4, 5;
+        WITH live AS (
+            SELECT c.app_id, c.module, c.kind, c.period_start, c.period_end, c.sa_updated_at, c.unit, c.currency, c.quantity, c.amount,
+                   c.schema ->> '$id' AS schema_id,
+                   coalesce(c.schema -> 'x-samna' -> 'accumulate' ->> 'method', 'sum') AS method,
+                   (SELECT jsonb_object_agg(g.path, c.detail #> string_to_array(g.path, '.'))
+                    FROM jsonb_array_elements_text(CASE WHEN jsonb_typeof(c.schema -> 'x-samna' -> 'accumulate' -> 'group') = 'array'
+                                                        THEN c.schema -> 'x-samna' -> 'accumulate' -> 'group' ELSE '[]'::jsonb END) AS g(path)) AS group_key,
+                   c.kind IN ('fee', 'credit') OR c.period_end = c.period_start
+                       OR c.schema -> 'x-samna' -> 'accumulate' ->> 'proration' = 'start' AS anchored
+            FROM claimius.app_cost c
+            WHERE c.app_id = p_app_id
+              AND c.sa_deleted_at IS NULL
+              AND (p_module IS NULL OR c.module = p_module)
+              AND (p_status IS NULL OR c.status = p_status)
+              AND (p_subject_type IS NULL OR c.detail -> 'subject' ->> 'type' = p_subject_type)
+              AND (p_subject_id IS NULL OR lower(c.detail -> 'subject' ->> 'id') = p_subject_id::TEXT)
+              AND (p_from IS NULL OR c.period_end > p_from OR c.period_start >= p_from)
+              AND (p_to IS NULL OR c.period_start < p_to)
+              AND NOT EXISTS (SELECT 1 FROM claimius.app_cost s WHERE s.supersedes_id = c.id AND s.sa_deleted_at IS NULL)
+        ), spread AS (
+            SELECT l.app_id, l.module, l.kind, l.schema_id, l.group_key, l.method, l.period_start, l.sa_updated_at,
+                   b.bucket AT TIME ZONE 'UTC' AS bucket, l.unit, l.currency,
+                   l.quantity * f.fraction AS quantity, l.amount * f.fraction AS amount, f.fraction, f.hours
+            FROM live l
+            CROSS JOIN LATERAL generate_series(
+                date_trunc(p_granularity, l.period_start AT TIME ZONE 'UTC'),
+                date_trunc(p_granularity, (CASE WHEN l.anchored THEN l.period_start ELSE l.period_end - interval '1 microsecond' END) AT TIME ZONE 'UTC'),
+                v_step) AS b(bucket)
+            CROSS JOIN LATERAL (
+                SELECT CASE WHEN l.anchored
+                            THEN CASE WHEN (p_from IS NULL OR l.period_start >= p_from) AND (p_to IS NULL OR l.period_start < p_to) THEN 1 ELSE 0 END
+                            ELSE extract(epoch FROM least(l.period_end, (b.bucket + v_step) AT TIME ZONE 'UTC', p_to) - greatest(l.period_start, b.bucket AT TIME ZONE 'UTC', p_from))
+                                 / extract(epoch FROM l.period_end - l.period_start) END AS fraction,
+                       CASE WHEN l.anchored
+                            THEN extract(epoch FROM l.period_end - l.period_start) / 3600
+                            ELSE extract(epoch FROM least(l.period_end, (b.bucket + v_step) AT TIME ZONE 'UTC', p_to) - greatest(l.period_start, b.bucket AT TIME ZONE 'UTC', p_from)) / 3600 END AS hours
+            ) f
+        )
+        SELECT s.app_id, s.module, s.kind, s.schema_id, s.group_key, s.bucket, s.unit, s.currency,
+               CASE s.method
+                   WHEN 'max' THEN max(s.quantity)
+                   WHEN 'last' THEN (array_agg(s.quantity ORDER BY s.period_start DESC, s.sa_updated_at DESC))[1]
+                   WHEN 'count' THEN count(*)::NUMERIC
+                   ELSE sum(s.quantity) END,
+               CASE s.method
+                   WHEN 'max' THEN max(s.amount)
+                   WHEN 'last' THEN (array_agg(s.amount ORDER BY s.period_start DESC, s.sa_updated_at DESC))[1]
+                   ELSE sum(s.amount) END,
+               sum(s.hours), count(*)
+        FROM spread s
+        WHERE s.fraction > 0
+        GROUP BY s.app_id, s.module, s.kind, s.schema_id, s.group_key, s.method, s.bucket, s.unit, s.currency
+        ORDER BY 6, 2, 3, 4, 5, 7, 8;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = claimius, pg_temp;
 
-COMMENT ON FUNCTION claimius.get_app_cost(UUID, UUID, TEXT, TIMESTAMPTZ, TIMESTAMPTZ, TEXT) IS 'The live cost rows of one app summed per bucket, one row per module, unit and currency per hour or per UTC day, with the number of hours each bucket folds; p_module narrows to one module, p_from is inclusive and p_to exclusive on period_start. Answers a reader holding READ on the app through get_access, in the app itself or in this prophet''s own app; a reader without it, and an inactive reader, gets no rows. A granularity other than hour or day raises 22023.';
+COMMENT ON FUNCTION claimius.get_app_cost(UUID, UUID, TEXT, TIMESTAMPTZ, TIMESTAMPTZ, TEXT, TEXT, TEXT, UUID) IS 'The live cost rows of one app accumulated per bucket: one row per module, kind, schema $id, group key, unit and currency per UTC hour, day or month, with the hours of window the bucket folds and the number of rows it accumulated. A fee or a credit, a row whose window is empty and a row whose schema prorates by start fall whole into the bucket of their period_start; every other row is prorated by the overlap of [period_start, period_end) with the bucket and with the window [p_from, p_to). The row''s schema x-samna.accumulate decides the rest: method sum, max, last by period_start or count on quantity, sum, max or last on amount, and group, paths into detail whose values make group_key, null without one. A row some live row names in supersedes_id is left out. p_module, p_status, p_subject_type and p_subject_id, the last two read from detail.subject, narrow the rows. Answers a reader holding READ on the app through get_access, in the app itself or in this prophet''s own app; a reader without it, and an inactive reader, gets no rows. A granularity other than hour, day or month raises 22023.';
 
-GRANT EXECUTE ON FUNCTION claimius.get_app_cost(UUID, UUID, TEXT, TIMESTAMPTZ, TIMESTAMPTZ, TEXT)
+GRANT EXECUTE ON FUNCTION claimius.get_app_cost(UUID, UUID, TEXT, TIMESTAMPTZ, TIMESTAMPTZ, TEXT, TEXT, TEXT, UUID)
     TO claimius_disciple_client, claimius_writer, claimius_admin, claimius_reader;
 
 DROP FUNCTION IF EXISTS claimius.get_owner_graph(UUID, UUID, INTEGER);

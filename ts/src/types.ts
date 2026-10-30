@@ -243,19 +243,171 @@ export const ErrForbidden = new AuthError('forbidden')
 export const ErrNotFound = new AuthError('not found')
 export const ErrUnauthorized = new AuthError('unauthorized')
 
-export type CostGranularity = 'hour' | 'day'
+export type CostGranularity = 'hour' | 'day' | 'month'
+export type CostKind = 'usage' | 'fee' | 'period' | 'credit'
+export type CostStatus = 'estimated' | 'settled' | 'invoiced'
+export type CostAccumulateMethod = 'sum' | 'max' | 'last' | 'count'
+export type CostProration = 'overlap' | 'start'
 
 export const COST_GRANULARITY_HOUR: CostGranularity = 'hour'
 export const COST_GRANULARITY_DAY: CostGranularity = 'day'
+export const COST_GRANULARITY_MONTH: CostGranularity = 'month'
+export const COST_SCHEMA_ID = 'https://samna.io/schema/cost/1'
+
+export interface CostAccumulate {
+  method?: CostAccumulateMethod
+  proration?: CostProration
+  group?: string[]
+}
+
+export interface CostPresentation {
+  title?: string
+  columns?: string[]
+  unit_label?: string
+  amount_label?: string
+  accumulate?: CostAccumulate
+}
+
+export interface CostSchemaDocument {
+  $schema?: string
+  $id?: string
+  'x-samna'?: CostPresentation
+  [keyword: string]: unknown
+}
+
+export const COST_SCHEMA: CostSchemaDocument = {
+  $schema: 'https://json-schema.org/draft/2020-12/schema',
+  $id: COST_SCHEMA_ID,
+  title: 'Cost evidence',
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    subject: {
+      type: 'object',
+      required: ['type', 'id'],
+      additionalProperties: false,
+      properties: {
+        type: { type: 'string', pattern: '^[a-z_][a-z0-9_]*\\.[a-z_][a-z0-9_]*$' },
+        id: { type: 'string', format: 'uuid' },
+        name: { type: 'string' }
+      }
+    },
+    source: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        vendor: { type: 'string' },
+        ids: { type: 'array', items: { type: 'string' } },
+        refs: {
+          type: 'array',
+          items: {
+            type: 'object',
+            required: ['table', 'id'],
+            additionalProperties: false,
+            properties: { table: { type: 'string' }, id: { type: 'string' } }
+          }
+        },
+        run_id: { type: 'string' }
+      }
+    },
+    items: {
+      type: 'array',
+      items: {
+        type: 'object',
+        required: ['description', 'quantity', 'unit', 'amount'],
+        additionalProperties: false,
+        properties: {
+          description: { type: 'string' },
+          quantity: { type: 'number' },
+          unit: { type: 'string', minLength: 1 },
+          unit_price: { type: 'number' },
+          amount: { type: 'number' },
+          ref: { type: 'string' },
+          at: { type: 'string', format: 'date-time' }
+        }
+      }
+    },
+    pricing: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        list: { type: 'string' },
+        tier: { type: 'string' },
+        prorated: {
+          type: 'object',
+          required: ['from', 'to', 'fraction'],
+          additionalProperties: false,
+          properties: {
+            from: { type: 'string', format: 'date-time' },
+            to: { type: 'string', format: 'date-time' },
+            fraction: { type: 'number', minimum: 0, maximum: 1 }
+          }
+        }
+      }
+    },
+    notes: { type: 'string' }
+  },
+  'x-samna': {
+    title: 'Cost',
+    columns: ['subject.name', 'items', 'pricing.tier', 'notes'],
+    unit_label: 'Unit',
+    amount_label: 'Amount',
+    accumulate: { method: 'sum', proration: 'overlap', group: ['subject.id'] }
+  }
+}
+
+export interface CostSubject {
+  type: string
+  id: string
+  name?: string
+}
+
+export interface CostSource {
+  vendor?: string
+  ids?: string[]
+  refs?: { table: string; id: string }[]
+  run_id?: string
+}
+
+export interface CostItem {
+  description: string
+  quantity: number
+  unit: string
+  unit_price?: number
+  amount: number
+  ref?: string
+  at?: string
+}
+
+export interface CostPricing {
+  list?: string
+  tier?: string
+  prorated?: { from: string; to: string; fraction: number }
+}
+
+export interface CostEvidence {
+  subject?: CostSubject
+  source?: CostSource
+  items?: CostItem[]
+  pricing?: CostPricing
+  notes?: string
+}
 
 export interface AppCost {
   id: string
   module: string
+  kind: CostKind
   period_start: string
+  period_end: string
   quantity: number
   unit: string
+  unit_price: number | null
   amount: number
   currency: string
+  ref: string
+  supersedes_id: string | null
+  status: CostStatus
+  schema: CostSchemaDocument
   detail: Record<string, unknown>
   owner_id: string
   created_by: string
@@ -264,19 +416,55 @@ export interface AppCost {
   updated_at: string
 }
 
+export interface AppCostItemInput {
+  description: string
+  quantity: number
+  unit: string
+  unit_price?: number
+  amount?: number
+  ref?: string
+  at?: string
+}
+
+export interface AppCostInput {
+  module: string
+  ref: string
+  currency: string
+  kind?: CostKind
+  period_start?: string
+  period_end?: string
+  at?: string
+  quantity?: number
+  unit?: string
+  unit_price?: number
+  amount?: number
+  status?: CostStatus
+  supersedes_id?: string
+  items?: AppCostItemInput[]
+  schema?: CostSchemaDocument
+  detail?: Record<string, unknown>
+}
+
 export interface AppCostBucket {
   app_id?: string
   module: string
+  kind: CostKind
+  schema_id: string | null
+  group_key: Record<string, unknown> | null
   period_start: string
   unit: string
   currency: string
   quantity: number
   amount: number
   hours: number
+  rows: number
 }
 
 export interface AppCostQuery {
   module?: string
+  status?: CostStatus
+  subject_type?: string
+  subject_id?: string
   from?: string
   to?: string
   granularity?: CostGranularity

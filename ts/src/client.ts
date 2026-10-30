@@ -144,6 +144,9 @@ export async function postRefreshToken(
 export function appCostUrl(url: string, query?: AppCostQuery): string {
   const target = new URL(url, typeof location === 'undefined' ? 'http://localhost' : location.origin)
   if (query?.module) target.searchParams.set('module', query.module)
+  if (query?.status) target.searchParams.set('status', query.status)
+  if (query?.subject_type) target.searchParams.set('subject_type', query.subject_type)
+  if (query?.subject_id) target.searchParams.set('subject_id', query.subject_id)
   if (query?.from) target.searchParams.set('from', query.from)
   if (query?.to) target.searchParams.set('to', query.to)
   if (query?.granularity) target.searchParams.set('granularity', query.granularity)

@@ -3,6 +3,7 @@ package echo
 import (
 	"database/sql"
 	"errors"
+	"fmt"
 	"net/http"
 
 	"github.com/google/uuid"
@@ -13,34 +14,47 @@ import (
 	"github.com/nimling/samna-auth-middleware/v2/shared"
 )
 
-const appCostColumns = `id, module, period_start, quantity, unit, amount, currency, detail, sa_owner_id, sa_created_by, sa_deleted_at, sa_created_at, sa_updated_at`
+const appCostColumns = `id, module, kind, period_start, period_end, quantity, unit, unit_price, amount, currency, ref, supersedes_id, status, schema, detail, sa_owner_id, sa_created_by, sa_deleted_at, sa_created_at, sa_updated_at`
 
 func PostAppCost(ctx echo.Context) error {
 	appID, _ := ctx.Get("app_id").(uuid.UUID)
-	cost := &shared.AppCost{}
-	if err := cost.Bind(ctx); err != nil {
+	input := &shared.AppCostInput{}
+	if err := input.Bind(ctx); err != nil {
 		return respond.Error(ctx, http.StatusBadRequest, "invalid json body")
 	}
-	if err := cost.ValidatePost(); err != nil {
+	if err := input.ValidatePost(); err != nil {
 		return respond.Error(ctx, http.StatusBadRequest, err.Error())
 	}
-	owner, err := getAppCostOwner(ctx, appID, cost.CreatedBy, true)
+	cost, err := input.Normalize()
+	if err != nil {
+		return respond.Error(ctx, http.StatusBadRequest, err.Error())
+	}
+	owner, err := getAppCostOwner(ctx, appID, input.CreatedBy, true)
 	if err != nil {
 		return respond.Error(ctx, errorsx.ErrToHttpCode(err), "")
 	}
+	if cost.SupersedesID != nil {
+		if err := getAppCostSuperseded(ctx, appID, *cost.SupersedesID, cost.Ref); err != nil {
+			return respond.Error(ctx, errorsx.ErrToHttpCode(err), err.Error())
+		}
+	}
 	cost.OwnerID = owner
 	cost.DeletedAt = nil
-	if len(cost.Detail) == 0 {
-		cost.Detail = []byte(`{}`)
-	}
 	if _, err := sdb.Instance().DB.NewInsert().
 		Model(cost).
 		Value("app_id", "?", appID).
-		On("CONFLICT (app_id, module, period_start) WHERE sa_deleted_at IS NULL DO UPDATE").
+		On("CONFLICT (app_id, module, ref) WHERE sa_deleted_at IS NULL DO UPDATE").
+		Set("kind = EXCLUDED.kind").
+		Set("period_start = EXCLUDED.period_start").
+		Set("period_end = EXCLUDED.period_end").
 		Set("quantity = EXCLUDED.quantity").
 		Set("unit = EXCLUDED.unit").
+		Set("unit_price = EXCLUDED.unit_price").
 		Set("amount = EXCLUDED.amount").
 		Set("currency = EXCLUDED.currency").
+		Set("supersedes_id = EXCLUDED.supersedes_id").
+		Set("status = EXCLUDED.status").
+		Set("schema = EXCLUDED.schema").
 		Set("detail = EXCLUDED.detail").
 		Set("sa_created_by = EXCLUDED.sa_created_by").
 		Returning(appCostColumns).
@@ -72,29 +86,17 @@ func PutAppCost(ctx echo.Context) error {
 	if err != nil {
 		return respond.Error(ctx, errorsx.ErrToHttpCode(err), "")
 	}
-	columns := make([]string, 0, 5)
-	if patch.HasKey("quantity") {
-		cost.Quantity = patch.Quantity
-		columns = append(columns, "quantity")
-	}
-	if patch.HasKey("unit") {
-		cost.Unit = patch.Unit
-		columns = append(columns, "unit")
-	}
-	if patch.HasKey("amount") {
-		cost.Amount = patch.Amount
-		columns = append(columns, "amount")
-	}
-	if patch.HasKey("currency") {
-		cost.Currency = patch.Currency
-		columns = append(columns, "currency")
+	columns := make([]string, 0, 2)
+	if patch.HasKey("status") {
+		cost.Status = patch.Status
+		columns = append(columns, "status")
 	}
 	if patch.HasKey("detail") {
 		cost.Detail = patch.Detail
+		if err := cost.Normalize(); err != nil {
+			return respond.Error(ctx, http.StatusBadRequest, err.Error())
+		}
 		columns = append(columns, "detail")
-	}
-	if len(columns) == 0 {
-		return respond.JSON(ctx, http.StatusOK, cost, 1)
 	}
 	if _, err := sdb.Instance().DB.NewUpdate().
 		Model(cost).
@@ -162,6 +164,21 @@ func getAppCostOwner(ctx echo.Context, appID uuid.UUID, createdBy *uuid.UUID, st
 		return uuid.Nil, errorsx.ErrDbUnexpected
 	}
 	return owner, nil
+}
+
+func getAppCostSuperseded(ctx echo.Context, appID, supersededID uuid.UUID, ref string) error {
+	var supersededRef string
+	if err := sdb.Instance().NewRaw(`SELECT ref FROM claimius.app_cost WHERE id = ? AND app_id = ? AND sa_deleted_at IS NULL`, supersededID, appID).
+		Scan(ctx.Request().Context(), &supersededRef); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("%w: supersedes_id names no live row of the app", errorsx.ErrNotFound)
+		}
+		return errorsx.ErrDbUnexpected
+	}
+	if supersededRef == ref {
+		return fmt.Errorf("%w: supersedes_id must name another row", errorsx.ErrBadRequest)
+	}
+	return nil
 }
 
 func getAppCostWritable(ctx echo.Context, appID, costID uuid.UUID) (*shared.AppCost, error) {

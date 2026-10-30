@@ -187,6 +187,7 @@ var endpointSpecs = map[ObjectType]endpointSpec{
 var payloadEndpoints = map[reflect.Type]string{
 	reflect.TypeOf(&SamnaUserToken{}):    "user/token",
 	reflect.TypeOf(&SamnaUserExternal{}): "user/external",
+	reflect.TypeOf(&AppCostInput{}):      "cost",
 }
 
 func (d *DB) routes(model any) bool {
@@ -507,6 +508,13 @@ func (q *InsertQuery) execClaimius(ctx context.Context, dest ...any) (handled bo
 		}
 		q.created = result.Created
 		return true, dispatchScan(result.SamnaUser, dest...)
+	case *AppCostInput:
+		result, created, err := q.db.putAppCost(ctx, q.conn, q.accessClaim, m)
+		if err != nil {
+			return true, err
+		}
+		q.created = created
+		return true, dispatchScan(result, dest...)
 	case *SamnaUserExternal:
 		result, err := q.db.postUserFromExternal(ctx, q.conn, q.accessClaim, *m)
 		if err != nil {

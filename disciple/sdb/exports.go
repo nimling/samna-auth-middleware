@@ -8,6 +8,9 @@ type (
 	AccessUser               = shared.AccessUser
 	AppCost                  = shared.AppCost
 	AppCostBucket            = shared.AppCostBucket
+	AppCostInput             = shared.AppCostInput
+	AppCostItem              = shared.AppCostItem
+	AppCostQuery             = shared.AppCostQuery
 	Audit                    = shared.Audit
 	BindingFilters           = shared.BindingFilters
 	Claim                    = shared.Claim
@@ -74,6 +77,17 @@ const (
 	OBJECT_TYPE_CLAIM_OBJECT  = shared.OBJECT_TYPE_CLAIM_OBJECT
 	OBJECT_TYPE_LOCATION      = shared.OBJECT_TYPE_LOCATION
 	OBJECT_TYPE_APP_COST      = shared.OBJECT_TYPE_APP_COST
+	COST_SCHEMA_ID            = shared.COST_SCHEMA_ID
+	COST_KIND_USAGE           = shared.COST_KIND_USAGE
+	COST_KIND_FEE             = shared.COST_KIND_FEE
+	COST_KIND_PERIOD          = shared.COST_KIND_PERIOD
+	COST_KIND_CREDIT          = shared.COST_KIND_CREDIT
+	COST_STATUS_ESTIMATED     = shared.COST_STATUS_ESTIMATED
+	COST_STATUS_SETTLED       = shared.COST_STATUS_SETTLED
+	COST_STATUS_INVOICED      = shared.COST_STATUS_INVOICED
+	COST_GRANULARITY_HOUR     = shared.COST_GRANULARITY_HOUR
+	COST_GRANULARITY_DAY      = shared.COST_GRANULARITY_DAY
+	COST_GRANULARITY_MONTH    = shared.COST_GRANULARITY_MONTH
 	OBJECT_TYPE_OBJECT_ASSET  = shared.OBJECT_TYPE_OBJECT_ASSET
 	OBJECT_TYPE_ORGANIZATION  = shared.OBJECT_TYPE_ORGANIZATION
 	OBJECT_TYPE_SAMNA_SECRET  = shared.OBJECT_TYPE_SAMNA_SECRET
@@ -92,6 +106,8 @@ var (
 	AnonymousUserID      = shared.AnonymousUserID
 	ErrBadCode           = shared.ErrBadCode
 	ErrBadProfileItem    = shared.ErrBadProfileItem
+	ErrBadAppCost        = shared.ErrBadAppCost
+	CostSchema           = shared.CostSchema
 	ErrNoProphet         = shared.ErrNoProphet
 	ErrCodeInvalid       = shared.ErrCodeInvalid
 	GetCodeHash          = shared.GetCodeHash

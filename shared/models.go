@@ -854,20 +854,58 @@ type AppCost struct {
 	bun.BaseModel `bun:"table:claimius.app_cost" json:"-"`
 	nimbody.Body  `bun:"-" json:"-"`
 
-	ID          uuid.UUID       `bun:"id,pk,default:gen_random_uuid()" json:"id"`
-	Module      string          `bun:"module" json:"module"`
-	PeriodStart time.Time       `bun:"period_start" json:"period_start"`
-	Quantity    float64         `bun:"quantity" json:"quantity"`
-	Unit        string          `bun:"unit" json:"unit"`
-	Amount      float64         `bun:"amount" json:"amount"`
-	Currency    string          `bun:"currency" json:"currency"`
-	Detail      json.RawMessage `bun:"detail,type:jsonb,default:'{}'" json:"detail"`
-	OwnerID     uuid.UUID       `bun:"sa_owner_id" json:"owner_id"`
-	CreatedBy   *uuid.UUID      `bun:"sa_created_by" json:"created_by"`
-	DeletedAt   *time.Time      `bun:"sa_deleted_at" json:"deleted_at,omitzero"`
-	CreatedAt   time.Time       `bun:"sa_created_at,default:now()" json:"created_at"`
-	UpdatedAt   time.Time       `bun:"sa_updated_at,default:now()" json:"updated_at"`
-	Txid        uint64          `bun:"txid,scanonly" json:"-"`
+	ID           uuid.UUID       `bun:"id,pk,default:gen_random_uuid()" json:"id"`
+	Module       string          `bun:"module" json:"module"`
+	Kind         string          `bun:"kind" json:"kind"`
+	PeriodStart  time.Time       `bun:"period_start" json:"period_start"`
+	PeriodEnd    time.Time       `bun:"period_end" json:"period_end"`
+	Quantity     float64         `bun:"quantity" json:"quantity"`
+	Unit         string          `bun:"unit" json:"unit"`
+	UnitPrice    *float64        `bun:"unit_price" json:"unit_price"`
+	Amount       float64         `bun:"amount" json:"amount"`
+	Currency     string          `bun:"currency" json:"currency"`
+	Ref          string          `bun:"ref" json:"ref"`
+	SupersedesID *uuid.UUID      `bun:"supersedes_id" json:"supersedes_id"`
+	Status       string          `bun:"status" json:"status"`
+	Schema       json.RawMessage `bun:"schema,type:jsonb,default:'{}'" json:"schema"`
+	Detail       json.RawMessage `bun:"detail,type:jsonb,default:'{}'" json:"detail"`
+	OwnerID      uuid.UUID       `bun:"sa_owner_id" json:"owner_id"`
+	CreatedBy    *uuid.UUID      `bun:"sa_created_by" json:"created_by"`
+	DeletedAt    *time.Time      `bun:"sa_deleted_at" json:"deleted_at,omitzero"`
+	CreatedAt    time.Time       `bun:"sa_created_at,default:now()" json:"created_at"`
+	UpdatedAt    time.Time       `bun:"sa_updated_at,default:now()" json:"updated_at"`
+	Txid         uint64          `bun:"txid,scanonly" json:"-"`
+}
+
+type AppCostItem struct {
+	Description string     `json:"description"`
+	Quantity    float64    `json:"quantity"`
+	Unit        string     `json:"unit"`
+	UnitPrice   *float64   `json:"unit_price,omitempty"`
+	Amount      *float64   `json:"amount,omitempty"`
+	Ref         string     `json:"ref,omitempty"`
+	At          *time.Time `json:"at,omitempty"`
+}
+
+type AppCostInput struct {
+	nimbody.Body `json:"-"`
+	Module       string          `json:"module"`
+	Kind         string          `json:"kind,omitempty"`
+	PeriodStart  *time.Time      `json:"period_start,omitempty"`
+	PeriodEnd    *time.Time      `json:"period_end,omitempty"`
+	At           *time.Time      `json:"at,omitempty"`
+	Quantity     *float64        `json:"quantity,omitempty"`
+	Unit         string          `json:"unit,omitempty"`
+	UnitPrice    *float64        `json:"unit_price,omitempty"`
+	Amount       *float64        `json:"amount,omitempty"`
+	Currency     string          `json:"currency"`
+	Ref          string          `json:"ref"`
+	Status       string          `json:"status,omitempty"`
+	SupersedesID *uuid.UUID      `json:"supersedes_id,omitempty"`
+	Items        []AppCostItem   `json:"items,omitempty"`
+	Schema       json.RawMessage `json:"schema,omitempty"`
+	Detail       json.RawMessage `json:"detail,omitempty"`
+	CreatedBy    *uuid.UUID      `json:"created_by,omitempty"`
 }
 
 type Audit struct {

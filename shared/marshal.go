@@ -147,3 +147,7 @@ func (m *AppCost) PatchBody() map[string]any {
 	}
 	return nil
 }
+
+func (m *AppCostInput) MarshalWrite() ([]byte, error)   { return sauth.Marshal(m) }
+func (m *AppCostInput) UnmarshalWrite(raw []byte) error { return sauth.Unmarshal(raw, m) }
+func (m *AppCostInput) WriteResult() any                { return &AppCost{} }

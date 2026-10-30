@@ -1359,11 +1359,18 @@ CREATE TABLE IF NOT EXISTS claimius.app_cost (
                                                  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
                                                  app_id          UUID NOT NULL,
                                                  module          TEXT NOT NULL CHECK (module <> ''),
-                                                 period_start    TIMESTAMPTZ NOT NULL CHECK (date_trunc('hour', period_start AT TIME ZONE 'UTC') = period_start AT TIME ZONE 'UTC'),
+                                                 kind            TEXT NOT NULL DEFAULT 'usage' CHECK (kind IN ('usage', 'fee', 'period', 'credit')),
+                                                 period_start    TIMESTAMPTZ NOT NULL,
+                                                 period_end      TIMESTAMPTZ NOT NULL,
                                                  quantity        NUMERIC NOT NULL DEFAULT 0,
                                                  unit            TEXT NOT NULL CHECK (unit <> ''),
+                                                 unit_price      NUMERIC,
                                                  amount          NUMERIC NOT NULL DEFAULT 0,
                                                  currency        TEXT NOT NULL CHECK (currency ~ '^[A-Z]{3}$'),
+                                                 ref             TEXT NOT NULL,
+                                                 supersedes_id   UUID REFERENCES claimius.app_cost(id),
+                                                 status          TEXT NOT NULL DEFAULT 'settled' CHECK (status IN ('estimated', 'settled', 'invoiced')),
+                                                 schema          JSONB NOT NULL DEFAULT '{}'::jsonb,
                                                  detail          JSONB NOT NULL DEFAULT '{}'::jsonb,
                                                  sa_owner_id     UUID NOT NULL,
                                                  sa_created_by   UUID NOT NULL,
@@ -1373,25 +1380,51 @@ CREATE TABLE IF NOT EXISTS claimius.app_cost (
                                                  txid            XID8 NOT NULL DEFAULT pg_current_xact_id()
 );
 
-COMMENT ON TABLE claimius.app_cost IS 'One hour of cost an app reports for itself or for a built in module that did work on its behalf. Written by the app''s own actor through /sam/cost, upserted on (app_id, module, period_start) among live rows, published on the app''s feed like every routed table. Application data: never aged by prune.';
-COMMENT ON COLUMN claimius.app_cost.id IS 'Row id, kept across the upserts of one hour.';
+ALTER TABLE claimius.app_cost ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'usage' CHECK (kind IN ('usage', 'fee', 'period', 'credit'));
+ALTER TABLE claimius.app_cost ADD COLUMN IF NOT EXISTS period_end TIMESTAMPTZ;
+ALTER TABLE claimius.app_cost ADD COLUMN IF NOT EXISTS unit_price NUMERIC;
+ALTER TABLE claimius.app_cost ADD COLUMN IF NOT EXISTS ref TEXT;
+ALTER TABLE claimius.app_cost ADD COLUMN IF NOT EXISTS supersedes_id UUID REFERENCES claimius.app_cost(id);
+ALTER TABLE claimius.app_cost ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'settled' CHECK (status IN ('estimated', 'settled', 'invoiced'));
+ALTER TABLE claimius.app_cost ADD COLUMN IF NOT EXISTS schema JSONB NOT NULL DEFAULT '{}'::jsonb;
+UPDATE claimius.app_cost SET period_end = period_start + interval '1 hour' WHERE period_end IS NULL;
+UPDATE claimius.app_cost SET ref = to_char(period_start AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:00:00"Z"') WHERE ref IS NULL;
+ALTER TABLE claimius.app_cost ALTER COLUMN period_end SET NOT NULL;
+ALTER TABLE claimius.app_cost ALTER COLUMN ref SET NOT NULL;
+ALTER TABLE claimius.app_cost DROP CONSTRAINT IF EXISTS app_cost_period_start_check;
+ALTER TABLE claimius.app_cost DROP CONSTRAINT IF EXISTS app_cost_ref_check;
+ALTER TABLE claimius.app_cost ADD CONSTRAINT app_cost_ref_check CHECK (ref <> '');
+ALTER TABLE claimius.app_cost DROP CONSTRAINT IF EXISTS app_cost_period_check;
+ALTER TABLE claimius.app_cost ADD CONSTRAINT app_cost_period_check CHECK (period_end >= period_start);
+
+COMMENT ON TABLE claimius.app_cost IS 'One cost an app reports for itself or for a built in module that did work on its behalf: metered usage over a window, a fee at an instant, time based usage prorated on read, or a credit. Written by the app''s own actor through /sam/cost, replaced on (app_id, module, ref) among live rows, published on the app''s feed like every routed table. A correction is a new row naming the one it supersedes. Application data: never aged by prune.';
+COMMENT ON COLUMN claimius.app_cost.id IS 'Row id, kept across the replaces of one ref.';
 COMMENT ON COLUMN claimius.app_cost.app_id IS 'The app the cost belongs to, taken from the authenticated app on the /sam channel.';
 COMMENT ON COLUMN claimius.app_cost.module IS 'The app''s own slug for its own usage, or the slug of the built in module that did the work for the app: uptime, subscription, storage and so on.';
-COMMENT ON COLUMN claimius.app_cost.period_start IS 'The hour the row covers, truncated to the hour.';
-COMMENT ON COLUMN claimius.app_cost.quantity IS 'What was counted in the hour, in unit.';
-COMMENT ON COLUMN claimius.app_cost.unit IS 'What quantity counts: request, check, mail, byte, row, or the app''s own word.';
-COMMENT ON COLUMN claimius.app_cost.amount IS 'What the hour costs, in currency; the app decides how it prices itself.';
+COMMENT ON COLUMN claimius.app_cost.kind IS 'usage: metered direct usage over the window. fee: a single cost or charge at an instant, period_end equal to period_start. period: time based usage over the window, a seat month, a device day, GB days, prorated on read. credit: a negative correction, discount or refund.';
+COMMENT ON COLUMN claimius.app_cost.period_start IS 'Start of the window the row covers, or the instant of a fee or credit.';
+COMMENT ON COLUMN claimius.app_cost.period_end IS 'End of the window, exclusive, never before period_start; equal to period_start for a single cost.';
+COMMENT ON COLUMN claimius.app_cost.quantity IS 'What was counted over the window, in unit.';
+COMMENT ON COLUMN claimius.app_cost.unit IS 'What quantity counts: request, check, mail, byte, seat, event, item, or the app''s own word.';
+COMMENT ON COLUMN claimius.app_cost.unit_price IS 'Price of one unit in currency when the cost was priced per unit; amount is then quantity times unit_price, checked on write.';
+COMMENT ON COLUMN claimius.app_cost.amount IS 'What the customer bears for the row, in currency; negative only for a credit. The app decides how it prices itself.';
 COMMENT ON COLUMN claimius.app_cost.currency IS 'ISO 4217 code of amount.';
-COMMENT ON COLUMN claimius.app_cost.detail IS 'The app''s own breakdown of the hour, free form.';
+COMMENT ON COLUMN claimius.app_cost.ref IS 'The reporting app''s own reference for the window or the event. A report of the same ref replaces the row''s values.';
+COMMENT ON COLUMN claimius.app_cost.supersedes_id IS 'The row this correction supersedes. The superseded row stays and is left out of every sum.';
+COMMENT ON COLUMN claimius.app_cost.status IS 'estimated until the app settles the figure, settled, or invoiced once billed.';
+COMMENT ON COLUMN claimius.app_cost.schema IS 'Empty, and the row is a plain cost over a window whose detail is any object; or a JSON Schema document, draft 2020-12, named by $id, that detail is checked against on write and that says how the row is presented and accumulated: x-samna carries title, columns, unit_label, amount_label and accumulate, with method sum, max, last or count, proration overlap or start, and group, paths into detail that key the buckets.';
+COMMENT ON COLUMN claimius.app_cost.detail IS 'The evidence behind the row: any object when schema is empty, otherwise an object the row''s schema accepts, normalised by the prophet on write.';
 COMMENT ON COLUMN claimius.app_cost.sa_owner_id IS 'The app''s owning organization, stamped by the prophet from samna_app.sa_owner_id.';
-COMMENT ON COLUMN claimius.app_cost.sa_created_by IS 'user_claim.id of the app actor that reported the hour, a live grant in the app.';
-COMMENT ON COLUMN claimius.app_cost.sa_deleted_at IS 'Soft delete timestamp. A deleted hour is published like any other change and never read.';
+COMMENT ON COLUMN claimius.app_cost.sa_created_by IS 'user_claim.id of the app actor that reported the row, a live grant in the app.';
+COMMENT ON COLUMN claimius.app_cost.sa_deleted_at IS 'Soft delete timestamp. A deleted row is published like any other change and never read.';
 COMMENT ON COLUMN claimius.app_cost.sa_created_at IS 'Creation timestamp.';
-COMMENT ON COLUMN claimius.app_cost.sa_updated_at IS 'Last update timestamp, set by tg_update_timestamp on every upsert of the hour.';
+COMMENT ON COLUMN claimius.app_cost.sa_updated_at IS 'Last update timestamp, set by tg_update_timestamp on every replace of the ref.';
 COMMENT ON COLUMN claimius.app_cost.txid IS 'Local transaction that last wrote the row, stamped by tg_update_txid on every insert and update, a replayed one included.';
 
-CREATE UNIQUE INDEX IF NOT EXISTS idx_app_cost_app_module_period ON claimius.app_cost (app_id, module, period_start) WHERE sa_deleted_at IS NULL;
+DROP INDEX IF EXISTS claimius.idx_app_cost_app_module_period;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_app_cost_app_module_ref ON claimius.app_cost (app_id, module, ref) WHERE sa_deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_app_cost_app_period ON claimius.app_cost (app_id, period_start);
+CREATE INDEX IF NOT EXISTS idx_app_cost_supersedes ON claimius.app_cost (supersedes_id) WHERE supersedes_id IS NOT NULL;
 
 UPDATE claimius.table_info SET table_name = 'user_identity' WHERE schema_name = 'claimius' AND table_name = 'user_token';
 UPDATE claimius.object_info SET object_type = 'claimius.user_identity' WHERE object_type = 'claimius.user_token';
