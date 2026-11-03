@@ -64,3 +64,34 @@ func PutProfile(ctx context.Context, userID uuid.UUID, items map[string]*shared.
 	}
 	return json.RawMessage(profile), nil
 }
+
+func userNameError(err error) error {
+	var pgErr pgdriver.Error
+	if errors.As(err, &pgErr) {
+		switch pgErr.Field('C') {
+		case "P0404":
+			return fmt.Errorf("%w: %s", shared.ErrNotFound, pgErr.Field('M'))
+		case "22023":
+			return fmt.Errorf("%w: %s", shared.ErrBadUserName, pgErr.Field('M'))
+		case "23505":
+			return fmt.Errorf("%w: %s", shared.ErrUserNameTaken, pgErr.Field('M'))
+		}
+	}
+	return err
+}
+
+func GetUserNameAvailable(ctx context.Context, appID uuid.UUID, userName string) (*shared.UserNameAvailable, error) {
+	out := shared.UserNameAvailable{UserName: userName}
+	if err := instance.NewRaw(`SELECT claimius.get_user_name_available(?, ?)`, appID, userName).Scan(ctx, &out.Available); err != nil {
+		return nil, userNameError(err)
+	}
+	return &out, nil
+}
+
+func PutUserName(ctx context.Context, appID uuid.UUID, body shared.BodySamUserName) (*shared.BodySamUserName, error) {
+	out := shared.BodySamUserName{UserID: body.UserID}
+	if err := instance.NewRaw(`SELECT claimius.update_user_name(?, ?, ?)`, appID, body.UserID, body.UserName).Scan(ctx, &out.UserName); err != nil {
+		return nil, userNameError(err)
+	}
+	return &out, nil
+}
