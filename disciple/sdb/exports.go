@@ -95,22 +95,23 @@ const (
 )
 
 var (
-	AuditWhere           = shared.AuditWhere
-	ClaimWhere           = shared.ClaimWhere
-	AnonymousUserID      = shared.AnonymousUserID
-	ErrBadCode           = shared.ErrBadCode
-	ErrBadAppCost        = shared.ErrBadAppCost
-	CostSchema           = shared.CostSchema
-	ErrCodeInvalid       = shared.ErrCodeInvalid
-	ErrNoAccess          = shared.ErrNoAccess
-	ErrNotFound          = shared.ErrNotFound
-	ErrRootConflict      = shared.ErrRootConflict
-	ErrUserAlreadyExists = shared.ErrUserAlreadyExists
-	ObjectWhere          = shared.ObjectWhere
-	RelationClaimObjects = shared.RelationClaimObjects
-	RelationClaimUsers   = shared.RelationClaimUsers
-	RelationOwner        = shared.RelationOwner
-	ResolveObjectType    = shared.ResolveObjectType
-	StripObjectSchema    = shared.StripObjectSchema
-	UserWhere            = shared.UserWhere
+	AuditWhere            = shared.AuditWhere
+	ClaimWhere            = shared.ClaimWhere
+	AnonymousUserID       = shared.AnonymousUserID
+	ErrBadCode            = shared.ErrBadCode
+	ErrBadAppCost         = shared.ErrBadAppCost
+	CostSchema            = shared.CostSchema
+	ErrCodeInvalid        = shared.ErrCodeInvalid
+	ErrNoAccess           = shared.ErrNoAccess
+	ErrNotFound           = shared.ErrNotFound
+	ErrOrganizationParent = shared.ErrOrganizationParent
+	ErrRootConflict       = shared.ErrRootConflict
+	ErrUserAlreadyExists  = shared.ErrUserAlreadyExists
+	ObjectWhere           = shared.ObjectWhere
+	RelationClaimObjects  = shared.RelationClaimObjects
+	RelationClaimUsers    = shared.RelationClaimUsers
+	RelationOwner         = shared.RelationOwner
+	ResolveObjectType     = shared.ResolveObjectType
+	StripObjectSchema     = shared.StripObjectSchema
+	UserWhere             = shared.UserWhere
 )
