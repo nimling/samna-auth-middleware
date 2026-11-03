@@ -98,11 +98,11 @@ reader → app /api/asset/:id/data → prophet /sam/object_asset/:id/data → ho
 
 3. **The home.** `GET /asset/:id/data` in `disciple/sam`'s `RegisterEndpoints` accepts only that token: valid against the app's JWKS, the expected issuer, the app in the audience, an expiry, and `client_id` the slug of the prophet the disciple is bound to. A user's token for the same app carries the app's slug there and is refused with `401`. The disciple cannot know the host's storage, so it calls the host's source, `AssetSource`, which opens the asset by id and answers status, headers and body. With no source, or no asset, it answers `404`. A `200` whose `ETag` matches the request's `If-None-Match`, or whose `Last-Modified` is not after its `If-Modified-Since`, is answered `304` without a body.
 
-The host registers both callbacks with its configuration:
+The host registers both callbacks with `PutOptions` of `disciple/echo`, imported here as `saecho`, where it starts:
 
 ```go
-db, err := sdb.Init(e.Logger, sdb.Options{
-	AssetSource: func(ctx context.Context, assetID uuid.UUID) (*sdb.AssetResponse, error) { ... },
+saecho.PutOptions(saecho.Options{
+	AssetSource: func(ctx context.Context, assetID uuid.UUID) (*saecho.AssetResponse, error) { ... },
 	AssetCache:  cache,
 })
 ```
