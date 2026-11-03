@@ -73,7 +73,7 @@ func TestProfileEntriesCarryASchemaAndAValue(t *testing.T) {
 	schema := shared.ProfileSchema{Type: "string", Title: "Certificate", Format: "uri"}
 	item := shared.BodySamProfileItem{UserID: user, Field: "certificate", Schema: schema, Value: json.RawMessage(`"https://example.no/certificate"`)}
 
-	first, err := disciple.PutProfileItem(ctx, reader, item)
+	first, err := replica.PutProfileItem(ctx, reader, item)
 	if err != nil {
 		t.Fatalf("put: %v", err)
 	}
@@ -83,7 +83,7 @@ func TestProfileEntriesCarryASchemaAndAValue(t *testing.T) {
 	}
 
 	item.Value = json.RawMessage(`"https://example.no/certificate/2"`)
-	second, err := disciple.PutProfileItem(ctx, reader, item)
+	second, err := replica.PutProfileItem(ctx, reader, item)
 	if err != nil {
 		t.Fatalf("put again: %v", err)
 	}
@@ -116,25 +116,25 @@ func TestProfileEntriesCarryASchemaAndAValue(t *testing.T) {
 
 	bad := item
 	bad.Field = "Name!"
-	if _, err := disciple.PutProfileItem(ctx, reader, bad); !errors.Is(err, shared.ErrBadProfileItem) {
+	if _, err := replica.PutProfileItem(ctx, reader, bad); !errors.Is(err, shared.ErrBadProfileItem) {
 		t.Fatalf("a malformed field is refused, got %v", err)
 	}
 	noSchema := item
 	noSchema.Schema = shared.ProfileSchema{}
-	if _, err := disciple.PutProfileItem(ctx, reader, noSchema); !errors.Is(err, shared.ErrBadProfileItem) {
+	if _, err := replica.PutProfileItem(ctx, reader, noSchema); !errors.Is(err, shared.ErrBadProfileItem) {
 		t.Fatalf("a schema that is not an object is refused, got %v", err)
 	}
-	if _, err := disciple.PutProfileItem(ctx, &shared.AccessClaim{UserID: stranger, Access: shared.ACCESS_READ}, item); !errors.Is(err, shared.ErrNoAccess) {
+	if _, err := replica.PutProfileItem(ctx, &shared.AccessClaim{UserID: stranger, Access: shared.ACCESS_READ}, item); !errors.Is(err, shared.ErrNoAccess) {
 		t.Fatalf("only the user the entry is for may write it, got %v", err)
 	}
 	outsider := item
 	outsider.UserID = stranger
-	if _, err := disciple.PutProfileItem(ctx, &shared.AccessClaim{UserID: stranger, Access: shared.ACCESS_READ}, outsider); !errors.Is(err, shared.ErrNotFound) {
+	if _, err := replica.PutProfileItem(ctx, &shared.AccessClaim{UserID: stranger, Access: shared.ACCESS_READ}, outsider); !errors.Is(err, shared.ErrNotFound) {
 		t.Fatalf("a user with no row in the app gets no entry, got %v", err)
 	}
 
 	field := "certificate"
-	after, err := disciple.DeleteProfileItem(ctx, reader, shared.BodySamProfileItemKey{UserID: user, Field: &field})
+	after, err := replica.DeleteProfileItem(ctx, reader, shared.BodySamProfileItemKey{UserID: user, Field: &field})
 	if err != nil {
 		t.Fatalf("delete: %v", err)
 	}
@@ -183,6 +183,7 @@ func TestUserNameIsReservedOncePerApp(t *testing.T) {
 	t.Setenv("SAUTH_APP_SECRET", app.Secret)
 	disciple.RouteToProphet = true
 	t.Cleanup(func() { disciple.RouteToProphet = false })
+	replica := &sam.Replica{DB: disciple}
 
 	if got := client.GetProfileLink(owner); got != server.URL+"/u/"+owner.String() {
 		t.Fatalf("the profile link is the samna_auth address with the user id, got %s", got)
@@ -192,31 +193,31 @@ func TestUserNameIsReservedOncePerApp(t *testing.T) {
 	ownerClaim := &shared.AccessClaim{UserID: owner, Access: shared.ACCESS_READ}
 	rivalClaim := &shared.AccessClaim{UserID: rival, Access: shared.ACCESS_READ}
 
-	free, err := disciple.GetUserNameAvailable(ctx, ownerClaim, name)
+	free, err := replica.GetUserNameAvailable(ctx, ownerClaim, name)
 	if err != nil {
 		t.Fatalf("available: %v", err)
 	}
 	if !free.Available || free.UserName != name {
 		t.Fatalf("a name nobody holds is available, got %+v", free)
 	}
-	reserved, err := disciple.PutUserName(ctx, ownerClaim, shared.BodySamUserName{UserID: owner, UserName: &name})
+	reserved, err := replica.PutUserName(ctx, ownerClaim, shared.BodySamUserName{UserID: owner, UserName: &name})
 	if err != nil {
 		t.Fatalf("reserve: %v", err)
 	}
 	if reserved == nil || *reserved != name {
 		t.Fatalf("the reserve returns the name, got %v", reserved)
 	}
-	if again, err := disciple.PutUserName(ctx, ownerClaim, shared.BodySamUserName{UserID: owner, UserName: &name}); err != nil || *again != name {
+	if again, err := replica.PutUserName(ctx, ownerClaim, shared.BodySamUserName{UserID: owner, UserName: &name}); err != nil || *again != name {
 		t.Fatalf("the holder reserves its own name again, got %v %v", again, err)
 	}
-	taken, err := disciple.GetUserNameAvailable(ctx, rivalClaim, name)
+	taken, err := replica.GetUserNameAvailable(ctx, rivalClaim, name)
 	if err != nil {
 		t.Fatalf("available after reserve: %v", err)
 	}
 	if taken.Available {
 		t.Fatalf("a reserved name is not available, got %+v", taken)
 	}
-	if _, err := disciple.PutUserName(ctx, rivalClaim, shared.BodySamUserName{UserID: rival, UserName: &name}); !errors.Is(err, shared.ErrUserNameTaken) {
+	if _, err := replica.PutUserName(ctx, rivalClaim, shared.BodySamUserName{UserID: rival, UserName: &name}); !errors.Is(err, shared.ErrUserNameTaken) {
 		t.Fatalf("a taken name is refused, got %v", err)
 	}
 	if _, err := prophet.ExecContext(ctx, `UPDATE claimius.samna_user SET user_name = upper(?) WHERE user_id = ? AND app_id = ?`, name, rival, app.ID); err == nil {
@@ -226,11 +227,11 @@ func TestUserNameIsReservedOncePerApp(t *testing.T) {
 		t.Fatalf("the same name is free in another app, got %v", err)
 	}
 
-	if _, err := disciple.PutUserName(ctx, rivalClaim, shared.BodySamUserName{UserID: owner, UserName: &name}); !errors.Is(err, shared.ErrNoAccess) {
+	if _, err := replica.PutUserName(ctx, rivalClaim, shared.BodySamUserName{UserID: owner, UserName: &name}); !errors.Is(err, shared.ErrNoAccess) {
 		t.Fatalf("only the user reserves a name for itself, got %v", err)
 	}
 	for _, bad := range []string{"me", "Upper", "1digit", uuid.NewString(), "with space"} {
-		if _, err := disciple.GetUserNameAvailable(ctx, ownerClaim, bad); !errors.Is(err, shared.ErrBadUserName) {
+		if _, err := replica.GetUserNameAvailable(ctx, ownerClaim, bad); !errors.Is(err, shared.ErrBadUserName) {
 			t.Errorf("%q is not a user name, got %v", bad, err)
 		}
 		if _, err := psdb.GetUserNameAvailable(ctx, app.ID, bad); !errors.Is(err, shared.ErrBadUserName) {
@@ -238,14 +239,14 @@ func TestUserNameIsReservedOncePerApp(t *testing.T) {
 		}
 	}
 
-	released, err := disciple.PutUserName(ctx, ownerClaim, shared.BodySamUserName{UserID: owner})
+	released, err := replica.PutUserName(ctx, ownerClaim, shared.BodySamUserName{UserID: owner})
 	if err != nil {
 		t.Fatalf("release: %v", err)
 	}
 	if released != nil {
 		t.Fatalf("a null name releases it, got %v", *released)
 	}
-	if _, err := disciple.PutUserName(ctx, rivalClaim, shared.BodySamUserName{UserID: rival, UserName: &name}); err != nil {
+	if _, err := replica.PutUserName(ctx, rivalClaim, shared.BodySamUserName{UserID: rival, UserName: &name}); err != nil {
 		t.Fatalf("a released name reserves for the next user, got %v", err)
 	}
 

@@ -124,14 +124,14 @@ ac, err := sdb.Instance().MutationAccess(ctx, userID, certificateID, "public.cer
 if err != nil {
 	return err
 }
-profile, err := sam.PutProfileItem(ctx, ac, shared.BodySamProfileItem{
+profile, err := sam.Disciple().PutProfileItem(ctx, ac, shared.BodySamProfileItem{
 	UserID: userID, Field: "certificate",
 	Schema: json.RawMessage(`{"type": "string", "title": "Certificate", "format": "uri", "component": "link"}`),
 	Value:  json.RawMessage(`"https://example.no/certificates/` + certificateID.String() + `"`),
 })
 ```
 
-1. `disciple/sam` `PutProfileItem(ctx, ac, item)` writes the entry, or replaces the entry of the same field, and answers the whole profile. `DeleteProfileItem(ctx, ac, key)` withdraws one field, or every entry of the app when `Field` is nil, and answers the profile.
+1. `sam.Disciple().PutProfileItem(ctx, ac, item)` writes the entry, or replaces the entry of the same field, and answers the whole profile. `DeleteProfileItem(ctx, ac, key)` withdraws one field, or every entry of the app when `Field` is nil, and answers the profile.
 2. The `AccessClaim` is the user's own, with READ: a disciple writes only for the user it shows, never for another user. Anything else is `ErrNoAccess`.
 3. The shape is checked on both sides, `ErrBadProfileItem` and `400`: `field` is lower case letters, digits, `_` and `.`, starting with a letter; `schema` an object with a `type`; `value` JSON. `shared.ProfileSchema` is a typed struct: a key outside its vocabulary is refused at decode, `Validate` checks the type, format, component, pattern, items, properties and default, `Check` the value against it, on both roles.
 4. The user needs a live row in the app on the prophet, else `ErrNotFound` and `404`.

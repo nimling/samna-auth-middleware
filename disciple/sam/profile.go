@@ -9,7 +9,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/nimling/samna-auth-middleware/v2/client"
-	sdb "github.com/nimling/samna-auth-middleware/v2/disciple/sdb"
 	"github.com/nimling/samna-auth-middleware/v2/shared"
 )
 
@@ -22,14 +21,14 @@ func profileActor(ac *shared.AccessClaim, userID uuid.UUID) error {
 	return nil
 }
 
-func PutProfileItem(ctx context.Context, ac *shared.AccessClaim, item shared.BodySamProfileItem) (json.RawMessage, error) {
+func (r *Replica) PutProfileItem(ctx context.Context, ac *shared.AccessClaim, item shared.BodySamProfileItem) (json.RawMessage, error) {
 	if err := profileActor(ac, item.UserID); err != nil {
 		return nil, err
 	}
 	if err := item.Validate(); err != nil {
 		return nil, err
 	}
-	if !sdb.Instance().RouteToProphet {
+	if !r.DB.RouteToProphet {
 		return nil, ErrNoProphet
 	}
 	var profile json.RawMessage
@@ -39,14 +38,14 @@ func PutProfileItem(ctx context.Context, ac *shared.AccessClaim, item shared.Bod
 	return profile, nil
 }
 
-func DeleteProfileItem(ctx context.Context, ac *shared.AccessClaim, key shared.BodySamProfileItemKey) (json.RawMessage, error) {
+func (r *Replica) DeleteProfileItem(ctx context.Context, ac *shared.AccessClaim, key shared.BodySamProfileItemKey) (json.RawMessage, error) {
 	if err := profileActor(ac, key.UserID); err != nil {
 		return nil, err
 	}
 	if err := key.Validate(); err != nil {
 		return nil, err
 	}
-	if !sdb.Instance().RouteToProphet {
+	if !r.DB.RouteToProphet {
 		return nil, ErrNoProphet
 	}
 	var profile json.RawMessage
@@ -68,14 +67,14 @@ func profileError(err error) error {
 	return err
 }
 
-func GetUserNameAvailable(ctx context.Context, ac *shared.AccessClaim, userName string) (*shared.UserNameAvailable, error) {
+func (r *Replica) GetUserNameAvailable(ctx context.Context, ac *shared.AccessClaim, userName string) (*shared.UserNameAvailable, error) {
 	if ac == nil || ac.UserID == uuid.Nil {
 		return nil, shared.ErrNoAccess
 	}
 	if err := (shared.BodySamUserName{UserID: ac.UserID, UserName: &userName}).Validate(); err != nil {
 		return nil, err
 	}
-	if !sdb.Instance().RouteToProphet {
+	if !r.DB.RouteToProphet {
 		return nil, ErrNoProphet
 	}
 	var out shared.UserNameAvailable
@@ -85,14 +84,14 @@ func GetUserNameAvailable(ctx context.Context, ac *shared.AccessClaim, userName 
 	return &out, nil
 }
 
-func PutUserName(ctx context.Context, ac *shared.AccessClaim, body shared.BodySamUserName) (*string, error) {
+func (r *Replica) PutUserName(ctx context.Context, ac *shared.AccessClaim, body shared.BodySamUserName) (*string, error) {
 	if err := profileActor(ac, body.UserID); err != nil {
 		return nil, err
 	}
 	if err := body.Validate(); err != nil {
 		return nil, err
 	}
-	if !sdb.Instance().RouteToProphet {
+	if !r.DB.RouteToProphet {
 		return nil, ErrNoProphet
 	}
 	var out shared.BodySamUserName
