@@ -2990,6 +2990,11 @@ BEGIN
                 UPDATE claimius.user_field SET user_id = p_target_user_id
                 WHERE user_id = p_source_user_id AND app_id = v_app_row.app_id;
 
+                DELETE FROM claimius.user_object
+                WHERE user_id = p_source_user_id AND app_id = v_app_row.app_id;
+
+                DELETE FROM claimius.samna_user WHERE id = v_source_app_user.id;
+
                 UPDATE claimius.samna_user
                 SET first_name    = v_source_app_user.first_name,
                     last_name     = v_source_app_user.last_name,
@@ -3006,11 +3011,6 @@ BEGIN
                         END,
                     sa_updated_at = now()
                 WHERE id = v_target_app_user.id;
-
-                DELETE FROM claimius.user_object
-                WHERE user_id = p_source_user_id AND app_id = v_app_row.app_id;
-
-                DELETE FROM claimius.samna_user WHERE id = v_source_app_user.id;
             END IF;
 
             PERFORM claimius.insert_audit(
@@ -4100,7 +4100,12 @@ BEGIN
         )
         VALUES (
                    COALESCE(p_user_id, gen_random_uuid()),
-                   p_app_id, p_first_name, p_last_name, p_user_name, p_user_image,
+                   p_app_id, p_first_name, p_last_name,
+                   CASE WHEN NOT EXISTS (
+                       SELECT 1 FROM claimius.samna_user u
+                       WHERE u.app_id = p_app_id AND lower(u.user_name) = lower(p_user_name) AND u.sa_deleted_at IS NULL
+                   ) THEN p_user_name END,
+                   p_user_image,
                    p_email, p_phone, p_external_id, 'active', 'user'
                )
         RETURNING * INTO v_user_row;
@@ -4141,7 +4146,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius.upsert_app_user(p_user_id uuid, p_app_id uuid, p_first_name text, p_last_name text, p_user_name text, p_email text, p_phone text, p_external_id text, p_user_image text, p_sa_created_by uuid) IS 'Creates per app samna_user row and grants the app default claim, stamped with the acting user_claim.id p_sa_created_by or else its own id. Idempotent.';
+COMMENT ON FUNCTION claimius.upsert_app_user(p_user_id uuid, p_app_id uuid, p_first_name text, p_last_name text, p_user_name text, p_email text, p_phone text, p_external_id text, p_user_image text, p_sa_created_by uuid) IS 'Creates per app samna_user row and grants the app default claim, stamped with the acting user_claim.id p_sa_created_by or else its own id. p_user_name lands only when no live row of the app holds it, ignoring case. Idempotent.';
 
 GRANT EXECUTE ON FUNCTION claimius.upsert_app_user(p_user_id uuid, p_app_id uuid, p_first_name text, p_last_name text, p_user_name text, p_email text, p_phone text, p_external_id text, p_user_image text, p_sa_created_by uuid)
     TO claimius_writer, claimius_reader;
@@ -7078,6 +7083,75 @@ $$ LANGUAGE plpgsql;
 COMMENT ON FUNCTION claimius.update_profile(UUID, JSONB) IS 'Writes the user''s own entries of the public profile, keys without a dot, each {"schema": {...}, "value": ...}; a key whose entry is null is removed. Written on every row of the user so the sync carries it. The prophet calls it for the signed in user; an app''s entries are written through upsert_profile_item. Returns the profile. P0404 for a user with no live row, 22023 for a malformed entry.';
 
 GRANT EXECUTE ON FUNCTION claimius.update_profile(UUID, JSONB)
+    TO claimius_writer, claimius_reader;
+
+CREATE OR REPLACE FUNCTION claimius._check_user_name(p_user_name TEXT) RETURNS VOID AS $$
+BEGIN
+    IF p_user_name IS NULL OR p_user_name !~ '^[a-z][a-z0-9_-]{2,31}$' THEN
+        RAISE EXCEPTION 'user name refused: % must be 3 to 32 lower case letters, digits, _ and - and start with a letter', p_user_name USING ERRCODE = '22023';
+    END IF;
+END;
+$$ LANGUAGE plpgsql IMMUTABLE;
+
+COMMENT ON FUNCTION claimius._check_user_name(TEXT) IS 'The shape of a reservable user name: 3 to 32 lower case letters, digits, _ and -, starting with a letter, so it never reads as a user_id or as me. Raises 22023 otherwise.';
+
+GRANT EXECUTE ON FUNCTION claimius._check_user_name(TEXT)
+    TO claimius_writer, claimius_reader;
+
+CREATE OR REPLACE FUNCTION claimius.get_user_name_available(
+    p_app_id    UUID,
+    p_user_name TEXT
+) RETURNS BOOLEAN AS $$
+BEGIN
+    PERFORM claimius._check_user_name(p_user_name);
+    RETURN NOT EXISTS (
+        SELECT 1 FROM claimius.samna_user u
+        WHERE u.app_id = p_app_id AND lower(u.user_name) = p_user_name AND u.sa_deleted_at IS NULL
+    );
+END;
+$$ LANGUAGE plpgsql STABLE;
+
+COMMENT ON FUNCTION claimius.get_user_name_available(UUID, TEXT) IS 'Whether no live user of the app holds the user name, ignoring case. 22023 for a malformed name.';
+
+GRANT EXECUTE ON FUNCTION claimius.get_user_name_available(UUID, TEXT)
+    TO claimius_writer, claimius_reader;
+
+CREATE OR REPLACE FUNCTION claimius.update_user_name(
+    p_app_id    UUID,
+    p_user_id   UUID,
+    p_user_name TEXT
+) RETURNS TEXT AS $$
+DECLARE
+    v_user_name TEXT;
+BEGIN
+    IF p_user_name IS NOT NULL THEN
+        PERFORM claimius._check_user_name(p_user_name);
+    END IF;
+    IF NOT EXISTS (
+        SELECT 1 FROM claimius.samna_user u
+        WHERE u.user_id = p_user_id AND u.app_id = p_app_id AND u.sa_deleted_at IS NULL
+    ) THEN
+        RAISE EXCEPTION 'user % has no live row in app %', p_user_id, p_app_id USING ERRCODE = 'P0404';
+    END IF;
+    IF p_user_name IS NOT NULL AND EXISTS (
+        SELECT 1 FROM claimius.samna_user u
+        WHERE u.app_id = p_app_id AND lower(u.user_name) = p_user_name AND u.user_id <> p_user_id AND u.sa_deleted_at IS NULL
+    ) THEN
+        RAISE EXCEPTION 'user name % is taken in app %', p_user_name, p_app_id USING ERRCODE = '23505';
+    END IF;
+
+    UPDATE claimius.samna_user
+       SET user_name = p_user_name,
+           sa_updated_at = now()
+     WHERE user_id = p_user_id AND app_id = p_app_id AND sa_deleted_at IS NULL
+    RETURNING user_name INTO v_user_name;
+    RETURN v_user_name;
+END;
+$$ LANGUAGE plpgsql;
+
+COMMENT ON FUNCTION claimius.update_user_name(UUID, UUID, TEXT) IS 'Reserves the user name for the user in the app, or releases it when null. Unique per app ignoring case through idx_samna_user_app_user_name, so a second reserve of a taken name is refused. Returns the user name. P0404 when the user has no live row in the app, 22023 for a malformed name, 23505 when another user of the app holds it.';
+
+GRANT EXECUTE ON FUNCTION claimius.update_user_name(UUID, UUID, TEXT)
     TO claimius_writer, claimius_reader;
 
 CREATE OR REPLACE FUNCTION claimius.get_secret_value(

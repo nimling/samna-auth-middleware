@@ -130,7 +130,7 @@ COMMENT ON COLUMN claimius.samna_user.profile IS 'The user''s public profile: on
 COMMENT ON TABLE claimius.samna_user IS 'User record. One row per (user_id, app_id) pair.';
 COMMENT ON COLUMN claimius.samna_user.user_id IS 'Stable application identifier across apps. Used in all references.';
 COMMENT ON COLUMN claimius.samna_user.app_id IS 'Required app scope. Disciples only hold rows for their own app.';
-COMMENT ON COLUMN claimius.samna_user.user_name IS 'Optional display username, distinct from first_name/last_name.';
+COMMENT ON COLUMN claimius.samna_user.user_name IS 'Optional username, distinct from first_name/last_name, unique per app ignoring case among live rows. A user reserves it in an app through update_user_name; a profile resolves by it while every link carries the user_id.';
 ALTER TABLE claimius.samna_user ADD COLUMN IF NOT EXISTS user_image TEXT;
 
 COMMENT ON COLUMN claimius.samna_user.user_image IS 'Optional user image. URL, string, or id that the implementing system recognizes.';
@@ -147,6 +147,8 @@ CREATE INDEX IF NOT EXISTS idx_samna_user_email ON claimius.samna_user (email);
 CREATE INDEX IF NOT EXISTS idx_samna_user_sa_deleted_at ON claimius.samna_user (sa_deleted_at);
 CREATE INDEX IF NOT EXISTS idx_samna_user_status ON claimius.samna_user (status);
 CREATE INDEX IF NOT EXISTS idx_samna_user_app_external ON claimius.samna_user (app_id, external_id) WHERE sa_deleted_at IS NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_samna_user_app_user_name
+    ON claimius.samna_user (app_id, lower(user_name)) WHERE sa_deleted_at IS NULL;
 
 CREATE TABLE IF NOT EXISTS claimius.samna_client (
                                                      id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
