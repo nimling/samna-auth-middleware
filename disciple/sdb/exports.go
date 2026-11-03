@@ -69,8 +69,6 @@ const (
 	CLAIM_TYPE_VIRTUAL        = shared.CLAIM_TYPE_VIRTUAL
 	CODE_KIND_GUEST           = shared.CODE_KIND_GUEST
 	CODE_KIND_INVITE          = shared.CODE_KIND_INVITE
-	CodeParam                 = shared.CodeParam
-	CodeHeader                = shared.CodeHeader
 	GUEST_MODE_CODE           = shared.GUEST_MODE_CODE
 	GUEST_MODE_OFF            = shared.GUEST_MODE_OFF
 	GUEST_MODE_OPEN           = shared.GUEST_MODE_OPEN
@@ -115,7 +113,6 @@ var (
 	ErrNoProphet         = shared.ErrNoProphet
 	ErrCodeInvalid       = shared.ErrCodeInvalid
 	GetCodeHash          = shared.GetCodeHash
-	GetCodeURL           = shared.GetCodeURL
 	GetCodeValue         = shared.GetCodeValue
 	ErrNoAccess          = shared.ErrNoAccess
 	ErrNotFound          = shared.ErrNotFound

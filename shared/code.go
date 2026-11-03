@@ -10,7 +10,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net/url"
 	"sync"
 	"time"
 
@@ -21,11 +20,7 @@ import (
 	"github.com/uptrace/bun/driver/pgdriver"
 )
 
-const (
-	CodeParam  = "samk"
-	CodeHeader = "SAuth-Code"
-	CodeCookie = "__Host-sauth_samk"
-)
+const CodeCookie = "__Host-sauth_samk"
 
 type CodeKind string
 
@@ -140,24 +135,6 @@ func GetCodeValue() (string, error) {
 func GetCodeHash(value string) string {
 	sum := sha256.Sum256([]byte(value))
 	return hex.EncodeToString(sum[:])
-}
-
-func GetCodeURL(base, path, value string) (string, error) {
-	u, err := url.Parse(base)
-	if err != nil {
-		return "", fmt.Errorf("code url base: %w", err)
-	}
-	if path != "" {
-		ref, err := url.Parse(path)
-		if err != nil {
-			return "", fmt.Errorf("code url path: %w", err)
-		}
-		u = u.ResolveReference(ref)
-	}
-	q := u.Query()
-	q.Set(CodeParam, value)
-	u.RawQuery = q.Encode()
-	return u.String(), nil
 }
 
 func GetCodeLive(ca *CodeAccess, now time.Time) error {
@@ -337,7 +314,7 @@ func (d *DB) PostCode(ctx context.Context, ac *AccessClaim, claimID uuid.UUID, b
 	}
 	created := &CodeCreated{Code: *code, Value: value}
 	if base != "" {
-		if created.URL, err = GetCodeURL(base, body.Path, value); err != nil {
+		if created.URL, err = client.GetCodeURL(base, body.Path, value); err != nil {
 			return nil, err
 		}
 	}
