@@ -2,23 +2,19 @@ package shared
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
-	"net/url"
 	"regexp"
 	"strings"
 	"unicode/utf8"
 
 	"github.com/google/uuid"
-	"github.com/nimling/samna-auth-middleware/v2/client"
 )
 
 var (
 	ErrBadProfileItem = errors.New("bad profile item")
-	ErrNoProphet      = errors.New("no prophet to send the profile item to")
 	ErrBadUserName    = errors.New("bad user name")
 	ErrUserNameTaken  = errors.New("user name taken")
 )
@@ -267,59 +263,6 @@ func (b BodySamProfileItemKey) Validate() error {
 	return nil
 }
 
-func profileActor(ac *AccessClaim, userID uuid.UUID) error {
-	if ac == nil || ac.UserID == uuid.Nil || ac.UserID != userID || ac.Access&ACCESS_READ == 0 {
-		return ErrNoAccess
-	}
-	return nil
-}
-
-func (d *DB) PutProfileItem(ctx context.Context, ac *AccessClaim, item BodySamProfileItem) (json.RawMessage, error) {
-	if err := profileActor(ac, item.UserID); err != nil {
-		return nil, err
-	}
-	if err := item.Validate(); err != nil {
-		return nil, err
-	}
-	if !d.RouteToProphet {
-		return nil, ErrNoProphet
-	}
-	var profile json.RawMessage
-	if err := client.Put(ctx, "profile", item, &profile); err != nil {
-		return nil, profileError(err)
-	}
-	return profile, nil
-}
-
-func (d *DB) DeleteProfileItem(ctx context.Context, ac *AccessClaim, key BodySamProfileItemKey) (json.RawMessage, error) {
-	if err := profileActor(ac, key.UserID); err != nil {
-		return nil, err
-	}
-	if err := key.Validate(); err != nil {
-		return nil, err
-	}
-	if !d.RouteToProphet {
-		return nil, ErrNoProphet
-	}
-	var profile json.RawMessage
-	if err := client.Delete(ctx, "profile", key, &profile); err != nil {
-		return nil, profileError(err)
-	}
-	return profile, nil
-}
-
-func profileError(err error) error {
-	switch {
-	case errors.Is(err, client.ErrNotFound):
-		return fmt.Errorf("%w: %w", ErrNotFound, err)
-	case errors.Is(err, client.ErrForbidden):
-		return fmt.Errorf("%w: %w", ErrNoAccess, err)
-	case errors.Is(err, client.ErrBadRequest):
-		return fmt.Errorf("%w: %w", ErrBadProfileItem, err)
-	}
-	return err
-}
-
 func validateUserName(userName string) error {
 	if !userNamePattern.MatchString(userName) {
 		return fmt.Errorf("%w: user_name must be 3 to 32 lower case letters, digits, _ and - and start with a letter", ErrBadUserName)
@@ -335,52 +278,4 @@ func (b BodySamUserName) Validate() error {
 		return validateUserName(*b.UserName)
 	}
 	return nil
-}
-
-func (d *DB) GetUserNameAvailable(ctx context.Context, ac *AccessClaim, userName string) (*UserNameAvailable, error) {
-	if ac == nil || ac.UserID == uuid.Nil {
-		return nil, ErrNoAccess
-	}
-	if err := validateUserName(userName); err != nil {
-		return nil, err
-	}
-	if !d.RouteToProphet {
-		return nil, ErrNoProphet
-	}
-	var out UserNameAvailable
-	if err := client.Get(ctx, "user_name?user_name="+url.QueryEscape(userName), &out); err != nil {
-		return nil, userNameError(err)
-	}
-	return &out, nil
-}
-
-func (d *DB) PutUserName(ctx context.Context, ac *AccessClaim, body BodySamUserName) (*string, error) {
-	if err := profileActor(ac, body.UserID); err != nil {
-		return nil, err
-	}
-	if err := body.Validate(); err != nil {
-		return nil, err
-	}
-	if !d.RouteToProphet {
-		return nil, ErrNoProphet
-	}
-	var out BodySamUserName
-	if err := client.Put(ctx, "user_name", body, &out); err != nil {
-		return nil, userNameError(err)
-	}
-	return out.UserName, nil
-}
-
-func userNameError(err error) error {
-	switch {
-	case errors.Is(err, client.ErrConflict):
-		return fmt.Errorf("%w: %w", ErrUserNameTaken, err)
-	case errors.Is(err, client.ErrNotFound):
-		return fmt.Errorf("%w: %w", ErrNotFound, err)
-	case errors.Is(err, client.ErrForbidden):
-		return fmt.Errorf("%w: %w", ErrNoAccess, err)
-	case errors.Is(err, client.ErrBadRequest):
-		return fmt.Errorf("%w: %w", ErrBadUserName, err)
-	}
-	return err
 }

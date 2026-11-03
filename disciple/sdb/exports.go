@@ -110,7 +110,6 @@ var (
 	ErrUserNameTaken     = shared.ErrUserNameTaken
 	ErrBadAppCost        = shared.ErrBadAppCost
 	CostSchema           = shared.CostSchema
-	ErrNoProphet         = shared.ErrNoProphet
 	ErrCodeInvalid       = shared.ErrCodeInvalid
 	GetCodeHash          = shared.GetCodeHash
 	GetCodeValue         = shared.GetCodeValue
