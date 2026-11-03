@@ -11,7 +11,6 @@ import (
 
 	"github.com/labstack/echo/v4"
 	"github.com/nimling/samna-auth-middleware/v2/client"
-	"github.com/nimling/samna-auth-middleware/v2/shared"
 	"github.com/nimling/samna-auth-middleware/v2/utils"
 )
 
@@ -57,7 +56,7 @@ type TemplateCliCode struct {
 }
 
 func PostCliToken(ctx echo.Context) error {
-	if shared.GetDebugMode() != shared.DebugModeNone {
+	if utils.GetDebugMode() != utils.DebugModeNone {
 		return respondOAuthError(ctx, http.StatusBadRequest, "invalid_request", cliDebugRefusal)
 	}
 	if err := ctx.Request().ParseForm(); err != nil {

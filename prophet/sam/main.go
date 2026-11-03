@@ -13,6 +13,7 @@ import (
 	"github.com/nimling/samna-auth-middleware/v2/notification"
 	sdb "github.com/nimling/samna-auth-middleware/v2/prophet/sdb"
 	"github.com/nimling/samna-auth-middleware/v2/shared"
+	"github.com/nimling/samna-auth-middleware/v2/utils"
 )
 
 const leadInterval = 5 * time.Second
@@ -52,7 +53,7 @@ func Init(ctx context.Context) error {
 	r.run(func() {
 		shared.LeadSync(ctx, db, shared.RetentionLockKey, leadInterval, db.PruneLoop)
 	})
-	if shared.GetDebugMode() != shared.DebugModeNone {
+	if utils.GetDebugMode() != utils.DebugModeNone {
 		return nil
 	}
 	r.run(func() {

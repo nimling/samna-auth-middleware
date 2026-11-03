@@ -12,7 +12,6 @@ import (
 	"github.com/labstack/gommon/log"
 
 	"github.com/nimling/samna-auth-middleware/v2/client"
-	"github.com/nimling/samna-auth-middleware/v2/shared"
 	"github.com/nimling/samna-auth-middleware/v2/utils"
 )
 
@@ -59,7 +58,7 @@ func Init(ctx context.Context, logger echo.Logger, opts Options) error {
 	}
 	r := &runner{logger: logger, opts: opts, done: make(chan struct{})}
 	run = r
-	if shared.GetDebugMode() != shared.DebugModeNone {
+	if utils.GetDebugMode() != utils.DebugModeNone {
 		close(r.done)
 		logger.Info("uptime reporter disabled in debug mode")
 		return nil

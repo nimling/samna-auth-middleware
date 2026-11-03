@@ -97,7 +97,7 @@ var ErrRoutedSet = errors.New("a routed update carries a Set expression the prop
 var ErrRoutedNoRecord = errors.New("a routed update or delete carries no record: populate the model's key or call ID, the record is never read from a Where expression")
 
 func (d *DB) GetApp(ctx context.Context) (*SamnaApp, error) {
-	if seed := utils.Cfg().DebugSeed; seed != "" && GetDebugMode() != DebugModeNone {
+	if seed := utils.Cfg().DebugSeed; seed != "" && utils.GetDebugMode() != utils.DebugModeNone {
 		app, err := d.GetAppEnv(ctx)
 		if err != nil {
 			return nil, err
@@ -161,7 +161,7 @@ func DeleteAppSeed() {
 var initiateApps atomic.Pointer[[]SamnaApp]
 
 func GetInitiateApps(ctx context.Context) ([]SamnaApp, error) {
-	if GetDebugMode() != DebugModeNone {
+	if utils.GetDebugMode() != utils.DebugModeNone {
 		apps := []SamnaApp{}
 		for _, pair := range strings.Split(utils.Cfg().DebugInitiateApps, ",") {
 			slug, origin, ok := strings.Cut(strings.TrimSpace(pair), "=")
@@ -333,7 +333,7 @@ func openPool(dsn string) *bun.DB {
 }
 
 func resolveOIDC(logger echo.Logger) {
-	if GetDebugMode() != DebugModeNone {
+	if utils.GetDebugMode() != utils.DebugModeNone {
 		return
 	}
 	c := utils.Cfg()
@@ -367,24 +367,6 @@ func resolveOIDC(logger echo.Logger) {
 	}
 	utils.SetOIDC(oidc.Issuer, *tokenURL, *jwksURL)
 	logger.Infof("oidc issuer=%s token=%s jwks=%s", oidc.Issuer, oidc.TokenEndpoint, oidc.JwksUri)
-}
-
-type DebugMode string
-
-const (
-	DebugModeNone    DebugMode = "none"
-	DebugModeUser    DebugMode = "user"
-	DebugModeClients DebugMode = "clients"
-)
-
-func GetDebugMode() DebugMode {
-	if utils.Cfg().DebugUserID != "" {
-		return DebugModeUser
-	}
-	if utils.Cfg().DebugClients != "" {
-		return DebugModeClients
-	}
-	return DebugModeNone
 }
 
 func ModelType[T any]() reflect.Type {

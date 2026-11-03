@@ -11,13 +11,14 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/nimling/samna-auth-middleware/v2/client"
+	"github.com/nimling/samna-auth-middleware/v2/utils"
 )
 
 func (d *DB) ValidateToken(ctx context.Context, token string) (*SamnaUser, uuid.UUID, error) {
 	if token == "" {
 		return nil, uuid.Nil, fmt.Errorf("token is required")
 	}
-	if GetDebugMode() != DebugModeNone {
+	if utils.GetDebugMode() != utils.DebugModeNone {
 		return d.validateTokenDebug(ctx, token)
 	}
 	body := map[string]string{"token": token}

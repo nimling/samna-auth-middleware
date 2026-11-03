@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 	"github.com/nimling/samna-auth-middleware/v2/shared"
+	"github.com/nimling/samna-auth-middleware/v2/utils"
 	"github.com/uptrace/bun"
 )
 
@@ -39,7 +40,7 @@ func Init(logger echo.Logger, opts ...Options) (*DB, error) {
 	if err != nil {
 		return nil, err
 	}
-	d.RouteToProphet = shared.GetDebugMode() == shared.DebugModeNone
+	d.RouteToProphet = utils.GetDebugMode() == utils.DebugModeNone
 	instance = &DB{DB: d}
 	if len(opts) > 0 {
 		instance.Options = opts[0]

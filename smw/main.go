@@ -13,15 +13,14 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
-	"github.com/nimling/samna-auth-middleware/v2/shared"
 	"github.com/nimling/samna-auth-middleware/v2/utils"
 )
 
 func UserAuthMiddleware(opts *UserAuthOptions) echo.MiddlewareFunc {
 	config := configFromUserAuthOptions(opts)
 
-	switch shared.GetDebugMode() {
-	case shared.DebugModeUser:
+	switch utils.GetDebugMode() {
+	case utils.DebugModeUser:
 		return func(next echo.HandlerFunc) echo.HandlerFunc {
 			return func(ctx echo.Context) error {
 				proceed := next
@@ -38,7 +37,7 @@ func UserAuthMiddleware(opts *UserAuthOptions) echo.MiddlewareFunc {
 				return proceed(ctx)
 			}
 		}
-	case shared.DebugModeClients:
+	case utils.DebugModeClients:
 		return func(next echo.HandlerFunc) echo.HandlerFunc {
 			return func(ctx echo.Context) error {
 				proceed := next
