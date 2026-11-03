@@ -12,6 +12,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
+	"github.com/nimling/samna-auth-middleware/v2/client"
 	"github.com/nimling/samna-auth-middleware/v2/disciple/sam"
 	psam "github.com/nimling/samna-auth-middleware/v2/prophet/sam"
 	psdb "github.com/nimling/samna-auth-middleware/v2/prophet/sdb"
@@ -183,7 +184,7 @@ func TestUserNameIsReservedOncePerApp(t *testing.T) {
 	disciple.RouteToProphet = true
 	t.Cleanup(func() { disciple.RouteToProphet = false })
 
-	if got := shared.GetProfileLink(owner); got != server.URL+"/u/"+owner.String() {
+	if got := client.GetProfileLink(owner); got != server.URL+"/u/"+owner.String() {
 		t.Fatalf("the profile link is the samna_auth address with the user id, got %s", got)
 	}
 

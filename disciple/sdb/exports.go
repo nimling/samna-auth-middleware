@@ -110,7 +110,6 @@ var (
 	ErrBadProfileItem    = shared.ErrBadProfileItem
 	ErrBadUserName       = shared.ErrBadUserName
 	ErrUserNameTaken     = shared.ErrUserNameTaken
-	GetProfileLink       = shared.GetProfileLink
 	ErrBadAppCost        = shared.ErrBadAppCost
 	CostSchema           = shared.CostSchema
 	ErrNoProphet         = shared.ErrNoProphet

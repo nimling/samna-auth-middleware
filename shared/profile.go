@@ -14,7 +14,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/nimling/samna-auth-middleware/v2/client"
-	"github.com/nimling/samna-auth-middleware/v2/utils"
 )
 
 var (
@@ -319,10 +318,6 @@ func profileError(err error) error {
 		return fmt.Errorf("%w: %w", ErrBadProfileItem, err)
 	}
 	return err
-}
-
-func GetProfileLink(userID uuid.UUID) string {
-	return strings.TrimRight(utils.Cfg().Endpoint, "/") + "/u/" + userID.String()
 }
 
 func validateUserName(userName string) error {
