@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/nimling/samna-auth-middleware/v2/client"
 	"github.com/nimling/samna-auth-middleware/v2/pkg/encryption"
 	"github.com/uptrace/bun"
 )
@@ -197,6 +198,6 @@ func (s *SamnaSecret) Resolve(ctx context.Context, d *DB, userID uuid.UUID) (str
 		if err == nil || !d.RouteToProphet || attempt > 0 {
 			return plain, err
 		}
-		DeleteAppSeed()
+		client.DeleteAppSeed()
 	}
 }

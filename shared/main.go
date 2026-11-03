@@ -15,7 +15,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 	"github.com/lib/pq"
 	"github.com/nimling/samna-auth-middleware/v2/client"
@@ -110,7 +109,7 @@ func (d *DB) GetApp(ctx context.Context) (*SamnaApp, error) {
 		if err != nil {
 			return nil, err
 		}
-		seed, err := GetAppSeed(ctx)
+		seed, err := client.GetAppSeed(ctx)
 		if err != nil {
 			return nil, err
 		}
@@ -130,32 +129,6 @@ func (d *DB) GetApp(ctx context.Context) (*SamnaApp, error) {
 	}
 	app.PrivateSeed = seed
 	return &app, nil
-}
-
-type AppSeed struct {
-	PrivateSeed string    `json:"private_seed"`
-	OwnerID     uuid.UUID `json:"owner_id"`
-}
-
-var appSeed atomic.Pointer[AppSeed]
-
-func GetAppSeed(ctx context.Context) (*AppSeed, error) {
-	if seed := appSeed.Load(); seed != nil {
-		return seed, nil
-	}
-	var delivered AppSeed
-	if err := client.Get(ctx, "app", &delivered); err != nil {
-		return nil, fmt.Errorf("get app seed from the prophet: %w", err)
-	}
-	if delivered.PrivateSeed == "" {
-		return nil, errors.New("the prophet delivered no app seed")
-	}
-	appSeed.Store(&delivered)
-	return &delivered, nil
-}
-
-func DeleteAppSeed() {
-	appSeed.Store(nil)
 }
 
 var initiateApps atomic.Pointer[[]SamnaApp]

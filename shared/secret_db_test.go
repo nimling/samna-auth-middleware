@@ -22,8 +22,8 @@ import (
 )
 
 type seedEnvelope struct {
-	Data  sdb.AppSeed `json:"data"`
-	Count int         `json:"count"`
+	Data  client.AppSeed `json:"data"`
+	Count int            `json:"count"`
 }
 
 func getSecretSeed(t *testing.T) []byte {
@@ -129,7 +129,7 @@ func getProphetSeed(t *testing.T, seeds ...[]byte) *atomic.Int32 {
 		n := int(calls.Add(1)) - 1
 		seed := seeds[min(n, len(seeds)-1)]
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(seedEnvelope{Data: sdb.AppSeed{PrivateSeed: hex.EncodeToString(seed)}, Count: 1})
+		_ = json.NewEncoder(w).Encode(seedEnvelope{Data: client.AppSeed{PrivateSeed: hex.EncodeToString(seed)}, Count: 1})
 	}))
 	t.Cleanup(server.Close)
 	t.Setenv("SAUTH_ENDPOINT", server.URL)
@@ -139,8 +139,8 @@ func getProphetSeed(t *testing.T, seeds ...[]byte) *atomic.Int32 {
 	t.Setenv("SAUTH_DEBUG_CLIENTS", "")
 	t.Setenv("SAUTH_DEBUG_PRIVATE_SEED", "")
 	client.Bind(server.URL, "")
-	sdb.DeleteAppSeed()
-	t.Cleanup(sdb.DeleteAppSeed)
+	client.DeleteAppSeed()
+	t.Cleanup(client.DeleteAppSeed)
 	return &calls
 }
 
@@ -183,7 +183,7 @@ func TestResolveFetchesTheSeedAgainWhenItChanged(t *testing.T) {
 	calls := getProphetSeed(t, stale, seed)
 	db := getDeployedDisciple(t)
 	ctx := context.Background()
-	if _, err := sdb.GetAppSeed(ctx); err != nil {
+	if _, err := client.GetAppSeed(ctx); err != nil {
 		t.Fatalf("first seed: %v", err)
 	}
 	secretID := postKeptSecret(t, db, getSealedValue(t, "rotated", seed))

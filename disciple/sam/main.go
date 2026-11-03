@@ -86,7 +86,7 @@ func Init(ctx context.Context) error {
 
 func getAppSeed(ctx context.Context, db *shared.DB, interval time.Duration) {
 	for {
-		_, err := shared.GetAppSeed(ctx)
+		_, err := client.GetAppSeed(ctx)
 		if err == nil || ctx.Err() != nil {
 			return
 		}
