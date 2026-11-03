@@ -38,21 +38,19 @@ func forwardedAgent(ctx echo.Context) string {
 }
 
 func forwardedUser(ctx echo.Context) *uuid.UUID {
-	raw := ctx.Request().Header.Get(headerForwardedUser)
-	if raw == "" {
-		raw = ctx.QueryParam("user_id")
-	}
-	if raw == "" {
-		if id, ok := ctx.Get("user_id").(uuid.UUID); ok && id != uuid.Nil {
+	if secret, _ := ctx.Get("app_secret").(string); secret != "" {
+		if raw := ctx.Request().Header.Get(headerForwardedUser); raw != "" {
+			id, err := uuid.Parse(raw)
+			if err != nil || id == uuid.Nil {
+				return nil
+			}
 			return &id
 		}
-		return nil
 	}
-	id, err := uuid.Parse(raw)
-	if err != nil || id == uuid.Nil {
-		return nil
+	if id, ok := ctx.Get("user_id").(uuid.UUID); ok && id != uuid.Nil {
+		return &id
 	}
-	return &id
+	return nil
 }
 
 func captureApp(ctx echo.Context) (uuid.UUID, bool) {
