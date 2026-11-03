@@ -7,21 +7,26 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"net/url"
 	"regexp"
 	"strings"
 	"unicode/utf8"
 
 	"github.com/google/uuid"
 	"github.com/nimling/samna-auth-middleware/v2/client"
+	"github.com/nimling/samna-auth-middleware/v2/utils"
 )
 
 var (
 	ErrBadProfileItem = errors.New("bad profile item")
 	ErrNoProphet      = errors.New("no prophet to send the profile item to")
+	ErrBadUserName    = errors.New("bad user name")
+	ErrUserNameTaken  = errors.New("user name taken")
 )
 
 var (
 	profileFieldPattern = regexp.MustCompile(`^[a-z][a-z0-9_.]{0,63}$`)
+	userNamePattern     = regexp.MustCompile(`^[a-z][a-z0-9_-]{2,31}$`)
 	profileTypes        = []string{"string", "number", "integer", "boolean", "array", "object", "null"}
 	profileFormats      = []string{"multiline", "markdown", "uri", "email", "phone", "date", "time", "datetime", "image", "color", "country", "currency", "percent", "duration"}
 	profileComponents   = []string{"text", "textarea", "markdown", "link", "badge", "chip", "tag", "list", "image", "avatar", "progress", "rating", "table", "keyvalue", "date", "boolean", "number", "card", "hidden"}
@@ -66,6 +71,16 @@ type BodySamProfileItem struct {
 type BodySamProfileItemKey struct {
 	UserID uuid.UUID `json:"user_id"`
 	Field  *string   `json:"field,omitempty"`
+}
+
+type BodySamUserName struct {
+	UserID   uuid.UUID `json:"user_id"`
+	UserName *string   `json:"user_name"`
+}
+
+type UserNameAvailable struct {
+	UserName  string `json:"user_name"`
+	Available bool   `json:"available"`
 }
 
 func (s *ProfileSchema) UnmarshalJSON(data []byte) error {
@@ -302,6 +317,75 @@ func profileError(err error) error {
 		return fmt.Errorf("%w: %w", ErrNoAccess, err)
 	case errors.Is(err, client.ErrBadRequest):
 		return fmt.Errorf("%w: %w", ErrBadProfileItem, err)
+	}
+	return err
+}
+
+func GetProfileLink(userID uuid.UUID) string {
+	return strings.TrimRight(utils.Cfg().Endpoint, "/") + "/u/" + userID.String()
+}
+
+func validateUserName(userName string) error {
+	if !userNamePattern.MatchString(userName) {
+		return fmt.Errorf("%w: user_name must be 3 to 32 lower case letters, digits, _ and - and start with a letter", ErrBadUserName)
+	}
+	return nil
+}
+
+func (b BodySamUserName) Validate() error {
+	if b.UserID == uuid.Nil {
+		return fmt.Errorf("%w: user_id is required", ErrBadUserName)
+	}
+	if b.UserName != nil {
+		return validateUserName(*b.UserName)
+	}
+	return nil
+}
+
+func (d *DB) GetUserNameAvailable(ctx context.Context, ac *AccessClaim, userName string) (*UserNameAvailable, error) {
+	if ac == nil || ac.UserID == uuid.Nil {
+		return nil, ErrNoAccess
+	}
+	if err := validateUserName(userName); err != nil {
+		return nil, err
+	}
+	if !d.RouteToProphet {
+		return nil, ErrNoProphet
+	}
+	var out UserNameAvailable
+	if err := client.Get(ctx, "user_name?user_name="+url.QueryEscape(userName), &out); err != nil {
+		return nil, userNameError(err)
+	}
+	return &out, nil
+}
+
+func (d *DB) PutUserName(ctx context.Context, ac *AccessClaim, body BodySamUserName) (*string, error) {
+	if err := profileActor(ac, body.UserID); err != nil {
+		return nil, err
+	}
+	if err := body.Validate(); err != nil {
+		return nil, err
+	}
+	if !d.RouteToProphet {
+		return nil, ErrNoProphet
+	}
+	var out BodySamUserName
+	if err := client.Put(ctx, "user_name", body, &out); err != nil {
+		return nil, userNameError(err)
+	}
+	return out.UserName, nil
+}
+
+func userNameError(err error) error {
+	switch {
+	case errors.Is(err, client.ErrConflict):
+		return fmt.Errorf("%w: %w", ErrUserNameTaken, err)
+	case errors.Is(err, client.ErrNotFound):
+		return fmt.Errorf("%w: %w", ErrNotFound, err)
+	case errors.Is(err, client.ErrForbidden):
+		return fmt.Errorf("%w: %w", ErrNoAccess, err)
+	case errors.Is(err, client.ErrBadRequest):
+		return fmt.Errorf("%w: %w", ErrBadUserName, err)
 	}
 	return err
 }

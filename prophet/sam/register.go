@@ -141,6 +141,10 @@ func RegisterEndpoints(g *echo.Group) {
 	profile.PUT("", h.PutProfileItem)
 	profile.DELETE("", h.DeleteProfileItem)
 
+	userName := g.Group("/user_name")
+	userName.GET("", h.GetUserNameAvailable)
+	userName.PUT("", h.PutUserName)
+
 	field := g.Group("/field")
 	field.GET("", h.GetObjectFields)
 	field.GET("/:id", h.GetObjectField)
