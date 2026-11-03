@@ -61,11 +61,14 @@ func (o *Organization) ValidatePatch() error {
 	if o.IsEmpty() {
 		return errors.New("no fields to update")
 	}
-	if err := disallowKeys(o, append(commonForbiddenKeys, "owner_id", "root_id")...); err != nil {
+	if err := disallowKeys(o, append(commonForbiddenKeys, "root_id")...); err != nil {
 		return err
 	}
 	if o.HasKey("name") && o.Name == "" {
 		return errors.New("name cannot be empty")
+	}
+	if o.HasKey("owner_id") && (o.OwnerID == nil || *o.OwnerID == uuid.Nil) {
+		return errors.New("owner_id must not be the nil uuid")
 	}
 	return nil
 }

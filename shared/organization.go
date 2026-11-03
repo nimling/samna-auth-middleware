@@ -2,6 +2,8 @@ package shared
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 
 	"github.com/google/uuid"
 	"github.com/lib/pq"
@@ -149,15 +151,54 @@ func (d *DB) InsertRootOrganization(ctx context.Context, conn bun.IConn, ac *Acc
 	return org, nil
 }
 
+func (d *DB) validateOrganizationParent(ctx context.Context, ac *AccessClaim, orgID, ownerID uuid.UUID) error {
+	if ownerID == uuid.Nil {
+		return nil
+	}
+	var parent struct {
+		Moved   bool `bun:"moved"`
+		Allowed bool `bun:"allowed"`
+	}
+	err := d.NewRaw(`
+		SELECT o.sa_owner_id <> p.id AS moved,
+		       o.sa_root_id = p.sa_root_id
+		       AND NOT EXISTS (
+		           SELECT 1 FROM claimius.get_owner_ancestors(?, p.id) a WHERE a.object_id = o.id
+		       ) AS allowed
+		FROM claimius.organization o, claimius.organization p
+		WHERE o.id = ? AND o.sa_deleted_at IS NULL
+		  AND p.id = ? AND p.sa_deleted_at IS NULL
+	`, OBJECT_TYPE_ORGANIZATION, orgID, ownerID).Scan(ctx, &parent)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrNotFound
+	}
+	if err != nil {
+		return err
+	}
+	if !parent.Moved {
+		return nil
+	}
+	if !parent.Allowed {
+		return ErrOrganizationParent
+	}
+	if ac == nil || !d.HasAccess(ctx, ac.UserID, ownerID, OBJECT_TYPE_ORGANIZATION, ACCESS_WRITE) {
+		return ErrNoAccess
+	}
+	return nil
+}
+
 func (d *DB) updateOrganization(ctx context.Context, conn bun.IConn, ac *AccessClaim, orgID uuid.UUID, org *Organization) (*Organization, error) {
 	if ac == nil {
 		return nil, ErrNoAccess
+	}
+	if err := d.validateOrganizationParent(ctx, ac, orgID, org.OwnerID); err != nil {
+		return nil, err
 	}
 	q := d.DB.NewUpdate().Conn(conn).
 		Model(org).
 		Where("id = ?", orgID).
 		Where("sa_deleted_at IS NULL").
-		ExcludeColumn("id", "sa_owner_id", "sa_root_id", "sa_created_by", "provider_id", "sa_created_at", "sa_updated_at", "sa_deleted_at").
+		ExcludeColumn("id", "sa_root_id", "sa_created_by", "provider_id", "sa_created_at", "sa_updated_at", "sa_deleted_at").
 		OmitZero().
 		Returning("*")
 	for _, column := range org.PatchNulls() {

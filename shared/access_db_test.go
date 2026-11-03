@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"slices"
 	"testing"
 	"time"
 
@@ -709,5 +710,89 @@ func TestLocalDeleteRemovesAScopeBindingAndAGrantByTheirOwnID(t *testing.T) {
 	}
 	if _, err := db.NewDelete().Model(&sdb.ClaimObject{ID: uuid.New(), ClaimID: claim.ID}).Access(ac).Exec(ctx); !errors.Is(err, sdb.ErrNotFound) {
 		t.Fatalf("a binding id the claim does not hold answers ErrNotFound, got %v", err)
+	}
+}
+
+func TestUpdateOrganizationMovesItUnderAnotherParent(t *testing.T) {
+	db := database(t)
+	ctx := context.Background()
+	ac, err := db.MutationAccess(ctx, userA, orgRoot, sdb.OBJECT_TYPE_ORGANIZATION, sdb.ACCESS_WRITE)
+	if err != nil {
+		t.Fatalf("access: %v", err)
+	}
+	insert := func(name string, owner uuid.UUID) uuid.UUID {
+		org := sdb.Organization{Name: name, Type: sdb.ORGANIZATION_TYPE_CHILD, OwnerID: owner}
+		if err := db.NewInsert().Model(&org).Access(ac).Scan(ctx, &org); err != nil {
+			t.Fatalf("insert %s: %v", name, err)
+		}
+		return org.ID
+	}
+	mover := insert("Mover", orgRoot)
+	sibling := insert("Sibling", orgRoot)
+	child := insert("Mover child", mover)
+	organization := sdb.ObjectType(sdb.OBJECT_TYPE_ORGANIZATION)
+	grant := func(name string, access sdb.ClaimAccess, object uuid.UUID, user uuid.UUID) {
+		claim, err := db.CreateClaim(ctx, nil, ac, sdb.CreateClaimParams{Name: name, Access: access})
+		if err != nil {
+			t.Fatalf("claim %s: %v", name, err)
+		}
+		if _, err := claim.AssignObject(&sdb.ClaimObject{ObjectID: &object, ObjectType: &organization, Inherits: true, OwnerID: orgRoot, RootID: orgRoot}); err != nil {
+			t.Fatalf("bind %s: %v", name, err)
+		}
+		if _, err := claim.AssignUser(user); err != nil {
+			t.Fatalf("assign %s: %v", name, err)
+		}
+	}
+	grant("Sibling reader", sdb.ACCESS_READ, sibling, userC)
+	grant("Mover writer", sdb.ACCESS_READ|sdb.ACCESS_WRITE, mover, userB)
+	move := func(actor uuid.UUID, id, owner uuid.UUID) error {
+		access, err := db.MutationAccess(ctx, actor, id, sdb.OBJECT_TYPE_ORGANIZATION, sdb.ACCESS_WRITE)
+		if err != nil {
+			return err
+		}
+		target := sdb.Organization{ID: id, OwnerID: owner}
+		return db.NewUpdate().Model(&target).Access(access).Scan(ctx, &target)
+	}
+	ownerOf := func(id uuid.UUID) uuid.UUID {
+		var owner uuid.UUID
+		if err := db.NewRaw(`SELECT sa_owner_id FROM claimius.organization WHERE id = ?`, id).Scan(ctx, &owner); err != nil {
+			t.Fatalf("read owner: %v", err)
+		}
+		return owner
+	}
+
+	if db.HasAccess(ctx, userC, child, sdb.OBJECT_TYPE_ORGANIZATION, sdb.ACCESS_READ) {
+		t.Fatal("the sibling's reader must not read the mover's child before the move")
+	}
+	if err := move(userB, mover, sibling); !errors.Is(err, sdb.ErrNoAccess) {
+		t.Fatalf("a caller without write on the new parent must be refused, got %v", err)
+	}
+	if owner := ownerOf(mover); owner != orgRoot {
+		t.Fatalf("a refused move must leave the owner, got %s", owner)
+	}
+	if err := move(userA, mover, sibling); err != nil {
+		t.Fatalf("move under the sibling: %v", err)
+	}
+	if owner := ownerOf(mover); owner != sibling {
+		t.Fatalf("the mover must be owned by the sibling, got %s", owner)
+	}
+	ancestors, err := db.GetParentOrganizations(ctx, child)
+	if err != nil {
+		t.Fatalf("ancestors: %v", err)
+	}
+	if !slices.Contains(ancestors, sibling) || !slices.Contains(ancestors, mover) {
+		t.Fatalf("the mover's child must follow it under the sibling, got %v", ancestors)
+	}
+	if !db.HasAccess(ctx, userC, child, sdb.OBJECT_TYPE_ORGANIZATION, sdb.ACCESS_READ) {
+		t.Fatal("the sibling's reader must read the mover's child after the move")
+	}
+	if err := move(userA, sibling, child); !errors.Is(err, sdb.ErrOrganizationParent) {
+		t.Fatalf("a move under a descendant must be refused, got %v", err)
+	}
+	if err := move(userA, sibling, sibling); !errors.Is(err, sdb.ErrOrganizationParent) {
+		t.Fatalf("a move under itself must be refused, got %v", err)
+	}
+	if owner := ownerOf(sibling); owner != orgRoot {
+		t.Fatalf("a refused cycle must leave the owner, got %s", owner)
 	}
 }

@@ -624,3 +624,28 @@ func TestABindingKeepsTheOwnerItIsGivenRoutedOrLocal(t *testing.T) {
 		t.Fatalf("a binding given no owner takes the access owner %s, got %s", ac.OwnerID, owner)
 	}
 }
+
+func TestARoutedOrganizationMoveIsCheckedBeforeTheProphet(t *testing.T) {
+	db := database(t)
+	ctx := context.Background()
+	ac, err := db.MutationAccess(ctx, userA, orgGrand, sdb.OBJECT_TYPE_ORGANIZATION, sdb.ACCESS_WRITE)
+	if err != nil {
+		t.Fatalf("access: %v", err)
+	}
+	calls := recordingProphet(t)
+	db.RouteToProphet = true
+	defer func() { db.RouteToProphet = false }()
+
+	cycle := sdb.Organization{ID: orgAlpha, OwnerID: orgGrand}
+	if err := db.NewUpdate().Model(&cycle).Access(ac).OmitZero().Scan(ctx, &cycle); !errors.Is(err, sdb.ErrOrganizationParent) {
+		t.Fatalf("a routed move under a descendant must be refused, got %v", err)
+	}
+	if len(*calls) != 0 {
+		t.Fatalf("a refused move must not reach the prophet, got %v", *calls)
+	}
+	move := sdb.Organization{ID: orgGrand, OwnerID: orgRoot}
+	_ = db.NewUpdate().Model(&move).Access(ac).OmitZero().Scan(ctx, &move)
+	if len(*calls) != 1 || strings.Replace((*calls)[0], " /sam/", " /", 1) != "PATCH /organization/"+orgGrand.String() {
+		t.Fatalf("a routed move must patch the organization on the prophet, got %v", *calls)
+	}
+}

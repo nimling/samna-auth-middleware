@@ -197,7 +197,7 @@ func putOrganization(ctx echo.Context, org Organization, appID uuid.UUID) error 
 	columns := make([]string, 0, 6)
 	for key, column := range map[string]string{
 		"name": "name", "description": "description", "type": "type",
-		"external_id": "external_id", "location_id": "sa_location_id", "level": "sa_level",
+		"external_id": "external_id", "location_id": "sa_location_id", "level": "sa_level", "owner_id": "sa_owner_id",
 	} {
 		if org.HasKey(key) {
 			columns = append(columns, column)
@@ -205,6 +205,28 @@ func putOrganization(ctx echo.Context, org Organization, appID uuid.UUID) error 
 	}
 	if len(columns) == 0 {
 		return errorsx.ErrBadRequest
+	}
+	if org.HasKey("owner_id") {
+		var allowed bool
+		if err := sdb.Instance().NewRaw(`
+			SELECT o.sa_root_id = p.sa_root_id
+			       AND NOT EXISTS (
+			           SELECT 1 FROM claimius.get_owner_ancestors('claimius.organization', p.id) a WHERE a.object_id = o.id
+			       )
+			FROM claimius.organization o, claimius.organization p
+			WHERE o.id = ? AND o.sa_deleted_at IS NULL
+			  AND p.id = ? AND p.sa_deleted_at IS NULL
+			  AND claimius.app_has_object(?, 'claimius.organization', p.id)`,
+			org.ID, *org.OwnerID, appID).Scan(ctx.Request().Context(), &allowed); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return errorsx.ErrNotFound
+			}
+			ctx.Logger().Errorf("putOrganization parent: %v", err)
+			return errorsx.ErrDbUnexpected
+		}
+		if !allowed {
+			return errorsx.ErrBadRequest
+		}
 	}
 	res, err := sdb.Instance().NewUpdate().
 		Model(&org).
