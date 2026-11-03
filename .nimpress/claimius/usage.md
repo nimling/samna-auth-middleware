@@ -61,7 +61,7 @@ A count halves every 14 days after its latest use, computed at read time by `_de
 
 ## Per user relations
 
-`user_relation` holds one row per user, app and related object: `pinned`, `priority`, `used_at`, a `description`, and a `parent_id` and `sibling_id` into the user's own relations for ordering. It carries recents, favourites and per user tags against any object.
+`user_relation` holds one row per user, app and related object: `pinned`, `priority`, `used_at`, a `description`, and a `parent_id` and `sibling_id` into the user's own relations for ordering. It carries recents, favourites and per user tags against any object. Relations track bookmarks, pinned items and usage history, each in the app of its row.
 
 1. A relation belongs to its user alone. `resolve_access` answers `claimius.user_relation` by matching `id` and `user_id`, and reads no grant.
 

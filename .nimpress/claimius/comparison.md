@@ -124,6 +124,14 @@ Entra ID decides at token issuance, not per object:
 
 **Claimius wins** every per object operation, which Entra ID does not answer, and revocation. Entra ID wins issuance and storage for an application whose decisions are coarse enough to fit in fewer than 200 groups and roles; the two compose, Entra ID proving who the user is and claimius what the user may do to each object.
 
+## What claimius is not
+
+It is not an authentication system. Establishing who the caller is happens in Samna Auth and the middleware's guard, and claimius starts from an identity that has already been established.
+
+It is not a policy language. There are no conditions beyond a grant's time window, no attribute expressions, and no rule ordering to reason about. A grant is a mask on a binding, and the deny bit, weighed by the claim level, is the only combining rule; see [Denials](./denials.md).
+
+It is not a token format. Nothing it produces is signed, carried in a header, or verified by a third party. Every answer is a query result inside a trust boundary that already holds the data. Acting for another user is answered the same way, per request against live grants; see [Delegation](./users.md#delegation). The vocabulary of acting for another user predates [RFC 8693](https://www.rfc-editor.org/rfc/rfc8693). OASIS WS-Trust 1.4 named the two elements `ActAs` and `OnBehalfOf`, and that is where the phrase in common use comes from.
+
 ## Cost
 
 ### The data set and the workload
