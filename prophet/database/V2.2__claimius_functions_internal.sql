@@ -1486,7 +1486,7 @@ BEGIN
     INTO v_built
     FROM claimius._build_grants_for_objects(p_user_id, p_app_id, p_object_types, p_object_ids, p_cascades, v_point) b;
 
-    WITH area AS (
+    WITH area AS MATERIALIZED (
         SELECT b.object_type, b.object_id
         FROM jsonb_to_recordset(v_built) AS b(object_type TEXT, object_id UUID, sa_access INTEGER)
         WHERE b.sa_access = 0
