@@ -360,9 +360,11 @@ func getRelayedAssetData(ctx echo.Context, target, token string) error {
 		return respond.Error(ctx, http.StatusBadGateway, "")
 	}
 	req.Header.Set(echo.HeaderAuthorization, "Bearer "+token)
-	for _, name := range client.ConditionalHeaders {
-		if v := ctx.Request().Header.Get(name); v != "" {
-			req.Header.Set(name, v)
+	for _, names := range [][]string{client.ConditionalHeaders, client.RangeHeaders} {
+		for _, name := range names {
+			if v := ctx.Request().Header.Get(name); v != "" {
+				req.Header.Set(name, v)
+			}
 		}
 	}
 	resp, err := http.DefaultClient.Do(req)
@@ -377,7 +379,7 @@ func getRelayedAssetData(ctx echo.Context, target, token string) error {
 		}
 	}
 	ctx.Response().WriteHeader(resp.StatusCode)
-	if resp.StatusCode == http.StatusNotModified {
+	if resp.StatusCode == http.StatusNotModified || resp.StatusCode == http.StatusRequestedRangeNotSatisfiable {
 		return nil
 	}
 	_, err = io.Copy(ctx.Response(), resp.Body)
@@ -413,17 +415,41 @@ func getProphetAssetData(ctx echo.Context, home objectAssetHome) error {
 			conditions.IfModifiedSince = &since
 		}
 	}
-	resp, err := blobClient.DownloadStream(reqCtx, &blob.DownloadStreamOptions{
-		AccessConditions: &blob.AccessConditions{ModifiedAccessConditions: conditions},
-	})
-	var respErr *azcore.ResponseError
-	if errors.As(err, &respErr) && respErr.StatusCode == http.StatusNotModified {
-		for _, name := range client.AssetHeaders {
-			if v := respErr.RawResponse.Header.Get(name); v != "" {
-				ctx.Response().Header().Set(name, v)
-			}
+	access := &blob.AccessConditions{ModifiedAccessConditions: conditions}
+	options := &blob.DownloadStreamOptions{AccessConditions: access}
+	r := client.AssetRange{Status: http.StatusOK}
+	if ctx.Request().Header.Get("Range") != "" {
+		props, err := blobClient.GetProperties(reqCtx, &blob.GetPropertiesOptions{AccessConditions: access})
+		if done, failure := putBlobNotModified(ctx, err); done {
+			return failure
 		}
-		return ctx.NoContent(http.StatusNotModified)
+		if err != nil {
+			ctx.Logger().Error(err)
+			return respond.Error(ctx, http.StatusInternalServerError, "")
+		}
+		size, etag, lastModified := int64(-1), "", ""
+		if props.ContentLength != nil {
+			size = *props.ContentLength
+		}
+		if props.ETag != nil {
+			etag = string(*props.ETag)
+		}
+		if props.LastModified != nil {
+			lastModified = props.LastModified.UTC().Format(http.TimeFormat)
+		}
+		r = client.GetAssetRange(ctx.Request().Header, size, etag, lastModified)
+		if r.Status == http.StatusRequestedRangeNotSatisfiable {
+			ctx.Response().Header().Set("Accept-Ranges", "bytes")
+			ctx.Response().Header().Set("Content-Range", r.GetContentRange())
+			return ctx.NoContent(r.Status)
+		}
+		if r.Status == http.StatusPartialContent {
+			options.Range = blob.HTTPRange{Offset: r.Start, Count: r.Length}
+		}
+	}
+	resp, err := blobClient.DownloadStream(reqCtx, options)
+	if done, failure := putBlobNotModified(ctx, err); done {
+		return failure
 	}
 	if err != nil {
 		ctx.Logger().Error(err)
@@ -447,5 +473,23 @@ func getProphetAssetData(ctx echo.Context, home objectAssetHome) error {
 	if resp.CacheControl != nil {
 		header.Set(echo.HeaderCacheControl, *resp.CacheControl)
 	}
-	return respond.Stream(ctx, http.StatusOK, header.Get(echo.HeaderContentType), resp.Body)
+	header.Set("Accept-Ranges", "bytes")
+	if r.Status == http.StatusPartialContent {
+		header.Set("Content-Range", r.GetContentRange())
+		header.Set(echo.HeaderContentLength, strconv.FormatInt(r.Length, 10))
+	}
+	return respond.Stream(ctx, r.Status, header.Get(echo.HeaderContentType), resp.Body)
+}
+
+func putBlobNotModified(ctx echo.Context, err error) (bool, error) {
+	var respErr *azcore.ResponseError
+	if !errors.As(err, &respErr) || respErr.StatusCode != http.StatusNotModified {
+		return false, nil
+	}
+	for _, name := range client.AssetHeaders {
+		if v := respErr.RawResponse.Header.Get(name); v != "" {
+			ctx.Response().Header().Set(name, v)
+		}
+	}
+	return true, ctx.NoContent(http.StatusNotModified)
 }

@@ -140,6 +140,12 @@ func getProphetAssetData(ctx echo.Context, linkID uuid.UUID, cache AssetCache) e
 			conditional.Set(name, v)
 		}
 	}
+	request := conditional.Clone()
+	for _, name := range client.RangeHeaders {
+		if v := ctx.Request().Header.Get(name); v != "" {
+			request.Set(name, v)
+		}
+	}
 	path := "object_asset/" + linkID.String() + "/data"
 
 	if cache != nil {
@@ -150,7 +156,7 @@ func getProphetAssetData(ctx echo.Context, linkID uuid.UUID, cache AssetCache) e
 		}
 		if cached != nil {
 			if getAssetFresh(cached.Header, time.Now()) {
-				return putAssetResponse(ctx, cached, conditional)
+				return putAssetResponse(ctx, cached, request)
 			}
 			validators := http.Header{}
 			if v := cached.Header.Get("ETag"); v != "" {
@@ -169,40 +175,48 @@ func getProphetAssetData(ctx echo.Context, linkID uuid.UUID, cache AssetCache) e
 			if resp.StatusCode == http.StatusNotModified {
 				resp.Body.Close()
 				for _, name := range client.AssetHeaders {
-					if v := resp.Header.Get(name); v != "" && name != echo.HeaderContentLength && name != echo.HeaderContentType {
+					if v := resp.Header.Get(name); v != "" && name != echo.HeaderContentLength && name != echo.HeaderContentType && name != "Content-Range" {
 						cached.Header.Set(name, v)
 					}
 				}
-				return putAssetResponse(ctx, cached, conditional)
+				return putAssetResponse(ctx, cached, request)
 			}
 			if cached.Body != nil {
 				cached.Body.Close()
 			}
-			return putProphetResponse(ctx, linkID, cache, resp)
+			return putProphetResponse(ctx, linkID, cache, resp, request)
 		}
+		resp, err := client.GetStream(reqCtx, path, conditional)
+		if err != nil {
+			return putProphetError(ctx, err)
+		}
+		return putProphetResponse(ctx, linkID, cache, resp, request)
 	}
 
-	resp, err := client.GetStream(reqCtx, path, conditional)
+	resp, err := client.GetStream(reqCtx, path, request)
 	if err != nil {
 		return putProphetError(ctx, err)
 	}
-	return putProphetResponse(ctx, linkID, cache, resp)
+	return putProphetResponse(ctx, linkID, nil, resp, request)
 }
 
-func putProphetResponse(ctx echo.Context, linkID uuid.UUID, cache AssetCache, resp *http.Response) error {
+func putProphetResponse(ctx echo.Context, linkID uuid.UUID, cache AssetCache, resp *http.Response, request http.Header) error {
 	defer resp.Body.Close()
 	for _, name := range client.AssetHeaders {
 		if v := resp.Header.Get(name); v != "" {
 			ctx.Response().Header().Set(name, v)
 		}
 	}
-	ctx.Response().WriteHeader(resp.StatusCode)
-	if resp.StatusCode == http.StatusNotModified {
-		return nil
-	}
-	if resp.StatusCode != http.StatusOK || cache == nil || !getAssetStorable(resp.Header) {
+	if resp.StatusCode != http.StatusOK {
+		ctx.Response().WriteHeader(resp.StatusCode)
+		if resp.StatusCode == http.StatusNotModified || resp.StatusCode == http.StatusRequestedRangeNotSatisfiable {
+			return nil
+		}
 		_, err := io.Copy(ctx.Response(), resp.Body)
 		return err
+	}
+	if cache == nil || !getAssetStorable(resp.Header) {
+		return putAssetRange(ctx, resp.Header, resp.Body, request)
 	}
 	reader, writer := io.Pipe()
 	done := make(chan struct{})
@@ -214,7 +228,11 @@ func putProphetResponse(ctx echo.Context, linkID uuid.UUID, cache AssetCache, re
 		}
 		_, _ = io.Copy(io.Discard, reader)
 	}()
-	_, err := io.Copy(ctx.Response(), io.TeeReader(resp.Body, writer))
+	whole := io.TeeReader(resp.Body, writer)
+	err := putAssetRange(ctx, resp.Header, whole, request)
+	if err == nil {
+		_, err = io.Copy(io.Discard, whole)
+	}
 	writer.CloseWithError(err)
 	<-done
 	return err
@@ -231,7 +249,7 @@ func putProphetError(ctx echo.Context, err error) error {
 	return respondError(ctx, http.StatusBadGateway, "Bad gateway")
 }
 
-func putAssetResponse(ctx echo.Context, res *AssetResponse, conditional http.Header) error {
+func putAssetResponse(ctx echo.Context, res *AssetResponse, request http.Header) error {
 	if res.Body != nil {
 		defer res.Body.Close()
 	}
@@ -244,16 +262,54 @@ func putAssetResponse(ctx echo.Context, res *AssetResponse, conditional http.Hea
 			ctx.Response().Header().Set(name, v)
 		}
 	}
-	if status == http.StatusOK && getAssetNotModified(res.Header, conditional) {
+	if status == http.StatusOK && getAssetNotModified(res.Header, request) {
 		ctx.Response().Header().Del(echo.HeaderContentLength)
 		ctx.Response().WriteHeader(http.StatusNotModified)
 		return nil
+	}
+	if status == http.StatusOK && res.Body != nil {
+		return putAssetRange(ctx, res.Header, res.Body, request)
 	}
 	ctx.Response().WriteHeader(status)
 	if status == http.StatusNotModified || res.Body == nil {
 		return nil
 	}
 	_, err := io.Copy(ctx.Response(), res.Body)
+	return err
+}
+
+func putAssetRange(ctx echo.Context, header http.Header, body io.Reader, request http.Header) error {
+	size, err := strconv.ParseInt(header.Get(echo.HeaderContentLength), 10, 64)
+	if err != nil {
+		size = -1
+	}
+	out := ctx.Response()
+	if size >= 0 {
+		out.Header().Set("Accept-Ranges", "bytes")
+	}
+	r := client.GetAssetRange(request, size, header.Get("ETag"), header.Get(echo.HeaderLastModified))
+	switch r.Status {
+	case http.StatusRequestedRangeNotSatisfiable:
+		out.Header().Set("Content-Range", r.GetContentRange())
+		out.Header().Set(echo.HeaderContentLength, "0")
+		out.WriteHeader(r.Status)
+		return nil
+	case http.StatusPartialContent:
+		if seeker, ok := body.(io.Seeker); ok {
+			if _, err := seeker.Seek(r.Start, io.SeekStart); err != nil {
+				return err
+			}
+		} else if _, err := io.CopyN(io.Discard, body, r.Start); err != nil {
+			return err
+		}
+		out.Header().Set("Content-Range", r.GetContentRange())
+		out.Header().Set(echo.HeaderContentLength, strconv.FormatInt(r.Length, 10))
+		out.WriteHeader(r.Status)
+		_, err := io.CopyN(out, body, r.Length)
+		return err
+	}
+	out.WriteHeader(http.StatusOK)
+	_, err = io.Copy(out, body)
 	return err
 }
 

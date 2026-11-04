@@ -388,7 +388,7 @@ func GetStream(ctx context.Context, path string, header http.Header) (*http.Resp
 	if err != nil {
 		return nil, err
 	}
-	if resp.StatusCode == http.StatusNotModified || (resp.StatusCode >= 200 && resp.StatusCode < 300) {
+	if resp.StatusCode == http.StatusNotModified || resp.StatusCode == http.StatusRequestedRangeNotSatisfiable || (resp.StatusCode >= 200 && resp.StatusCode < 300) {
 		return resp, nil
 	}
 	defer resp.Body.Close()
@@ -457,6 +457,79 @@ func refusal(body io.ReadCloser, sentinel error) error {
 	return fmt.Errorf("%w: %s", sentinel, envelope.Error.Message)
 }
 
-var AssetHeaders = []string{"Content-Type", "Content-Length", "ETag", "Last-Modified", "Cache-Control"}
+var AssetHeaders = []string{"Content-Type", "Content-Length", "ETag", "Last-Modified", "Cache-Control", "Accept-Ranges", "Content-Range"}
 
 var ConditionalHeaders = []string{"If-None-Match", "If-Modified-Since"}
+
+var RangeHeaders = []string{"Range", "If-Range"}
+
+type AssetRange struct {
+	Status int
+	Start  int64
+	Length int64
+	Size   int64
+}
+
+func (r AssetRange) GetContentRange() string {
+	if r.Status == http.StatusRequestedRangeNotSatisfiable {
+		return fmt.Sprintf("bytes */%d", r.Size)
+	}
+	return fmt.Sprintf("bytes %d-%d/%d", r.Start, r.Start+r.Length-1, r.Size)
+}
+
+func GetAssetRange(request http.Header, size int64, etag, lastModified string) AssetRange {
+	whole := AssetRange{Status: http.StatusOK, Length: size, Size: size}
+	value := strings.TrimSpace(request.Get("Range"))
+	if value == "" || size < 0 {
+		return whole
+	}
+	if condition := strings.TrimSpace(request.Get("If-Range")); condition != "" {
+		if strings.HasPrefix(condition, `"`) {
+			if condition != etag {
+				return whole
+			}
+		} else {
+			since, err := http.ParseTime(condition)
+			modified, modifiedErr := http.ParseTime(lastModified)
+			if err != nil || modifiedErr != nil || !since.Equal(modified) {
+				return whole
+			}
+		}
+	}
+	spec, ok := strings.CutPrefix(value, "bytes=")
+	if !ok || strings.Contains(spec, ",") {
+		return whole
+	}
+	first, last, ok := strings.Cut(strings.TrimSpace(spec), "-")
+	if !ok {
+		return whole
+	}
+	unsatisfiable := AssetRange{Status: http.StatusRequestedRangeNotSatisfiable, Size: size}
+	if first == "" {
+		suffix, err := strconv.ParseInt(last, 10, 64)
+		if err != nil || suffix < 0 {
+			return whole
+		}
+		if suffix == 0 || size == 0 {
+			return unsatisfiable
+		}
+		suffix = min(suffix, size)
+		return AssetRange{Status: http.StatusPartialContent, Start: size - suffix, Length: suffix, Size: size}
+	}
+	start, err := strconv.ParseInt(first, 10, 64)
+	if err != nil || start < 0 {
+		return whole
+	}
+	end := size - 1
+	if last != "" {
+		stop, err := strconv.ParseInt(last, 10, 64)
+		if err != nil || stop < start {
+			return whole
+		}
+		end = min(end, stop)
+	}
+	if start >= size {
+		return unsatisfiable
+	}
+	return AssetRange{Status: http.StatusPartialContent, Start: start, Length: end - start + 1, Size: size}
+}
