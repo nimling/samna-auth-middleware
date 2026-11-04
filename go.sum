@@ -79,6 +79,8 @@ github.com/nimling/nimbody v1.0.4 h1:zHKH/CtgjVp1Q20fqIml7I4Vj0dS9XsR2s1oJjpj1/A
 github.com/nimling/nimbody v1.0.4/go.mod h1:P+qiBlOF+jkBGDnXgmnV00jlZ11KPpY11TcRQp9ycFw=
 github.com/nimling/nimtel v0.0.4 h1:ikJEURQF3Wqg8RihU/UTzQ5zMkdYt7QY30vcLR2KGlo=
 github.com/nimling/nimtel v0.0.4/go.mod h1:PYkXZN1oB/0jc38WJjxdAzklt6a/zL67HSyzMGKe950=
+github.com/nimling/nimtel v1.0.0 h1:8Kelo7FNzV+aB86gKLsagUt9xzq8ysoh1Osli/1gWB0=
+github.com/nimling/nimtel v1.0.0/go.mod h1:PYkXZN1oB/0jc38WJjxdAzklt6a/zL67HSyzMGKe950=
 github.com/pkg/browser v0.0.0-20240102092130-5ac0b6a4141c h1:+mdjkGKdHQG3305AYmdv1U2eRNDiU2ErMBj1gwrq8eQ=
 github.com/pkg/browser v0.0.0-20240102092130-5ac0b6a4141c/go.mod h1:7rwL4CYBLnjLxUqIJNnCWiEdr3bn6IUYi15bNlnbCCU=
 github.com/pmezard/go-difflib v1.0.0/go.mod h1:iKH77koFhYxTK1pcRnkKkqfTogsbg7gZNVY4sRDYZ/4=
