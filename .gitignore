@@ -37,3 +37,6 @@ go.work.sum
 
 # bench suites, run by just bench
 /bench/
+
+.env.*
+!.env.example
