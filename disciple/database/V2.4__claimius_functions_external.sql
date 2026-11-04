@@ -2241,10 +2241,7 @@ DECLARE
 BEGIN
     IF TG_TABLE_NAME = 'user_object' AND TG_OP = 'UPDATE' THEN
         DELETE FROM claimius.claim_graph_cache c
-        USING (SELECT DISTINCT n.user_id
-               FROM changed n
-                   JOIN before o ON o.user_id = n.user_id AND o.object_type = n.object_type AND o.object_id = n.object_id
-               WHERE (n.sa_access, n.grants, n.scope, n.direct_grant) IS DISTINCT FROM (o.sa_access, o.grants, o.scope, o.direct_grant)) u
+        USING (SELECT DISTINCT n.user_id FROM changed n) u
         WHERE c.user_id = u.user_id;
         RETURN NULL;
     ELSIF TG_TABLE_NAME = 'user_object' THEN
