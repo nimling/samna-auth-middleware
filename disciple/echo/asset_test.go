@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -357,5 +358,141 @@ func TestTheOutboundAssetRouteUsesTheHostCacheOnlyWhileFresh(t *testing.T) {
 	}
 	if rec.Body.String() != "fresh-bytes" || cache.puts != 2 || rec.Header().Get("Cache-Control") != "no-store" {
 		t.Fatalf("a no-store answer is streamed with its header and never put, got %q puts=%d", rec.Body.String(), cache.puts)
+	}
+}
+
+func TestTheInboundAssetRouteAnswersByteRanges(t *testing.T) {
+	key, kid := getAssetTestKeys(t)
+	assetID := uuid.New()
+	source := func(_ context.Context, _ uuid.UUID) (*AssetResponse, error) {
+		return &AssetResponse{
+			Status: http.StatusOK,
+			Header: http.Header{"Content-Type": {"audio/mpeg"}, "Content-Length": {"10"}, "Etag": {`"v1"`}, "Last-Modified": {"Tue, 13 Oct 2026 10:00:00 GMT"}},
+			Body:   io.NopCloser(strings.NewReader("0123456789")),
+		}, nil
+	}
+	cases := []struct {
+		name    string
+		header  map[string]string
+		status  int
+		body    string
+		content string
+	}{
+		{"a closed range", map[string]string{"Range": "bytes=2-5"}, http.StatusPartialContent, "2345", "bytes 2-5/10"},
+		{"a suffix range", map[string]string{"Range": "bytes=-3"}, http.StatusPartialContent, "789", "bytes 7-9/10"},
+		{"If-Range with the current ETag", map[string]string{"Range": "bytes=0-1", "If-Range": `"v1"`}, http.StatusPartialContent, "01", "bytes 0-1/10"},
+		{"If-Range with a stale ETag", map[string]string{"Range": "bytes=0-1", "If-Range": `"v0"`}, http.StatusOK, "0123456789", ""},
+		{"a range past the end", map[string]string{"Range": "bytes=10-12"}, http.StatusRequestedRangeNotSatisfiable, "", "bytes */10"},
+		{"no range", nil, http.StatusOK, "0123456789", ""},
+	}
+	for _, c := range cases {
+		ctx, rec := getAssetTestRequest(t, assetID, getAssetTestToken(t, key, kid, assetTestSlug, assetTestProphet), c.header)
+		if err := getAssetData(ctx, source); err != nil {
+			t.Fatalf("%s: %v", c.name, err)
+		}
+		if rec.Code != c.status || rec.Body.String() != c.body {
+			t.Fatalf("%s: got %d %q, want %d %q", c.name, rec.Code, rec.Body.String(), c.status, c.body)
+		}
+		if rec.Header().Get("Content-Range") != c.content || rec.Header().Get("Accept-Ranges") != "bytes" {
+			t.Fatalf("%s: Content-Range %q Accept-Ranges %q", c.name, rec.Header().Get("Content-Range"), rec.Header().Get("Accept-Ranges"))
+		}
+		if c.status == http.StatusPartialContent && rec.Header().Get("Content-Length") != strconv.Itoa(len(c.body)) {
+			t.Fatalf("%s: a 206 carries the length of its range, got %q", c.name, rec.Header().Get("Content-Length"))
+		}
+	}
+}
+
+func TestTheOutboundAssetRouteServesRangesFromTheWholeCachedBody(t *testing.T) {
+	linkID := uuid.New()
+	calls := getAssetTestProphet(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "video/mp4")
+		w.Header().Set("ETag", `"v4"`)
+		w.Header().Set("Cache-Control", "public, max-age=300")
+		w.Write([]byte("0123456789"))
+	})
+
+	cache := &assetTestCache{}
+	ctx, rec := getAssetTestReader(map[string]string{"Range": "bytes=3-4"})
+	if err := getProphetAssetData(ctx, linkID, cache); err != nil {
+		t.Fatalf("miss: %v", err)
+	}
+	if rec.Code != http.StatusPartialContent || rec.Body.String() != "34" || rec.Header().Get("Content-Range") != "bytes 3-4/10" {
+		t.Fatalf("a range on a miss answers 206 with its bytes, got %d %q %q", rec.Code, rec.Body.String(), rec.Header().Get("Content-Range"))
+	}
+	if (*calls)[0].header.Get("Range") != "" {
+		t.Fatalf("with a cache the prophet is asked for the whole body, got Range %q", (*calls)[0].header.Get("Range"))
+	}
+	if cache.puts != 1 || string(cache.putBody) != "0123456789" {
+		t.Fatalf("the cache is put the whole body, never the range, got puts=%d %q", cache.puts, cache.putBody)
+	}
+
+	cache.stored = &AssetResponse{Status: http.StatusOK, Header: http.Header{
+		"Content-Type": {"video/mp4"}, "Content-Length": {"10"}, "Etag": {`"v4"`}, "Cache-Control": {"max-age=300"}, "Date": {time.Now().UTC().Format(http.TimeFormat)},
+	}}
+	cache.body = []byte("0123456789")
+	before := len(*calls)
+	ctx, rec = getAssetTestReader(map[string]string{"Range": "bytes=-2"})
+	if err := getProphetAssetData(ctx, linkID, cache); err != nil {
+		t.Fatalf("fresh: %v", err)
+	}
+	if rec.Code != http.StatusPartialContent || rec.Body.String() != "89" || len(*calls) != before || cache.puts != 1 {
+		t.Fatalf("a fresh stored body answers the range without the prophet and puts nothing, got %d %q calls=%d puts=%d", rec.Code, rec.Body.String(), len(*calls)-before, cache.puts)
+	}
+
+	ctx, rec = getAssetTestReader(map[string]string{"Range": "bytes=20-"})
+	if err := getProphetAssetData(ctx, linkID, cache); err != nil {
+		t.Fatalf("unsatisfiable: %v", err)
+	}
+	if rec.Code != http.StatusRequestedRangeNotSatisfiable || rec.Body.Len() != 0 || rec.Header().Get("Content-Range") != "bytes */10" || cache.puts != 1 {
+		t.Fatalf("a range past a stored body answers 416, got %d %q %q puts=%d", rec.Code, rec.Body.String(), rec.Header().Get("Content-Range"), cache.puts)
+	}
+}
+
+func TestTheOutboundAssetRoutePassesRangesThroughWithoutACache(t *testing.T) {
+	linkID := uuid.New()
+	calls := getAssetTestProphet(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "audio/ogg")
+		w.Header().Set("ETag", `"v5"`)
+		w.Header().Set("Accept-Ranges", "bytes")
+		switch r.Header.Get("Range") {
+		case "bytes=1-2":
+			w.Header().Set("Content-Range", "bytes 1-2/10")
+			w.Header().Set("Content-Length", "2")
+			w.WriteHeader(http.StatusPartialContent)
+			w.Write([]byte("12"))
+		case "bytes=50-":
+			w.Header().Set("Content-Range", "bytes */10")
+			w.WriteHeader(http.StatusRequestedRangeNotSatisfiable)
+		default:
+			w.Write([]byte("0123456789"))
+		}
+	})
+
+	ctx, rec := getAssetTestReader(map[string]string{"Range": "bytes=1-2", "If-Range": `"v5"`})
+	if err := getProphetAssetData(ctx, linkID, nil); err != nil {
+		t.Fatalf("range: %v", err)
+	}
+	last := (*calls)[len(*calls)-1]
+	if last.header.Get("Range") != "bytes=1-2" || last.header.Get("If-Range") != `"v5"` {
+		t.Fatalf("without a cache the range and its validator reach the prophet, got %v", last.header)
+	}
+	if rec.Code != http.StatusPartialContent || rec.Body.String() != "12" || rec.Header().Get("Content-Range") != "bytes 1-2/10" || rec.Header().Get("Accept-Ranges") != "bytes" {
+		t.Fatalf("the prophet's 206 passes through, got %d %q %v", rec.Code, rec.Body.String(), rec.Header())
+	}
+
+	ctx, rec = getAssetTestReader(map[string]string{"Range": "bytes=50-"})
+	if err := getProphetAssetData(ctx, linkID, nil); err != nil {
+		t.Fatalf("unsatisfiable: %v", err)
+	}
+	if rec.Code != http.StatusRequestedRangeNotSatisfiable || rec.Header().Get("Content-Range") != "bytes */10" {
+		t.Fatalf("the prophet's 416 passes through, got %d %v", rec.Code, rec.Header())
+	}
+
+	ctx, rec = getAssetTestReader(map[string]string{"Range": "bytes=4-5"})
+	if err := getProphetAssetData(ctx, linkID, nil); err != nil {
+		t.Fatalf("whole: %v", err)
+	}
+	if rec.Code != http.StatusPartialContent || rec.Body.String() != "45" || rec.Header().Get("Content-Range") != "bytes 4-5/10" {
+		t.Fatalf("a prophet that answers the whole body still yields the range, got %d %q %q", rec.Code, rec.Body.String(), rec.Header().Get("Content-Range"))
 	}
 }

@@ -108,3 +108,60 @@ func TestTheRelayCarriesAProphetTokenAndPassesTheHomeAnswerThrough(t *testing.T)
 		t.Fatalf("the home's 304 passes through without a body, got %d %q", rec.Code, rec.Body.String())
 	}
 }
+
+func TestTheRelayPassesByteRangesThroughToTheHome(t *testing.T) {
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("key: %v", err)
+	}
+	var seen *http.Request
+	home := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seen = r.Clone(r.Context())
+		w.Header().Set("Content-Type", "video/mp4")
+		w.Header().Set("ETag", `"h2"`)
+		w.Header().Set("Accept-Ranges", "bytes")
+		if r.Header.Get("Range") == "bytes=100-" {
+			w.Header().Set("Content-Range", "bytes */9")
+			w.WriteHeader(http.StatusRequestedRangeNotSatisfiable)
+			return
+		}
+		w.Header().Set("Content-Range", "bytes 0-2/9")
+		w.Header().Set("Content-Length", "3")
+		w.WriteHeader(http.StatusPartialContent)
+		w.Write([]byte("mp4"))
+	}))
+	defer home.Close()
+
+	token, err := getObjectAssetToken(key, uuid.New(), "https://auth.example.test", "book", uuid.New(), "sauth", time.Now())
+	if err != nil {
+		t.Fatalf("sign: %v", err)
+	}
+	target := home.URL + "/api/auth/asset/" + uuid.NewString() + "/data"
+
+	e := echo.New()
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/sam/object_asset/x/data", nil)
+	req.Header.Set("Range", "bytes=0-2")
+	req.Header.Set("If-Range", `"h2"`)
+	ctx := e.NewContext(req, rec)
+	if err := getRelayedAssetData(ctx, target, token); err != nil {
+		t.Fatalf("relay range: %v", err)
+	}
+	if seen.Header.Get("Range") != "bytes=0-2" || seen.Header.Get("If-Range") != `"h2"` {
+		t.Fatalf("the range and its validator reach the home, got %v", seen.Header)
+	}
+	if rec.Code != http.StatusPartialContent || rec.Body.String() != "mp4" || rec.Header().Get("Content-Range") != "bytes 0-2/9" || rec.Header().Get("Accept-Ranges") != "bytes" {
+		t.Fatalf("the home's 206 passes through, got %d %q %v", rec.Code, rec.Body.String(), rec.Header())
+	}
+
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/sam/object_asset/x/data", nil)
+	req.Header.Set("Range", "bytes=100-")
+	ctx = e.NewContext(req, rec)
+	if err := getRelayedAssetData(ctx, target, token); err != nil {
+		t.Fatalf("relay unsatisfiable: %v", err)
+	}
+	if rec.Code != http.StatusRequestedRangeNotSatisfiable || rec.Body.Len() != 0 || rec.Header().Get("Content-Range") != "bytes */9" {
+		t.Fatalf("the home's 416 passes through without a body, got %d %q %v", rec.Code, rec.Body.String(), rec.Header())
+	}
+}

@@ -2,8 +2,8 @@
 gate: samna-developer
 layout: doc
 title: Assets
-description: The shared link from an asset to a claimius object, object_asset, which apps it is published to, how a link is read and written, and how a file is fetched end to end through the prophet without any hop keeping or inventing freshness.
-tags: object_asset, get_object_assets, apps_for_object, GetObjectAssets, GetObjectAsset, GetObjectAssetData, GetAssetData, AssetSource, AssetCache, asset link, profile, banner, logo
+description: The shared link from an asset to a claimius object, object_asset, which apps it is published to, how a link is read and written, and how a file is fetched end to end through the prophet, whole or by byte range, without any hop keeping or inventing freshness.
+tags: object_asset, get_object_assets, apps_for_object, GetObjectAssets, GetObjectAsset, GetObjectAssetData, GetAssetData, AssetSource, AssetCache, asset link, byte range, profile, banner, logo
 lastUpdated: true
 ---
 
@@ -92,11 +92,11 @@ A reader fetches a file from its own app, the app asks the prophet, and the prop
 reader → app /api/asset/:id/data → prophet /sam/object_asset/:id/data → home <auth base>/asset/:asset_id/data
 ```
 
-1. **The app.** The consumer's own route calls `GetObjectAssetData(ctx, linkID)` from `disciple/echo`. It checks the reader's READ on the link's object through `GetObjectAsset`, then asks the prophet through the `client` with the app's credentials, forwarding the reader's `If-None-Match` and `If-Modified-Since`. It writes back the status, `Content-Type`, `Content-Length`, `ETag`, `Last-Modified` and `Cache-Control` unchanged, so a `304` reaches the reader as a `304`, and streams the body. A `404` or `403` from the prophet is passed on; any other failure answers `502`.
+1. **The app.** The consumer's own route calls `GetObjectAssetData(ctx, linkID)` from `disciple/echo`. It checks the reader's READ on the link's object through `GetObjectAsset`, then asks the prophet through the `client` with the app's credentials, forwarding the reader's `If-None-Match` and `If-Modified-Since`, and its `Range` and `If-Range` when the host registers no `AssetCache`. It writes back the status, `Content-Type`, `Content-Length`, `ETag`, `Last-Modified`, `Cache-Control`, `Accept-Ranges` and `Content-Range` unchanged, so a `304` reaches the reader as a `304` and a `206` as a `206`, and streams the body. A `404` or `403` from the prophet is passed on; any other failure answers `502`.
 
-2. **The prophet.** `GET /sam/object_asset/:id/data` answers only a live link published to the calling app, `404` otherwise. When the prophet holds the asset itself, a live row of its own `public.asset` table with the link's `asset_id` and `app_id`, it streams that asset from its blob store with the conditional headers passed on. Otherwise it relays a `GET` carrying the reader's conditional headers to the home at `<auth base>/asset/<asset_id>/data`. The auth base is the first of the home app's redirect URIs that ends in `/callback`, without `/callback`: the group the home mounts `RegisterEndpoints` on. A home with no such URI answers `502`. The relay carries a JWT signed with the home app's key, `kid` the home app's id, issuer the prophet's endpoint, audience the home app's slug, subject the prophet's system app, `client_id` the system app's slug, valid for one minute.
+2. **The prophet.** `GET /sam/object_asset/:id/data` answers only a live link published to the calling app, `404` otherwise. When the prophet holds the asset itself, a live row of its own `public.asset` table with the link's `asset_id` and `app_id`, it streams that asset, or only the requested range of it, from its blob store with the conditional headers passed on. Otherwise it relays a `GET` carrying the reader's conditional and range headers to the home at `<auth base>/asset/<asset_id>/data`. The auth base is the first of the home app's redirect URIs that ends in `/callback`, without `/callback`: the group the home mounts `RegisterEndpoints` on. A home with no such URI answers `502`. The relay carries a JWT signed with the home app's key, `kid` the home app's id, issuer the prophet's endpoint, audience the home app's slug, subject the prophet's system app, `client_id` the system app's slug, valid for one minute.
 
-3. **The home.** `GET /asset/:id/data` in `disciple/sam`'s `RegisterEndpoints` accepts only that token: valid against the app's JWKS, the expected issuer, the app in the audience, an expiry, and `client_id` the slug of the prophet the disciple is bound to. A user's token for the same app carries the app's slug there and is refused with `401`. The disciple cannot know the host's storage, so it calls the host's source, `AssetSource`, which opens the asset by id and answers status, headers and body. With no source, or no asset, it answers `404`. A `200` whose `ETag` matches the request's `If-None-Match`, or whose `Last-Modified` is not after its `If-Modified-Since`, is answered `304` without a body.
+3. **The home.** `GET /asset/:id/data` in `disciple/sam`'s `RegisterEndpoints` accepts only that token: valid against the app's JWKS, the expected issuer, the app in the audience, an expiry, and `client_id` the slug of the prophet the disciple is bound to. A user's token for the same app carries the app's slug there and is refused with `401`. The disciple cannot know the host's storage, so it calls the host's source, `AssetSource`, which opens the asset by id and answers status, headers and body. With no source, or no asset, it answers `404`. A `200` whose `ETag` matches the request's `If-None-Match`, or whose `Last-Modified` is not after its `If-Modified-Since`, is answered `304` without a body. A range is cut from the source's body, which is seeked when it is an `io.Seeker`, such as an `*os.File`, and read up to the range otherwise.
 
 The host registers both callbacks with `PutOptions` of `disciple/echo`, imported here as `saecho`, where it starts:
 
@@ -107,6 +107,22 @@ saecho.PutOptions(saecho.Options{
 })
 ```
 
+## Byte ranges
+
+Every hop answers ranges the way a file server does, so audio and video seek and resume.
+
+1. An answer whose size is known carries `Accept-Ranges: bytes`.
+
+2. One range, `bytes=0-499`, `bytes=500-` or the suffix `bytes=-500`, answers `206` with `Content-Range: bytes <first>-<last>/<size>`, the range's `Content-Length` and only those bytes. A range that runs past the end stops at the last byte.
+
+3. `If-Range` keeps the range only when it is the current strong `ETag` or the exact `Last-Modified` date; any other validator answers the whole body with `200`.
+
+4. A range that starts past the last byte, `bytes=-0`, or any range of an empty file answers `416` with `Content-Range: bytes */<size>` and no body.
+
+5. Several ranges in one request, a unit other than `bytes` or a malformed range answer the whole body with `200`.
+
+6. `If-None-Match` and `If-Modified-Since` are checked first: a matching validator answers `304` whatever the range.
+
 ## Freshness passes through
 
 Every hop passes `Content-Type`, `Content-Length`, `ETag`, `Last-Modified` and `Cache-Control` through untouched and never invents freshness. The middleware keeps no cache of its own. A host may register an `AssetCache`:
@@ -114,13 +130,15 @@ Every hop passes `Content-Type`, `Content-Length`, `ETag`, `Last-Modified` and `
 | Method | Called |
 |---|---|
 | `Get(ctx, linkID, conditional)` | Before the prophet is asked; answers a stored response or nothing |
-| `Put(ctx, linkID, header, body)` | While a `200` streams to the reader, with every response header and the body |
+| `Put(ctx, linkID, header, body)` | While a `200` streams from the prophet, with every response header and the whole body, even when the reader asked for a range |
 
 1. A stored response is served only while it is fresh under its own `Cache-Control`: `s-maxage` or `max-age` against its `Date` and `Age`, and never when it says `no-store`, `no-cache` or `private`.
 
 2. A stale one is revalidated with the prophet using its own `ETag` and `Last-Modified`. A `304` serves the stored body with the fresh validators and `Cache-Control` the prophet answered, and puts nothing; a `200` streams the new body and puts it.
 
-3. Only a `200` is put, and never one that says `no-store` or `private`.
+3. Only a whole `200` is put, never a `206`, and never one that says `no-store` or `private`.
+
+4. With a cache the app asks the prophet for the whole body and cuts the reader's range from it while the whole body streams into `Put`. A stored body answers ranges itself.
 
 A host cache that honours `no-store`, `private`, `max-age` and revalidation by `ETag` and `Last-Modified` is therefore never asked to serve what the home would not have let a cache serve.
 
