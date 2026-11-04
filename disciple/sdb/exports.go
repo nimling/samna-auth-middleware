@@ -21,12 +21,6 @@ type (
 	CodeAccess               = shared.CodeAccess
 	CodeCreated              = shared.CodeCreated
 	CodeKind                 = shared.CodeKind
-	BodyCode                 = shared.BodyCode
-	BodyClaimGuest           = shared.BodyClaimGuest
-	BodySamProfileItem       = shared.BodySamProfileItem
-	BodySamProfileItemKey    = shared.BodySamProfileItemKey
-	BodySamUserName          = shared.BodySamUserName
-	UserNameAvailable        = shared.UserNameAvailable
 	ProfileItem              = shared.ProfileItem
 	CreateClaimParams        = shared.CreateClaimParams
 	CreateVirtualClaimParams = shared.CreateVirtualClaimParams
@@ -69,8 +63,6 @@ const (
 	CLAIM_TYPE_VIRTUAL        = shared.CLAIM_TYPE_VIRTUAL
 	CODE_KIND_GUEST           = shared.CODE_KIND_GUEST
 	CODE_KIND_INVITE          = shared.CODE_KIND_INVITE
-	CodeParam                 = shared.CodeParam
-	CodeHeader                = shared.CodeHeader
 	GUEST_MODE_CODE           = shared.GUEST_MODE_CODE
 	GUEST_MODE_OFF            = shared.GUEST_MODE_OFF
 	GUEST_MODE_OPEN           = shared.GUEST_MODE_OPEN
@@ -103,30 +95,23 @@ const (
 )
 
 var (
-	AuditWhere           = shared.AuditWhere
-	ClaimWhere           = shared.ClaimWhere
-	AnonymousUserID      = shared.AnonymousUserID
-	ErrBadCode           = shared.ErrBadCode
-	ErrBadProfileItem    = shared.ErrBadProfileItem
-	ErrBadUserName       = shared.ErrBadUserName
-	ErrUserNameTaken     = shared.ErrUserNameTaken
-	GetProfileLink       = shared.GetProfileLink
-	ErrBadAppCost        = shared.ErrBadAppCost
-	CostSchema           = shared.CostSchema
-	ErrNoProphet         = shared.ErrNoProphet
-	ErrCodeInvalid       = shared.ErrCodeInvalid
-	GetCodeHash          = shared.GetCodeHash
-	GetCodeURL           = shared.GetCodeURL
-	GetCodeValue         = shared.GetCodeValue
-	ErrNoAccess          = shared.ErrNoAccess
-	ErrNotFound          = shared.ErrNotFound
-	ErrRootConflict      = shared.ErrRootConflict
-	ErrUserAlreadyExists = shared.ErrUserAlreadyExists
-	ObjectWhere          = shared.ObjectWhere
-	RelationClaimObjects = shared.RelationClaimObjects
-	RelationClaimUsers   = shared.RelationClaimUsers
-	RelationOwner        = shared.RelationOwner
-	ResolveObjectType    = shared.ResolveObjectType
-	StripObjectSchema    = shared.StripObjectSchema
-	UserWhere            = shared.UserWhere
+	AuditWhere            = shared.AuditWhere
+	ClaimWhere            = shared.ClaimWhere
+	AnonymousUserID       = shared.AnonymousUserID
+	ErrBadCode            = shared.ErrBadCode
+	ErrBadAppCost         = shared.ErrBadAppCost
+	CostSchema            = shared.CostSchema
+	ErrCodeInvalid        = shared.ErrCodeInvalid
+	ErrNoAccess           = shared.ErrNoAccess
+	ErrNotFound           = shared.ErrNotFound
+	ErrOrganizationParent = shared.ErrOrganizationParent
+	ErrRootConflict       = shared.ErrRootConflict
+	ErrUserAlreadyExists  = shared.ErrUserAlreadyExists
+	ObjectWhere           = shared.ObjectWhere
+	RelationClaimObjects  = shared.RelationClaimObjects
+	RelationClaimUsers    = shared.RelationClaimUsers
+	RelationOwner         = shared.RelationOwner
+	ResolveObjectType     = shared.ResolveObjectType
+	StripObjectSchema     = shared.StripObjectSchema
+	UserWhere             = shared.UserWhere
 )

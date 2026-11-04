@@ -169,6 +169,10 @@ They answer what a row names, never what the reader may do: a write still goes t
 
 A read writes only its settle: the pairs it recomputes and the marks it moves, the `user_users_diff` rows those raise while the app has a viewer, its cursor, the `user_users` rows of a first directory view, the `user_users_diff` rows it folds into `user_users`, the reader's `usage_diff` rows it folds into its pairs and the `claim_graph_cache` row a graph read stores. Nothing else in a read path writes.
 
+When something that reads has to cause an effect, a cascade, an audit entry, a sync notification, the effect belongs to the write that caused it. A cascade and a sync event are triggers on the table where the originating write happened, the cascade firing once per transition; an audit entry is written in the transaction of that write; see [Audit](./audit.md). Past its settle, the read path stays a read.
+
+A read that writes takes locks. Under concurrency those locks land on rows that live traffic is trying to read, and the symptom is a listing that takes minutes on a small dataset while ordinary writes queue behind it. That is why the settle is the one write a read makes, why it locks the reader's own share and nothing per area, and why every wait it makes is bounded, items 2 and 3 below.
+
 1. No cascade runs in a read. The soft delete of a user cascades to its grants, relations and field values through `tg_cascade_user_soft_delete`, once, in the write that deleted the user. `check_user_active` is a predicate.
 
 2. A settle locks nothing per area: the areas are read from the cursor or the mark, never taken. It locks the reader's whole share with one advisory lock, its own pairs and its cursor, and the `user_users_diff` and `user_users` rows of the objects it folds, and never anything per object; see [Materialization](./materialization.md#locks-a-settle-takes).

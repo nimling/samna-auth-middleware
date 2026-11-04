@@ -10,13 +10,14 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
+	"github.com/nimling/samna-auth-middleware/v2/client"
 	sdb "github.com/nimling/samna-auth-middleware/v2/disciple/sdb"
 	"github.com/nimling/samna-auth-middleware/v2/shared"
 )
 
 const (
-	CodeParam  = shared.CodeParam
-	CodeHeader = shared.CodeHeader
+	CodeParam  = client.CodeParam
+	CodeHeader = client.CodeHeader
 	CodeCookie = shared.CodeCookie
 )
 

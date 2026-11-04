@@ -9,7 +9,7 @@ lastUpdated: true
 
 # Samna Auth Middleware
 
-Samna Auth Middleware is the Go module every service in the Samna stack links to reach [Samna Auth](/solutions/auth/). It authenticates requests, keeps a local copy of the access state in the service's own Postgres, and answers access questions from that copy without a network call. The TypeScript package `@nimling/samna-auth-middleware` ships beside it for the browser half.
+Samna Auth Middleware is the Go module every service in the Samna stack links to reach [Samna Auth](/solutions/auth/server). It authenticates requests, keeps a local copy of the access state in the service's own Postgres, and answers access questions from that copy without a network call. The TypeScript package `@nimling/samna-auth-middleware` ships beside it for the browser half.
 
 **Repository**: [nimling/samna-auth-middleware](https://github.com/nimling/samna-auth-middleware)
 

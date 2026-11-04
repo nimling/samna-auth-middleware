@@ -21,7 +21,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 	"github.com/nimling/samna-auth-middleware/v2/client"
-	sdb "github.com/nimling/samna-auth-middleware/v2/disciple/sdb"
 	"github.com/nimling/samna-auth-middleware/v2/utils"
 )
 
@@ -103,9 +102,9 @@ func TestTheInboundAssetRouteAcceptsOnlyTheProphetToken(t *testing.T) {
 	key, kid := getAssetTestKeys(t)
 	assetID := uuid.New()
 	var opened []uuid.UUID
-	source := func(_ context.Context, id uuid.UUID) (*sdb.AssetResponse, error) {
+	source := func(_ context.Context, id uuid.UUID) (*AssetResponse, error) {
 		opened = append(opened, id)
-		return &sdb.AssetResponse{
+		return &AssetResponse{
 			Status: http.StatusOK,
 			Header: http.Header{"Content-Type": {"image/png"}, "Etag": {`"v1"`}, "Cache-Control": {"max-age=60"}, "X-Internal": {"secret"}},
 			Body:   io.NopCloser(strings.NewReader("png-bytes")),
@@ -206,7 +205,7 @@ func getAssetTestReader(header map[string]string) (echo.Context, *httptest.Respo
 
 type assetTestCache struct {
 	mu      sync.Mutex
-	stored  *sdb.AssetResponse
+	stored  *AssetResponse
 	body    []byte
 	gets    []http.Header
 	puts    int
@@ -214,14 +213,14 @@ type assetTestCache struct {
 	putHead http.Header
 }
 
-func (c *assetTestCache) Get(_ context.Context, _ uuid.UUID, conditional http.Header) (*sdb.AssetResponse, error) {
+func (c *assetTestCache) Get(_ context.Context, _ uuid.UUID, conditional http.Header) (*AssetResponse, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.gets = append(c.gets, conditional)
 	if c.stored == nil {
 		return nil, nil
 	}
-	return &sdb.AssetResponse{Status: c.stored.Status, Header: c.stored.Header.Clone(), Body: io.NopCloser(bytes.NewReader(c.body))}, nil
+	return &AssetResponse{Status: c.stored.Status, Header: c.stored.Header.Clone(), Body: io.NopCloser(bytes.NewReader(c.body))}, nil
 }
 
 func (c *assetTestCache) Put(_ context.Context, _ uuid.UUID, header http.Header, body io.Reader) error {
@@ -309,7 +308,7 @@ func TestTheOutboundAssetRouteUsesTheHostCacheOnlyWhileFresh(t *testing.T) {
 		t.Fatalf("a miss streams the prophet's 200 and puts it with its headers, got %q puts=%d %q", rec.Body.String(), cache.puts, cache.putBody)
 	}
 
-	cache.stored = &sdb.AssetResponse{Status: http.StatusOK, Header: http.Header{
+	cache.stored = &AssetResponse{Status: http.StatusOK, Header: http.Header{
 		"Content-Type": {"image/png"}, "Etag": {`"v3"`}, "Cache-Control": {"max-age=300"}, "Date": {time.Now().UTC().Format(http.TimeFormat)},
 	}}
 	cache.body = []byte("cached-bytes")

@@ -5,8 +5,11 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"fmt"
-	"github.com/nimling/samna-auth-middleware/v2/utils"
 	"net/url"
+	"strings"
+
+	"github.com/google/uuid"
+	"github.com/nimling/samna-auth-middleware/v2/utils"
 )
 
 const (
@@ -80,4 +83,31 @@ func EndSessionURL(slug string, pageRedirect string) (string, error) {
 func RevokeURLFor(slug string) (string, error) {
 	endpoint := utils.Cfg().Endpoint
 	return joinURL(endpoint, fmt.Sprintf("api/app/%s/oauth/revoke", slug))
+}
+
+func GetProfileLink(userID uuid.UUID) string {
+	return strings.TrimRight(utils.Cfg().Endpoint, "/") + "/u/" + userID.String()
+}
+
+const (
+	CodeParam  = "samk"
+	CodeHeader = "SAuth-Code"
+)
+
+func GetCodeURL(base, path, value string) (string, error) {
+	u, err := url.Parse(base)
+	if err != nil {
+		return "", fmt.Errorf("code url base: %w", err)
+	}
+	if path != "" {
+		ref, err := url.Parse(path)
+		if err != nil {
+			return "", fmt.Errorf("code url path: %w", err)
+		}
+		u = u.ResolveReference(ref)
+	}
+	q := u.Query()
+	q.Set(CodeParam, value)
+	u.RawQuery = q.Encode()
+	return u.String(), nil
 }

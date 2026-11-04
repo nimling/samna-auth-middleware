@@ -11,6 +11,8 @@ lastUpdated: true
 
 A prophet appends every change of a mirrored source table to `sync_event`. A consumer of an app, a disciple database or a peer prophet, reads the app's events after its cursor and applies them to its own copy, where it derives its own pairs. The protocol that moves the events is pull, and it belongs to the middleware; see [Sync in Go](./middleware/sync.md).
 
+The prophet to disciple stream is an append only log of state changes with a monotonic sequence, consumed idempotently, with failures retried rather than dropped. That is the delivery contract behind [RFC 8417](https://www.rfc-editor.org/rfc/rfc8417) security event tokens and the push and poll profiles in [RFC 8935](https://www.rfc-editor.org/rfc/rfc8935) and [RFC 8936](https://www.rfc-editor.org/rfc/rfc8936); the middleware takes the poll shape. Claimius carries the payload as source rows rather than as signed json web tokens, because both ends are databases under one authority rather than independent parties needing to verify each other: a consumer pulls with its own app credentials.
+
 ## The row
 
 `sync_event (seq bigserial, operation, event_type, payload jsonb, app_id, written_at, txid xid8)` is indexed by its primary key `seq`, by `idx_sync_event_app_txid_seq (app_id, txid, seq)` and by `idx_sync_event_written_brin`, a BRIN summary on `written_at`. `txid` defaults to `pg_current_xact_id()`, the transaction that wrote the event.

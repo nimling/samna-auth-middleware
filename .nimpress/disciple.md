@@ -57,7 +57,7 @@ Each role has one runtime start, `sam.Init(ctx) error`, joined by `sam.Done()`. 
 
 1. One run context. `main` makes the signal context with `signal.NotifyContext` and a run context it cancels after `e.Shutdown` returns, and hands the run context to `sam.Init` and `uptime.Init`. Cancelling it is the only way a runner ends; there is no `Stop`.
 2. `Init(ctx) error` starts the goroutines and returns at once. It returns an error only when the runtime cannot start: no database (`shared.ErrNotConnected`), the first `LISTEN` failing, or a second call while it still runs (`ErrStarted`). A host treats that error as fatal. After start, failures are logged and retried.
-3. Each role owns its database. `sdb.Init` on the role creates the process's pool through `shared.Connect` and holds it; `sdb.Instance()` answers it, the disciple's as `*sdb.DB`, which embeds `*shared.DB` with the asset `sdb.Options{AssetSource, AssetCache}` given to `sdb.Init`. `sam.Init` reads its role's `sdb.Instance()` and hands that `*shared.DB` to what it starts: `notification.Init(ctx, db)` and `analytics.Init(ctx, db)` are wiring inside the middleware, and no host calls them or passes a database.
+3. Each role owns its database. `sdb.Init` on the role creates the process's pool through `shared.Connect` and holds it; `sdb.Instance()` answers it, the disciple's as `*sdb.DB`, which embeds `*shared.DB`. The asset callbacks are `disciple/echo` `Options{AssetSource, AssetCache}`, given to `PutOptions`. `sam.Init` reads its role's `sdb.Instance()` and hands that `*shared.DB` to what it starts: `notification.Init(ctx, db)` and `analytics.Init(ctx, db)` are wiring inside the middleware, and no host calls them or passes a database.
 4. One `LISTEN` connection. `(*shared.DB).Listen(ctx, channel)` hands each subscriber its own channel of notifications on one `pq.Listener` per process, adding the channel on the first subscriber and dropping it on the last. `notification` listens on `claimius_notification`, and a prophet's held `/sam/sync/:cursor` pull on `claimius_sync` for as long as the request holds. The connection closes when the last subscriber's context ends. A `nil` notification means the connection was re-established and notifications may have been lost.
 5. A clean end. On cancel `notification` and `analytics` stop taking work, write what is queued within 10 s and end; a write after that is logged as dropped. The sync and peer workers return. `sam.Done()` closes once everything its `Init` started has ended, and `uptime.Done()` once the reporter has.
 6. Long lived handlers end with the server, not the runner. `notification.EndStreams` ends every open notification stream, and on a prophet `prophetecho.EndStreams` (`prophet/echo`) answers every held `/sam/sync/:cursor` pull with what it has. A host registers each one it mounts with `e.Server.RegisterOnShutdown(notification.EndStreams)` before it serves, so `e.Shutdown` ends them as it begins instead of waiting for its deadline; the runtime keeps writing until the run context ends.
@@ -124,18 +124,18 @@ ac, err := sdb.Instance().MutationAccess(ctx, userID, certificateID, "public.cer
 if err != nil {
 	return err
 }
-profile, err := sdb.Instance().PutProfileItem(ctx, ac, sdb.BodySamProfileItem{
+profile, err := sam.Disciple().PutProfileItem(ctx, ac, shared.BodySamProfileItem{
 	UserID: userID, Field: "certificate",
 	Schema: json.RawMessage(`{"type": "string", "title": "Certificate", "format": "uri", "component": "link"}`),
 	Value:  json.RawMessage(`"https://example.no/certificates/` + certificateID.String() + `"`),
 })
 ```
 
-1. `PutProfileItem(ctx, ac, item)` writes the entry, or replaces the entry of the same field, and answers the whole profile. `DeleteProfileItem(ctx, ac, key)` withdraws one field, or every entry of the app when `Field` is nil, and answers the profile.
+1. `sam.Disciple().PutProfileItem(ctx, ac, item)` writes the entry, or replaces the entry of the same field, and answers the whole profile. `DeleteProfileItem(ctx, ac, key)` withdraws one field, or every entry of the app when `Field` is nil, and answers the profile.
 2. The `AccessClaim` is the user's own, with READ: a disciple writes only for the user it shows, never for another user. Anything else is `ErrNoAccess`.
 3. The shape is checked on both sides, `ErrBadProfileItem` and `400`: `field` is lower case letters, digits, `_` and `.`, starting with a letter; `schema` an object with a `type`; `value` JSON. `shared.ProfileSchema` is a typed struct: a key outside its vocabulary is refused at decode, `Validate` checks the type, format, component, pattern, items, properties and default, `Check` the value against it, on both roles.
 4. The user needs a live row in the app on the prophet, else `ErrNotFound` and `404`.
-5. A disciple without a prophet answers `ErrNoProphet`.
+5. A disciple without a prophet answers `sam.ErrNoProphet`. The bodies, their `Validate` and `ErrBadProfileItem` are `shared`, where the prophet checks with them too.
 6. Over the wire: `PUT /sam/profile` with `user_id`, `field`, `schema` and `value`, `DELETE /sam/profile` with `user_id` and an optional `field`, each answering the profile.
 7. Whether the page shows an app's entries is the user's choice on Samna Auth.
 

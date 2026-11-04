@@ -20,7 +20,18 @@ A user is who acts. A person and a machine client are both users, and both hold 
 | `type` | `user`, `client`, `system`, `guest` | Separates people from machines |
 | `status` | `active`, `pending`, `suspended`, `inactive` | Gates every read before any grant is read |
 
+| Status | Means |
+|---|---|
+| `active` | Fully operational: can authenticate and access resources |
+| `pending` | Invited but has not completed registration |
+| `suspended` | Temporarily disabled, cannot authenticate |
+| `inactive` | Permanently disabled |
+
+Claimius tells the last three apart for the people who set them and for nothing else: `check_user_active` passes only an `active` row that is not soft deleted, so a user in any other status resolves to no access whatever grants they hold. Soft deletion is `sa_deleted_at`, a column of its own, not a status. Suspension is therefore one column write, not a sweep over every claim.
+
 ## One identity, one row per app
+
+On a prophet every query against user state, grants, and the materialized index filters on `app_id`. A query without it reads another application's view of the same person and returns access that does not apply where it was asked. The read functions take the app as a parameter for this reason. There is no ambient default. A disciple mirrors one app: its rows carry no `app_id` and its read functions take none.
 
 1. The rows of one person across apps share `user_id` and differ in everything else; `idx_samna_user_user_app` is unique on `(user_id, app_id)` among live rows. A foreign key from an application table targets `samna_user.user_id`, never `samna_user.id`.
 
@@ -56,7 +67,7 @@ one probe of the user row and one range of `idx_object_asset_object` by user. A 
 
 2. `samna_client.client_id` is the client's `user_id`. The client has a per app `samna_user` row of type `client`, created with `upsert_app_user(client_id, ...)`, and its grants are `user_claim` rows on that id.
 
-3. Writes the client performs stamp `sa_created_by` with one of the client's own grants on the target app. A client without a grant on the app has no actor token and cannot create rows.
+3. Writes the client performs stamp `sa_created_by` with one of the client's own grants on the target app. A client with no grant on the target application has no authority to write under, and cannot create rows there. Provisioning assigns the owning claim to the client first: `upsert_app_client` finds or creates the named capability claim in the app, owned by the app's organization, and grants it to the client.
 
 4. A disciple holds its app's `samna_client` rows, so it verifies a client against its own copy.
 
@@ -84,7 +95,7 @@ An access code opens one claim. The table is `claimius.code`, written on the pro
 | `count`, `used_count` | Uses allowed, 0 unlimited, and taken; a use is taken in one statement on the prophet |
 | `revoked_at` | Set by `DeleteCode`; a revoked code never resolves again |
 
-1. The helpers are `GetCodeValue()`, `GetCodeHash(value)` and `GetCodeURL(base, path, value)`; on a disciple `PostCode(ctx, ac, claimID, body, base)` returns the row with `value` and `url` once, `GetCodes(ctx, claimID)` lists a claim's codes, `DeleteCode(ctx, ac, id)` revokes one and `GetCodeAccess(ctx, value)` resolves one, cached for 30 seconds and cleared by any code, claim or grant event of the feed. `ac` is OWNER on the claim; the prophet's `insert_code` and `delete_code` check it again. The prophet set has the same functions in `prophet/sdb` with the app id first, for samna_auth; `uuid.Nil` there finds, redeems or lists a code in any app, and `CodeAccess.AppID` names the app.
+1. The helpers are `shared.GetCodeValue()`, `shared.GetCodeHash(value)` and `client.GetCodeURL(base, path, value)`; on a disciple `PostCode(ctx, ac, claimID, body, base)` returns the row with `value` and `url` once, `GetCodes(ctx, claimID)` lists a claim's codes, `DeleteCode(ctx, ac, id)` revokes one and `GetCodeAccess(ctx, value)` resolves one, cached for 30 seconds and cleared by any code, claim or grant event of the feed. `ac` is OWNER on the claim; the prophet's `insert_code` and `delete_code` check it again. The prophet set has the same functions in `prophet/sdb` with the app id first, for samna_auth; `uuid.Nil` there finds, redeems or lists a code in any app, and `CodeAccess.AppID` names the app.
 
 2. Action codes stay with the service that runs actions: bookable's own `code` table and its Tengo actions use these helpers and nothing else.
 
@@ -92,7 +103,7 @@ An access code opens one claim. The table is `claimius.code`, written on the pro
 
 `smw.UserAuthMiddleware` resolves the actor in this order: bearer, cookie, machine client, then the code, then the anonymous guest.
 
-1. `samk` is a reserved query parameter on every route, `smw.CodeParam`. An API call may send the value in the header `SAuth-Code` instead; a browser carries it in the `__Host-sauth_samk` cookie after its first visit. The guard takes the value off the request, out of the URL and the header, before the handler or a request logger reads it, and sets `Referrer-Policy: no-referrer` on the answer.
+1. `samk` is a reserved query parameter on every route, `client.CodeParam`, which `smw` re-exports with `CodeHeader`. An API call may send the value in the header `SAuth-Code` instead; a browser carries it in the `__Host-sauth_samk` cookie after its first visit. The guard takes the value off the request, out of the URL and the header, before the handler or a request logger reads it, and sets `Referrer-Policy: no-referrer` on the answer.
 
 2. A guest code acts as the guest of its claim only on a route group mounted with `smw.UserAuthOptions{Guest: true}`, and every such request writes an audit row naming the claim and the code id, never the value. On a navigation GET there the guard sets `__Host-sauth_samk`, `HttpOnly; Secure; SameSite=Lax; Path=/`, expiring with the code, and answers `303` to the same URL without `samk`. On any other route a guest code is no identity: it is still taken off the request, spends no use, writes no audit row, sets no `CodeKey` and leaves the cookie alone, and the request answers as one without a credential, `401` or the login redirect on a navigation, or proceeds without an actor on an `Optional` route. A signed in user there who brings `samk` on a navigation GET gets the `303` without it and no cookie. `GET /code` from `sam.RegisterEndpoints` answers a guest code only where that group is mounted with `Guest`.
 
@@ -104,9 +115,39 @@ An access code opens one claim. The table is `claimius.code`, written on the pro
 
 6. A route group mounted with `smw.UserAuthOptions{Guest: true}` serves a request with no credential and no code as anonymous: `UserIDKey` is `shared.AnonymousUserID` and `AnonymousKey` is set. `MutationAccess`, `GetAccess`, `MutationAccessMany` and `ObjectWhere` resolve that actor through `get_guest_access(object_type, object_id)`: the guest of an open guest claim covering the object, capped at READ, with an audit row per resolved check. An object no open claim covers answers as before, the handler's `403` turned into `401`. Without `Guest` neither an open guest claim nor a guest code makes anyone the guest.
 
-## Acting for another user
+## Delegation
 
-An actor acts for a target without becoming the target. `get_user_access(actor, app, target, required)` answers what the actor may do to the target user:
+An administrator books a room for an employee. A receptionist checks in a visitor. A support agent fixes a reservation. In each case one person acts and a different person is the subject of the result.
+
+Claimius models this as delegation, never as impersonation. The acting user keeps their own identity for the whole operation. Nothing anywhere substitutes one user for the other.
+
+The distinction is the one drawn in [RFC 8693](https://www.rfc-editor.org/rfc/rfc8693) section 1.1. Under impersonation the downstream system cannot tell the two parties apart, and the record shows only the subject. Under delegation the acting party remains visible and the record shows that A acted for B.
+
+### What a delegated write leaves behind
+
+Three pieces of state, and they never collapse into one.
+
+| Recorded | Holds | Answers |
+|---|---|---|
+| `sa_created_by` on the row | The actor's `user_claim.id` | Under whose authority was this written |
+| The member or subject row | The target's `user_id` | Who is this for |
+| The audit entry | The actor's grant in `sa_created_by`, the object written and the operation | Who did what, to which object, and when |
+
+Read them back and the operation reconstructs itself. An impersonation model cannot answer the first question at all, because it discards the actor at the boundary.
+
+### Provenance is the grant, not the person
+
+`sa_created_by` holds a `claimius.user_claim.id`, not a user id. What is recorded is the assignment the actor was acting under, which carries the claim, the owning organization, and the time window that made the action legal. A stamp that still names a user id reads as that user, and `_restamp_created_by` rewrites it to the user's grant where the answer is unambiguous; see [One identity, one row per app](#one-identity-one-row-per-app).
+
+That indirection buys two things. Authorship survives identity changes: a user can be merged across applications without breaking a single authorship reference. And the record is auditable in the way that matters, because knowing which grant was used is stronger evidence than knowing which person was logged in.
+
+The same value is the answer to the RFC 8693 `act` claim of section 4.1, which records the acting party rather than the subject.
+
+There is no `sa_updated_by` and no `sa_deleted_by` column. `sa_created_by` names the creator and stays put. Attribution for later changes lives in the audit trail, which the service and claimius's own functions write in the transaction of each change they record; see [Audit](./audit.md).
+
+### Acting for another user
+
+The permission to act for another user is itself a grant, resolved by a read against the target user row before anything is written. `get_user_access(actor, app, target, required)` answers what the actor may do to the target user:
 
 1. It settles what the actor's listing would and checks the actor active.
 
@@ -122,7 +163,35 @@ An actor acts for a target without becoming the target. `get_user_access(actor, 
 | Shared visibility, a positive count from actor to target | 36: read, member | the one `user_users` row of the pair by its key, and the pending `user_users_diff` rows of the actor and of the target: only an object one of the two moved on can change their count |
 | A claim bound to the target's `samna_user` row | the effective mask of each non deny binding less the bits of the deny bindings on the same target whose level is not lower, closed under implication, limited to owner, write, read and execute, inside the grant's window | the actor's grants, their claims and their bindings on the target |
 
-The row the actor writes carries the actor's `user_claim.id` in `sa_created_by` and the target's `user_id` as its subject, so the acting party stays visible. The verdict is a live grant, so revoking it revokes the delegation on the next read.
+An empty result means the actor is not active, the target is unknown or not active in the app, or the ORed mask does not cover `required`, and the caller has no path to act. The same call returns the `user_claim.id` of the claim branch, which the follow on write is stamped with, so authorization and provenance come from one round trip and cannot drift apart. Self and shared visibility carry no grant, and a verdict from them alone returns none.
+
+The row the actor writes carries the actor's `user_claim.id` in `sa_created_by` and the target's `user_id` as its subject, so the acting party stays visible.
+
+This is the decision that [RFC 8693](https://www.rfc-editor.org/rfc/rfc8693) section 4.4 puts in a `may_act` token claim. Claimius keeps it as a live grant in the database instead, so revoking the claim revokes the delegation on the next read rather than at the next token refresh.
+
+### The target may be named three ways
+
+The same call accepts the target as an `external_id` from a host system, the stable `user_id`, or the `samna_user.id` row key, and resolves them in that order. An integration can address people entirely by its own reference and never learn the internal ids.
+
+Resolution happens inside the access function, in the same call that decides the grant. Resolving an identifier in application code and then checking access on the result is two round trips and one race.
+
+### Where the boundary sits in an api
+
+The pattern that falls out of this is a self route and a target route.
+
+A self route reads the identity from the credential and never accepts a target. There is nothing to delegate, so there is no delegation check to make.
+
+A target route names the subject in the path and derives the actor from the credential. Every one of them resolves the actor's right to act on that target first, and the row it writes carries both identities as described above.
+
+Bookable implements exactly this split across `/me` and `/user/{id}`. See [Access Control](/solutions/bookable/concepts/access) and [Admin booking management](/solutions/bookable/examples/admin-booking-management).
+
+### Distance from RFC 8693
+
+The semantics match. The transport does not, and the difference is deliberate.
+
+RFC 8693 delegation is carried in a token: a client exchanges its own token for one that names a subject and nests the actor in an `act` chain, which can then be forwarded to another service. Claimius resolves delegation per request against live grants, so no delegated credential is ever minted and no actor chain is forwarded anywhere.
+
+The cost is that a delegated call cannot be handed to a third service on its own authority. The gain is that there is no delegated token to leak, no window between revocation and expiry, and no way for the chain to outlive the grant that justified it.
 
 ## Listing users
 

@@ -1,4 +1,4 @@
-package sdb
+package echo
 
 import (
 	"crypto/rand"

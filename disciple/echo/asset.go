@@ -26,12 +26,30 @@ var (
 	prophetKeys   = map[string]jwt.Keyfunc{}
 )
 
+type AssetResponse struct {
+	Status int
+	Header http.Header
+	Body   io.ReadCloser
+}
+
+type AssetCache interface {
+	Get(ctx context.Context, linkID uuid.UUID, conditional http.Header) (*AssetResponse, error)
+	Put(ctx context.Context, linkID uuid.UUID, header http.Header, body io.Reader) error
+}
+
+type Options struct {
+	AssetSource func(ctx context.Context, assetID uuid.UUID) (*AssetResponse, error)
+	AssetCache  AssetCache
+}
+
+var options Options
+
+func PutOptions(o Options) {
+	options = o
+}
+
 func GetAssetData(ctx echo.Context) error {
-	var source func(context.Context, uuid.UUID) (*sdb.AssetResponse, error)
-	if db := sdb.Instance(); db != nil {
-		source = db.AssetSource
-	}
-	return getAssetData(ctx, source)
+	return getAssetData(ctx, options.AssetSource)
 }
 
 func GetObjectAssetData(ctx echo.Context, linkID uuid.UUID) error {
@@ -44,10 +62,10 @@ func GetObjectAssetData(ctx echo.Context, linkID uuid.UUID) error {
 		ctx.Logger().Errorf("GetObjectAssetData: %v", err)
 		return respondError(ctx, http.StatusInternalServerError, "Internal server error")
 	}
-	return getProphetAssetData(ctx, linkID, db.AssetCache)
+	return getProphetAssetData(ctx, linkID, options.AssetCache)
 }
 
-func getAssetData(ctx echo.Context, source func(context.Context, uuid.UUID) (*sdb.AssetResponse, error)) error {
+func getAssetData(ctx echo.Context, source func(context.Context, uuid.UUID) (*AssetResponse, error)) error {
 	if err := getProphetToken(ctx.Request()); err != nil {
 		ctx.Logger().Warnf("asset data: %v", err)
 		return respondError(ctx, http.StatusUnauthorized, "Unauthorized")
@@ -114,7 +132,7 @@ func getProphetKeys(jwksURL string) (jwt.Keyfunc, error) {
 	return k.Keyfunc, nil
 }
 
-func getProphetAssetData(ctx echo.Context, linkID uuid.UUID, cache sdb.AssetCache) error {
+func getProphetAssetData(ctx echo.Context, linkID uuid.UUID, cache AssetCache) error {
 	reqCtx := ctx.Request().Context()
 	conditional := http.Header{}
 	for _, name := range client.ConditionalHeaders {
@@ -171,7 +189,7 @@ func getProphetAssetData(ctx echo.Context, linkID uuid.UUID, cache sdb.AssetCach
 	return putProphetResponse(ctx, linkID, cache, resp)
 }
 
-func putProphetResponse(ctx echo.Context, linkID uuid.UUID, cache sdb.AssetCache, resp *http.Response) error {
+func putProphetResponse(ctx echo.Context, linkID uuid.UUID, cache AssetCache, resp *http.Response) error {
 	defer resp.Body.Close()
 	for _, name := range client.AssetHeaders {
 		if v := resp.Header.Get(name); v != "" {
@@ -213,7 +231,7 @@ func putProphetError(ctx echo.Context, err error) error {
 	return respondError(ctx, http.StatusBadGateway, "Bad gateway")
 }
 
-func putAssetResponse(ctx echo.Context, res *sdb.AssetResponse, conditional http.Header) error {
+func putAssetResponse(ctx echo.Context, res *AssetResponse, conditional http.Header) error {
 	if res.Body != nil {
 		defer res.Body.Close()
 	}

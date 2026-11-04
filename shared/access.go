@@ -16,11 +16,12 @@ import (
 )
 
 var (
-	ErrNoAccess          = errors.New("no access")
-	ErrNotFound          = errors.New("not found")
-	ErrInternalServer    = errors.New("internal server error")
-	ErrRootConflict      = errors.New("identity already registered under a different root")
-	ErrUserAlreadyExists = errors.New("user already exists")
+	ErrNoAccess           = errors.New("no access")
+	ErrNotFound           = errors.New("not found")
+	ErrInternalServer     = errors.New("internal server error")
+	ErrRootConflict       = errors.New("identity already registered under a different root")
+	ErrUserAlreadyExists  = errors.New("user already exists")
+	ErrOrganizationParent = errors.New("an organization moves only under an organization of its own root that is neither itself nor one of its descendants")
 )
 
 func selfAccessClaim(userID uuid.UUID, requiredAccess ClaimAccess) *AccessClaim {

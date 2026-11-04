@@ -11,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
+	"github.com/nimling/samna-auth-middleware/v2/client"
 	psam "github.com/nimling/samna-auth-middleware/v2/prophet/sam"
 	psdb "github.com/nimling/samna-auth-middleware/v2/prophet/sdb"
 	"github.com/nimling/samna-auth-middleware/v2/shared"
@@ -18,7 +19,7 @@ import (
 )
 
 type samAppEnvelope struct {
-	Data shared.AppSeed `json:"data"`
+	Data client.AppSeed `json:"data"`
 }
 
 func getSamAppServer(t *testing.T) *httptest.Server {

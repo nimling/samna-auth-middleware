@@ -60,3 +60,21 @@ func SetOIDC(issuer string, tokenURL, jwksURL url.URL) {
 func SetAuthDisabled() {
 	Cfg().AuthDisabled = true
 }
+
+type DebugMode string
+
+const (
+	DebugModeNone    DebugMode = "none"
+	DebugModeUser    DebugMode = "user"
+	DebugModeClients DebugMode = "clients"
+)
+
+func GetDebugMode() DebugMode {
+	if Cfg().DebugUserID != "" {
+		return DebugModeUser
+	}
+	if Cfg().DebugClients != "" {
+		return DebugModeClients
+	}
+	return DebugModeNone
+}

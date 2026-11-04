@@ -12,8 +12,8 @@ require (
 	github.com/labstack/gommon v0.5.0
 	github.com/lestrrat-go/jwx/v2 v2.1.6
 	github.com/lib/pq v1.12.3
-	github.com/nimling/nimbody v1.0.4
-	github.com/nimling/nimtel v0.0.4
+	github.com/nimling/nimbody v1.0.0
+	github.com/nimling/nimtel v1.0.0
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.2
 	github.com/uptrace/bun v1.2.18
 	github.com/uptrace/bun/dialect/pgdialect v1.2.18

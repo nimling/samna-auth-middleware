@@ -74,7 +74,7 @@ func Init(ctx context.Context) error {
 	r.run(func() {
 		shared.LeadSync(ctx, db, shared.RetentionLockKey, leadInterval, db.PruneLoop)
 	})
-	if shared.GetDebugMode() != shared.DebugModeNone {
+	if utils.GetDebugMode() != utils.DebugModeNone {
 		return nil
 	}
 	r.run(func() { bindClient(ctx, Disciple(), leadInterval) })
@@ -86,7 +86,7 @@ func Init(ctx context.Context) error {
 
 func getAppSeed(ctx context.Context, db *shared.DB, interval time.Duration) {
 	for {
-		_, err := shared.GetAppSeed(ctx)
+		_, err := client.GetAppSeed(ctx)
 		if err == nil || ctx.Err() != nil {
 			return
 		}

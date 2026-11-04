@@ -17,6 +17,8 @@ Access is three rows. A `claim` says what may be done, a `user_claim` says who h
 | `user_claim` | `user_id`, `claim_id`, `starts_at`, `ends_at`, `reason`, `sa_owner_id` |
 | `claim_object` | `claim_id`, `object_type`, `object_id`, `sa_access`, `inherits`, `scope`, `reason`, `ref_id` |
 
+The pair is constrained: `object_id` and `object_type` are both present or both absent, `claim_object_object_pair`. There is no half bound row. A binding with both covers that object; a binding with neither carries its grant in `scope`; see [Scope grants](#scope-grants).
+
 A user holds at most one live grant per claim and app, enforced by `idx_user_claim_unique`.
 
 A grant and a binding live in the app of their claim. On the prophet `user_claim_app_claim_fkey` and `claim_object_app_claim_fkey` reference `claim (app_id, id)`, so a writer acting through one app that grants or binds a claim of another stamps the claim's app. Each row then travels to the app's consumers with its claim, and a disciple, which holds only its app's claims, never receives a grant or a binding whose claim it lacks; see [Sync](./sync.md).

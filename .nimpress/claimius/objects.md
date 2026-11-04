@@ -37,6 +37,8 @@ The implementing side makes a table participate by carrying the `sa_*` columns a
 
 2. Under `replay_mode` it seeds the rows already present with `_bulk_seed_user_object`: the `object_info` row of every row, then the pairs of every user affected by every live row, in every app of it, collected in one statement and grouped by user, recomputed in batches of 1,000 objects per user. Each pair raises its `user_users_diff` row like any other, for the reads and the drain to fold. The seed emits no sync event.
 
+Adding `sa_parent_id` and `sa_root_id` to a table already in production is a three step change: add the columns, backfill them, then re-register the table with `upsert_table_info` so the engine picks up the new shape, `calc_hierarchical_access` in place of `calc_object_access`. Registration is idempotent. It reseeds the table's `object_info` rows and pairs but builds no closure for the rows already there, so the parenthood tree of the backfilled rows is built by `recompute_state` after it.
+
 `delete_table_info(VARIADIC object_types)` deregisters the named tables: it detaches their triggers and deletes their `table_info`, `inheritance_info`, `user_object` and `object_info` rows, the `user_object` rows counted out of `user_users` like any other delete. A name that is not a registered table raises.
 
 `recompute_state` rebuilds the closure of every root of every tree from live rows and seeds every registered type a live binding names, the path after a bulk write that bypassed the triggers.

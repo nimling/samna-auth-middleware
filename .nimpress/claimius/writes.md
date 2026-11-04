@@ -27,7 +27,11 @@ A write changes a source row: a registered row, an organization, a location, a c
 | The implementing side's registered tables | Direct insert and update, by the implementing side |
 | Cross root moves | `migrate_root`, reviewed by a person on every call |
 
-`claim`, `user_claim` and `claim_object` also take a direct insert, because their triggers do the same work whatever the path in; the functions are the form for SQL callers and return one jsonb object keyed by the table they wrote. Never written by hand: `user_object`, `object_info`, `user_users`, `user_users_diff`, `inheritance_info`, `table_info`, `sync_event`, `access_diff`, `user_activity`, `claim_graph_cache`.
+Names prefixed with an underscore are internal. They exist because the public functions call them, and calling one directly skips the checks the public entry point performs.
+
+`claim`, `user_claim` and `claim_object` also accept a direct insert, because the before triggers below enforce the app home, the app scope, the grant check and the composition checks regardless of the path in, and the after triggers do the same work. The write functions are the ergonomic form for SQL callers such as seed scripts and DO blocks, and return one jsonb object keyed by the table they wrote. They are not the security boundary; the triggers are. Two rules live only in `insert_claim` and `update_claim`: the expansion of a claim mask and the refusal of a mask with no bit besides deny, so a claim inserted directly stores its mask as given; see [Claims](./claims.md#expansion). On a prophet `claimius_writer` holds no `INSERT` on the three tables; see [Security](./security.md).
+
+Never written by hand: `user_object`, `object_info`, `user_users`, `user_users_diff`, `inheritance_info`, `table_info`, `sync_event`, `access_diff`, `user_activity`, `claim_graph_cache`.
 
 ## The triggers
 

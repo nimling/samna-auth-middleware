@@ -832,6 +832,11 @@ func (q *UpdateQuery) route(ctx context.Context, dest ...any) error {
 	if len(q.setCols) > 0 {
 		return fmt.Errorf("%w: %T", ErrRoutedSet, q.model)
 	}
+	if m, ok := embeddedPtr(q.model, reflect.TypeOf(Organization{})).(*Organization); ok {
+		if err := q.db.validateOrganizationParent(ctx, q.accessClaim, q.recordID, m.OwnerID); err != nil {
+			return err
+		}
+	}
 	path, err := EndpointFor(q.model, q.recordID)
 	if err != nil {
 		return err

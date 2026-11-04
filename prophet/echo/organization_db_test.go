@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"testing"
 
 	"github.com/google/uuid"
@@ -94,5 +95,57 @@ func TestPutOrganizationClearsAFieldSentAsNull(t *testing.T) {
 	}
 	if code, _ := getPatchStatus(pecho.PutOrganization, appID, claimID, rootID, `{}`); code != http.StatusBadRequest {
 		t.Fatalf("an empty patch must be refused with 400, got %d", code)
+	}
+}
+
+func TestPutOrganizationMovesUnderASiblingAndRefusesACycle(t *testing.T) {
+	appID, claimID := getGrantFixture(t)
+	ctx := context.Background()
+	mover, sibling, child := uuid.New(), uuid.New(), uuid.New()
+	if _, err := psdb.Instance().ExecContext(ctx, `
+		INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
+		VALUES (?, 'Mover', 'child', ?, ?, 1, ?), (?, 'Sibling', 'child', ?, ?, 1, ?)`,
+		mover, grantRoot, grantRoot, grantUser, sibling, grantRoot, grantRoot, grantUser); err != nil {
+		t.Fatalf("insert siblings: %v", err)
+	}
+	if _, err := psdb.Instance().ExecContext(ctx, `
+		INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
+		VALUES (?, 'Mover child', 'child', ?, ?, 2, ?)`, child, mover, grantRoot, grantUser); err != nil {
+		t.Fatalf("insert child: %v", err)
+	}
+	for _, id := range []uuid.UUID{mover, sibling, child} {
+		if _, err := psdb.Instance().ExecContext(ctx, `SELECT claimius.upsert_app_object(?, 'claimius.organization', ?)`, appID, id); err != nil {
+			t.Fatalf("link %s: %v", id, err)
+		}
+	}
+	ancestors := func(id uuid.UUID) []uuid.UUID {
+		ids := make([]uuid.UUID, 0)
+		if err := psdb.Instance().NewRaw(`SELECT object_id FROM claimius.get_owner_ancestors('claimius.organization', ?) WHERE hop > 0`, id).Scan(ctx, &ids); err != nil {
+			t.Fatalf("ancestors of %s: %v", id, err)
+		}
+		return ids
+	}
+
+	if code, body := getPatchStatus(pecho.PutOrganization, appID, claimID, mover, `{"owner_id":"`+sibling.String()+`"}`); code == http.StatusBadRequest || code == http.StatusNotFound {
+		t.Fatalf("a move under a sibling must pass, got %d %s", code, body)
+	}
+	if got := ancestors(child); !slices.Contains(got, sibling) || !slices.Contains(got, mover) {
+		t.Fatalf("the child of a moved organization must follow it under the sibling, got ancestors %v", got)
+	}
+	if code, _ := getPatchStatus(pecho.PutOrganization, appID, claimID, sibling, `{"owner_id":"`+child.String()+`"}`); code != http.StatusBadRequest {
+		t.Fatalf("a move under a descendant must be refused with 400, got %d", code)
+	}
+	if code, _ := getPatchStatus(pecho.PutOrganization, appID, claimID, sibling, `{"owner_id":"`+sibling.String()+`"}`); code != http.StatusBadRequest {
+		t.Fatalf("a move under itself must be refused with 400, got %d", code)
+	}
+	if code, _ := getPatchStatus(pecho.PutOrganization, appID, claimID, sibling, `{"owner_id":"`+uuid.Nil.String()+`"}`); code != http.StatusBadRequest {
+		t.Fatalf("a move under the nil uuid must be refused with 400, got %d", code)
+	}
+	var owner uuid.UUID
+	if err := psdb.Instance().NewRaw(`SELECT sa_owner_id FROM claimius.organization WHERE id = ?`, sibling).Scan(ctx, &owner); err != nil {
+		t.Fatalf("read owner: %v", err)
+	}
+	if owner != grantRoot {
+		t.Fatalf("a refused move must leave the owner, got %s", owner)
 	}
 }
