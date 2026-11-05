@@ -5,8 +5,7 @@ default:
     @just --list
 
 install:
-    go install github.com/nimling/sbump/cmd@latest
-    mv "$(go env GOPATH)/bin/cmd" "$(go env GOPATH)/bin/sbump"
+    sh scripts/install.sh
 
 deploy:
     sbump patch --env APP_VERSION --json ts/package.json@.version --push-version --auto --workflow
