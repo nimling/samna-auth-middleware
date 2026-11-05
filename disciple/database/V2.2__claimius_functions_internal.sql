@@ -19,6 +19,7 @@ BEGIN
         FROM claimius.organization o
                  JOIN claimius.inheritance_info e
                       ON e.tree_type = 'ownership'
+                          AND e.root_id = p_root_id
                           AND e.descendant_type = 'claimius.organization'
                           AND e.descendant_id = o.sa_owner_id
         WHERE o.id = v_start;
@@ -101,6 +102,7 @@ BEGIN
         FROM claimius.location l
                  JOIN claimius.inheritance_info e
                       ON e.tree_type = 'location'
+                          AND e.root_id = p_root_id
                           AND e.descendant_type = 'claimius.location'
                           AND e.descendant_id = l.sa_parent_id
         WHERE l.id = v_start;
@@ -192,6 +194,7 @@ BEGIN
         SELECT array_agg(e.ancestor_id ORDER BY e.depth DESC) INTO v_prefix
         FROM claimius.inheritance_info e
         WHERE e.tree_type = 'parenthood'
+          AND e.root_id = p_root_id
           AND e.descendant_type = p_object_type
           AND e.descendant_id = v_parent;
         IF v_prefix IS NULL THEN
@@ -282,6 +285,7 @@ BEGIN
         AND EXISTS (
             SELECT 1 FROM claimius.inheritance_info p
             WHERE p.tree_type = p_tree_type
+              AND p.root_id = p_root_id
               AND p.descendant_type = p_node_type
               AND p.descendant_id = p_parent_id
               AND p.depth = 0
@@ -289,6 +293,7 @@ BEGIN
         AND NOT EXISTS (
             SELECT 1 FROM claimius.inheritance_info s
             WHERE s.tree_type = p_tree_type
+              AND s.root_id = p_root_id
               AND s.ancestor_type = p_node_type
               AND s.ancestor_id = p_node_id
               AND s.descendant_type = p_node_type
@@ -321,6 +326,7 @@ BEGIN
             SELECT s.descendant_type, s.descendant_id, s.depth
             FROM claimius.inheritance_info s
             WHERE s.tree_type = p_tree_type
+              AND s.root_id = p_root_id
               AND s.ancestor_type = p_node_type
               AND s.ancestor_id = p_node_id
         ),
@@ -328,6 +334,7 @@ BEGIN
             SELECT a.ancestor_type, a.ancestor_id, a.depth
             FROM claimius.inheritance_info a
             WHERE a.tree_type = p_tree_type
+              AND a.root_id = p_root_id
               AND a.descendant_type = p_node_type
               AND a.descendant_id = p_parent_id
         )
@@ -336,7 +343,9 @@ BEGIN
         )
         SELECT p_tree_type, p_root_id, a.ancestor_type, a.ancestor_id, s.descendant_type, s.descendant_id, a.depth + s.depth + 1
         FROM a
-            CROSS JOIN s;
+            CROSS JOIN s
+        ON CONFLICT (tree_type, root_id, ancestor_type, ancestor_id, descendant_type, descendant_id)
+            DO UPDATE SET depth = EXCLUDED.depth, sa_updated_at = now();
         RETURN;
     END IF;
 

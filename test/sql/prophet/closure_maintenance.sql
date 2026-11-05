@@ -1,5 +1,5 @@
 BEGIN;
-SELECT plan(13);
+SELECT plan(18);
 
 CREATE TABLE public.sqltest_node (
     id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -170,6 +170,56 @@ SELECT is(pg_temp.closure_drift(), 0::BIGINT, 'hard deleting an organization dro
 UPDATE claimius.organization SET sa_owner_id = '10000000-0000-4000-8000-0000000000c4'
  WHERE id = '10000000-0000-4000-8000-0000000000c3';
 SELECT is(pg_temp.closure_drift(), 0::BIGINT, 'reparenting an organization under its own descendant drops the subtree its root no longer reaches');
+
+INSERT INTO claimius.inheritance_info (tree_type, root_id, ancestor_type, ancestor_id, descendant_type, descendant_id, depth)
+VALUES ('ownership', '10000000-0000-4000-8000-0000000000c2', 'claimius.organization', '10000000-0000-4000-8000-0000000000c2',
+        'claimius.organization', '10000000-0000-4000-8000-0000000000c2', 0);
+
+SELECT lives_ok(
+    $$INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
+      VALUES ('10000000-0000-4000-8000-0000000000c7', 'Under a stale root', 'company',
+              '10000000-0000-4000-8000-0000000000c2', '10000000-0000-4000-8000-0000000000c1', 2,
+              'a0000000-0000-4000-8000-0000000000c1')$$,
+    'an organization inserted under a parent that still carries a self edge under a root it once was lands'
+);
+
+SELECT is(
+    (SELECT count(*) FROM claimius.inheritance_info
+      WHERE tree_type = 'ownership' AND root_id = '10000000-0000-4000-8000-0000000000c1'
+        AND descendant_id = '10000000-0000-4000-8000-0000000000c7'),
+    3::BIGINT,
+    'its edges come from the live root alone: the self edge, the parent and the root'
+);
+
+INSERT INTO public.sqltest_leaf (id, name, sa_owner_id, sa_created_by)
+VALUES ('40000000-0000-4000-8000-0000000000c2', 'Leaf under a stale root', '10000000-0000-4000-8000-0000000000c2',
+        'a0000000-0000-4000-8000-0000000000c1');
+
+SELECT is(
+    (SELECT array_agg(DISTINCT root_id) FROM claimius.inheritance_info
+      WHERE tree_type = 'ownership' AND descendant_id = '40000000-0000-4000-8000-0000000000c2'),
+    ARRAY['10000000-0000-4000-8000-0000000000c1']::UUID[],
+    'a row owned by that parent is filed under the live root alone'
+);
+
+DELETE FROM claimius.inheritance_info
+ WHERE tree_type = 'ownership' AND root_id = '10000000-0000-4000-8000-0000000000c2';
+
+INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
+VALUES ('10000000-0000-4000-8000-0000000000c6', 'Sibling', 'company',
+        '10000000-0000-4000-8000-0000000000c2', '10000000-0000-4000-8000-0000000000c1', 2,
+        'a0000000-0000-4000-8000-0000000000c1');
+INSERT INTO claimius.inheritance_info (tree_type, root_id, ancestor_type, ancestor_id, descendant_type, descendant_id, depth)
+VALUES ('ownership', '10000000-0000-4000-8000-0000000000c1', 'claimius.organization', '10000000-0000-4000-8000-0000000000c6',
+        'claimius.organization', '10000000-0000-4000-8000-0000000000c7', 1);
+
+SELECT lives_ok(
+    $$UPDATE claimius.organization SET sa_owner_id = '10000000-0000-4000-8000-0000000000c6'
+       WHERE id = '10000000-0000-4000-8000-0000000000c7'$$,
+    'a move whose edge to the new parent the closure already holds is absorbed'
+);
+
+SELECT is(pg_temp.closure_drift(), 0::BIGINT, 'the absorbed move leaves the closure a full build writes');
 
 SELECT * FROM finish();
 ROLLBACK;
