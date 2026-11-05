@@ -63,6 +63,11 @@ func Init(ctx context.Context) error {
 		return shared.ErrNotConnected
 	}
 	db := sdb.Instance().DB
+	if utils.GetDebugMode() == utils.DebugModeNone {
+		if _, err := Disciple().GetState(ctx); err != nil {
+			return err
+		}
+	}
 	r, err := start(ctx)
 	if err != nil {
 		return err
@@ -359,7 +364,7 @@ func (r *Replica) GetState(ctx context.Context) (State, error) {
 		Limit(1).
 		Scan(ctx)
 	if errors.Is(err, sql.ErrNoRows) {
-		return State{}, nil
+		return State{}, shared.ErrNoDiscipleState
 	}
 	if err != nil {
 		return State{}, err
