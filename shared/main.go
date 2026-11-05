@@ -60,7 +60,7 @@ func (d *DB) prepared(ctx context.Context, db *bun.DB, dest any, query string, a
 	if db == d.DB && d.RouteToProphet {
 		if _, r, fresh := client.WithRequestSeq(ctx); !fresh {
 			if target := r.Get(); !target.IsZero() {
-				if err := d.WaitForSeq(ctx, target, r.Timeout); err != nil && !errors.Is(err, sql.ErrNoRows) {
+				if err := d.WaitForSeq(ctx, target, r.Timeout); err != nil {
 					d.Logger.Warnf("routed write %s not yet applied, reading anyway: %v", target, err)
 				}
 			}
@@ -91,6 +91,7 @@ func (d *DB) GetConnectionString() string {
 }
 
 var ErrSyncUnreachable = errors.New("sync unreachable: app inactive on samna_auth")
+var ErrNoDiscipleState = errors.New("claimius.disciple_state has no row: the service must call claimius.upsert_disciple_state at setup")
 var ErrSecretExpired = errors.New("secret expired")
 var ErrRoutedSet = errors.New("a routed update carries a Set expression the prophet cannot apply: set the field on the model, or use NewDelete for a soft delete")
 var ErrRoutedNoRecord = errors.New("a routed update or delete carries no record: populate the model's key or call ID, the record is never read from a Where expression")
@@ -348,7 +349,11 @@ func ModelType[T any]() reflect.Type {
 
 func (d *DB) GetSeq(ctx context.Context) (client.SyncCursor, error) {
 	var row DiscipleState
-	if err := d.NewSelect().Model(&row).Limit(1).Scan(ctx); err != nil {
+	err := d.NewSelect().Model(&row).Limit(1).Scan(ctx)
+	if errors.Is(err, sql.ErrNoRows) {
+		return client.SyncCursor{}, ErrNoDiscipleState
+	}
+	if err != nil {
 		return client.SyncCursor{}, err
 	}
 	return row.Cursor(), nil

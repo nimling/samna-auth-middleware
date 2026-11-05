@@ -2,7 +2,6 @@ package smw
 
 import (
 	"database/sql"
-	"errors"
 	"net/http"
 	"time"
 
@@ -84,7 +83,7 @@ func WaitForSeq(timeout time.Duration) echo.MiddlewareFunc {
 				if target.IsZero() {
 					return
 				}
-				if err := db.WaitForSeq(ctx.Request().Context(), target, timeout); err != nil && !errors.Is(err, sql.ErrNoRows) {
+				if err := db.WaitForSeq(ctx.Request().Context(), target, timeout); err != nil {
 					ctx.Logger().Warnf("routed write %s not yet applied, answering anyway: %v", target, err)
 				}
 			})

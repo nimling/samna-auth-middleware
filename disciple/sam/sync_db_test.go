@@ -549,3 +549,70 @@ func TestApplyPageSplicesUnderAParentWithAStaleRootEdge(t *testing.T) {
 		t.Fatalf("the child must hold its self edge and its root once under the live root, got %d edges", edges)
 	}
 }
+
+func withoutDiscipleState(t *testing.T, db *shared.DB) {
+	t.Helper()
+	ctx := context.Background()
+	var row string
+	if err := db.NewRaw(`SELECT to_jsonb(s)::TEXT FROM claimius.disciple_state s LIMIT 1`).Scan(ctx, &row); err != nil {
+		t.Fatalf("read cursor row: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `DELETE FROM claimius.disciple_state`); err != nil {
+		t.Fatalf("delete cursor row: %v", err)
+	}
+	t.Cleanup(func() {
+		if _, err := db.ExecContext(context.Background(),
+			`INSERT INTO claimius.disciple_state SELECT * FROM jsonb_populate_record(NULL::claimius.disciple_state, ?::JSONB)`, row); err != nil {
+			t.Fatalf("restore cursor row: %v", err)
+		}
+	})
+}
+
+func TestInitWithoutDiscipleStateFails(t *testing.T) {
+	db := database(t)
+	t.Setenv("SAUTH_DEBUG_USER_ID", "")
+	t.Setenv("SAUTH_DEBUG_CLIENTS", "")
+	withoutDiscipleState(t, db)
+	if _, err := sam.Disciple().GetState(t.Context()); !errors.Is(err, shared.ErrNoDiscipleState) {
+		t.Fatalf("GetState without a disciple_state row = %v, want ErrNoDiscipleState", err)
+	}
+	if err := sam.Init(t.Context()); !errors.Is(err, shared.ErrNoDiscipleState) {
+		t.Fatalf("Init without a disciple_state row = %v, want ErrNoDiscipleState", err)
+	}
+}
+
+func TestInitWithDiscipleStateStarts(t *testing.T) {
+	database(t)
+	prophet := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer prophet.Close()
+	t.Setenv("SAUTH_DEBUG_USER_ID", "")
+	t.Setenv("SAUTH_DEBUG_CLIENTS", "")
+	t.Setenv("SAUTH_ENDPOINT", prophet.URL)
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	if err := sam.Init(ctx); err != nil {
+		t.Fatalf("Init with a disciple_state row = %v", err)
+	}
+	if err := sam.Init(ctx); !errors.Is(err, sam.ErrStarted) {
+		t.Fatalf("second Init = %v, want ErrStarted", err)
+	}
+	cancel()
+	select {
+	case <-sam.Done():
+	case <-time.After(15 * time.Second):
+		t.Fatal("Done not closed after cancel")
+	}
+}
+
+func TestGetSeqWithoutDiscipleStateFails(t *testing.T) {
+	db := database(t)
+	withoutDiscipleState(t, db)
+	if _, err := sdb.Instance().GetSeq(t.Context()); !errors.Is(err, shared.ErrNoDiscipleState) {
+		t.Fatalf("GetSeq without a disciple_state row = %v, want ErrNoDiscipleState", err)
+	}
+	if err := sdb.Instance().WaitForSeq(t.Context(), client.SyncCursor{Txid: 1, Seq: 1}, time.Second); !errors.Is(err, shared.ErrNoDiscipleState) {
+		t.Fatalf("WaitForSeq without a disciple_state row = %v, want ErrNoDiscipleState", err)
+	}
+}
