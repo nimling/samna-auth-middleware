@@ -47,6 +47,9 @@ BEGIN
     FOR v_id IN SELECT id FROM public.sqltest_node WHERE sa_parent_id = id AND sa_deleted_at IS NULL LOOP
         PERFORM claimius.build_parenthood_tree('public.sqltest_node', v_id);
     END LOOP;
+    FOR v_id IN SELECT id FROM claimius.samna_app WHERE sa_parent_id = id AND sa_deleted_at IS NULL LOOP
+        PERFORM claimius.build_parenthood_tree('claimius.samna_app', v_id);
+    END LOOP;
 
     WITH built AS (
         SELECT tree_type, root_id, ancestor_type, ancestor_id, descendant_type, descendant_id, depth

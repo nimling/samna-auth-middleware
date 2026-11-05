@@ -222,4 +222,7 @@ func TestProphetMirrorsAPeersAppThroughItsFeed(t *testing.T) {
 		app.ID, peer.ID).Scan(ctx, &cursor); err != nil {
 		t.Fatalf("the peer must keep the mirror's cursor as a consumer of the app: %v", err)
 	}
+	if c := getSyncConsumer(t, app.ID, peer.ID); !c.Peer || c.Txid != cursor.Txid || c.Seq != cursor.Seq {
+		t.Fatalf("the mirror must read as a peer consumer at its cursor, got %+v", c)
+	}
 }

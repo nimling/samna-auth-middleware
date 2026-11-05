@@ -3,7 +3,7 @@ gate: samna-developer
 layout: doc
 title: Sync
 description: The outbox of source rows a prophet writes, the (txid, seq) cursor served below the snapshot xmin, pages applied whole by one consumer per database, per consumer cursors and trimming capped at the source rows, and the cursor as the consistency token, in events and rows as functions of the data.
-tags: sync_event, emit_sync_event, emit_app_object_sync_event, get_sync_events, get_sync_seq, check_sync_cursor, update_sync_cursor, trim_sync_event, sync_consumer, disciple_state, replay_mode, cursor, txid, xmin, consistency
+tags: sync_event, emit_sync_event, emit_app_object_sync_event, get_sync_events, get_sync_seq, check_sync_cursor, update_sync_cursor, get_sync_consumers, trim_sync_event, sync_consumer, disciple_state, replay_mode, cursor, txid, xmin, consistency
 lastUpdated: true
 ---
 
@@ -65,7 +65,7 @@ The pull loop runs on every process of a service. Each takes a session level `pg
 
 ## Cursors and trimming
 
-`sync_consumer (app_id, consumer_id)` holds one cursor per consumer, named by its `disciple_state` or `prophet_peer` id. A pull for the page after a cursor is the consumer's proof that it applied everything up to it, and `update_sync_cursor` records it with the contact time. The app's `prophet_state` row carries the lowest cursor among its consumers in contact within 7 days.
+`sync_consumer (app_id, consumer_id)` holds one cursor per consumer, named by its `disciple_state` or `prophet_peer` id. A pull for the page after a cursor is the consumer's proof that it applied everything up to it, and `update_sync_cursor` records it with the contact time and, in `peer`, whether the pull was a peer prophet's, `peer = true`. The app's `prophet_state` row carries the lowest cursor among its consumers in contact within 7 days.
 
 `trim_sync_event(stale_after)` deletes, in two passes:
 
@@ -87,6 +87,28 @@ It records the highest position removed per app in `prophet_state (trimmed_txid,
 | `backlog` | the app's events after the cursor outnumber its source rows | takes the snapshot |
 
 A consumer a little behind replays the events it missed; one so far behind that the events outnumber the app's rows reads the rows once instead.
+
+## Where a consumer stands
+
+`get_sync_consumers(app_id)` reads every consumer of an app's feed, the lowest cursor first, one row each:
+
+| Column | Is |
+|---|---|
+| `consumer_id`, `peer` | the consumer's `disciple_state` or `prophet_peer` id, and whether it pulls as a peer prophet |
+| `txid`, `seq` | its cursor, the position its last pull proved it applied |
+| `last_contact_at`, `in_contact` | its last pull, and whether that lies within the 7 days `trim_sync_event` and `prophet_state` count as in contact |
+| `head_txid`, `head_seq` | the app's head, `get_sync_seq` |
+| `trimmed_txid`, `trimmed_seq` | the app's trimmed position in `prophet_state`; a cursor below it is answered `trimmed` |
+| `behind` | the events the feed serves this consumer after its cursor, counted up to 1,001 as `check_sync_cursor` counts, so 1,001 reads as more than 1,000 |
+| `next_txid`, `next_seq`, `next_operation`, `next_event_type`, `next_payload_id` | the first of them, the event the consumer's next page starts with; NULL at the head |
+
+`behind` and the first event apply the feed's own filters per consumer: an event below the snapshot's `xmin`, no derived type, and `app_handover` only for a peer. Sync lag reads from it against `disciple_state (last_applied_txid, last_applied_seq)` on the disciple:
+
+1. A consumer whose contact moves while its cursor stays and `behind` is above 0 pulls the page that starts at `next_*` and fails to apply it; the event names the row.
+2. A consumer whose contact has stopped has stopped pulling; `in_contact` false means the trim no longer waits for it.
+3. The disciple's own cursor runs at most one page ahead of the one recorded here, the page it applied after its last pull.
+
+In Go it is `prophet/sdb.GetSyncConsumers(ctx, appID)`; the middleware mounts no route for it.
 
 ## The cursor is the consistency token
 
@@ -124,6 +146,14 @@ events(app) ≤ R_a = Σ_{app scoped source tables} rows(app) + live links(app) 
 
 `get_sync_seq` is one descent of `idx_sync_event_app_txid_seq`.
 
+`get_sync_consumers` reads the app's consumers by the primary key of `sync_consumer`, the head once and the `prophet_state` row once, and per consumer one descent of `idx_sync_event_app_txid_seq` reading `min(n_b, 1001)` entries for a consumer `n_b` events behind, the count and the first event out of the same ordered range:
+
+```
+reads(get_sync_consumers) = 1 + Σ_{consumers k} (1 + min(n_k, 1001))
+```
+
+It never scans `sync_event` and reads no other app's entries.
+
 ## Proofs and measurements
 
 ### Why the cursor never passes an event
@@ -149,6 +179,20 @@ The snapshot's cursor `(xmin, 0)` holds by the same argument: every event below 
 ### Why the feed carries no derived rows
 
 Measured on a prophet with one root, 200 organizations under it and 50 users, granting a claim bound to the root to the 50 users and letting each list its organizations: the feed took 50 `user_claim` events. Publishing the derived rows as well would take 12,651 `user_object` and 227,850 `user_users` events more, 240,551 events against 50. The fan out of a grant to the pairs it reaches, `|T_c|` per holder, and of each pair to the users who share its object, `U_x − 1` per pair and direction, is exactly what a consumer derives locally instead of reading.
+
+### Where a consumer stands, measured
+
+Measured on a prophet holding 200,000 events, 100,000 of them the app's, with three consumers of the app at `0.0`, two of the app's events behind the head and at the head, `EXPLAIN (ANALYZE, BUFFERS)` of `SELECT * FROM claimius.get_sync_consumers(app)`, which the planner inlines:
+
+```
+Index Only Scan Backward using idx_sync_event_app_txid_seq   rows=1     loops=1   the head
+Index Scan using prophet_state_app_id_key                    rows=1     loops=1
+Index Scan using idx_sync_event_app_txid_seq                 rows=334   loops=3   one descent per consumer
+  Index Cond: (app_id = $1) AND (ROW(txid, seq) > ROW(c.last_applied_txid, c.last_applied_seq))
+Buffers: shared hit=62
+```
+
+The three descents read 1,001, 2 and 0 entries, 1,003 together, and the whole read touched 62 buffers of a 200,000 row outbox. `TestGetSyncConsumersBoundsItsCountAndDescendsOncePerConsumer` in `prophet/echo/sync_db_test.go` pins the plan: every read of `sync_event` is a descent of `idx_sync_event_app_txid_seq`, one for the head and one per consumer.
 
 ### The consistency token
 
