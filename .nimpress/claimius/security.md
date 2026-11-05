@@ -79,7 +79,7 @@ A code in a URL is a bearer capability, so it is handled as one; [Users](./users
 
 `session`, `dpop_jti`, `par_request`, `jwks_cache` and `rate_limit` on a prophet, and `dpop_jti` on a disciple, are `UNLOGGED`: no WAL, not replicated, emptied after a crash. Each holds values that expire, and losing all of them costs a login, a new DPoP proof or a refetched key set, never a security property: a replayed DPoP proof still fails on its `iat`. `rate_limit_gcra` keeps one `rate_limit` row per key, the theoretical arrival time of the generic cell rate algorithm, updated under a transaction advisory lock on the key.
 
-`user_identity` binds an approved outside identity to a `user_id` under an organization. It is written on the prophet, and the feed carries it to every app the organization is linked to without its `data`, the claims of the token it was approved from, which stay on the prophet.
+`user_identity` binds an approved outside identity to a `user_id` under an organization. It is written on the prophet, and the feed carries it to every app the organization is linked to without its `data`, the claims of the token it was approved from, which stay on the prophet. An app other than the identity's own receives it with `claim_id` set to null, since that claim is the issuing app's and never reaches another app's consumers; the feed and the snapshot both serve it through `get_sync_payload`.
 
 ## Soft delete
 
