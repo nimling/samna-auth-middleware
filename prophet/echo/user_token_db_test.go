@@ -170,3 +170,58 @@ func TestAuditRowsReachTheirApp(t *testing.T) {
 		t.Fatalf("an audit row must reach its app through the feed as claimius.audit, got %s", rec.Body.String())
 	}
 }
+
+func getSnapshotRecorder(appID uuid.UUID) *httptest.ResponseRecorder {
+	req := httptest.NewRequest(http.MethodGet, "/?consumer="+uuid.NewString(), nil)
+	rec := httptest.NewRecorder()
+	ctx := echo.New().NewContext(req, rec)
+	ctx.Set("app_id", appID)
+	ctx.Set("request_id", uuid.New())
+	_ = pecho.GetSyncSnapshot(ctx)
+	return rec
+}
+
+func TestUserIdentityClaimStaysWithItsApp(t *testing.T) {
+	appID, claimID := getGrantFixture(t)
+	ctx := context.Background()
+	var orgID uuid.UUID
+	if err := psdb.Instance().NewRaw(`SELECT sa_owner_id FROM claimius.claim WHERE id = ?`, claimID).Scan(ctx, &orgID); err != nil {
+		t.Fatalf("read org: %v", err)
+	}
+	linked := postPeerApp(t, grantUser)
+	if _, err := psdb.Instance().ExecContext(ctx, `SELECT claimius.upsert_app_object(?, 'claimius.organization', ?, ?)`, linked.ID, orgID, grantUser); err != nil {
+		t.Fatalf("link org: %v", err)
+	}
+	homeHead, linkedHead := getAppHead(t, appID), getAppHead(t, linked.ID)
+
+	identityID := uuid.New()
+	if _, err := psdb.Instance().ExecContext(ctx, `
+		INSERT INTO claimius.user_identity (id, app_id, user_id, external_id, type, claim_id, data, sa_owner_id)
+		VALUES (?, ?, ?, ?, 'token', ?, '{"sub":"secret"}', ?)
+	`, identityID, appID, grantUser, "ext-"+uuid.NewString(), claimID, orgID); err != nil {
+		t.Fatalf("identity: %v", err)
+	}
+
+	for _, c := range []struct {
+		name string
+		rec  *httptest.ResponseRecorder
+		want any
+	}{
+		{"own feed", getSyncPage(appID, homeHead, ""), claimID.String()},
+		{"own snapshot", getSnapshotRecorder(appID), claimID.String()},
+		{"linked feed", getSyncPage(linked.ID, linkedHead, ""), nil},
+		{"linked snapshot", getSnapshotRecorder(linked.ID), nil},
+	} {
+		rows := getTokenPayloads(t, c.rec, identityID)
+		if len(rows) != 1 {
+			t.Fatalf("%s: the identity must reach the app once, got %d %s", c.name, c.rec.Code, c.rec.Body.String()[:min(len(c.rec.Body.String()), 300)])
+		}
+		got, ok := rows[0]["claim_id"]
+		if !ok || got != c.want {
+			t.Fatalf("%s: an identity carries its claim_id to its own app and a null claim_id to any other, got %v", c.name, rows[0])
+		}
+		if _, ok := rows[0]["data"]; ok {
+			t.Fatalf("%s: an identity leaves the prophet without its data, got %v", c.name, rows[0])
+		}
+	}
+}

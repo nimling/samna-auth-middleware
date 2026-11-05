@@ -390,6 +390,37 @@ func TestApplyPageAppliesAUserToken(t *testing.T) {
 	}
 }
 
+func TestApplyPageAppliesAnIdentityOfAnotherAppWithoutItsClaim(t *testing.T) {
+	db := database(t)
+	ctx := context.Background()
+	from := cursor(t)
+	orgID, identityID, userID := uuid.New(), uuid.New(), uuid.New()
+	external := "ext-" + uuid.NewString()
+	identity := func(claim string) json.RawMessage {
+		return json.RawMessage(fmt.Sprintf(
+			`{"id":%q,"app_id":%q,"user_id":%q,"id_claim":"sub","external_id":%q,"type":"token","claim_id":%s,"sa_owner_id":%q,"sa_created_at":"2026-01-01T00:00:00Z","sa_updated_at":"2026-01-01T00:00:00Z"}`,
+			identityID, uuid.New(), userID, external, claim, orgID))
+	}
+	foreign := []sam.SyncPayload{
+		organizationPayload(step(from, 1), orgID),
+		{SyncCursor: step(from, 2), Operation: "upsert", EventType: "claimius.user_identity", Payload: identity(fmt.Sprintf("%q", uuid.New()))},
+	}
+	if err := sam.Disciple().ApplyPage(ctx, from, sam.State{Cursor: step(from, 2)}, foreign, ""); err == nil || !strings.Contains(err.Error(), "user_identity_claim_id_fkey") {
+		t.Fatalf("an identity naming a claim the disciple does not hold must fail on user_identity_claim_id_fkey, got %v", err)
+	}
+	stripped := []sam.SyncPayload{
+		organizationPayload(step(from, 1), orgID),
+		{SyncCursor: step(from, 2), Operation: "upsert", EventType: "claimius.user_identity", Payload: identity("null")},
+	}
+	if err := sam.Disciple().ApplyPage(ctx, from, sam.State{Cursor: step(from, 2)}, stripped, ""); err != nil {
+		t.Fatalf("an identity served with a null claim_id must apply, got %v", err)
+	}
+	identities, err := db.GetUserIdentities(ctx, []uuid.UUID{userID})
+	if err != nil || len(identities) != 1 || identities[0].ExternalID != external || identities[0].ClaimID != nil {
+		t.Fatalf("the applied identity must be read back with no claim, got %v %v", identities, err)
+	}
+}
+
 func TestApplyPageAppliesAnAuditRow(t *testing.T) {
 	db := database(t)
 	ctx := context.Background()

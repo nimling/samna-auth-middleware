@@ -118,7 +118,7 @@ func GetSyncSnapshot(ctx echo.Context) error {
 		{"claimius.object_asset", &[]shared.ObjectAsset{}, true},
 		{shared.OBJECT_TYPE_APP_COST, &[]shared.AppCost{}, true},
 		{shared.OBJECT_TYPE_CODE, &[]shared.Code{}, true},
-		{"claimius.user_identity", &[]UserIdentity{}, false},
+		{"claimius.user_identity", nil, false},
 		{"claimius.audit", &[]shared.Audit{}, true},
 	}
 
@@ -135,6 +135,21 @@ func GetSyncSnapshot(ctx echo.Context) error {
 			}
 		} else {
 			for _, t := range tables {
+				if t.model == nil {
+					var rows []SyncPayload
+					q := tx.NewSelect().TableExpr("claimius.user_identity AS u").
+						ColumnExpr("'upsert' AS operation, ? AS event_type, claimius.get_sync_payload(?, ?, to_jsonb(u), FALSE) AS payload",
+							t.eventType, uuid.NullUUID{UUID: appID, Valid: appID != uuid.Nil}, t.eventType)
+					if appID != uuid.Nil {
+						q = q.Where("? IN (SELECT claimius.apps_for_object('claimius.organization', u.sa_owner_id))", appID)
+					}
+					if err := q.Scan(txCtx, &rows); err != nil {
+						ctx.Logger().Errorf("snapshot %s: %v", t.eventType, err)
+						return err
+					}
+					records = append(records, rows...)
+					continue
+				}
 				q := tx.NewSelect().Model(t.model)
 				if t.eventType == string(OBJECT_TYPE_ORGANIZATION) || t.eventType == string(OBJECT_TYPE_LOCATION) {
 					if appID != uuid.Nil {
@@ -153,12 +168,6 @@ func GetSyncSnapshot(ctx echo.Context) error {
 					q = q.Order("sa_created_at", "id")
 				} else if t.filterApp && appID != uuid.Nil {
 					q = q.Where("app_id = ?", appID)
-				}
-				if t.eventType == "claimius.user_identity" {
-					q = q.ExcludeColumn("data")
-					if appID != uuid.Nil {
-						q = q.Where("? IN (SELECT claimius.apps_for_object('claimius.organization', ?TableAlias.sa_owner_id))", appID)
-					}
 				}
 				if err := q.Scan(txCtx); err != nil {
 					ctx.Logger().Errorf("snapshot %s: %v", t.eventType, err)

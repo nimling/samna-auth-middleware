@@ -3,7 +3,7 @@ gate: samna-developer
 layout: doc
 title: Sync
 description: The outbox of source rows a prophet writes, the (txid, seq) cursor served below the snapshot xmin, pages applied whole by one consumer per database, per consumer cursors and trimming capped at the source rows, and the cursor as the consistency token, in events and rows as functions of the data.
-tags: sync_event, emit_sync_event, emit_app_object_sync_event, get_sync_events, get_sync_seq, check_sync_cursor, update_sync_cursor, get_sync_consumers, trim_sync_event, sync_consumer, disciple_state, replay_mode, cursor, txid, xmin, consistency
+tags: sync_event, emit_sync_event, emit_app_object_sync_event, get_sync_events, get_sync_payload, get_sync_seq, check_sync_cursor, update_sync_cursor, get_sync_consumers, trim_sync_event, sync_consumer, disciple_state, replay_mode, cursor, txid, xmin, consistency
 lastUpdated: true
 ---
 
@@ -34,6 +34,8 @@ A disciple therefore holds the organizations linked to its app and no other:
 The feed carries source rows and nothing derived from them. `user_object`, `user_users`, `user_users_diff`, `object_info`, `inheritance_info`, `access_diff` and `audit` never publish, `get_sync_events` excludes `claimius.user_object`, `claimius.user_users`, `claimius.user_users_diff` and `claimius.audit` by event type, and the base files delete any such row left in the outbox. A settle writes pairs, `user_users_diff` rows and counts, never source rows, so it emits nothing; each database derives and folds the rows of its own pairs.
 
 Two kinds of event travel only to a peer prophet, a pull with `peer = true`: `app_handover` events, and an organization's `private_seed`, wrapped under the prophet's `SAUTH_MASTER_KEY`, which `get_sync_events` strips from every organization payload it serves to a disciple.
+
+A `user_identity` reaches every app its organization is linked to without its `data`, and an app other than the identity's own `app_id` receives it with `claim_id` set to null: the claim belongs to the issuing app, a consumer of another app never holds it, and the consumer's foreign key on `claim_id` would refuse the row and stall the page. `get_sync_payload(app, event_type, payload, peer)` is the one rule for what a payload leaves out, called by `get_sync_events` and by the snapshot for every `user_identity` row.
 
 The app's own `private_seed` is never in the feed. A disciple fetches it from `GET /sam/app` with its app slug and secret at startup and holds it in memory; see [Security](./security.md), Secrets 7.
 

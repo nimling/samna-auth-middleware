@@ -6973,6 +6973,26 @@ COMMENT ON FUNCTION claimius.upsert_analytics_capture(UUID, TEXT, TEXT, BYTEA) I
 GRANT EXECUTE ON FUNCTION claimius.upsert_analytics_capture(UUID, TEXT, TEXT, BYTEA)
     TO claimius_writer, claimius_reader;
 
+CREATE OR REPLACE FUNCTION claimius.get_sync_payload(
+    p_app_id     UUID,
+    p_event_type TEXT,
+    p_payload    JSONB,
+    p_peer       BOOLEAN
+) RETURNS JSONB AS $$
+    SELECT CASE WHEN p_event_type = 'claimius.organization' AND NOT p_peer THEN p_payload - 'private_seed'
+                WHEN p_event_type = 'claimius.user_identity' THEN
+                    CASE WHEN p_app_id IS NOT NULL AND p_payload ? 'claim_id' AND p_payload ->> 'app_id' IS DISTINCT FROM p_app_id::TEXT
+                         THEN jsonb_set(p_payload, '{claim_id}', 'null')
+                         ELSE p_payload END
+                    - CASE WHEN p_peer THEN ARRAY[]::TEXT[] ELSE ARRAY['data'] END
+                ELSE p_payload END;
+$$ LANGUAGE sql IMMUTABLE;
+
+COMMENT ON FUNCTION claimius.get_sync_payload(UUID, TEXT, JSONB, BOOLEAN) IS 'The payload of a source row as the feed and the snapshot serve it to one app. An organization''s private_seed and a user_identity''s data travel to peer prophets only. A user_identity served to an app other than its own carries a null claim_id, since no consumer of another app holds the issuing app''s claim; with no app, as on a snapshot taken without one, it keeps it.';
+
+GRANT EXECUTE ON FUNCTION claimius.get_sync_payload(UUID, TEXT, JSONB, BOOLEAN)
+    TO claimius_writer, claimius_reader;
+
 CREATE OR REPLACE FUNCTION claimius.get_sync_events(
     p_app_id    UUID,
     p_txid      BIGINT,
@@ -6988,9 +7008,7 @@ CREATE OR REPLACE FUNCTION claimius.get_sync_events(
     written_at  TIMESTAMPTZ
 ) AS $$
     SELECT e.txid::TEXT::BIGINT, e.seq, e.operation, e.event_type,
-           CASE WHEN NOT p_peer AND e.event_type = 'claimius.organization' THEN e.payload - 'private_seed'
-                WHEN NOT p_peer AND e.event_type = 'claimius.user_identity' THEN e.payload - 'data'
-                ELSE e.payload END,
+           claimius.get_sync_payload(p_app_id, e.event_type, e.payload, p_peer),
            e.written_at
     FROM claimius.sync_event e
     WHERE e.app_id = p_app_id
@@ -7002,7 +7020,7 @@ CREATE OR REPLACE FUNCTION claimius.get_sync_events(
     LIMIT p_limit;
 $$ LANGUAGE sql STABLE;
 
-COMMENT ON FUNCTION claimius.get_sync_events(UUID, BIGINT, BIGINT, INTEGER, BOOLEAN) IS 'Delta feed of source rows for one app after a (txid, seq) cursor, in (txid, seq) order. Serves only events whose transaction is below the xmin of the reading snapshot, or the reader''s own. Every event written later carries a txid at or above that xmin, so the cursor never passes an event still to be served, whatever order sequences commit in. Organization and location events are written once per linked app, so other apps'' shared hierarchy rows never leave the prophet. Handover events travel to peer prophets only, and an organization''s private_seed, the key of its apps'' app_secret, and a user_identity''s data, the claims of the token it was issued from, travel to peer prophets only.';
+COMMENT ON FUNCTION claimius.get_sync_events(UUID, BIGINT, BIGINT, INTEGER, BOOLEAN) IS 'Delta feed of source rows for one app after a (txid, seq) cursor, in (txid, seq) order. Serves only events whose transaction is below the xmin of the reading snapshot, or the reader''s own. Every event written later carries a txid at or above that xmin, so the cursor never passes an event still to be served, whatever order sequences commit in. Organization and location events are written once per linked app, so other apps'' shared hierarchy rows never leave the prophet. Handover events travel to peer prophets only, and an organization''s private_seed, the key of its apps'' app_secret, and a user_identity''s data, the claims of the token it was issued from, travel to peer prophets only, and a user_identity reaches an app other than its own without its claim_id, all through get_sync_payload.';
 
 GRANT EXECUTE ON FUNCTION claimius.get_sync_events(UUID, BIGINT, BIGINT, INTEGER, BOOLEAN)
     TO claimius_writer, claimius_reader;
