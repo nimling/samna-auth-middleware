@@ -77,11 +77,14 @@ BEGIN
 
     IF v_owner_id IS NOT NULL AND p_object_type <> 'claimius.organization' THEN
         SELECT e.root_id INTO v_owner_root
-        FROM claimius.inheritance_info e
-        WHERE e.tree_type = 'ownership'
-          AND e.descendant_type = 'claimius.organization'
-          AND e.descendant_id = v_owner_id
-          AND e.depth = 0;
+        FROM claimius.organization o
+                 JOIN claimius.inheritance_info e
+                      ON e.tree_type = 'ownership'
+                          AND e.root_id = o.sa_root_id
+                          AND e.descendant_type = 'claimius.organization'
+                          AND e.descendant_id = o.id
+                          AND e.depth = 0
+        WHERE o.id = v_owner_id;
         IF v_owner_root IS NOT NULL THEN
             INSERT INTO claimius.inheritance_info (
                 tree_type, root_id, ancestor_type, ancestor_id, descendant_type, descendant_id, depth
@@ -94,6 +97,7 @@ BEGIN
             SELECT 'ownership', v_owner_root, e.ancestor_type, e.ancestor_id, p_object_type, p_object_id, e.depth + 1
             FROM claimius.inheritance_info e
             WHERE e.tree_type = 'ownership'
+              AND e.root_id = v_owner_root
               AND e.descendant_type = 'claimius.organization'
               AND e.descendant_id   = v_owner_id
             ON CONFLICT DO NOTHING;
@@ -102,11 +106,14 @@ BEGIN
 
     IF v_loc_id IS NOT NULL THEN
         SELECT e.root_id INTO v_loc_root
-        FROM claimius.inheritance_info e
-        WHERE e.tree_type = 'location'
-          AND e.descendant_type = 'claimius.location'
-          AND e.descendant_id = v_loc_id
-          AND e.depth = 0;
+        FROM claimius.location l
+                 JOIN claimius.inheritance_info e
+                      ON e.tree_type = 'location'
+                          AND e.root_id = l.sa_root_id
+                          AND e.descendant_type = 'claimius.location'
+                          AND e.descendant_id = l.id
+                          AND e.depth = 0
+        WHERE l.id = v_loc_id;
         IF v_loc_root IS NOT NULL THEN
             INSERT INTO claimius.inheritance_info (
                 tree_type, root_id, ancestor_type, ancestor_id, descendant_type, descendant_id, depth
@@ -119,6 +126,7 @@ BEGIN
             SELECT 'location', v_loc_root, e.ancestor_type, e.ancestor_id, p_object_type, p_object_id, e.depth + 1
             FROM claimius.inheritance_info e
             WHERE e.tree_type = 'location'
+              AND e.root_id = v_loc_root
               AND e.descendant_type = 'claimius.location'
               AND e.descendant_id   = v_loc_id
             ON CONFLICT DO NOTHING;
@@ -284,7 +292,9 @@ BEGIN
             tree_type, root_id, ancestor_type, ancestor_id, descendant_type, descendant_id, depth
         ) VALUES (
             v_tree, v_root_id, v_object_type, v_obj_id, v_object_type, v_obj_id, 0
-        );
+        )
+        ON CONFLICT (tree_type, root_id, ancestor_type, ancestor_id, descendant_type, descendant_id)
+            DO UPDATE SET depth = 0, sa_updated_at = now();
         IF v_new_parent <> v_obj_id THEN
             PERFORM claimius._splice_subtree(v_tree, v_object_type, v_obj_id, v_root_id, v_new_parent);
         END IF;
@@ -387,11 +397,14 @@ BEGIN
 
     IF v_is_in AND v_new_owner IS NOT NULL THEN
         SELECT e.root_id INTO v_new_root
-        FROM claimius.inheritance_info e
-        WHERE e.tree_type = 'ownership'
-          AND e.descendant_type = 'claimius.organization'
-          AND e.descendant_id = v_new_owner
-          AND e.depth = 0;
+        FROM claimius.organization o
+                 JOIN claimius.inheritance_info e
+                      ON e.tree_type = 'ownership'
+                          AND e.root_id = o.sa_root_id
+                          AND e.descendant_type = 'claimius.organization'
+                          AND e.descendant_id = o.id
+                          AND e.depth = 0
+        WHERE o.id = v_new_owner;
         IF v_new_root IS NOT NULL THEN
             INSERT INTO claimius.inheritance_info (
                 tree_type, root_id, ancestor_type, ancestor_id, descendant_type, descendant_id, depth
@@ -404,6 +417,7 @@ BEGIN
             SELECT 'ownership', v_new_root, e.ancestor_type, e.ancestor_id, 'claimius.location', p_obj_id, e.depth + 1
             FROM claimius.inheritance_info e
             WHERE e.tree_type = 'ownership'
+              AND e.root_id = v_new_root
               AND e.descendant_type = 'claimius.organization'
               AND e.descendant_id   = v_new_owner;
         END IF;

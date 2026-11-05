@@ -478,3 +478,43 @@ func TestApplyPageTakesTheSharedUserImageAndItsWithdrawal(t *testing.T) {
 		t.Fatalf("a withdrawn image must be cleared on the disciple, got %q", *got)
 	}
 }
+
+func TestApplyPageSplicesUnderAParentWithAStaleRootEdge(t *testing.T) {
+	db := database(t)
+	ctx := context.Background()
+	from := cursor(t)
+	root := uuid.New()
+	child := uuid.New()
+	stale := uuid.New()
+
+	if err := sam.Disciple().ApplyPage(ctx, from, sam.State{Cursor: step(from, 1)}, []sam.SyncPayload{organizationPayload(step(from, 1), root)}, ""); err != nil {
+		t.Fatalf("apply root: %v", err)
+	}
+	if _, err := db.ExecContext(ctx,
+		`INSERT INTO claimius.inheritance_info (tree_type, root_id, ancestor_type, ancestor_id, descendant_type, descendant_id, depth)
+		 VALUES ('ownership', ?, 'claimius.organization', ?, 'claimius.organization', ?, 0)`, stale, root, root); err != nil {
+		t.Fatalf("stale edge: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = db.ExecContext(context.Background(), `DELETE FROM claimius.inheritance_info WHERE root_id = ?`, stale)
+	})
+
+	page := []sam.SyncPayload{{
+		SyncCursor: step(from, 2),
+		Operation:  "upsert",
+		EventType:  "claimius.organization",
+		Payload: json.RawMessage(fmt.Sprintf(
+			`{"id":%q,"name":"Child","type":"company","private_seed":"seed","sa_owner_id":%q,"sa_root_id":%q,"sa_level":1,"sa_created_by":%q,"sa_created_at":"2026-01-01T00:00:00Z","sa_updated_at":"2026-01-01T00:00:00Z"}`,
+			child, root, root, root)),
+	}}
+	if err := sam.Disciple().ApplyPage(ctx, step(from, 1), sam.State{Cursor: step(from, 2)}, page, ""); err != nil {
+		t.Fatalf("a child synced under a parent that carries a self edge under another root must apply: %v", err)
+	}
+	var edges int
+	if err := db.NewRaw(`SELECT count(*) FROM claimius.inheritance_info WHERE tree_type = 'ownership' AND root_id = ? AND descendant_id = ?`, root, child).Scan(ctx, &edges); err != nil {
+		t.Fatalf("count edges: %v", err)
+	}
+	if edges != 2 {
+		t.Fatalf("the child must hold its self edge and its root once under the live root, got %d edges", edges)
+	}
+}

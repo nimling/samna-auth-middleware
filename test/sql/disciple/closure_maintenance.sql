@@ -1,5 +1,5 @@
 BEGIN;
-SELECT plan(16);
+SELECT plan(24);
 
 CREATE TABLE public.sqltest_node (
     id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -189,6 +189,86 @@ SELECT ok(
 );
 
 SELECT is(pg_temp.closure_drift(), 0::BIGINT, 'a replayed organization insert leaves the closure a full build writes');
+
+INSERT INTO claimius.inheritance_info (tree_type, root_id, ancestor_type, ancestor_id, descendant_type, descendant_id, depth)
+VALUES ('ownership', '10000000-0000-4000-8000-0000000000c2', 'claimius.organization', '10000000-0000-4000-8000-0000000000c2',
+        'claimius.organization', '10000000-0000-4000-8000-0000000000c2', 0);
+
+SET LOCAL claimius.replay_mode = 'true';
+SELECT lives_ok(
+    $$INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
+      VALUES ('10000000-0000-4000-8000-0000000000c7', 'Synced under a stale root', 'company',
+              '10000000-0000-4000-8000-0000000000c2', '10000000-0000-4000-8000-0000000000c1', 2,
+              'a0000000-0000-4000-8000-0000000000c1')$$,
+    'an organization synced under a parent that still carries a self edge under a root it once was lands'
+);
+SET LOCAL claimius.replay_mode = 'false';
+
+SELECT is(
+    (SELECT count(*) FROM claimius.inheritance_info
+      WHERE tree_type = 'ownership' AND root_id = '10000000-0000-4000-8000-0000000000c1'
+        AND descendant_id = '10000000-0000-4000-8000-0000000000c7'),
+    3::BIGINT,
+    'its edges come from the live root alone: the self edge, the parent and the root'
+);
+
+INSERT INTO public.sqltest_leaf (id, name, sa_owner_id, sa_created_by)
+VALUES ('40000000-0000-4000-8000-0000000000c2', 'Leaf under a stale root', '10000000-0000-4000-8000-0000000000c2',
+        'a0000000-0000-4000-8000-0000000000c1');
+
+SELECT is(
+    (SELECT array_agg(DISTINCT root_id) FROM claimius.inheritance_info
+      WHERE tree_type = 'ownership' AND descendant_id = '40000000-0000-4000-8000-0000000000c2'),
+    ARRAY['10000000-0000-4000-8000-0000000000c1']::UUID[],
+    'a row owned by that parent is filed under the live root alone'
+);
+
+DELETE FROM claimius.inheritance_info
+ WHERE tree_type = 'ownership' AND root_id = '10000000-0000-4000-8000-0000000000c2';
+
+INSERT INTO claimius.inheritance_info (tree_type, root_id, ancestor_type, ancestor_id, descendant_type, descendant_id, depth)
+VALUES ('ownership', '10000000-0000-4000-8000-0000000000c1', 'claimius.organization', '10000000-0000-4000-8000-0000000000c6',
+        'claimius.organization', '10000000-0000-4000-8000-0000000000c7', 1);
+
+SET LOCAL claimius.replay_mode = 'true';
+SELECT lives_ok(
+    $$UPDATE claimius.organization SET sa_owner_id = '10000000-0000-4000-8000-0000000000c6'
+       WHERE id = '10000000-0000-4000-8000-0000000000c7'$$,
+    'a replayed move whose edge to the new parent the closure already holds is absorbed'
+);
+SET LOCAL claimius.replay_mode = 'false';
+
+SELECT is(pg_temp.closure_drift(), 0::BIGINT, 'the absorbed move leaves the closure a full build writes');
+
+INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
+VALUES ('10000000-0000-4000-8000-0000000000c8', 'Second root', 'company',
+        '10000000-0000-4000-8000-0000000000c8', '10000000-0000-4000-8000-0000000000c8', 0,
+        'a0000000-0000-4000-8000-0000000000c1');
+INSERT INTO claimius.inheritance_info (tree_type, root_id, ancestor_type, ancestor_id, descendant_type, descendant_id, depth)
+VALUES ('ownership', '10000000-0000-4000-8000-0000000000c1', 'claimius.organization', '10000000-0000-4000-8000-0000000000c8',
+        'claimius.organization', '10000000-0000-4000-8000-0000000000c8', 0);
+
+SET LOCAL claimius.replay_mode = 'true';
+SELECT lives_ok(
+    $$UPDATE claimius.organization
+         SET sa_owner_id = '10000000-0000-4000-8000-0000000000c8', sa_root_id = '10000000-0000-4000-8000-0000000000c8'
+       WHERE id = '10000000-0000-4000-8000-0000000000c7'$$,
+    'a replayed move to another root whose root carries a stale self edge elsewhere lands'
+);
+SET LOCAL claimius.replay_mode = 'false';
+
+SELECT is(
+    (SELECT count(*) FROM claimius.inheritance_info
+      WHERE tree_type = 'ownership' AND root_id = '10000000-0000-4000-8000-0000000000c8'
+        AND descendant_id = '10000000-0000-4000-8000-0000000000c7'),
+    2::BIGINT,
+    'under the new root it holds its self edge and the root once'
+);
+
+DELETE FROM claimius.inheritance_info
+ WHERE tree_type = 'ownership' AND root_id = '10000000-0000-4000-8000-0000000000c1'
+   AND descendant_id = '10000000-0000-4000-8000-0000000000c8';
+SELECT is(pg_temp.closure_drift(), 0::BIGINT, 'the cross root move under replay leaves the closure a full build writes');
 
 SELECT * FROM finish();
 ROLLBACK;
