@@ -1,5 +1,5 @@
 BEGIN;
-SELECT plan(24);
+SELECT plan(29);
 
 CREATE TABLE public.sqltest_node (
     id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -269,6 +269,32 @@ DELETE FROM claimius.inheritance_info
  WHERE tree_type = 'ownership' AND root_id = '10000000-0000-4000-8000-0000000000c1'
    AND descendant_id = '10000000-0000-4000-8000-0000000000c8';
 SELECT is(pg_temp.closure_drift(), 0::BIGINT, 'the cross root move under replay leaves the closure a full build writes');
+
+INSERT INTO claimius.inheritance_info (tree_type, root_id, ancestor_type, ancestor_id, descendant_type, descendant_id, depth)
+VALUES ('ownership', '10000000-0000-4000-8000-0000000000c2', 'claimius.organization', '10000000-0000-4000-8000-0000000000c2',
+        'claimius.organization', '10000000-0000-4000-8000-0000000000c2', 0),
+       ('ownership', '10000000-0000-4000-8000-0000000000c2', 'claimius.organization', '10000000-0000-4000-8000-0000000000c2',
+        'public.sqltest_leaf', '40000000-0000-4000-8000-0000000000c2', 1);
+UPDATE claimius.object_info SET sa_owner_root_id = '10000000-0000-4000-8000-0000000000c2'
+ WHERE object_type = 'public.sqltest_leaf' AND object_id = '40000000-0000-4000-8000-0000000000c2';
+
+SELECT is(claimius._realign_closure(), 2, 'the realign counts the rows under a root no organization carries');
+SELECT is(pg_temp.closure_drift(), 0::BIGINT, 'the realign leaves the closure a full build writes');
+SELECT is(
+    (SELECT sa_owner_root_id FROM claimius.object_info
+      WHERE object_type = 'public.sqltest_leaf' AND object_id = '40000000-0000-4000-8000-0000000000c2'),
+    '10000000-0000-4000-8000-0000000000c1'::UUID,
+    'the realign files the misfiled object_info row under the live root'
+);
+SELECT ok(
+    EXISTS (SELECT 1 FROM claimius.access_diff
+             WHERE kind = 'object'
+               AND object_type = 'claimius.organization'
+               AND object_id = '10000000-0000-4000-8000-0000000000c1'
+               AND cascade),
+    'the realign raises the root area with cascade'
+);
+SELECT is(claimius._realign_closure(), 0, 'a clean closure realigns nothing');
 
 SELECT * FROM finish();
 ROLLBACK;

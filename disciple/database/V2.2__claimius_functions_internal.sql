@@ -377,6 +377,62 @@ COMMENT ON FUNCTION claimius._splice_subtree(claimius.tree_type, TEXT, UUID, UUI
 GRANT EXECUTE ON FUNCTION claimius._splice_subtree(claimius.tree_type, TEXT, UUID, UUID, UUID)
     TO claimius_disciple_client, claimius_reader;
 
+CREATE OR REPLACE FUNCTION claimius._realign_closure()
+    RETURNS INTEGER AS $$
+DECLARE
+    r       RECORD;
+    v_stale INTEGER;
+BEGIN
+    SELECT count(*) INTO v_stale
+    FROM claimius.inheritance_info i
+    WHERE (i.tree_type = 'ownership'
+           AND NOT EXISTS (SELECT 1 FROM claimius.organization o WHERE o.sa_root_id = i.root_id))
+       OR (i.tree_type = 'location'
+           AND NOT EXISTS (SELECT 1 FROM claimius.location l WHERE l.sa_root_id = i.root_id));
+    IF v_stale = 0 THEN
+        RETURN 0;
+    END IF;
+
+    DELETE FROM claimius.inheritance_info WHERE tree_type IN ('ownership', 'location');
+
+    FOR r IN
+        SELECT o.id, o.sa_root_id
+        FROM claimius.organization o
+        WHERE o.sa_deleted_at IS NULL
+          AND NOT EXISTS (SELECT 1 FROM claimius.organization p WHERE p.id = o.sa_owner_id AND p.id <> o.id)
+    LOOP
+        PERFORM claimius.build_ownership_tree(r.sa_root_id, r.id);
+        PERFORM claimius._raise_object_diff('claimius.organization', r.id, TRUE, r.sa_root_id);
+    END LOOP;
+
+    FOR r IN
+        SELECT l.id, l.sa_root_id
+        FROM claimius.location l
+        WHERE l.sa_deleted_at IS NULL
+          AND NOT EXISTS (SELECT 1 FROM claimius.location p WHERE p.id = l.sa_parent_id AND p.id <> l.id)
+    LOOP
+        PERFORM claimius.build_location_tree(r.sa_root_id, r.id);
+    END LOOP;
+
+    FOR r IN
+        SELECT oi.object_type, array_agg(oi.object_id) AS ids
+        FROM claimius.object_info oi
+        WHERE oi.sa_owner_root_id IS NOT NULL
+          AND NOT EXISTS (SELECT 1 FROM claimius.organization o WHERE o.sa_root_id = oi.sa_owner_root_id)
+        GROUP BY oi.object_type
+    LOOP
+        PERFORM claimius._write_object_info(r.object_type, r.ids);
+    END LOOP;
+
+    RETURN v_stale;
+END;
+$$ LANGUAGE plpgsql;
+
+COMMENT ON FUNCTION claimius._realign_closure() IS 'Rebuilds the ownership and location closures from live data when rows sit under a root no live organization or location carries as sa_root_id, the leftovers of a root change replayed while the closure reads spanned every root: every tree is rebuilt from its top held node, the object_info owner roots those rows misfiled are rewritten, and each top node raises its cascade area so every holder''s pairs recompute. Answers the number of stale rows found, 0 when nothing was rebuilt.';
+
+GRANT EXECUTE ON FUNCTION claimius._realign_closure()
+    TO claimius_disciple_client, claimius_reader;
+
 CREATE OR REPLACE FUNCTION claimius._select_owned_rows(p_object_type TEXT, p_root_id UUID)
     RETURNS TABLE(id UUID, sa_owner_id UUID) AS $$
 DECLARE

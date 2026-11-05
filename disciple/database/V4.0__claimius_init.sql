@@ -11,6 +11,8 @@ DO $$
     DECLARE
         r RECORD;
     BEGIN
+        PERFORM claimius._realign_closure();
+
         FOR r IN
             SELECT o.id, o.sa_root_id
             FROM claimius.organization o
