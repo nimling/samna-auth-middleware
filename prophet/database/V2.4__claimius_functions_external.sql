@@ -5063,19 +5063,22 @@ GRANT EXECUTE ON FUNCTION claimius.count_sync_source_rows(UUID, BIGINT)
     TO claimius_writer, claimius_reader;
 
 DROP FUNCTION IF EXISTS claimius.update_sync_cursor(UUID, UUID, BIGINT);
+DROP FUNCTION IF EXISTS claimius.update_sync_cursor(UUID, UUID, BIGINT, BIGINT);
 
 CREATE OR REPLACE FUNCTION claimius.update_sync_cursor(
     p_app_id        UUID,
     p_consumer_id   UUID,
     p_txid          BIGINT,
-    p_seq           BIGINT
+    p_seq           BIGINT,
+    p_peer          BOOLEAN DEFAULT FALSE
 ) RETURNS VOID AS $$
-    INSERT INTO claimius.sync_consumer (app_id, consumer_id, last_applied_txid, last_applied_seq, last_contact_at)
-    VALUES (p_app_id, p_consumer_id, p_txid::TEXT::XID8, p_seq, now())
+    INSERT INTO claimius.sync_consumer (app_id, consumer_id, last_applied_txid, last_applied_seq, last_contact_at, peer)
+    VALUES (p_app_id, p_consumer_id, p_txid::TEXT::XID8, p_seq, now(), p_peer)
     ON CONFLICT (app_id, consumer_id) DO UPDATE SET
         last_applied_txid = EXCLUDED.last_applied_txid,
         last_applied_seq  = EXCLUDED.last_applied_seq,
-        last_contact_at   = EXCLUDED.last_contact_at;
+        last_contact_at   = EXCLUDED.last_contact_at,
+        peer              = EXCLUDED.peer;
 
     INSERT INTO claimius.prophet_state (app_id, last_applied_txid, last_applied_seq, sync_mode, last_contact_at, next_attempt_at)
     VALUES (p_app_id, p_txid::TEXT::XID8, p_seq, 'active', now(), now())
@@ -5092,9 +5095,9 @@ CREATE OR REPLACE FUNCTION claimius.update_sync_cursor(
         sa_updated_at    = now();
 $$ LANGUAGE sql;
 
-COMMENT ON FUNCTION claimius.update_sync_cursor(UUID, UUID, BIGINT, BIGINT) IS 'Moves one consumer''s (txid, seq) cursor for an app and records the contact on the app''s prophet_state row.';
+COMMENT ON FUNCTION claimius.update_sync_cursor(UUID, UUID, BIGINT, BIGINT, BOOLEAN) IS 'Moves one consumer''s (txid, seq) cursor for an app, records whether it pulled as a peer prophet, and records the contact on the app''s prophet_state row.';
 
-GRANT EXECUTE ON FUNCTION claimius.update_sync_cursor(UUID, UUID, BIGINT, BIGINT)
+GRANT EXECUTE ON FUNCTION claimius.update_sync_cursor(UUID, UUID, BIGINT, BIGINT, BOOLEAN)
     TO claimius_writer, claimius_reader;
 
 CREATE OR REPLACE FUNCTION claimius.trim_sync_event(
@@ -6083,6 +6086,62 @@ $$ LANGUAGE plpgsql STABLE;
 COMMENT ON FUNCTION claimius.check_sync_cursor(UUID, BIGINT, BIGINT) IS 'Whether a consumer at a (txid, seq) cursor must take the snapshot instead of the feed. NULL when the feed serves it; ahead when the cursor is above every sequence or transaction the prophet issued; trimmed when events after the cursor were trimmed; backlog when the app''s events after the cursor outnumber its source rows.';
 
 GRANT EXECUTE ON FUNCTION claimius.check_sync_cursor(UUID, BIGINT, BIGINT)
+    TO claimius_writer, claimius_reader;
+
+CREATE OR REPLACE FUNCTION claimius.get_sync_consumers(p_app_id UUID)
+    RETURNS TABLE (
+        consumer_id     UUID,
+        peer            BOOLEAN,
+        txid            BIGINT,
+        seq             BIGINT,
+        last_contact_at TIMESTAMPTZ,
+        in_contact      BOOLEAN,
+        head_txid       BIGINT,
+        head_seq        BIGINT,
+        trimmed_txid    BIGINT,
+        trimmed_seq     BIGINT,
+        behind          BIGINT,
+        next_txid       BIGINT,
+        next_seq        BIGINT,
+        next_operation  claimius.sync_operation,
+        next_event_type TEXT,
+        next_payload_id TEXT
+    ) AS $$
+    SELECT c.consumer_id, c.peer, c.last_applied_txid::TEXT::BIGINT, c.last_applied_seq, c.last_contact_at,
+           c.last_contact_at > now() - INTERVAL '7 days',
+           h.txid, h.seq,
+           coalesce(ps.trimmed_txid::TEXT::BIGINT, 0), coalesce(ps.trimmed_seq, 0),
+           b.behind, b.next_txid, b.next_seq, b.next_operation, b.next_event_type, b.next_payload_id
+    FROM claimius.sync_consumer c
+    CROSS JOIN claimius.get_sync_seq(p_app_id) h
+    LEFT JOIN claimius.prophet_state ps ON ps.app_id = p_app_id
+    CROSS JOIN LATERAL (
+        SELECT count(*) AS behind,
+               (array_agg(a.txid::TEXT::BIGINT) FILTER (WHERE a.n = 1))[1] AS next_txid,
+               (array_agg(a.seq) FILTER (WHERE a.n = 1))[1] AS next_seq,
+               (array_agg(a.operation) FILTER (WHERE a.n = 1))[1] AS next_operation,
+               (array_agg(a.event_type) FILTER (WHERE a.n = 1))[1] AS next_event_type,
+               (array_agg(a.payload ->> 'id') FILTER (WHERE a.n = 1))[1] AS next_payload_id
+        FROM (
+            SELECT e.txid, e.seq, e.operation, e.event_type, e.payload,
+                   row_number() OVER (ORDER BY e.txid, e.seq) AS n
+            FROM claimius.sync_event e
+            WHERE e.app_id = p_app_id
+              AND (e.txid, e.seq) > (c.last_applied_txid, c.last_applied_seq)
+              AND (e.txid < pg_snapshot_xmin(pg_current_snapshot()) OR e.txid = pg_current_xact_id_if_assigned())
+              AND e.event_type NOT IN ('claimius.user_object', 'claimius.user_users', 'claimius.user_users_diff')
+              AND (c.peer OR e.event_type <> 'claimius.app_handover')
+            ORDER BY e.txid, e.seq
+            LIMIT 1001
+        ) a
+    ) b
+    WHERE c.app_id = p_app_id
+    ORDER BY c.last_applied_txid, c.last_applied_seq, c.consumer_id;
+$$ LANGUAGE sql STABLE;
+
+COMMENT ON FUNCTION claimius.get_sync_consumers(UUID) IS 'Every consumer of one app''s feed, lowest cursor first: its (txid, seq) cursor, whether it pulls as a peer prophet, its last contact and whether that falls within the 7 days the trim and prophet_state count as in contact, the app''s head from get_sync_seq and its trimmed position from prophet_state, how many events the feed serves that consumer after its cursor, counted up to 1,001 as check_sync_cursor counts, and the first of them with its operation, event type and payload id, the event a stuck page holds. One descent of idx_sync_event_app_txid_seq per consumer.';
+
+GRANT EXECUTE ON FUNCTION claimius.get_sync_consumers(UUID)
     TO claimius_writer, claimius_reader;
 
 CREATE OR REPLACE FUNCTION claimius.check_sync_home(p_app_id UUID, p_prophet TEXT)

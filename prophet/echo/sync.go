@@ -194,7 +194,7 @@ func GetSyncSnapshot(ctx echo.Context) error {
 	}
 
 	if appID != uuid.Nil {
-		if _, err := sdb.Instance().NewRaw("SELECT claimius.update_sync_cursor(?, ?, ?, ?)", appID, consumerID, cursor.Txid, cursor.Seq).
+		if _, err := sdb.Instance().NewRaw("SELECT claimius.update_sync_cursor(?, ?, ?, ?, ?)", appID, consumerID, cursor.Txid, cursor.Seq, peer).
 			Exec(reqCtx); err != nil {
 			ctx.Logger().Errorf("snapshot cursor %s: %v", appID, err)
 		}
@@ -242,7 +242,7 @@ func GetSyncEvents(ctx echo.Context) error {
 		return respond.Error(ctx, http.StatusConflict, "Snapshot required: cursor "+stale.String)
 	}
 
-	if _, err := sdb.Instance().NewRaw("SELECT claimius.update_sync_cursor(?, ?, ?, ?)", appID, consumerID, seq.Txid, seq.Seq).
+	if _, err := sdb.Instance().NewRaw("SELECT claimius.update_sync_cursor(?, ?, ?, ?, ?)", appID, consumerID, seq.Txid, seq.Seq, peer).
 		Exec(reqCtx); err != nil {
 		ctx.Logger().Errorf("delta cursor %s: %v", appID, err)
 	}
