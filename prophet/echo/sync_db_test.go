@@ -16,6 +16,7 @@ import (
 	"github.com/nimling/samna-auth-middleware/v2/client"
 	pecho "github.com/nimling/samna-auth-middleware/v2/prophet/echo"
 	psdb "github.com/nimling/samna-auth-middleware/v2/prophet/sdb"
+	"github.com/nimling/samna-auth-middleware/v2/shared"
 	"github.com/nimling/samna-auth-middleware/v2/smw"
 )
 
@@ -272,5 +273,143 @@ func TestEndStreamsAnswersAHeldPullAtOnce(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatalf("the held pull is still waiting 2s after EndStreams")
+	}
+}
+
+func postSyncEventOfType(t *testing.T, appID uuid.UUID, eventType string) string {
+	t.Helper()
+	id := uuid.NewString()
+	if _, err := psdb.Instance().ExecContext(context.Background(), `
+		INSERT INTO claimius.sync_event (operation, event_type, payload, app_id)
+		VALUES ('upsert', ?, jsonb_build_object('id', ?::TEXT, 'app_id', ?::UUID), ?)
+	`, eventType, id, appID, appID); err != nil {
+		t.Fatalf("write %s event: %v", eventType, err)
+	}
+	return id
+}
+
+func getSyncConsumer(t *testing.T, appID, consumerID uuid.UUID) shared.SyncConsumer {
+	t.Helper()
+	consumers, err := psdb.GetSyncConsumers(context.Background(), appID)
+	if err != nil {
+		t.Fatalf("read sync consumers: %v", err)
+	}
+	for _, c := range consumers {
+		if c.ConsumerID == consumerID {
+			return c
+		}
+	}
+	t.Fatalf("consumer %s is not among the app's consumers %+v", consumerID, consumers)
+	return shared.SyncConsumer{}
+}
+
+func TestGetSyncConsumersNamesWhereEachConsumerStands(t *testing.T) {
+	appID, _ := getGrantFixture(t)
+	ctx := context.Background()
+	start := getAppHead(t, appID)
+	disciple, peer, current := uuid.New(), uuid.New(), uuid.New()
+
+	getSyncPage(appID, start, "consumer="+disciple.String())
+	if _, err := psdb.Instance().ExecContext(ctx, `SELECT claimius.update_sync_cursor(?, ?, ?, ?, TRUE)`, appID, peer, start.Txid, start.Seq); err != nil {
+		t.Fatalf("record peer cursor: %v", err)
+	}
+	handover := postSyncEventOfType(t, appID, "claimius.app_handover")
+	field := postSyncEventOfType(t, appID, "claimius.user_field")
+	head := getAppHead(t, appID)
+	getSyncPage(appID, head, "consumer="+current.String())
+
+	d := getSyncConsumer(t, appID, disciple)
+	if d.Peer || d.Txid != start.Txid || d.Seq != start.Seq || !d.InContact {
+		t.Fatalf("a disciple must read with the cursor it pulled at and in contact, got %+v", d)
+	}
+	if d.HeadTxid != head.Txid || d.HeadSeq != head.Seq {
+		t.Fatalf("every consumer must carry the app's head %s, got %d.%d", head, d.HeadTxid, d.HeadSeq)
+	}
+	if d.Behind != 1 || d.NextEventType == nil || *d.NextEventType != "claimius.user_field" || d.NextPayloadID == nil || *d.NextPayloadID != field ||
+		d.NextOperation == nil || *d.NextOperation != "upsert" || d.NextSeq == nil || *d.NextSeq != head.Seq {
+		t.Fatalf("a disciple must count and name only what the feed serves it, the handover left out, got %+v", d)
+	}
+
+	p := getSyncConsumer(t, appID, peer)
+	if !p.Peer || p.Behind != 2 || p.NextEventType == nil || *p.NextEventType != "claimius.app_handover" || p.NextPayloadID == nil || *p.NextPayloadID != handover {
+		t.Fatalf("a peer must count and name the handover the feed serves it, got %+v", p)
+	}
+
+	c := getSyncConsumer(t, appID, current)
+	if c.Behind != 0 || c.NextSeq != nil || c.NextEventType != nil || c.NextPayloadID != nil {
+		t.Fatalf("a consumer at the head has nothing after its cursor, got %+v", c)
+	}
+
+	var trimmed client.SyncCursor
+	if err := psdb.Instance().NewRaw(`SELECT trimmed_txid::TEXT::BIGINT AS txid, trimmed_seq AS seq FROM claimius.prophet_state WHERE app_id = ?`, appID).Scan(ctx, &trimmed); err != nil {
+		t.Fatalf("read trimmed position: %v", err)
+	}
+	if c.TrimmedTxid != trimmed.Txid || c.TrimmedSeq != trimmed.Seq {
+		t.Fatalf("every consumer must carry the app's trimmed position %s, got %d.%d", trimmed, c.TrimmedTxid, c.TrimmedSeq)
+	}
+
+	if _, err := psdb.Instance().ExecContext(ctx, `UPDATE claimius.sync_consumer SET last_contact_at = now() - INTERVAL '8 days' WHERE app_id = ? AND consumer_id = ?`, appID, disciple); err != nil {
+		t.Fatalf("age consumer: %v", err)
+	}
+	if d := getSyncConsumer(t, appID, disciple); d.InContact {
+		t.Fatalf("a consumer out of contact for more than 7 days must read as out of contact, got %+v", d)
+	}
+}
+
+func TestGetSyncConsumersBoundsItsCountAndDescendsOncePerConsumer(t *testing.T) {
+	appID, _ := getGrantFixture(t)
+	ctx := context.Background()
+	start := getAppHead(t, appID)
+	consumer := uuid.New()
+	getSyncPage(appID, start, "consumer="+consumer.String())
+	if _, err := psdb.Instance().ExecContext(ctx, `
+		INSERT INTO claimius.sync_event (operation, event_type, payload, app_id)
+		SELECT 'upsert', 'claimius.user_field', jsonb_build_object('id', gen_random_uuid()), ?
+		FROM generate_series(1, 20000)
+	`, appID); err != nil {
+		t.Fatalf("write events: %v", err)
+	}
+	if c := getSyncConsumer(t, appID, consumer); c.Behind != 1001 || c.NextSeq == nil || *c.NextSeq <= start.Seq {
+		t.Fatalf("a consumer more than 1,000 events behind must count 1,001 and name its next event, got %+v", c)
+	}
+
+	if _, err := psdb.Instance().ExecContext(ctx, `ANALYZE claimius.sync_event`); err != nil {
+		t.Fatalf("analyze: %v", err)
+	}
+	consumers, err := psdb.GetSyncConsumers(ctx, appID)
+	if err != nil {
+		t.Fatalf("read sync consumers: %v", err)
+	}
+	var plan []map[string]any
+	var raw []byte
+	if err := psdb.Instance().NewRaw(`EXPLAIN (ANALYZE, FORMAT JSON) SELECT * FROM claimius.get_sync_consumers(?)`, appID).Scan(ctx, &raw); err != nil {
+		t.Fatalf("explain: %v", err)
+	}
+	if err := json.Unmarshal(raw, &plan); err != nil {
+		t.Fatalf("decode plan %s: %v", raw, err)
+	}
+	var scans []string
+	var loops []float64
+	var walk func(node map[string]any)
+	walk = func(node map[string]any) {
+		if rel, _ := node["Relation Name"].(string); rel == "sync_event" {
+			index, _ := node["Index Name"].(string)
+			scans = append(scans, node["Node Type"].(string)+" "+index)
+			n, _ := node["Actual Loops"].(float64)
+			loops = append(loops, n)
+		}
+		children, _ := node["Plans"].([]any)
+		for _, child := range children {
+			walk(child.(map[string]any))
+		}
+	}
+	walk(plan[0]["Plan"].(map[string]any))
+	for _, scan := range scans {
+		if !strings.HasSuffix(scan, " idx_sync_event_app_txid_seq") {
+			t.Fatalf("every read of sync_event must be a descent of idx_sync_event_app_txid_seq, got %v", scans)
+		}
+	}
+	if len(scans) != 2 || loops[0]+loops[1] != float64(1+len(consumers)) {
+		t.Fatalf("the read must descend once for the head and once per consumer of %d, got %v loops %v", len(consumers), scans, loops)
 	}
 }

@@ -469,3 +469,22 @@ export interface AppCostQuery {
   to?: string
   granularity?: CostGranularity
 }
+
+export interface SyncConsumer {
+  consumer_id: string
+  peer: boolean
+  txid: number
+  seq: number
+  last_contact_at: string
+  in_contact: boolean
+  head_txid: number
+  head_seq: number
+  trimmed_txid: number
+  trimmed_seq: number
+  behind: number
+  next_txid?: number
+  next_seq?: number
+  next_operation?: 'upsert' | 'delete'
+  next_event_type?: string
+  next_payload_id?: string
+}

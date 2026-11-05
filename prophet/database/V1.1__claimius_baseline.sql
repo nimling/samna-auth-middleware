@@ -772,12 +772,15 @@ CREATE TABLE IF NOT EXISTS claimius.sync_consumer (
                                                       last_applied_txid   XID8 NOT NULL DEFAULT '0',
                                                       last_applied_seq    BIGINT NOT NULL DEFAULT 0,
                                                       last_contact_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+                                                      peer                BOOLEAN NOT NULL DEFAULT FALSE,
                                                       PRIMARY KEY (app_id, consumer_id)
 );
 
 ALTER TABLE claimius.sync_consumer ADD COLUMN IF NOT EXISTS last_applied_txid XID8 NOT NULL DEFAULT '0';
+ALTER TABLE claimius.sync_consumer ADD COLUMN IF NOT EXISTS peer BOOLEAN NOT NULL DEFAULT FALSE;
 
 COMMENT ON TABLE claimius.sync_consumer IS 'Per consumer sync cursor: the (txid, seq) position a disciple database last proved it applied by asking for what comes after it.';
+COMMENT ON COLUMN claimius.sync_consumer.peer IS 'Whether the consumer last pulled as a peer prophet, with peer = true, and is served what a peer is served, app_handover events included.';
 
 INSERT INTO claimius.sync_consumer (app_id, consumer_id, last_applied_seq, last_contact_at)
 SELECT ps.app_id, '00000000-0000-0000-0000-000000000000', ps.last_applied_seq, ps.last_contact_at

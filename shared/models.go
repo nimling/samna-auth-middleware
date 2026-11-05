@@ -1127,6 +1127,25 @@ type SyncEvent struct {
 	WrittenAt time.Time       `bun:"written_at,default:now()" json:"written_at"`
 }
 
+type SyncConsumer struct {
+	ConsumerID    uuid.UUID `bun:"consumer_id,type:uuid" json:"consumer_id"`
+	Peer          bool      `bun:"peer" json:"peer"`
+	Txid          int64     `bun:"txid" json:"txid"`
+	Seq           int64     `bun:"seq" json:"seq"`
+	LastContactAt time.Time `bun:"last_contact_at" json:"last_contact_at"`
+	InContact     bool      `bun:"in_contact" json:"in_contact"`
+	HeadTxid      int64     `bun:"head_txid" json:"head_txid"`
+	HeadSeq       int64     `bun:"head_seq" json:"head_seq"`
+	TrimmedTxid   int64     `bun:"trimmed_txid" json:"trimmed_txid"`
+	TrimmedSeq    int64     `bun:"trimmed_seq" json:"trimmed_seq"`
+	Behind        int64     `bun:"behind" json:"behind"`
+	NextTxid      *int64    `bun:"next_txid" json:"next_txid,omitempty"`
+	NextSeq       *int64    `bun:"next_seq" json:"next_seq,omitempty"`
+	NextOperation *string   `bun:"next_operation" json:"next_operation,omitempty"`
+	NextEventType *string   `bun:"next_event_type" json:"next_event_type,omitempty"`
+	NextPayloadID *string   `bun:"next_payload_id" json:"next_payload_id,omitempty"`
+}
+
 type DiscipleState struct {
 	bun.BaseModel `bun:"table:claimius.disciple_state"`
 
