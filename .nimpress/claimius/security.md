@@ -71,7 +71,7 @@ A code in a URL is a bearer capability, so it is handled as one; [Users](./users
 3. Every answer to a request that carries or follows a code sends `Referrer-Policy: no-referrer`, and the guard takes `samk` and `SAuth-Code` off the request before a handler, a request logger or a span reads it. The telemetry span records the path only.
 4. A code resolves only inside `starts_at` and `ends_at`, below `count` and until `revoked_at`; a revoke reaches every disciple through the feed and clears the resolve cache. A counted use and an invite redeem are single statements on the prophet, so the last use is taken once.
 5. Twenty failed resolves per address and minute answer `429`, and the limit holds for valid codes too until the minute passes; an unanswerable resolve is `503`.
-6. A guest reads at most, in the access walk itself, and every guest request writes an audit row with the claim and the code id.
+6. A guest gets what its claim grants, held to the guest ceiling in the access walk itself, READ unless the app raises it, and every guest request writes an audit row with the claim and the code id.
 7. A guest code is an identity only on a route group mounted with `UserAuthOptions{Guest: true}`. On every other route it is taken off the request and ignored, so the request answers `401`, or the login redirect on a navigation, exactly as one without a credential.
 8. Guest tokens from `POST /sam/guest` always expire, at the access token lifetime or the grant's end.
 
