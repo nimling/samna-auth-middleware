@@ -14,7 +14,7 @@ import (
 
 func (d *DB) GetAccess(ctx context.Context, userID, objectID uuid.UUID, objectType string, requiredAccess ClaimAccess) (*AccessClaim, error) {
 	if userID == AnonymousUserID {
-		return d.getGuestAccess(ctx, objectID, objectType, requiredAccess)
+		return d.getGuestAccess(ctx, userID, objectID, objectType, requiredAccess)
 	}
 	if objectType == OBJECT_TYPE_USER && userID == objectID {
 		return selfAccessClaim(userID, requiredAccess), nil
@@ -23,12 +23,12 @@ func (d *DB) GetAccess(ctx context.Context, userID, objectID uuid.UUID, objectTy
 	err := d.prepared(ctx, d.DB, &claims, "SELECT * FROM claimius.get_access($1::uuid, $2::uuid, $3::text, $4::int)", userID, objectID, objectType, requiredAccess)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return nil, ErrNoAccess
+			return d.getGuestAccess(ctx, userID, objectID, objectType, requiredAccess)
 		}
 		return nil, ErrInternalServer
 	}
 	if len(claims) == 0 {
-		return nil, ErrNoAccess
+		return d.getGuestAccess(ctx, userID, objectID, objectType, requiredAccess)
 	}
 	d.Usage.Add(nil, userID, objectType, objectID)
 	nimtel.Organization(ctx, claims[0].RootID, claims[0].OwnerID)

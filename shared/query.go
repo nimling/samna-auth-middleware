@@ -139,16 +139,23 @@ func ObjectWhere(q *bun.SelectQuery, userID uuid.UUID, objectType string, requir
 		}
 		return q
 	}
+	guest := "(" + guestUserWhere + " AND EXISTS (SELECT 1 FROM claimius.get_guest_access(?, " + table + ".id, ?)))"
 	if objectID != nil {
 		return q.
 			Where(table+".id = ?", *objectID).
-			Where("EXISTS (SELECT 1 FROM claimius.get_access(?, ?, ?, ?))", userID, *objectID, objectType, int(requiredAccess))
+			Where("(EXISTS (SELECT 1 FROM claimius.get_access(?, ?, ?, ?)) OR "+guest+")", userID, *objectID, objectType, int(requiredAccess), userID, objectType, int(requiredAccess))
 	}
 	var pageLimit any
 	if limit > 0 {
 		pageLimit = limit
 	}
-	q = q.Where(table+".id IN (SELECT object_id FROM claimius.get_objects(?, ?, ?, ?, ?))", userID, objectType, int(requiredAccess), after, pageLimit)
+	q = q.Where("("+table+".id IN (SELECT object_id FROM claimius.get_objects(?, ?, ?, ?, ?)) OR "+guest+")", userID, objectType, int(requiredAccess), after, pageLimit, userID, objectType, int(requiredAccess))
+	if after != nil {
+		q = q.Where(table+".id > ?", *after)
+	}
+	if limit > 0 {
+		q = q.Limit(limit)
+	}
 	if after != nil || limit > 0 {
 		q = q.OrderExpr(table + ".id")
 	}

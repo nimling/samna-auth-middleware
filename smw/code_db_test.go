@@ -536,6 +536,78 @@ func TestACodeOnAPerBookingManageClaimLetsItsHolderCancel(t *testing.T) {
 	}
 }
 
+func TestACodeGuestAlsoHoldsTheOpenClaims(t *testing.T) {
+	f := getCodeFixture(t)
+	ctx := context.Background()
+	bookers, bookersAC := f.postClaim(t, "Bookers", shared.ACCESS_READ|shared.ACCESS_EXECUTE, f.org)
+	if _, err := sdb.Instance().PutClaimGuest(ctx, bookersAC, bookers, shared.GUEST_MODE_OPEN); err != nil {
+		t.Fatalf("open guest claim: %v", err)
+	}
+	order, orderAC := f.postClaim(t, "Order", shared.ACCESS_READ|shared.ACCESS_WRITE, f.hidden)
+	if _, err := sdb.Instance().PutClaimGuest(ctx, orderAC, order, shared.GUEST_MODE_CODE); err != nil {
+		t.Fatalf("code guest claim: %v", err)
+	}
+	code, err := sdb.Instance().PostCode(ctx, orderAC, order, shared.BodyCode{Kind: shared.CODE_KIND_GUEST}, "https://svc.example.test")
+	if err != nil {
+		t.Fatalf("post code: %v", err)
+	}
+	request := func(method string) *http.Request {
+		req := httptest.NewRequest(method, "/api/booking", nil)
+		req.Header.Set(smw.CodeHeader, code.Value)
+		return req
+	}
+
+	if rec, answer := serveGuard(t, guestRoute, f.hidden, shared.ACCESS_WRITE, request(http.MethodPut)); rec.Code != http.StatusOK || answer.Access&int(shared.ACCESS_READ|shared.ACCESS_WRITE) != int(shared.ACCESS_READ|shared.ACCESS_WRITE) {
+		t.Fatalf("the code guest holds its own claim, got %d access %d", rec.Code, answer.Access)
+	}
+	rec, answer := serveGuard(t, guestRoute, f.org, shared.ACCESS_EXECUTE, request(http.MethodPost))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("the code guest books through the open claim every anonymous caller holds, got %d", rec.Code)
+	}
+	if answer.Access != int(shared.ACCESS_READ|shared.ACCESS_EXECUTE) {
+		t.Fatalf("the open claim grants READ|EXECUTE, got access %d", answer.Access)
+	}
+	if rec, _ := serveGuard(t, guestRoute, f.org, shared.ACCESS_WRITE, request(http.MethodPut)); rec.Code != http.StatusForbidden {
+		t.Fatalf("WRITE neither claim grants is refused, got %d", rec.Code)
+	}
+
+	var guest uuid.UUID
+	if err := sdb.Instance().NewRaw(`
+		SELECT uc.user_id FROM claimius.user_claim uc JOIN claimius.samna_user u ON u.user_id = uc.user_id AND u.type = 'guest'
+		WHERE uc.claim_id = ? AND uc.sa_deleted_at IS NULL`, order).Scan(ctx, &guest); err != nil {
+		t.Fatalf("guest: %v", err)
+	}
+	listed := func(userID uuid.UUID) map[uuid.UUID]bool {
+		ids := make([]uuid.UUID, 0)
+		q := sdb.Instance().NewSelect().ColumnExpr("organization.id").TableExpr("claimius.get_organizations AS organization").
+			Where("organization.id IN (?, ?)", f.org, f.hidden)
+		if err := sdb.ObjectWhere(q, userID, shared.OBJECT_TYPE_ORGANIZATION, shared.ACCESS_READ, nil, nil, 0).Scan(ctx, &ids); err != nil {
+			t.Fatalf("list: %v", err)
+		}
+		found := make(map[uuid.UUID]bool, len(ids))
+		for _, id := range ids {
+			found[id] = true
+		}
+		return found
+	}
+	if found := listed(guest); !found[f.org] || !found[f.hidden] {
+		t.Fatalf("a code guest lists its own objects and the open ones, got %v", found)
+	}
+	if found := listed(f.owner); found[f.hidden] {
+		t.Fatalf("a signed in user gets no union with the open claims, got %v", found)
+	}
+	stranger := uuid.New()
+	if _, err := sdb.Instance().ExecContext(ctx, `SELECT claimius.upsert_app_user(p_user_id => ?, p_first_name => 'Stranger')`, stranger); err != nil {
+		t.Fatalf("stranger: %v", err)
+	}
+	if _, err := sdb.Instance().MutationAccess(ctx, stranger, f.org, shared.OBJECT_TYPE_ORGANIZATION, shared.ACCESS_EXECUTE); err == nil {
+		t.Fatal("a signed in user without a grant is not given the open claims")
+	}
+	if found := listed(stranger); len(found) != 0 {
+		t.Fatalf("a signed in user without a grant lists nothing, got %v", found)
+	}
+}
+
 func TestRepeatedFailedCodesAnswer429(t *testing.T) {
 	f := getCodeFixture(t)
 	f.putGuest(t, shared.GUEST_MODE_CODE)

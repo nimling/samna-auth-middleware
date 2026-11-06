@@ -70,7 +70,7 @@ func TestGetOrganizationsQuery_BindsThePage(t *testing.T) {
 	if !strings.Contains(got, want) {
 		t.Fatalf("page not bound into get_objects:\nwant %s\ngot  %s", want, got)
 	}
-	if !strings.HasSuffix(got, `ORDER BY "organization".id`) {
+	if !strings.HasSuffix(got, `ORDER BY "organization".id LIMIT 50`) {
 		t.Fatalf("page not ordered by id: %s", got)
 	}
 }
@@ -164,7 +164,7 @@ func TestObjectWhere_OrdersOnlyAPage(t *testing.T) {
 	}
 	after := uuid.MustParse("10000000-0000-4000-8000-000000000011")
 	got = sdb.ObjectWhere(db.NewSelect().Model(&orgs), userID, "claimius.organization", sdb.ACCESS_READ, nil, &after, 25).String()
-	if !strings.HasSuffix(got, `ORDER BY "organization".id`) {
+	if !strings.HasSuffix(got, `ORDER BY "organization".id LIMIT 25`) {
 		t.Fatalf("a page must order on the id its cursor continues from: %s", got)
 	}
 }
