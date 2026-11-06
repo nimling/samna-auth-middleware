@@ -48,10 +48,10 @@ BEGIN
     END IF;
 
     IF EXISTS (SELECT 1 FROM claimius.samna_user u WHERE u.user_id = p_user_id AND u.app_id = p_app_id AND u.type = 'guest' AND u.sa_deleted_at IS NULL) THEN
-        IF (p_required_access & ~4) <> 0 THEN
+        v_cap := coalesce((SELECT a.guest_access FROM claimius.samna_app a WHERE a.id = p_app_id), 4);
+        IF (p_required_access & ~v_cap) <> 0 THEN
             RETURN;
         END IF;
-        v_cap := 4;
     END IF;
 
     SELECT s.* INTO v_pair FROM claimius._settle_pair(p_app_id, p_user_id, p_object_type, p_object_id) s;
@@ -100,7 +100,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = claimius, pg_temp;
 
-COMMENT ON FUNCTION claimius.get_access(UUID, UUID, UUID, TEXT, INTEGER) IS 'Strongest active claim based grant for one (user, app, object) whose mask covers p_required_access: the user row, then the point settle and the read of the pair with its object_info row in one pass through _settle_pair, and the grant chosen from the pair, or, when no claim grant covers p_required_access, the creator''s direct_grant with no user_claim_id and claim_name direct. Only when the settle was skipped on a lock and the pair gives nothing does it walk the ancestors through get_direct_access. user_claim_id is the actor token for follow-on writes. sa_root_id is the owning organization root, suitable for FK to claimius.organization on follow-on claim and claim_object writes. A user of type guest is capped at READ: a requirement past READ answers nothing and the returned mask keeps the READ bit only.';
+COMMENT ON FUNCTION claimius.get_access(UUID, UUID, UUID, TEXT, INTEGER) IS 'Strongest active claim based grant for one (user, app, object) whose mask covers p_required_access: the user row, then the point settle and the read of the pair with its object_info row in one pass through _settle_pair, and the grant chosen from the pair, or, when no claim grant covers p_required_access, the creator''s direct_grant with no user_claim_id and claim_name direct. Only when the settle was skipped on a lock and the pair gives nothing does it walk the ancestors through get_direct_access. user_claim_id is the actor token for follow-on writes. sa_root_id is the owning organization root, suitable for FK to claimius.organization on follow-on claim and claim_object writes. A user of type guest is held to the guest ceiling of its app, samna_app.guest_access, READ (4) unless the app sets it: a requirement past the ceiling answers nothing and the returned mask keeps the bits of the ceiling only. Within it the claim decides.';
 
 DROP FUNCTION IF EXISTS claimius.get_direct_access(UUID, UUID, UUID, TEXT);
 

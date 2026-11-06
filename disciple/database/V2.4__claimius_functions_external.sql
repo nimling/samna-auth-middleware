@@ -40,10 +40,10 @@ BEGIN
     END IF;
 
     IF EXISTS (SELECT 1 FROM claimius.samna_user u WHERE u.user_id = p_user_id AND u.type = 'guest' AND u.sa_deleted_at IS NULL) THEN
-        IF (p_required_access & ~4) <> 0 THEN
+        v_cap := coalesce((SELECT s.guest_access FROM claimius.disciple_state s LIMIT 1), 4);
+        IF (p_required_access & ~v_cap) <> 0 THEN
             RETURN;
         END IF;
-        v_cap := 4;
     END IF;
 
     SELECT s.* INTO v_pair FROM claimius._settle_pair(p_user_id, p_object_type, p_object_id) s;
@@ -92,7 +92,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = claimius, pg_temp;
 
-COMMENT ON FUNCTION claimius.get_access(UUID, UUID, TEXT, INTEGER) IS 'Strongest active claim based grant for one (user, object) whose mask covers p_required_access: the user row, then the point settle and the read of the pair with its object_info row in one pass through _settle_pair, and the grant chosen from the pair, or, when no claim grant covers p_required_access, the creator''s direct_grant with no user_claim_id and claim_name direct. Only when the settle was skipped on a lock and the pair gives nothing does it walk the ancestors through get_direct_access. user_claim_id is the actor token for follow-on writes. sa_root_id is the owning organization root, suitable for FK to claimius.organization on follow-on claim and claim_object writes. A user of type guest is capped at READ: a requirement past READ answers nothing and the returned mask keeps the READ bit only.';
+COMMENT ON FUNCTION claimius.get_access(UUID, UUID, TEXT, INTEGER) IS 'Strongest active claim based grant for one (user, object) whose mask covers p_required_access: the user row, then the point settle and the read of the pair with its object_info row in one pass through _settle_pair, and the grant chosen from the pair, or, when no claim grant covers p_required_access, the creator''s direct_grant with no user_claim_id and claim_name direct. Only when the settle was skipped on a lock and the pair gives nothing does it walk the ancestors through get_direct_access. user_claim_id is the actor token for follow-on writes. sa_root_id is the owning organization root, suitable for FK to claimius.organization on follow-on claim and claim_object writes. A user of type guest is held to the guest ceiling, disciple_state.guest_access, READ (4) unless the service sets SAUTH_GUEST_ACCESS or the app setting: a requirement past the ceiling answers nothing and the returned mask keeps the bits of the ceiling only. Within it the claim decides.';
 
 DROP FUNCTION IF EXISTS claimius.get_direct_access(UUID, UUID, UUID, TEXT);
 
@@ -4771,9 +4771,11 @@ COMMENT ON FUNCTION claimius.redeem_code(TEXT, UUID) IS 'The local redeem of a d
 GRANT EXECUTE ON FUNCTION claimius.redeem_code(TEXT, UUID)
     TO claimius_disciple_client;
 
+DROP FUNCTION IF EXISTS claimius.get_guest_access(TEXT, UUID);
 CREATE OR REPLACE FUNCTION claimius.get_guest_access(
-    p_object_type TEXT,
-    p_object_id   UUID
+    p_object_type     TEXT,
+    p_object_id       UUID,
+    p_required_access INTEGER DEFAULT 4
 ) RETURNS TABLE (
                     user_id        UUID,
                     user_object_id UUID,
@@ -4788,7 +4790,7 @@ CREATE OR REPLACE FUNCTION claimius.get_guest_access(
                     direct_grant   BOOLEAN,
                     level          INTEGER
                 ) AS $$
-    SELECT g.user_id, a.user_object_id, a.user_claim_id, a.claim_id, a.claim_name, a.sa_access & 4,
+    SELECT g.user_id, a.user_object_id, a.user_claim_id, a.claim_id, a.claim_name, a.sa_access,
            a.scope, a.sa_owner_id, a.sa_root_id, a.sa_location_id, a.direct_grant, a.level
     FROM claimius.claim c
     JOIN claimius.user_claim g ON g.claim_id = c.id
@@ -4796,16 +4798,16 @@ CREATE OR REPLACE FUNCTION claimius.get_guest_access(
                               AND (g.starts_at IS NULL OR g.starts_at <= now())
                               AND (g.ends_at IS NULL OR g.ends_at > now())
     JOIN claimius.samna_user u ON u.user_id = g.user_id AND u.type = 'guest' AND u.sa_deleted_at IS NULL
-    CROSS JOIN LATERAL claimius.get_access(g.user_id, p_object_id, p_object_type, 4) a
+    CROSS JOIN LATERAL claimius.get_access(g.user_id, p_object_id, p_object_type, p_required_access) a
     WHERE c.guest_mode = 'open'
       AND c.sa_deleted_at IS NULL
     ORDER BY a.level DESC, a.claim_id
     LIMIT 1
 $$ LANGUAGE sql VOLATILE SECURITY DEFINER SET search_path = claimius, pg_temp;
 
-COMMENT ON FUNCTION claimius.get_guest_access(TEXT, UUID) IS 'Access of a request that carries no credential, on a route that allows guests: the guest of an open guest claim whose grant is live and whose access covers the object, with its access capped at READ, or no row. user_id is the guest the request then acts as. VOLATILE: it settles through get_access.';
+COMMENT ON FUNCTION claimius.get_guest_access(TEXT, UUID, INTEGER) IS 'Access of a request that carries no credential, on a route that allows guests: the guest of an open guest claim whose grant is live and whose access covers p_required_access on the object, or no row. The claim decides the access, held to the guest ceiling get_access applies to every guest. user_id is the guest the request then acts as. VOLATILE: it settles through get_access.';
 
-GRANT EXECUTE ON FUNCTION claimius.get_guest_access(TEXT, UUID)
+GRANT EXECUTE ON FUNCTION claimius.get_guest_access(TEXT, UUID, INTEGER)
     TO claimius_disciple_client, claimius_writer, claimius_admin, claimius_reader;
 
 CREATE OR REPLACE FUNCTION claimius.prune(p_settings JSONB)

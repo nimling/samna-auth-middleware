@@ -79,6 +79,7 @@ func Init(ctx context.Context) error {
 	r.run(func() {
 		shared.LeadSync(ctx, db, shared.RetentionLockKey, leadInterval, db.PruneLoop)
 	})
+	r.run(func() { db.GuestAccessLoop(ctx) })
 	if utils.GetDebugMode() != utils.DebugModeNone {
 		return nil
 	}

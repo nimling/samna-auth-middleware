@@ -91,10 +91,10 @@ SELECT is((SELECT count(*) FROM claimius.update_code_used(pg_temp.hash('guest-va
 
 SELECT is_empty($$
     SELECT 1 FROM claimius.get_access(pg_temp.crew('guest'), pg_temp.crew('org'), 'claimius.organization', 2)
-$$, 'a guest never writes, whatever its claim holds');
+$$, 'under the default guest ceiling a guest write is refused, whatever its claim holds');
 
 SELECT is((SELECT sa_access FROM claimius.get_access(pg_temp.crew('guest'), pg_temp.crew('org'), 'claimius.organization', 4)),
-          4, 'a guest reads, capped at READ');
+          4, 'under the default guest ceiling a guest holds READ only');
 
 SELECT is_empty($$
     SELECT 1 FROM claimius.get_guest_access('claimius.organization', pg_temp.crew('org'))
@@ -106,7 +106,7 @@ $$, 'an owner opens the guest claim');
 
 SELECT results_eq($$
     SELECT user_id, sa_access FROM claimius.get_guest_access('claimius.organization', pg_temp.crew('org'))
-$$, $$ VALUES (pg_temp.crew('guest'), 4) $$, 'an open guest claim serves its object as its guest, capped at READ');
+$$, $$ VALUES (pg_temp.crew('guest'), 4) $$, 'an open guest claim serves its object as its guest, held to the default guest ceiling');
 
 SELECT is_empty($$
     SELECT 1 FROM claimius.get_guest_access('claimius.organization', pg_temp.crew('hidden'))

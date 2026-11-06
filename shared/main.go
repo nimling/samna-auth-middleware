@@ -37,6 +37,7 @@ type DB struct {
 	RouteToProphet bool
 	Prophet        bool
 	Retention      func(context.Context) Retention
+	GuestAccess    func(context.Context) *ClaimAccess
 }
 
 type stmtKey struct {

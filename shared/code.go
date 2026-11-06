@@ -10,6 +10,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"strconv"
 	"sync"
 	"time"
 
@@ -440,16 +442,46 @@ func (d *DB) PutClaimGuest(ctx context.Context, ac *AccessClaim, claimID uuid.UU
 	return &claim, nil
 }
 
-func (d *DB) getGuestAccess(ctx context.Context, objectID uuid.UUID, objectType string, requiredAccess ClaimAccess) (*AccessClaim, error) {
-	if requiredAccess&^ACCESS_READ != 0 {
-		return nil, ErrNoAccess
+func GuestAccessEnv() ClaimAccess {
+	if v, err := strconv.Atoi(os.Getenv("SAUTH_GUEST_ACCESS")); err == nil {
+		return ClaimAccess(v)
 	}
+	return ACCESS_READ
+}
+
+func (d *DB) PutGuestAccess(ctx context.Context, access ClaimAccess) error {
+	_, err := d.NewRaw("UPDATE claimius.disciple_state SET guest_access = ?", int(access)).Exec(ctx)
+	return err
+}
+
+func (d *DB) GuestAccessLoop(ctx context.Context) {
+	ticker := time.NewTicker(time.Hour)
+	defer ticker.Stop()
+	for {
+		access := GuestAccessEnv()
+		if d.GuestAccess != nil {
+			if a := d.GuestAccess(ctx); a != nil {
+				access = *a
+			}
+		}
+		if err := d.PutGuestAccess(ctx, access); err != nil && ctx.Err() == nil {
+			d.Logger.Errorf("guest access: %v", err)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
+}
+
+func (d *DB) getGuestAccess(ctx context.Context, objectID uuid.UUID, objectType string, requiredAccess ClaimAccess) (*AccessClaim, error) {
 	type guestAccessRow struct {
 		GuestUserID uuid.UUID `bun:"user_id"`
 		AccessClaim
 	}
 	rows := make([]guestAccessRow, 0, 1)
-	if err := d.NewRaw("SELECT * FROM claimius.get_guest_access(?, ?)", objectType, objectID).Scan(ctx, &rows); err != nil && !errors.Is(err, sql.ErrNoRows) {
+	if err := d.NewRaw("SELECT * FROM claimius.get_guest_access(?, ?, ?)", objectType, objectID, int(requiredAccess)).Scan(ctx, &rows); err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrInternalServer
 	}
 	if len(rows) == 0 {

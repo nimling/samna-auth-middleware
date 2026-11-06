@@ -124,13 +124,10 @@ func ObjectWhere(q *bun.SelectQuery, userID uuid.UUID, objectType string, requir
 		}
 	}
 	if userID == AnonymousUserID {
-		if requiredAccess&^ACCESS_READ != 0 {
-			return q.Where("FALSE")
-		}
 		if objectID != nil {
 			q = q.Where(table+".id = ?", *objectID)
 		}
-		q = q.Where("EXISTS (SELECT 1 FROM claimius.get_guest_access(?, "+table+".id))", objectType)
+		q = q.Where("EXISTS (SELECT 1 FROM claimius.get_guest_access(?, "+table+".id, ?))", objectType, int(requiredAccess))
 		if after != nil {
 			q = q.Where(table+".id > ?", *after)
 		}

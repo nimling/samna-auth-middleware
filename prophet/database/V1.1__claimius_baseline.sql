@@ -86,6 +86,10 @@ ALTER TABLE claimius.samna_app ADD COLUMN IF NOT EXISTS home_prophet TEXT;
 
 COMMENT ON COLUMN claimius.samna_app.home_prophet IS 'The prophet that decides the app''s writes, by its prophet_peer.prophet slug. NULL when this prophet is the app''s home.';
 
+ALTER TABLE claimius.samna_app ADD COLUMN IF NOT EXISTS guest_access INTEGER NOT NULL DEFAULT 4;
+
+COMMENT ON COLUMN claimius.samna_app.guest_access IS 'The guest ceiling of the app: the highest access mask get_access answers a guest of the app, whatever its claim holds. READ (4) by default; within it the claim decides. Written from the app''s settings.';
+
 CREATE INDEX IF NOT EXISTS idx_samna_app_sa_deleted_at ON claimius.samna_app (sa_deleted_at);
 CREATE INDEX IF NOT EXISTS idx_samna_app_status ON claimius.samna_app (status);
 CREATE INDEX IF NOT EXISTS idx_samna_app_sa_owner_id ON claimius.samna_app (sa_owner_id);
@@ -316,7 +320,7 @@ DO $$ BEGIN
     ALTER TABLE claimius.claim ADD CONSTRAINT claim_guest_mode_check CHECK (guest_mode IN ('open', 'code', 'off'));
 EXCEPTION WHEN duplicate_object THEN NULL;
 END $$;
-COMMENT ON COLUMN claimius.claim.guest_mode IS 'How the guest of the claim is reached: open, by anyone without a credential, through a disciple''s get_guest_access; code, only by the holder of a live guest code of the claim; off, not at all. Set only through update_claim_guest, which also ensures the guest and its grant. A guest reads at most: get_access caps a guest user at READ.';
+COMMENT ON COLUMN claimius.claim.guest_mode IS 'How the guest of the claim is reached: open, by anyone without a credential, through a disciple''s get_guest_access; code, only by the holder of a live guest code of the claim; off, not at all. Set only through update_claim_guest, which also ensures the guest and its grant. A guest gets what its claim grants, held to the guest ceiling get_access applies, samna_app.guest_access of its app, READ by default.';
 
 CREATE TABLE IF NOT EXISTS claimius.user_claim (
                                                    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),

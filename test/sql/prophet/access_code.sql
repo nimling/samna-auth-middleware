@@ -94,10 +94,10 @@ SELECT is((SELECT count(*) FROM claimius.update_code_used(pg_temp.crew('app'), p
 
 SELECT is_empty($$
     SELECT 1 FROM claimius.get_access('a0000000-0000-4000-8000-0000000000c9', pg_temp.crew('app'), pg_temp.crew('org'), 'claimius.organization', 2)
-$$, 'a guest never writes, whatever its claim holds');
+$$, 'under the default guest ceiling a guest write is refused, whatever its claim holds');
 
 SELECT is((SELECT sa_access FROM claimius.get_access('a0000000-0000-4000-8000-0000000000c9', pg_temp.crew('app'), pg_temp.crew('org'), 'claimius.organization', 4)),
-          4, 'a guest reads, capped at READ');
+          4, 'under the default guest ceiling a guest holds READ only');
 
 SELECT lives_ok($$
     SELECT claimius.insert_code(pg_temp.crew('app'), 'a0000000-0000-4000-8000-000000000c51', pg_temp.crew('reader_claim'), pg_temp.hash('invite-value'), 'invite',
