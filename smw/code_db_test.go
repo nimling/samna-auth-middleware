@@ -5,6 +5,7 @@ package smw_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -533,6 +534,61 @@ func TestACodeOnAPerBookingManageClaimLetsItsHolderCancel(t *testing.T) {
 	other.Header.Set(smw.CodeHeader, code.Value)
 	if rec, _ := serveGuard(t, guestRoute, f.org, shared.ACCESS_WRITE, other); rec.Code != http.StatusForbidden {
 		t.Fatalf("the code reaches only the booking its claim is bound to, got %d", rec.Code)
+	}
+}
+
+func TestTheCreatorOfAClaimOpensItToAGuestAndMintsItsCode(t *testing.T) {
+	f := getCodeFixture(t)
+	ctx := context.Background()
+	db := sdb.Instance()
+	bookers, _ := f.postClaim(t, "Bookers", shared.ACCESS_READ|shared.ACCESS_EXECUTE, f.org)
+	holders := []uuid.UUID{uuid.New(), uuid.New()}
+	grants := make([]uuid.UUID, 0, len(holders))
+	for _, holder := range holders {
+		if _, err := db.ExecContext(ctx, `SELECT claimius.upsert_app_user(p_user_id => ?, p_first_name => 'Booker')`, holder); err != nil {
+			t.Fatalf("booker: %v", err)
+		}
+		var grant uuid.UUID
+		if err := db.NewRaw(`
+			SELECT (claimius.insert_user_claim(p_claim_id => ?, p_user_id => ?, p_sa_owner_id => ?, p_sa_created_by => ?) -> 'user_claim' ->> 'id')::UUID
+		`, bookers, holder, f.org, f.owner).Scan(ctx, &grant); err != nil {
+			t.Fatalf("grant bookers: %v", err)
+		}
+		grants = append(grants, grant)
+	}
+	booker, stranger := holders[0], holders[1]
+	var order uuid.UUID
+	if err := db.NewRaw(`
+		SELECT (claimius.insert_claim(p_name => 'Order', p_description => NULL, p_sa_access => 47,
+		        p_sa_owner_id => ?0, p_sa_root_id => ?0, p_sa_created_by => ?1, p_type => 'virtual') -> 'claim' ->> 'id')::UUID
+	`, f.org, grants[0]).Scan(ctx, &order); err != nil {
+		t.Fatalf("order claim: %v", err)
+	}
+	bookerAC := &shared.AccessClaim{UserID: booker}
+	if _, err := db.PutClaimGuest(ctx, &shared.AccessClaim{UserID: stranger}, order, shared.GUEST_MODE_CODE); !errors.Is(err, shared.ErrNoAccess) {
+		t.Fatalf("a holder of the same claim who did not make the order claim is refused, got %v", err)
+	}
+	if _, err := db.PutClaimGuest(ctx, bookerAC, order, shared.GUEST_MODE_CODE); err != nil {
+		t.Fatalf("the creator of a claim with no grant on it makes it a guest claim: %v", err)
+	}
+	code, err := db.PostCode(ctx, bookerAC, order, shared.BodyCode{Kind: shared.CODE_KIND_GUEST}, "https://svc.example.test")
+	if err != nil {
+		t.Fatalf("the creator of a claim mints its guest code: %v", err)
+	}
+	if code.CreatedBy != grants[0] {
+		t.Fatalf("the code is made under the grant the creator made the claim with, got %s want %s", code.CreatedBy, grants[0])
+	}
+	if _, err := db.PostCode(ctx, &shared.AccessClaim{UserID: stranger}, order, shared.BodyCode{Kind: shared.CODE_KIND_GUEST}, ""); !errors.Is(err, shared.ErrNoAccess) {
+		t.Fatalf("the stranger still mints nothing on it, got %v", err)
+	}
+	var guest uuid.UUID
+	if err := db.NewRaw(`
+		SELECT uc.user_id FROM claimius.user_claim uc JOIN claimius.samna_user u ON u.user_id = uc.user_id AND u.type = 'guest'
+		WHERE uc.claim_id = ? AND uc.sa_deleted_at IS NULL`, order).Scan(ctx, &guest); err != nil {
+		t.Fatalf("guest: %v", err)
+	}
+	if _, err := db.PostCode(ctx, &shared.AccessClaim{UserID: guest}, order, shared.BodyCode{Kind: shared.CODE_KIND_GUEST}, ""); !errors.Is(err, shared.ErrNoAccess) {
+		t.Fatalf("the guest holds the claim, not the claim row, and mints nothing on it, got %v", err)
 	}
 }
 

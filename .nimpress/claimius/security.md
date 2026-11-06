@@ -74,6 +74,7 @@ A code in a URL is a bearer capability, so it is handled as one; [Users](./users
 6. A guest gets exactly what its claim grants, in the access walk itself: the claim's guest mode, access mask, scope, level and grant window are its limits, and every guest request writes an audit row with the claim and the code id. A guest acting through a code also holds the open guest claims, which every anonymous caller holds already, so the union grants nothing an anonymous request would not get; no signed in user or client is given it.
 7. A guest code is an identity only on a route group mounted with `UserAuthOptions{Guest: true}`. On every other route it is taken off the request and ignored, so the request answers `401`, or the login redirect on a navigation, exactly as one without a credential.
 8. Guest tokens from `POST /sam/guest` always expire, at the access token lifetime or the grant's end.
+9. Every guest and code write, `update_claim_guest`, `upsert_guest_user`, `insert_code` and `delete_code`, runs `_check_code_owner`: the actor owns the claim by a grant that covers OWNER, or made it under a grant it still holds and the creator's own access, denies applied, still covers OWNER. The write is stamped with that grant, so a code is never made under an identity that cannot be revoked. A holder of the claim who did not make it, a guest included, owns nothing on the claim row and mints nothing.
 
 ## Ephemeral tables
 

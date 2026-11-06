@@ -5576,17 +5576,7 @@ BEGIN
         RAISE EXCEPTION 'upsert_guest_user: claim % not found in the app', p_claim_id USING ERRCODE = 'P0404';
     END IF;
 
-    SELECT a.user_claim_id INTO v_actor_uc
-      FROM claimius.get_access(p_actor_user_id, p_app_id, p_claim_id, 'claimius.claim', 1) a
-     LIMIT 1;
-    IF v_actor_uc IS NULL THEN
-        SELECT a.user_claim_id INTO v_actor_uc
-          FROM claimius.get_direct_access(p_actor_user_id, p_app_id, p_claim_id, 'claimius.claim', 1) a
-         LIMIT 1;
-    END IF;
-    IF v_actor_uc IS NULL THEN
-        RAISE EXCEPTION 'upsert_guest_user: the actor does not own claim %', p_claim_id USING ERRCODE = 'P0403';
-    END IF;
+    v_actor_uc := claimius._check_code_owner(p_app_id, p_claim_id, p_actor_user_id);
 
     INSERT INTO claimius.samna_user (user_id, app_id, first_name, status, type)
     VALUES (p_guest_user_id, p_app_id, 'Guest', 'active', 'guest')
@@ -5629,18 +5619,26 @@ CREATE OR REPLACE FUNCTION claimius._check_code_owner(
     p_actor_user_id UUID
 ) RETURNS UUID AS $$
 DECLARE
-    v_actor_uc UUID;
+    v_created_by UUID;
+    v_actor_uc   UUID;
+    v_made       BOOLEAN;
 BEGIN
-    IF NOT EXISTS (
-        SELECT 1 FROM claimius.claim
-        WHERE id = p_claim_id AND app_id = p_app_id AND sa_deleted_at IS NULL
-    ) THEN
+    SELECT c.sa_created_by INTO v_created_by
+      FROM claimius.claim c
+     WHERE c.id = p_claim_id AND c.app_id = p_app_id AND c.sa_deleted_at IS NULL;
+    IF NOT FOUND THEN
         RAISE EXCEPTION 'claim % not found in the app', p_claim_id USING ERRCODE = 'P0404';
     END IF;
 
-    SELECT a.user_claim_id INTO v_actor_uc
+    SELECT a.user_claim_id, a.direct_grant INTO v_actor_uc, v_made
       FROM claimius.get_access(p_actor_user_id, p_app_id, p_claim_id, 'claimius.claim', 1) a
      LIMIT 1;
+    IF v_actor_uc IS NULL AND v_made AND EXISTS (
+        SELECT 1 FROM claimius.user_claim uc
+        WHERE uc.id = v_created_by AND uc.app_id = p_app_id AND uc.user_id = p_actor_user_id AND uc.sa_deleted_at IS NULL
+    ) THEN
+        v_actor_uc := v_created_by;
+    END IF;
     IF v_actor_uc IS NULL THEN
         SELECT a.user_claim_id INTO v_actor_uc
           FROM claimius.get_direct_access(p_actor_user_id, p_app_id, p_claim_id, 'claimius.claim', 1) a
@@ -5653,7 +5651,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius._check_code_owner(UUID, UUID, UUID) IS 'The grant by which the actor owns a claim of the app, the check every code and guest write runs. Raises P0404 for a claim outside the app and P0403 when the actor does not own it.';
+COMMENT ON FUNCTION claimius._check_code_owner(UUID, UUID, UUID) IS 'The grant by which the actor owns a claim of the app, the check every code and guest write runs: the grant get_access chose, or, when no grant covers OWNER and the creator''s own access does, the grant the actor created the claim under. Raises P0404 for a claim outside the app and P0403 when the actor does not own it.';
 
 GRANT EXECUTE ON FUNCTION claimius._check_code_owner(UUID, UUID, UUID)
     TO claimius_writer, claimius_reader;
