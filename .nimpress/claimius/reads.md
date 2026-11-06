@@ -198,7 +198,6 @@ PL/pgSQL caches a plan per statement and, under `plan_cache_mode = auto`, switch
 | Step | Entries |
 |---|---|
 | `check_user_active`, one probe of `samna_user` by `(user_id, app_id)` | 1 |
-| The guest probe of the same row, which holds a guest to the guest ceiling | 1 |
 | The pair, one probe of the `user_object` primary key, with its mark | 1 |
 | The object's `object_info` row, for owner, location and owner root | 1 |
 | The trimmed position of the app | 1 |

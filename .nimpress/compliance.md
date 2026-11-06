@@ -1020,19 +1020,19 @@ just test TestACodeIsStoredByItsHashAndNeverByItsValue
 
 5. Today: `passes`, `shared/code.go:139` and both baselines.
 
-### C61, a guest is held to the guest ceiling
+### C61, a guest gets exactly what its claim grants
 
 1. Standard: OWASP ASVS V4.1.3, least privilege.
 
-2. Check: a guest, reached by code or by an open guest claim, is reached only on a route group mounted with `UserAuthOptions{Guest: true}`, where it gets what its claim grants, held to the guest ceiling: under the default ceiling, READ, it is refused anything past READ and its mask holds READ only, whatever its claim holds, and under a ceiling raised to READ|EXECUTE a claim holding EXECUTE executes while a claim holding READ only is still refused; every guest request writes an audit row naming the claim and the code id; on any other route a guest code is no identity and the request answers `401`, or the login redirect on a navigation, with no use spent and no audit row.
+2. Check: a guest, reached by code or by an open guest claim, is reached only on a route group mounted with `UserAuthOptions{Guest: true}`, where it gets exactly what its claim grants: an open claim holding READ reads with mask 4 and is refused a write, an open claim holding READ|EXECUTE books, and a code on a claim bound to one booking with READ|WRITE|EXECUTE cancels that booking and reaches nothing else; every guest request writes an audit row naming the claim and the code id; on any other route a guest code is no identity and the request answers `401`, or the login redirect on a navigation, with no use spent and no audit row.
 
 3. Method:
 
 ```bash
-just test 'TestAGuestCodeInTheHeaderActsAsTheGuestAndIsAudited|TestAnOpenGuestClaimServesARouteThatAllowsGuests|TestAGuestCodeIsNoIdentityOnARouteWithoutGuest|TestARaisedGuestCeiling'
+just test 'TestAGuestCodeInTheHeaderActsAsTheGuestAndIsAudited|TestAnOpenGuestClaimServesARouteThatAllowsGuests|TestAGuestCodeIsNoIdentityOnARouteWithoutGuest|TestAnOpenGuestClaimWithReadOnlyReadsAndIsRefusedAWrite|TestAnOpenGuestClaimWithExecuteLetsAGuestBook|TestACodeOnAPerBookingManageClaimLetsItsHolderCancel'
 ```
 
-4. Pass: under the default ceiling WRITE is refused and READ answers mask 4, under a raised ceiling the EXECUTE claim answers 12 and the READ claim refuses EXECUTE, one audit row names the claim and the code without the value, and a route without `Guest` answers `401` and `302` to the login while the single use code stays unused.
+4. Pass: the READ claim answers mask 4 and refuses WRITE and EXECUTE, the READ|EXECUTE claim answers 12 on EXECUTE, the booking claim answers 14 on WRITE on its booking and 403 elsewhere, one audit row names the claim and the code without the value, and a route without `Guest` answers `401` and `302` to the login while the single use code stays unused.
 
 5. Today: `passes`, `get_access` in both `V2.4` files, `smw/code.go:128` and `smw/code.go:156`.
 

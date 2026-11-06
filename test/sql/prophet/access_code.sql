@@ -92,12 +92,12 @@ SELECT is((claimius.get_code(pg_temp.crew('app'), pg_temp.hash('guest-value')) -
 SELECT is((SELECT count(*) FROM claimius.update_code_used(pg_temp.crew('app'), pg_temp.hash('guest-value'))), 1::BIGINT, 'the first use of a single use code passes');
 SELECT is((SELECT count(*) FROM claimius.update_code_used(pg_temp.crew('app'), pg_temp.hash('guest-value'))), 0::BIGINT, 'the second use finds nothing');
 
-SELECT is_empty($$
+SELECT isnt_empty($$
     SELECT 1 FROM claimius.get_access('a0000000-0000-4000-8000-0000000000c9', pg_temp.crew('app'), pg_temp.crew('org'), 'claimius.organization', 2)
-$$, 'under the default guest ceiling a guest write is refused, whatever its claim holds');
+$$, 'a guest writes what its claim grants');
 
 SELECT is((SELECT sa_access FROM claimius.get_access('a0000000-0000-4000-8000-0000000000c9', pg_temp.crew('app'), pg_temp.crew('org'), 'claimius.organization', 4)),
-          4, 'under the default guest ceiling a guest holds READ only');
+          15, 'a guest holds exactly what its claim grants');
 
 SELECT lives_ok($$
     SELECT claimius.insert_code(pg_temp.crew('app'), 'a0000000-0000-4000-8000-000000000c51', pg_temp.crew('reader_claim'), pg_temp.hash('invite-value'), 'invite',

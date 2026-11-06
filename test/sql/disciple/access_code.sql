@@ -89,12 +89,12 @@ SELECT is((claimius.get_code(pg_temp.hash('guest-value')) ->> 'guest_user_id')::
 SELECT is((SELECT count(*) FROM claimius.update_code_used(pg_temp.hash('guest-value'))), 1::BIGINT, 'the first use of a single use code passes');
 SELECT is((SELECT count(*) FROM claimius.update_code_used(pg_temp.hash('guest-value'))), 0::BIGINT, 'the second use finds nothing');
 
-SELECT is_empty($$
+SELECT isnt_empty($$
     SELECT 1 FROM claimius.get_access(pg_temp.crew('guest'), pg_temp.crew('org'), 'claimius.organization', 2)
-$$, 'under the default guest ceiling a guest write is refused, whatever its claim holds');
+$$, 'a guest writes what its claim grants');
 
 SELECT is((SELECT sa_access FROM claimius.get_access(pg_temp.crew('guest'), pg_temp.crew('org'), 'claimius.organization', 4)),
-          4, 'under the default guest ceiling a guest holds READ only');
+          15, 'a guest holds exactly what its claim grants');
 
 SELECT is_empty($$
     SELECT 1 FROM claimius.get_guest_access('claimius.organization', pg_temp.crew('org'))
@@ -106,7 +106,7 @@ $$, 'an owner opens the guest claim');
 
 SELECT results_eq($$
     SELECT user_id, sa_access FROM claimius.get_guest_access('claimius.organization', pg_temp.crew('org'))
-$$, $$ VALUES (pg_temp.crew('guest'), 4) $$, 'an open guest claim serves its object as its guest, held to the default guest ceiling');
+$$, $$ VALUES (pg_temp.crew('guest'), 15) $$, 'an open guest claim serves its object as its guest with the access of the claim');
 
 SELECT is_empty($$
     SELECT 1 FROM claimius.get_guest_access('claimius.organization', pg_temp.crew('hidden'))

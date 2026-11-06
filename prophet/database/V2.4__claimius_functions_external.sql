@@ -41,17 +41,9 @@ CREATE OR REPLACE FUNCTION claimius.get_access(
                 ) AS $$
 DECLARE
     v_pair RECORD;
-    v_cap  INTEGER := ~0;
 BEGIN
     IF NOT claimius.check_user_active(p_app_id, p_user_id) THEN
         RETURN;
-    END IF;
-
-    IF EXISTS (SELECT 1 FROM claimius.samna_user u WHERE u.user_id = p_user_id AND u.app_id = p_app_id AND u.type = 'guest' AND u.sa_deleted_at IS NULL) THEN
-        v_cap := coalesce((SELECT a.guest_access FROM claimius.samna_app a WHERE a.id = p_app_id), 4);
-        IF (p_required_access & ~v_cap) <> 0 THEN
-            RETURN;
-        END IF;
     END IF;
 
     SELECT s.* INTO v_pair FROM claimius._settle_pair(p_app_id, p_user_id, p_object_type, p_object_id) s;
@@ -63,7 +55,7 @@ BEGIN
                 best.user_claim_id,
                 best.claim_id,
                 best.claim_name,
-                best.access_bits & v_cap,
+                best.access_bits,
                 v_pair.scope,
                 v_pair.sa_owner_id,
                 v_pair.sa_owner_root_id,
@@ -83,7 +75,7 @@ BEGIN
                 NULL::UUID,
                 NULL::UUID,
                 'direct'::TEXT,
-                v_pair.sa_access & v_cap,
+                v_pair.sa_access,
                 v_pair.scope,
                 v_pair.sa_owner_id,
                 v_pair.sa_owner_root_id,
@@ -95,12 +87,12 @@ BEGIN
 
     IF NOT v_pair.settled THEN
         RETURN QUERY
-            SELECT d.user_object_id, d.user_claim_id, d.claim_id, d.claim_name, d.sa_access & v_cap, d.scope, d.sa_owner_id, d.sa_root_id, d.sa_location_id, d.direct_grant, d.level FROM claimius.get_direct_access(p_user_id, p_app_id, p_object_id, p_object_type, p_required_access, FALSE, FALSE) d;
+            SELECT d.user_object_id, d.user_claim_id, d.claim_id, d.claim_name, d.sa_access, d.scope, d.sa_owner_id, d.sa_root_id, d.sa_location_id, d.direct_grant, d.level FROM claimius.get_direct_access(p_user_id, p_app_id, p_object_id, p_object_type, p_required_access, FALSE, FALSE) d;
     END IF;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = claimius, pg_temp;
 
-COMMENT ON FUNCTION claimius.get_access(UUID, UUID, UUID, TEXT, INTEGER) IS 'Strongest active claim based grant for one (user, app, object) whose mask covers p_required_access: the user row, then the point settle and the read of the pair with its object_info row in one pass through _settle_pair, and the grant chosen from the pair, or, when no claim grant covers p_required_access, the creator''s direct_grant with no user_claim_id and claim_name direct. Only when the settle was skipped on a lock and the pair gives nothing does it walk the ancestors through get_direct_access. user_claim_id is the actor token for follow-on writes. sa_root_id is the owning organization root, suitable for FK to claimius.organization on follow-on claim and claim_object writes. A user of type guest is held to the guest ceiling of its app, samna_app.guest_access, READ (4) unless the app sets it: a requirement past the ceiling answers nothing and the returned mask keeps the bits of the ceiling only. Within it the claim decides.';
+COMMENT ON FUNCTION claimius.get_access(UUID, UUID, UUID, TEXT, INTEGER) IS 'Strongest active claim based grant for one (user, app, object) whose mask covers p_required_access: the user row, then the point settle and the read of the pair with its object_info row in one pass through _settle_pair, and the grant chosen from the pair, or, when no claim grant covers p_required_access, the creator''s direct_grant with no user_claim_id and claim_name direct. Only when the settle was skipped on a lock and the pair gives nothing does it walk the ancestors through get_direct_access. user_claim_id is the actor token for follow-on writes. sa_root_id is the owning organization root, suitable for FK to claimius.organization on follow-on claim and claim_object writes. A user of type guest is answered like any user: exactly what its claims grant.';
 
 DROP FUNCTION IF EXISTS claimius.get_direct_access(UUID, UUID, UUID, TEXT);
 

@@ -265,7 +265,7 @@ DO $$ BEGIN
     ALTER TABLE claimius.claim ADD CONSTRAINT claim_guest_mode_check CHECK (guest_mode IN ('open', 'code', 'off'));
 EXCEPTION WHEN duplicate_object THEN NULL;
 END $$;
-COMMENT ON COLUMN claimius.claim.guest_mode IS 'How the guest of the claim is reached: open, by anyone without a credential, through get_guest_access; code, only by the holder of a live guest code of the claim; off, not at all. Set only through update_claim_guest, which also ensures the guest and its grant. A guest gets what its claim grants, held to the guest ceiling get_access applies, disciple_state.guest_access, READ by default.';
+COMMENT ON COLUMN claimius.claim.guest_mode IS 'How the guest of the claim is reached: open, by anyone without a credential, through get_guest_access; code, only by the holder of a live guest code of the claim; off, not at all. Set only through update_claim_guest, which also ensures the guest and its grant. A guest gets exactly what its claim grants: the claim''s access mask, scope, level and grant window are its limits.';
 
 CREATE TABLE IF NOT EXISTS claimius.user_claim (
                                                    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -687,10 +687,6 @@ UPDATE claimius.disciple_state SET access_trimmed_txid = pg_current_xact_id() WH
 COMMENT ON COLUMN claimius.disciple_state.prophet IS 'Slug of the one prophet the disciple is bound to, as that prophet names itself on its feed. The cursor is a position on its feed alone. NULL until the first answer.';
 COMMENT ON COLUMN claimius.disciple_state.endpoint IS 'Where the bound prophet answers. The disciple keeps pulling and routing writes there until another prophet serves it under an agreed handover.';
 COMMENT ON COLUMN claimius.disciple_state.access_trimmed_txid IS 'The lowest cursor among the users used within the access_diff retention at its last trim, or the oldest running transaction when none was: every area below it is gone, and a reader whose cursor is below it resettles its whole reach.';
-
-ALTER TABLE claimius.disciple_state ADD COLUMN IF NOT EXISTS guest_access INTEGER NOT NULL DEFAULT 4;
-
-COMMENT ON COLUMN claimius.disciple_state.guest_access IS 'The guest ceiling of the disciple: the highest access mask get_access answers a guest, whatever its claim holds. READ (4) by default; within it the claim decides. Written by the middleware from SAUTH_GUEST_ACCESS and the app''s settings.';
 
 DROP TABLE IF EXISTS claimius.reconcile_queue;
 

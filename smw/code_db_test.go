@@ -62,7 +62,7 @@ func getCodeFixture(t *testing.T) codeFixture {
 		t.Fatalf("owner claim: %v", err)
 	}
 	if err := db.NewRaw(`
-		SELECT (claimius.insert_claim(p_name => 'Readers', p_description => NULL, p_sa_access => 15,
+		SELECT (claimius.insert_claim(p_name => 'Readers', p_description => NULL, p_sa_access => 4,
 		        p_sa_owner_id => ?0, p_sa_root_id => ?0, p_sa_created_by => ?1) -> 'claim' ->> 'id')::UUID
 	`, f.org, f.owner).Scan(ctx, &f.readers); err != nil {
 		t.Fatalf("reader claim: %v", err)
@@ -329,7 +329,7 @@ func (f codeFixture) assertGuest(t *testing.T, answer guardAnswer) {
 		t.Fatalf("the request acts as the guest of the claim %s, got %s", guest, answer.UserID)
 	}
 	if answer.Access != int(shared.ACCESS_READ) {
-		t.Fatalf("under the default guest ceiling a guest holds READ only, got access %d from a claim holding 15", answer.Access)
+		t.Fatalf("a guest holds what its claim grants, READ, got access %d", answer.Access)
 	}
 }
 
@@ -363,7 +363,7 @@ func TestAGuestCodeInTheHeaderActsAsTheGuestAndIsAudited(t *testing.T) {
 	write := httptest.NewRequest(http.MethodGet, "/api/board", nil)
 	write.Header.Set(smw.CodeHeader, code.Value)
 	if rec, _ := serveGuard(t, guestRoute, f.org, shared.ACCESS_WRITE, write); rec.Code != http.StatusForbidden {
-		t.Fatalf("under the default guest ceiling a guest write is refused, got %d", rec.Code)
+		t.Fatalf("a guest of a READ claim is refused a write, got %d", rec.Code)
 	}
 }
 
@@ -438,7 +438,7 @@ func TestAnOpenGuestClaimServesARouteThatAllowsGuests(t *testing.T) {
 		t.Fatalf("a route without Guest is unaffected by an open guest claim, got %d", rec.Code)
 	}
 	if rec, _ := serveGuard(t, &smw.UserAuthOptions{Guest: true}, f.org, shared.ACCESS_WRITE, httptest.NewRequest(http.MethodGet, "/api/board", nil)); rec.Code != http.StatusUnauthorized {
-		t.Fatalf("under the default guest ceiling an open guest write is refused, got %d", rec.Code)
+		t.Fatalf("an open guest of a READ claim is refused a write, got %d", rec.Code)
 	}
 
 	f.putGuest(t, shared.GUEST_MODE_CODE)
@@ -447,23 +447,7 @@ func TestAnOpenGuestClaimServesARouteThatAllowsGuests(t *testing.T) {
 	}
 }
 
-func (f codeFixture) putGuestAccess(t *testing.T, access shared.ClaimAccess) {
-	t.Helper()
-	ctx := context.Background()
-	if _, err := sdb.Instance().ExecContext(ctx, `SELECT claimius.upsert_disciple_state()`); err != nil {
-		t.Fatalf("disciple state: %v", err)
-	}
-	if err := sdb.Instance().PutGuestAccess(ctx, access); err != nil {
-		t.Fatalf("guest access %d: %v", access, err)
-	}
-	t.Cleanup(func() {
-		if err := sdb.Instance().PutGuestAccess(context.Background(), shared.GuestAccessEnv()); err != nil {
-			t.Errorf("reset guest access: %v", err)
-		}
-	})
-}
-
-func (f codeFixture) postClaim(t *testing.T, name string, access shared.ClaimAccess) (uuid.UUID, *shared.AccessClaim) {
+func (f codeFixture) postClaim(t *testing.T, name string, access shared.ClaimAccess, object uuid.UUID) (uuid.UUID, *shared.AccessClaim) {
 	t.Helper()
 	ctx := context.Background()
 	db := sdb.Instance()
@@ -477,7 +461,7 @@ func (f codeFixture) postClaim(t *testing.T, name string, access shared.ClaimAcc
 	if _, err := db.ExecContext(ctx, `
 		SELECT claimius.insert_claim_object(p_claim_id => ?, p_sa_owner_id => ?, p_sa_root_id => ?, p_sa_created_by => ?,
 		       p_object_id => ?, p_object_type => 'claimius.organization', p_inherits => TRUE)
-	`, id, f.org, f.org, f.owner, f.org); err != nil {
+	`, id, f.org, f.org, f.owner, object); err != nil {
 		t.Fatalf("bind %s: %v", name, err)
 	}
 	ac, err := db.MutationAccess(ctx, f.owner, id, shared.OBJECT_TYPE_CLAIM, shared.ACCESS_OWNER)
@@ -487,56 +471,68 @@ func (f codeFixture) postClaim(t *testing.T, name string, access shared.ClaimAcc
 	return id, ac
 }
 
-func TestARaisedGuestCeilingLetsAnOpenGuestExecuteWhatItsClaimGrants(t *testing.T) {
+func TestAnOpenGuestClaimWithReadOnlyReadsAndIsRefusedAWrite(t *testing.T) {
 	f := getCodeFixture(t)
-	f.putGuestAccess(t, shared.ACCESS_READ|shared.ACCESS_EXECUTE)
-	bookers, ac := f.postClaim(t, "Bookers", shared.ACCESS_READ|shared.ACCESS_EXECUTE)
+	viewers, ac := f.postClaim(t, "Viewers", shared.ACCESS_READ, f.org)
+	if _, err := sdb.Instance().PutClaimGuest(context.Background(), ac, viewers, shared.GUEST_MODE_OPEN); err != nil {
+		t.Fatalf("open guest claim: %v", err)
+	}
+
+	if rec, answer := serveGuard(t, guestRoute, f.org, shared.ACCESS_READ, httptest.NewRequest(http.MethodGet, "/api/board", nil)); rec.Code != http.StatusOK || answer.Access != int(shared.ACCESS_READ) {
+		t.Fatalf("an open READ claim lets a guest read with mask 4, got %d access %d", rec.Code, answer.Access)
+	}
+	for _, required := range []shared.ClaimAccess{shared.ACCESS_WRITE, shared.ACCESS_EXECUTE} {
+		if rec, _ := serveGuard(t, guestRoute, f.org, required, httptest.NewRequest(http.MethodPost, "/api/booking", nil)); rec.Code != http.StatusUnauthorized {
+			t.Fatalf("an open READ claim refuses a guest access %d, got %d", required, rec.Code)
+		}
+	}
+}
+
+func TestAnOpenGuestClaimWithExecuteLetsAGuestBook(t *testing.T) {
+	f := getCodeFixture(t)
+	bookers, ac := f.postClaim(t, "Bookers", shared.ACCESS_READ|shared.ACCESS_EXECUTE, f.org)
 	if _, err := sdb.Instance().PutClaimGuest(context.Background(), ac, bookers, shared.GUEST_MODE_OPEN); err != nil {
 		t.Fatalf("open guest claim: %v", err)
 	}
 
 	rec, answer := serveGuard(t, guestRoute, f.org, shared.ACCESS_EXECUTE, httptest.NewRequest(http.MethodPost, "/api/booking", nil))
 	if rec.Code != http.StatusOK {
-		t.Fatalf("an open guest claim with EXECUTE under a READ|EXECUTE ceiling books, got %d", rec.Code)
+		t.Fatalf("an open READ|EXECUTE claim lets a guest book, got %d", rec.Code)
 	}
 	if !answer.Anonymous || answer.Access != int(shared.ACCESS_READ|shared.ACCESS_EXECUTE) {
 		t.Fatalf("the guest holds what its claim grants, READ|EXECUTE, got anonymous %v access %d", answer.Anonymous, answer.Access)
 	}
 	if rec, _ := serveGuard(t, guestRoute, f.org, shared.ACCESS_WRITE, httptest.NewRequest(http.MethodPut, "/api/booking", nil)); rec.Code != http.StatusUnauthorized {
-		t.Fatalf("a requirement past the ceiling is refused, got %d", rec.Code)
+		t.Fatalf("WRITE the claim does not grant is refused, got %d", rec.Code)
 	}
 }
 
-func TestARaisedGuestCeilingKeepsAReadOnlyOpenGuestFromWriting(t *testing.T) {
+func TestACodeOnAPerBookingManageClaimLetsItsHolderCancel(t *testing.T) {
 	f := getCodeFixture(t)
-	f.putGuestAccess(t, shared.ACCESS_READ|shared.ACCESS_EXECUTE)
-	viewers, ac := f.postClaim(t, "Viewers", shared.ACCESS_READ)
-	if _, err := sdb.Instance().PutClaimGuest(context.Background(), ac, viewers, shared.GUEST_MODE_OPEN); err != nil {
-		t.Fatalf("open guest claim: %v", err)
+	booking := f.hidden
+	manage, ac := f.postClaim(t, "Manage booking", shared.ACCESS_READ|shared.ACCESS_WRITE|shared.ACCESS_EXECUTE, booking)
+	if _, err := sdb.Instance().PutClaimGuest(context.Background(), ac, manage, shared.GUEST_MODE_CODE); err != nil {
+		t.Fatalf("code guest claim: %v", err)
+	}
+	code, err := sdb.Instance().PostCode(context.Background(), ac, manage, shared.BodyCode{Kind: shared.CODE_KIND_GUEST}, "https://svc.example.test")
+	if err != nil {
+		t.Fatalf("post code: %v", err)
 	}
 
-	if rec, answer := serveGuard(t, guestRoute, f.org, shared.ACCESS_READ, httptest.NewRequest(http.MethodGet, "/api/board", nil)); rec.Code != http.StatusOK || answer.Access != int(shared.ACCESS_READ) {
-		t.Fatalf("a READ claim still reads, got %d access %d", rec.Code, answer.Access)
-	}
-	if rec, _ := serveGuard(t, guestRoute, f.org, shared.ACCESS_EXECUTE, httptest.NewRequest(http.MethodPost, "/api/booking", nil)); rec.Code != http.StatusUnauthorized {
-		t.Fatalf("a READ only open guest claim refuses EXECUTE under a raised ceiling, got %d", rec.Code)
-	}
-}
-
-func TestARaisedGuestCeilingLetsACodeGuestActOnWhatItsClaimGrants(t *testing.T) {
-	f := getCodeFixture(t)
-	f.putGuestAccess(t, shared.ACCESS_ALL)
-	f.putGuest(t, shared.GUEST_MODE_CODE)
-	code := f.postCode(t, shared.BodyCode{Kind: shared.CODE_KIND_GUEST})
-
-	req := httptest.NewRequest(http.MethodDelete, "/api/booking", nil)
-	req.Header.Set(smw.CodeHeader, code.Value)
-	rec, answer := serveGuard(t, guestRoute, f.org, shared.ACCESS_WRITE, req)
+	cancel := httptest.NewRequest(http.MethodDelete, "/api/booking", nil)
+	cancel.Header.Set(smw.CodeHeader, code.Value)
+	rec, answer := serveGuard(t, guestRoute, booking, shared.ACCESS_WRITE, cancel)
 	if rec.Code != http.StatusOK {
-		t.Fatalf("the holder of a code on a claim holding 15 under an ALL ceiling writes, got %d", rec.Code)
+		t.Fatalf("the holder of a code on a manage claim of the booking cancels it, got %d", rec.Code)
 	}
-	if answer.Access != int(shared.ACCESS_ALL) {
+	if answer.Access != int(shared.ACCESS_READ|shared.ACCESS_WRITE|shared.ACCESS_EXECUTE) {
 		t.Fatalf("the code guest holds what its claim grants, got access %d", answer.Access)
+	}
+
+	other := httptest.NewRequest(http.MethodDelete, "/api/booking", nil)
+	other.Header.Set(smw.CodeHeader, code.Value)
+	if rec, _ := serveGuard(t, guestRoute, f.org, shared.ACCESS_WRITE, other); rec.Code != http.StatusForbidden {
+		t.Fatalf("the code reaches only the booking its claim is bound to, got %d", rec.Code)
 	}
 }
 

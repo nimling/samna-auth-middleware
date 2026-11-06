@@ -198,7 +198,7 @@ With nothing raised in the object's root since the mark:
 entries(get_access) = 1 + 1 + 1 + 1 + 1 + 2 + 0 = 8
 ```
 
-one `check_user_active`, one probe of the reader's `samna_user` row for the guest type that holds a guest to the guest ceiling, one pair on the `user_object` primary key with its mark, one `object_info` row with the owner, location and owner root, the trimmed position, the two empty ranges of the areas of the root and of the reader's assignments since the mark, and the grant chosen from the pair with no probe. With something raised in the root since the mark the check also reads the areas and the object's closure range, and moves the mark; only an area on the object, with cascade on an ancestor, or an assignment of the reader recomputes the pair.
+one `check_user_active`, one pair on the `user_object` primary key with its mark, one `object_info` row with the owner, location and owner root, the trimmed position, the two empty ranges of the areas of the root and of the reader's assignments since the mark, and the grant chosen from the pair with no probe. With something raised in the root since the mark the check also reads the areas and the object's closure range, and moves the mark; only an area on the object, with cascade on an ancestor, or an assignment of the reader recomputes the pair.
 
 With `a'_x` ancestors on the chains of the walk and `B'_x` bindings on them:
 
