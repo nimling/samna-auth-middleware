@@ -15,6 +15,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
+	"github.com/nimling/samna-auth-middleware/v2/analytics"
 	sdb "github.com/nimling/samna-auth-middleware/v2/disciple/sdb"
 	"github.com/nimling/samna-auth-middleware/v2/shared"
 	"github.com/nimling/samna-auth-middleware/v2/smw"
@@ -108,6 +109,7 @@ type guardAnswer struct {
 	UserID    uuid.UUID `json:"user_id"`
 	Access    int       `json:"access"`
 	Anonymous bool      `json:"anonymous"`
+	Session   string    `json:"session"`
 	Query     string    `json:"query"`
 	Header    string    `json:"header"`
 }
@@ -124,11 +126,12 @@ func serveGuard(t *testing.T, opts *smw.UserAuthOptions, object uuid.UUID, requi
 		if err != nil {
 			return ctx.String(http.StatusForbidden, "Forbidden")
 		}
-		anonymous, _ := ctx.Get(smw.AnonymousKey).(bool)
+		anonymous, _ := ctx.Get(smw.AnonymousKey).(string)
 		return ctx.JSON(http.StatusOK, guardAnswer{
 			UserID:    ac.UserID,
 			Access:    int(ac.Access),
-			Anonymous: anonymous,
+			Anonymous: anonymous != "",
+			Session:   anonymous,
 			Query:     ctx.Request().URL.RawQuery + "|" + ctx.Request().RequestURI + "|" + ctx.QueryParam(smw.CodeParam),
 			Header:    ctx.Request().Header.Get(smw.CodeHeader),
 		})
@@ -431,6 +434,20 @@ func TestAnOpenGuestClaimServesARouteThatAllowsGuests(t *testing.T) {
 		t.Fatal("the request is marked anonymous")
 	}
 	f.assertGuest(t, answer)
+	var session *http.Cookie
+	for _, c := range rec.Result().Cookies() {
+		if c.Name == analytics.AnonymousCookie {
+			session = c
+		}
+	}
+	if session == nil || session.Value != answer.Session || !session.HttpOnly {
+		t.Fatalf("the first anonymous request mints the session key and sets it as an HttpOnly cookie, got %+v for %q", session, answer.Session)
+	}
+	again := httptest.NewRequest(http.MethodGet, "/api/board", nil)
+	again.AddCookie(&http.Cookie{Name: analytics.AnonymousCookie, Value: answer.Session})
+	if _, next := serveGuard(t, &smw.UserAuthOptions{Guest: true}, f.org, shared.ACCESS_READ, again); next.Session != answer.Session {
+		t.Fatalf("the cookie carries the same session key back, got %q after %q", next.Session, answer.Session)
+	}
 
 	if rec, _ := serveGuard(t, &smw.UserAuthOptions{Guest: true}, f.hidden, shared.ACCESS_READ, httptest.NewRequest(http.MethodGet, "/api/board", nil)); rec.Code != http.StatusUnauthorized {
 		t.Fatalf("an object no open guest claim covers answers 401 as before, got %d", rec.Code)

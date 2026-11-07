@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
+	"github.com/nimling/samna-auth-middleware/v2/analytics"
 	"github.com/nimling/samna-auth-middleware/v2/client"
 	sdb "github.com/nimling/samna-auth-middleware/v2/disciple/sdb"
 	"github.com/nimling/samna-auth-middleware/v2/shared"
@@ -155,6 +156,7 @@ func serveGuestCode(ctx echo.Context, access *shared.CodeAccess, value string, s
 	ctx.Set(CodeKey, access)
 	if !authenticated {
 		ctx.Set(UserIDKey, *access.GuestUserID)
+		ctx.Set(AnonymousKey, analytics.AnonymousID(ctx))
 		if err := shared.WriteAudit(reqCtx, sdb.Instance().DB.DB, nil, "guest request", "read", shared.OBJECT_TYPE_CLAIM,
 			access.ClaimID, access.OwnerID, access.GuestUserClaimID,
 			fmt.Sprintf("guest of claim %s with code %s: %s %s", access.ClaimID, access.ID, ctx.Request().Method, ctx.Request().URL.Path)); err != nil {
@@ -204,7 +206,7 @@ func serveInviteCode(ctx echo.Context, access *shared.CodeAccess, value string, 
 
 func serveAnonymous(ctx echo.Context, proceed echo.HandlerFunc) error {
 	ctx.Set(UserIDKey, shared.AnonymousUserID)
-	ctx.Set(AnonymousKey, true)
+	ctx.Set(AnonymousKey, analytics.AnonymousID(ctx))
 	res := ctx.Response()
 	res.Before(func() {
 		if res.Status == http.StatusForbidden {
