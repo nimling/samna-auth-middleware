@@ -39,7 +39,7 @@ const mutationAccessQuery = "SELECT * FROM claimius.mutation_access($1::uuid, $2
 
 func (d *DB) MutationAccess(ctx context.Context, userID, objectID uuid.UUID, objectType string, requiredAccess ClaimAccess) (*AccessClaim, error) {
 	if userID == AnonymousUserID {
-		return d.getGuestAccess(ctx, userID, objectID, objectType, requiredAccess)
+		return d.getGuestAccess(ctx, objectID, objectType, requiredAccess)
 	}
 	if objectType == OBJECT_TYPE_USER && userID == objectID {
 		return selfAccessClaim(userID, requiredAccess), nil
@@ -53,16 +53,16 @@ func (d *DB) MutationAccess(ctx context.Context, userID, objectID uuid.UUID, obj
 			case "P0404":
 				return nil, ErrNotFound
 			case "P0403":
-				return d.getGuestAccess(ctx, userID, objectID, objectType, requiredAccess)
+				return nil, ErrNoAccess
 			}
 		}
 		if errors.Is(err, sql.ErrNoRows) {
-			return d.getGuestAccess(ctx, userID, objectID, objectType, requiredAccess)
+			return nil, ErrNoAccess
 		}
 		return nil, ErrInternalServer
 	}
 	if len(claims) == 0 {
-		return d.getGuestAccess(ctx, userID, objectID, objectType, requiredAccess)
+		return nil, ErrNoAccess
 	}
 	d.Usage.Add(nil, userID, objectType, objectID)
 	nimtel.Organization(ctx, claims[0].RootID, claims[0].OwnerID)
@@ -171,10 +171,10 @@ func (d *DB) MutationAccessMany(ctx context.Context, requests []AccessRequest) (
 		d.Usage.Add(nil, requests[idx].UserID, requests[idx].ObjectType, requests[idx].ObjectID)
 	}
 	for i, r := range requests {
-		if set[i].Claim != nil {
+		if r.UserID != AnonymousUserID {
 			continue
 		}
-		if ac, guestErr := d.getGuestAccess(ctx, r.UserID, r.ObjectID, r.ObjectType, r.RequiredAccess); guestErr == nil {
+		if ac, guestErr := d.getGuestAccess(ctx, r.ObjectID, r.ObjectType, r.RequiredAccess); guestErr == nil {
 			set[i].Claim = ac
 		}
 	}

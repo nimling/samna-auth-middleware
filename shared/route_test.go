@@ -163,8 +163,8 @@ func TestMutationAccess_StaysOnThePrimary(t *testing.T) {
 	if got := replica.queries(); len(got) != 0 {
 		t.Fatalf("a check that may settle must not reach the replica, got %v", got)
 	}
-	if got := primary.queries(); len(got) != 2 || !strings.Contains(got[0], "mutation_access") || !strings.Contains(got[1], "get_guest_access") {
-		t.Fatalf("expected the check and the guest union on the primary, got %v", got)
+	if got := primary.queries(); len(got) != 1 || !strings.Contains(got[0], "mutation_access") {
+		t.Fatalf("expected the check on the primary, got %v", got)
 	}
 }
 
@@ -177,14 +177,8 @@ func TestPrepared_ParsesAStatementOncePerConnection(t *testing.T) {
 			t.Fatalf("mutation access: %v", err)
 		}
 	}
-	checks := 0
-	for _, q := range primary.queries() {
-		if strings.Contains(q, "mutation_access") {
-			checks++
-		}
-	}
-	if primary.prepares != 1+3 || checks != 3 {
-		t.Fatalf("expected one parse for three checks and one per unprepared guest union, got %d parses and %d checks", primary.prepares, checks)
+	if primary.prepares != 1 || len(primary.queries()) != 3 {
+		t.Fatalf("expected one parse for three executions, got %d parses and %d executions", primary.prepares, len(primary.queries()))
 	}
 }
 

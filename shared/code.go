@@ -440,15 +440,13 @@ func (d *DB) PutClaimGuest(ctx context.Context, ac *AccessClaim, claimID uuid.UU
 	return &claim, nil
 }
 
-const guestUserWhere = "EXISTS (SELECT 1 FROM claimius.get_users WHERE user_id = ? AND type = 'guest' AND sa_deleted_at IS NULL)"
-
-func (d *DB) getGuestAccess(ctx context.Context, userID, objectID uuid.UUID, objectType string, requiredAccess ClaimAccess) (*AccessClaim, error) {
+func (d *DB) getGuestAccess(ctx context.Context, objectID uuid.UUID, objectType string, requiredAccess ClaimAccess) (*AccessClaim, error) {
 	type guestAccessRow struct {
 		GuestUserID uuid.UUID `bun:"user_id"`
 		AccessClaim
 	}
 	rows := make([]guestAccessRow, 0, 1)
-	if err := d.NewRaw("SELECT * FROM claimius.get_guest_access(?, ?, ?) WHERE ?::uuid = ?::uuid OR "+guestUserWhere, objectType, objectID, int(requiredAccess), userID, AnonymousUserID, userID).Scan(ctx, &rows); err != nil && !errors.Is(err, sql.ErrNoRows) {
+	if err := d.NewRaw("SELECT * FROM claimius.get_guest_access(?, ?, ?)", objectType, objectID, int(requiredAccess)).Scan(ctx, &rows); err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrInternalServer
 	}
 	if len(rows) == 0 {
