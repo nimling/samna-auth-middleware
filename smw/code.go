@@ -65,7 +65,7 @@ func readCode(ctx echo.Context) (string, codeSource) {
 	return "", codeSourceNone
 }
 
-func WriteCodeCookie(ctx echo.Context, value string, maxAge int, expires *time.Time) {
+func writeCodeCookie(ctx echo.Context, value string, maxAge int, expires *time.Time) {
 	cookie := &http.Cookie{
 		Name:     CodeCookie,
 		Value:    value,
@@ -86,7 +86,7 @@ func WriteCodeCookie(ctx echo.Context, value string, maxAge int, expires *time.T
 }
 
 func clearCodeCookie(ctx echo.Context) {
-	WriteCodeCookie(ctx, "", -1, nil)
+	writeCodeCookie(ctx, "", -1, nil)
 }
 
 func isNavigationGet(ctx echo.Context) bool {
@@ -164,7 +164,7 @@ func serveGuestCode(ctx echo.Context, access *shared.CodeAccess, value string, s
 	}
 	if source == codeSourceQuery && isNavigationGet(ctx) {
 		if !authenticated {
-			WriteCodeCookie(ctx, value, 0, access.EndsAt)
+			writeCodeCookie(ctx, value, 0, access.EndsAt)
 		}
 		return respondCodeStripped(ctx)
 	}
@@ -177,7 +177,7 @@ func serveInviteCode(ctx echo.Context, access *shared.CodeAccess, value string, 
 		if login == "" || !isNavigationGet(ctx) {
 			return respondCodeRefused(ctx)
 		}
-		WriteCodeCookie(ctx, value, codeInviteMaxAge, nil)
+		writeCodeCookie(ctx, value, codeInviteMaxAge, nil)
 		return ctx.Redirect(http.StatusSeeOther, login+"?next="+url.QueryEscape(ctx.Request().URL.RequestURI()))
 	}
 	userID, _ := ctx.Get(UserIDKey).(uuid.UUID)
