@@ -1,0 +1,30 @@
+name: Update Feature and Milestone Dates
+
+on:
+  issues:
+    types: [opened, edited, labeled, unlabeled, closed, reopened]
+  project_card:
+    types: [created, edited, moved]
+  milestone:
+    types: [created, edited, opened, closed, deleted]
+  workflow_dispatch:
+    inputs:
+      feature_issue_number:
+        description: 'Feature issue number to update (leave empty to update all features)'
+        required: false
+      milestone_number:
+        description: 'Milestone number to update (leave empty to update relevant milestones)'
+        required: false
+
+jobs:
+  manage-dates:
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+      contents: read
+
+    steps:
+      - name: Run Date Manager
+        uses: nimling/github-date-manager-action@v1.0.0
+        with:
+          github_token: ${{ secrets.ADMIN_GITHUB_TOKEN }}
