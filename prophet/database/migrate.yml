@@ -1,0 +1,15 @@
+name: Claimius prophet
+description: The claimius prophet schema as a consumer's git include reads it, built and tested on its own
+version: "1.0"
+
+steps:
+  - name: Claimius Schema
+    type: base
+    slug: claimius
+    schemas: [claimius]
+    pre: CREATE EXTENSION IF NOT EXISTS pgcrypto
+    include:
+      - path: ./
+
+tests:
+  - ../../test/sql/prophet
