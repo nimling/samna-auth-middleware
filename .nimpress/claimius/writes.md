@@ -1,0 +1,154 @@
+---
+layout: doc
+title: Writes
+description: The claimius write surface, which tables take a direct insert, what every trigger does inside the write's own transaction, the rows each write stores as a function of the data, one request worked through, and the locks a write takes.
+tags: create_claim, assign_claim_user, assign_claim_object, remove_claim, calc_object_access, calc_hierarchical_access, calc_claim_access, calc_object_trees, emit_sync_event, enforce_app_home, _check_claim_composition, _lock_objects, _object_lock_budget, create_app, write cost
+lastUpdated: true
+---
+
+# Writes
+
+A write changes a source row: a registered row, an organization, a location, a claim, a binding, a grant, a user. Triggers on the source table keep the closure, the object's `object_info` row and the writer's own pairs true inside the same transaction, raise the area of what changed, and append the source row to the outbox. Every other user settles when it reads; see [Materialization](./materialization.md).
+
+## The surface
+
+| Table | Written through |
+|---|---|
+| `claim` | `create_claim`, `update_claim`, `remove_claim` |
+| `user_claim` | `assign_claim_user`, `update_claim_user`, `remove_user_claim` |
+| `claim_object` | `assign_claim_object`, `update_claim_object`, `remove_claim_object` |
+| `samna_user` | `ensure_app_user`, `merge_user` |
+| `organization` roots | `create_root_organization` |
+| `samna_app` | `init` for the system app, `create_app` for every other app; see [Apps](./apps.md#creating-an-app) |
+| `app_object` | `link_app_object`, `unlink_app_object` |
+| `organization`, `location`, `samna_app` updates, `samna_client`, `samna_secret`, `object_field`, `user_field`, `user_relation`, `prophet_state` | Direct insert and update |
+| The implementing side's registered tables | Direct insert and update, by the implementing side |
+| Cross root moves | `migrate_root`, reviewed by a person on every call |
+
+`claim`, `user_claim` and `claim_object` also take a direct insert, because their triggers do the same work whatever the path in; the functions are the form for SQL callers and return one jsonb object keyed by the table they wrote. Never written by hand: `user_object`, `object_info`, `user_users`, `inheritance_info`, `table_info`, `sync_event`, `access_diff`, `access_diff_user`, `reconcile_queue`, `claim_graph_cache`.
+
+## The triggers
+
+| Trigger | On | Does |
+|---|---|---|
+| `tg_enforce_app_home`, `enforce_app_home` | the source tables, before | Refuses a write outside replay to a row of an app another prophet decides, SQLSTATE `P0409` with the home in the hint; an organization or location is refused when any app it is linked to is decided elsewhere. One probe of `samna_app` and of `app_handover`, or of the row's `app_object` links |
+| `tg_self_root` | `organization`, `location`, before insert | A root self references; a child copies its parent's `sa_root_id`, one probe |
+| `tg_update_txid` | `claim`, `user_claim`, `claim_object`, before | Stamps `txid = pg_current_xact_id()`, which the graph cache compares to its snapshot |
+| `tg_check_claim_composition` | `claim_object`, before | Refuses a binding that hands out more than the actor holds, a self link, a reverse link, and a link to a claim the actor cannot read |
+| `tg_calc_access`, `calc_object_access` | registered tables without their own tree, `samna_user`, `samna_client`, `samna_secret`, `claim`, `user_relation`, `object_field`, `user_field`, `user_token` | Keeps the row's ownership and location closure rows, its `object_info` row, the actor's pair, and raises the object area when the write is structural |
+| `tg_calc_access`, `calc_hierarchical_access` | `organization`, `location`, registered tables with their own tree | The same, with the table's own tree kept incrementally and the object area raised with `cascade` |
+| `tg_calc_trees`, `calc_object_trees` | `samna_app`, `user_claim`, `claim_object` | Their ownership closure rows and nothing else |
+| `tg_calc_claim_access`, `calc_claim_access` | `claim`, `claim_object`, `user_claim` | Raises the claim area and settles the actor's pairs on the claim and on a binding's object |
+| `tg_emit_sync_event`, `emit_sync_event` | the source tables | One outbox row per row written; see [Sync](./sync.md) |
+| `tg_count_user_users_*` | `user_object`, per statement | The `user_users` counting of [Users](./users.md) |
+| `tg_invalidate_claim_graph_cache` | `user_object`, `object_info`, `user_users`, `samna_user` | Drops the affected users' cached claim graph; see [Graphs](./graphs.md) |
+| `tg_cascade_user_soft_delete` | `samna_user`, on the transition of `sa_deleted_at` | Soft deletes the user's grants, relations and field values in the app, once |
+
+### A registered row
+
+`calc_object_access` runs after every insert, update or delete:
+
+1. `_retree_object` detaches the row's ownership and location closure rows when it is deleted or moved, `rows(x)` deletes, and attaches it when it is inserted, restored or moved: the self edge and the owner's ancestor rows copied with `depth + 1`, `d_o + 1` rows, and the same for its location pin, `d_l + 1`. A parent outside the closure leaves the row out, as a full build would. It returns whether the write is structural, anything but an update that keeps the row live, its owner and its location.
+
+2. When the write is not an update, or an update of `name`, `description`, `sa_owner_id`, `sa_location_id`, `sa_root_id` or `sa_deleted_at`, `_write_object_info` upserts the one `object_info` row where a field differs, or deletes it for a row gone or soft deleted.
+
+3. Per app of the row, `_app_ids_for_row`: the actor's pair on the row, `R(actor, {x})`, and on a structural write one object area.
+
+### An organization, a location, or a row with its own tree
+
+`calc_hierarchical_access` keeps the row's own tree incrementally under the transaction advisory lock of its root, so writes inside one tenant serialize and writes in different roots never meet:
+
+| Write | Closure rows |
+|---|---|
+| Insert at depth `d` | the self edge and `d` rows under the parent, `d + 1` |
+| Reparent of a subtree of `n_S` nodes | `n_S × D_old` deleted, `n_S × (D_p + 1)` inserted, by `_splice_subtree` |
+| Soft delete of a node with subtree `S` | every row of `S`'s nodes deleted |
+| Restore | the restored subtree rebuilt under its live parent by `build_ownership_tree`, `build_location_tree` or `build_parenthood_tree` with the node |
+| Update that moves nothing | none |
+
+A location is also a node of its owner's ownership tree: `_reattach_location_in_ownership` drops its ownership rows and inserts its self edge and its owner's chain, `d(owner) + 2` rows, when its owner changes or it is deleted or restored. An organization's own location pin, and a parenthood row's owner and pin, move through `_retree_object`. An update that changes `sa_root_id` outside replay is refused; `migrate_root` is the only path across roots.
+
+A new organization or location inherits the app links of its owner: per app the owner is linked to, `link_app_object` inserts the link and recomputes the pair of every user of `_affected_users_for_object`. Then `object_info` as above, the actor's pair per app, and one object area with `cascade` unless the update is a rename, `name` and `description` alone, which every reader sees through `object_info` without a settle.
+
+### A claim, a binding or a grant
+
+`calc_claim_access` does nothing under replay; otherwise it raises one area and settles the actor:
+
+| Write | Raises | Actor's pairs recomputed |
+|---|---|---|
+| `claim` | `claim` area of the claim | the claim |
+| `claim_object` | `claim` area of its claim, and of the linked claim for a link | the claim and the bound object |
+| `user_claim` | `claim` area of the claim with `user_id` the assignee | the claim |
+
+The assignee is not settled in the write. A grant changes one user's access and its area names that user, so the assignee's next check settles the pair it asks about and its next listing its share. The other holders of a claim are an unbounded set, `|H_c|`, and none of them is settled in the writer's transaction.
+
+`_check_claim_composition` runs first on every `claim_object` insert or update outside replay:
+
+1. A binding on an object whose effective mask, `eff(c, b)`, carries a bit the actor does not hold there is refused: `reconcile_if_pending` settles the actor's pair on the object, one range reads `max(sa_access)`, and `eff & ~A(actor, y) & 15` must be 0. A deny, a removal and a binding that does not change mask, claim or object are exempt. Two first bindings pass on the actor's owner bit on an organization in place of its access on the object:
+
+    1. On a prophet, the first live binding of an app, while the app carries none, from an actor whose grant belongs to another app, when the actor holds owner on the organization that owns the `samna_app` row, judged in the actor's own app, the app of its `user_claim`, after settling that one pair. A new app has no pairs, so no actor could hold anything in it; the owner of the organization that owns the app is the one with the authority to open it, and `create_app` binds under it.
+
+    2. The first live binding on a `samna_user` that holds a claim assigned under the binding's owning organization, when the actor holds owner on that organization in the binding's app. A new user has no pair anyone could hold yet; the owner of the organization the user was just made a member of may bind the user, which is how `create_organization_user` binds the new user's claim.
+
+2. A composition link must not point at its own claim or reverse a live link, one probe of `idx_claim_object_object`, and the actor must hold read on the target claim, its settled pair on `claimius.claim`.
+
+## What each write stores
+
+`F` is the `user_users` counting of a pair entering or leaving, `U_x` entries read and at most `2 (U_x − 1)` rows written; `R` the recompute of [Materialization](./materialization.md#recomputing-a-share).
+
+| Write | Closure rows | `object_info` | Pairs recomputed | Areas | Outbox rows |
+|---|---|---|---|---|---|
+| Registered row insert | `d_o + d_l + 2` | 1 | the actor's pair | 1 object | 0 |
+| Registered row rename | 0 | 1 | the actor's pair | 0 | 0 |
+| Registered row move or soft delete | `rows(x)` deleted, `d_o + d_l + 2` inserted on a move | 1 | the actor's pair | 1 object | 0 |
+| Organization or location insert at depth `d` | `d + 1`, and `d(owner) + 2` for a location | 1 | the actor's pair, and every affected user per inherited app link | 1 object with `cascade` | 1 per linked app |
+| Organization or location reparent of `n_S` nodes | `n_S (D_old + D_p + 1)` | 1 when a field moved | the actor's pair | 1 object with `cascade` | 1 per linked app |
+| Organization or location rename | 0 | 1 | the actor's pair | 0 | 1 per linked app |
+| `claim` insert | `d_o + 1` for the claim itself | 1 | the actor's pair on the claim, twice | 1 claim, 1 object | 1 |
+| `claim_object` insert | `d_o + 1` | 0 | the actor's pairs on the claim and the object | 1 claim, 2 for a link | 1 |
+| `user_claim` insert | `d_o + 1` | 0 | the actor's pair on the claim | 1 claim | 1 |
+| `samna_user` soft delete | 0 | 0 | none beyond the cascade | 1 object, and 1 claim per grant of the user | `1 + C` and the relations and fields |
+
+Every write is constant in the number of users who hold the claims involved: the only user a write settles is its actor, on the rows it names. A pair recompute that finds its pair unchanged writes nothing, so a second recompute of the same pair in one transaction costs its reads and no rows. The implementing side's registered tables write no outbox rows; the source rows of claimius do, one per row written, and an organization or location one per app linked to it.
+
+## One request, one transaction
+
+The write a person makes through the API: create a claim, bind it to a node `y` with `inherits`, grant it to `k` users. As one transaction on the prophet:
+
+| Step | Source rows | Pairs recomputed | Areas |
+|---|---|---|---|
+| `claim` | 1, and `d_o + 1` closure rows | the actor's pair on the claim, twice | the claim area, and an object area on the claim |
+| `claim_object` on `y` | 1, and `d_o + 1` closure rows | the actor's pairs on the claim and on `y` | the claim area raised again |
+| `user_claim` × `k` | `k`, and `k (d_o + 1)` closure rows | the actor's pair on the claim, `k` times | `k` claim areas, one per assignee |
+
+```
+source rows  = 2 + k                     outbox rows = 2 + k
+recomputes   = 4 + k, each of one pair   pairs written ≤ 2
+area rows    = 2 + k: the claim area raised twice, the object area, one per assignee
+```
+
+The request is linear in the users it names and independent of the reach `|T_c| = 1 + |desc(y)|` of the node and of every other user of the app. Each assignee settles its share, about `|T_c|` pairs, on its next listing, and a single pair on its next check. The measured consequence for the feed, 50 events against 240,551 when derived rows travelled, is in [Sync](./sync.md).
+
+### Why only the actor is settled in the write
+
+A writer reads its own write back in the same request: a handler creates a row and returns it, or binds a claim and shows it. The actor's pairs on the rows the write names are what that read back needs, so the write settles them and nothing else. Every other user of the change is an unbounded set, and settling them in the write would put their pairs inside the writer's transaction with every row locked until commit. `_actor_user_for_row` resolves the actor from `sa_created_by`, one probe.
+
+## Removing a claim
+
+`remove_claim` soft deletes, in four statements, the links pointing at the claim, its `|H_c|` grants, its `n_c` bindings, then the claim. Each soft delete is an update that fires the triggers of its table: per row one area raise, which collapses onto the claim's area or the assignee's, one outbox row, and the actor's pair on the claim, a pair that stops changing after the first. So the removal writes `|H_c| + n_c + 1 + links` source rows and outbox rows, and at most `2 + |H_c|` area rows, whatever the claim reaches. Each holder's pairs that reached `T_c` only through the claim are deleted by that holder's next read.
+
+## Locks
+
+1. A hierarchy write takes the transaction advisory lock of its root, `pg_advisory_xact_lock(hashtext(root))`.
+
+2. An area raise takes the area row's lock until commit, so two writers of one claim, or of one object, serialize on that row and on nothing else. A reader settling the area holds it `FOR KEY SHARE`, which a raise does not wait on.
+
+3. A pair recompute takes the per object advisory keys of its objects, `_lock_objects`, sorted by key; a settle takes the keys of its whole share sorted before its first recompute, and the `user_users` trigger takes them again, which waits on nothing. So two settles over overlapping objects acquire their common keys in one order and cannot deadlock.
+
+4. Every per object locker holds the covering lock shared, and a transaction whose per object locks would pass `_object_lock_budget()`, 512, takes the covering lock exclusive in their place. So no transaction holds more than 512 per object entries of the server's shared lock table; see [Materialization](./materialization.md#the-lock-budget).
+
+5. A read takes one transaction advisory lock for the reader's whole share, per app and user, with `pg_try_advisory_xact_lock`, so two reads of one user never settle at once and neither waits on the other.
+
+## Routed writes
+
+On a disciple a write to a shared type goes to the prophet, and the row the prophet answers with is upserted locally; the implementing side's own tables are written locally. That routing belongs to the middleware; see [Writes in Go](./middleware/writes.md).
