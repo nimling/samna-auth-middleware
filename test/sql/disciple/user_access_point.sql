@@ -1,0 +1,70 @@
+BEGIN;
+SELECT plan(6);
+
+DO $$
+DECLARE
+    v_sys   UUID := '00000000-0000-4000-8000-0000000009e0';
+    v_a     UUID := 'a0000000-0000-4000-8000-0000000009e1';
+    v_b     UUID := 'a0000000-0000-4000-8000-0000000009e2';
+    v_c     UUID := 'a0000000-0000-4000-8000-0000000009e3';
+    v_root  UUID := '10000000-0000-4000-8000-0000000009e0';
+    v_crew  UUID;
+BEGIN
+    PERFORM claimius.upsert_disciple_state();
+    PERFORM claimius.upsert_app_user(p_user_id => v_a, p_first_name => 'Ada');
+    PERFORM claimius.upsert_app_user(p_user_id => v_b, p_first_name => 'Bo', p_external_id => 'ext-bo');
+    PERFORM claimius.upsert_app_user(p_user_id => v_c, p_first_name => 'Cy');
+    INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
+    VALUES (v_root, 'Point root', 'company', v_root, v_root, 0, v_sys);
+    INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
+    SELECT md5('point kid ' || k)::UUID, 'Kid ' || k, 'company', v_root, v_root, 1, v_sys
+    FROM generate_series(1, 20) k;
+    v_crew := (claimius.insert_claim(
+        p_name => 'Point crew', p_description => NULL, p_sa_access => 4,
+        p_sa_owner_id => v_root, p_sa_root_id => v_root, p_sa_created_by => v_sys) -> 'claim' ->> 'id')::UUID;
+    PERFORM claimius.insert_claim_object(
+        p_claim_id => v_crew, p_sa_owner_id => v_root, p_sa_root_id => v_root, p_sa_created_by => v_sys,
+        p_object_id => v_root, p_object_type => 'claimius.organization', p_inherits => TRUE);
+    PERFORM claimius.insert_user_claim(p_claim_id => v_crew, p_user_id => v_a, p_sa_owner_id => v_root, p_sa_created_by => v_sys);
+    PERFORM claimius.insert_user_claim(p_claim_id => v_crew, p_user_id => v_b, p_sa_owner_id => v_root, p_sa_created_by => v_sys);
+    PERFORM count(*) FROM claimius.get_organizations(v_a, 0);
+    PERFORM count(*) FROM claimius.get_organizations(v_b, 0);
+END $$;
+
+CREATE TEMP TABLE pending AS SELECT count(*) AS n, (SELECT count(*) FROM claimius.user_users) AS folded FROM claimius.user_users_diff;
+
+SELECT is((SELECT n FROM pending), 0::BIGINT, 'with no viewer the settled pairs raise no user_users_diff row');
+
+SELECT is(
+    (SELECT access FROM claimius.get_user_access('a0000000-0000-4000-8000-0000000009e1', 'ext-bo', 0)),
+    36,
+    'a user sharing objects through rows still pending is seen with member and read, resolved by external id'
+);
+
+SELECT is(
+    (SELECT count(*) FROM claimius.user_users WHERE viewer_id = 'a0000000-0000-4000-8000-0000000009e1'),
+    1::BIGINT,
+    'the point check makes the actor a viewer and builds its row toward the one user it shares objects with'
+);
+
+SELECT is_empty(
+    $$SELECT 1 FROM claimius.get_user_access('a0000000-0000-4000-8000-0000000009e1', 'a0000000-0000-4000-8000-0000000009e3', 0)$$,
+    'a user sharing nothing is not seen'
+);
+
+SELECT set_eq(
+    $$SELECT u.user_id FROM claimius.get_users('a0000000-0000-4000-8000-0000000009e1', 0) u$$,
+    $$SELECT s.user_id FROM claimius.samna_user s
+      WHERE (s.user_id = 'a0000000-0000-4000-8000-0000000009e1'
+             OR EXISTS (SELECT 1 FROM claimius.get_user_access('a0000000-0000-4000-8000-0000000009e1', s.user_id::TEXT, 0)))$$,
+    'the listing and the point check see the same users'
+);
+
+SELECT is(
+    (SELECT access FROM claimius.get_user_access('a0000000-0000-4000-8000-0000000009e1', 'a0000000-0000-4000-8000-0000000009e2', 0)),
+    36,
+    'after the listing folds the rows the stored count answers the same'
+);
+
+SELECT * FROM finish();
+ROLLBACK;
