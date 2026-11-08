@@ -1,0 +1,49 @@
+{
+  "name": "@nimling/samna-auth-middleware",
+  "version": "2.0.0-alpha0119",
+  "description": "TypeScript caller for samna_auth. Reads OIDC discovery, builds login and logout redirect URLs, validates session tokens. Confidential flows are server-only.",
+  "author": "nimling",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/nimling/samna_auth_middleware.git",
+    "directory": "ts"
+  },
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json && pnpm run build:browser",
+    "build:browser": "esbuild src/browser.ts --bundle --format=iife --global-name=SamnaAnalytics --minify --target=es2020 --outfile=dist/analytics.global.js",
+    "clean": "rimraf dist",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "prepare": "pnpm run build"
+  },
+  "dependencies": {
+    "jose": "^5.9.6",
+    "rrweb-snapshot": "2.1.4"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "esbuild": "^0.28.2",
+    "jsdom": "^30.0.1",
+    "rimraf": "^6.0.1",
+    "typescript": "~5.9.3",
+    "vitest": "^3.2.4"
+  },
+  "publishConfig": {
+    "access": "restricted",
+    "registry": "https://npm.pkg.github.com"
+  }
+}
