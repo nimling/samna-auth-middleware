@@ -294,12 +294,12 @@ func (d *DB) Close() error {
 }
 
 func openPool(dsn string) *bun.DB {
-	sqlDB := sql.OpenDB(codeHashConnector{pgdriver.NewConnector(
+	sqlDB := sql.OpenDB(GetCodeHashConnector(pgdriver.NewConnector(
 		pgdriver.WithDSN(dsn),
 		pgdriver.WithReadTimeout(120*time.Second),
 		pgdriver.WithWriteTimeout(120*time.Second),
 		pgdriver.WithDialTimeout(30*time.Second),
-	)})
+	)))
 	sqlDB.SetMaxOpenConns(25)
 	sqlDB.SetMaxIdleConns(2)
 	sqlDB.SetConnMaxLifetime(2 * time.Minute)
@@ -445,6 +445,10 @@ func holdSyncLock(ctx context.Context, conn *bun.Conn, interval time.Duration, w
 func discardConn(conn *bun.Conn) {
 	_ = conn.Raw(func(any) error { return driver.ErrBadConn })
 	_ = conn.Close()
+}
+
+func GetCodeHashConnector(connector driver.Connector) driver.Connector {
+	return codeHashConnector{Connector: connector}
 }
 
 type codeHashConnector struct {

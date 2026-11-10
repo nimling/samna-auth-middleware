@@ -125,7 +125,7 @@ An access code opens one claim. The table is `claimius.code`, written on the pro
 
 7. A handler's `403` for the anonymous user is answered as `401`, so a browser is sent to the login where a person would have access.
 
-8. `smw.AnonymousMiddleware` is this anonymous step exposed for a host that runs its own credential check, chained after it: a request that already carries an actor in `UserIDKey` passes through untouched, any other runs the same resolution, 2 to 7, per app, the app being `app_id` on the context, else the one `SAuth-App-Slug` names, else the system app. Each application decides where it mounts it; the prophet host mounts it after its session middleware.
+8. `smw.AnonymousMiddleware` is this anonymous step exposed for a host that runs its own credential check, chained after it: a request that already carries an actor in `UserIDKey` passes through untouched, any other runs the same resolution, 2 to 7, per app, the app being `app_id` on the context, else the one `SAuth-App-Slug` names, else the system app. Each application decides where it mounts it; the prophet host mounts it after its session middleware. A host with a pool of its own has three steps: chain the middleware, open its pool through `shared.GetCodeHashConnector(connector)`, the same wrapper `shared.Connect` uses, which sets `claimius.samk` on the connection before every statement whose context carries the presented code so `GetAccess`, `MutationAccess` and `ObjectWhere` on that pool judge the code gated grant, and call `shared.DeletePublicClaimCache()` after its own writes of claims, bindings and grants outside the `/sam/claim` handlers.
 
 ## Delegation
 
