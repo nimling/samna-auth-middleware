@@ -163,14 +163,23 @@ CREATE TABLE IF NOT EXISTS claimius.samna_user (
                                                    profile         JSONB NOT NULL DEFAULT '{}'::jsonb
 );
 
-DROP VIEW IF EXISTS claimius.get_users;
-ALTER TABLE claimius.samna_user
-    DROP COLUMN IF EXISTS bio,
-    DROP COLUMN IF EXISTS company,
-    DROP COLUMN IF EXISTS job_title,
-    DROP COLUMN IF EXISTS linkedin,
-    DROP COLUMN IF EXISTS website,
-    ADD COLUMN IF NOT EXISTS profile JSONB NOT NULL DEFAULT '{}'::jsonb;
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'claimius' AND table_name = 'samna_user'
+          AND column_name IN ('bio', 'company', 'job_title', 'linkedin', 'website')
+    ) THEN
+        DROP VIEW IF EXISTS claimius.get_users;
+        ALTER TABLE claimius.samna_user
+            DROP COLUMN IF EXISTS bio,
+            DROP COLUMN IF EXISTS company,
+            DROP COLUMN IF EXISTS job_title,
+            DROP COLUMN IF EXISTS linkedin,
+            DROP COLUMN IF EXISTS website;
+    END IF;
+END $$;
+ALTER TABLE claimius.samna_user ADD COLUMN IF NOT EXISTS profile JSONB NOT NULL DEFAULT '{}'::jsonb;
 DROP TABLE IF EXISTS claimius.profile_item CASCADE;
 DROP TABLE IF EXISTS claimius.retention_export CASCADE;
 DROP TABLE IF EXISTS claimius.retention CASCADE;
@@ -395,8 +404,16 @@ COMMENT ON COLUMN claimius.claim.level IS 'The level of the claim, 0 unless set.
 DROP INDEX IF EXISTS claimius.idx_claim_sa_deleted_at;
 ALTER TABLE claimius.claim ADD COLUMN IF NOT EXISTS txid XID8 NOT NULL DEFAULT pg_current_xact_id();
 COMMENT ON COLUMN claimius.claim.txid IS 'Local transaction that last wrote the row, stamped by tg_update_txid on every insert and update, a replayed one included. get_claim_graph compares it to the snapshot a cached graph was built under.';
-DROP VIEW IF EXISTS claimius.get_claims;
-ALTER TABLE claimius.claim DROP COLUMN IF EXISTS guest_mode;
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'claimius' AND table_name = 'claim' AND column_name = 'guest_mode'
+    ) THEN
+        DROP VIEW IF EXISTS claimius.get_claims;
+        ALTER TABLE claimius.claim DROP COLUMN guest_mode;
+    END IF;
+END $$;
 
 CREATE TABLE IF NOT EXISTS claimius.user_claim (
                                                    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
