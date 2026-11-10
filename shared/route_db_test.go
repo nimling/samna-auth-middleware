@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
@@ -41,7 +42,7 @@ func stubProphet(t *testing.T, db *sdb.DB) (*[]routedCall, func()) {
 			w.Write([]byte(`{"data":null,"count":0}`))
 			return
 		}
-		if strings.HasSuffix(r.URL.Path, "/user/token") {
+		if strings.HasSuffix(r.URL.Path, "/user/token") || strings.HasSuffix(r.URL.Path, "/user/guest") {
 			var user sdb.SamnaUser
 			if err := db.NewSelect().Model(&user).Where("user_id = ?", userB).Where("sa_deleted_at IS NULL").Limit(1).Scan(r.Context()); err != nil {
 				t.Errorf("read the user the stub answers with: %v", err)
@@ -647,5 +648,43 @@ func TestARoutedOrganizationMoveIsCheckedBeforeTheProphet(t *testing.T) {
 	_ = db.NewUpdate().Model(&move).Access(ac).OmitZero().Scan(ctx, &move)
 	if len(*calls) != 1 || strings.Replace((*calls)[0], " /sam/", " /", 1) != "PATCH /organization/"+orgGrand.String() {
 		t.Fatalf("a routed move must patch the organization on the prophet, got %v", *calls)
+	}
+}
+
+func TestAGuestIsRoutedToTheProphetOrRegisteredLocally(t *testing.T) {
+	db := database(t)
+	ctx := context.Background()
+	ac, err := db.MutationAccess(ctx, userA, orgRoot, sdb.OBJECT_TYPE_ORGANIZATION, sdb.ACCESS_WRITE)
+	if err != nil {
+		t.Fatalf("access: %v", err)
+	}
+	calls, stop := stubProphet(t, db)
+	defer stop()
+	endsAt := time.Now().Add(24 * time.Hour).UTC()
+	email := "guest." + uuid.NewString() + "@example.com"
+
+	db.RouteToProphet = true
+	if _, _, err := db.PostUserGuest(ctx, nil, ac, sdb.SamnaUserGuest{User: &sdb.SamnaUser{Email: email}, OwnerID: &orgRoot, ClaimID: ac.ClaimID, EndsAt: &endsAt}); err != nil {
+		t.Fatalf("routed guest: %v", err)
+	}
+	if len(*calls) != 1 || (*calls)[0].method != http.MethodPost || !strings.HasSuffix((*calls)[0].path, "/user/guest") || (*calls)[0].createdBy != ac.UserClaimID.String() {
+		t.Fatalf("a routed guest must be one POST /user/guest carrying the actor, got %v", *calls)
+	}
+
+	db.RouteToProphet = false
+	first, created, err := db.PostUserGuest(ctx, nil, ac, sdb.SamnaUserGuest{User: &sdb.SamnaUser{Email: email}, OwnerID: &orgRoot, ClaimID: ac.ClaimID, EndsAt: &endsAt})
+	if err != nil || !created {
+		t.Fatalf("the first local guest must be created, created %v, err %v", created, err)
+	}
+	again, created, err := db.PostUserGuest(ctx, nil, ac, sdb.SamnaUserGuest{User: &sdb.SamnaUser{Email: strings.ToUpper(email)}, OwnerID: &orgRoot, ClaimID: ac.ClaimID, EndsAt: &endsAt})
+	if err != nil || created || again.UserID != first.UserID {
+		t.Fatalf("the same email must reuse the guest, created %v, err %v", created, err)
+	}
+	var kind string
+	if err := db.NewRaw(`SELECT type::text FROM claimius.samna_user WHERE user_id = ? AND sa_deleted_at IS NULL`, first.UserID).Scan(ctx, &kind); err != nil || kind != "guest" {
+		t.Fatalf("the local guest must be of type guest, got %q: %v", kind, err)
+	}
+	if len(*calls) != 1 {
+		t.Fatalf("a local guest must not reach the prophet, got %v", *calls)
 	}
 }

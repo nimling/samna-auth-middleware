@@ -4317,6 +4317,223 @@ COMMENT ON FUNCTION claimius.insert_organization_user(UUID, UUID, JSONB, JSONB, 
 GRANT EXECUTE ON FUNCTION claimius.insert_organization_user(UUID, UUID, JSONB, JSONB, TEXT)
     TO claimius_disciple_client, claimius_writer, claimius_admin, claimius_reader;
 
+CREATE OR REPLACE FUNCTION claimius.insert_organization_guest(
+    p_caller_uc  UUID,
+    p_owner_id   UUID,
+    p_user       JSONB,
+    p_ends_at    TIMESTAMPTZ,
+    p_reason     TEXT DEFAULT NULL
+) RETURNS JSONB AS $$
+DECLARE
+    v_email             TEXT := NULLIF(lower(btrim(p_user ->> 'email')), '');
+    v_phone             TEXT := NULLIF(btrim(p_user ->> 'phone'), '');
+    v_claim_id          UUID := NULLIF(p_user ->> 'claim_id', '')::UUID;
+    v_root_id           UUID;
+    v_created           BOOLEAN := FALSE;
+    v_identity          claimius.guest_identity;
+    v_user_row          claimius.samna_user;
+    v_caller_user_id    UUID;
+    v_existing_uc       claimius.user_claim;
+    v_existing_virtual  claimius.claim;
+    v_existing_caller   claimius.user_claim;
+    v_existing_obj      claimius.claim_object;
+    v_claim_user        JSONB;
+    v_virtual_claim     JSONB;
+    v_virtual_claim_id  UUID;
+    v_claim_obj         JSONB;
+    v_caller_user_claim JSONB;
+BEGIN
+    IF v_claim_id IS NULL THEN
+        RAISE EXCEPTION 'claim_id required';
+    END IF;
+    IF p_owner_id IS NULL THEN
+        RAISE EXCEPTION 'owner_id required';
+    END IF;
+    IF p_ends_at IS NULL THEN
+        RAISE EXCEPTION 'ends_at required';
+    END IF;
+
+    SELECT sa_root_id INTO v_root_id
+      FROM claimius.organization
+     WHERE id = p_owner_id
+       AND sa_deleted_at IS NULL;
+    IF v_root_id IS NULL THEN
+        RAISE EXCEPTION 'owner_id invalid';
+    END IF;
+
+    IF p_caller_uc IS NOT NULL THEN
+        SELECT user_id INTO v_caller_user_id
+          FROM claimius.user_claim
+         WHERE id = p_caller_uc
+           AND sa_deleted_at IS NULL;
+        IF v_caller_user_id IS NULL THEN
+            RAISE EXCEPTION 'caller user_claim invalid';
+        END IF;
+    END IF;
+
+    IF v_email IS NOT NULL OR v_phone IS NOT NULL THEN
+        SELECT * INTO v_identity
+          FROM claimius.guest_identity
+         WHERE sa_owner_id = p_owner_id
+           AND ((v_email IS NOT NULL AND email = v_email) OR (v_phone IS NOT NULL AND phone = v_phone))
+         ORDER BY sa_deleted_at IS NOT NULL, sa_updated_at DESC
+         LIMIT 1;
+    END IF;
+
+    IF v_identity.user_id IS NOT NULL THEN
+        UPDATE claimius.samna_user
+           SET first_name    = COALESCE(NULLIF(p_user ->> 'first_name', ''), first_name),
+               last_name     = COALESCE(NULLIF(p_user ->> 'last_name', ''), last_name),
+               email         = COALESCE(v_email, email),
+               phone         = COALESCE(v_phone, phone),
+               sa_deleted_at = NULL,
+               sa_updated_at = now()
+         WHERE id = (
+                SELECT u.id FROM claimius.samna_user u
+                 WHERE u.user_id = v_identity.user_id
+                   AND u.type = 'guest'
+                 ORDER BY u.sa_deleted_at IS NOT NULL, u.sa_deleted_at DESC
+                 LIMIT 1)
+           AND NOT EXISTS (
+                SELECT 1 FROM claimius.samna_user l
+                 WHERE l.user_id = v_identity.user_id
+                   AND l.type <> 'guest'
+                   AND l.sa_deleted_at IS NULL)
+        RETURNING * INTO v_user_row;
+    END IF;
+
+    IF v_user_row.id IS NULL THEN
+        v_created := TRUE;
+        v_identity := NULL;
+        INSERT INTO claimius.samna_user (first_name, last_name, email, phone, status, type)
+        VALUES (
+            NULLIF(p_user ->> 'first_name', ''),
+            NULLIF(p_user ->> 'last_name', ''),
+            v_email,
+            v_phone,
+            'active',
+            'guest'
+        )
+        RETURNING * INTO v_user_row;
+    END IF;
+
+    SELECT * INTO v_existing_uc
+      FROM claimius.user_claim
+     WHERE claim_id = v_claim_id
+       AND user_id = v_user_row.user_id
+       AND sa_deleted_at IS NULL
+     LIMIT 1;
+
+    IF v_existing_uc.id IS NOT NULL THEN
+        v_claim_user := jsonb_build_object('user_claim', to_jsonb(v_existing_uc));
+    ELSE
+        v_claim_user := claimius.insert_user_claim(
+            p_claim_id      => v_claim_id,
+            p_user_id       => v_user_row.user_id,
+            p_sa_owner_id   => p_owner_id,
+            p_sa_created_by => p_caller_uc,
+            p_reason        => p_reason
+        );
+    END IF;
+
+    SELECT * INTO v_existing_virtual
+      FROM claimius.claim
+     WHERE name = 'user:' || v_user_row.user_id::text
+       AND type = 'virtual'
+       AND sa_deleted_at IS NULL
+     LIMIT 1;
+
+    IF v_existing_virtual.id IS NOT NULL THEN
+        v_virtual_claim    := jsonb_build_object('claim', to_jsonb(v_existing_virtual));
+        v_virtual_claim_id := v_existing_virtual.id;
+    ELSE
+        v_virtual_claim := claimius.insert_claim(
+            p_name          => 'user:' || v_user_row.user_id::text,
+            p_description   => NULL,
+            p_sa_access     => 15,
+            p_sa_owner_id   => p_owner_id,
+            p_sa_root_id    => v_root_id,
+            p_sa_created_by => p_caller_uc,
+            p_inherits      => TRUE,
+            p_type          => 'virtual'
+        );
+        v_virtual_claim_id := (v_virtual_claim -> 'claim' ->> 'id')::UUID;
+    END IF;
+
+    SELECT * INTO v_existing_obj
+      FROM claimius.claim_object
+     WHERE claim_id = v_virtual_claim_id
+       AND object_id = v_user_row.user_id
+       AND object_type = 'claimius.samna_user'
+       AND sa_deleted_at IS NULL
+     LIMIT 1;
+
+    IF v_existing_obj.id IS NOT NULL THEN
+        v_claim_obj := jsonb_build_object('claim_object', to_jsonb(v_existing_obj));
+    ELSE
+        v_claim_obj := claimius.insert_claim_object(
+            p_claim_id      => v_virtual_claim_id,
+            p_sa_owner_id   => p_owner_id,
+            p_sa_root_id    => v_root_id,
+            p_sa_created_by => p_caller_uc,
+            p_object_id     => v_user_row.user_id,
+            p_object_type   => 'claimius.samna_user'
+        );
+    END IF;
+
+    IF v_caller_user_id IS NOT NULL THEN
+        SELECT * INTO v_existing_caller
+          FROM claimius.user_claim
+         WHERE claim_id = v_virtual_claim_id
+           AND user_id = v_caller_user_id
+           AND sa_deleted_at IS NULL
+         LIMIT 1;
+
+        IF v_existing_caller.id IS NOT NULL THEN
+            v_caller_user_claim := jsonb_build_object('user_claim', to_jsonb(v_existing_caller));
+        ELSE
+            v_caller_user_claim := claimius.insert_user_claim(
+                p_claim_id      => v_virtual_claim_id,
+                p_user_id       => v_caller_user_id,
+                p_sa_owner_id   => p_owner_id,
+                p_sa_created_by => p_caller_uc
+            );
+        END IF;
+    END IF;
+
+    IF v_identity.id IS NOT NULL THEN
+        UPDATE claimius.guest_identity
+           SET email         = COALESCE(v_email, email),
+               phone         = COALESCE(v_phone, phone),
+               ends_at       = GREATEST(ends_at, p_ends_at),
+               sa_deleted_at = NULL,
+               sa_updated_at = now()
+         WHERE id = v_identity.id
+        RETURNING * INTO v_identity;
+    ELSE
+        INSERT INTO claimius.guest_identity (user_id, email, phone, ends_at, sa_owner_id, sa_created_by)
+        VALUES (v_user_row.user_id, v_email, v_phone, p_ends_at, p_owner_id, p_caller_uc)
+        RETURNING * INTO v_identity;
+    END IF;
+
+    RETURN jsonb_build_object(
+        'samna_user',        to_jsonb(v_user_row),
+        'created',           v_created,
+        'user_claim',        v_claim_user        -> 'user_claim',
+        'virtual_claim',     v_virtual_claim     -> 'claim',
+        'claim_object',      v_claim_obj         -> 'claim_object',
+        'caller_user_claim', v_caller_user_claim -> 'user_claim',
+        'guest_identity',    to_jsonb(v_identity)
+    );
+END;
+$$ LANGUAGE plpgsql;
+
+COMMENT ON FUNCTION claimius.insert_organization_guest(UUID, UUID, JSONB, TIMESTAMPTZ, TEXT) IS
+    'The gate of a guest user a disciple registers. A guest_identity of the owner organization whose email or phone matches p_user reuses its guest, undeleting a soft deleted one and moving ends_at later, unless the user_id now belongs to a regular user; otherwise a samna_user of type guest is inserted, with or without email and phone. Grants the supplied claim with p_reason, ensures the per-user virtual claim bound to the guest, grants it to the caller when p_caller_uc is not null, and writes the guest_identity. Returns samna_user, created, user_claim, virtual_claim, claim_object, caller_user_claim and guest_identity.';
+
+GRANT EXECUTE ON FUNCTION claimius.insert_organization_guest(UUID, UUID, JSONB, TIMESTAMPTZ, TEXT)
+    TO claimius_disciple_client, claimius_writer, claimius_admin, claimius_reader;
+
 CREATE OR REPLACE FUNCTION claimius.notify_notification() RETURNS trigger AS $$
 BEGIN
     PERFORM pg_notify('claimius_notification',
@@ -4758,6 +4975,21 @@ DECLARE
     v_n       BIGINT;
     v_deleted BIGINT := 0;
 BEGIN
+    UPDATE claimius.samna_user u
+       SET sa_deleted_at = now()
+      FROM claimius.guest_identity g
+     WHERE g.user_id = u.user_id
+       AND u.type = 'guest'
+       AND u.sa_deleted_at IS NULL
+       AND g.sa_deleted_at IS NULL
+       AND g.ends_at < now();
+    GET DIAGNOSTICS v_n = ROW_COUNT;
+    v_deleted := v_deleted + v_n;
+    UPDATE claimius.guest_identity
+       SET sa_deleted_at = now()
+     WHERE sa_deleted_at IS NULL
+       AND ends_at < now();
+
     FOR v_row IN
         SELECT t.table_name, t.column_name,
                coalesce((p_settings ->> (t.table_name || '_days'))::INTEGER, (p_settings ->> (t.kind || '_days'))::INTEGER, t.days) AS days,
@@ -4768,7 +5000,8 @@ BEGIN
             ('notification', 'closed_at',     'notification', 365),
             ('notification', 'sa_deleted_at', 'notification', 365),
             ('dpop_jti',     'expires_at',    'token',          7),
-            ('samna_user',   'sa_deleted_at', 'log',          180)
+            ('samna_user',   'sa_deleted_at', 'log',          180),
+            ('guest_identity', 'sa_deleted_at', 'log',          180)
         ) AS t (table_name, column_name, kind, days)
     LOOP
         CONTINUE WHEN v_row.days <= 0 OR pg_total_relation_size(('claimius.' || v_row.table_name)::REGCLASS) < v_row.limit_bytes;
@@ -4785,7 +5018,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius.prune(JSONB) IS 'Retention. Every runtime table belongs to a kind, audit, notification, token or log, and a soft deleted guest user ages out as log. p_settings sets days per table (<table>_days) or per kind (<kind>_days), and a size per kind (<kind>_size_mb) or for all (size_mb, 4096). A table under its size is left alone; over it, every row whose time column is older than its days is deleted, and 0 days leaves a table alone. A host with runtime tables of its own defines public.prune(JSONB) of the same shape, and it runs after.';
+COMMENT ON FUNCTION claimius.prune(JSONB) IS 'Retention. A guest user registered here whose guest_identity ends_at has passed is soft deleted first, with its guest_identity. Every runtime table belongs to a kind, audit, notification, token or log, and a soft deleted guest user ages out as log. p_settings sets days per table (<table>_days) or per kind (<kind>_days), and a size per kind (<kind>_size_mb) or for all (size_mb, 4096). A table under its size is left alone; over it, every row whose time column is older than its days is deleted, and 0 days leaves a table alone. A host with runtime tables of its own defines public.prune(JSONB) of the same shape, and it runs after.';
 
 GRANT EXECUTE ON FUNCTION claimius.prune(JSONB)
     TO claimius_disciple_client;

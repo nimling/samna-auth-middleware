@@ -402,6 +402,30 @@ CREATE INDEX IF NOT EXISTS idx_user_identity_type ON claimius.user_identity (typ
 CREATE INDEX IF NOT EXISTS idx_user_identity_sa_owner_id ON claimius.user_identity (sa_owner_id);
 CREATE INDEX IF NOT EXISTS idx_user_identity_sa_deleted_at ON claimius.user_identity (sa_deleted_at);
 
+CREATE TABLE IF NOT EXISTS claimius.guest_identity (
+                                                   id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                                                   user_id         UUID NOT NULL,
+                                                   email           TEXT,
+                                                   phone           TEXT,
+                                                   ends_at         TIMESTAMPTZ NOT NULL,
+                                                   sa_owner_id     UUID NOT NULL,
+                                                   sa_created_by   UUID,
+                                                   sa_deleted_at   TIMESTAMPTZ,
+                                                   sa_created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+                                                   sa_updated_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+COMMENT ON TABLE claimius.guest_identity IS 'The email and phone a disciple registered a guest user under, in the organization that registered it, and when the guest is no longer needed. Kept apart from user_identity and never synced. A registration with the same email or phone in the same organization reuses the guest, a soft deleted one included; after ends_at the guest is soft deleted by prune.';
+COMMENT ON COLUMN claimius.guest_identity.ends_at IS 'When the registering disciple no longer needs the guest; a later registration only moves it later.';
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_guest_identity_owner_user
+    ON claimius.guest_identity (sa_owner_id, user_id) WHERE sa_deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_guest_identity_owner_email ON claimius.guest_identity (sa_owner_id, email) WHERE email IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_guest_identity_owner_phone ON claimius.guest_identity (sa_owner_id, phone) WHERE phone IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_guest_identity_user_id ON claimius.guest_identity (user_id);
+CREATE INDEX IF NOT EXISTS idx_guest_identity_ends_at ON claimius.guest_identity (ends_at) WHERE sa_deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_guest_identity_sa_deleted_at ON claimius.guest_identity (sa_deleted_at);
+
 CREATE TABLE IF NOT EXISTS claimius.table_info (
                                                    id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
                                                    schema_name         TEXT NOT NULL,
