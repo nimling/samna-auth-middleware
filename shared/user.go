@@ -577,6 +577,47 @@ func (d *DB) postUserFromExternal(ctx context.Context, conn bun.IConn, ac *Acces
 	return d.callCreateOrganizationUser(ctx, conn, ac, *payload.OwnerID, &user, identity, payload.Reason)
 }
 
+func (d *DB) PostUserGuest(ctx context.Context, conn bun.IConn, ac *AccessClaim, payload SamnaUserGuest) (*SamnaUser, bool, error) {
+	if ac == nil || ac.UserClaimID == nil {
+		return nil, false, ErrNoAccess
+	}
+	var user SamnaUser
+	q := d.NewInsert().Conn(conn).Model(&payload).Access(ac)
+	if err := q.Scan(ctx, &user); err != nil {
+		return nil, false, err
+	}
+	return &user, q.Created(), nil
+}
+
+func (d *DB) postUserFromGuest(ctx context.Context, conn bun.IConn, ac *AccessClaim, payload SamnaUserGuest) (*OrganizationUserResult, error) {
+	if ac == nil || ac.UserClaimID == nil {
+		return nil, ErrNoAccess
+	}
+	user := SamnaUser{}
+	if payload.User != nil {
+		user = *payload.User
+	}
+	user.ClaimID = payload.ClaimID
+	userJSON, err := json.Marshal(user)
+	if err != nil {
+		return nil, fmt.Errorf("marshal user: %w", err)
+	}
+	var raw []byte
+	if err := d.NewRaw(`
+		SELECT claimius.insert_organization_guest(?, ?, ?::jsonb, ?, ?)
+	`, *ac.UserClaimID, *payload.OwnerID, string(userJSON), *payload.EndsAt, payload.Reason).Conn(conn).Scan(ctx, &raw); err != nil {
+		return nil, fmt.Errorf("insert_organization_guest: %w", err)
+	}
+	var result OrganizationUserResult
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return nil, fmt.Errorf("unmarshal insert_organization_guest: %w", err)
+	}
+	if result.SamnaUser == nil {
+		return nil, fmt.Errorf("insert_organization_guest returned no samna_user")
+	}
+	return &result, nil
+}
+
 func (d *DB) GetUsersMany(ctx context.Context, userIDs, ids []uuid.UUID, emails, externalIDs []string) ([]SamnaUser, error) {
 	users := make([]SamnaUser, 0)
 	err := d.NewRaw("SELECT * FROM claimius.get_users(?::uuid[], ?::uuid[], ?::text[], ?::text[])", pq.Array(userIDs), pq.Array(ids), pq.Array(emails), pq.Array(externalIDs)).Scan(ctx, &users)

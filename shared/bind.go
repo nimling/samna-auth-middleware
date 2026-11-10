@@ -152,6 +152,10 @@ func (e *SamnaUserExternal) Bind(ctx echo.Context) error {
 	return e.Body.Bound(ctx, e)
 }
 
+func (g *SamnaUserGuest) Bind(ctx echo.Context) error {
+	return g.Body.Bound(ctx, g)
+}
+
 func (uc *UserClaim) Bind(ctx echo.Context) error {
 	return uc.Body.Bound(ctx, uc)
 }

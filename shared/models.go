@@ -390,6 +390,16 @@ type SamnaUserExternal struct {
 	CreatedBy    *uuid.UUID `json:"created_by,omitempty"`
 }
 
+type SamnaUserGuest struct {
+	nimbody.Body `json:"-"`
+	User         *SamnaUser `json:"user,omitempty"`
+	ClaimID      *uuid.UUID `json:"claim_id"`
+	EndsAt       *time.Time `json:"ends_at"`
+	Reason       *string    `json:"reason,omitempty"`
+	OwnerID      *uuid.UUID `json:"owner_id,omitempty"`
+	CreatedBy    *uuid.UUID `json:"created_by,omitempty"`
+}
+
 type UserIdentity struct {
 	bun.BaseModel `bun:"table:claimius.user_identity"`
 

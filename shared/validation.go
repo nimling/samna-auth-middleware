@@ -102,6 +102,25 @@ func (e *SamnaUserExternal) ValidatePost() error {
 	return nil
 }
 
+func (g *SamnaUserGuest) ValidatePost() error {
+	if unknown := g.GetUnknown(); len(unknown) > 0 {
+		return errors.New(unknown[0] + " not allowed")
+	}
+	if g.OwnerID == nil || *g.OwnerID == uuid.Nil {
+		return errors.New("owner_id required")
+	}
+	if g.ClaimID == nil || *g.ClaimID == uuid.Nil {
+		return errors.New("claim_id required")
+	}
+	if g.EndsAt == nil || g.EndsAt.IsZero() {
+		return errors.New("ends_at required")
+	}
+	if g.User == nil {
+		return errors.New("user required")
+	}
+	return nil
+}
+
 func (c *Claim) ValidatePost() error {
 	if unknown := c.GetUnknown(); len(unknown) > 0 {
 		return errors.New(unknown[0] + " not allowed")

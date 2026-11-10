@@ -4761,16 +4761,18 @@ BEGIN
     FOR v_row IN
         SELECT t.table_name, t.column_name,
                coalesce((p_settings ->> (t.table_name || '_days'))::INTEGER, (p_settings ->> (t.kind || '_days'))::INTEGER, t.days) AS days,
-               coalesce((p_settings ->> (t.kind || '_size_mb'))::BIGINT, (p_settings ->> 'size_mb')::BIGINT, 4096) * 1024 * 1024 AS limit_bytes
+               coalesce((p_settings ->> (t.kind || '_size_mb'))::BIGINT, (p_settings ->> 'size_mb')::BIGINT, 4096) * 1024 * 1024 AS limit_bytes,
+               CASE WHEN t.table_name = 'samna_user' THEN ' AND type = ''guest''' ELSE '' END AS home
         FROM (VALUES
             ('audit',        'sa_created_at', 'audit',        730),
             ('notification', 'closed_at',     'notification', 365),
             ('notification', 'sa_deleted_at', 'notification', 365),
-            ('dpop_jti',     'expires_at',    'token',          7)
+            ('dpop_jti',     'expires_at',    'token',          7),
+            ('samna_user',   'sa_deleted_at', 'log',          180)
         ) AS t (table_name, column_name, kind, days)
     LOOP
         CONTINUE WHEN v_row.days <= 0 OR pg_total_relation_size(('claimius.' || v_row.table_name)::REGCLASS) < v_row.limit_bytes;
-        EXECUTE format('DELETE FROM claimius.%I WHERE %I < now() - make_interval(days => $1)', v_row.table_name, v_row.column_name)
+        EXECUTE format('DELETE FROM claimius.%I WHERE %I < now() - make_interval(days => $1)%s', v_row.table_name, v_row.column_name, v_row.home)
             USING v_row.days;
         GET DIAGNOSTICS v_n = ROW_COUNT;
         v_deleted := v_deleted + v_n;
@@ -4783,7 +4785,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius.prune(JSONB) IS 'Retention. Every runtime table belongs to a kind, audit, notification or token. p_settings sets days per table (<table>_days) or per kind (<kind>_days), and a size per kind (<kind>_size_mb) or for all (size_mb, 4096). A table under its size is left alone; over it, every row whose time column is older than its days is deleted, and 0 days leaves a table alone. A host with runtime tables of its own defines public.prune(JSONB) of the same shape, and it runs after.';
+COMMENT ON FUNCTION claimius.prune(JSONB) IS 'Retention. Every runtime table belongs to a kind, audit, notification, token or log, and a soft deleted guest user ages out as log. p_settings sets days per table (<table>_days) or per kind (<kind>_days), and a size per kind (<kind>_size_mb) or for all (size_mb, 4096). A table under its size is left alone; over it, every row whose time column is older than its days is deleted, and 0 days leaves a table alone. A host with runtime tables of its own defines public.prune(JSONB) of the same shape, and it runs after.';
 
 GRANT EXECUTE ON FUNCTION claimius.prune(JSONB)
     TO claimius_disciple_client;

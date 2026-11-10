@@ -112,6 +112,16 @@ func (m *SamnaUserExternal) PatchBody() map[string]any {
 	return nil
 }
 
+func (m *SamnaUserGuest) MarshalWrite() ([]byte, error)   { return sauth.Marshal(m) }
+func (m *SamnaUserGuest) UnmarshalWrite(raw []byte) error { return sauth.Unmarshal(raw, m) }
+func (m *SamnaUserGuest) WriteResult() any                { return &SamnaUser{} }
+func (m *SamnaUserGuest) PatchBody() map[string]any {
+	if bv := m.Validator(); bv != nil {
+		return bv.Body
+	}
+	return nil
+}
+
 func (m *UserClaim) MarshalWrite() ([]byte, error)   { return sauth.Marshal(m) }
 func (m *UserClaim) UnmarshalWrite(raw []byte) error { return sauth.Unmarshal(raw, m) }
 func (m *UserClaim) PatchBody() map[string]any {

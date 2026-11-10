@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"time"
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
@@ -45,6 +46,15 @@ type SamnaUserToken struct {
 type SamnaUserExternal struct {
 	User      *SamnaUser `json:"user"`
 	ClaimID   *uuid.UUID `json:"claim_id"`
+	OwnerID   *uuid.UUID `json:"owner_id"`
+	Reason    *string    `json:"reason"`
+	CreatedBy *uuid.UUID `json:"created_by"`
+}
+
+type SamnaUserGuest struct {
+	User      *SamnaUser `json:"user"`
+	ClaimID   *uuid.UUID `json:"claim_id"`
+	EndsAt    *time.Time `json:"ends_at"`
 	OwnerID   *uuid.UUID `json:"owner_id"`
 	Reason    *string    `json:"reason"`
 	CreatedBy *uuid.UUID `json:"created_by"`
@@ -455,6 +465,65 @@ func PostUserExternal(ctx echo.Context) error {
 		return respond.Error(ctx, status, err.Error())
 	}
 	return respond.JSON(ctx, status, user, 1)
+}
+
+func PostUserGuest(ctx echo.Context) error {
+	var req SamnaUserGuest
+	if err := ctx.Bind(&req); err != nil {
+		return respond.Error(ctx, http.StatusBadRequest, "Malformed request")
+	}
+	if req.ClaimID == nil || req.OwnerID == nil || req.EndsAt == nil || req.EndsAt.IsZero() || req.User == nil {
+		return respond.Error(ctx, http.StatusBadRequest, "user, claim_id, owner_id and ends_at are required")
+	}
+	if appID, _ := ctx.Get("app_id").(uuid.UUID); appID == uuid.Nil {
+		return respond.Error(ctx, http.StatusUnauthorized, "Unauthorized")
+	}
+	if req.CreatedBy == nil || *req.CreatedBy == uuid.Nil {
+		return respond.Error(ctx, http.StatusBadRequest, "created_by is required")
+	}
+	raw, err := json.Marshal(req.User)
+	if err != nil {
+		return respond.Error(ctx, http.StatusBadRequest, "Malformed request")
+	}
+	body := map[string]any{}
+	if err := json.Unmarshal(raw, &body); err != nil {
+		return respond.Error(ctx, http.StatusBadRequest, "Malformed request")
+	}
+	body["claim_id"] = *req.ClaimID
+	userJSON, err := json.Marshal(body)
+	if err != nil {
+		return respond.Error(ctx, http.StatusBadRequest, "Malformed request")
+	}
+	var payload []byte
+	if err := sdb.Instance().NewRaw(
+		"SELECT claimius.insert_organization_guest(?, ?, ?::jsonb, ?, ?)",
+		*req.CreatedBy, *req.OwnerID, string(userJSON), *req.EndsAt, req.Reason,
+	).Scan(ctx.Request().Context(), &payload); err != nil {
+		var pgErr pgdriver.Error
+		if errors.As(err, &pgErr) {
+			switch pgErr.Field('C') {
+			case "P0001":
+				return respond.Error(ctx, http.StatusBadRequest, pgErr.Field('M'))
+			case "P0403":
+				return respond.Error(ctx, http.StatusForbidden, pgErr.Field('M'))
+			}
+		}
+		ctx.Logger().Errorf("insert_organization_guest: %v", err)
+		return respond.Error(ctx, http.StatusInternalServerError, "Internal server error")
+	}
+	var result struct {
+		SamnaUser *SamnaUser `json:"samna_user"`
+		Created   bool       `json:"created"`
+	}
+	if err := json.Unmarshal(payload, &result); err != nil || result.SamnaUser == nil {
+		ctx.Logger().Errorf("unmarshal insert_organization_guest: %v", err)
+		return respond.Error(ctx, http.StatusInternalServerError, "Internal server error")
+	}
+	status := http.StatusOK
+	if result.Created {
+		status = http.StatusCreated
+	}
+	return respond.JSON(ctx, status, result.SamnaUser, 1)
 }
 
 func getUser(ctx echo.Context, userID uuid.UUID) (*SamnaUser, error) {
