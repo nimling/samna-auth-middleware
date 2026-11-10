@@ -22,7 +22,7 @@ func Init(logger echo.Logger) (*DB, error) {
 		return nil, err
 	}
 	d.RouteToProphet = utils.GetDebugMode() == utils.DebugModeNone
-	if _, err := d.GetPublicClaims(context.Background()); err != nil {
+	if _, err := d.GetPublicClaims(context.Background(), uuid.Nil); err != nil {
 		return nil, err
 	}
 	instance = &DB{DB: d}

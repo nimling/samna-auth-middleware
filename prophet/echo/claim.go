@@ -68,6 +68,7 @@ func GetClaim(ctx echo.Context) error {
 }
 
 func PostClaim(ctx echo.Context) error {
+	defer shared.DeletePublicClaimCache()
 	appID, _ := ctx.Get("app_id").(uuid.UUID)
 	claim := &Claim{}
 	if err := claim.Bind(ctx); err != nil {
@@ -101,6 +102,7 @@ func PostClaim(ctx echo.Context) error {
 }
 
 func PutClaim(ctx echo.Context) error {
+	defer shared.DeletePublicClaimCache()
 	appID, _ := ctx.Get("app_id").(uuid.UUID)
 	claimID, err := uuid.Parse(ctx.Param("id"))
 	if err != nil {
@@ -172,6 +174,7 @@ func PutClaim(ctx echo.Context) error {
 }
 
 func DeleteClaim(ctx echo.Context) error {
+	defer shared.DeletePublicClaimCache()
 	appID, _ := ctx.Get("app_id").(uuid.UUID)
 	claimID, err := uuid.Parse(ctx.Param("id"))
 	if err != nil {
@@ -201,6 +204,7 @@ func DeleteClaim(ctx echo.Context) error {
 }
 
 func PostClaimObject(ctx echo.Context) error {
+	defer shared.DeletePublicClaimCache()
 	appID, _ := ctx.Get("app_id").(uuid.UUID)
 	claimID, err := uuid.Parse(ctx.Param("claim_id"))
 	if err != nil {
@@ -238,6 +242,7 @@ func PostClaimObject(ctx echo.Context) error {
 }
 
 func PatchClaimObject(ctx echo.Context) error {
+	defer shared.DeletePublicClaimCache()
 	appID, _ := ctx.Get("app_id").(uuid.UUID)
 	claimID, err := uuid.Parse(ctx.Param("claim_id"))
 	if err != nil {
@@ -300,6 +305,7 @@ func PatchClaimObject(ctx echo.Context) error {
 }
 
 func DeleteClaimObject(ctx echo.Context) error {
+	defer shared.DeletePublicClaimCache()
 	appID, _ := ctx.Get("app_id").(uuid.UUID)
 	claimID, err := uuid.Parse(ctx.Param("claim_id"))
 	if err != nil {
@@ -334,6 +340,7 @@ func DeleteClaimObject(ctx echo.Context) error {
 }
 
 func PostClaimUser(ctx echo.Context) error {
+	defer shared.DeletePublicClaimCache()
 	appID, _ := ctx.Get("app_id").(uuid.UUID)
 	claimID, err := uuid.Parse(ctx.Param("claim_id"))
 	if err != nil {
@@ -371,6 +378,7 @@ func PostClaimUser(ctx echo.Context) error {
 }
 
 func PatchClaimUser(ctx echo.Context) error {
+	defer shared.DeletePublicClaimCache()
 	appID, _ := ctx.Get("app_id").(uuid.UUID)
 	claimID, err := uuid.Parse(ctx.Param("claim_id"))
 	if err != nil {
@@ -443,6 +451,7 @@ func PatchClaimUser(ctx echo.Context) error {
 }
 
 func DeleteClaimUser(ctx echo.Context) error {
+	defer shared.DeletePublicClaimCache()
 	appID, _ := ctx.Get("app_id").(uuid.UUID)
 	claimID, err := uuid.Parse(ctx.Param("claim_id"))
 	if err != nil {

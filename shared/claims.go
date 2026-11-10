@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"slices"
-	"sync/atomic"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -47,10 +47,10 @@ func (c PublicClaims) Find(hash string) *PublicClaim {
 	return nil
 }
 
-var publicClaimCache atomic.Pointer[PublicClaims]
+var publicClaimCache sync.Map
 
 func DeletePublicClaimCache() {
-	publicClaimCache.Store(nil)
+	publicClaimCache.Clear()
 }
 
 type publicClaimRow struct {
@@ -63,16 +63,16 @@ type publicClaimRow struct {
 	Inherits   *bool           `bun:"inherits"`
 }
 
-func (d *DB) GetPublicClaims(ctx context.Context) (PublicClaims, error) {
-	if cached := publicClaimCache.Load(); cached != nil {
-		return *cached, nil
+func (d *DB) GetPublicClaims(ctx context.Context, appID uuid.UUID) (PublicClaims, error) {
+	if cached, ok := publicClaimCache.Load(appID); ok {
+		return cached.(PublicClaims), nil
 	}
-	query := "SELECT * FROM claimius.get_public_claims()"
+	query := d.NewRaw("SELECT * FROM claimius.get_public_claims()")
 	if d.Prophet {
-		query = "SELECT * FROM claimius.get_public_claims(claimius.get_app_id())"
+		query = d.NewRaw("SELECT * FROM claimius.get_public_claims(?)", appID)
 	}
 	rows := make([]publicClaimRow, 0)
-	if err := d.NewRaw(query).Scan(ctx, &rows); err != nil && !errors.Is(err, sql.ErrNoRows) {
+	if err := query.Scan(ctx, &rows); err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return nil, err
 	}
 	claims := make(PublicClaims, 0)
@@ -91,7 +91,7 @@ func (d *DB) GetPublicClaims(ctx context.Context) (PublicClaims, error) {
 			current.Bindings = append(current.Bindings, PublicBinding{ObjectType: *row.ObjectType, ObjectID: *row.ObjectID, Inherits: row.Inherits != nil && *row.Inherits})
 		}
 	}
-	publicClaimCache.Store(&claims)
+	publicClaimCache.Store(appID, claims)
 	return claims, nil
 }
 

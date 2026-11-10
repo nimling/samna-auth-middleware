@@ -287,6 +287,7 @@ COMMENT ON COLUMN claimius.claim.level IS 'The level of the claim, 0 unless set.
 DROP INDEX IF EXISTS claimius.idx_claim_sa_deleted_at;
 ALTER TABLE claimius.claim ADD COLUMN IF NOT EXISTS txid XID8 NOT NULL DEFAULT pg_current_xact_id();
 COMMENT ON COLUMN claimius.claim.txid IS 'Local transaction that last wrote the row, stamped by tg_update_txid on every insert and update, a replayed one included. get_claim_graph compares it to the snapshot a cached graph was built under.';
+DROP VIEW IF EXISTS claimius.get_claims;
 ALTER TABLE claimius.claim DROP COLUMN IF EXISTS guest_mode;
 
 CREATE TABLE IF NOT EXISTS claimius.user_claim (

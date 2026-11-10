@@ -50,7 +50,7 @@ func main() {
 
 The prophet starts its runtime once with `sam.Init(runCtx)` (`prophet/sam`), which reads `sdb.Instance()` and starts notification, which the SSE notification stream needs, analytics, whose hourly fold runs on one replica, and the peer sync for every `prophet_peer` row, on a run context `main` cancels after `e.Shutdown`. The host registers `notification.EndStreams` and `prophetecho.EndStreams` with `e.Server.RegisterOnShutdown` and joins `sam.Done()` after the http server has shut down, as [Lifecycle](../.nimpress/disciple.md#lifecycle) orders. A held `GET sync/:cursor` waits on `claimius_sync` through the process's one listener, `(*shared.DB).Listen`, for as long as the request holds.
 
-4. `smw.UserAuthMiddleware(opts)` protects browser and bearer facing routes. Pass `nil` to take the slug, secret, redirect and page redirect from the config. `smw.ClientAuthMiddleware()` protects service to service routes.
+4. `smw.UserAuthMiddleware(opts)` protects browser and bearer facing routes. Pass `nil` to take the slug, secret, redirect and page redirect from the config. `smw.ClientAuthMiddleware()` protects service to service routes. A host that runs its own credential check, as samna_auth does with its session middleware, chains `smw.AnonymousMiddleware` after it: a request that already carries an actor in `smw.UserIDKey` passes through untouched, any other is resolved as the anonymous user exactly as on a disciple, with the rate limit, the code from `samk`, `SAuth-Code` or the cookie, the in memory public grants and the `403` to `401` rewrite, per app: the app from `app_id` on the context, else the one `SAuth-App-Slug` names, else the system app. Each application decides where it mounts it.
 
 ## App scoping
 

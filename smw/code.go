@@ -11,6 +11,7 @@ import (
 	"github.com/nimling/samna-auth-middleware/v2/analytics"
 	"github.com/nimling/samna-auth-middleware/v2/client"
 	sdb "github.com/nimling/samna-auth-middleware/v2/disciple/sdb"
+	psdb "github.com/nimling/samna-auth-middleware/v2/prophet/sdb"
 	"github.com/nimling/samna-auth-middleware/v2/shared"
 )
 
@@ -98,7 +99,7 @@ func respondUnavailable(ctx echo.Context, what string, err error) error {
 func serveCode(ctx echo.Context, value string, source codeSource, proceed echo.HandlerFunc) error {
 	ctx.Response().Header().Set("Referrer-Policy", "no-referrer")
 	reqCtx := ctx.Request().Context()
-	public, err := sdb.Instance().GetPublicClaims(reqCtx)
+	public, err := sdb.Instance().GetPublicClaims(reqCtx, uuid.Nil)
 	if err != nil {
 		return respondUnavailable(ctx, "load public claims", err)
 	}
@@ -153,16 +154,56 @@ func serveInviteLogin(ctx echo.Context, value string) error {
 	return ctx.Redirect(http.StatusSeeOther, login+"?next="+url.QueryEscape(ctx.Request().URL.RequestURI()))
 }
 
+func anonymousDB() *shared.DB {
+	if d := sdb.Instance(); d != nil {
+		return d.DB
+	}
+	if p := psdb.Instance(); p != nil {
+		return p
+	}
+	return nil
+}
+
+func anonymousApp(ctx echo.Context, db *shared.DB) (uuid.UUID, error) {
+	if !db.Prophet {
+		return uuid.Nil, nil
+	}
+	if appID, ok := ctx.Get("app_id").(uuid.UUID); ok && appID != uuid.Nil {
+		return appID, nil
+	}
+	var appID uuid.UUID
+	if slug := ctx.Request().Header.Get("SAuth-App-Slug"); slug != "" {
+		err := db.NewRaw("SELECT id FROM claimius.samna_app WHERE slug = ? AND sa_deleted_at IS NULL", slug).Scan(ctx.Request().Context(), &appID)
+		return appID, err
+	}
+	err := db.NewRaw("SELECT claimius.get_app_id()").Scan(ctx.Request().Context(), &appID)
+	return appID, err
+}
+
+func AnonymousMiddleware(next echo.HandlerFunc) echo.HandlerFunc {
+	return func(ctx echo.Context) error {
+		if userID, ok := ctx.Get(UserIDKey).(uuid.UUID); ok && userID != uuid.Nil {
+			return next(ctx)
+		}
+		value, source := readCode(ctx)
+		return serveAnonymous(ctx, value, source, next)
+	}
+}
+
 func serveAnonymous(ctx echo.Context, value string, source codeSource, proceed echo.HandlerFunc) error {
 	if limit, period := rateSettings(); !rateLimit.allow(rateKey(ctx), limit, period) {
 		return respondRateLimited(ctx, period)
 	}
-	instance := sdb.Instance()
+	instance := anonymousDB()
 	if instance == nil {
 		return respondUnauthenticated(ctx)
 	}
 	reqCtx := ctx.Request().Context()
-	public, err := instance.GetPublicClaims(reqCtx)
+	appID, err := anonymousApp(ctx, instance)
+	if err != nil {
+		return respondUnavailable(ctx, "resolve the app of an anonymous request", err)
+	}
+	public, err := instance.GetPublicClaims(reqCtx, appID)
 	if err != nil {
 		return respondUnavailable(ctx, "load public claims", err)
 	}
@@ -184,7 +225,12 @@ func serveAnonymous(ctx echo.Context, value string, source codeSource, proceed e
 			}
 			clearCodeCookie(ctx)
 		default:
-			_, err := instance.GetCodeAccess(reqCtx, value)
+			var err error
+			if instance.Prophet {
+				_, err = psdb.GetCodeAccess(reqCtx, appID, value)
+			} else {
+				_, err = instance.GetCodeAccess(reqCtx, value)
+			}
 			if err == nil {
 				return serveInviteLogin(ctx, value)
 			}

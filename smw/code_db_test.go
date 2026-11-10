@@ -748,3 +748,48 @@ func TestTheBuilderWritesAndChangesTheAnonymousUsersGrantWithItsCode(t *testing.
 		t.Fatalf("options on another user's grant are refused through the builder, got %v", err)
 	}
 }
+
+func TestAnonymousMiddlewareResolvesOnlyWhenNoActorIsSet(t *testing.T) {
+	f := getCodeFixture(t)
+	value, _ := f.grantPublic(t, f.readers, &shared.ClaimOptions{Samk: &shared.ClaimOptionsSamk{Header: true}}, nil)
+	server := newAuthServerWithFailingRefresh(t)
+	t.Cleanup(server.Close)
+	_ = userAuthHandlerAgainst(t, server, nil)
+	handler := smw.AnonymousMiddleware(func(ctx echo.Context) error {
+		userID, _ := ctx.Get(smw.UserIDKey).(uuid.UUID)
+		ac, err := sdb.Instance().MutationAccess(ctx.Request().Context(), userID, f.org, shared.OBJECT_TYPE_ORGANIZATION, shared.ACCESS_READ)
+		if err != nil {
+			return ctx.String(http.StatusForbidden, "Forbidden")
+		}
+		return ctx.JSON(http.StatusOK, guardAnswer{UserID: ac.UserID, Access: int(ac.Access)})
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/board", nil)
+	req.Header.Set(smw.CodeHeader, value)
+	rec := httptest.NewRecorder()
+	if err := handler(echo.New().NewContext(req, rec)); err != nil || rec.Code != http.StatusOK {
+		t.Fatalf("with no actor set the middleware resolves the anonymous user and its code, got %d %v %s", rec.Code, err, rec.Body.String())
+	}
+	var answer guardAnswer
+	if err := json.Unmarshal(rec.Body.Bytes(), &answer); err != nil || answer.UserID != shared.AnonymousUserID || answer.Access != int(shared.ACCESS_READ) {
+		t.Fatalf("the handler sees the anonymous user with the grant behind the code, got %+v %v", answer, err)
+	}
+
+	plain := httptest.NewRequest(http.MethodGet, "/api/board", nil)
+	rec = httptest.NewRecorder()
+	if err := handler(echo.New().NewContext(plain, rec)); err != nil || rec.Code != http.StatusUnauthorized {
+		t.Fatalf("without the code the handler's 403 is answered 401, got %d %v", rec.Code, err)
+	}
+
+	preset := httptest.NewRequest(http.MethodGet, "/api/board", nil)
+	preset.Header.Set(smw.CodeHeader, value)
+	rec = httptest.NewRecorder()
+	ctx := echo.New().NewContext(preset, rec)
+	ctx.Set(smw.UserIDKey, f.owner)
+	if err := handler(ctx); err != nil || rec.Code != http.StatusOK {
+		t.Fatalf("an actor the host already set passes through, got %d %v", rec.Code, err)
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &answer); err != nil || answer.UserID != f.owner || preset.Header.Get(smw.CodeHeader) != value {
+		t.Fatalf("the middleware touches nothing when an actor is set, got %+v header %q", answer, preset.Header.Get(smw.CodeHeader))
+	}
+}
