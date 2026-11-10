@@ -389,7 +389,7 @@ type OrganizationUserResult struct {
 	UserIdentity    *UserIdentity `json:"user_identity"`
 }
 
-func (d *DB) CreateOrganizationUser(ctx context.Context, conn bun.IConn, ac *AccessClaim, in *SamnaUser) (*SamnaUser, error) {
+func (d *DB) PostUser(ctx context.Context, conn bun.IConn, ac *AccessClaim, in *SamnaUser) (*SamnaUser, error) {
 	if ac == nil || ac.UserClaimID == nil {
 		return nil, ErrNoAccess
 	}
@@ -407,8 +407,23 @@ func (d *DB) CreateOrganizationUser(ctx context.Context, conn bun.IConn, ac *Acc
 			return nil, rootErr
 		}
 	}
+	var exists bool
+	if err := d.NewRaw(`
+		SELECT EXISTS (
+			SELECT 1 FROM claimius.samna_user
+			WHERE sa_deleted_at IS NULL
+			  AND ((? <> '00000000-0000-0000-0000-000000000000'::uuid AND user_id = ?)
+			    OR (nullif(?, '') IS NOT NULL AND external_id = ?))
+		)
+	`, in.UserID, in.UserID, in.ExternalID, in.ExternalID).Conn(conn).Scan(ctx, &exists); err != nil {
+		return nil, err
+	}
+	if exists {
+		return nil, ErrUserAlreadyExists
+	}
 	if err := d.NewInsert().Conn(conn).Model(in).Access(ac).Scan(ctx); err != nil {
-		if errors.Is(err, client.ErrConflict) {
+		var pgErr pgdriver.Error
+		if errors.Is(err, client.ErrConflict) || (errors.As(err, &pgErr) && pgErr.Field('C') == "23505") {
 			return nil, ErrUserAlreadyExists
 		}
 		return nil, err

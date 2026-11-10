@@ -111,7 +111,7 @@ func TestEveryWriteHelperOfADiscipleGoesToTheProphetFirst(t *testing.T) {
 	if !created {
 		t.Fatal("a routed token write must answer created from the prophet's 201")
 	}
-	if _, err := db.CreateOrganizationUser(ctx, nil, ac, &sdb.SamnaUser{UserID: uuid.New(), Email: "routed@example.com", OwnerID: &orgRoot, ClaimID: &claim.ID}); err != nil {
+	if _, err := db.PostUser(ctx, nil, ac, &sdb.SamnaUser{UserID: uuid.New(), Email: "routed@example.com", OwnerID: &orgRoot, ClaimID: &claim.ID}); err != nil {
 		t.Fatalf("create organization user: %v", err)
 	}
 	if _, err := db.DeleteUser(ctx, nil, ac, userB); err != nil {
@@ -174,11 +174,11 @@ func TestADiscipleInDebugModeWritesTheSameHelpersLocally(t *testing.T) {
 		t.Fatalf("assign user: %v", err)
 	}
 	member := uuid.New()
-	if _, err := db.CreateOrganizationUser(ctx, nil, ac, &sdb.SamnaUser{UserID: member, Email: "local@example.com", OwnerID: &orgRoot, ClaimID: &claim.ID}); err != nil {
+	if _, err := db.PostUser(ctx, nil, ac, &sdb.SamnaUser{UserID: member, Email: "local@example.com", OwnerID: &orgRoot, ClaimID: &claim.ID}); err != nil {
 		t.Fatalf("create organization user: %v", err)
 	}
-	if again, err := db.CreateOrganizationUser(ctx, nil, ac, &sdb.SamnaUser{UserID: member, OwnerID: &orgRoot, ClaimID: &claim.ID}); err != nil || again.UserID != member {
-		t.Fatalf("a second create of the same user upserts its one row and keeps its one grant, got %v %v", again, err)
+	if _, err := db.PostUser(ctx, nil, ac, &sdb.SamnaUser{UserID: member, OwnerID: &orgRoot, ClaimID: &claim.ID}); !errors.Is(err, sdb.ErrUserAlreadyExists) {
+		t.Fatalf("a second create of the same user must be refused as already existing, got %v", err)
 	}
 	token, err := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{"sub": "local-identity"}).SignedString([]byte("test"))
 	if err != nil {

@@ -254,6 +254,9 @@ func PostUser(ctx echo.Context) error {
 		userName = *req.UserName
 	}
 	user, err := postUser(ctx, req, userName)
+	if errors.Is(err, errorsx.ErrAlreadyExists) {
+		return respond.Error(ctx, http.StatusConflict, "user already exists")
+	}
 	if err != nil {
 		return respond.Error(ctx, http.StatusInternalServerError, "Internal server error")
 	}
@@ -679,6 +682,20 @@ func getUserLocations(ctx echo.Context, userID uuid.UUID) ([]Location, error) {
 }
 
 func postUser(ctx echo.Context, req BodyUser, userName string) (*SamnaUser, error) {
+	var exists bool
+	if err := sdb.Instance().NewRaw(`SELECT EXISTS (
+		SELECT 1 FROM claimius.samna_user
+		WHERE sa_deleted_at IS NULL
+		  AND ((?::uuid IS NOT NULL AND user_id = ?::uuid)
+		    OR (nullif(?, '') IS NOT NULL AND external_id = ?)))`,
+		req.UserID, req.UserID, req.ExternalID, req.ExternalID,
+	).Scan(ctx.Request().Context(), &exists); err != nil {
+		ctx.Logger().Errorf("check samna_user: %v", err)
+		return nil, errorsx.ErrDbUnexpected
+	}
+	if exists {
+		return nil, errorsx.ErrAlreadyExists
+	}
 	var userID uuid.UUID
 	err := sdb.Instance().NewRaw(`INSERT INTO claimius.samna_user (user_id, first_name, last_name, user_name, email, phone, external_id)
 		VALUES (coalesce(?::uuid, gen_random_uuid()), ?, ?,
@@ -687,16 +704,15 @@ func postUser(ctx echo.Context, req BodyUser, userName string) (*SamnaUser, erro
 		            WHERE lower(u.user_name) = lower(?) AND u.sa_deleted_at IS NULL
 		        ) THEN nullif(?, '') END,
 		        ?, nullif(?, ''), ?)
-		ON CONFLICT (user_id) WHERE sa_deleted_at IS NULL DO UPDATE SET
-		    first_name = EXCLUDED.first_name,
-		    last_name = EXCLUDED.last_name,
-		    email = EXCLUDED.email,
-		    sa_updated_at = now()
+		ON CONFLICT (user_id) WHERE sa_deleted_at IS NULL DO NOTHING
 		RETURNING user_id`,
 		req.UserID, req.FirstName, req.LastName, userName, userName, req.Email, req.Phone, req.ExternalID,
 	).Scan(ctx.Request().Context(), &userID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, errorsx.ErrAlreadyExists
+	}
 	if err != nil {
-		ctx.Logger().Errorf("upsert samna_user: %v", err)
+		ctx.Logger().Errorf("insert samna_user: %v", err)
 		return nil, errorsx.ErrDbUnexpected
 	}
 
