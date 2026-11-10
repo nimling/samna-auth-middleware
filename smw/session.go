@@ -40,7 +40,10 @@ func authenticateCookie(ctx echo.Context, config *AuthMiddlewareConfig, keyFunc 
 		}
 		if !errors.Is(vldErr, ErrorTokenExpired) {
 			ctx.Logger().Errorf("Failed to validate the cookie access_token: %v", vldErr)
-			return fmt.Errorf("validate cookie token: %w: %w", vldErr, ErrorUnauthorized)
+			utils.ClearCookie(ctx, accessTokenCookieKey)
+			utils.ClearCookie(ctx, refreshTokenCookieKey)
+			utils.ClearCookie(ctx, csrfTokenCookieKey)
+			return ErrorCredentialMissing
 		}
 	}
 
@@ -51,7 +54,7 @@ func authenticateCookie(ctx echo.Context, config *AuthMiddlewareConfig, keyFunc 
 			utils.ClearCookie(ctx, accessTokenCookieKey)
 			utils.ClearCookie(ctx, refreshTokenCookieKey)
 			utils.ClearCookie(ctx, csrfTokenCookieKey)
-			return fmt.Errorf("refresh rejected: %w: %w", err, ErrorUnauthorized)
+			return ErrorCredentialMissing
 		}
 		return fmt.Errorf("refresh failed: %w: %w", err, ErrorUnauthorized)
 	}

@@ -137,10 +137,11 @@ type Organization struct {
 	ID          uuid.UUID   `bun:"id,pk,notnull,type:uuid,default:gen_random_uuid()" json:"id"`
 	Name        string      `bun:"name,notnull" json:"name"`
 	Description *string     `bun:"description" json:"description,omitempty"`
+	Kind        *string     `bun:"kind" json:"kind,omitempty"`
 	OwnerID     *uuid.UUID  `bun:"sa_owner_id,type:uuid" json:"owner_id,omitempty"`
 	RootID      *uuid.UUID  `bun:"sa_root_id,type:uuid" json:"root_id"`
 	LocationID  *uuid.UUID  `bun:"sa_location_id,type:uuid" json:"location_id,omitempty"`
-	Type        *string     `bun:"type" json:"type,omitempty"`
+	Type        *string     `bun:"type,nullzero" json:"type,omitempty"`
 	PrivateSeed string      `bun:"private_seed" json:"-"`
 	Level       int         `bun:"sa_level,notnull,default:0" json:"level"`
 	ExternalID  *string     `bun:"external_id" json:"external_id,omitempty"`
@@ -199,7 +200,6 @@ type Claim struct {
 	Inherits    bool        `bun:"inherits,notnull" json:"inherits"`
 	Level       int         `bun:"level,notnull,default:0" json:"level"`
 	Type        ClaimType   `bun:"type,notnull,default:'system'" json:"type"`
-	GuestMode   string      `bun:"guest_mode,notnull,default:'off'" json:"guest_mode,omitempty"`
 	CreatedBy   *uuid.UUID  `bun:"sa_created_by,type:uuid" json:"created_by,omitempty"`
 	OwnerID     uuid.UUID   `bun:"sa_owner_id,type:uuid,notnull" json:"owner_id"`
 	RootID      uuid.UUID   `bun:"sa_root_id,type:uuid,notnull" json:"root_id"`
@@ -219,21 +219,22 @@ type Claim struct {
 }
 
 type UserClaim struct {
-	ID            uuid.UUID  `bun:"id,pk,notnull,type:uuid,default:gen_random_uuid()" json:"id"`
-	AppID         uuid.UUID  `bun:"app_id,notnull,type:uuid" json:"app_id"`
-	ClaimID       uuid.UUID  `bun:"claim_id,type:uuid,notnull" json:"claim_id"`
-	UserID        uuid.UUID  `bun:"user_id,type:uuid,notnull" json:"user_id"`
-	Reason        *string    `bun:"reason" json:"reason,omitempty"`
-	StartsAt      *time.Time `bun:"starts_at" json:"starts_at"`
-	EndsAt        *time.Time `bun:"ends_at" json:"ends_at"`
-	CreatedBy     *uuid.UUID `bun:"sa_created_by,type:uuid" json:"created_by"`
-	OwnerID       uuid.UUID  `bun:"sa_owner_id,type:uuid,notnull" json:"owner_id"`
-	DeletedAt     *time.Time `bun:"sa_deleted_at" json:"deleted_at,omitzero"`
-	CreatedAt     time.Time  `bun:"sa_created_at,notnull,default:current_timestamp" json:"created_at"`
-	UpdatedAt     time.Time  `bun:"sa_updated_at,notnull,default:current_timestamp" json:"updated_at"`
-	Txid          uint64     `bun:"txid,scanonly" json:"-"`
-	FirstName     string     `bun:"first_name,scanonly" json:"first_name,omitempty"`
-	LastName      string     `bun:"last_name,scanonly" json:"last_name,omitempty"`
+	ID            uuid.UUID       `bun:"id,pk,notnull,type:uuid,default:gen_random_uuid()" json:"id"`
+	AppID         uuid.UUID       `bun:"app_id,notnull,type:uuid" json:"app_id"`
+	ClaimID       uuid.UUID       `bun:"claim_id,type:uuid,notnull" json:"claim_id"`
+	UserID        uuid.UUID       `bun:"user_id,type:uuid,notnull" json:"user_id"`
+	Reason        *string         `bun:"reason" json:"reason,omitempty"`
+	StartsAt      *time.Time      `bun:"starts_at" json:"starts_at"`
+	EndsAt        *time.Time      `bun:"ends_at" json:"ends_at"`
+	Options       json.RawMessage `bun:"options,type:jsonb" json:"options,omitempty"`
+	CreatedBy     *uuid.UUID      `bun:"sa_created_by,type:uuid" json:"created_by"`
+	OwnerID       uuid.UUID       `bun:"sa_owner_id,type:uuid,notnull" json:"owner_id"`
+	DeletedAt     *time.Time      `bun:"sa_deleted_at" json:"deleted_at,omitzero"`
+	CreatedAt     time.Time       `bun:"sa_created_at,notnull,default:current_timestamp" json:"created_at"`
+	UpdatedAt     time.Time       `bun:"sa_updated_at,notnull,default:current_timestamp" json:"updated_at"`
+	Txid          uint64          `bun:"txid,scanonly" json:"-"`
+	FirstName     string          `bun:"first_name,scanonly" json:"first_name,omitempty"`
+	LastName      string          `bun:"last_name,scanonly" json:"last_name,omitempty"`
 	nimbody.Body  `bun:"-" json:"-"`
 	bun.BaseModel `bun:"table:claimius.user_claim" json:"-"`
 }

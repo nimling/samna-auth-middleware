@@ -10,6 +10,7 @@ import (
 	"github.com/nimling/samna-auth-middleware/v2/pkg/errorsx"
 	"github.com/nimling/samna-auth-middleware/v2/pkg/respond"
 	sdb "github.com/nimling/samna-auth-middleware/v2/prophet/sdb"
+	"github.com/nimling/samna-auth-middleware/v2/shared"
 	"github.com/nimling/samna-auth-middleware/v2/utils"
 )
 
@@ -112,6 +113,9 @@ func DeleteOrganization(ctx echo.Context) error {
 	}
 	organization, err := deleteOrganization(ctx, organizationID, appID)
 	if err != nil {
+		if errors.Is(err, shared.ErrOrganizationCompany) {
+			return respond.Error(ctx, http.StatusBadRequest, err.Error())
+		}
 		return respond.Error(ctx, errorsx.ErrToHttpCode(err), "")
 	}
 	return respond.JSON(ctx, http.StatusOK, organization, 1)
@@ -159,14 +163,10 @@ func getOrganization(ctx echo.Context, orgID, appID uuid.UUID) (*Organization, e
 
 func postOrganization(ctx echo.Context, org Organization, appID uuid.UUID) (*Organization, error) {
 	if org.OwnerID == nil || *org.OwnerID == org.ID {
-		orgType := "standard"
-		if org.Type != nil && *org.Type != "" {
-			orgType = *org.Type
-		}
 		var rootID uuid.UUID
 		if err := sdb.Instance().NewRaw(
-			"SELECT (claimius.upsert_root_organization(?, ?, ?, ?, ?, ?, ?) -> 'organization' ->> 'id')::uuid",
-			appID, org.Name, org.CreatedBy, org.Description, orgType, org.ID, org.ExternalID,
+			"SELECT (claimius.upsert_root_organization(?, ?, ?, ?, ?, ?, ?, ?) -> 'organization' ->> 'id')::uuid",
+			appID, org.Name, org.CreatedBy, org.Description, ORGANIZATION_TYPE_ENTITY, org.ID, org.ExternalID, org.Kind,
 		).Scan(ctx.Request().Context(), &rootID); err != nil {
 			ctx.Logger().Errorf("postOrganization root: %v", err)
 			return nil, errorsx.ErrDbUnexpected
@@ -196,7 +196,7 @@ func postOrganization(ctx echo.Context, org Organization, appID uuid.UUID) (*Org
 func putOrganization(ctx echo.Context, org Organization, appID uuid.UUID) error {
 	columns := make([]string, 0, 6)
 	for key, column := range map[string]string{
-		"name": "name", "description": "description", "type": "type",
+		"name": "name", "description": "description", "kind": "kind",
 		"external_id": "external_id", "location_id": "sa_location_id", "level": "sa_level", "owner_id": "sa_owner_id",
 	} {
 		if org.HasKey(key) {
@@ -252,6 +252,20 @@ func putOrganization(ctx echo.Context, org Organization, appID uuid.UUID) error 
 
 func deleteOrganization(ctx echo.Context, organizationID, appID uuid.UUID) (*Organization, error) {
 	var organization Organization
+	var orgType OrganizationType
+	if err := sdb.Instance().NewRaw(
+		"SELECT type FROM claimius.organization WHERE id = ? AND sa_deleted_at IS NULL AND claimius.app_has_object(?, 'claimius.organization', id)",
+		organizationID, appID,
+	).Scan(ctx.Request().Context(), &orgType); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, errorsx.ErrNotFound
+		}
+		ctx.Logger().Errorf("deleteOrganization type: %v", err)
+		return nil, errorsx.ErrDbUnexpected
+	}
+	if orgType == ORGANIZATION_TYPE_COMPANY {
+		return nil, shared.ErrOrganizationCompany
+	}
 	res, err := sdb.Instance().
 		NewUpdate().
 		Model(&organization).

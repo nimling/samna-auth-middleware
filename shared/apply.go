@@ -23,6 +23,7 @@ func ApplyEvent(ctx context.Context, idb bun.IDB, conn bun.IConn, operation, eve
 	raw = stripAppID(raw)
 	if eventType == OBJECT_TYPE_CODE || eventType == OBJECT_TYPE_CLAIM || eventType == OBJECT_TYPE_USER_CLAIM {
 		DeleteCodeCache()
+		DeletePublicClaimCache()
 	}
 	switch operation {
 	case "upsert":

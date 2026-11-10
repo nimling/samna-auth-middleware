@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"slices"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/uptrace/bun"
@@ -180,8 +182,25 @@ func (c *Claim) ReCreateFor(access ClaimAccess, opts ReCreateForOptions, userIDs
 	}
 
 	expanded := expandAccess(access)
+	owner := *c.accessClaim
 	if len(bindings) > 0 {
 		primary := bindings[0]
+		if primary.ObjectID != nil && primary.ObjectType != nil && !strings.HasPrefix(string(*primary.ObjectType), "claimius.") {
+			types, err := c.sessionDB.GetObjectTypes(c.sessionCtx)
+			if err != nil {
+				return nil, err
+			}
+			if slices.Contains(types, *primary.ObjectType) {
+				if err := c.sessionDB.NewSelect().Conn(c.sessionConn).
+					ColumnExpr("sa_owner_id").
+					TableExpr("?", bun.Ident(string(*primary.ObjectType))).
+					Where("id = ?", *primary.ObjectID).
+					Where("sa_deleted_at IS NULL").
+					Scan(c.sessionCtx, &owner.OwnerID); err != nil {
+					return nil, err
+				}
+			}
+		}
 		existing := &Claim{}
 		err := c.sessionDB.NewSelect().Conn(c.sessionConn).
 			Model(existing).
@@ -190,7 +209,7 @@ func (c *Claim) ReCreateFor(access ClaimAccess, opts ReCreateForOptions, userIDs
 			Where("claim.sa_access = ?", expanded).
 			Where("claim.inherits = ?", inherits).
 			Where("claim.name = ?", name).
-			Where("claim.sa_owner_id = ?", c.OwnerID).
+			Where("claim.sa_owner_id = ?", owner.OwnerID).
 			Where(`EXISTS (
 				SELECT 1 FROM claimius.claim_object co
 				WHERE co.claim_id = claim.id
@@ -201,7 +220,7 @@ func (c *Claim) ReCreateFor(access ClaimAccess, opts ReCreateForOptions, userIDs
 			Limit(1).
 			Scan(c.sessionCtx)
 		if err == nil {
-			existing.With(c.sessionCtx, c.accessClaim, c.sessionDB).Conn(c.sessionConn)
+			existing.With(c.sessionCtx, &owner, c.sessionDB).Conn(c.sessionConn)
 			if len(userIDs) > 0 {
 				if _, err := existing.AssignUser(userIDs...); err != nil {
 					return nil, err
@@ -222,7 +241,7 @@ func (c *Claim) ReCreateFor(access ClaimAccess, opts ReCreateForOptions, userIDs
 		Type:        c.Type,
 		Level:       c.Level,
 	}
-	newClaim, err := c.sessionDB.CreateClaim(c.sessionCtx, c.sessionConn, c.accessClaim, params)
+	newClaim, err := c.sessionDB.CreateClaim(c.sessionCtx, c.sessionConn, &owner, params)
 	if err != nil {
 		return nil, err
 	}

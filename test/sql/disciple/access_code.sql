@@ -1,5 +1,5 @@
 BEGIN;
-SELECT plan(18);
+SELECT plan(19);
 
 CREATE TEMP TABLE crew (key TEXT PRIMARY KEY, id UUID);
 
@@ -17,6 +17,7 @@ BEGIN
     PERFORM claimius.upsert_app_user(p_user_id => v_owner, p_first_name => 'Owner');
     PERFORM claimius.upsert_app_user(p_user_id => 'a0000000-0000-4000-8000-000000000c52', p_first_name => 'Invited');
     PERFORM claimius.upsert_app_user(p_user_id => 'a0000000-0000-4000-8000-000000000c53', p_first_name => 'Late');
+    PERFORM claimius.upsert_app_user(p_user_id => 'a0000000-0000-4000-8000-000000000c54', p_first_name => 'Viewer');
     PERFORM claimius.upsert_app_user(p_user_id => 'a0000000-0000-4000-8000-000000000c55', p_first_name => 'Outsider');
 
     INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
@@ -54,63 +55,71 @@ CREATE FUNCTION pg_temp.hash(p_value TEXT) RETURNS TEXT AS $$
     SELECT encode(digest(p_value, 'sha256'), 'hex')
 $$ LANGUAGE sql;
 
-SELECT throws_ok($$
-    SELECT claimius.insert_code('a0000000-0000-4000-8000-000000000c51', pg_temp.crew('reader_claim'), pg_temp.hash('guest-value'), 'guest')
-$$, '22023', NULL, 'a guest code needs a guest claim');
-
-SELECT lives_ok($$
-    SELECT claimius.update_claim_guest(pg_temp.crew('reader_claim'), 'a0000000-0000-4000-8000-000000000c51', 'code')
-$$, 'an owner of the claim makes it a guest claim in code mode');
-
-INSERT INTO crew
-SELECT 'guest', uc.user_id
-FROM claimius.user_claim uc
-JOIN claimius.samna_user u ON u.user_id = uc.user_id AND u.type = 'guest'
-WHERE uc.claim_id = pg_temp.crew('reader_claim') AND uc.sa_deleted_at IS NULL;
-
-SELECT isnt(pg_temp.crew('guest'), NULL, 'the guest claim has a guest holding it');
+SELECT results_eq($$
+    SELECT type::TEXT, first_name FROM claimius.samna_user WHERE user_id = claimius.anonymous_user_id() AND sa_deleted_at IS NULL
+$$, $$ VALUES ('anonymous', 'Public') $$, 'the disciple bootstrap writes the anonymous user, type anonymous, named Public');
 
 SELECT throws_ok($$
-    SELECT claimius.insert_code('a0000000-0000-4000-8000-000000000c51', pg_temp.crew('reader_claim'), 'guest-value', 'guest')
+    SELECT claimius.insert_code('a0000000-0000-4000-8000-000000000c51', pg_temp.crew('reader_claim'), pg_temp.hash('some-value'), 'guest')
+$$, '23514', NULL, 'invite is the only kind of code');
+
+SELECT throws_ok($$
+    SELECT claimius.insert_code('a0000000-0000-4000-8000-000000000c51', pg_temp.crew('reader_claim'), 'invite-value', 'invite')
 $$, '22023', NULL, 'a value is refused where the hash belongs');
 
 SELECT throws_ok($$
-    SELECT claimius.insert_code('a0000000-0000-4000-8000-000000000c55', pg_temp.crew('reader_claim'), pg_temp.hash('guest-value'), 'guest')
+    SELECT claimius.insert_code('a0000000-0000-4000-8000-000000000c55', pg_temp.crew('reader_claim'), pg_temp.hash('invite-value'), 'invite')
 $$, 'P0403', NULL, 'a user who does not own the claim creates no code');
 
-SELECT lives_ok($$
-    SELECT claimius.insert_code('a0000000-0000-4000-8000-000000000c51', pg_temp.crew('reader_claim'), pg_temp.hash('guest-value'), 'guest', p_count => 1)
-$$, 'an owner of the claim creates a guest code by its hash');
-
-SELECT ok(NOT EXISTS (SELECT 1 FROM claimius.code WHERE to_jsonb(code)::TEXT LIKE '%guest-value%'), 'the value is stored nowhere');
-
-SELECT is((claimius.get_code(pg_temp.hash('guest-value')) ->> 'guest_user_id')::UUID, pg_temp.crew('guest'), 'the code resolves to the guest of its claim');
-
-SELECT is((SELECT count(*) FROM claimius.update_code_used(pg_temp.hash('guest-value'))), 1::BIGINT, 'the first use of a single use code passes');
-SELECT is((SELECT count(*) FROM claimius.update_code_used(pg_temp.hash('guest-value'))), 0::BIGINT, 'the second use finds nothing');
-
-SELECT isnt_empty($$
-    SELECT 1 FROM claimius.get_access(pg_temp.crew('guest'), pg_temp.crew('org'), 'claimius.organization', 2)
-$$, 'a guest writes what its claim grants');
-
-SELECT is((SELECT sa_access FROM claimius.get_access(pg_temp.crew('guest'), pg_temp.crew('org'), 'claimius.organization', 4)),
-          15, 'a guest holds exactly what its claim grants');
-
 SELECT is_empty($$
-    SELECT 1 FROM claimius.get_guest_access('claimius.organization', pg_temp.crew('org'))
-$$, 'a guest claim in code mode serves no request without a credential');
+    SELECT 1 FROM claimius.get_access(claimius.anonymous_user_id(), pg_temp.crew('org'), 'claimius.organization', 4)
+$$, 'the anonymous user holds nothing before a grant');
 
 SELECT lives_ok($$
-    SELECT claimius.update_claim_guest(pg_temp.crew('reader_claim'), 'a0000000-0000-4000-8000-000000000c51', 'open')
-$$, 'an owner opens the guest claim');
+    INSERT INTO crew SELECT 'public_uc', (claimius.insert_user_claim(p_claim_id => pg_temp.crew('reader_claim'), p_user_id => claimius.anonymous_user_id(),
+                                      p_sa_owner_id => pg_temp.crew('org'), p_sa_created_by => pg_temp.crew('owner_uc')) -> 'user_claim' ->> 'id')::UUID
+$$, 'an owner grants the claim to the anonymous user: the public grant');
+
+SELECT throws_ok($$
+    SELECT claimius.insert_user_claim(p_claim_id => pg_temp.crew('reader_claim'), p_user_id => 'a0000000-0000-4000-8000-000000000c54',
+                                      p_sa_owner_id => pg_temp.crew('org'), p_sa_created_by => pg_temp.crew('owner_uc'),
+                                      p_options => ('{"samk": {"hash": "' || pg_temp.hash('x') || '", "header": true}}')::jsonb)
+$$, '22023', NULL, 'options are refused on a grant of any other user');
 
 SELECT results_eq($$
-    SELECT user_id, sa_access FROM claimius.get_guest_access('claimius.organization', pg_temp.crew('org'))
-$$, $$ VALUES (pg_temp.crew('guest'), 15) $$, 'an open guest claim serves its object as its guest with the access of the claim');
+    SELECT sa_access, user_claim_id FROM claimius.get_access(claimius.anonymous_user_id(), pg_temp.crew('org'), 'claimius.organization', 4)
+$$, $$ VALUES (15, pg_temp.crew('owner_uc')) $$, 'the anonymous user holds the public grant with the mask of the claim and the token of the grant that made it public');
 
 SELECT is_empty($$
-    SELECT 1 FROM claimius.get_guest_access('claimius.organization', pg_temp.crew('hidden'))
-$$, 'an object no open guest claim covers is served to no one');
+    SELECT 1 FROM claimius.get_access('a0000000-0000-4000-8000-000000000c54', pg_temp.crew('org'), 'claimius.organization', 4)
+$$, 'a public grant is the anonymous user''s and no one else''s');
+
+SELECT is_empty($$
+    SELECT 1 FROM claimius.get_access(claimius.anonymous_user_id(), pg_temp.crew('hidden'), 'claimius.organization', 4)
+$$, 'an object no public grant reaches is served to no one');
+
+SELECT results_eq($$
+    SELECT object_id FROM claimius.get_objects(claimius.anonymous_user_id(), 'claimius.organization', 4)
+$$, $$ VALUES (pg_temp.crew('org')) $$, 'the anonymous user lists what its grants reach');
+
+SELECT is((SELECT count(*) FROM claimius.get_public_claims()), 1::BIGINT, 'the public claims are the anonymous user''s grants with their bindings');
+
+SELECT throws_ok($$
+    SELECT claimius.update_user_claim(pg_temp.crew('public_uc'), p_options => '{"samk": {"hash": "short", "header": true}}'::jsonb)
+$$, '22023', NULL, 'options outside the shape are refused');
+
+SELECT lives_ok($$
+    SELECT claimius.update_user_claim(pg_temp.crew('public_uc'), p_options => ('{"samk": {"hash": "' || pg_temp.hash('public-value') || '", "header": true}}')::jsonb)
+$$, 'an owner puts a code on the public grant');
+
+SELECT is_empty($$
+    SELECT 1 FROM claimius.get_access(claimius.anonymous_user_id(), pg_temp.crew('org'), 'claimius.organization', 4)
+$$, 'a grant behind a code serves no request that does not present it');
+
+SELECT lives_ok($$ SELECT set_config('claimius.samk', pg_temp.hash('public-value'), TRUE) $$, 'the request presents the code in claimius.samk');
+
+SELECT is((SELECT sa_access FROM claimius.get_access(claimius.anonymous_user_id(), pg_temp.crew('org'), 'claimius.organization', 4)),
+          15, 'the presented code opens the grant in the walk');
 
 SELECT lives_ok($$
     SELECT claimius.insert_code('a0000000-0000-4000-8000-000000000c51', pg_temp.crew('reader_claim'), pg_temp.hash('invite-value'), 'invite', p_count => 1)

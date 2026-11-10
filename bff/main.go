@@ -67,7 +67,7 @@ func Serve(ctx context.Context, config Config) error {
 	sam.RegisterStatus(e.Group(path.Join(path.Dir(config.BasePath), path.Base(uptime.StatusBasePath))))
 
 	gate := smw.UserAuthMiddleware(nil)
-	siteGate := smw.UserAuthMiddleware(&smw.UserAuthOptions{Optional: true})
+	siteGate := smw.UserAuthMiddleware(nil)
 
 	me := auth.Group("/me", gate)
 	me.GET("", h.GetMe)

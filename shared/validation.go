@@ -23,18 +23,14 @@ func (l *Location) ValidatePost() error {
 }
 
 func (o *Organization) ValidatePost() error {
+	if o.HasKey("type") {
+		return errors.New("type not allowed")
+	}
 	if unknown := o.GetUnknown(); len(unknown) > 0 {
 		return errors.New(unknown[0] + " not allowed")
 	}
 	if o.Name == "" {
 		return errors.New("name required")
-	}
-	switch o.Type {
-	case "", ORGANIZATION_TYPE_COMPANY, ORGANIZATION_TYPE_CHILD:
-	case ORGANIZATION_TYPE_SYSTEM:
-		return errors.New("type system not allowed")
-	default:
-		return errors.New("type invalid")
 	}
 	return nil
 }
@@ -346,6 +342,9 @@ func (l *Location) ValidatePatch() error {
 }
 
 func (o *Organization) ValidatePut() error {
+	if o.HasKey("type") {
+		return errors.New("type not allowed")
+	}
 	if unknown := o.GetUnknown(); len(unknown) > 0 {
 		return errors.New(unknown[0] + " not allowed")
 	}
@@ -376,19 +375,15 @@ func (o *Organization) ValidatePut() error {
 	if o.Name == "" {
 		return errors.New("name required")
 	}
-	switch o.Type {
-	case "", ORGANIZATION_TYPE_COMPANY, ORGANIZATION_TYPE_CHILD:
-	case ORGANIZATION_TYPE_SYSTEM:
-		return errors.New("type system not allowed")
-	default:
-		return errors.New("type invalid")
-	}
 	return nil
 }
 
 func (o *Organization) ValidatePatch() error {
 	if o.IsEmpty() {
 		return errors.New("no fields to update")
+	}
+	if o.HasKey("type") {
+		return errors.New("type not allowed")
 	}
 	if unknown := o.GetUnknown(); len(unknown) > 0 {
 		return errors.New(unknown[0] + " not allowed")
@@ -419,15 +414,6 @@ func (o *Organization) ValidatePatch() error {
 	}
 	if o.HasKey("name") && o.Name == "" {
 		return errors.New("name required")
-	}
-	if o.HasKey("type") {
-		switch o.Type {
-		case ORGANIZATION_TYPE_COMPANY, ORGANIZATION_TYPE_CHILD:
-		case ORGANIZATION_TYPE_SYSTEM:
-			return errors.New("type system not allowed")
-		default:
-			return errors.New("type invalid")
-		}
 	}
 	return nil
 }

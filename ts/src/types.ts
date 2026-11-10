@@ -1,9 +1,10 @@
-export type UserType = 'user' | 'client' | 'system' | 'guest'
+export type UserType = 'user' | 'client' | 'system' | 'guest' | 'anonymous'
 
 export const USER_TYPE_USER: UserType = 'user'
 export const USER_TYPE_CLIENT: UserType = 'client'
 export const USER_TYPE_SYSTEM: UserType = 'system'
 export const USER_TYPE_GUEST: UserType = 'guest'
+export const USER_TYPE_ANONYMOUS: UserType = 'anonymous'
 
 export type ClaimType = 'system' | 'user' | 'service' | 'virtual'
 
@@ -57,16 +58,21 @@ export const CODE_PARAM = 'samk'
 export const CODE_HEADER = 'SAuth-Code'
 export const CODE_COOKIE = '__Host-sauth_samk'
 
-export type CodeKind = 'invite' | 'guest'
+export type CodeKind = 'invite'
 
 export const CODE_KIND_INVITE: CodeKind = 'invite'
-export const CODE_KIND_GUEST: CodeKind = 'guest'
 
-export type GuestMode = 'open' | 'code' | 'off'
+export interface ClaimOptionsSamk {
+  value?: string
+  hash?: string
+  query: boolean
+  header: boolean
+  cookie: boolean
+}
 
-export const GUEST_MODE_OPEN: GuestMode = 'open'
-export const GUEST_MODE_CODE: GuestMode = 'code'
-export const GUEST_MODE_OFF: GuestMode = 'off'
+export interface ClaimOptions {
+  samk?: ClaimOptionsSamk
+}
 
 export interface Code {
   id: string
@@ -131,10 +137,6 @@ export interface ProfileItem {
 
 export type Profile = Record<string, ProfileItem>
 
-export interface BodyClaimGuest {
-  mode: GuestMode
-}
-
 export interface ResponseEnvelope<T> {
   data: T
   error?: string
@@ -198,8 +200,6 @@ export interface AuthMiddlewareConfig {
   openIDConfigURL: string
   debugUserID?: string
   debugClients?: Record<string, DebugClient>
-  optional?: boolean
-  guest?: boolean
 }
 
 export interface UserAuthOptions {
@@ -207,8 +207,6 @@ export interface UserAuthOptions {
   clientSecret?: string
   redirectURI?: string
   pageRedirectURI?: string
-  optional?: boolean
-  guest?: boolean
 }
 
 export interface ResponseToken {

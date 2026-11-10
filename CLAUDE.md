@@ -20,6 +20,7 @@ The SQL under `prophet/database` and `disciple/database` is the truth of the sch
 5. The claim level, stated once: only `claim.level` compares, the higher level wins, equal levels fall to the classes; the level of an organization or location is tree depth.
 6. A Go change with a browser facing contract is mirrored into `ts/src/` in the same change. No code comments; `COMMENT ON` stays.
 7. This repo ships nothing for one consumer. A consumer pins a version and writes its own migration in its own repo.
+8. Access is only claims, held by a user, a temporary user of type `guest` or the anonymous user: one reserved `samna_user` per app, `shared.AnonymousUserID` and `claimius.anonymous_user_id()`, type `anonymous`, named Public, written by the bootstrap and never minted in Go. A grant to it is the public grant of its claim; its code and carriers sit in `user_claim.options.samk` beside the grant's window. `smw.UserAuthMiddleware` resolves every route the same way, with no option and no group, and a request without a credential acts as that user under `SAUTH_RATE_LIMIT` per `SAUTH_RATE_PERIOD`. Nothing in the mechanism is named guest; `claimius.code` is invite only.
 
 ## Rules
 

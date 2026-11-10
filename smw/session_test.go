@@ -91,34 +91,11 @@ func TestRefreshAuthServerErrorRedirectsToLoginOnNavigation(t *testing.T) {
 	}
 }
 
-func TestOptionalServesRequestCarryingNoCredential(t *testing.T) {
+func TestABrokenCredentialIsClearedAndResolvesAsNoCredential(t *testing.T) {
 	server := newAuthServerWithFailingRefresh(t)
 	defer server.Close()
 
-	handler := userAuthHandlerAgainst(t, server, &smw.UserAuthOptions{Optional: true})
-
-	e := echo.New()
-	req := httptest.NewRequest(http.MethodGet, "/guide/intro", nil)
-	req.Header.Set("Accept", "text/html")
-	rec := httptest.NewRecorder()
-
-	if err := handler(e.NewContext(req, rec)); err != nil {
-		t.Fatalf("middleware handler: %v", err)
-	}
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", rec.Code)
-	}
-	if rec.Body.String() != "ok" {
-		t.Fatalf("body = %q, want ok", rec.Body.String())
-	}
-}
-
-func TestOptionalRefusesRequestCarryingABrokenCredential(t *testing.T) {
-	server := newAuthServerWithFailingRefresh(t)
-	defer server.Close()
-
-	handler := userAuthHandlerAgainst(t, server, &smw.UserAuthOptions{Optional: true})
+	handler := userAuthHandlerAgainst(t, server, nil)
 
 	e := echo.New()
 	req := httptest.NewRequest(http.MethodGet, "/api/me/employee", nil)
@@ -134,7 +111,7 @@ func TestOptionalRefusesRequestCarryingABrokenCredential(t *testing.T) {
 	}
 }
 
-func TestWithoutOptionalARequestCarryingNoCredentialIsRefused(t *testing.T) {
+func TestARequestCarryingNoCredentialIsRefusedWhenNothingIsPublic(t *testing.T) {
 	server := newAuthServerWithFailingRefresh(t)
 	defer server.Close()
 

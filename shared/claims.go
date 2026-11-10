@@ -5,6 +5,9 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"slices"
+	"sync/atomic"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/lib/pq"
@@ -12,10 +15,87 @@ import (
 	"github.com/uptrace/bun"
 )
 
-func (d *DB) GetAccess(ctx context.Context, userID, objectID uuid.UUID, objectType string, requiredAccess ClaimAccess) (*AccessClaim, error) {
-	if userID == AnonymousUserID {
-		return d.getGuestAccess(ctx, objectID, objectType, requiredAccess)
+type PublicBinding struct {
+	ObjectType string
+	ObjectID   uuid.UUID
+	Inherits   bool
+}
+
+type PublicClaim struct {
+	ClaimID  uuid.UUID
+	Samk     *ClaimOptionsSamk
+	StartsAt *time.Time
+	EndsAt   *time.Time
+	Bindings []PublicBinding
+}
+
+func (p PublicClaim) Accepts(hash string, query, header, cookie bool) bool {
+	if p.Samk == nil || p.Samk.Hash != hash {
+		return false
 	}
+	return (query && p.Samk.Query) || (header && p.Samk.Header) || (cookie && p.Samk.Cookie)
+}
+
+type PublicClaims []PublicClaim
+
+func (c PublicClaims) Find(hash string) *PublicClaim {
+	for i := range c {
+		if c[i].Samk != nil && c[i].Samk.Hash == hash {
+			return &c[i]
+		}
+	}
+	return nil
+}
+
+var publicClaimCache atomic.Pointer[PublicClaims]
+
+func DeletePublicClaimCache() {
+	publicClaimCache.Store(nil)
+}
+
+type publicClaimRow struct {
+	ClaimID    uuid.UUID       `bun:"claim_id"`
+	Options    json.RawMessage `bun:"options,type:jsonb"`
+	StartsAt   *time.Time      `bun:"starts_at"`
+	EndsAt     *time.Time      `bun:"ends_at"`
+	ObjectType *string         `bun:"object_type"`
+	ObjectID   *uuid.UUID      `bun:"object_id"`
+	Inherits   *bool           `bun:"inherits"`
+}
+
+func (d *DB) GetPublicClaims(ctx context.Context) (PublicClaims, error) {
+	if cached := publicClaimCache.Load(); cached != nil {
+		return *cached, nil
+	}
+	query := "SELECT * FROM claimius.get_public_claims()"
+	if d.Prophet {
+		query = "SELECT * FROM claimius.get_public_claims(claimius.get_app_id())"
+	}
+	rows := make([]publicClaimRow, 0)
+	if err := d.NewRaw(query).Scan(ctx, &rows); err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return nil, err
+	}
+	claims := make(PublicClaims, 0)
+	for _, row := range rows {
+		if len(claims) == 0 || claims[len(claims)-1].ClaimID != row.ClaimID {
+			var options ClaimOptions
+			if len(row.Options) > 0 {
+				if err := json.Unmarshal(row.Options, &options); err != nil {
+					return nil, err
+				}
+			}
+			claims = append(claims, PublicClaim{ClaimID: row.ClaimID, Samk: options.Samk, StartsAt: row.StartsAt, EndsAt: row.EndsAt})
+		}
+		if row.ObjectType != nil && row.ObjectID != nil {
+			current := &claims[len(claims)-1]
+			current.Bindings = append(current.Bindings, PublicBinding{ObjectType: *row.ObjectType, ObjectID: *row.ObjectID, Inherits: row.Inherits != nil && *row.Inherits})
+		}
+	}
+	publicClaimCache.Store(&claims)
+	return claims, nil
+}
+
+func (d *DB) GetAccess(ctx context.Context, userID, objectID uuid.UUID, objectType string, requiredAccess ClaimAccess) (*AccessClaim, error) {
 	if objectType == OBJECT_TYPE_USER && userID == objectID {
 		return selfAccessClaim(userID, requiredAccess), nil
 	}
@@ -195,6 +275,7 @@ func (d *DB) insertClaim(ctx context.Context, conn bun.IConn, ac *AccessClaim, c
 	if ac == nil {
 		return nil, ErrNoAccess
 	}
+	defer DeletePublicClaimCache()
 	claim.CreatedBy = ac.UserClaimID
 	claim.RootID = ac.RootID
 	var payload []byte
@@ -222,6 +303,13 @@ func (d *DB) insertClaim(ctx context.Context, conn bun.IConn, ac *AccessClaim, c
 	return claim, nil
 }
 
+func NullableJSON(raw json.RawMessage) any {
+	if len(raw) == 0 {
+		return nil
+	}
+	return string(raw)
+}
+
 func (d *DB) updateClaim(ctx context.Context, conn bun.IConn, ac *AccessClaim, claimID uuid.UUID, claim *Claim) (*Claim, error) {
 	if ac == nil {
 		return nil, ErrNoAccess
@@ -234,6 +322,7 @@ func (d *DB) updateClaim(ctx context.Context, conn bun.IConn, ac *AccessClaim, c
 		level       interface{}
 		claimType   interface{}
 	)
+	defer DeletePublicClaimCache()
 	if claim.HasKey("name") {
 		name = claim.Name
 	}
@@ -278,6 +367,7 @@ func (d *DB) deleteClaim(ctx context.Context, conn bun.IConn, ac *AccessClaim, c
 	if ac == nil || ac.UserClaimID == nil {
 		return nil, ErrNoAccess
 	}
+	defer DeletePublicClaimCache()
 	var claim Claim
 	err := d.NewSelect().Conn(conn).
 		Model(&claim).
@@ -293,6 +383,7 @@ func (d *DB) insertClaimObject(ctx context.Context, conn bun.IConn, ac *AccessCl
 	if ac == nil {
 		return nil, ErrNoAccess
 	}
+	defer DeletePublicClaimCache()
 	if co.OwnerID == uuid.Nil {
 		co.OwnerID = ac.OwnerID
 	}
@@ -341,6 +432,7 @@ func (d *DB) deleteClaimObject(ctx context.Context, conn bun.IConn, ac *AccessCl
 	if ac == nil || ac.UserClaimID == nil {
 		return nil, ErrNoAccess
 	}
+	defer DeletePublicClaimCache()
 	var rowID uuid.UUID
 	err := d.NewSelect().Conn(conn).
 		ColumnExpr("id").
@@ -370,12 +462,17 @@ func (d *DB) insertClaimUser(ctx context.Context, conn bun.IConn, ac *AccessClai
 	if ac == nil || ac.UserClaimID == nil {
 		return nil, ErrNoAccess
 	}
+	defer DeletePublicClaimCache()
 	uc.OwnerID = ac.OwnerID
 	uc.CreatedBy = *ac.UserClaimID
+	options, value, err := SealClaimOptions(uc.Options)
+	if err != nil {
+		return nil, err
+	}
 	var payload []byte
-	err := d.NewRaw(`
+	err = d.NewRaw(`
 		SELECT (claimius.insert_user_claim(
-			?, ?, ?, ?, ?, ?, ?
+			?, ?, ?, ?, ?, ?, ?, ?::jsonb
 		) -> 'user_claim')::jsonb
 	`,
 		claimID,
@@ -385,13 +482,15 @@ func (d *DB) insertClaimUser(ctx context.Context, conn bun.IConn, ac *AccessClai
 		uc.Reason,
 		uc.StartsAt,
 		uc.EndsAt,
+		NullableJSON(options),
 	).Conn(conn).Scan(ctx, &payload)
 	if err != nil {
-		return nil, err
+		return nil, codeError(err)
 	}
 	if err := json.Unmarshal(payload, uc); err != nil {
 		return nil, err
 	}
+	uc.Options = ShowClaimOptions(uc.Options, value)
 	return uc, nil
 }
 
@@ -399,6 +498,7 @@ func (d *DB) deleteClaimUser(ctx context.Context, conn bun.IConn, ac *AccessClai
 	if ac == nil || ac.UserClaimID == nil {
 		return nil, ErrNoAccess
 	}
+	defer DeletePublicClaimCache()
 	var rowID uuid.UUID
 	err := d.NewSelect().Conn(conn).
 		ColumnExpr("id").
@@ -547,4 +647,50 @@ func (d *DB) GetDescendants(ctx context.Context, objectID uuid.UUID) ([]Descenda
 		return nil, err
 	}
 	return rows, nil
+}
+
+func (d *DB) updateClaimUser(ctx context.Context, conn bun.IConn, ac *AccessClaim, grantID uuid.UUID, uc *UserClaim, columns []string) (*UserClaim, error) {
+	if ac == nil || ac.UserClaimID == nil {
+		return nil, ErrNoAccess
+	}
+	defer DeletePublicClaimCache()
+	sent := func(key string) bool { return uc.HasKey(key) || slices.Contains(columns, key) }
+	var (
+		reason   any
+		startsAt any
+		endsAt   any
+		options  any
+		value    string
+	)
+	if sent("reason") {
+		reason = uc.Reason
+	}
+	if sent("starts_at") {
+		startsAt = uc.StartsAt
+	}
+	if sent("ends_at") {
+		endsAt = uc.EndsAt
+	}
+	if sent("options") {
+		sealed, plain, err := SealClaimOptions(uc.Options)
+		if err != nil {
+			return nil, err
+		}
+		options, value = "{}", plain
+		if len(sealed) > 0 {
+			options = string(sealed)
+		}
+	}
+	var payload []byte
+	err := d.NewRaw(`
+		SELECT (claimius.update_user_claim(?, ?, ?, ?, ?::jsonb) -> 'user_claim')::jsonb
+	`, grantID, reason, startsAt, endsAt, options).Conn(conn).Scan(ctx, &payload)
+	if err != nil {
+		return nil, codeError(err)
+	}
+	if err := json.Unmarshal(payload, uc); err != nil {
+		return nil, err
+	}
+	uc.Options = ShowClaimOptions(uc.Options, value)
+	return uc, nil
 }

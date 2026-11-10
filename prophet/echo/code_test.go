@@ -27,7 +27,7 @@ func postJSON(t *testing.T, body string, handler echo.HandlerFunc) int {
 }
 
 func TestPostCodeRequiresTheHashNeverAValue(t *testing.T) {
-	body := `{"claim_id":"20000000-0000-4000-8000-000000000002","user_id":"40000000-0000-4000-8000-000000000004","kind":"guest","value":"plain"}`
+	body := `{"claim_id":"20000000-0000-4000-8000-000000000002","user_id":"40000000-0000-4000-8000-000000000004","kind":"invite","value":"plain"}`
 	if code := postJSON(t, body, pecho.PostCode); code != http.StatusBadRequest {
 		t.Errorf("status = %d, want 400 when the body carries no hash, because the prophet stores the SHA-256 of a code and never its value", code)
 	}

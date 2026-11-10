@@ -1,4 +1,4 @@
-GET {{base}}/api/root?samk=hurl-guest-code
+GET {{base}}/api/root?samk=hurl-public-code
 Accept: text/html
 HTTP 303
 [Asserts]
@@ -6,16 +6,20 @@ header "Location" == "/api/root"
 header "Referrer-Policy" == "no-referrer"
 header "Set-Cookie" not exists
 
-GET {{base}}/code
-SAuth-Code: hurl-guest-code
+GET {{base}}/api/root
+SAuth-Code: hurl-public-code
 HTTP 200
 [Asserts]
 header "Referrer-Policy" == "no-referrer"
-jsonpath "$.data.kind" == "guest"
-jsonpath "$.data.object_type" == "claimius.organization"
-jsonpath "$.data.data.view" == "board"
+
+GET {{base}}/code
+SAuth-Code: hurl-invite-code
+HTTP 200
+[Asserts]
+header "Referrer-Policy" == "no-referrer"
+jsonpath "$.data.kind" == "invite"
 jsonpath "$.data.hash" not exists
-body not contains "hurl-guest-code"
+body not contains "hurl-invite-code"
 
 GET {{base}}/code
 HTTP 404
@@ -37,9 +41,3 @@ HTTP 303
 [Asserts]
 header "Location" == "/api/root"
 header "Referrer-Policy" == "no-referrer"
-
-GET {{base}}/api/root?samk=hurl-invite-code
-Accept: text/html
-HTTP 303
-[Asserts]
-header "Location" == "/api/root"

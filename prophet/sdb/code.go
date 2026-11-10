@@ -30,8 +30,8 @@ func codeError(err error) error {
 }
 
 func PostCode(ctx context.Context, appID uuid.UUID, body shared.BodySamCode) (json.RawMessage, error) {
-	if body.Kind != shared.CODE_KIND_INVITE && body.Kind != shared.CODE_KIND_GUEST {
-		return nil, fmt.Errorf("%w: kind must be invite or guest", shared.ErrBadCode)
+	if body.Kind != shared.CODE_KIND_INVITE {
+		return nil, fmt.Errorf("%w: kind must be invite", shared.ErrBadCode)
 	}
 	if body.Count < 0 {
 		return nil, fmt.Errorf("%w: count must not be negative", shared.ErrBadCode)
@@ -102,19 +102,6 @@ func PostCodeRedeem(ctx context.Context, appID uuid.UUID, hash string, userID uu
 			return nil, shared.ErrCodeInvalid
 		}
 		return nil, err
-	}
-	return raw, nil
-}
-
-func PutClaimGuest(ctx context.Context, appID, userID, claimID uuid.UUID, mode shared.GuestMode) (json.RawMessage, error) {
-	if mode != shared.GUEST_MODE_OPEN && mode != shared.GUEST_MODE_CODE && mode != shared.GUEST_MODE_OFF {
-		return nil, fmt.Errorf("%w: mode must be open, code or off", shared.ErrBadCode)
-	}
-	var raw json.RawMessage
-	if err := instance.NewRaw("SELECT claimius.update_claim_guest(?, ?, ?, ?, ?)",
-		appID, claimID, userID, GetGuestUserID(appID, claimID), string(mode),
-	).Scan(ctx, (*[]byte)(&raw)); err != nil {
-		return nil, codeError(err)
 	}
 	return raw, nil
 }

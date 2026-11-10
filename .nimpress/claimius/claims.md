@@ -130,6 +130,10 @@ The use is reusing a surface at another strength. A Bookings Admin claim binds e
 
 A `claim_object` with no object pair and a `scope` payload is a capability: a page, a feature, a public subset for a machine client; see [Capabilities](./capabilities.md). A scope on an object binding is a different thing: its keys are field names of the object; see [Redaction](./redaction.md).
 
+## The public grant
+
+A `user_claim` of the anonymous user, `anonymous_user_id()`, is the public grant of its claim: every request without a credential holds it between its `starts_at` and `ends_at`, settled and walked like any grant. `user_claim.options`, accepted on that user's grants alone, may put the grant behind a code, `{"samk": {"hash", "query", "header", "cookie"}}`, which the walk counts only while the request presents it in `claimius.samk`; see [Users](./users.md), Three holders and The guard.
+
 ## Removing a claim
 
 `delete_claim(claim, actor)` soft deletes, in order, the links pointing at the claim, its grants, its bindings, and the claim, and returns the deleted claim row. Each soft delete fires the triggers of its table, which raise the object area of each binding's object, the assignment area of each grant's user and, for the claim itself, one object area per binding and one on the claim object, and settle the actor's pairs on the claim and on each binding's object. The holders settle on their own next reads; see [Materialization](./materialization.md).

@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"reflect"
+	"regexp"
 	"slices"
 	"strings"
 	"sync"
@@ -293,12 +294,12 @@ func (d *DB) Close() error {
 }
 
 func openPool(dsn string) *bun.DB {
-	sqlDB := sql.OpenDB(pgdriver.NewConnector(
+	sqlDB := sql.OpenDB(codeHashConnector{pgdriver.NewConnector(
 		pgdriver.WithDSN(dsn),
 		pgdriver.WithReadTimeout(120*time.Second),
 		pgdriver.WithWriteTimeout(120*time.Second),
 		pgdriver.WithDialTimeout(30*time.Second),
-	))
+	)})
 	sqlDB.SetMaxOpenConns(25)
 	sqlDB.SetMaxIdleConns(2)
 	sqlDB.SetConnMaxLifetime(2 * time.Minute)
@@ -444,4 +445,86 @@ func holdSyncLock(ctx context.Context, conn *bun.Conn, interval time.Duration, w
 func discardConn(conn *bun.Conn) {
 	_ = conn.Raw(func(any) error { return driver.ErrBadConn })
 	_ = conn.Close()
+}
+
+type codeHashConnector struct {
+	driver.Connector
+}
+
+func (c codeHashConnector) Connect(ctx context.Context) (driver.Conn, error) {
+	conn, err := c.Connector.Connect(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return &codeHashConn{Conn: conn.(*pgdriver.Conn)}, nil
+}
+
+type codeHashConn struct {
+	*pgdriver.Conn
+	hash string
+}
+
+var codeHashPattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
+
+func (c *codeHashConn) carry(ctx context.Context) error {
+	hash := CodeHashFrom(ctx)
+	if !codeHashPattern.MatchString(hash) {
+		hash = ""
+	}
+	if hash == c.hash {
+		return nil
+	}
+	if _, err := c.Conn.ExecContext(ctx, "SELECT set_config('claimius.samk', '"+hash+"', false)", nil); err != nil {
+		return err
+	}
+	c.hash = hash
+	return nil
+}
+
+func (c *codeHashConn) ExecContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Result, error) {
+	if err := c.carry(ctx); err != nil {
+		return nil, err
+	}
+	return c.Conn.ExecContext(ctx, query, args)
+}
+
+func (c *codeHashConn) QueryContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Rows, error) {
+	if err := c.carry(ctx); err != nil {
+		return nil, err
+	}
+	return c.Conn.QueryContext(ctx, query, args)
+}
+
+func (c *codeHashConn) PrepareContext(ctx context.Context, query string) (driver.Stmt, error) {
+	stmt, err := c.Conn.PrepareContext(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	return &codeHashStmt{Stmt: stmt, conn: c}, nil
+}
+
+type codeHashStmt struct {
+	driver.Stmt
+	conn *codeHashConn
+}
+
+func (s *codeHashStmt) ExecContext(ctx context.Context, args []driver.NamedValue) (driver.Result, error) {
+	if err := s.conn.carry(ctx); err != nil {
+		return nil, err
+	}
+	return s.Stmt.(driver.StmtExecContext).ExecContext(ctx, args)
+}
+
+func (s *codeHashStmt) QueryContext(ctx context.Context, args []driver.NamedValue) (driver.Rows, error) {
+	if err := s.conn.carry(ctx); err != nil {
+		return nil, err
+	}
+	return s.Stmt.(driver.StmtQueryContext).QueryContext(ctx, args)
+}
+
+func (c *codeHashConn) BeginTx(ctx context.Context, opts driver.TxOptions) (driver.Tx, error) {
+	if err := c.carry(ctx); err != nil {
+		return nil, err
+	}
+	return c.Conn.BeginTx(ctx, opts)
 }

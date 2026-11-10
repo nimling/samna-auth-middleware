@@ -159,7 +159,7 @@ func TestUserAccessResolvesExternalID(t *testing.T) {
 
 func TestRootAccessSkipsSoftDeletedRoot(t *testing.T) {
 	db := database(t)
-	ac, err := db.RootAccess(context.Background(), userC, sdb.ACCESS_READ)
+	ac, err := db.RootAccess(context.Background(), userC, uuid.Nil, sdb.ACCESS_READ)
 	if err != nil {
 		t.Fatalf("root access: %v", err)
 	}
@@ -203,7 +203,7 @@ func TestDeleteTakesTheRecordIDFromTheModel(t *testing.T) {
 	if err != nil {
 		t.Fatalf("access: %v", err)
 	}
-	org := sdb.Organization{Name: "Deleted by model", Type: sdb.ORGANIZATION_TYPE_CHILD, OwnerID: orgRoot}
+	org := sdb.Organization{Name: "Deleted by model", Type: sdb.ORGANIZATION_TYPE_ENTITY, OwnerID: orgRoot}
 	if err := db.NewInsert().Model(&org).Access(ac).Scan(ctx, &org); err != nil {
 		t.Fatalf("insert child organization: %v", err)
 	}
@@ -567,7 +567,7 @@ func TestClaimUnderSoftDeletedOrganizationAgreesWithItsGate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("access: %v", err)
 	}
-	org := sdb.Organization{Name: "Composer owner", Type: sdb.ORGANIZATION_TYPE_CHILD, OwnerID: orgRoot}
+	org := sdb.Organization{Name: "Composer owner", Type: sdb.ORGANIZATION_TYPE_ENTITY, OwnerID: orgRoot}
 	if err := db.NewInsert().Model(&org).Access(ac).Scan(ctx, &org); err != nil {
 		t.Fatalf("insert child organization: %v", err)
 	}
@@ -721,7 +721,7 @@ func TestUpdateOrganizationMovesItUnderAnotherParent(t *testing.T) {
 		t.Fatalf("access: %v", err)
 	}
 	insert := func(name string, owner uuid.UUID) uuid.UUID {
-		org := sdb.Organization{Name: name, Type: sdb.ORGANIZATION_TYPE_CHILD, OwnerID: owner}
+		org := sdb.Organization{Name: name, Type: sdb.ORGANIZATION_TYPE_ENTITY, OwnerID: owner}
 		if err := db.NewInsert().Model(&org).Access(ac).Scan(ctx, &org); err != nil {
 			t.Fatalf("insert %s: %v", name, err)
 		}

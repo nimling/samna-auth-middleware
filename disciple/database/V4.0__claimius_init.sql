@@ -45,3 +45,8 @@ DO $$
             PERFORM claimius.build_location_tree(r.sa_root_id, r.id);
         END LOOP;
     END $$;
+
+INSERT INTO claimius.samna_user (user_id, status, type, first_name)
+SELECT claimius.anonymous_user_id(), 'active', 'anonymous', 'Public'
+WHERE EXISTS (SELECT 1 FROM claimius.disciple_state)
+ON CONFLICT (user_id) WHERE sa_deleted_at IS NULL DO NOTHING;

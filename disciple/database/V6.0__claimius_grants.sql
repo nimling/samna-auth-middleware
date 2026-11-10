@@ -5,7 +5,7 @@ CREATE OR REPLACE VIEW claimius.get_claims AS SELECT * FROM claimius.claim;
 CREATE OR REPLACE VIEW claimius.get_grants AS SELECT * FROM claimius.user_claim;
 
 COMMENT ON VIEW claimius.get_users IS 'Every samna_user row as it stands, soft deleted and inactive rows included, with no reader and no access filter: the rows of the get_users lookup by id, as a relation a query joins. The read surface of the SamnaUser model: bun selects and belongs-to joins read it through select:claimius.get_users, so app code reaches the table only through a get_ name. Defined here, after every column change of the set, so it carries every column.';
-COMMENT ON VIEW claimius.get_organizations IS 'Every organization row as it stands, soft deleted rows included, with no reader and no access filter: the rows of the get_organizations lookup by id, as a relation a query joins. The read surface of the Organization model for bun selects and belongs-to joins.';
+COMMENT ON VIEW claimius.get_organizations IS 'Every organization row as it stands, soft deleted rows included, with no reader and no access filter: the rows of the get_organizations lookup by id, as a relation a query joins. The read surface of the Organization model for bun selects and belongs-to joins. Defined here, after every column change of the set, so it carries every column.';
 COMMENT ON VIEW claimius.get_locations IS 'Every location row as it stands, soft deleted rows included, with no reader and no access filter: the rows of the get_locations lookup by id, as a relation a query joins. The read surface of the Location model for bun selects and belongs-to joins.';
 COMMENT ON VIEW claimius.get_claims IS 'Every claim row as it stands, soft deleted rows included, with no reader and no access filter: the rows of the get_claims lookup by id, as a relation a query joins. The read surface of the Claim model for bun selects and belongs-to joins.';
 COMMENT ON VIEW claimius.get_grants IS 'Every user_claim row as it stands, soft deleted grants and grants outside their window included, with no reader and no access filter: the rows of the get_grants lookup by id, as a relation a query joins. The read surface of the UserClaim model for bun selects and belongs-to joins.';
@@ -19,7 +19,7 @@ BEGIN
              claimius.insert_claim_object, claimius.update_claim_object, claimius.delete_claim_object,
              claimius.migrate_root,
              claimius.upsert_disciple_state, claimius.insert_secret,
-             claimius.update_claim_guest, claimius.insert_code, claimius.delete_code, claimius.redeem_code,
+             claimius.upsert_guest_user, claimius.insert_code, claimius.delete_code, claimius.redeem_code,
              claimius.upsert_table_info, claimius.delete_table_info, claimius.upsert_internal_table_info,
              claimius.recompute_state, claimius.prune,
              claimius.upsert_search_source, claimius.delete_search_source

@@ -12,6 +12,8 @@ import (
 	"github.com/nimling/samna-auth-middleware/v2/pkg/errorsx"
 	"github.com/nimling/samna-auth-middleware/v2/pkg/respond"
 	sdb "github.com/nimling/samna-auth-middleware/v2/prophet/sdb"
+	"github.com/nimling/samna-auth-middleware/v2/sauth"
+	"github.com/nimling/samna-auth-middleware/v2/shared"
 	"github.com/nimling/samna-auth-middleware/v2/utils"
 	"github.com/uptrace/bun"
 )
@@ -346,16 +348,25 @@ func PostClaimUser(ctx echo.Context) error {
 	}
 	userClaim.AppID = appID
 	userClaim.ClaimID = claimID
+	options, value, err := shared.SealClaimOptions(userClaim.Options)
+	if err != nil {
+		return respond.Error(ctx, http.StatusBadRequest, err.Error())
+	}
+	if err := sdb.Instance().NewRaw("SELECT claimius._check_claim_options(?::jsonb)", shared.NullableJSON(options)).Scan(ctx.Request().Context(), (*[]byte)(&userClaim.Options)); err != nil {
+		return respond.Error(ctx, errorsx.ErrToHttpCode(err), "user_claim insert failed")
+	}
 	if _, err := sdb.Instance().NewInsert().
 		Model(userClaim).
 		On("CONFLICT (claim_id, user_id, app_id) WHERE sa_deleted_at IS NULL DO UPDATE").
 		Set("reason = EXCLUDED.reason").
+		Set("options = EXCLUDED.options").
 		Set("sa_updated_at = now()").
 		Returning("*").
 		Exec(ctx.Request().Context()); err != nil {
 		ctx.Logger().Errorf("PostClaimUser: %v", err)
 		return respond.Error(ctx, errorsx.ErrToHttpCode(err), "user_claim insert failed")
 	}
+	userClaim.Options = shared.ShowClaimOptions(userClaim.Options, value)
 	return respond.JSON(ctx, http.StatusCreated, userClaim, 1)
 }
 
@@ -393,24 +404,42 @@ func PatchClaimUser(ctx echo.Context) error {
 	if err := patch.ValidatePatch(); err != nil {
 		return respond.Error(ctx, http.StatusBadRequest, err.Error())
 	}
+	var options any
+	var value string
+	if patch.HasKey("options") {
+		sealed, plain, err := shared.SealClaimOptions(patch.Options)
+		if err != nil {
+			return respond.Error(ctx, http.StatusBadRequest, err.Error())
+		}
+		options, value = "{}", plain
+		if len(sealed) > 0 {
+			options = string(sealed)
+		}
+	}
 	var result struct {
 		UserClaim json.RawMessage `bun:"update_user_claim"`
 	}
 	if err := sdb.Instance().NewRaw(
-		"SELECT claimius.update_user_claim(?, ?, ?, ?) AS update_user_claim",
-		userClaimID, patch.Reason, patch.StartsAt, patch.EndsAt,
+		"SELECT claimius.update_user_claim(?, ?, ?, ?, ?::jsonb) AS update_user_claim",
+		userClaimID, patch.Reason, patch.StartsAt, patch.EndsAt, options,
 	).Scan(ctx.Request().Context(), &result); err != nil {
 		ctx.Logger().Errorf("PatchClaimUser update: %v", err)
 		return respond.Error(ctx, errorsx.ErrToHttpCode(err), "user_claim update failed")
 	}
 	wrapper := struct {
-		UserClaim UserClaim `json:"user_claim"`
+		UserClaim json.RawMessage `json:"user_claim"`
 	}{}
+	var updated UserClaim
 	if err := json.Unmarshal(result.UserClaim, &wrapper); err != nil {
 		ctx.Logger().Errorf("PatchClaimUser unmarshal: %v", err)
 		return respond.Error(ctx, http.StatusInternalServerError, "user_claim decode failed")
 	}
-	return respond.JSON(ctx, http.StatusOK, wrapper.UserClaim, 1)
+	if err := sauth.Unmarshal(wrapper.UserClaim, &updated); err != nil {
+		ctx.Logger().Errorf("PatchClaimUser unmarshal: %v", err)
+		return respond.Error(ctx, http.StatusInternalServerError, "user_claim decode failed")
+	}
+	updated.Options = shared.ShowClaimOptions(updated.Options, value)
+	return respond.JSON(ctx, http.StatusOK, updated, 1)
 }
 
 func DeleteClaimUser(ctx echo.Context) error {

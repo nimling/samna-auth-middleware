@@ -104,7 +104,14 @@ INSERT INTO superseded VALUES
         ('claimius.get_expired_consent(interval,text,integer)'),
         ('claimius.delete_exported_consent(text[])'),
         ('claimius.upsert_retention(text,claimius.retention_class,integer,text,text)'),
-        ('claimius._check_claim_level(uuid,uuid,uuid,integer)');
+        ('claimius._check_claim_level(uuid,uuid,uuid,integer)'),
+        ('claimius.update_claim_guest(uuid,uuid,uuid,uuid,text)'),
+        ('claimius.insert_claim(uuid,text,text,integer,uuid,uuid,uuid,boolean,claimius.claim_type,integer,jsonb)'),
+        ('claimius.update_claim(uuid,text,text,integer,boolean,integer,claimius.claim_type,uuid,jsonb)'),
+        ('claimius.insert_user_claim(uuid,uuid,uuid,uuid,uuid,text,timestamp with time zone,timestamp with time zone)'),
+        ('claimius.update_user_claim(uuid,text,timestamp with time zone,timestamp with time zone)'),
+        ('claimius.anonymous_user_id(text)'),
+        ('claimius._is_anonymous(uuid)');
 
 SELECT is_empty($$
     SELECT s.signature FROM superseded s

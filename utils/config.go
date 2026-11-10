@@ -19,6 +19,8 @@ type Config struct {
 	DebugSeed         string
 	DebugInitiateApps string
 	ReplicaDSN        string
+	RateLimit         string
+	RatePeriod        string
 
 	Issuer       string
 	TokenURL     url.URL
@@ -42,6 +44,8 @@ func loadConfig() {
 	cfg.DebugSeed = os.Getenv("SAUTH_DEBUG_PRIVATE_SEED")
 	cfg.DebugInitiateApps = os.Getenv("SAUTH_DEBUG_INITIATE_APPS")
 	cfg.ReplicaDSN = os.Getenv("SAUTH_REPLICA_DSN")
+	cfg.RateLimit = os.Getenv("SAUTH_RATE_LIMIT")
+	cfg.RatePeriod = os.Getenv("SAUTH_RATE_PERIOD")
 }
 
 func Cfg() *Config {

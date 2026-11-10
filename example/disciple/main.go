@@ -45,7 +45,7 @@ func main() {
 	sam.RegisterStatus(e.Group(uptime.StatusBasePath))
 	sam.RegisterCli(e.Group("/api/auth"))
 
-	sam.RegisterEndpoints(e.Group("", smw.UserAuthMiddleware(&smw.UserAuthOptions{Guest: true})))
+	sam.RegisterEndpoints(e.Group("", smw.UserAuthMiddleware(nil)))
 
 	api := e.Group("", smw.UserAuthMiddleware(nil))
 
@@ -168,7 +168,7 @@ func GetUserAccess(ctx echo.Context) error {
 }
 
 func GetRootAccess(ctx echo.Context) error {
-	ac, err := sdb.Instance().RootAccess(ctx.Request().Context(), actor(ctx), shared.ACCESS_READ)
+	ac, err := sdb.Instance().RootAccess(ctx.Request().Context(), actor(ctx), uuid.Nil, shared.ACCESS_READ)
 	if err != nil {
 		return accessError(ctx, err)
 	}

@@ -3,7 +3,7 @@ gate: samna-developer
 layout: doc
 title: Users
 description: One person or machine, one stable user_id, one samna_user row per app, machine clients, delegation through get_user_access, and user_users with the count it holds, the user_users_diff rows a write raises and a read folds, what each reads and writes, and why the count is exact.
-tags: samna_user, user_id, upsert_app_user, guest, upsert_guest_user, update_claim_guest, claimius.code, samk, get_guest_access, check_user_active, merge_user, samna_client, get_user_access, get_users, user_users, user_users_diff, _settle_user_users_diff, _user_users_for_viewer, delegation
+tags: samna_user, user_id, upsert_app_user, anonymous_user_id, upsert_guest_user, claimius.code, samk, user_claim.options, get_public_claims, check_user_active, merge_user, samna_client, get_user_access, get_users, user_users, user_users_diff, _settle_user_users_diff, _user_users_for_viewer, delegation
 lastUpdated: true
 ---
 
@@ -17,7 +17,7 @@ A user is who acts. A person and a machine client are both users, and both hold 
 | `id` | The row key for one app | Internal to that row |
 | `app_id` | The app scope | Present in every query against user state on a prophet |
 | `external_id` | The host system's reference | Lookup from an integration |
-| `type` | `user`, `client`, `system`, `guest` | Separates people from machines |
+| `type` | `user`, `client`, `system`, `guest`, `anonymous` | Separates people, machines, temporary users and the one anonymous user of the app |
 | `status` | `active`, `pending`, `suspended`, `inactive` | Gates every read before any grant is read |
 
 | Status | Means |
@@ -71,15 +71,23 @@ one probe of the user row and one range of `idx_object_asset_object` by user. A 
 
 4. A disciple holds its app's `samna_client` rows, so it verifies a client against its own copy.
 
-## Guests
+## Three holders
 
-A guest is the holder of one claim without an account: a `samna_user` of type `guest` with the id `uuid.NewSHA1(app, "guest:" + claim)`, one per app and claim. A guest gets exactly what its claims grant: `get_access` answers a guest user like any user. The claim is the whole of the limit: its `guest_mode` decides whether it is public, and its access mask, scope, level and grant window decide what the guest may do. An open claim holding READ lets anyone read and refuses a write; an open claim holding READ|EXECUTE lets anyone book; a code on a claim bound to one booking with READ|WRITE|EXECUTE lets its holder cancel that booking and nothing else. There is no setting outside the claim.
+Access is only claims, and a claim is held by one of three kinds of user. Nothing in the mechanism is named after the caller.
 
-1. A guest claim is a claim granted to its guest, with a mode in `claim.guest_mode`: `open`, anyone without a credential acts as the guest; `code`, only the holder of a live guest code does; `off`, the default, neither. `sdb.Instance().PutClaimGuest(ctx, ac, claimID, mode)`, with `ac` an owner of the claim, routes to `PUT /sam/claim/:id/guest`, where `update_claim_guest` ensures the guest and its grant through `upsert_guest_user` and sets the mode. `off` leaves the guest and its grant in place. An owner of a claim, for this and for every code write, is a user whose grant covers OWNER on the claim, or the user who created the claim under a grant it still holds, when the creator's own access on the claim covers OWNER: `_check_code_owner` answers that grant, and the guest and the codes are made under it. A guest holds the claim, not the claim row: it owns the objects the claim is bound to, never the claim itself.
+1. A user: a person or a machine client with a `user_claim` on its `user_id`.
 
-2. `POST /sam/guest` still signs a guest token for an owner of the claim. The token always carries `exp`: the access token lifetime, `SAUTH_ACCESS_TOKEN_DURATION` or 900 seconds, capped by the grant's `ends_at`.
+2. A temporary user: a `samna_user` of type `guest`, made for one claim by `upsert_guest_user` under an owner's grant, the id `uuid.NewSHA1(app, "guest:" + claim)` or a fresh one when it stands for a named person; it is answered like any user, exactly what its claims grant. `POST /sam/user/temporary` signs its token, always with `exp`, the access token lifetime or the grant's `ends_at`.
 
-3. The guest lives on the prophet, the only place that can sign its token, and reaches the app's disciples through the feed like any user, so a disciple answers a guest's access from the synced grant.
+3. The anonymous user: one reserved `samna_user` per app, `user_id` `9f6783f1-f493-595a-8304-ad905d047f73`, `shared.AnonymousUserID` and `claimius.anonymous_user_id()`, type `anonymous`, named `Public`, no email. The prophet writes it in `upsert_system_app` and `upsert_app`, the init file backfills every live app, a disciple without a prophet writes it in `upsert_disciple_state`, and every disciple receives it through the feed like the system user; Go never mints it. A `user_claim` of the anonymous user is the public grant of its claim: every request without a credential holds it between the grant's `starts_at` and `ends_at`, with the claim's mask, scope, level and denies, settled and listed exactly as for any user. A write under it is stamped with the grant's own `sa_created_by`, the grant of the user who made the claim public. An open READ claim lets anyone read and refuses a write; an open READ|EXECUTE claim lets anyone book; a code on a claim bound to one booking with READ|WRITE|EXECUTE lets the holder of the code cancel that booking and nothing else. There is no setting outside the grant.
+
+### The public grant and its code
+
+1. The grant is written like any grant: `POST /sam/claim/:claim_id/user` with `user_id` the anonymous user, `starts_at`, `ends_at` and, when the grant is to be behind a code, `options`; on a disciple `sdb.Instance().NewInsert().Model(&sdb.UserClaim{ClaimID: id, UserID: sdb.AnonymousUserID, Options: ...}).Access(ac)`, which routes there. `user_claim.options` is `{"samk": {"value": "<plain code, minted when absent>", "query": true, "header": true, "cookie": true}}` on the way in: Go seals it, `shared.SealClaimOptions`, so the table holds `hash`, the hex SHA-256 of the value, and the carriers; the answer carries `value` once and nothing stores it. `PATCH /sam/claim/:claim_id/user/:id` changes `reason`, `starts_at`, `ends_at` and `options`; `"options": {}` clears the code. `_check_claim_options` keeps the shape, `insert_user_claim` and `update_user_claim` refuse `options` on a grant of any other user, both with `22023`.
+
+2. The code gate runs inside the walk: the grant's hash travels on every derivation of the anonymous user's pairs as `samk`, `_best_grant` and `get_direct_access` count the derivation only while `current_setting('claimius.samk')` holds that hash, and the guard carries the presented code there, so `get_access`, `get_objects`, `search` and `ObjectWhere` all answer the same.
+
+3. An owner of a claim, for the public grant and for every code write, is a user whose grant covers OWNER on the claim, or the user who created the claim under a grant it still holds, when the creator's own access on the claim covers OWNER: `_check_code_owner` answers that grant, and the temporary users and the codes are made under it.
 
 ## Access codes
 
@@ -87,7 +95,7 @@ An access code opens one claim. The table is `claimius.code`, written on the pro
 
 | Column | Is |
 |---|---|
-| `kind` | `invite`: a signed in user redeems it into a grant of the claim. `guest`: its holder acts as the guest of the claim |
+| `kind` | `invite`, the only kind: a signed in user redeems it into a grant of the claim. Access without a credential is a grant of the anonymous user, whose code lives in `user_claim.options` |
 | `claim_id` | The claim it opens |
 | `object_id`, `object_type` | Optional object the service handed it out for |
 | `data` | Free JSON the service keeps with it |
@@ -95,27 +103,27 @@ An access code opens one claim. The table is `claimius.code`, written on the pro
 | `count`, `used_count` | Uses allowed, 0 unlimited, and taken; a use is taken in one statement on the prophet |
 | `revoked_at` | Set by `DeleteCode`; a revoked code never resolves again |
 
-1. The helpers are `shared.GetCodeValue()`, `shared.GetCodeHash(value)` and `client.GetCodeURL(base, path, value)`; on a disciple `PostCode(ctx, ac, claimID, body, base)` returns the row with `value` and `url` once, `GetCodes(ctx, claimID)` lists a claim's codes, `DeleteCode(ctx, ac, id)` revokes one and `GetCodeAccess(ctx, value)` resolves one, cached for 30 seconds and cleared by any code, claim or grant event of the feed. `ac` is an owner of the claim, by a grant or as its creator (Guests 1); the prophet's `insert_code` and `delete_code` check it again. The prophet set has the same functions in `prophet/sdb` with the app id first, for samna_auth; `uuid.Nil` there finds, redeems or lists a code in any app, and `CodeAccess.AppID` names the app.
+1. The helpers are `shared.GetCodeValue()`, `shared.GetCodeHash(value)` and `client.GetCodeURL(base, path, value)`; on a disciple `PostCode(ctx, ac, claimID, body, base)` returns the row with `value` and `url` once, `GetCodes(ctx, claimID)` lists a claim's codes, `DeleteCode(ctx, ac, id)` revokes one and `GetCodeAccess(ctx, value)` resolves one, cached for 30 seconds and cleared by any code, claim or grant event of the feed. `ac` is an owner of the claim, by a grant or as its creator (The public grant and its code 3); the prophet's `insert_code` and `delete_code` check it again. The prophet set has the same functions in `prophet/sdb` with the app id first, for samna_auth; `uuid.Nil` there finds, redeems or lists a code in any app, and `CodeAccess.AppID` names the app.
 
 2. Action codes stay with the service that runs actions: bookable's own `code` table and its Tengo actions use these helpers and nothing else.
 
 ## The guard
 
-`smw.UserAuthMiddleware` resolves the actor in this order: bearer, cookie, machine client, then the code, then the anonymous guest.
+`smw.UserAuthMiddleware` resolves the actor the same way on every route; there is no option and no route group. Bearer, cookie and machine client first, as before. A request with none of them is the anonymous user.
 
 1. `samk` is a reserved query parameter on every route, `client.CodeParam`, which `smw` re-exports with `CodeHeader`. An API call may send the value in the header `SAuth-Code` instead; a browser carries it in the `__Host-sauth_samk` cookie after its first visit. The guard takes the value off the request, out of the URL and the header, before the handler or a request logger reads it, and sets `Referrer-Policy: no-referrer` on the answer.
 
-2. A guest code acts as the guest of its claim only on a route group mounted with `smw.UserAuthOptions{Guest: true}`, and every such request writes an audit row naming the claim and the code id, never the value. On a navigation GET there the guard sets `__Host-sauth_samk`, `HttpOnly; Secure; SameSite=Lax; Path=/`, expiring with the code, and answers `303` to the same URL without `samk`. On any other route a guest code is no identity: it is still taken off the request, spends no use, writes no audit row, sets no `CodeKey` and leaves the cookie alone, and the request answers as one without a credential, `401` or the login redirect on a navigation, or proceeds without an actor on an `Optional` route. A signed in user there who brings `samk` on a navigation GET gets the `303` without it and no cookie. `GET /code` from `sam.RegisterEndpoints` answers a guest code only where that group is mounted with `Guest`. A handler that hands a guest code out in an api answer, not a navigation, sets the same cookie with `smw.WriteCodeCookie(ctx, value, 0, code.EndsAt)`; it is the one writer of the cookie, and its lifetime is the code's window.
+2. Without a credential the request first passes the rate limit, then `UserIDKey` is `shared.AnonymousUserID` and `AnonymousKey` the per browser `sauth_anonymous_id`. The guard holds the anonymous user's live grants in memory, `shared.PublicClaims` from `get_public_claims`, loaded at `sdb.Init` and dropped on every claim, grant and binding event of the feed and every local claim write; when the user holds none the request answers `401`, or the login redirect on a navigation, with no round trip. The state never decides access: every check runs through `get_access` as for any user.
 
-3. An invite code needs a login. Without one, a navigation stores the value in the same cookie for ten minutes and goes to `/api/auth/login?next=` the URL without `samk`; the login returns there, and the guard redeems the invite for the signed in user in one transaction, `redeem_code`, granting the claim. A user who already holds the claim spends no use.
+3. A presented code is matched against those grants: when one names its SHA-256 in `options.samk.hash` and accepts the carrier it came in, the hash goes on the request context, `shared.WithCodeHash`, and the connection the request's queries run on sets `claimius.samk` to it before each statement, so the walk counts that grant. On a navigation GET with the code in the query and `cookie` accepted, the guard sets `__Host-sauth_samk`, `HttpOnly; Secure; SameSite=Lax; Path=/`, expiring with the grant, and answers `303` to the same URL without `samk`. A code no grant names, or one in a carrier the grant refuses, answers `401`; a dead code in the cookie clears the cookie and the request goes on as the anonymous user.
 
-4. A signed in user who brings a guest code stays the actor and is never downgraded; the code adds nothing to the user's own rights. How the two should combine is not decided: no union is made.
+4. An invite code needs a login. Without one, a navigation stores the value in the same cookie for ten minutes and goes to `/api/auth/login?next=` the URL without `samk`; the login returns there, and the guard redeems the invite for the signed in user in one transaction, `redeem_code`, granting the claim. A user who already holds the claim spends no use.
 
-5. Twenty failed resolves from one address within a minute answer `429` with `Retry-After` for the rest of the minute, valid codes included. A resolve the database cannot answer is `503`, never a pass.
+5. A signed in user who brings a public code stays the actor and is never downgraded; the code adds nothing to the user's own rights, and a navigation carrying it in the query is answered `303` without it.
 
-6. A route group mounted with `smw.UserAuthOptions{Guest: true}` serves a request with no credential and no code as anonymous: `UserIDKey` is `shared.AnonymousUserID` and `AnonymousKey` is set. `MutationAccess`, `GetAccess`, `MutationAccessMany` and `ObjectWhere` resolve that actor through `get_guest_access(object_type, object_id, required_access)`: the guest of an open guest claim whose access covers the requirement on the object, with the mask of its claim, with an audit row per resolved check. An object no open claim covers answers as before, the handler's `403` turned into `401`. Without `Guest` neither an open guest claim nor a guest code makes anyone the guest.
+6. The rate limit is one limiter for every request without a credential and every code resolution, keyed on the address and, when present, the `sauth_anonymous_id` cookie: `SAUTH_RATE_LIMIT` requests per `SAUTH_RATE_PERIOD`, 60 per minute unless set, per replica. Past it the answer is `429` with `Retry-After` for the rest of the period, valid codes included. `POST /api/auth/cli/token` and `/revoke` share it. A resolve the database cannot answer is `503`, never a pass.
 
-7. A request acting through a guest code holds the claims of the code's guest and also the open guest claims every anonymous caller holds, since an open claim is a claim everyone holds. Where the guest's own claims do not cover a check, `MutationAccess`, `GetAccess`, `MutationAccessMany` and `ObjectWhere` fall to `get_guest_access` exactly as for the anonymous actor, with its audit row. The union is made only for an actor whose `samna_user.type` is `guest`; a signed in user or a client gets none, 4 above.
+7. A handler's `403` for the anonymous user is answered as `401`, so a browser is sent to the login where a person would have access.
 
 ## Delegation
 

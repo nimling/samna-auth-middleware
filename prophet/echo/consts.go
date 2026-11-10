@@ -16,10 +16,11 @@ const (
 	USER_STATUS_SUSPENDED = "suspended"
 	USER_STATUS_INACTIVE  = "inactive"
 
-	USER_TYPE_USER   = "user"
-	USER_TYPE_CLIENT = "client"
-	USER_TYPE_SYSTEM = "system"
-	USER_TYPE_GUEST  = "guest"
+	USER_TYPE_USER      = "user"
+	USER_TYPE_CLIENT    = "client"
+	USER_TYPE_SYSTEM    = "system"
+	USER_TYPE_GUEST     = "guest"
+	USER_TYPE_ANONYMOUS = "anonymous"
 
 	ASSET_UPLOAD_PENDING  AssetStatus = "pending"
 	ASSET_UPLOAD_COMPLETE AssetStatus = "complete"
@@ -73,7 +74,7 @@ const (
 
 	ORGANIZATION_TYPE_SYSTEM  OrganizationType = "system"
 	ORGANIZATION_TYPE_COMPANY OrganizationType = "company"
-	ORGANIZATION_TYPE_CHILD   OrganizationType = "child"
+	ORGANIZATION_TYPE_ENTITY  OrganizationType = "entity"
 
 	LOCATION_TYPE_BUILDING LocationType = "building"
 	LOCATION_TYPE_FLOOR    LocationType = "floor"

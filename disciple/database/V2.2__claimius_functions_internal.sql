@@ -783,12 +783,13 @@ CREATE OR REPLACE FUNCTION claimius._best_grant(
       AND (g ->> 'user_claim_id') IS NOT NULL
       AND ((g ->> 'starts_at') IS NULL OR (g ->> 'starts_at')::TIMESTAMPTZ <= now())
       AND ((g ->> 'ends_at') IS NULL OR (g ->> 'ends_at')::TIMESTAMPTZ > now())
+      AND ((g ->> 'samk') IS NULL OR g ->> 'samk' = current_setting('claimius.samk', TRUE))
     ORDER BY claimius._popcount((g ->> 'access')::INTEGER) DESC, (g ->> 'access')::INTEGER DESC,
              coalesce((g ->> 'level')::INTEGER, 0) DESC, (g ->> 'claim_created_at')::TIMESTAMPTZ ASC
     LIMIT 1
 $$;
 
-COMMENT ON FUNCTION claimius._best_grant(JSONB, INTEGER) IS 'Strongest derivation in a user_object grants array whose mask covers p_required_access and whose stored window holds at now(). Reads nothing: the grant id, its window, the claim name and its creation time are stored on the derivation, and every write that can change them raises an area covering the pair. Shared by get_access, get_objects and search so every read path resolves the actor token identically.';
+COMMENT ON FUNCTION claimius._best_grant(JSONB, INTEGER) IS 'Strongest derivation in a user_object grants array whose mask covers p_required_access and whose stored window holds at now(). A derivation behind a code, samk on the entry from the grant''s options, counts only while the request presents that code in claimius.samk. Reads nothing: the grant id, its window, the claim name and its creation time are stored on the derivation, and every write that can change them raises an area covering the pair. Shared by get_access, get_objects and search so every read path resolves the actor token identically.';
 
 GRANT EXECUTE ON FUNCTION claimius._best_grant(JSONB, INTEGER)
     TO claimius_disciple_client, claimius_reader;
@@ -991,7 +992,7 @@ CREATE OR REPLACE FUNCTION claimius._build_grants_for_objects(
         GROUP BY r.object_type, r.object_id
     ),
     grants_held AS MATERIALIZED (
-        SELECT uc.id AS user_claim_id, uc.claim_id, uc.starts_at, uc.ends_at,
+        SELECT CASE WHEN uc.user_id = claimius.anonymous_user_id() THEN uc.sa_created_by ELSE uc.id END AS user_claim_id, uc.id AS grant_id, uc.options -> 'samk' ->> 'hash' AS samk, uc.claim_id, uc.starts_at, uc.ends_at,
                c.sa_access AS claim_access, c.inherits, c.level, c.name AS claim_name, c.sa_created_at AS claim_created_at,
                c.id IS NOT NULL AS claim_live
         FROM claimius.user_claim uc
@@ -1003,7 +1004,7 @@ CREATE OR REPLACE FUNCTION claimius._build_grants_for_objects(
         SELECT g.* FROM grants_held g WHERE g.claim_live
     ),
     linked AS MATERIALIZED (
-        SELECT h.user_claim_id, h.claim_id, h.starts_at, h.ends_at, h.claim_access, h.level, h.claim_name, h.claim_created_at,
+        SELECT h.user_claim_id, h.claim_id, h.starts_at, h.ends_at, h.claim_access, h.level, h.claim_name, h.claim_created_at, h.samk,
                link.object_id AS bound_claim_id, link.sa_access AS link_access,
                cb.sa_access AS bound_claim_access, cb.level AS bound_level
         FROM held h
@@ -1061,7 +1062,7 @@ CREATE OR REPLACE FUNCTION claimius._build_grants_for_objects(
                           AND su.user_id = p_user_id
                           AND su.sa_deleted_at IS NULL)
                    ELSE (oi.sa_created_by = p_user_id
-                         OR EXISTS (SELECT 1 FROM grants_held g WHERE g.user_claim_id = oi.sa_created_by))
+                         OR EXISTS (SELECT 1 FROM grants_held g WHERE g.grant_id = oi.sa_created_by))
                         AND (EXISTS (SELECT 1 FROM claimius.inheritance_info e
                                      WHERE e.descendant_type = 'claimius.organization'
                                        AND e.descendant_id = oi.sa_owner_id
@@ -1179,7 +1180,7 @@ CREATE OR REPLACE FUNCTION claimius._build_grants_for_objects(
                h.user_claim_id, h.claim_id, r.from_type, r.from_id, NULL::UUID AS composed_from, r.tree_type, r.hop,
                CASE WHEN r.target_type = 'claimius.claim' AND r.tree_type = 'direct' THEN 4
                     ELSE claimius._effective_access(h.claim_access, r.sa_access) END AS sa_access,
-               r.scope, h.level, h.claim_name, h.claim_created_at, h.starts_at, h.ends_at
+               r.scope, h.level, h.claim_name, h.claim_created_at, h.starts_at, h.ends_at, h.samk
         FROM reach r
             JOIN held h ON h.claim_id = r.claim_id
         WHERE (r.tree_type = 'direct' OR h.inherits)
@@ -1190,7 +1191,7 @@ CREATE OR REPLACE FUNCTION claimius._build_grants_for_objects(
 
         SELECT t.object_type, t.object_id,
                h.user_claim_id, h.claim_id, t.object_type, t.object_id, NULL::UUID, 'direct', 0,
-               4, NULL::JSONB, h.level, h.claim_name, h.claim_created_at, h.starts_at, h.ends_at
+               4, NULL::JSONB, h.level, h.claim_name, h.claim_created_at, h.starts_at, h.ends_at, h.samk
         FROM targets t
             JOIN held h ON h.claim_id = t.object_id
         WHERE t.object_type = 'claimius.claim'
@@ -1205,7 +1206,7 @@ CREATE OR REPLACE FUNCTION claimius._build_grants_for_objects(
                             & claimius._effective_access(l.bound_claim_access, r.sa_access) & ~16)
                          | ((claimius._effective_access(l.claim_access, l.link_access)
                             | claimius._effective_access(l.bound_claim_access, r.sa_access)) & 16) END,
-               r.scope, greatest(l.level, l.bound_level), l.claim_name, l.claim_created_at, l.starts_at, l.ends_at
+               r.scope, greatest(l.level, l.bound_level), l.claim_name, l.claim_created_at, l.starts_at, l.ends_at, l.samk
         FROM reach r
             JOIN linked l ON l.bound_claim_id = r.claim_id
         WHERE r.target_type <> 'claimius.claim'
@@ -1222,6 +1223,7 @@ CREATE OR REPLACE FUNCTION claimius._build_grants_for_objects(
                    'claim_created_at', d.claim_created_at,
                    'starts_at', d.starts_at,
                    'ends_at', d.ends_at,
+                   'samk', d.samk,
                    'access', d.sa_access & CASE WHEN (d.sa_access & 16) <> 0 THEN 15 ELSE ~16 END,
                    'cascaded_from', jsonb_build_object('type', d.from_type, 'id', d.from_id),
                    'composed_from', d.composed_from,

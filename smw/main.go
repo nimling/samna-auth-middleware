@@ -32,7 +32,7 @@ func UserAuthMiddleware(opts *UserAuthOptions) echo.MiddlewareFunc {
 					return respondAuthError(ctx, forwardErr)
 				}
 				if value, source := readCode(ctx); value != "" {
-					return serveCode(ctx, config, value, source, true, proceed)
+					return serveCode(ctx, value, source, proceed)
 				}
 				return proceed(ctx)
 			}
@@ -43,16 +43,8 @@ func UserAuthMiddleware(opts *UserAuthOptions) echo.MiddlewareFunc {
 				proceed := next
 				clientErr := authenticateClient(ctx, config.DebugClients)
 				if errors.Is(clientErr, ErrorCredentialMissing) {
-					if value, source := readCode(ctx); value != "" {
-						return serveCode(ctx, config, value, source, false, proceed)
-					}
-					if config.Guest {
-						return serveAnonymous(ctx, proceed)
-					}
-					if config.Optional {
-						return proceed(ctx)
-					}
-					return ctx.String(http.StatusUnauthorized, "Unauthorized")
+					value, source := readCode(ctx)
+					return serveAnonymous(ctx, value, source, proceed)
 				}
 				if clientErr != nil {
 					return respondAuthError(ctx, clientErr)
@@ -64,7 +56,7 @@ func UserAuthMiddleware(opts *UserAuthOptions) echo.MiddlewareFunc {
 					return respondAuthError(ctx, forwardErr)
 				}
 				if value, source := readCode(ctx); value != "" {
-					return serveCode(ctx, config, value, source, true, proceed)
+					return serveCode(ctx, value, source, proceed)
 				}
 				return proceed(ctx)
 			}
@@ -73,9 +65,6 @@ func UserAuthMiddleware(opts *UserAuthOptions) echo.MiddlewareFunc {
 
 	c := utils.Cfg()
 	if c.AuthDisabled {
-		if config.Optional {
-			return passthroughMiddleware()
-		}
 		return inactiveAppMiddleware()
 	}
 	config.ExpectedTokenIssuer = c.Issuer
@@ -96,10 +85,14 @@ func UserAuthMiddleware(opts *UserAuthOptions) echo.MiddlewareFunc {
 			if authErr != nil {
 				return respondAuthError(ctx, authErr)
 			}
-			if value, source := readCode(ctx); value != "" {
-				return serveCode(ctx, config, value, source, authenticated, proceed)
+			value, source := readCode(ctx)
+			if authenticated {
+				if value != "" {
+					return serveCode(ctx, value, source, proceed)
+				}
+				return proceed(ctx)
 			}
-			return serveRequest(ctx, config, authenticated, proceed)
+			return serveAnonymous(ctx, value, source, proceed)
 		}
 	}
 }
@@ -174,14 +167,6 @@ func inactiveAppMiddleware() echo.MiddlewareFunc {
 	}
 }
 
-func passthroughMiddleware() echo.MiddlewareFunc {
-	return func(next echo.HandlerFunc) echo.HandlerFunc {
-		return func(ctx echo.Context) error {
-			return next(ctx)
-		}
-	}
-}
-
 func configFromUserAuthOptions(opts *UserAuthOptions) *AuthMiddlewareConfig {
 	if opts == nil {
 		opts = &UserAuthOptions{}
@@ -213,8 +198,6 @@ func configFromUserAuthOptions(opts *UserAuthOptions) *AuthMiddlewareConfig {
 		PageRedirectURI: pageRedirectURI,
 		DebugUserID:     parseUUID(c.DebugUserID),
 		DebugClients:    parseDebugClients(),
-		Optional:        opts.Optional,
-		Guest:           opts.Guest,
 		SeqTimeout:      opts.SeqTimeout,
 	}
 }

@@ -215,6 +215,16 @@ func (d *DB) deleteOrganization(ctx context.Context, conn bun.IConn, ac *AccessC
 	if ac == nil {
 		return nil, ErrNoAccess
 	}
+	var orgType OrganizationType
+	if err := d.DB.NewRaw(`SELECT type FROM claimius.organization WHERE id = ? AND sa_deleted_at IS NULL`, orgID).Conn(conn).Scan(ctx, &orgType); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	if orgType == ORGANIZATION_TYPE_COMPANY {
+		return nil, ErrOrganizationCompany
+	}
 	var org Organization
 	_, err := d.DB.NewUpdate().Conn(conn).
 		Model(&org).

@@ -2,6 +2,7 @@ package echo
 
 import (
 	"crypto/rsa"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"os"
@@ -14,27 +15,13 @@ import (
 	"github.com/nimling/samna-auth-middleware/v2/pkg/encryption"
 	"github.com/nimling/samna-auth-middleware/v2/pkg/respond"
 	sdb "github.com/nimling/samna-auth-middleware/v2/prophet/sdb"
+	"github.com/nimling/samna-auth-middleware/v2/sauth"
 	"github.com/nimling/samna-auth-middleware/v2/shared"
 	"github.com/nimling/samna-auth-middleware/v2/utils"
 )
 
-type BodyGuest struct {
-	ClaimID uuid.UUID `json:"claim_id"`
-	UserID  uuid.UUID `json:"user_id"`
-}
-
-type GuestTokenResponse struct {
-	AccessToken     string     `json:"access_token"`
-	AccessExpiresIn int        `json:"access_expires_in"`
-	TokenType       string     `json:"token_type"`
-	UserID          uuid.UUID  `json:"user_id"`
-	ClaimID         uuid.UUID  `json:"claim_id"`
-	StartsAt        *time.Time `json:"starts_at,omitempty"`
-	EndsAt          *time.Time `json:"ends_at,omitempty"`
-}
-
 func PostGuestToken(ctx echo.Context) error {
-	var body BodyGuest
+	var body shared.BodyGuest
 	if err := ctx.Bind(&body); err != nil {
 		return respond.Error(ctx, http.StatusBadRequest, "Bad request")
 	}
@@ -48,34 +35,45 @@ func PostGuestToken(ctx echo.Context) error {
 	appID, _ := ctx.Get("app_id").(uuid.UUID)
 	appSlug, _ := ctx.Get("app_slug").(string)
 	masterKey, _ := ctx.Get("app_key").(encryption.MasterKeyPair)
-	grant, err := sdb.PutGuestUser(ctx.Request().Context(), appID, body.ClaimID, body.UserID)
+	raw, err := sdb.PutGuestUser(ctx.Request().Context(), appID, body)
 	if errors.Is(err, shared.ErrNotFound) {
 		return respond.Error(ctx, http.StatusNotFound, "Not found")
 	}
 	if errors.Is(err, shared.ErrNoAccess) {
 		return respond.Error(ctx, http.StatusForbidden, "Forbidden")
 	}
+	if errors.Is(err, shared.ErrBadCode) {
+		return respond.Error(ctx, http.StatusBadRequest, err.Error())
+	}
 	if err != nil {
 		ctx.Logger().Errorf("PostGuestToken: %v", err)
 		return respond.Error(ctx, http.StatusInternalServerError, "Internal server error")
 	}
+	var resp shared.GuestTokenResponse
+	if err := json.Unmarshal(raw, &resp); err != nil {
+		ctx.Logger().Errorf("PostGuestToken: read guest: %v", err)
+		return respond.Error(ctx, http.StatusInternalServerError, "Internal server error")
+	}
+	var user shared.SamnaUser
+	var grant shared.UserClaim
+	if err := sauth.Unmarshal(resp.SamnaUser, &user); err != nil {
+		ctx.Logger().Errorf("PostGuestToken: read guest user: %v", err)
+		return respond.Error(ctx, http.StatusInternalServerError, "Internal server error")
+	}
+	if err := sauth.Unmarshal(resp.UserClaim, &grant); err != nil {
+		ctx.Logger().Errorf("PostGuestToken: read guest grant: %v", err)
+		return respond.Error(ctx, http.StatusInternalServerError, "Internal server error")
+	}
 
-	guestUserID := sdb.GetGuestUserID(appID, body.ClaimID)
-	accessToken, expiresIn, err := signGuestAccessToken(masterKey.PrivateKey, appID, appSlug, guestUserID, utils.Cfg().Endpoint, grant.StartsAt, grant.EndsAt)
+	accessToken, expiresIn, err := signGuestAccessToken(masterKey.PrivateKey, appID, appSlug, user.UserID, utils.Cfg().Endpoint, grant.StartsAt, grant.EndsAt)
 	if err != nil {
 		ctx.Logger().Errorf("PostGuestToken: sign access token: %v", err)
 		return respond.Error(ctx, http.StatusInternalServerError, "Internal server error")
 	}
 
-	return respond.JSON(ctx, http.StatusOK, &GuestTokenResponse{
-		AccessToken:     accessToken,
-		AccessExpiresIn: expiresIn,
-		TokenType:       "Bearer",
-		UserID:          guestUserID,
-		ClaimID:         body.ClaimID,
-		StartsAt:        grant.StartsAt,
-		EndsAt:          grant.EndsAt,
-	}, 1)
+	resp.AccessToken, resp.AccessExpiresIn, resp.TokenType = accessToken, expiresIn, "Bearer"
+	resp.UserID, resp.ClaimID, resp.StartsAt, resp.EndsAt = user.UserID, body.ClaimID, grant.StartsAt, grant.EndsAt
+	return respond.JSON(ctx, http.StatusOK, &resp, 1)
 }
 
 type guestClaims struct {

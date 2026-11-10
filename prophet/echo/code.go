@@ -95,20 +95,3 @@ func PostCodeRedeem(ctx echo.Context) error {
 	}
 	return respond.JSON(ctx, http.StatusOK, raw, 1)
 }
-
-func PutClaimGuest(ctx echo.Context) error {
-	appID, _ := ctx.Get("app_id").(uuid.UUID)
-	claimID, err := uuid.Parse(ctx.Param("id"))
-	if err != nil {
-		return respond.Error(ctx, http.StatusBadRequest, "id must be a uuid")
-	}
-	var body shared.BodySamClaimGuest
-	if err := ctx.Bind(&body); err != nil || body.UserID == uuid.Nil {
-		return respond.Error(ctx, http.StatusBadRequest, "user_id is required")
-	}
-	raw, err := sdb.PutClaimGuest(ctx.Request().Context(), appID, body.UserID, claimID, body.Mode)
-	if err != nil {
-		return respondCodeError(ctx, err)
-	}
-	return respond.JSON(ctx, http.StatusOK, raw, 1)
-}

@@ -103,7 +103,7 @@ func QueryPage(ctx echo.Context) (*uuid.UUID, int, error) {
 
 func UserWhere(userID uuid.UUID, requiredAccess ClaimAccess) string {
 	return fmt.Sprintf(
-		`(samna_user.user_id = '%[1]s' OR (samna_user.user_id IN (SELECT user_id FROM claimius.get_users('%[1]s', %[2]d)) AND samna_user.user_id NOT IN (SELECT user_id FROM claimius.get_users WHERE type = 'system' AND sa_deleted_at IS NULL)))`,
+		`(samna_user.user_id = '%[1]s' OR (samna_user.user_id IN (SELECT user_id FROM claimius.get_users('%[1]s', %[2]d)) AND samna_user.user_id NOT IN (SELECT user_id FROM claimius.get_users WHERE type IN ('system', 'anonymous') AND sa_deleted_at IS NULL)))`,
 		userID, requiredAccess,
 	)
 }
@@ -122,22 +122,6 @@ func ObjectWhere(q *bun.SelectQuery, userID uuid.UUID, objectType string, requir
 		if i := strings.LastIndex(strings.ToUpper(table), " AS "); i >= 0 {
 			table = strings.TrimSpace(table[i+4:])
 		}
-	}
-	if userID == AnonymousUserID {
-		if objectID != nil {
-			q = q.Where(table+".id = ?", *objectID)
-		}
-		q = q.Where("EXISTS (SELECT 1 FROM claimius.get_guest_access(?, "+table+".id, ?))", objectType, int(requiredAccess))
-		if after != nil {
-			q = q.Where(table+".id > ?", *after)
-		}
-		if limit > 0 {
-			q = q.Limit(limit)
-		}
-		if after != nil || limit > 0 {
-			q = q.OrderExpr(table + ".id")
-		}
-		return q
 	}
 	if objectID != nil {
 		return q.
@@ -243,11 +227,19 @@ func (d *DB) applyRouted(ctx context.Context, conn bun.IConn, model any, raw jso
 		if err := unmarshalWrite(result, raw); err != nil {
 			return err
 		}
+		replay := raw
+		if _, ok := result.(*UserClaim); ok {
+			sealed, err := SealGrantOptions(raw)
+			if err != nil {
+				return err
+			}
+			replay = sealed
+		}
 		apply := func(c bun.IConn) error {
 			if _, err := c.ExecContext(ctx, "SELECT set_config('claimius.replay_mode', 'true', true)"); err != nil {
 				return err
 			}
-			if err := ApplyEvent(ctx, d.DB, c, "upsert", modelTableName(d, result), raw); err != nil {
+			if err := ApplyEvent(ctx, d.DB, c, "upsert", modelTableName(d, result), replay); err != nil {
 				return err
 			}
 			_, err := c.ExecContext(ctx, "SELECT set_config('claimius.replay_mode', 'false', true)")
@@ -898,6 +890,17 @@ func (q *UpdateQuery) execClaimius(ctx context.Context, dest ...any) (handled bo
 			return false, nil
 		}
 		result, err := q.db.updateClaim(ctx, q.conn, q.accessClaim, q.recordID, m)
+		if err != nil {
+			return true, err
+		}
+		*m = *result
+		return true, dispatchScan(q.model, dest...)
+	case "claimius.user_claim":
+		m, ok := embeddedPtr(q.model, reflect.TypeOf(UserClaim{})).(*UserClaim)
+		if !ok {
+			return false, nil
+		}
+		result, err := q.db.updateClaimUser(ctx, q.conn, q.accessClaim, q.recordID, m, q.columns)
 		if err != nil {
 			return true, err
 		}

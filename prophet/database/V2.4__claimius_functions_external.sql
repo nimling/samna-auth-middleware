@@ -92,7 +92,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = claimius, pg_temp;
 
-COMMENT ON FUNCTION claimius.get_access(UUID, UUID, UUID, TEXT, INTEGER) IS 'Strongest active claim based grant for one (user, app, object) whose mask covers p_required_access: the user row, then the point settle and the read of the pair with its object_info row in one pass through _settle_pair, and the grant chosen from the pair, or, when no claim grant covers p_required_access, the creator''s direct_grant with no user_claim_id and claim_name direct. Only when the settle was skipped on a lock and the pair gives nothing does it walk the ancestors through get_direct_access. user_claim_id is the actor token for follow-on writes. sa_root_id is the owning organization root, suitable for FK to claimius.organization on follow-on claim and claim_object writes. A user of type guest is answered like any user: exactly what its claims grant.';
+COMMENT ON FUNCTION claimius.get_access(UUID, UUID, UUID, TEXT, INTEGER) IS 'Strongest active claim based grant for one (user, app, object) whose mask covers p_required_access: the user row, then the point settle and the read of the pair with its object_info row in one pass through _settle_pair, and the grant chosen from the pair, or, when no claim grant covers p_required_access, the creator''s direct_grant with no user_claim_id and claim_name direct. Only when the settle was skipped on a lock and the pair gives nothing does it walk the ancestors through get_direct_access. user_claim_id is the actor token for follow-on writes; for the anonymous user it is the grant of the user who made the claim public. sa_root_id is the owning organization root, suitable for FK to claimius.organization on follow-on claim and claim_object writes. A user of type guest is answered like any user: exactly what its claims grant. A request without a credential acts as the anonymous user, anonymous_user_id(), answered like any user from its grants; a grant whose options.samk names a code counts only while the request presents it in claimius.samk.';
 
 DROP FUNCTION IF EXISTS claimius.get_direct_access(UUID, UUID, UUID, TEXT);
 
@@ -171,12 +171,13 @@ BEGIN
               AND NOT pa.attisdropped
         ),
         held AS MATERIALIZED (
-            SELECT uc.id AS user_claim_id, c.id AS claim_id, c.name, c.sa_access, c.inherits, c.level
+            SELECT CASE WHEN uc.user_id = claimius.anonymous_user_id() THEN uc.sa_created_by ELSE uc.id END AS user_claim_id, c.id AS claim_id, c.name, c.sa_access, c.inherits, c.level
             FROM claimius.user_claim uc
                      JOIN claimius.claim c
                           ON c.id = uc.claim_id
                               AND c.sa_deleted_at IS NULL
             WHERE uc.user_id = p_user_id
+              AND (uc.options -> 'samk' IS NULL OR uc.options -> 'samk' ->> 'hash' = current_setting('claimius.samk', TRUE))
               AND uc.app_id = p_app_id
               AND uc.sa_deleted_at IS NULL
               AND (uc.starts_at IS NULL OR uc.starts_at <= now())
@@ -304,7 +305,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path = claimius, pg_temp;
 
-COMMENT ON FUNCTION claimius.get_direct_access(UUID, UUID, UUID, TEXT, INTEGER, BOOLEAN, BOOLEAN) IS 'Locates the closest, strongest user_claim the user holds related to the given object via ancestor walk, directly or through composition, with the binding narrowing its claim and the user''s denies subtracted by class. The walk of the gate when the point settle was skipped on a lock. VOLATILE: with p_settle it settles through reconcile_if_pending.';
+COMMENT ON FUNCTION claimius.get_direct_access(UUID, UUID, UUID, TEXT, INTEGER, BOOLEAN, BOOLEAN) IS 'Locates the closest, strongest user_claim the user holds related to the given object via ancestor walk, directly or through composition, with the binding narrowing its claim and the user''s denies subtracted by class. A grant whose options.samk names a code counts only while the request presents it in claimius.samk; a grant of the anonymous user, anonymous_user_id(), carries the grant''s sa_created_by as its actor token. The walk of the gate when the point settle was skipped on a lock. VOLATILE: with p_settle it settles through reconcile_if_pending.';
 
 DROP FUNCTION IF EXISTS claimius.get_objects(UUID, UUID, TEXT, INTEGER);
 
@@ -368,7 +369,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = claimius, pg_temp;
 
-COMMENT ON FUNCTION claimius.get_objects(p_user_id uuid, p_app_id uuid, p_object_type text, p_required_access integer, p_after uuid, p_limit integer) IS 'Object ids and metadata for objects whose mask covers p_required_access, in object_id order after p_after, at most p_limit rows. user_claim_id is the actor token from the strongest surviving claim grant; null when only direct_grant applies. claim_id and claim_name describe the claim that contributed the strongest grant. sa_root_id is derived from the owning organization root.';
+COMMENT ON FUNCTION claimius.get_objects(p_user_id uuid, p_app_id uuid, p_object_type text, p_required_access integer, p_after uuid, p_limit integer) IS 'Object ids and metadata for objects whose mask covers p_required_access, in object_id order after p_after, at most p_limit rows. user_claim_id is the actor token from the strongest surviving claim grant; null when only direct_grant applies. claim_id and claim_name describe the claim that contributed the strongest grant. sa_root_id is derived from the owning organization root. The anonymous user, anonymous_user_id(), lists like any user; a grant whose options.samk names a code counts only while the request presents it in claimius.samk.';
 
 DROP FUNCTION IF EXISTS claimius.get_organizations(UUID, UUID, INTEGER);
 
@@ -2640,6 +2641,36 @@ DROP FUNCTION IF EXISTS claimius.create_claim(UUID, TEXT, TEXT, INTEGER, UUID, U
 
 DROP FUNCTION IF EXISTS claimius.create_claim(uuid,text,text,integer,uuid,uuid,uuid,boolean,claimius.claim_type);
 DROP FUNCTION IF EXISTS claimius.insert_claim(uuid,text,text,integer,uuid,uuid,uuid,boolean,claimius.claim_type);
+CREATE OR REPLACE FUNCTION claimius._check_claim_options(
+    p_options JSONB
+) RETURNS JSONB AS $$
+DECLARE
+    v_code JSONB := p_options -> 'samk';
+BEGIN
+    IF p_options IS NULL OR p_options = '{}'::JSONB THEN
+        RETURN NULL;
+    END IF;
+    IF jsonb_typeof(p_options) <> 'object'
+       OR EXISTS (SELECT 1 FROM jsonb_object_keys(p_options) k WHERE k <> 'samk') THEN
+        RAISE EXCEPTION 'claim options refused: an object whose only key is samk' USING ERRCODE = '22023';
+    END IF;
+    IF jsonb_typeof(v_code) <> 'object'
+       OR coalesce(v_code ->> 'hash', '') !~ '^[0-9a-f]{64}$'
+       OR EXISTS (SELECT 1 FROM jsonb_object_keys(v_code) k WHERE k NOT IN ('hash', 'query', 'header', 'cookie'))
+       OR EXISTS (SELECT 1 FROM jsonb_each(v_code) e WHERE e.key IN ('query', 'header', 'cookie') AND jsonb_typeof(e.value) <> 'boolean')
+       OR NOT (coalesce((v_code ->> 'query')::BOOLEAN, FALSE) OR coalesce((v_code ->> 'header')::BOOLEAN, FALSE) OR coalesce((v_code ->> 'cookie')::BOOLEAN, FALSE)) THEN
+        RAISE EXCEPTION 'claim options refused: samk is {"hash": <64 hex>, "query": bool, "header": bool, "cookie": bool} with at least one carrier true' USING ERRCODE = '22023';
+    END IF;
+    RETURN p_options;
+END;
+$$ LANGUAGE plpgsql IMMUTABLE;
+
+COMMENT ON FUNCTION claimius._check_claim_options(JSONB) IS 'The shape of user_claim.options: NULL or {} clears it; otherwise an object whose only key is samk, {"hash": the hex SHA-256 of the code value, "query": bool, "header": bool, "cookie": bool} with at least one carrier true. The value is hashed in Go, shared.ClaimOptions, before the call, and never reaches the table. Returns the options to store. Raises 22023 otherwise.';
+
+GRANT EXECUTE ON FUNCTION claimius._check_claim_options(JSONB)
+    TO claimius_writer, claimius_reader;
+
+DROP FUNCTION IF EXISTS claimius.insert_claim(UUID, TEXT, TEXT, INTEGER, UUID, UUID, UUID, BOOLEAN, claimius.claim_type, INTEGER, JSONB);
 CREATE OR REPLACE FUNCTION claimius.insert_claim(
     p_app_id            UUID,
     p_name              TEXT,
@@ -2694,6 +2725,7 @@ DROP FUNCTION IF EXISTS claimius.update_claim(uuid,text,text,integer,boolean);
 
 DROP FUNCTION IF EXISTS claimius.update_claim(UUID, TEXT, TEXT, INTEGER, BOOLEAN, INTEGER);
 DROP FUNCTION IF EXISTS claimius.update_claim(UUID, TEXT, TEXT, INTEGER, BOOLEAN, INTEGER, claimius.claim_type);
+DROP FUNCTION IF EXISTS claimius.update_claim(UUID, TEXT, TEXT, INTEGER, BOOLEAN, INTEGER, claimius.claim_type, UUID, JSONB);
 
 CREATE OR REPLACE FUNCTION claimius.update_claim(
     p_claim_id          UUID,
@@ -2774,6 +2806,7 @@ GRANT EXECUTE ON FUNCTION claimius.delete_claim(p_claim_id uuid, p_deleted_by uu
     TO claimius_writer;
 
 DROP FUNCTION IF EXISTS claimius.assign_claim_user(uuid,uuid,uuid,uuid,uuid,text,timestamp with time zone,timestamp with time zone);
+DROP FUNCTION IF EXISTS claimius.insert_user_claim(UUID, UUID, UUID, UUID, UUID, TEXT, TIMESTAMPTZ, TIMESTAMPTZ);
 CREATE OR REPLACE FUNCTION claimius.insert_user_claim(
     p_app_id        UUID,
     p_claim_id      UUID,
@@ -2782,50 +2815,61 @@ CREATE OR REPLACE FUNCTION claimius.insert_user_claim(
     p_sa_created_by UUID,
     p_reason        TEXT DEFAULT NULL,
     p_starts_at     TIMESTAMPTZ DEFAULT NULL,
-    p_ends_at       TIMESTAMPTZ DEFAULT NULL
+    p_ends_at       TIMESTAMPTZ DEFAULT NULL,
+    p_options       JSONB DEFAULT NULL
 ) RETURNS JSONB AS $$
 DECLARE
     v_row claimius.user_claim;
 BEGIN
+    IF p_options IS NOT NULL AND p_options <> '{}'::JSONB AND p_user_id IS DISTINCT FROM claimius.anonymous_user_id() THEN
+        RAISE EXCEPTION 'grant options refused: options are accepted only on a grant of the anonymous user' USING ERRCODE = '22023';
+    END IF;
     INSERT INTO claimius.user_claim (
         app_id, claim_id, user_id, reason, starts_at, ends_at,
-        sa_owner_id, sa_created_by
+        sa_owner_id, sa_created_by, options
     ) VALUES (
                  p_app_id, p_claim_id, p_user_id, p_reason, p_starts_at, p_ends_at,
-                 p_sa_owner_id, p_sa_created_by
+                 p_sa_owner_id, p_sa_created_by, claimius._check_claim_options(p_options)
              ) RETURNING * INTO v_row;
     RETURN jsonb_build_object('user_claim', to_jsonb(v_row));
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius.insert_user_claim(p_app_id uuid, p_claim_id uuid, p_user_id uuid, p_sa_owner_id uuid, p_sa_created_by uuid, p_reason text, p_starts_at timestamp with time zone, p_ends_at timestamp with time zone) IS 'Grants a claim to a user in an app.';
+COMMENT ON FUNCTION claimius.insert_user_claim(p_app_id uuid, p_claim_id uuid, p_user_id uuid, p_sa_owner_id uuid, p_sa_created_by uuid, p_reason text, p_starts_at timestamp with time zone, p_ends_at timestamp with time zone, p_options jsonb) IS 'Grants a claim to a user in an app. A grant to the anonymous user, anonymous_user_id(), is the public grant of the claim, valid between p_starts_at and p_ends_at and behind the code p_options.samk names when it names one; p_options is checked by _check_claim_options and refused with 22023 on any other user.';
 
-GRANT EXECUTE ON FUNCTION claimius.insert_user_claim(p_app_id uuid, p_claim_id uuid, p_user_id uuid, p_sa_owner_id uuid, p_sa_created_by uuid, p_reason text, p_starts_at timestamp with time zone, p_ends_at timestamp with time zone)
+GRANT EXECUTE ON FUNCTION claimius.insert_user_claim(p_app_id uuid, p_claim_id uuid, p_user_id uuid, p_sa_owner_id uuid, p_sa_created_by uuid, p_reason text, p_starts_at timestamp with time zone, p_ends_at timestamp with time zone, p_options jsonb)
     TO claimius_writer;
 
 DROP FUNCTION IF EXISTS claimius.update_claim_user(uuid,text,timestamp with time zone,timestamp with time zone);
+DROP FUNCTION IF EXISTS claimius.update_user_claim(UUID, TEXT, TIMESTAMPTZ, TIMESTAMPTZ);
 CREATE OR REPLACE FUNCTION claimius.update_user_claim(
     p_user_claim_id UUID,
     p_reason        TEXT DEFAULT NULL,
     p_starts_at     TIMESTAMPTZ DEFAULT NULL,
-    p_ends_at       TIMESTAMPTZ DEFAULT NULL
+    p_ends_at       TIMESTAMPTZ DEFAULT NULL,
+    p_options       JSONB DEFAULT NULL
 ) RETURNS JSONB AS $$
 DECLARE
     v_row claimius.user_claim;
 BEGIN
+    IF p_options IS NOT NULL AND p_options <> '{}'::JSONB AND NOT EXISTS (
+        SELECT 1 FROM claimius.user_claim uc WHERE uc.id = p_user_claim_id AND uc.user_id = claimius.anonymous_user_id()) THEN
+        RAISE EXCEPTION 'grant options refused: options are accepted only on a grant of the anonymous user' USING ERRCODE = '22023';
+    END IF;
     UPDATE claimius.user_claim SET
                                    reason = coalesce(p_reason, reason),
                                    starts_at = coalesce(p_starts_at, starts_at),
-                                   ends_at = coalesce(p_ends_at, ends_at)
+                                   ends_at = coalesce(p_ends_at, ends_at),
+                                   options = CASE WHEN p_options IS NULL THEN options ELSE claimius._check_claim_options(p_options) END
     WHERE id = p_user_claim_id
     RETURNING * INTO v_row;
     RETURN jsonb_build_object('user_claim', to_jsonb(v_row));
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius.update_user_claim(p_user_claim_id uuid, p_reason text, p_starts_at timestamp with time zone, p_ends_at timestamp with time zone) IS 'Patches selected fields on a user_claim.';
+COMMENT ON FUNCTION claimius.update_user_claim(p_user_claim_id uuid, p_reason text, p_starts_at timestamp with time zone, p_ends_at timestamp with time zone, p_options jsonb) IS 'Patches selected fields on a user_claim. A NULL p_options preserves options and {} clears them; any other value is checked by _check_claim_options and refused with 22023 unless the grant is the anonymous user''s.';
 
-GRANT EXECUTE ON FUNCTION claimius.update_user_claim(p_user_claim_id uuid, p_reason text, p_starts_at timestamp with time zone, p_ends_at timestamp with time zone)
+GRANT EXECUTE ON FUNCTION claimius.update_user_claim(p_user_claim_id uuid, p_reason text, p_starts_at timestamp with time zone, p_ends_at timestamp with time zone, p_options jsonb)
     TO claimius_writer;
 
 DROP FUNCTION IF EXISTS claimius.remove_user_claim(UUID, UUID);
@@ -3353,18 +3397,24 @@ GRANT EXECUTE ON FUNCTION claimius._restamp_created_by()
     TO claimius_writer, claimius_reader;
 
 DROP FUNCTION IF EXISTS claimius.create_root_organization(uuid,text,uuid,text,text,uuid,text);
+DROP FUNCTION IF EXISTS claimius.upsert_root_organization(uuid,text,uuid,text,text,uuid,text);
 CREATE OR REPLACE FUNCTION claimius.upsert_root_organization(
     p_app_id            UUID,
     p_name              TEXT,
     p_actor_user_claim_id UUID,
     p_description       TEXT DEFAULT NULL,
-    p_type              TEXT DEFAULT 'standard',
+    p_type              claimius.organization_type DEFAULT 'entity',
     p_id                UUID DEFAULT NULL,
-    p_external_id       TEXT DEFAULT NULL
+    p_external_id       TEXT DEFAULT NULL,
+    p_kind              TEXT DEFAULT NULL
 ) RETURNS JSONB AS $$
 DECLARE
     v_row   claimius.organization;
 BEGIN
+    IF p_type = 'system' THEN
+        RAISE EXCEPTION 'a root organization of type system is made only by the system bootstrap' USING ERRCODE = '22023';
+    END IF;
+
     p_id := claimius.ensure_uuid_null(p_id);
 
     SELECT * INTO v_row
@@ -3380,10 +3430,10 @@ BEGIN
     END IF;
 
     INSERT INTO claimius.organization (
-        id, name, description, type, external_id,
+        id, name, description, kind, type, external_id,
         sa_level, sa_created_by
     ) VALUES (
-                 coalesce(p_id, gen_random_uuid()), p_name, p_description, p_type, p_external_id,
+                 coalesce(p_id, gen_random_uuid()), p_name, p_description, p_kind, p_type, p_external_id,
                  0, p_actor_user_claim_id
              )
     RETURNING * INTO v_row;
@@ -3394,9 +3444,9 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius.upsert_root_organization(UUID, TEXT, UUID, TEXT, TEXT, UUID, TEXT) IS 'Creates a new root organization with self referencing sa_owner_id and sa_root_id, linked to the app through app_object. Idempotent on (app, name).';
+COMMENT ON FUNCTION claimius.upsert_root_organization(UUID, TEXT, UUID, TEXT, claimius.organization_type, UUID, TEXT, TEXT) IS 'Creates a new root organization with self referencing sa_owner_id and sa_root_id, linked to the app through app_object. Idempotent on (app, name). p_type is entity unless the platform path asks for company; system is refused with SQLSTATE 22023.';
 
-GRANT EXECUTE ON FUNCTION claimius.upsert_root_organization(UUID, TEXT, UUID, TEXT, TEXT, UUID, TEXT)
+GRANT EXECUTE ON FUNCTION claimius.upsert_root_organization(UUID, TEXT, UUID, TEXT, claimius.organization_type, UUID, TEXT, TEXT)
     TO claimius_writer, claimius_reader;
 
 DROP FUNCTION IF EXISTS claimius.link_app_organization(uuid,uuid,boolean,uuid);
@@ -3538,6 +3588,10 @@ BEGIN
         INSERT INTO claimius.samna_user (user_id, app_id, status, type, first_name, last_name)
         VALUES (p_system_user_id, v_app_id, 'active', 'system', 'System', 'User');
     END IF;
+
+    INSERT INTO claimius.samna_user (user_id, app_id, status, type, first_name)
+    VALUES (claimius.anonymous_user_id(), v_app_id, 'active', 'anonymous', 'Public')
+    ON CONFLICT (user_id, app_id) WHERE sa_deleted_at IS NULL DO NOTHING;
 
     SELECT id INTO v_org_id FROM claimius.organization
     WHERE type = 'system'
@@ -3897,6 +3951,10 @@ BEGIN
             VALUES (v_actor.user_id, v_app.id, 'active', 'system');
         END IF;
     END IF;
+
+    INSERT INTO claimius.samna_user (user_id, app_id, status, type, first_name)
+    VALUES (claimius.anonymous_user_id(), v_app.id, 'active', 'anonymous', 'Public')
+    ON CONFLICT (user_id, app_id) WHERE sa_deleted_at IS NULL DO NOTHING;
 
     PERFORM claimius.upsert_app_organization(v_app.id, v_org.id, TRUE, p_actor_user_claim_id);
 
@@ -5555,11 +5613,17 @@ COMMENT ON FUNCTION claimius.get_peer_grant(UUID, TEXT) IS 'The live grant of th
 GRANT EXECUTE ON FUNCTION claimius.get_peer_grant(UUID, TEXT)
     TO claimius_writer, claimius_reader;
 
+DROP FUNCTION IF EXISTS claimius.upsert_guest_user(UUID, UUID, UUID, UUID);
+
 CREATE OR REPLACE FUNCTION claimius.upsert_guest_user(
     p_app_id        UUID,
     p_claim_id      UUID,
     p_actor_user_id UUID,
-    p_guest_user_id UUID
+    p_guest_user_id UUID,
+    p_first_name    TEXT DEFAULT NULL,
+    p_last_name     TEXT DEFAULT NULL,
+    p_email         TEXT DEFAULT NULL,
+    p_phone         TEXT DEFAULT NULL
 ) RETURNS JSONB AS $$
 DECLARE
     v_claim    claimius.claim;
@@ -5578,8 +5642,8 @@ BEGIN
 
     v_actor_uc := claimius._check_code_owner(p_app_id, p_claim_id, p_actor_user_id);
 
-    INSERT INTO claimius.samna_user (user_id, app_id, first_name, status, type)
-    VALUES (p_guest_user_id, p_app_id, 'Guest', 'active', 'guest')
+    INSERT INTO claimius.samna_user (user_id, app_id, first_name, last_name, email, phone, status, type)
+    VALUES (p_guest_user_id, p_app_id, COALESCE(p_first_name, 'Guest'), p_last_name, p_email, p_phone, 'active', 'guest')
     ON CONFLICT (user_id, app_id) WHERE sa_deleted_at IS NULL DO UPDATE SET
         sa_updated_at = claimius.samna_user.sa_updated_at
     RETURNING * INTO v_user;
@@ -5608,9 +5672,9 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius.upsert_guest_user(UUID, UUID, UUID, UUID) IS 'Ensures the guest user of a claim in an app, a samna_user of type guest, and its grant of the claim, made under the grant by which the actor owns the claim. The guest and its grant are written on the prophet, which alone signs the guest token, and reach the app''s disciples through the feed. Raises P0404 for a claim outside the app and P0403 when the actor does not own it. Returns samna_user and user_claim.';
+COMMENT ON FUNCTION claimius.upsert_guest_user(UUID, UUID, UUID, UUID, TEXT, TEXT, TEXT, TEXT) IS 'Ensures a guest user of a claim in an app, a samna_user of type guest with id p_guest_user_id, and its grant of the claim, made under the grant by which the actor owns the claim. p_first_name, p_last_name, p_email and p_phone, each optional, name the person the guest stands for, first_name Guest when none is given. The guest and its grant are written on the prophet, which alone signs the guest token, and reach the app''s disciples through the feed. Raises P0404 for a claim outside the app, P0403 when the actor does not own it. Returns samna_user and user_claim.';
 
-GRANT EXECUTE ON FUNCTION claimius.upsert_guest_user(UUID, UUID, UUID, UUID)
+GRANT EXECUTE ON FUNCTION claimius.upsert_guest_user(UUID, UUID, UUID, UUID, TEXT, TEXT, TEXT, TEXT)
     TO claimius_writer;
 
 CREATE OR REPLACE FUNCTION claimius._check_code_owner(
@@ -5656,36 +5720,7 @@ COMMENT ON FUNCTION claimius._check_code_owner(UUID, UUID, UUID) IS 'The grant b
 GRANT EXECUTE ON FUNCTION claimius._check_code_owner(UUID, UUID, UUID)
     TO claimius_writer, claimius_reader;
 
-CREATE OR REPLACE FUNCTION claimius.update_claim_guest(
-    p_app_id        UUID,
-    p_claim_id      UUID,
-    p_actor_user_id UUID,
-    p_guest_user_id UUID,
-    p_mode          TEXT
-) RETURNS JSONB AS $$
-DECLARE
-    v_guest JSONB;
-    v_claim claimius.claim;
-BEGIN
-    IF p_mode NOT IN ('open', 'code', 'off') THEN
-        RAISE EXCEPTION 'update_claim_guest: unknown mode %', p_mode USING ERRCODE = '22023';
-    END IF;
-    PERFORM claimius._check_code_owner(p_app_id, p_claim_id, p_actor_user_id);
-
-    v_guest := claimius.upsert_guest_user(p_app_id, p_claim_id, p_actor_user_id, p_guest_user_id);
-
-    UPDATE claimius.claim SET guest_mode = p_mode
-     WHERE id = p_claim_id AND app_id = p_app_id
-    RETURNING * INTO v_claim;
-
-    RETURN v_guest || jsonb_build_object('claim', to_jsonb(v_claim) - 'txid');
-END;
-$$ LANGUAGE plpgsql;
-
-COMMENT ON FUNCTION claimius.update_claim_guest(UUID, UUID, UUID, UUID, TEXT) IS 'Makes a claim a guest claim: ensures its guest and the guest''s grant through upsert_guest_user and sets guest_mode to open, code or off. off leaves the guest and its grant in place and only stops open and code resolution. Raises P0404 for a claim outside the app, P0403 when the actor does not own it and 22023 for an unknown mode. Returns claim, samna_user and user_claim.';
-
-GRANT EXECUTE ON FUNCTION claimius.update_claim_guest(UUID, UUID, UUID, UUID, TEXT)
-    TO claimius_writer;
+DROP FUNCTION IF EXISTS claimius.update_claim_guest(UUID, UUID, UUID, UUID, TEXT);
 
 CREATE OR REPLACE FUNCTION claimius.insert_code(
     p_app_id        UUID,
@@ -5714,10 +5749,6 @@ BEGIN
     v_actor_uc := claimius._check_code_owner(p_app_id, p_claim_id, p_actor_user_id);
 
     SELECT * INTO v_claim FROM claimius.claim WHERE id = p_claim_id;
-    IF p_kind = 'guest' AND v_claim.guest_mode = 'off' THEN
-        RAISE EXCEPTION 'insert_code: claim % is not a guest claim', p_claim_id USING ERRCODE = '22023';
-    END IF;
-
     INSERT INTO claimius.code (app_id, hash, kind, claim_id, object_id, object_type, data,
                                starts_at, ends_at, count, sa_owner_id, sa_created_by)
     VALUES (p_app_id, p_hash, p_kind, p_claim_id, p_object_id, p_object_type, coalesce(p_data, '{}'::JSONB),
@@ -5732,7 +5763,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius.insert_code(UUID, UUID, UUID, TEXT, TEXT, UUID, TEXT, JSONB, TIMESTAMPTZ, TIMESTAMPTZ, INTEGER) IS 'Stores an access code of a claim by the SHA-256 of its value, never the value, made under the grant by which the actor owns the claim. A guest code needs a claim whose guest_mode is not off. Raises P0404 for a claim outside the app, P0403 when the actor does not own it and 22023 for a malformed hash, window or kind. Returns code.';
+COMMENT ON FUNCTION claimius.insert_code(UUID, UUID, UUID, TEXT, TEXT, UUID, TEXT, JSONB, TIMESTAMPTZ, TIMESTAMPTZ, INTEGER) IS 'Stores an access code of a claim by the SHA-256 of its value, never the value, made under the grant by which the actor owns the claim. Raises P0404 for a claim outside the app, P0403 when the actor does not own it and 22023 for a malformed hash, window or kind. Returns code.';
 
 GRANT EXECUTE ON FUNCTION claimius.insert_code(UUID, UUID, UUID, TEXT, TEXT, UUID, TEXT, JSONB, TIMESTAMPTZ, TIMESTAMPTZ, INTEGER)
     TO claimius_writer;
@@ -5787,34 +5818,50 @@ COMMENT ON FUNCTION claimius.get_codes(UUID, UUID) IS 'The codes of one claim of
 GRANT EXECUTE ON FUNCTION claimius.get_codes(UUID, UUID)
     TO claimius_writer, claimius_reader;
 
+CREATE OR REPLACE FUNCTION claimius.get_public_claims(
+    p_app_id UUID
+) RETURNS TABLE (
+                    claim_id    UUID,
+                    options     JSONB,
+                    starts_at   TIMESTAMPTZ,
+                    ends_at     TIMESTAMPTZ,
+                    object_type TEXT,
+                    object_id   UUID,
+                    inherits    BOOLEAN
+                ) AS $$
+    SELECT c.id, uc.options, uc.starts_at, uc.ends_at, co.object_type, co.object_id, c.inherits AND co.inherits
+    FROM claimius.user_claim uc
+        JOIN claimius.claim c ON c.id = uc.claim_id AND c.sa_deleted_at IS NULL
+        LEFT JOIN claimius.claim_object co
+               ON co.claim_id = c.id
+              AND co.app_id = uc.app_id
+              AND co.sa_deleted_at IS NULL
+              AND co.object_id IS NOT NULL
+    WHERE uc.user_id = claimius.anonymous_user_id()
+      AND uc.app_id = p_app_id
+      AND uc.sa_deleted_at IS NULL
+      AND (uc.ends_at IS NULL OR uc.ends_at > now())
+    ORDER BY c.id, co.object_type, co.object_id
+$$ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = claimius, pg_temp;
+
+COMMENT ON FUNCTION claimius.get_public_claims(UUID) IS 'Every claim the anonymous user, anonymous_user_id(), holds through a live grant not yet ended, one row per binding with an object, or one row with no object when it has none: the grant''s options and window and whether the binding cascades. The guard of smw.UserAuthMiddleware holds this in memory, loaded at sdb.Init and dropped on every claim, grant and binding event, to answer a request without a credential 401 at once when the app holds no public claim and to know which code and carriers to read. It decides no access: every check runs through get_access.';
+
+GRANT EXECUTE ON FUNCTION claimius.get_public_claims(UUID)
+    TO claimius_writer, claimius_reader;
+
 CREATE OR REPLACE FUNCTION claimius.get_code(
     p_app_id UUID,
     p_hash   TEXT
 ) RETURNS JSONB AS $$
-    SELECT to_jsonb(c) || jsonb_build_object(
-               'guest_mode', cl.guest_mode,
-               'guest_user_id', g.user_id,
-               'guest_user_claim_id', g.id)
+    SELECT to_jsonb(c)
     FROM claimius.code c
     JOIN claimius.claim cl ON cl.id = c.claim_id AND cl.sa_deleted_at IS NULL
-    LEFT JOIN LATERAL (
-        SELECT uc.id, uc.user_id
-          FROM claimius.user_claim uc
-          JOIN claimius.samna_user u ON u.user_id = uc.user_id AND u.app_id = uc.app_id
-         WHERE uc.claim_id = c.claim_id
-                 AND uc.app_id = c.app_id
-           AND uc.sa_deleted_at IS NULL
-           AND u.type = 'guest'
-           AND u.sa_deleted_at IS NULL
-         ORDER BY uc.sa_created_at
-         LIMIT 1
-    ) g ON TRUE
     WHERE (p_app_id IS NULL OR c.app_id = p_app_id)
       AND c.hash = p_hash
       AND c.sa_deleted_at IS NULL
 $$ LANGUAGE sql STABLE;
 
-COMMENT ON FUNCTION claimius.get_code(UUID, TEXT) IS 'The code whose value hashes to p_hash, in the app or in any app when p_app_id is NULL, as JSON with its app_id, with guest_mode, the mode of its claim, and guest_user_id and guest_user_claim_id, the guest holding the claim and its grant, or NULL. The window, the count and revoked_at are the caller''s to check; update_code_used and redeem_code check them again atomically.';
+COMMENT ON FUNCTION claimius.get_code(UUID, TEXT) IS 'The code whose value hashes to p_hash, in the app or in any app when p_app_id is NULL, as JSON with its app_id, or NULL. The window, the count and revoked_at are the caller''s to check; update_code_used and redeem_code check them again atomically.';
 
 GRANT EXECUTE ON FUNCTION claimius.get_code(UUID, TEXT)
     TO claimius_writer, claimius_reader;

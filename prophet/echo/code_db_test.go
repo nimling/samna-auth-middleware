@@ -4,6 +4,7 @@ package echo_test
 
 import (
 	"context"
+	"encoding/json"
 	"net/http/httptest"
 	"testing"
 
@@ -84,27 +85,12 @@ func TestCodesAreWrittenOnTheProphetAndResolvedOnTheDisciple(t *testing.T) {
 	if err != nil {
 		t.Fatalf("the owner owns the reader claim on the disciple: %v", err)
 	}
-	if _, err := disciple.PutClaimGuest(ctx, ac, readers, shared.GUEST_MODE_CODE); err != nil {
-		t.Fatalf("the disciple makes the claim a guest claim through the prophet: %v", err)
-	}
-	guest := psdb.GetGuestUserID(app.ID, readers)
-	for name, db := range map[string]*shared.DB{"prophet": prophet, "disciple": disciple} {
-		var mode string
-		if err := db.NewRaw(`SELECT guest_mode FROM claimius.claim WHERE id = ?`, readers).Scan(ctx, &mode); err != nil || mode != "code" {
-			t.Fatalf("the %s holds guest_mode code, got %q %v", name, mode, err)
-		}
-		var grants int
-		if err := db.NewRaw(`SELECT count(*) FROM claimius.user_claim WHERE claim_id = ? AND user_id = ? AND sa_deleted_at IS NULL`, readers, guest).Scan(ctx, &grants); err != nil || grants != 1 {
-			t.Fatalf("the %s holds the grant of the claim's guest, got %d %v", name, grants, err)
-		}
-	}
-
 	stranger := &shared.AccessClaim{UserID: invited}
-	if _, err := disciple.PostCode(ctx, stranger, readers, shared.BodyCode{Kind: shared.CODE_KIND_GUEST}, ""); err == nil {
+	if _, err := disciple.PostCode(ctx, stranger, readers, shared.BodyCode{Kind: shared.CODE_KIND_INVITE}, ""); err == nil {
 		t.Fatal("the prophet refuses a code from a user who does not own the claim")
 	}
 
-	created, err := disciple.PostCode(ctx, ac, readers, shared.BodyCode{Kind: shared.CODE_KIND_GUEST, Count: 1}, "https://svc.example.test")
+	created, err := disciple.PostCode(ctx, ac, readers, shared.BodyCode{Kind: shared.CODE_KIND_INVITE, Count: 1}, "https://svc.example.test")
 	if err != nil {
 		t.Fatalf("post code through the prophet: %v", err)
 	}
@@ -116,8 +102,8 @@ func TestCodesAreWrittenOnTheProphetAndResolvedOnTheDisciple(t *testing.T) {
 	if err != nil {
 		t.Fatalf("the disciple resolves the code it was answered with: %v", err)
 	}
-	if access.GuestUserID == nil || *access.GuestUserID != guest {
-		t.Fatalf("the code resolves to the claim's guest %s, got %v", guest, access.GuestUserID)
+	if access.ClaimID != readers {
+		t.Fatalf("the code resolves to its claim %s, got %s", readers, access.ClaimID)
 	}
 	if _, err := disciple.PutCodeUsed(ctx, created.Value); err != nil {
 		t.Fatalf("the counted use is taken on the prophet: %v", err)
@@ -166,6 +152,33 @@ func TestCodesAreWrittenOnTheProphetAndResolvedOnTheDisciple(t *testing.T) {
 	var revoked bool
 	if err := disciple.NewRaw(`SELECT revoked_at IS NOT NULL FROM claimius.code WHERE id = ?`, invite.ID).Scan(ctx, &revoked); err != nil || !revoked {
 		t.Fatalf("the disciple holds the revoke, got %v %v", revoked, err)
+	}
+
+	var public shared.UserClaim
+	if err := disciple.NewInsert().Model(&shared.UserClaim{ClaimID: readers, UserID: shared.AnonymousUserID, Options: json.RawMessage(`{"samk": {"header": true}}`)}).Access(ac).Scan(ctx, &public); err != nil {
+		t.Fatalf("grant the anonymous user through the prophet: %v", err)
+	}
+	var minted shared.ClaimOptions
+	if err := json.Unmarshal(public.Options, &minted); err != nil || minted.Samk == nil || minted.Samk.Value == "" {
+		t.Fatalf("the routed grant answers the minted value once, got %s %v", public.Options, err)
+	}
+	var changed shared.UserClaim
+	if err := disciple.NewUpdate().Model(&shared.UserClaim{ID: public.ID, ClaimID: readers, Options: json.RawMessage(`{"samk": {"value": "4711", "query": true}}`)}).Column("options").Access(ac).Scan(ctx, &changed); err != nil {
+		t.Fatalf("change the grant through the prophet: %v", err)
+	}
+	var chosen shared.ClaimOptions
+	if err := json.Unmarshal(changed.Options, &chosen); err != nil || chosen.Samk == nil || chosen.Samk.Value != "4711" || !chosen.Samk.Query {
+		t.Fatalf("the routed update answers the chosen value once, got %s %v", changed.Options, err)
+	}
+	for name, db := range map[string]*shared.DB{"prophet": prophet, "disciple": disciple} {
+		var stored string
+		if err := db.NewRaw(`SELECT options -> 'samk' ->> 'hash' FROM claimius.user_claim WHERE id = ?`, public.ID).Scan(ctx, &stored); err != nil || stored != shared.GetCodeHash("4711") {
+			t.Fatalf("the %s holds the hash of the code, got %q %v", name, stored, err)
+		}
+		var plain int
+		if err := db.NewRaw(`SELECT count(*) FROM claimius.user_claim WHERE to_jsonb(user_claim)::TEXT LIKE '%4711%' OR to_jsonb(user_claim)::TEXT LIKE '%' || ? || '%'`, minted.Samk.Value).Scan(ctx, &plain); err != nil || plain != 0 {
+			t.Fatalf("the %s stores no code value, got %d %v", name, plain, err)
+		}
 	}
 
 	if _, err := disciple.ExecContext(ctx, `DELETE FROM claimius.code WHERE claim_id = ?`, readers); err != nil {

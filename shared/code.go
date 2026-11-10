@@ -24,22 +24,91 @@ const CodeCookie = "__Host-sauth_samk"
 
 type CodeKind string
 
-const (
-	CODE_KIND_INVITE CodeKind = "invite"
-	CODE_KIND_GUEST  CodeKind = "guest"
-)
-
-type GuestMode string
-
-const (
-	GUEST_MODE_OPEN GuestMode = "open"
-	GUEST_MODE_CODE GuestMode = "code"
-	GUEST_MODE_OFF  GuestMode = "off"
-)
+const CODE_KIND_INVITE CodeKind = "invite"
 
 var ErrCodeInvalid = errors.New("code is unknown, revoked, outside its window or used up")
 
 var AnonymousUserID = uuid.NewSHA1(uuid.NameSpaceURL, []byte("claimius:anonymous"))
+
+type codeHashKey struct{}
+
+func WithCodeHash(ctx context.Context, hash string) context.Context {
+	if hash == "" {
+		return ctx
+	}
+	return context.WithValue(ctx, codeHashKey{}, hash)
+}
+
+func CodeHashFrom(ctx context.Context) string {
+	hash, _ := ctx.Value(codeHashKey{}).(string)
+	return hash
+}
+
+type ClaimOptionsSamk struct {
+	Value  string `json:"value,omitempty"`
+	Hash   string `json:"hash,omitempty"`
+	Query  bool   `json:"query"`
+	Header bool   `json:"header"`
+	Cookie bool   `json:"cookie"`
+}
+
+type ClaimOptions struct {
+	Samk *ClaimOptionsSamk `json:"samk,omitempty"`
+}
+
+func (o *ClaimOptions) Seal() (string, error) {
+	if o == nil || o.Samk == nil {
+		return "", nil
+	}
+	if o.Samk.Value == "" && o.Samk.Hash == "" {
+		value, err := GetCodeValue()
+		if err != nil {
+			return "", err
+		}
+		o.Samk.Value = value
+	}
+	value := o.Samk.Value
+	if value != "" {
+		o.Samk.Hash = GetCodeHash(value)
+	}
+	o.Samk.Value = ""
+	return value, nil
+}
+
+func SealClaimOptions(raw json.RawMessage) (json.RawMessage, string, error) {
+	if len(raw) == 0 || string(raw) == "null" {
+		return nil, "", nil
+	}
+	var options ClaimOptions
+	if err := json.Unmarshal(raw, &options); err != nil {
+		return nil, "", fmt.Errorf("%w: options: %w", ErrBadCode, err)
+	}
+	value, err := options.Seal()
+	if err != nil {
+		return nil, "", err
+	}
+	sealed, err := json.Marshal(options)
+	if err != nil {
+		return nil, "", err
+	}
+	return sealed, value, nil
+}
+
+func ShowClaimOptions(raw json.RawMessage, value string) json.RawMessage {
+	if value == "" || len(raw) == 0 {
+		return raw
+	}
+	var options ClaimOptions
+	if err := json.Unmarshal(raw, &options); err != nil || options.Samk == nil {
+		return raw
+	}
+	options.Samk.Value = value
+	shown, err := json.Marshal(options)
+	if err != nil {
+		return raw
+	}
+	return shown
+}
 
 type Code struct {
 	bun.BaseModel `bun:"table:claimius.code"`
@@ -65,10 +134,7 @@ type Code struct {
 
 type CodeAccess struct {
 	Code
-	AppID            *uuid.UUID `bun:"-" json:"app_id,omitempty"`
-	GuestMode        GuestMode  `bun:"-" json:"guest_mode"`
-	GuestUserID      *uuid.UUID `bun:"-" json:"guest_user_id,omitempty"`
-	GuestUserClaimID *uuid.UUID `bun:"-" json:"guest_user_claim_id,omitempty"`
+	AppID *uuid.UUID `bun:"-" json:"app_id,omitempty"`
 }
 
 type BodyCode struct {
@@ -98,13 +164,25 @@ type BodySamCodeActor struct {
 	UserID uuid.UUID `json:"user_id"`
 }
 
-type BodyClaimGuest struct {
-	Mode GuestMode `json:"mode"`
+type BodyGuest struct {
+	ClaimID   uuid.UUID `json:"claim_id"`
+	UserID    uuid.UUID `json:"user_id"`
+	FirstName *string   `json:"first_name,omitempty"`
+	LastName  *string   `json:"last_name,omitempty"`
+	Email     *string   `json:"email,omitempty"`
+	Phone     *string   `json:"phone,omitempty"`
 }
 
-type BodySamClaimGuest struct {
-	UserID uuid.UUID `json:"user_id"`
-	Mode   GuestMode `json:"mode"`
+type GuestTokenResponse struct {
+	AccessToken     string          `json:"access_token"`
+	AccessExpiresIn int             `json:"access_expires_in"`
+	TokenType       string          `json:"token_type"`
+	UserID          uuid.UUID       `json:"user_id"`
+	ClaimID         uuid.UUID       `json:"claim_id"`
+	StartsAt        *time.Time      `json:"starts_at,omitempty"`
+	EndsAt          *time.Time      `json:"ends_at,omitempty"`
+	SamnaUser       json.RawMessage `json:"samna_user,omitempty"`
+	UserClaim       json.RawMessage `json:"user_claim,omitempty"`
 }
 
 type CodeCreated struct {
@@ -115,12 +193,6 @@ type CodeCreated struct {
 
 type CodeRedeemed struct {
 	Code      Code      `json:"code"`
-	UserClaim UserClaim `json:"user_claim"`
-}
-
-type ClaimGuest struct {
-	Claim     Claim     `json:"claim"`
-	SamnaUser SamnaUser `json:"samna_user"`
 	UserClaim UserClaim `json:"user_claim"`
 }
 
@@ -148,9 +220,6 @@ func GetCodeLive(ca *CodeAccess, now time.Time) error {
 		return ErrCodeInvalid
 	}
 	if ca.Count > 0 && ca.UsedCount >= ca.Count {
-		return ErrCodeInvalid
-	}
-	if ca.Kind == CODE_KIND_GUEST && (ca.GuestMode == GUEST_MODE_OFF || ca.GuestUserID == nil) {
 		return ErrCodeInvalid
 	}
 	return nil
@@ -275,8 +344,8 @@ func (d *DB) PostCode(ctx context.Context, ac *AccessClaim, claimID uuid.UUID, b
 	if ac == nil || ac.UserID == uuid.Nil {
 		return nil, ErrNoAccess
 	}
-	if body.Kind != CODE_KIND_INVITE && body.Kind != CODE_KIND_GUEST {
-		return nil, fmt.Errorf("%w: kind must be invite or guest", ErrBadCode)
+	if body.Kind != CODE_KIND_INVITE {
+		return nil, fmt.Errorf("%w: kind must be invite", ErrBadCode)
 	}
 	if body.Count < 0 {
 		return nil, fmt.Errorf("%w: count must not be negative", ErrBadCode)
@@ -404,63 +473,63 @@ func (d *DB) PostCodeRedeem(ctx context.Context, value string, userID uuid.UUID)
 	return &grant, nil
 }
 
-func (d *DB) PutClaimGuest(ctx context.Context, ac *AccessClaim, claimID uuid.UUID, mode GuestMode) (*Claim, error) {
+func (d *DB) PutGuestUser(ctx context.Context, ac *AccessClaim, body BodyGuest) (*GuestTokenResponse, error) {
 	if ac == nil || ac.UserID == uuid.Nil {
 		return nil, ErrNoAccess
 	}
-	if mode != GUEST_MODE_OPEN && mode != GUEST_MODE_CODE && mode != GUEST_MODE_OFF {
-		return nil, fmt.Errorf("%w: mode must be open, code or off", ErrBadCode)
-	}
-	defer DeleteCodeCache()
-	var raw json.RawMessage
+	body.UserID = ac.UserID
+	var resp GuestTokenResponse
 	if d.RouteToProphet {
-		if err := client.Put(ctx, "claim/"+claimID.String()+"/guest", BodySamClaimGuest{UserID: ac.UserID, Mode: mode}, &raw); err != nil {
+		if err := client.Post(ctx, "user/temporary", body, &resp); err != nil {
 			return nil, codeError(err)
 		}
-	} else if err := d.NewRaw("SELECT claimius.update_claim_guest(?, ?, ?)", claimID, ac.UserID, string(mode)).Scan(ctx, (*[]byte)(&raw)); err != nil {
-		return nil, codeError(err)
-	}
-	var parts struct {
-		Claim     json.RawMessage `json:"claim"`
-		SamnaUser json.RawMessage `json:"samna_user"`
-		UserClaim json.RawMessage `json:"user_claim"`
-	}
-	if err := json.Unmarshal(raw, &parts); err != nil {
-		return nil, err
-	}
-	if d.RouteToProphet {
-		if err := d.applyReplayed(ctx, replayEvent{OBJECT_TYPE_USER, parts.SamnaUser}, replayEvent{OBJECT_TYPE_USER_CLAIM, parts.UserClaim}, replayEvent{OBJECT_TYPE_CLAIM, parts.Claim}); err != nil {
+		if err := d.applyReplayed(ctx, replayEvent{OBJECT_TYPE_USER, resp.SamnaUser}, replayEvent{OBJECT_TYPE_USER_CLAIM, resp.UserClaim}); err != nil {
 			return nil, err
 		}
+		return &resp, nil
 	}
-	var claim Claim
-	if err := sauth.Unmarshal(parts.Claim, &claim); err != nil {
+	guestID := uuid.NullUUID{}
+	if body.FirstName != nil || body.LastName != nil || body.Email != nil || body.Phone != nil {
+		guestID = uuid.NullUUID{UUID: uuid.New(), Valid: true}
+	}
+	var raw json.RawMessage
+	if err := d.NewRaw("SELECT claimius.upsert_guest_user(?, ?, ?, ?, ?, ?, ?)",
+		body.ClaimID, ac.UserID, guestID, body.FirstName, body.LastName, body.Email, body.Phone,
+	).Scan(ctx, (*[]byte)(&raw)); err != nil {
+		return nil, codeError(err)
+	}
+	if err := json.Unmarshal(raw, &resp); err != nil {
 		return nil, err
 	}
-	return &claim, nil
+	var user SamnaUser
+	if err := sauth.Unmarshal(resp.SamnaUser, &user); err != nil {
+		return nil, err
+	}
+	var grant UserClaim
+	if err := sauth.Unmarshal(resp.UserClaim, &grant); err != nil {
+		return nil, err
+	}
+	resp.UserID, resp.ClaimID, resp.StartsAt, resp.EndsAt = user.UserID, body.ClaimID, grant.StartsAt, grant.EndsAt
+	return &resp, nil
 }
 
-func (d *DB) getGuestAccess(ctx context.Context, objectID uuid.UUID, objectType string, requiredAccess ClaimAccess) (*AccessClaim, error) {
-	type guestAccessRow struct {
-		GuestUserID uuid.UUID `bun:"user_id"`
-		AccessClaim
+func SealGrantOptions(raw json.RawMessage) (json.RawMessage, error) {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		return nil, err
 	}
-	rows := make([]guestAccessRow, 0, 1)
-	if err := d.NewRaw("SELECT * FROM claimius.get_guest_access(?, ?, ?)", objectType, objectID, int(requiredAccess)).Scan(ctx, &rows); err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return nil, ErrInternalServer
+	options, ok := fields["options"]
+	if !ok || len(options) == 0 || string(options) == "null" {
+		return raw, nil
 	}
-	if len(rows) == 0 {
-		return nil, ErrNoAccess
+	sealed, _, err := SealClaimOptions(options)
+	if err != nil {
+		return nil, err
 	}
-	ac := rows[0].AccessClaim
-	ac.UserID = rows[0].GuestUserID
-	claimID := uuid.Nil
-	if ac.ClaimID != nil {
-		claimID = *ac.ClaimID
+	if len(sealed) == 0 {
+		delete(fields, "options")
+	} else {
+		fields["options"] = sealed
 	}
-	if err := WriteAudit(ctx, d.DB, nil, "guest request", "read", objectType, objectID, ac.OwnerID, ac.UserClaimID,
-		fmt.Sprintf("open guest of claim %s", claimID)); err != nil {
-		return nil, ErrInternalServer
-	}
-	return &ac, nil
+	return json.Marshal(fields)
 }

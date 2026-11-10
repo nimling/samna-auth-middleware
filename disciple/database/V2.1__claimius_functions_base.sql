@@ -141,6 +141,18 @@ COMMENT ON FUNCTION claimius.in_replay_mode() IS 'True when claimius.replay_mode
 GRANT EXECUTE ON FUNCTION claimius.in_replay_mode()
     TO claimius_disciple_client, claimius_reader;
 
+DROP FUNCTION IF EXISTS claimius.anonymous_user_id(TEXT);
+DROP FUNCTION IF EXISTS claimius._is_anonymous(UUID);
+CREATE OR REPLACE FUNCTION claimius.anonymous_user_id()
+    RETURNS UUID AS $$
+    SELECT '9f6783f1-f493-595a-8304-ad905d047f73'::UUID
+$$ LANGUAGE sql IMMUTABLE;
+
+COMMENT ON FUNCTION claimius.anonymous_user_id() IS 'The reserved user_id of the anonymous user, shared.AnonymousUserID: a samna_user of type anonymous named Public that every app holds, written by upsert_system_app and upsert_app on the prophet and by upsert_disciple_state on a disciple without one, never minted in Go. A grant to it is the public grant of its claim, and a request without a credential acts as it.';
+
+GRANT EXECUTE ON FUNCTION claimius.anonymous_user_id()
+    TO claimius_disciple_client, claimius_reader;
+
 CREATE OR REPLACE FUNCTION claimius.get_subtree(
     p_tree_type     claimius.tree_type,
     p_root_id       UUID,

@@ -41,10 +41,11 @@ const (
 type UserType string
 
 const (
-	USER_TYPE_USER   UserType = "user"
-	USER_TYPE_CLIENT UserType = "client"
-	USER_TYPE_SYSTEM UserType = "system"
-	USER_TYPE_GUEST  UserType = "guest"
+	USER_TYPE_USER      UserType = "user"
+	USER_TYPE_CLIENT    UserType = "client"
+	USER_TYPE_SYSTEM    UserType = "system"
+	USER_TYPE_GUEST     UserType = "guest"
+	USER_TYPE_ANONYMOUS UserType = "anonymous"
 )
 
 type DebugClient struct {
@@ -68,8 +69,6 @@ type AuthMiddlewareConfig struct {
 	OpenIDConfigURL     url.URL
 	DebugUserID         *uuid.UUID
 	DebugClients        map[string]DebugClient
-	Optional            bool
-	Guest               bool
 	SeqTimeout          time.Duration
 }
 
@@ -78,8 +77,6 @@ type UserAuthOptions struct {
 	ClientSecret    string
 	RedirectURI     string
 	PageRedirectURI string
-	Optional        bool
-	Guest           bool
 	SeqTimeout      time.Duration
 }
 

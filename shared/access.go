@@ -16,12 +16,13 @@ import (
 )
 
 var (
-	ErrNoAccess           = errors.New("no access")
-	ErrNotFound           = errors.New("not found")
-	ErrInternalServer     = errors.New("internal server error")
-	ErrRootConflict       = errors.New("identity already registered under a different root")
-	ErrUserAlreadyExists  = errors.New("user already exists")
-	ErrOrganizationParent = errors.New("an organization moves only under an organization of its own root that is neither itself nor one of its descendants")
+	ErrNoAccess            = errors.New("no access")
+	ErrNotFound            = errors.New("not found")
+	ErrInternalServer      = errors.New("internal server error")
+	ErrRootConflict        = errors.New("identity already registered under a different root")
+	ErrUserAlreadyExists   = errors.New("user already exists")
+	ErrOrganizationParent  = errors.New("an organization moves only under an organization of its own root that is neither itself nor one of its descendants")
+	ErrOrganizationCompany = errors.New("the company organization cannot be deleted")
 )
 
 func selfAccessClaim(userID uuid.UUID, requiredAccess ClaimAccess) *AccessClaim {
@@ -38,9 +39,6 @@ func selfAccessClaim(userID uuid.UUID, requiredAccess ClaimAccess) *AccessClaim 
 const mutationAccessQuery = "SELECT * FROM claimius.mutation_access($1::uuid, $2::text, $3::text, $4::int)"
 
 func (d *DB) MutationAccess(ctx context.Context, userID, objectID uuid.UUID, objectType string, requiredAccess ClaimAccess) (*AccessClaim, error) {
-	if userID == AnonymousUserID {
-		return d.getGuestAccess(ctx, objectID, objectType, requiredAccess)
-	}
 	if objectType == OBJECT_TYPE_USER && userID == objectID {
 		return selfAccessClaim(userID, requiredAccess), nil
 	}
@@ -170,14 +168,6 @@ func (d *DB) MutationAccessMany(ctx context.Context, requests []AccessRequest) (
 		set[idx].Claim = &ac
 		d.Usage.Add(nil, requests[idx].UserID, requests[idx].ObjectType, requests[idx].ObjectID)
 	}
-	for i, r := range requests {
-		if r.UserID != AnonymousUserID {
-			continue
-		}
-		if ac, guestErr := d.getGuestAccess(ctx, r.ObjectID, r.ObjectType, r.RequiredAccess); guestErr == nil {
-			set[i].Claim = ac
-		}
-	}
 	return set, nil
 }
 
@@ -267,7 +257,13 @@ func (d *DB) UserAccess(ctx context.Context, actorID uuid.UUID, target string, r
 	return &users[0], nil
 }
 
-func (d *DB) RootAccess(ctx context.Context, userID uuid.UUID, requiredAccess ClaimAccess) (*AccessClaim, error) {
+func (d *DB) RootAccess(ctx context.Context, userID, appID uuid.UUID, requiredAccess ClaimAccess) (*AccessClaim, error) {
+	access := "claimius.get_access($1::uuid, root.sa_root_id, $2::text, $3::int)"
+	args := []any{userID, OBJECT_TYPE_ORGANIZATION, requiredAccess}
+	if d.Prophet {
+		access = "claimius.get_access($1::uuid, $4::uuid, root.sa_root_id, $2::text, $3::int)"
+		args = append(args, appID)
+	}
 	claims := make([]AccessClaim, 0)
 	err := d.prepared(ctx, d.DB, &claims, `SELECT claim.*
 		FROM (
@@ -279,9 +275,9 @@ func (d *DB) RootAccess(ctx context.Context, userID uuid.UUID, requiredAccess Cl
 			  AND uc.sa_deleted_at IS NULL
 			  AND c.sa_deleted_at IS NULL
 		) root
-		CROSS JOIN LATERAL claimius.get_access($1::uuid, root.sa_root_id, $2::text, $3::int) AS claim
+		CROSS JOIN LATERAL `+access+` AS claim
 		ORDER BY root.sa_root_id
-		LIMIT 1`, userID, OBJECT_TYPE_ORGANIZATION, requiredAccess)
+		LIMIT 1`, args...)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNoAccess

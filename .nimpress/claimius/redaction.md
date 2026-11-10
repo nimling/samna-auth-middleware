@@ -17,6 +17,8 @@ A `claim_object` with an object pair may carry a `scope`. Its keys are field nam
 
 A binding of a read claim to a user's `samna_user` row with that scope lets its holders see who the user is and nothing else about them.
 
+A grant of the anonymous user, the public grant of a claim, is scoped the same way: the binding's `scope` narrows what every request without a credential sees of the object.
+
 ## A mask per field
 
 For a pair, every field of the object's table carries its own access bits. The fields of a type are the columns of its table, read from `pg_attribute` in the same statement; a scope key that is not a column is ignored, so a scope naming no column grants nothing. `_apply_denies` settles each derivation of the pair:

@@ -35,6 +35,9 @@ func disallowKeys(b interface{ HasKey(string) bool }, keys ...string) error {
 }
 
 func (o *Organization) ValidatePost() error {
+	if o.HasKey("type") {
+		return errors.New("type not allowed")
+	}
 	if o.Name == "" {
 		return errors.New("name required")
 	}
@@ -48,7 +51,7 @@ func (o *Organization) ValidatePost() error {
 }
 
 func (o *Organization) ValidatePut() error {
-	if err := disallowKeys(o, append(commonForbiddenKeys, "owner_id", "root_id")...); err != nil {
+	if err := disallowKeys(o, append(commonForbiddenKeys, "owner_id", "root_id", "type")...); err != nil {
 		return err
 	}
 	if o.HasKey("name") && o.Name == "" {
@@ -61,7 +64,7 @@ func (o *Organization) ValidatePatch() error {
 	if o.IsEmpty() {
 		return errors.New("no fields to update")
 	}
-	if err := disallowKeys(o, append(commonForbiddenKeys, "root_id")...); err != nil {
+	if err := disallowKeys(o, append(commonForbiddenKeys, "root_id", "type")...); err != nil {
 		return err
 	}
 	if o.HasKey("name") && o.Name == "" {

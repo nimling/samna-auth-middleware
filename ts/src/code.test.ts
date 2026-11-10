@@ -18,7 +18,7 @@ describe('getCode', () => {
   it('reads the code the request carries', async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
-      json: async () => ({ data: { id: 'c1', kind: 'guest', claim_id: 'k1', data: { view: 'board' } } })
+      json: async () => ({ data: { id: 'c1', kind: 'invite', claim_id: 'k1', data: { view: 'board' } } })
     })
     vi.stubGlobal('fetch', fetchMock)
     const code = await getCode('/api/auth/code')

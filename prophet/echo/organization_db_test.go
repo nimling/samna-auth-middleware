@@ -30,7 +30,6 @@ func TestPostOrganizationLinksARootTheWayTheDiscipleSendsIt(t *testing.T) {
 	routed := &shared.Organization{
 		ID:        rootID,
 		Name:      "Routed root " + rootID.String(),
-		Type:      shared.ORGANIZATION_TYPE_COMPANY,
 		OwnerID:   rootID,
 		RootID:    rootID,
 		CreatedBy: actor,
@@ -104,13 +103,13 @@ func TestPutOrganizationMovesUnderASiblingAndRefusesACycle(t *testing.T) {
 	mover, sibling, child := uuid.New(), uuid.New(), uuid.New()
 	if _, err := psdb.Instance().ExecContext(ctx, `
 		INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
-		VALUES (?, 'Mover', 'child', ?, ?, 1, ?), (?, 'Sibling', 'child', ?, ?, 1, ?)`,
+		VALUES (?, 'Mover', 'entity', ?, ?, 1, ?), (?, 'Sibling', 'entity', ?, ?, 1, ?)`,
 		mover, grantRoot, grantRoot, grantUser, sibling, grantRoot, grantRoot, grantUser); err != nil {
 		t.Fatalf("insert siblings: %v", err)
 	}
 	if _, err := psdb.Instance().ExecContext(ctx, `
 		INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
-		VALUES (?, 'Mover child', 'child', ?, ?, 2, ?)`, child, mover, grantRoot, grantUser); err != nil {
+		VALUES (?, 'Mover child', 'entity', ?, ?, 2, ?)`, child, mover, grantRoot, grantUser); err != nil {
 		t.Fatalf("insert child: %v", err)
 	}
 	for _, id := range []uuid.UUID{mover, sibling, child} {
@@ -147,5 +146,21 @@ func TestPutOrganizationMovesUnderASiblingAndRefusesACycle(t *testing.T) {
 	}
 	if owner != grantRoot {
 		t.Fatalf("a refused move must leave the owner, got %s", owner)
+	}
+}
+
+func TestRootAccessReadsTheRootThroughTheAppOnTheProphet(t *testing.T) {
+	appID, claimID := getGrantFixture(t)
+	ctx := context.Background()
+	var rootID uuid.UUID
+	if err := psdb.Instance().NewRaw(`SELECT sa_root_id FROM claimius.claim WHERE id = ?`, claimID).Scan(ctx, &rootID); err != nil {
+		t.Fatalf("read root: %v", err)
+	}
+	ac, err := psdb.Instance().RootAccess(ctx, grantUser, appID, shared.ACCESS_READ)
+	if err != nil {
+		t.Fatalf("root access: %v", err)
+	}
+	if ac.RootID != rootID {
+		t.Fatalf("root access: want a grant under root %s, got %+v", rootID, ac)
 	}
 }

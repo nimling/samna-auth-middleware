@@ -4,8 +4,9 @@ DO $$
             CREATE TYPE claimius.claim_type AS ENUM ('system', 'user', 'service', 'virtual');
         END IF;
         IF NOT EXISTS (SELECT 1 FROM pg_type t JOIN pg_namespace n ON n.oid = t.typnamespace WHERE t.typname = 'user_type' AND n.nspname = 'claimius') THEN
-            CREATE TYPE claimius.user_type AS ENUM ('user', 'client', 'system', 'guest');
+            CREATE TYPE claimius.user_type AS ENUM ('user', 'client', 'system', 'guest', 'anonymous');
         END IF;
+        ALTER TYPE claimius.user_type ADD VALUE IF NOT EXISTS 'anonymous';
         IF NOT EXISTS (SELECT 1 FROM pg_type t JOIN pg_namespace n ON n.oid = t.typnamespace WHERE t.typname = 'user_status' AND n.nspname = 'claimius') THEN
             CREATE TYPE claimius.user_status AS ENUM ('active', 'pending', 'suspended', 'inactive');
         END IF;
@@ -17,6 +18,9 @@ DO $$
         END IF;
         IF NOT EXISTS (SELECT 1 FROM pg_type t JOIN pg_namespace n ON n.oid = t.typnamespace WHERE t.typname = 'app_status' AND n.nspname = 'claimius') THEN
             CREATE TYPE claimius.app_status AS ENUM ('draft', 'active', 'inactive', 'erroneous');
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM pg_type t JOIN pg_namespace n ON n.oid = t.typnamespace WHERE t.typname = 'organization_type' AND n.nspname = 'claimius') THEN
+            CREATE TYPE claimius.organization_type AS ENUM ('system', 'company', 'entity');
         END IF;
     END $$;
 
@@ -163,7 +167,8 @@ CREATE TABLE IF NOT EXISTS claimius.organization (
                                                      id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
                                                      name            VARCHAR(255) NOT NULL,
                                                      description     TEXT,
-                                                     type            VARCHAR(50),
+                                                     kind            TEXT,
+                                                     type            claimius.organization_type NOT NULL DEFAULT 'entity',
                                                      private_seed    TEXT NOT NULL DEFAULT '',
                                                      sa_owner_id     UUID NOT NULL,
                                                      sa_root_id      UUID NOT NULL,
@@ -178,8 +183,30 @@ CREATE TABLE IF NOT EXISTS claimius.organization (
 );
 
 ALTER TABLE claimius.organization ADD COLUMN IF NOT EXISTS private_seed TEXT NOT NULL DEFAULT '';
+ALTER TABLE claimius.organization ADD COLUMN IF NOT EXISTS kind TEXT;
+
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'claimius' AND table_name = 'organization'
+          AND column_name = 'type' AND udt_name <> 'organization_type'
+    ) THEN
+        DROP VIEW IF EXISTS claimius.get_organizations;
+        ALTER TABLE claimius.organization
+            ALTER COLUMN type TYPE claimius.organization_type USING (CASE
+                WHEN type = 'system' THEN 'system'
+                WHEN type = 'company' AND id = sa_owner_id THEN 'company'
+                ELSE 'entity'
+            END)::claimius.organization_type,
+            ALTER COLUMN type SET DEFAULT 'entity',
+            ALTER COLUMN type SET NOT NULL;
+    END IF;
+END $$;
 
 COMMENT ON TABLE claimius.organization IS 'Organization tree. Root iff sa_owner_id == sa_root_id == id.';
+COMMENT ON COLUMN claimius.organization.kind IS 'Free text the organization''s writers set and change, such as group. Synced from the prophet. Carries no logic.';
+COMMENT ON COLUMN claimius.organization.type IS 'Set by the platform, never by a user. system is the Samna Auth root, company the root that owns an app, which cannot be deleted, entity every other organization at any level. Synced from the prophet; a create here writes entity.';
 COMMENT ON COLUMN claimius.organization.private_seed IS 'Hex encoded HMAC seed. Synced from the prophet. Keys app_secret hashing for apps owned in this tree.';
 COMMENT ON COLUMN claimius.organization.sa_owner_id IS 'Parent org. Equals id at root.';
 COMMENT ON COLUMN claimius.organization.sa_root_id IS 'Top of tree. Equals id at root.';
@@ -260,12 +287,7 @@ COMMENT ON COLUMN claimius.claim.level IS 'The level of the claim, 0 unless set.
 DROP INDEX IF EXISTS claimius.idx_claim_sa_deleted_at;
 ALTER TABLE claimius.claim ADD COLUMN IF NOT EXISTS txid XID8 NOT NULL DEFAULT pg_current_xact_id();
 COMMENT ON COLUMN claimius.claim.txid IS 'Local transaction that last wrote the row, stamped by tg_update_txid on every insert and update, a replayed one included. get_claim_graph compares it to the snapshot a cached graph was built under.';
-ALTER TABLE claimius.claim ADD COLUMN IF NOT EXISTS guest_mode TEXT NOT NULL DEFAULT 'off';
-DO $$ BEGIN
-    ALTER TABLE claimius.claim ADD CONSTRAINT claim_guest_mode_check CHECK (guest_mode IN ('open', 'code', 'off'));
-EXCEPTION WHEN duplicate_object THEN NULL;
-END $$;
-COMMENT ON COLUMN claimius.claim.guest_mode IS 'How the guest of the claim is reached: open, by anyone without a credential, through get_guest_access; code, only by the holder of a live guest code of the claim; off, not at all. Set only through update_claim_guest, which also ensures the guest and its grant. A guest gets exactly what its claim grants: the claim''s access mask, scope, level and grant window are its limits.';
+ALTER TABLE claimius.claim DROP COLUMN IF EXISTS guest_mode;
 
 CREATE TABLE IF NOT EXISTS claimius.user_claim (
                                                    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -282,8 +304,11 @@ CREATE TABLE IF NOT EXISTS claimius.user_claim (
                                                    txid            XID8 NOT NULL DEFAULT pg_current_xact_id()
 );
 
-COMMENT ON TABLE claimius.user_claim IS 'Grants a claim to a user in an app. id is referenced as sa_created_by everywhere.';
-COMMENT ON COLUMN claimius.user_claim.user_id IS 'References samna_user.user_id, not samna_user.id.';
+ALTER TABLE claimius.user_claim ADD COLUMN IF NOT EXISTS options JSONB;
+COMMENT ON COLUMN claimius.user_claim.options IS 'Options of the grant, NULL when it has none, accepted only on a grant of the anonymous user, anonymous_user_id(). On it {"samk": {"hash": "<hex SHA-256 of the code value>", "query": true, "header": true, "cookie": true}} names the code a request without a credential must present to hold the grant and the carriers it is accepted in: the samk query parameter, the SAuth-Code header, the __Host-sauth_samk cookie, any subset of the three with at least one true. The value is shown once when it is written and never stored. Without samk the public grant is open to every request. Sits beside starts_at and ends_at, the validity of the grant. Checked by _check_claim_options on every write.';
+
+COMMENT ON TABLE claimius.user_claim IS 'Grants a claim to a user in an app. id is referenced as sa_created_by everywhere. A grant to the anonymous user, anonymous_user_id(), is the public grant of the claim: every request without a credential holds it, and a write under it is stamped with the grant''s own sa_created_by, the grant of the user who made the claim public.';
+COMMENT ON COLUMN claimius.user_claim.user_id IS 'References samna_user.user_id, not samna_user.id. The anonymous user, anonymous_user_id(), makes the grant public.';
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_user_claim_unique
     ON claimius.user_claim (claim_id, user_id) WHERE sa_deleted_at IS NULL;
@@ -1142,13 +1167,17 @@ CREATE TABLE IF NOT EXISTS claimius.code (
                                              sa_deleted_at   TIMESTAMPTZ,
                                              sa_created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
                                              sa_updated_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
-                                             CONSTRAINT code_kind_check CHECK (kind IN ('invite', 'guest')),
+                                             CONSTRAINT code_kind_check CHECK (kind IN ('invite')),
                                              CONSTRAINT code_count_check CHECK (count >= 0 AND used_count >= 0)
 );
 
+ALTER TABLE claimius.code DROP CONSTRAINT IF EXISTS code_kind_check;
+DELETE FROM claimius.code WHERE kind <> 'invite';
+ALTER TABLE claimius.code ADD CONSTRAINT code_kind_check CHECK (kind IN ('invite'));
+
 COMMENT ON TABLE claimius.code IS 'Access code of a claim, replicated from the prophet, which alone writes it. The value is never stored: hash is its SHA-256, which the guard of smw.UserAuthMiddleware looks up through get_code. Not a registered access table: a code is managed by the owners of its claim.';
 COMMENT ON COLUMN claimius.code.hash IS 'Hex SHA-256 of the code value. The value itself, 32 random bytes base64url, is never stored.';
-COMMENT ON COLUMN claimius.code.kind IS 'invite: redeemed once per signed in user into a grant of the claim. guest: the holder acts as the guest of the claim.';
+COMMENT ON COLUMN claimius.code.kind IS 'invite: redeemed once per signed in user into a grant of the claim. The only kind: access without a credential is a grant of the anonymous user, anonymous_user_id(), whose code lives in the grant''s options.';
 COMMENT ON COLUMN claimius.code.claim_id IS 'The claim the code opens. No foreign key: the feed may delete the claim row before the code row.';
 COMMENT ON COLUMN claimius.code.object_id IS 'Optional object the code was handed out for, for the service to open.';
 COMMENT ON COLUMN claimius.code.object_type IS 'Schema qualified type of object_id.';

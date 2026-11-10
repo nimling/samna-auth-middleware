@@ -2,10 +2,8 @@ package smw
 
 import (
 	"errors"
-	"fmt"
 	"net/http"
 	"net/url"
-	"strconv"
 	"time"
 
 	"github.com/google/uuid"
@@ -22,11 +20,7 @@ const (
 	CodeCookie = shared.CodeCookie
 )
 
-const (
-	codeFailureLimit  = 20
-	codeFailurePeriod = time.Minute
-	codeInviteMaxAge  = 600
-)
+const codeInviteMaxAge = 600
 
 type codeSource int
 
@@ -36,12 +30,6 @@ const (
 	codeSourceHeader
 	codeSourceCookie
 )
-
-var codeFailures = &rateLimiter{
-	windows: map[string]*rateWindow{},
-	limit:   codeFailureLimit,
-	period:  codeFailurePeriod,
-}
 
 func readCode(ctx echo.Context) (string, codeSource) {
 	req := ctx.Request()
@@ -102,97 +90,49 @@ func respondCodeRefused(ctx echo.Context) error {
 	return ctx.String(http.StatusUnauthorized, "Unauthorized")
 }
 
-func serveCode(ctx echo.Context, config *AuthMiddlewareConfig, value string, source codeSource, authenticated bool, proceed echo.HandlerFunc) error {
-	ctx.Response().Header().Set("Referrer-Policy", "no-referrer")
-	ip := ctx.RealIP()
-	if source != codeSourceCookie && codeFailures.blocked(ip) {
-		ctx.Response().Header().Set("Retry-After", strconv.Itoa(int(codeFailurePeriod.Seconds())))
-		return ctx.String(http.StatusTooManyRequests, "Too Many Requests")
-	}
+func respondUnavailable(ctx echo.Context, what string, err error) error {
+	ctx.Logger().Errorf("%s: %v", what, err)
+	return ctx.String(http.StatusServiceUnavailable, "Service Unavailable")
+}
 
+func serveCode(ctx echo.Context, value string, source codeSource, proceed echo.HandlerFunc) error {
+	ctx.Response().Header().Set("Referrer-Policy", "no-referrer")
 	reqCtx := ctx.Request().Context()
+	public, err := sdb.Instance().GetPublicClaims(reqCtx)
+	if err != nil {
+		return respondUnavailable(ctx, "load public claims", err)
+	}
+	if public.Find(shared.GetCodeHash(value)) != nil {
+		if source == codeSourceQuery && isNavigationGet(ctx) {
+			return respondCodeStripped(ctx)
+		}
+		return proceed(ctx)
+	}
+	if source != codeSourceCookie {
+		if limit, period := rateSettings(); !rateLimit.allow(rateKey(ctx), limit, period) {
+			return respondRateLimited(ctx, period)
+		}
+	}
 	access, err := sdb.Instance().GetCodeAccess(reqCtx, value)
 	if errors.Is(err, shared.ErrCodeInvalid) {
 		if source == codeSourceCookie {
 			clearCodeCookie(ctx)
-			return serveRequest(ctx, config, authenticated, proceed)
+			return proceed(ctx)
 		}
-		codeFailures.fail(ip)
 		return respondCodeRefused(ctx)
 	}
 	if err != nil {
-		ctx.Logger().Errorf("resolve access code: %v", err)
-		return ctx.String(http.StatusServiceUnavailable, "Service Unavailable")
-	}
-
-	switch access.Kind {
-	case shared.CODE_KIND_GUEST:
-		if !config.Guest {
-			if authenticated && source == codeSourceQuery && isNavigationGet(ctx) {
-				return respondCodeStripped(ctx)
-			}
-			return serveRequest(ctx, config, authenticated, proceed)
-		}
-		return serveGuestCode(ctx, access, value, source, authenticated, proceed)
-	case shared.CODE_KIND_INVITE:
-		return serveInviteCode(ctx, access, value, source, authenticated, proceed)
-	}
-	codeFailures.fail(ip)
-	return respondCodeRefused(ctx)
-}
-
-func serveGuestCode(ctx echo.Context, access *shared.CodeAccess, value string, source codeSource, authenticated bool, proceed echo.HandlerFunc) error {
-	reqCtx := ctx.Request().Context()
-	if access.Count > 0 && source != codeSourceCookie {
-		if _, err := sdb.Instance().PutCodeUsed(reqCtx, value); err != nil {
-			if errors.Is(err, shared.ErrCodeInvalid) {
-				codeFailures.fail(ctx.RealIP())
-				return respondCodeRefused(ctx)
-			}
-			ctx.Logger().Errorf("use access code %s: %v", access.ID, err)
-			return ctx.String(http.StatusServiceUnavailable, "Service Unavailable")
-		}
-	}
-	ctx.Set(CodeKey, access)
-	if !authenticated {
-		ctx.Set(UserIDKey, *access.GuestUserID)
-		ctx.Set(AnonymousKey, analytics.AnonymousID(ctx))
-		if err := shared.WriteAudit(reqCtx, sdb.Instance().DB.DB, nil, "guest request", "read", shared.OBJECT_TYPE_CLAIM,
-			access.ClaimID, access.OwnerID, access.GuestUserClaimID,
-			fmt.Sprintf("guest of claim %s with code %s: %s %s", access.ClaimID, access.ID, ctx.Request().Method, ctx.Request().URL.Path)); err != nil {
-			ctx.Logger().Errorf("audit guest request on code %s: %v", access.ID, err)
-			return ctx.String(http.StatusServiceUnavailable, "Service Unavailable")
-		}
-	}
-	if source == codeSourceQuery && isNavigationGet(ctx) {
-		if !authenticated {
-			writeCodeCookie(ctx, value, 0, access.EndsAt)
-		}
-		return respondCodeStripped(ctx)
-	}
-	return proceed(ctx)
-}
-
-func serveInviteCode(ctx echo.Context, access *shared.CodeAccess, value string, source codeSource, authenticated bool, proceed echo.HandlerFunc) error {
-	if !authenticated {
-		login := getLoginPath()
-		if login == "" || !isNavigationGet(ctx) {
-			return respondCodeRefused(ctx)
-		}
-		writeCodeCookie(ctx, value, codeInviteMaxAge, nil)
-		return ctx.Redirect(http.StatusSeeOther, login+"?next="+url.QueryEscape(ctx.Request().URL.RequestURI()))
+		return respondUnavailable(ctx, "resolve access code", err)
 	}
 	userID, _ := ctx.Get(UserIDKey).(uuid.UUID)
-	if _, err := sdb.Instance().PostCodeRedeem(ctx.Request().Context(), value, userID); err != nil {
+	if _, err := sdb.Instance().PostCodeRedeem(reqCtx, value, userID); err != nil {
 		if source == codeSourceCookie {
 			clearCodeCookie(ctx)
 		}
 		if errors.Is(err, shared.ErrCodeInvalid) {
-			codeFailures.fail(ctx.RealIP())
 			return respondCodeRefused(ctx)
 		}
-		ctx.Logger().Errorf("redeem access code %s: %v", access.ID, err)
-		return ctx.String(http.StatusServiceUnavailable, "Service Unavailable")
+		return respondUnavailable(ctx, "redeem access code "+access.ID.String(), err)
 	}
 	if source == codeSourceCookie {
 		clearCodeCookie(ctx)
@@ -204,8 +144,63 @@ func serveInviteCode(ctx echo.Context, access *shared.CodeAccess, value string, 
 	return proceed(ctx)
 }
 
-func serveAnonymous(ctx echo.Context, proceed echo.HandlerFunc) error {
-	ctx.Set(UserIDKey, shared.AnonymousUserID)
+func serveInviteLogin(ctx echo.Context, value string) error {
+	login := getLoginPath()
+	if login == "" || !isNavigationGet(ctx) {
+		return respondCodeRefused(ctx)
+	}
+	writeCodeCookie(ctx, value, codeInviteMaxAge, nil)
+	return ctx.Redirect(http.StatusSeeOther, login+"?next="+url.QueryEscape(ctx.Request().URL.RequestURI()))
+}
+
+func serveAnonymous(ctx echo.Context, value string, source codeSource, proceed echo.HandlerFunc) error {
+	if limit, period := rateSettings(); !rateLimit.allow(rateKey(ctx), limit, period) {
+		return respondRateLimited(ctx, period)
+	}
+	instance := sdb.Instance()
+	if instance == nil {
+		return respondUnauthenticated(ctx)
+	}
+	reqCtx := ctx.Request().Context()
+	public, err := instance.GetPublicClaims(reqCtx)
+	if err != nil {
+		return respondUnavailable(ctx, "load public claims", err)
+	}
+	userID := shared.AnonymousUserID
+	if value != "" {
+		ctx.Response().Header().Set("Referrer-Policy", "no-referrer")
+		hash := shared.GetCodeHash(value)
+		claim := public.Find(hash)
+		switch {
+		case claim != nil && claim.Accepts(hash, source == codeSourceQuery, source == codeSourceHeader, source == codeSourceCookie):
+			ctx.SetRequest(ctx.Request().WithContext(shared.WithCodeHash(reqCtx, hash)))
+			if source == codeSourceQuery && claim.Samk.Cookie && isNavigationGet(ctx) {
+				writeCodeCookie(ctx, value, 0, claim.EndsAt)
+				return respondCodeStripped(ctx)
+			}
+		case claim != nil:
+			if source != codeSourceCookie {
+				return respondCodeRefused(ctx)
+			}
+			clearCodeCookie(ctx)
+		default:
+			_, err := instance.GetCodeAccess(reqCtx, value)
+			if err == nil {
+				return serveInviteLogin(ctx, value)
+			}
+			if !errors.Is(err, shared.ErrCodeInvalid) {
+				return respondUnavailable(ctx, "resolve access code", err)
+			}
+			if source != codeSourceCookie {
+				return respondCodeRefused(ctx)
+			}
+			clearCodeCookie(ctx)
+		}
+	}
+	if len(public) == 0 {
+		return respondUnauthenticated(ctx)
+	}
+	ctx.Set(UserIDKey, userID)
 	ctx.Set(AnonymousKey, analytics.AnonymousID(ctx))
 	res := ctx.Response()
 	res.Before(func() {
@@ -214,17 +209,4 @@ func serveAnonymous(ctx echo.Context, proceed echo.HandlerFunc) error {
 		}
 	})
 	return proceed(ctx)
-}
-
-func serveRequest(ctx echo.Context, config *AuthMiddlewareConfig, authenticated bool, proceed echo.HandlerFunc) error {
-	if authenticated {
-		return proceed(ctx)
-	}
-	if config.Guest {
-		return serveAnonymous(ctx, proceed)
-	}
-	if config.Optional {
-		return proceed(ctx)
-	}
-	return respondUnauthenticated(ctx)
 }
