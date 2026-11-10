@@ -44,9 +44,9 @@ func TestADiscipleReportsItsCostThroughTheProphetAndReadsItBack(t *testing.T) {
 
 	var owners uuid.UUID
 	if err := prophet.NewRaw(`
-		SELECT (claimius.insert_claim(p_app_id => ?, p_name => 'Cost owners', p_description => NULL, p_sa_access => 15,
+		SELECT (claimius.insert_claim(p_name => 'Cost owners', p_description => NULL, p_sa_access => 15,
 		        p_sa_owner_id => ?, p_sa_root_id => ?, p_sa_created_by => ?) -> 'claim' ->> 'id')::UUID
-	`, app.ID, app.Org, app.Org, grantUser).Scan(ctx, &owners); err != nil {
+	`, app.Org, app.Org, grantUser).Scan(ctx, &owners); err != nil {
 		t.Fatalf("claim: %v", err)
 	}
 	for _, bound := range []struct {
@@ -54,19 +54,19 @@ func TestADiscipleReportsItsCostThroughTheProphetAndReadsItBack(t *testing.T) {
 		otype string
 	}{{app.Org, "claimius.organization"}, {app.ID, "claimius.samna_app"}} {
 		if _, err := prophet.ExecContext(ctx, `
-			SELECT claimius.insert_claim_object(p_app_id => ?, p_claim_id => ?, p_sa_owner_id => ?, p_sa_root_id => ?,
+			SELECT claimius.insert_claim_object(p_claim_id => ?, p_sa_owner_id => ?, p_sa_root_id => ?,
 			       p_sa_created_by => ?, p_object_id => ?, p_object_type => ?, p_inherits => TRUE)
-		`, app.ID, owners, app.Org, app.Org, grantUser, bound.id, bound.otype); err != nil {
+		`, owners, app.Org, app.Org, grantUser, bound.id, bound.otype); err != nil {
 			t.Fatalf("bind %s: %v", bound.otype, err)
 		}
 	}
 	owner, outsider := uuid.New(), uuid.New()
 	var ownerGrant uuid.UUID
 	if err := prophet.NewRaw(`
-		SELECT (claimius.insert_user_claim(p_app_id => ?, p_claim_id => ?, p_user_id => ?, p_sa_owner_id => ?, p_sa_created_by => ?)
+		SELECT (claimius.insert_user_claim(p_claim_id => ?, p_user_id => ?, p_sa_owner_id => ?, p_sa_created_by => ?)
 		        -> 'user_claim' ->> 'id')::UUID
 		FROM claimius.upsert_app_user(p_user_id => ?, p_app_id => ?, p_first_name => 'Owner')
-	`, app.ID, owners, owner, app.Org, grantUser, owner, app.ID).Scan(ctx, &ownerGrant); err != nil {
+	`, owners, owner, app.Org, grantUser, owner, app.ID).Scan(ctx, &ownerGrant); err != nil {
 		t.Fatalf("grant: %v", err)
 	}
 	if _, err := prophet.ExecContext(ctx, `SELECT claimius.upsert_app_user(p_user_id => ?, p_app_id => ?, p_first_name => 'Outsider')`, outsider, app.ID); err != nil {

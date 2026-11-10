@@ -22,26 +22,24 @@ func TestTheProphetHostResolvesAnAnonymousRequestPerApp(t *testing.T) {
 	prophet := psdb.Instance()
 	app := postPeerApp(t, grantUser)
 
-	for _, a := range []uuid.UUID{app.ID} {
-		if _, err := prophet.ExecContext(ctx, `
-			INSERT INTO claimius.samna_user (user_id, app_id, status, type, first_name)
-			VALUES (claimius.anonymous_user_id(), ?, 'active', 'anonymous', 'Public')
-			ON CONFLICT (user_id, app_id) WHERE sa_deleted_at IS NULL DO NOTHING`, a); err != nil {
-			t.Fatalf("the anonymous user of an app the test inserted directly, as upsert_app and the init backfill write it: %v", err)
-		}
+	if _, err := prophet.ExecContext(ctx, `
+		INSERT INTO claimius.samna_user (user_id, status, type, first_name)
+		VALUES (claimius.anonymous_user_id(), 'active', 'anonymous', 'Public')
+		ON CONFLICT (user_id) WHERE sa_deleted_at IS NULL DO NOTHING`); err != nil {
+		t.Fatalf("the one anonymous user, as upsert_app and the init backfill write it: %v", err)
 	}
 
 	var readers uuid.UUID
 	if err := prophet.NewRaw(`
-		SELECT (claimius.insert_claim(p_app_id => ?, p_name => 'Public readers', p_description => NULL, p_sa_access => 4,
+		SELECT (claimius.insert_claim(p_name => 'Public readers', p_description => NULL, p_sa_access => 4,
 		        p_sa_owner_id => ?, p_sa_root_id => ?, p_sa_created_by => ?) -> 'claim' ->> 'id')::UUID
-	`, app.ID, app.Org, app.Org, grantUser).Scan(ctx, &readers); err != nil {
+	`, app.Org, app.Org, grantUser).Scan(ctx, &readers); err != nil {
 		t.Fatalf("claim: %v", err)
 	}
 	if _, err := prophet.ExecContext(ctx, `
-		SELECT claimius.insert_claim_object(p_app_id => ?, p_claim_id => ?, p_sa_owner_id => ?, p_sa_root_id => ?,
+		SELECT claimius.insert_claim_object(p_claim_id => ?, p_sa_owner_id => ?, p_sa_root_id => ?,
 		       p_sa_created_by => ?, p_object_id => ?, p_object_type => 'claimius.organization', p_inherits => TRUE)
-	`, app.ID, readers, app.Org, app.Org, grantUser, app.Org); err != nil {
+	`, readers, app.Org, app.Org, grantUser, app.Org); err != nil {
 		t.Fatalf("bind: %v", err)
 	}
 	options := &shared.ClaimOptions{Samk: &shared.ClaimOptionsSamk{Header: true}}
@@ -51,8 +49,8 @@ func TestTheProphetHostResolvesAnAnonymousRequestPerApp(t *testing.T) {
 	}
 	raw, _ := json.Marshal(options)
 	if _, err := prophet.ExecContext(ctx, `
-		SELECT claimius.insert_user_claim(p_app_id => ?, p_claim_id => ?, p_user_id => ?, p_sa_owner_id => ?, p_sa_created_by => ?, p_options => ?::jsonb)
-	`, app.ID, readers, shared.AnonymousUserID, app.Org, grantUser, string(raw)); err != nil {
+		SELECT claimius.insert_user_claim(p_claim_id => ?, p_user_id => ?, p_sa_owner_id => ?, p_sa_created_by => ?, p_options => ?::jsonb)
+	`, readers, shared.AnonymousUserID, app.Org, grantUser, string(raw)); err != nil {
 		t.Fatalf("public grant: %v", err)
 	}
 	shared.DeletePublicClaimCache()
@@ -61,7 +59,7 @@ func TestTheProphetHostResolvesAnAnonymousRequestPerApp(t *testing.T) {
 	handler := smw.AnonymousMiddleware(func(ctx echo.Context) error {
 		userID, _ := ctx.Get(smw.UserIDKey).(uuid.UUID)
 		var access int
-		if err := prophet.NewRaw(`SELECT sa_access FROM claimius.get_access(?, ?, ?, 'claimius.organization', 4)`, userID, app.ID, app.Org).Scan(ctx.Request().Context(), &access); err != nil {
+		if err := prophet.NewRaw(`SELECT sa_access FROM claimius.get_access(?, ?, 'claimius.organization', 4)`, userID, app.Org).Scan(ctx.Request().Context(), &access); err != nil {
 			return ctx.String(http.StatusForbidden, "Forbidden")
 		}
 		return ctx.JSON(http.StatusOK, map[string]any{"user_id": userID, "access": access})

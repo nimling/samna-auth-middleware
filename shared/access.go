@@ -62,7 +62,7 @@ func (d *DB) MutationAccess(ctx context.Context, userID, objectID uuid.UUID, obj
 	if len(claims) == 0 {
 		return nil, ErrNoAccess
 	}
-	d.Usage.Add(nil, userID, objectType, objectID)
+	d.Usage.Add(userID, objectType, objectID)
 	nimtel.Organization(ctx, claims[0].RootID, claims[0].OwnerID)
 	claims[0].UserID = userID
 	return &claims[0], nil
@@ -166,7 +166,7 @@ func (d *DB) MutationAccessMany(ctx context.Context, requests []AccessRequest) (
 		ac := rows[i].AccessClaim
 		ac.UserID = requests[idx].UserID
 		set[idx].Claim = &ac
-		d.Usage.Add(nil, requests[idx].UserID, requests[idx].ObjectType, requests[idx].ObjectID)
+		d.Usage.Add(requests[idx].UserID, requests[idx].ObjectType, requests[idx].ObjectID)
 	}
 	return set, nil
 }
@@ -253,17 +253,11 @@ func (d *DB) UserAccess(ctx context.Context, actorID uuid.UUID, target string, r
 		}
 		return nil, ErrNoAccess
 	}
-	d.Usage.Add(nil, actorID, OBJECT_TYPE_USER, users[0].TargetUserID)
+	d.Usage.Add(actorID, OBJECT_TYPE_USER, users[0].TargetUserID)
 	return &users[0], nil
 }
 
-func (d *DB) RootAccess(ctx context.Context, userID, appID uuid.UUID, requiredAccess ClaimAccess) (*AccessClaim, error) {
-	access := "claimius.get_access($1::uuid, root.sa_root_id, $2::text, $3::int)"
-	args := []any{userID, OBJECT_TYPE_ORGANIZATION, requiredAccess}
-	if d.Prophet {
-		access = "claimius.get_access($1::uuid, $4::uuid, root.sa_root_id, $2::text, $3::int)"
-		args = append(args, appID)
-	}
+func (d *DB) RootAccess(ctx context.Context, userID uuid.UUID, requiredAccess ClaimAccess) (*AccessClaim, error) {
 	claims := make([]AccessClaim, 0)
 	err := d.prepared(ctx, d.DB, &claims, `SELECT claim.*
 		FROM (
@@ -275,9 +269,9 @@ func (d *DB) RootAccess(ctx context.Context, userID, appID uuid.UUID, requiredAc
 			  AND uc.sa_deleted_at IS NULL
 			  AND c.sa_deleted_at IS NULL
 		) root
-		CROSS JOIN LATERAL `+access+` AS claim
+		CROSS JOIN LATERAL claimius.get_access($1::uuid, root.sa_root_id, $2::text, $3::int) AS claim
 		ORDER BY root.sa_root_id
-		LIMIT 1`, args...)
+		LIMIT 1`, userID, OBJECT_TYPE_ORGANIZATION, requiredAccess)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNoAccess

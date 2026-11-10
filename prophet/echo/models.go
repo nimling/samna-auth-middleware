@@ -21,7 +21,6 @@ type ObjectStyle struct {
 type SamnaUser struct {
 	ID            uuid.UUID                  `bun:"id,pk,notnull,type:uuid,default:gen_random_uuid()" json:"id"`
 	UserID        uuid.UUID                  `bun:"user_id,notnull,type:uuid,default:gen_random_uuid()" json:"user_id"`
-	AppID         uuid.UUID                  `bun:"app_id,notnull,type:uuid" json:"app_id"`
 	FirstName     string                     `bun:"first_name" json:"first_name"`
 	LastName      string                     `bun:"last_name" json:"last_name"`
 	UserName      *string                    `bun:"user_name" json:"user_name,omitempty"`
@@ -36,7 +35,6 @@ type SamnaUser struct {
 	DeletedAt     *time.Time                 `bun:"sa_deleted_at,default:null" json:"deleted_at,omitzero"`
 	CreatedAt     time.Time                  `bun:"sa_created_at,notnull,default:current_timestamp" json:"created_at"`
 	UpdatedAt     time.Time                  `bun:"sa_updated_at,notnull,default:current_timestamp" json:"updated_at"`
-	App           *SamnaApp                  `bun:"rel:belongs-to,join:app_id=id" json:"app,omitempty"`
 	Fields        []*UserField               `bun:"rel:has-many,join:user_id=user_id" json:"fields,omitempty"`
 	Identity      map[string]json.RawMessage `bun:"-" json:"identity,omitempty"`
 	Access        ClaimAccess                `bun:"access,scanonly" json:"access,omitempty"`
@@ -193,7 +191,6 @@ type Location struct {
 
 type Claim struct {
 	ID          uuid.UUID   `bun:"id,pk,notnull,type:uuid,default:gen_random_uuid()" json:"id"`
-	AppID       uuid.UUID   `bun:"app_id,notnull,type:uuid" json:"app_id"`
 	Name        string      `bun:"name,notnull" json:"name"`
 	Description *string     `bun:"description" json:"description,omitempty"`
 	Access      ClaimAccess `bun:"sa_access,notnull" json:"access"`
@@ -220,7 +217,6 @@ type Claim struct {
 
 type UserClaim struct {
 	ID            uuid.UUID       `bun:"id,pk,notnull,type:uuid,default:gen_random_uuid()" json:"id"`
-	AppID         uuid.UUID       `bun:"app_id,notnull,type:uuid" json:"app_id"`
 	ClaimID       uuid.UUID       `bun:"claim_id,type:uuid,notnull" json:"claim_id"`
 	UserID        uuid.UUID       `bun:"user_id,type:uuid,notnull" json:"user_id"`
 	Reason        *string         `bun:"reason" json:"reason,omitempty"`
@@ -241,7 +237,6 @@ type UserClaim struct {
 
 type ClaimObject struct {
 	ID                uuid.UUID        `bun:"id,pk,notnull,type:uuid,default:gen_random_uuid()" json:"id"`
-	AppID             uuid.UUID        `bun:"app_id,notnull,type:uuid" json:"app_id"`
 	Reason            *string          `bun:"reason" json:"reason,omitempty"`
 	Scope             *json.RawMessage `bun:"scope,type:jsonb" json:"scope,omitempty"`
 	ClaimID           uuid.UUID        `bun:"claim_id,type:uuid,notnull" json:"claim_id"`

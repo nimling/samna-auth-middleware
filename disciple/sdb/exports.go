@@ -13,7 +13,6 @@ type (
 	AppCostQuery             = shared.AppCostQuery
 	Audit                    = shared.Audit
 	BindingFilters           = shared.BindingFilters
-	BodyGuest                = shared.BodyGuest
 	Claim                    = shared.Claim
 	ClaimAccess              = shared.ClaimAccess
 	ClaimObject              = shared.ClaimObject
@@ -31,7 +30,6 @@ type (
 	CreateVirtualClaimParams = shared.CreateVirtualClaimParams
 	Creator                  = shared.Creator
 	Descendant               = shared.Descendant
-	GuestTokenResponse       = shared.GuestTokenResponse
 	GrantFilters             = shared.GrantFilters
 	GraphNode                = shared.GraphNode
 	GraphWindow              = shared.GraphWindow

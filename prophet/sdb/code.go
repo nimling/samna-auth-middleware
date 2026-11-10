@@ -105,7 +105,3 @@ func PostCodeRedeem(ctx context.Context, appID uuid.UUID, hash string, userID uu
 	}
 	return raw, nil
 }
-
-func GetGuestUserID(appID, claimID uuid.UUID) uuid.UUID {
-	return uuid.NewSHA1(appID, []byte("guest:"+claimID.String()))
-}

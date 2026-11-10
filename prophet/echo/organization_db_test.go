@@ -149,14 +149,14 @@ func TestPutOrganizationMovesUnderASiblingAndRefusesACycle(t *testing.T) {
 	}
 }
 
-func TestRootAccessReadsTheRootThroughTheAppOnTheProphet(t *testing.T) {
-	appID, claimID := getGrantFixture(t)
+func TestRootAccessReadsTheRootOnTheProphet(t *testing.T) {
+	_, claimID := getGrantFixture(t)
 	ctx := context.Background()
 	var rootID uuid.UUID
 	if err := psdb.Instance().NewRaw(`SELECT sa_root_id FROM claimius.claim WHERE id = ?`, claimID).Scan(ctx, &rootID); err != nil {
 		t.Fatalf("read root: %v", err)
 	}
-	ac, err := psdb.Instance().RootAccess(ctx, grantUser, appID, shared.ACCESS_READ)
+	ac, err := psdb.Instance().RootAccess(ctx, grantUser, shared.ACCESS_READ)
 	if err != nil {
 		t.Fatalf("root access: %v", err)
 	}

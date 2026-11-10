@@ -114,19 +114,19 @@ func getAnalyticsReader(t *testing.T) (*httptest.Server, peerApp, uuid.UUID) {
 	}
 	var claimID uuid.UUID
 	if err := db.NewRaw(`SELECT (claimius.insert_claim(
-		p_app_id => ?, p_name => 'Analytics reader', p_description => NULL, p_sa_access => 4,
+		p_name => 'Analytics reader', p_description => NULL, p_sa_access => 4,
 		p_sa_owner_id => ?, p_sa_root_id => ?, p_sa_created_by => ?
-	) -> 'claim' ->> 'id')::UUID`, app.ID, app.Org, app.Org, grantUser).Scan(ctx, &claimID); err != nil {
+	) -> 'claim' ->> 'id')::UUID`, app.Org, app.Org, grantUser).Scan(ctx, &claimID); err != nil {
 		t.Fatalf("claim: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `SELECT claimius.insert_claim_object(
-		p_app_id => ?, p_claim_id => ?, p_sa_owner_id => ?, p_sa_root_id => ?, p_sa_created_by => ?,
+		p_claim_id => ?, p_sa_owner_id => ?, p_sa_root_id => ?, p_sa_created_by => ?,
 		p_sa_access => 4, p_scope => '{"analytics": {}}'::JSONB
-	)`, app.ID, claimID, app.Org, app.Org, grantUser); err != nil {
+	)`, claimID, app.Org, app.Org, grantUser); err != nil {
 		t.Fatalf("binding: %v", err)
 	}
-	if _, err := db.ExecContext(ctx, `SELECT claimius.insert_user_claim(p_app_id => ?, p_claim_id => ?, p_user_id => ?, p_sa_owner_id => ?, p_sa_created_by => ?)`,
-		app.ID, claimID, analyst, app.Org, grantUser); err != nil {
+	if _, err := db.ExecContext(ctx, `SELECT claimius.insert_user_claim(p_claim_id => ?, p_user_id => ?, p_sa_owner_id => ?, p_sa_created_by => ?)`,
+		claimID, analyst, app.Org, grantUser); err != nil {
 		t.Fatalf("grant: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `SELECT claimius.upsert_analytics_capture(?, '/', 'application/json', '{}'::BYTEA)`, app.ID); err != nil {

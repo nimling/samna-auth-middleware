@@ -3,8 +3,6 @@ CREATE OR REPLACE FUNCTION claimius.calc_object_access()
 DECLARE
     v_object_type   TEXT;
     v_obj_id        UUID;
-    v_app_id        UUID;
-    v_app_ids       UUID[];
     v_row           JSONB;
     v_root          UUID;
     v_op            TEXT;
@@ -22,8 +20,6 @@ BEGIN
         v_obj_id := NEW.id;
     END IF;
 
-    v_app_ids := ARRAY(SELECT claimius._app_ids_for_row(v_object_type, v_row));
-
     v_structural := claimius._retree_object(v_object_type, v_obj_id, to_jsonb(OLD), to_jsonb(NEW));
     IF v_op <> 'UPDATE' OR EXISTS (
         SELECT 1 FROM unnest(ARRAY['name', 'description', 'sa_owner_id', 'sa_location_id', 'sa_root_id', 'sa_deleted_at', 'sa_created_by']) AS k
@@ -40,16 +36,16 @@ BEGIN
             LEFT JOIN claimius.organization lo ON lo.id = l.sa_owner_id;
     END IF;
 
-    FOREACH v_app_id IN ARRAY v_app_ids LOOP
-        v_actor := CASE WHEN v_replay THEN NULL ELSE claimius._actor_user_for_row(v_app_id, v_object_type, coalesce(NEW, OLD)) END;
+    IF NOT v_replay THEN
+        v_actor := claimius._actor_user_for_row(v_object_type, coalesce(NEW, OLD));
         IF v_actor IS NOT NULL THEN
-            PERFORM claimius.recompute_user_object(v_app_id, v_actor, ARRAY[v_object_type], ARRAY[v_obj_id]);
+            PERFORM claimius.recompute_user_object(v_actor, ARRAY[v_object_type], ARRAY[v_obj_id]);
         END IF;
+    END IF;
 
-        IF v_structural THEN
-            PERFORM claimius._raise_object_diff(v_app_id, v_object_type, v_obj_id, FALSE, v_root);
-        END IF;
-    END LOOP;
+    IF v_structural THEN
+        PERFORM claimius._raise_object_diff(v_object_type, v_obj_id, FALSE, v_root);
+    END IF;
 
     RETURN coalesce(NEW, OLD);
 END;
@@ -219,8 +215,6 @@ CREATE OR REPLACE FUNCTION claimius.calc_hierarchical_access()
 DECLARE
     v_object_type   TEXT;
     v_obj_id        UUID;
-    v_app_id        UUID;
-    v_app_ids       UUID[];
     v_root_id       UUID;
     v_old_root_id   UUID;
     v_owner_root    UUID;
@@ -262,7 +256,6 @@ BEGIN
     END IF;
 
     IF v_op <> 'DELETE' THEN
-        v_app_ids   := ARRAY(SELECT claimius._app_ids_for_row(v_object_type, to_jsonb(NEW)));
         v_root_id   := (to_jsonb(NEW) ->> 'sa_root_id')::UUID;
         v_new_parent := (to_jsonb(NEW) ->> v_parent_col)::UUID;
         v_is_active := (to_jsonb(NEW) ->> 'sa_deleted_at') IS NULL;
@@ -271,9 +264,6 @@ BEGIN
         v_old_root_id := (to_jsonb(OLD) ->> 'sa_root_id')::UUID;
         v_old_parent := (to_jsonb(OLD) ->> v_parent_col)::UUID;
         v_was_active := (to_jsonb(OLD) ->> 'sa_deleted_at') IS NULL;
-        IF v_op = 'DELETE' THEN
-            v_app_ids := ARRAY(SELECT claimius._app_ids_for_row(v_object_type, to_jsonb(OLD)));
-        END IF;
     END IF;
 
     IF v_op = 'UPDATE' AND v_old_root_id IS DISTINCT FROM v_root_id AND NOT v_replay
@@ -342,21 +332,21 @@ BEGIN
             LEFT JOIN claimius.organization lo ON lo.id = l.sa_owner_id;
     END IF;
 
-    FOREACH v_app_id IN ARRAY v_app_ids LOOP
-        v_actor := CASE WHEN v_replay THEN NULL ELSE claimius._actor_user_for_row(v_app_id, v_object_type, coalesce(NEW, OLD)) END;
+    IF NOT v_replay THEN
+        v_actor := claimius._actor_user_for_row(v_object_type, coalesce(NEW, OLD));
         IF v_actor IS NOT NULL THEN
-            PERFORM claimius.recompute_user_object(v_app_id, v_actor, ARRAY[v_object_type], ARRAY[v_obj_id]);
+            PERFORM claimius.recompute_user_object(v_actor, ARRAY[v_object_type], ARRAY[v_obj_id]);
         END IF;
+    END IF;
 
-        IF NOT v_renamed THEN
-            PERFORM claimius._raise_object_diff(v_app_id, v_object_type, v_obj_id, TRUE, v_owner_root);
-        END IF;
-        IF v_dropped_ids IS NOT NULL THEN
-            PERFORM claimius._raise_object_diff(v_app_id, x.object_type, x.object_id, FALSE, coalesce(oi.sa_owner_root_id, v_owner_root))
-            FROM unnest(v_dropped_types, v_dropped_ids) AS x(object_type, object_id)
-                LEFT JOIN claimius.object_info oi ON oi.object_type = x.object_type AND oi.object_id = x.object_id;
-        END IF;
-    END LOOP;
+    IF NOT v_renamed THEN
+        PERFORM claimius._raise_object_diff(v_object_type, v_obj_id, TRUE, v_owner_root);
+    END IF;
+    IF v_dropped_ids IS NOT NULL THEN
+        PERFORM claimius._raise_object_diff(x.object_type, x.object_id, FALSE, coalesce(oi.sa_owner_root_id, v_owner_root))
+        FROM unnest(v_dropped_types, v_dropped_ids) AS x(object_type, object_id)
+            LEFT JOIN claimius.object_info oi ON oi.object_type = x.object_type AND oi.object_id = x.object_id;
+    END IF;
 
     RETURN coalesce(NEW, OLD);
 END;
@@ -434,7 +424,6 @@ CREATE OR REPLACE FUNCTION claimius.calc_claim_access()
     RETURNS TRIGGER AS $$
 DECLARE
     v_table       TEXT;
-    v_app_id      UUID;
     v_claim_id    UUID;
     v_actor       UUID;
 BEGIN
@@ -443,40 +432,39 @@ BEGIN
     END IF;
 
     v_table  := TG_TABLE_NAME;
-    v_app_id := coalesce(NEW.app_id, OLD.app_id);
 
     IF v_table = 'claim' THEN
         v_claim_id := coalesce(NEW.id, OLD.id);
         IF TG_OP <> 'UPDATE' OR (OLD.name, OLD.sa_access, OLD.level, OLD.inherits, OLD.sa_deleted_at)
                                   IS DISTINCT FROM (NEW.name, NEW.sa_access, NEW.level, NEW.inherits, NEW.sa_deleted_at) THEN
-            PERFORM claimius._raise_claim_diff(v_app_id, v_claim_id, NULL, coalesce(OLD.inherits, FALSE) OR coalesce(NEW.inherits, FALSE));
+            PERFORM claimius._raise_claim_diff(v_claim_id, NULL, coalesce(OLD.inherits, FALSE) OR coalesce(NEW.inherits, FALSE));
         END IF;
     ELSIF v_table = 'user_claim' THEN
         v_claim_id := coalesce(NEW.claim_id, OLD.claim_id);
-        PERFORM claimius._raise_claim_diff(v_app_id, v_claim_id, coalesce(NEW.user_id, OLD.user_id));
+        PERFORM claimius._raise_claim_diff(v_claim_id, coalesce(NEW.user_id, OLD.user_id));
     ELSIF coalesce(NEW.object_type, OLD.object_type) = 'claimius.claim' THEN
         v_claim_id := coalesce(NEW.claim_id, OLD.claim_id);
-        PERFORM claimius._raise_claim_diff(v_app_id, v_claim_id);
-        PERFORM claimius._raise_claim_diff(v_app_id, coalesce(NEW.object_id, OLD.object_id));
+        PERFORM claimius._raise_claim_diff(v_claim_id);
+        PERFORM claimius._raise_claim_diff(coalesce(NEW.object_id, OLD.object_id));
     ELSIF coalesce(NEW.object_id, OLD.object_id) IS NULL THEN
         v_claim_id := coalesce(NEW.claim_id, OLD.claim_id);
     ELSE
         v_claim_id := coalesce(NEW.claim_id, OLD.claim_id);
         IF TG_OP <> 'INSERT' THEN
-            PERFORM claimius._raise_object_diff(v_app_id, OLD.object_type, OLD.object_id, OLD.inherits OR coalesce(NEW.inherits, FALSE));
+            PERFORM claimius._raise_object_diff(OLD.object_type, OLD.object_id, OLD.inherits OR coalesce(NEW.inherits, FALSE));
         END IF;
         IF TG_OP = 'INSERT' OR (TG_OP = 'UPDATE' AND (NEW.object_type, NEW.object_id) IS DISTINCT FROM (OLD.object_type, OLD.object_id)) THEN
-            PERFORM claimius._raise_object_diff(v_app_id, NEW.object_type, NEW.object_id, NEW.inherits);
+            PERFORM claimius._raise_object_diff(NEW.object_type, NEW.object_id, NEW.inherits);
         END IF;
     END IF;
 
-    v_actor := claimius._actor_user_for_row(v_app_id, 'claimius.' || v_table, coalesce(NEW, OLD));
+    v_actor := claimius._actor_user_for_row('claimius.' || v_table, coalesce(NEW, OLD));
     IF v_actor IS NOT NULL THEN
-        PERFORM claimius.recompute_user_object(v_app_id, v_actor, ARRAY['claimius.claim'], ARRAY[v_claim_id]);
+        PERFORM claimius.recompute_user_object(v_actor, ARRAY['claimius.claim'], ARRAY[v_claim_id]);
         IF v_table = 'claim_object' THEN
             IF coalesce(NEW.object_id, OLD.object_id) IS NOT NULL THEN
                 PERFORM claimius.recompute_user_object(
-                        v_app_id, v_actor, ARRAY[coalesce(NEW.object_type, OLD.object_type)], ARRAY[coalesce(NEW.object_id, OLD.object_id)]);
+                        v_actor, ARRAY[coalesce(NEW.object_type, OLD.object_type)], ARRAY[coalesce(NEW.object_id, OLD.object_id)]);
             END IF;
         END IF;
     END IF;
@@ -490,8 +478,8 @@ COMMENT ON FUNCTION claimius.calc_claim_access() IS 'Trigger on claim, claim_obj
 GRANT EXECUTE ON FUNCTION claimius.calc_claim_access()
     TO claimius_writer, claimius_reader;
 
+DROP FUNCTION IF EXISTS claimius._denied_access(UUID, UUID, TEXT, UUID);
 CREATE OR REPLACE FUNCTION claimius._denied_access(
-    p_app_id      UUID,
     p_user_id     UUID,
     p_object_type TEXT,
     p_object_id   UUID
@@ -500,22 +488,20 @@ CREATE OR REPLACE FUNCTION claimius._denied_access(
         SELECT duc.claim_id AS deny_id, 15 AS cap
         FROM claimius.user_claim duc
         WHERE duc.user_id = p_user_id
-          AND duc.app_id = p_app_id
           AND duc.sa_deleted_at IS NULL
         UNION
         SELECT link.object_id, coalesce(link.sa_access & 15, 15)
         FROM claimius.user_claim huc
             JOIN claimius.claim h ON h.id = huc.claim_id AND h.sa_deleted_at IS NULL AND h.inherits
-            JOIN claimius.claim_object link ON link.claim_id = h.id AND link.app_id = p_app_id AND link.sa_deleted_at IS NULL
+            JOIN claimius.claim_object link ON link.claim_id = h.id AND link.sa_deleted_at IS NULL
                  AND link.object_type = 'claimius.claim' AND link.object_id IS NOT NULL AND link.inherits
         WHERE huc.user_id = p_user_id
-          AND huc.app_id = p_app_id
           AND huc.sa_deleted_at IS NULL
     )
     SELECT coalesce(bit_or(claimius._effective_access(d.sa_access, dco.sa_access) & held.cap & 15), 0)
     FROM held
         JOIN claimius.claim d ON d.id = held.deny_id AND d.sa_deleted_at IS NULL
-        JOIN claimius.claim_object dco ON dco.claim_id = d.id AND dco.app_id = p_app_id AND dco.sa_deleted_at IS NULL
+        JOIN claimius.claim_object dco ON dco.claim_id = d.id AND dco.sa_deleted_at IS NULL
     WHERE (claimius._effective_access(d.sa_access, dco.sa_access) & 16) <> 0
       AND (
           (dco.object_type = p_object_type AND dco.object_id = p_object_id)
@@ -529,23 +515,19 @@ CREATE OR REPLACE FUNCTION claimius._denied_access(
       );
 $$ LANGUAGE sql STABLE;
 
-COMMENT ON FUNCTION claimius._denied_access(UUID, UUID, TEXT, UUID) IS 'The bits, owner, write, read and execute, of every live deny binding reaching the user on the object in the app: through a grant the user holds, or through one inheriting link of a held inheriting claim, capped by the link''s mask; bound on the object itself, or on an ancestor in any tree where the claim and the binding inherit. Levels and classes are not applied; a caller masks the result with the user''s settled pair to keep only what the denies took away.';
+COMMENT ON FUNCTION claimius._denied_access(UUID, TEXT, UUID) IS 'The bits, owner, write, read and execute, of every live deny binding reaching the user on the object: through a grant the user holds, or through one inheriting link of a held inheriting claim, capped by the link''s mask; bound on the object itself, or on an ancestor in any tree where the claim and the binding inherit. Levels and classes are not applied; a caller masks the result with the user''s settled pair to keep only what the denies took away.';
 
-GRANT EXECUTE ON FUNCTION claimius._denied_access(UUID, UUID, TEXT, UUID)
+GRANT EXECUTE ON FUNCTION claimius._denied_access(UUID, TEXT, UUID)
     TO claimius_writer, claimius_reader;
 
 CREATE OR REPLACE FUNCTION claimius._check_claim_composition()
     RETURNS TRIGGER AS $$
 DECLARE
     v_user_id      UUID;
-    v_actor_app_id UUID;
-    v_app_owner_id UUID;
     v_has_access   BOOLEAN;
     v_actor_access INTEGER;
     v_effective    INTEGER;
     v_denied       INTEGER;
-    v_system_app_id UUID;
-    v_system_access INTEGER;
 BEGIN
     IF claimius.in_replay_mode() THEN
         RETURN NEW;
@@ -564,22 +546,21 @@ BEGIN
              OR NEW.claim_id IS DISTINCT FROM OLD.claim_id
              OR NEW.object_id IS DISTINCT FROM OLD.object_id)
     THEN
-        SELECT uc.user_id, uc.app_id INTO v_user_id, v_actor_app_id
+        SELECT uc.user_id INTO v_user_id
         FROM claimius.user_claim uc
         WHERE uc.id = NEW.sa_created_by
           AND uc.sa_deleted_at IS NULL;
 
         IF v_user_id IS NOT NULL THEN
-            PERFORM claimius.reconcile_if_pending(NEW.app_id, v_user_id, NEW.object_type, NEW.object_id);
+            PERFORM claimius.reconcile_if_pending(v_user_id, NEW.object_type, NEW.object_id);
 
             SELECT max(sa_access) INTO v_actor_access
             FROM claimius.user_object
             WHERE user_id     = v_user_id
-              AND app_id      = NEW.app_id
               AND object_type = NEW.object_type
               AND object_id   = NEW.object_id;
 
-            v_denied := claimius._denied_access(NEW.app_id, v_user_id, NEW.object_type, NEW.object_id) & ~coalesce(v_actor_access, 0);
+            v_denied := claimius._denied_access(v_user_id, NEW.object_type, NEW.object_id) & ~coalesce(v_actor_access, 0);
             IF (coalesce(v_effective, 0) & v_denied & 15) <> 0 THEN
                 RAISE EXCEPTION 'cannot grant access denied to the writer: user % is denied % on % %, requested %',
                     v_user_id, v_denied, NEW.object_type, NEW.object_id, v_effective USING ERRCODE = 'P0403';
@@ -592,12 +573,11 @@ BEGIN
                     WHERE oi.object_type = NEW.object_type
                       AND oi.object_id = NEW.object_id)
             THEN
-                PERFORM claimius.reconcile_if_pending(NEW.app_id, v_user_id, 'claimius.organization', NEW.sa_owner_id);
+                PERFORM claimius.reconcile_if_pending(v_user_id, 'claimius.organization', NEW.sa_owner_id);
 
                 SELECT uo.sa_access INTO v_actor_access
                 FROM claimius.user_object uo
                 WHERE uo.user_id = v_user_id
-                  AND uo.app_id = NEW.app_id
                   AND uo.object_type = 'claimius.organization'
                   AND uo.object_id = NEW.sa_owner_id;
 
@@ -605,7 +585,6 @@ BEGIN
                         SELECT 1 FROM claimius.user_claim uc
                         WHERE uc.id = nullif(current_setting('claimius.object_created_by', TRUE), '')::UUID
                           AND uc.user_id = v_user_id
-                          AND uc.app_id = NEW.app_id
                           AND uc.sa_deleted_at IS NULL)
                     AND (EXISTS (
                             SELECT 1 FROM claimius.inheritance_info e
@@ -620,76 +599,28 @@ BEGIN
             END IF;
 
             IF (coalesce(v_effective, 0) & ~coalesce(v_actor_access, 0) & 15) <> 0
-                AND v_actor_app_id IS DISTINCT FROM NEW.app_id
-                AND NOT EXISTS (
-                    SELECT 1 FROM claimius.claim_object co
-                    WHERE co.app_id = NEW.app_id
-                      AND co.sa_deleted_at IS NULL)
-            THEN
-                SELECT a.sa_owner_id INTO v_app_owner_id
-                FROM claimius.samna_app a
-                WHERE a.id = NEW.app_id
-                  AND a.sa_deleted_at IS NULL;
-
-                IF v_app_owner_id IS NOT NULL THEN
-                    PERFORM claimius.reconcile_if_pending(v_actor_app_id, v_user_id, 'claimius.organization', v_app_owner_id);
-
-                    IF EXISTS (
-                        SELECT 1 FROM claimius.user_object
-                        WHERE user_id     = v_user_id
-                          AND app_id      = v_actor_app_id
-                          AND object_type = 'claimius.organization'
-                          AND object_id   = v_app_owner_id
-                          AND (sa_access & 1) <> 0)
-                    THEN
-                        v_actor_access := 15;
-                    END IF;
-                END IF;
-            END IF;
-
-            IF (coalesce(v_effective, 0) & ~coalesce(v_actor_access, 0) & 15) <> 0
                 AND NEW.object_type = 'claimius.samna_user'
                 AND NOT EXISTS (
                     SELECT 1 FROM claimius.claim_object co
-                    WHERE co.app_id = NEW.app_id
-                      AND co.object_type = 'claimius.samna_user'
+                    WHERE co.object_type = 'claimius.samna_user'
                       AND co.object_id = NEW.object_id
                       AND co.sa_deleted_at IS NULL)
                 AND EXISTS (
                     SELECT 1 FROM claimius.user_claim m
-                    WHERE m.app_id = NEW.app_id
-                      AND m.user_id = NEW.object_id
+                    WHERE m.user_id = NEW.object_id
                       AND m.sa_owner_id = NEW.sa_owner_id
                       AND m.sa_deleted_at IS NULL)
             THEN
-                PERFORM claimius.reconcile_if_pending(NEW.app_id, v_user_id, 'claimius.organization', NEW.sa_owner_id);
+                PERFORM claimius.reconcile_if_pending(v_user_id, 'claimius.organization', NEW.sa_owner_id);
 
                 IF EXISTS (
                     SELECT 1 FROM claimius.user_object
                     WHERE user_id     = v_user_id
-                      AND app_id      = NEW.app_id
                       AND object_type = 'claimius.organization'
                       AND object_id   = NEW.sa_owner_id
                       AND (sa_access & 1) <> 0)
                 THEN
                     v_actor_access := 15;
-                END IF;
-            END IF;
-
-            IF (coalesce(v_effective, 0) & 16) = 0 AND (coalesce(v_effective, 0) & ~coalesce(v_actor_access, 0) & 15) <> 0 THEN
-                v_system_app_id := claimius.get_prophet_app_id();
-
-                IF v_system_app_id IS DISTINCT FROM NEW.app_id THEN
-                    PERFORM claimius.reconcile_if_pending(v_system_app_id, v_user_id, NEW.object_type, NEW.object_id);
-
-                    SELECT max(uo.sa_access) INTO v_system_access
-                    FROM claimius.user_object uo
-                    WHERE uo.user_id     = v_user_id
-                      AND uo.app_id      = v_system_app_id
-                      AND uo.object_type = NEW.object_type
-                      AND uo.object_id   = NEW.object_id;
-
-                    v_actor_access := coalesce(v_actor_access, 0) | (coalesce(v_system_access, 0) & 15);
                 END IF;
             END IF;
 
@@ -713,7 +644,6 @@ BEGIN
         WHERE claim_id      = NEW.object_id
           AND object_type   = 'claimius.claim'
           AND object_id     = NEW.claim_id
-          AND app_id        = NEW.app_id
           AND sa_deleted_at IS NULL
     ) THEN
         RAISE EXCEPTION 'claim composition cycle: % already points at %', NEW.object_id, NEW.claim_id;
@@ -728,12 +658,11 @@ BEGIN
         RAISE EXCEPTION 'sa_created_by % is not a valid user_claim', NEW.sa_created_by;
     END IF;
 
-    PERFORM claimius.reconcile_if_pending(NEW.app_id, v_user_id, 'claimius.claim', NEW.object_id);
+    PERFORM claimius.reconcile_if_pending(v_user_id, 'claimius.claim', NEW.object_id);
 
     SELECT EXISTS (
         SELECT 1 FROM claimius.user_object
         WHERE user_id     = v_user_id
-          AND app_id      = NEW.app_id
           AND object_type = 'claimius.claim'
           AND object_id   = NEW.object_id
           AND (sa_access & 4) <> 0
@@ -747,7 +676,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius._check_claim_composition() IS 'BEFORE INSERT/UPDATE trigger on claim_object. Rejects a grant whose effective mask gives bits that a deny reaching the actor on the object removes from the actor''s settled pair, whatever the level of either claim, and a grant that hands out more access than the actor holds on the object; denies and removals are exempt and the claim''s level is never judged. An object outside the claimius schema that this database holds no object_info row for, a disciple''s own row, is judged by the actor''s hold on the binding''s owning organization, which _check_app_scope keeps linked to the app; its type is never resolved. When the transaction carries claimius.object_created_by, the grant the calling app reports the row was created under, and that grant is a live user_claim of the actor in the binding''s app, the actor is the row''s creator and holds owner, write, read and execute on it, as the disciple holding the row counts the creator, while the binding''s owning organization is live or not held. The first binding of an app may come from an actor of another app holding owner on the organization that owns the app, judged in the actor''s own app. The first binding on a samna_user holding a claim assigned under the binding''s owning organization may come from an actor holding owner on that organization. Any other binding short of the actor''s hold in its app may still pass on the access the actor holds on the object in the system app, directly or through an inheriting ancestor grant, capped at that access. Enforces composition link invariants: no self loop, no reverse link cycle, caller has read on target claim. Bypassed during disciple replay.';
+COMMENT ON FUNCTION claimius._check_claim_composition() IS 'BEFORE INSERT/UPDATE trigger on claim_object. Rejects a grant whose effective mask gives bits that a deny reaching the actor on the object removes from the actor''s settled pair, whatever the level of either claim, and a grant that hands out more access than the actor holds on the object; denies and removals are exempt and the claim''s level is never judged. An object outside the claimius schema that this database holds no object_info row for, a disciple''s own row, is judged by the actor''s hold on the binding''s owning organization; its type is never resolved. When the transaction carries claimius.object_created_by, the grant the calling app reports the row was created under, and that grant is a live user_claim of the actor, the actor is the row''s creator and holds owner, write, read and execute on it, as the disciple holding the row counts the creator, while the binding''s owning organization is live or not held. The first binding on a samna_user holding a claim assigned under the binding''s owning organization may come from an actor holding owner on that organization. Enforces composition link invariants: no self loop, no reverse link cycle, caller has read on target claim. Bypassed during disciple replay.';
 
 GRANT EXECUTE ON FUNCTION claimius._check_claim_composition()
     TO claimius_writer, claimius_reader;
@@ -759,8 +688,8 @@ CREATE TRIGGER tg_check_claim_composition
 
 DROP FUNCTION IF EXISTS claimius._check_claim_level(UUID, UUID, UUID, INTEGER);
 
+DROP FUNCTION IF EXISTS claimius._check_claim_denies(UUID, UUID, UUID);
 CREATE OR REPLACE FUNCTION claimius._check_claim_denies(
-    p_app_id    UUID,
     p_actor_uc  UUID,
     p_claim_id  UUID
 ) RETURNS VOID AS $$
@@ -773,7 +702,6 @@ BEGIN
     SELECT uc.user_id INTO v_user_id
     FROM claimius.user_claim uc
     WHERE uc.id = p_actor_uc
-      AND uc.app_id = p_app_id
       AND uc.sa_deleted_at IS NULL;
     IF v_user_id IS NULL THEN
         RETURN;
@@ -784,20 +712,18 @@ BEGIN
         FROM claimius.claim_object co
             JOIN claimius.claim c ON c.id = co.claim_id
         WHERE co.claim_id = p_claim_id
-          AND co.app_id = p_app_id
           AND co.sa_deleted_at IS NULL
           AND co.object_id IS NOT NULL
           AND co.object_type <> 'claimius.claim'
           AND (claimius._effective_access(c.sa_access, co.sa_access) & 16) = 0
     LOOP
-        v_denied := claimius._denied_access(p_app_id, v_user_id, v_binding.object_type, v_binding.object_id) & v_binding.bits;
+        v_denied := claimius._denied_access(v_user_id, v_binding.object_type, v_binding.object_id) & v_binding.bits;
         CONTINUE WHEN v_denied = 0;
 
-        PERFORM claimius.reconcile_if_pending(p_app_id, v_user_id, v_binding.object_type, v_binding.object_id);
+        PERFORM claimius.reconcile_if_pending(v_user_id, v_binding.object_type, v_binding.object_id);
         SELECT max(uo.sa_access) INTO v_held
         FROM claimius.user_object uo
         WHERE uo.user_id = v_user_id
-          AND uo.app_id = p_app_id
           AND uo.object_type = v_binding.object_type
           AND uo.object_id = v_binding.object_id;
 
@@ -810,9 +736,9 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius._check_claim_denies(UUID, UUID, UUID) IS 'Refuses to hand out a claim that gives what is denied to the actor, the user of p_actor_uc in the app: on no object the claim grants bits on may those bits overlap what a deny reaching the actor there removes from the actor''s settled pair. The level of the claim plays no part. An actor that is not a live user_claim of the app passes.';
+COMMENT ON FUNCTION claimius._check_claim_denies(UUID, UUID) IS 'Refuses to hand out a claim that gives what is denied to the actor, the user of p_actor_uc: on no object the claim grants bits on may those bits overlap what a deny reaching the actor there removes from the actor''s settled pair. The level of the claim plays no part. An actor that is not a live user_claim passes.';
 
-GRANT EXECUTE ON FUNCTION claimius._check_claim_denies(UUID, UUID, UUID)
+GRANT EXECUTE ON FUNCTION claimius._check_claim_denies(UUID, UUID)
     TO claimius_writer, claimius_reader;
 
 CREATE OR REPLACE FUNCTION claimius._check_claim_grant()
@@ -822,9 +748,9 @@ BEGIN
         RETURN NEW;
     END IF;
     IF TG_TABLE_NAME = 'claim' THEN
-        PERFORM claimius._check_claim_denies(NEW.app_id, coalesce(nullif(current_setting('claimius.actor', TRUE), '')::UUID, NEW.sa_created_by), NEW.id);
+        PERFORM claimius._check_claim_denies(coalesce(nullif(current_setting('claimius.actor', TRUE), '')::UUID, NEW.sa_created_by), NEW.id);
     ELSE
-        PERFORM claimius._check_claim_denies(NEW.app_id, NEW.sa_created_by, NEW.claim_id);
+        PERFORM claimius._check_claim_denies(NEW.sa_created_by, NEW.claim_id);
     END IF;
     RETURN NEW;
 END;
@@ -845,77 +771,11 @@ CREATE TRIGGER tg_check_claim_level
     BEFORE UPDATE OF level ON claimius.claim
     FOR EACH ROW WHEN (NEW.level > OLD.level) EXECUTE FUNCTION claimius._check_claim_grant();
 
-CREATE OR REPLACE FUNCTION claimius.app_has_scope(
-    p_app_id      UUID,
-    p_owner_id    UUID,
-    p_object_type TEXT DEFAULT NULL,
-    p_object_id   UUID DEFAULT NULL
-) RETURNS BOOLEAN AS $$
-    SELECT claimius.app_has_object(p_app_id, 'claimius.organization', p_owner_id)
-       AND (p_object_type IS NULL
-            OR p_object_type NOT IN ('claimius.organization', 'claimius.location')
-            OR claimius.app_has_object(p_app_id, p_object_type, p_object_id));
-$$ LANGUAGE sql STABLE;
-
-COMMENT ON FUNCTION claimius.app_has_scope(UUID, UUID, TEXT, UUID) IS 'True when the owning organization, and the object when it is an organization or a location, are live in the app through app_object, so a row of the app scoped to them reaches the app''s disciples.';
-
-GRANT EXECUTE ON FUNCTION claimius.app_has_scope(UUID, UUID, TEXT, UUID)
-    TO claimius_writer, claimius_reader;
-
-CREATE OR REPLACE FUNCTION claimius._check_app_scope()
-    RETURNS TRIGGER AS $$
-DECLARE
-    v_object_type TEXT;
-    v_object_id   UUID;
-BEGIN
-    IF claimius.in_replay_mode() OR NEW.sa_deleted_at IS NOT NULL THEN
-        RETURN NEW;
-    END IF;
-    IF TG_TABLE_NAME = 'claim_object' THEN
-        v_object_type := NEW.object_type;
-        v_object_id := NEW.object_id;
-    END IF;
-    IF TG_OP = 'UPDATE'
-        AND NEW.app_id = OLD.app_id
-        AND NEW.sa_owner_id = OLD.sa_owner_id
-        AND OLD.sa_deleted_at IS NULL
-        AND (TG_TABLE_NAME <> 'claim_object'
-             OR (v_object_type IS NOT DISTINCT FROM (to_jsonb(OLD) ->> 'object_type')
-                 AND v_object_id IS NOT DISTINCT FROM (to_jsonb(OLD) ->> 'object_id')::UUID))
-    THEN
-        RETURN NEW;
-    END IF;
-    IF NOT claimius.app_has_object(NEW.app_id, 'claimius.organization', NEW.sa_owner_id) THEN
-        RAISE EXCEPTION 'cannot write claimius.% %: owning organization % is not linked to app %',
-            TG_TABLE_NAME, NEW.id, NEW.sa_owner_id, NEW.app_id USING ERRCODE = 'P0403';
-    END IF;
-    IF NOT claimius.app_has_scope(NEW.app_id, NEW.sa_owner_id, v_object_type, v_object_id) THEN
-        RAISE EXCEPTION 'cannot write claimius.% %: % % is not linked to app %',
-            TG_TABLE_NAME, NEW.id, v_object_type, v_object_id, NEW.app_id USING ERRCODE = 'P0403';
-    END IF;
-    RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
-
-COMMENT ON FUNCTION claimius._check_app_scope() IS 'BEFORE INSERT/UPDATE trigger on claim, user_claim and claim_object. Refuses with P0403 a live row whose owning organization, or whose bound organization or location, is not linked to the row''s app, since the row could never reach the app''s disciples. An update that keeps the app, owner and object of a live row passes. Bypassed during replay.';
-
-GRANT EXECUTE ON FUNCTION claimius._check_app_scope()
-    TO claimius_writer, claimius_reader;
-
 DROP TRIGGER IF EXISTS tg_check_app_scope ON claimius.claim;
-CREATE TRIGGER tg_check_app_scope
-    BEFORE INSERT OR UPDATE ON claimius.claim
-    FOR EACH ROW EXECUTE FUNCTION claimius._check_app_scope();
-
 DROP TRIGGER IF EXISTS tg_check_app_scope ON claimius.user_claim;
-CREATE TRIGGER tg_check_app_scope
-    BEFORE INSERT OR UPDATE ON claimius.user_claim
-    FOR EACH ROW EXECUTE FUNCTION claimius._check_app_scope();
-
 DROP TRIGGER IF EXISTS tg_check_app_scope ON claimius.claim_object;
-CREATE TRIGGER tg_check_app_scope
-    BEFORE INSERT OR UPDATE ON claimius.claim_object
-    FOR EACH ROW EXECUTE FUNCTION claimius._check_app_scope();
+DROP FUNCTION IF EXISTS claimius._check_app_scope();
+DROP FUNCTION IF EXISTS claimius.app_has_scope(UUID, UUID, TEXT, UUID);
 
 DROP FUNCTION IF EXISTS claimius._cascade_recompute(UUID, UUID, TEXT, UUID);
 
@@ -927,6 +787,7 @@ DECLARE
     v_payload JSONB;
     v_row   JSONB;
     v_old   JSONB;
+    v_apps  UUID[];
 BEGIN
     IF claimius.in_replay_mode() THEN
         RETURN coalesce(NEW, OLD);
@@ -951,13 +812,13 @@ BEGIN
         v_op := 'upsert';
         v_payload := to_jsonb(NEW) - 'txid';
     END IF;
+    v_row := to_jsonb(coalesce(NEW, OLD));
 
     IF v_type IN ('claimius.organization', 'claimius.location') THEN
         INSERT INTO claimius.sync_event (operation, event_type, payload, app_id)
         SELECT v_op, v_type, v_payload, a.app_id
         FROM claimius.apps_for_object(v_type, (v_payload ->> 'id')::UUID) AS a(app_id);
     ELSIF v_type = 'claimius.object_asset' THEN
-        v_row := to_jsonb(coalesce(NEW, OLD));
         INSERT INTO claimius.sync_event (operation, event_type, payload, app_id)
         SELECT v_op, v_type, v_payload, a.app_id
         FROM claimius.apps_for_object(v_row ->> 'object_type', (v_row ->> 'object_id')::UUID, (v_row ->> 'app_id')::UUID) AS a(app_id);
@@ -970,10 +831,27 @@ BEGIN
                 SELECT claimius.apps_for_object(v_row ->> 'object_type', (v_row ->> 'object_id')::UUID, (v_row ->> 'app_id')::UUID));
         END IF;
     ELSIF v_type = 'claimius.user_identity' THEN
-        v_row := to_jsonb(coalesce(NEW, OLD));
         INSERT INTO claimius.sync_event (operation, event_type, payload, app_id)
         SELECT v_op, v_type, v_payload, a.app_id
         FROM claimius.apps_for_object('claimius.organization', (v_row ->> 'sa_owner_id')::UUID) AS a(app_id);
+    ELSIF v_type IN ('claimius.claim', 'claimius.user_claim', 'claimius.claim_object', 'claimius.samna_user') THEN
+        IF v_type = 'claimius.samna_user' AND (v_row ->> 'user_id')::UUID = claimius.anonymous_user_id() THEN
+            RETURN coalesce(NEW, OLD);
+        END IF;
+        v_apps := ARRAY(SELECT claimius._app_ids_for_row(v_type, v_row));
+        IF v_type = 'claimius.user_claim' AND TG_OP <> 'DELETE' AND (v_payload ->> 'sa_deleted_at') IS NULL
+            AND (v_row ->> 'user_id')::UUID <> claimius.anonymous_user_id()
+        THEN
+            INSERT INTO claimius.sync_event (operation, event_type, payload, app_id)
+            SELECT 'upsert', 'claimius.samna_user', to_jsonb(u) - 'txid', a.app_id
+            FROM claimius.samna_user u
+                CROSS JOIN unnest(v_apps) AS a(app_id)
+            WHERE u.user_id = (v_row ->> 'user_id')::UUID
+              AND u.sa_deleted_at IS NULL;
+        END IF;
+        INSERT INTO claimius.sync_event (operation, event_type, payload, app_id)
+        SELECT v_op, v_type, v_payload, a.app_id
+        FROM unnest(v_apps) AS a(app_id);
     ELSE
         INSERT INTO claimius.sync_event (operation, event_type, payload, app_id)
         VALUES (v_op, v_type, v_payload, (v_payload ->> 'app_id')::uuid);
@@ -984,8 +862,9 @@ BEGIN
         AND (TG_OP = 'INSERT' OR (to_jsonb(OLD) ->> 'sa_deleted_at') IS NOT NULL)
     THEN
         INSERT INTO claimius.sync_event (operation, event_type, payload, app_id)
-        SELECT 'upsert', 'claimius.object_asset', to_jsonb(l) - 'txid', (v_payload ->> 'app_id')::UUID
+        SELECT 'upsert', 'claimius.object_asset', to_jsonb(l) - 'txid', a.app_id
         FROM claimius.object_asset l
+            CROSS JOIN unnest(v_apps) AS a(app_id)
         WHERE l.object_type = 'claimius.samna_user'
           AND l.object_id = (v_payload ->> 'user_id')::UUID
           AND l.sa_deleted_at IS NULL
@@ -996,7 +875,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius.emit_sync_event() IS 'Trigger on the source tables, named by the parent when it fires on a partition. Publishes into sync_event. An organization or location change is written once per app linked to it. An object_asset change is written once per app apps_for_object names for its object, and a link that moves to another object is deleted from the apps that no longer see it. A user_identity change is written once per app linked to its owning organization. A samna_user row that goes live in an app publishes the live links on that user to the app.';
+COMMENT ON FUNCTION claimius.emit_sync_event() IS 'Trigger on the source tables, named by the parent when it fires on a partition. Publishes into sync_event. An organization or location change is written once per app linked to it. An object_asset change is written once per app apps_for_object names for its object, and a link that moves to another object is deleted from the apps that no longer see it. A user_identity change is written once per app linked to its owning organization. A claim is written once per app linked to its owning organization, a grant or a binding once per app of its claim, and a samna_user once per app where the user holds a live grant of a claim owned in a linked organization; a live grant also writes its user to the apps of its claim first, so the app holds every user granted its claims. The anonymous user is never published: every disciple holds its own. A samna_user row that goes live publishes the live links on that user to its apps.';
 
 GRANT EXECUTE ON FUNCTION claimius.emit_sync_event()
     TO claimius_writer, claimius_reader;
@@ -1033,6 +912,24 @@ BEGIN
           AND t.sa_owner_id = v_link.object_id
         ORDER BY t.sa_created_at;
         INSERT INTO claimius.sync_event (operation, event_type, payload, app_id)
+        SELECT 'delete', x.event_type, jsonb_build_object('id', x.id), v_link.app_id
+        FROM (
+            SELECT 'claimius.claim_object' AS event_type, co.id, 1 AS n, co.sa_created_at
+            FROM claimius.claim_object co
+                JOIN claimius.claim c ON c.id = co.claim_id
+            WHERE v_link.object_type = 'claimius.organization' AND c.sa_owner_id = v_link.object_id
+            UNION ALL
+            SELECT 'claimius.user_claim', uc.id, 2, uc.sa_created_at
+            FROM claimius.user_claim uc
+                JOIN claimius.claim c ON c.id = uc.claim_id
+            WHERE v_link.object_type = 'claimius.organization' AND c.sa_owner_id = v_link.object_id
+            UNION ALL
+            SELECT 'claimius.claim', c.id, 3, c.sa_created_at
+            FROM claimius.claim c
+            WHERE v_link.object_type = 'claimius.organization' AND c.sa_owner_id = v_link.object_id
+        ) x
+        ORDER BY x.n, x.sa_created_at;
+        INSERT INTO claimius.sync_event (operation, event_type, payload, app_id)
         VALUES ('delete', v_link.object_type, jsonb_build_object('id', v_link.object_id), v_link.app_id);
         RETURN coalesce(NEW, OLD);
     END IF;
@@ -1046,6 +943,45 @@ BEGIN
     IF v_payload IS NOT NULL THEN
         INSERT INTO claimius.sync_event (operation, event_type, payload, app_id)
         VALUES ('upsert', v_link.object_type, v_payload, v_link.app_id);
+    END IF;
+
+    IF v_link.object_type = 'claimius.organization' THEN
+        INSERT INTO claimius.sync_event (operation, event_type, payload, app_id)
+        SELECT 'upsert', 'claimius.claim', to_jsonb(c) - 'txid', v_link.app_id
+        FROM claimius.claim c
+        WHERE c.sa_owner_id = v_link.object_id
+          AND c.sa_deleted_at IS NULL
+        ORDER BY c.sa_created_at;
+
+        INSERT INTO claimius.sync_event (operation, event_type, payload, app_id)
+        SELECT 'upsert', 'claimius.samna_user', to_jsonb(u) - 'txid', v_link.app_id
+        FROM claimius.samna_user u
+        WHERE u.sa_deleted_at IS NULL
+          AND u.user_id <> claimius.anonymous_user_id()
+          AND EXISTS (
+              SELECT 1
+              FROM claimius.user_claim uc
+                  JOIN claimius.claim c ON c.id = uc.claim_id AND c.sa_deleted_at IS NULL
+              WHERE uc.user_id = u.user_id
+                AND uc.sa_deleted_at IS NULL
+                AND c.sa_owner_id = v_link.object_id)
+        ORDER BY u.sa_created_at;
+
+        INSERT INTO claimius.sync_event (operation, event_type, payload, app_id)
+        SELECT 'upsert', 'claimius.user_claim', to_jsonb(uc) - 'txid', v_link.app_id
+        FROM claimius.user_claim uc
+            JOIN claimius.claim c ON c.id = uc.claim_id AND c.sa_deleted_at IS NULL
+        WHERE c.sa_owner_id = v_link.object_id
+          AND uc.sa_deleted_at IS NULL
+        ORDER BY uc.sa_created_at;
+
+        INSERT INTO claimius.sync_event (operation, event_type, payload, app_id)
+        SELECT 'upsert', 'claimius.claim_object', to_jsonb(co) - 'txid', v_link.app_id
+        FROM claimius.claim_object co
+            JOIN claimius.claim c ON c.id = co.claim_id AND c.sa_deleted_at IS NULL
+        WHERE c.sa_owner_id = v_link.object_id
+          AND co.sa_deleted_at IS NULL
+        ORDER BY co.sa_created_at;
     END IF;
 
     INSERT INTO claimius.sync_event (operation, event_type, payload, app_id)
@@ -1068,7 +1004,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius.emit_app_object_sync_event() IS 'Trigger on app_object. Publishes the linked row, its live object_asset links and, for an organization, its live user_identity rows to the app on link, and the delete of those and of the row on unlink.';
+COMMENT ON FUNCTION claimius.emit_app_object_sync_event() IS 'Trigger on app_object. Publishes the linked row, its live object_asset links and, for an organization, its live user_identity rows and the claims it owns with their live grants, the users holding them and their live bindings to the app on link, and the delete of those and of the row on unlink.';
 
 GRANT EXECUTE ON FUNCTION claimius.emit_app_object_sync_event()
     TO claimius_writer, claimius_reader;
@@ -1100,7 +1036,14 @@ BEGIN
         RETURN coalesce(NEW, OLD);
     END IF;
 
-    IF v_row ? 'app_id' THEN
+    IF v_type = 'claimius.samna_user' THEN
+        RETURN coalesce(NEW, OLD);
+    ELSIF v_type IN ('claimius.claim', 'claimius.user_claim', 'claimius.claim_object') THEN
+        SELECT claimius.get_app_home(a.app_id) INTO v_home
+        FROM claimius._app_ids_for_row(v_type, v_row) AS a(app_id)
+        WHERE claimius.get_app_home(a.app_id) IS NOT NULL
+        LIMIT 1;
+    ELSIF v_row ? 'app_id' THEN
         v_home := claimius.get_app_home((v_row ->> 'app_id')::UUID);
     ELSE
         SELECT claimius.get_app_home(ao.app_id) INTO v_home
@@ -1121,7 +1064,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius.enforce_app_home() IS 'Trigger on the source tables. Refuses, with SQLSTATE P0409 and the home in the hint, a write outside replay to a row of an app another prophet decides.';
+COMMENT ON FUNCTION claimius.enforce_app_home() IS 'Trigger on the source tables. Refuses, with SQLSTATE P0409 and the home in the hint, a write outside replay to a row of an app another prophet decides. A claim, grant or binding is a row of every app linked to its claim''s owning organization; a samna_user is shared and of no app.';
 
 GRANT EXECUTE ON FUNCTION claimius.enforce_app_home()
     TO claimius_writer, claimius_reader;
@@ -1140,8 +1083,8 @@ COMMENT ON FUNCTION claimius.notify_sync_event() IS 'Statement trigger on sync_e
 GRANT EXECUTE ON FUNCTION claimius.notify_sync_event()
     TO claimius_writer, claimius_reader;
 
+DROP FUNCTION IF EXISTS claimius._settle_pair(UUID, UUID, TEXT, UUID);
 CREATE OR REPLACE FUNCTION claimius._settle_pair(
-    p_app_id        UUID,
     p_user_id       UUID,
     p_object_type   TEXT,
     p_object_id     UUID
@@ -1175,7 +1118,6 @@ BEGIN
         SELECT uo.* INTO v_pair
         FROM claimius.user_object uo
         WHERE uo.user_id = p_user_id
-          AND uo.app_id = p_app_id
           AND uo.object_type = p_object_type
           AND uo.object_id = p_object_id;
         v_has_pair := FOUND;
@@ -1190,27 +1132,26 @@ BEGIN
         ELSE
             SELECT a.settled_txid INTO v_mark
             FROM claimius.user_activity a
-            WHERE a.user_id = p_user_id AND a.app_id = p_app_id;
+            WHERE a.user_id = p_user_id;
             v_mark := coalesce(v_mark, '0'::XID8);
         END IF;
 
         IF NOT v_live THEN
             IF v_has_pair THEN
-                PERFORM claimius.recompute_user_object(p_app_id, p_user_id, ARRAY[p_object_type], ARRAY[p_object_id], NULL, v_xmin);
+                PERFORM claimius.recompute_user_object(p_user_id, ARRAY[p_object_type], ARRAY[p_object_id], NULL, v_xmin);
                 v_has_pair := FALSE;
             END IF;
             v_settled := TRUE;
         ELSE
             SELECT ps.access_trimmed_txid INTO v_trimmed
             FROM claimius.prophet_state ps
-            WHERE ps.app_id = p_app_id;
+            WHERE ps.system_app_slug IS NOT NULL;
 
             IF v_mark < coalesce(v_trimmed, '0'::XID8) THEN
                 v_covered := TRUE;
             ELSIF EXISTS (
                 SELECT 1 FROM claimius.access_diff d
-                WHERE d.app_id = p_app_id
-                  AND d.kind = 'assignment'
+                WHERE d.kind = 'assignment'
                   AND d.user_id = p_user_id
                   AND d.txid >= v_mark) THEN
                 v_covered := TRUE;
@@ -1218,12 +1159,12 @@ BEGIN
                 IF v_info.sa_owner_root_id IS NULL THEN
                     v_areas := ARRAY(
                         SELECT d FROM claimius.access_diff d
-                        WHERE d.app_id = p_app_id AND d.root_id IS NULL AND d.txid >= v_mark
+                        WHERE d.root_id IS NULL AND d.txid >= v_mark
                         LIMIT 16);
                 ELSE
                     v_areas := ARRAY(
                         SELECT d FROM claimius.access_diff d
-                        WHERE d.app_id = p_app_id AND d.root_id = v_info.sa_owner_root_id AND d.txid >= v_mark
+                        WHERE d.root_id = v_info.sa_owner_root_id AND d.txid >= v_mark
                         LIMIT 16);
                 END IF;
 
@@ -1256,8 +1197,7 @@ BEGIN
                               AND e.depth > 0
                         ) n
                             JOIN claimius.access_diff d
-                                ON d.app_id = p_app_id
-                               AND d.kind = 'object'
+                                ON d.kind = 'object'
                                AND d.object_type = n.object_type
                                AND d.object_id = n.object_id
                         WHERE d.txid >= v_mark
@@ -1268,11 +1208,10 @@ BEGIN
 
             IF NOT v_settled THEN
                 IF v_covered THEN
-                    PERFORM claimius.recompute_user_object(p_app_id, p_user_id, ARRAY[p_object_type], ARRAY[p_object_id], NULL, v_xmin);
+                    PERFORM claimius.recompute_user_object(p_user_id, ARRAY[p_object_type], ARRAY[p_object_id], NULL, v_xmin);
                     SELECT uo.* INTO v_pair
                     FROM claimius.user_object uo
                     WHERE uo.user_id = p_user_id
-                      AND uo.app_id = p_app_id
                       AND uo.object_type = p_object_type
                       AND uo.object_id = p_object_id;
                     v_has_pair := FOUND;
@@ -1280,7 +1219,6 @@ BEGIN
                     UPDATE claimius.user_object uo
                     SET settled_txid = v_xmin
                     WHERE uo.user_id = p_user_id
-                      AND uo.app_id = p_app_id
                       AND uo.object_type = p_object_type
                       AND uo.object_id = p_object_id;
                 END IF;
@@ -1302,14 +1240,13 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius._settle_pair(UUID, UUID, TEXT, UUID) IS 'The point settle and the read of one pair in one pass: reads the pair and the object''s object_info row, takes the mark from the pair or the cursor when there is no pair, and recomputes the pair when an area of the object''s root or an assignment of the user was raised at or after the mark on the object, with cascade on an ancestor, or when the mark is below the trimmed position; otherwise moves the mark to the snapshot xmin as a heap only update. An object with no object_info row loses its pair. Returns one row: whether the settle ran, false when a lock wait past the settle timeout or a deadlock left the pair as it stands, with the pair''s mask, grants, scope and creator flag, NULL when the user holds no pair, and the object''s owner, location and owner root.';
+COMMENT ON FUNCTION claimius._settle_pair(UUID, TEXT, UUID) IS 'The point settle and the read of one pair in one pass: reads the pair and the object''s object_info row, takes the mark from the pair or the cursor when there is no pair, and recomputes the pair when an area of the object''s root or an assignment of the user was raised at or after the mark on the object, with cascade on an ancestor, or when the mark is below the trimmed position; otherwise moves the mark to the snapshot xmin as a heap only update. An object with no object_info row loses its pair. Returns one row: whether the settle ran, false when a lock wait past the settle timeout or a deadlock left the pair as it stands, with the pair''s mask, grants, scope and creator flag, NULL when the user holds no pair, and the object''s owner, location and owner root.';
 
-GRANT EXECUTE ON FUNCTION claimius._settle_pair(UUID, UUID, TEXT, UUID)
+GRANT EXECUTE ON FUNCTION claimius._settle_pair(UUID, TEXT, UUID)
     TO claimius_writer, claimius_reader;
 
 DROP FUNCTION IF EXISTS claimius.reconcile_if_pending(UUID, UUID, TEXT, UUID);
 CREATE OR REPLACE FUNCTION claimius.reconcile_if_pending(
-    p_app_id        UUID,
     p_user_id       UUID,
     p_object_type   TEXT DEFAULT NULL,
     p_object_id     UUID DEFAULT NULL
@@ -1319,17 +1256,17 @@ DECLARE
     v_lock_timeout  TEXT := current_setting('lock_timeout');
     v_settled       BOOLEAN := FALSE;
 BEGIN
-    IF p_app_id IS NULL OR p_user_id IS NULL THEN
+    IF p_user_id IS NULL THEN
         RETURN FALSE;
     END IF;
     PERFORM set_config('lock_timeout', claimius._settle_lock_timeout(), TRUE);
 
     IF p_object_type IS NOT NULL AND p_object_id IS NOT NULL THEN
-        SELECT s.settled INTO v_settled FROM claimius._settle_pair(p_app_id, p_user_id, p_object_type, p_object_id) s;
-    ELSIF pg_try_advisory_xact_lock(hashtextextended('claimius.share:' || p_app_id::TEXT || ':' || p_user_id::TEXT, 0)) THEN
-        v_settled := claimius._settle_diff_share(p_app_id, p_user_id);
+        SELECT s.settled INTO v_settled FROM claimius._settle_pair(p_user_id, p_object_type, p_object_id) s;
+    ELSIF pg_try_advisory_xact_lock(hashtextextended('claimius.share:' || p_user_id::TEXT, 0)) THEN
+        v_settled := claimius._settle_diff_share(p_user_id);
         IF v_settled THEN
-            PERFORM claimius._settle_usage_diff(p_app_id, p_user_id);
+            PERFORM claimius._settle_usage_diff(p_user_id);
         END IF;
     END IF;
     PERFORM set_config('lock_timeout', v_lock_timeout, TRUE);
@@ -1337,9 +1274,9 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius.reconcile_if_pending(UUID, UUID, TEXT, UUID) IS 'Settles what a read meets. With a target it settles the one pair through _settle_pair. Without a target it settles the reader''s share through _settle_diff_share under the share lock and folds its usage. Returns whether the settle ran: false when the share lock was held by another read or a lock wait past the settle timeout or a deadlock left the pair as it stands. Called at read entry points.';
+COMMENT ON FUNCTION claimius.reconcile_if_pending(UUID, TEXT, UUID) IS 'Settles what a read meets. With a target it settles the one pair through _settle_pair. Without a target it settles the reader''s share through _settle_diff_share under the share lock and folds its usage. Returns whether the settle ran: false when the share lock was held by another read or a lock wait past the settle timeout or a deadlock left the pair as it stands. Called at read entry points.';
 
-GRANT EXECUTE ON FUNCTION claimius.reconcile_if_pending(UUID, UUID, TEXT, UUID)
+GRANT EXECUTE ON FUNCTION claimius.reconcile_if_pending(UUID, TEXT, UUID)
     TO claimius_writer, claimius_reader;
 
 DROP FUNCTION IF EXISTS claimius.drain_access_diff(INTEGER);
@@ -1357,21 +1294,9 @@ BEGIN
     PERFORM set_config('lock_timeout', claimius._settle_lock_timeout(), TRUE);
     BEGIN
         FOR v_user IN
-            SELECT a.app_id, a.user_id, a.settled_txid, a.settled_at, a.last_used_at
-            FROM claimius.samna_app s
-                CROSS JOIN LATERAL (
-                    SELECT d.txid FROM claimius.access_diff d
-                    WHERE d.app_id = s.id
-                    ORDER BY d.txid DESC
-                    LIMIT 1
-                ) m
-                JOIN claimius.user_activity a ON a.app_id = s.id AND a.settled_txid < m.txid
-            WHERE EXISTS (
-                      SELECT 1 FROM claimius.prophet_state ps
-                      WHERE ps.app_id = s.id AND ps.system_app_slug IS NOT NULL)
-               OR NOT EXISTS (
-                      SELECT 1 FROM claimius.sync_consumer c
-                      WHERE c.app_id = s.id AND c.last_contact_at > now() - INTERVAL '7 days')
+            SELECT a.user_id, a.settled_txid, a.settled_at, a.last_used_at
+            FROM claimius.user_activity a
+            WHERE a.settled_txid < (SELECT d.txid FROM claimius.access_diff d ORDER BY d.txid DESC LIMIT 1)
             ORDER BY a.last_used_at DESC
             LIMIT least(greatest(p_limit_pairs, 0), 64)
         LOOP
@@ -1380,13 +1305,13 @@ BEGIN
             FROM (
                 SELECT d.sa_created_at
                 FROM claimius.access_diff d
-                WHERE d.app_id = v_user.app_id AND d.txid >= v_user.settled_txid
+                WHERE d.txid >= v_user.settled_txid
                 LIMIT 1000
             ) x;
             v_since := coalesce(v_user.settled_at, v_since, now());
             CONTINUE WHEN extract(epoch FROM now() - v_since) < v_areas * extract(epoch FROM now() - v_user.last_used_at);
-            CONTINUE WHEN NOT pg_try_advisory_xact_lock(hashtextextended('claimius.share:' || v_user.app_id::TEXT || ':' || v_user.user_id::TEXT, 0));
-            IF claimius._settle_diff_share(v_user.app_id, v_user.user_id) THEN
+            CONTINUE WHEN NOT pg_try_advisory_xact_lock(hashtextextended('claimius.share:' || v_user.user_id::TEXT, 0));
+            IF claimius._settle_diff_share(v_user.user_id) THEN
                 settled := settled + 1;
             END IF;
         END LOOP;
@@ -1399,13 +1324,13 @@ BEGIN
     PERFORM set_config('lock_timeout', v_lock_timeout, TRUE);
 
     BEGIN
-        PERFORM claimius._settle_usage_diff(NULL, NULL, greatest(p_limit_pairs, 0));
+        PERFORM claimius._settle_usage_diff(NULL, greatest(p_limit_pairs, 0));
     EXCEPTION WHEN OTHERS THEN
         failures := failures || ('usage_diff: ' || SQLERRM);
     END;
 
     BEGIN
-        PERFORM claimius._settle_user_users_diff(NULL, NULL, greatest(p_limit_pairs, 0));
+        PERFORM claimius._settle_user_users_diff(NULL, greatest(p_limit_pairs, 0));
     EXCEPTION WHEN OTHERS THEN
         failures := failures || ('user_users_diff: ' || SQLERRM);
     END;
@@ -1413,7 +1338,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = claimius, pg_temp;
 
-COMMENT ON FUNCTION claimius.drain_access_diff(INTEGER) IS 'Settles shares ahead of their reads, off the request path: takes the users whose cursor is below the newest area of their app, read per app from the (app_id, txid) index, most recently used first and at most 64, and settles each whose read rate 1 / (now - last_used_at) is at least the raise rate n / (now - settled_at) of the n areas since its cursor, under its own share lock. On the prophet only its own apps and apps with no disciple in contact. Then folds the usage_diff and user_users_diff rows of the oldest p_limit_pairs objects. Each of the three steps runs in its own subtransaction, so a failing step leaves the others to run: returns the shares settled and one message per failed step, which the caller logs. Trimming is trim_access_diff, run by the retention job.';
+COMMENT ON FUNCTION claimius.drain_access_diff(INTEGER) IS 'Settles shares ahead of their reads, off the request path: takes the users whose cursor is below the newest area, most recently used first and at most 64, and settles each whose read rate 1 / (now - last_used_at) is at least the raise rate n / (now - settled_at) of the n areas since its cursor, under its own share lock. Then folds the usage_diff and user_users_diff rows of the oldest p_limit_pairs objects. Each of the three steps runs in its own subtransaction, so a failing step leaves the others to run: returns the shares settled and one message per failed step, which the caller logs. Trimming is trim_access_diff, run by the retention job.';
 
 GRANT EXECUTE ON FUNCTION claimius.drain_access_diff(INTEGER)
     TO claimius_writer, claimius_reader;
@@ -1422,62 +1347,58 @@ CREATE OR REPLACE FUNCTION claimius.trim_access_diff(
     p_keep  INTERVAL DEFAULT INTERVAL '7 days'
 ) RETURNS BIGINT AS $$
 DECLARE
-    v_app       RECORD;
+    v_trimmed   XID8;
     v_low       XID8;
-    v_n         BIGINT;
-    v_deleted   BIGINT := 0;
+    v_deleted   BIGINT;
 BEGIN
-    FOR v_app IN
-        SELECT s.id AS app_id, coalesce(ps.access_trimmed_txid, '0'::XID8) AS access_trimmed_txid
-        FROM claimius.samna_app s
-            LEFT JOIN claimius.prophet_state ps ON ps.app_id = s.id
-        WHERE EXISTS (SELECT 1 FROM claimius.access_diff d WHERE d.app_id = s.id)
-    LOOP
-        SELECT min(a.settled_txid) INTO v_low
-        FROM claimius.user_activity a
-        WHERE a.app_id = v_app.app_id
-          AND a.last_used_at > now() - p_keep;
-        v_low := coalesce(v_low, pg_snapshot_xmin(pg_current_snapshot()));
-        CONTINUE WHEN v_low <= v_app.access_trimmed_txid;
-        DELETE FROM claimius.access_diff d WHERE d.app_id = v_app.app_id AND d.txid < v_low;
-        GET DIAGNOSTICS v_n = ROW_COUNT;
-        INSERT INTO claimius.prophet_state (app_id, access_trimmed_txid)
-        VALUES (v_app.app_id, v_low)
-        ON CONFLICT (app_id) DO UPDATE SET access_trimmed_txid = EXCLUDED.access_trimmed_txid;
-        v_deleted := v_deleted + v_n;
-    END LOOP;
+    SELECT ds.access_trimmed_txid INTO v_trimmed FROM claimius.prophet_state ds WHERE ds.system_app_slug IS NOT NULL;
+    IF NOT FOUND THEN
+        RETURN 0;
+    END IF;
+    SELECT min(a.settled_txid) INTO v_low
+    FROM claimius.user_activity a
+    WHERE a.last_used_at > now() - p_keep;
+    v_low := coalesce(v_low, pg_snapshot_xmin(pg_current_snapshot()));
+    IF v_low <= v_trimmed THEN
+        RETURN 0;
+    END IF;
+    DELETE FROM claimius.access_diff d WHERE d.txid < v_low;
+    GET DIAGNOSTICS v_deleted = ROW_COUNT;
+    UPDATE claimius.prophet_state SET access_trimmed_txid = v_low WHERE system_app_slug IS NOT NULL;
     RETURN v_deleted;
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius.trim_access_diff(INTERVAL) IS 'Trims, per app holding areas, child apps and apps a disciple pulls included, every area below the lowest cursor among the app''s users used within p_keep, or below the oldest running transaction when no user was, and records that position as the app''s access_trimmed_txid, creating its prophet_state row when the app has none. A reader whose cursor is below it resettles its whole reach. Returns the areas removed. The access_diff retention prune.';
+COMMENT ON FUNCTION claimius.trim_access_diff(INTERVAL) IS 'Trims every area below the lowest cursor among the users used within p_keep, or below the oldest running transaction when no user was, and records that position as access_trimmed_txid on the system app''s prophet_state row. A reader whose cursor is below it resettles its whole reach. Returns the areas removed. The access_diff retention prune.';
 
 GRANT EXECUTE ON FUNCTION claimius.trim_access_diff(INTERVAL)
     TO claimius_writer, claimius_reader;
 
-CREATE OR REPLACE FUNCTION claimius.cascade_user_soft_delete(p_app_id UUID, p_user_id UUID)
+DROP FUNCTION IF EXISTS claimius.cascade_user_soft_delete(p_app_id uuid, p_user_id uuid);
+CREATE OR REPLACE FUNCTION claimius.cascade_user_soft_delete(p_user_id UUID)
     RETURNS VOID AS $$
 BEGIN
     UPDATE claimius.user_claim
     SET sa_deleted_at = now()
-    WHERE user_id = p_user_id AND app_id = p_app_id AND sa_deleted_at IS NULL;
+    WHERE user_id = p_user_id AND TRUE AND sa_deleted_at IS NULL;
 
     UPDATE claimius.user_relation
     SET sa_deleted_at = now()
-    WHERE user_id = p_user_id AND app_id = p_app_id AND sa_deleted_at IS NULL;
+    WHERE user_id = p_user_id AND TRUE AND sa_deleted_at IS NULL;
 
     UPDATE claimius.user_field
     SET sa_deleted_at = now()
-    WHERE user_id = p_user_id AND app_id = p_app_id AND sa_deleted_at IS NULL;
+    WHERE user_id = p_user_id AND TRUE AND sa_deleted_at IS NULL;
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius.cascade_user_soft_delete(p_app_id uuid, p_user_id uuid) IS 'Propagates soft delete from samna_user to dependent rows.';
+COMMENT ON FUNCTION claimius.cascade_user_soft_delete(p_user_id uuid) IS 'Propagates soft delete from samna_user to dependent rows.';
 
-GRANT EXECUTE ON FUNCTION claimius.cascade_user_soft_delete(p_app_id uuid, p_user_id uuid)
+GRANT EXECUTE ON FUNCTION claimius.cascade_user_soft_delete(p_user_id uuid)
     TO claimius_writer, claimius_reader;
 
-CREATE OR REPLACE FUNCTION claimius.check_user_active(p_app_id UUID, p_user_id UUID)
+DROP FUNCTION IF EXISTS claimius.check_user_active(p_app_id uuid, p_user_id uuid);
+CREATE OR REPLACE FUNCTION claimius.check_user_active(p_user_id UUID)
     RETURNS BOOLEAN AS $$
 DECLARE
     v_status        claimius.user_status;
@@ -1485,7 +1406,7 @@ DECLARE
 BEGIN
     SELECT status, sa_deleted_at INTO v_status, v_deleted
     FROM claimius.samna_user
-    WHERE user_id = p_user_id AND app_id = p_app_id;
+    WHERE user_id = p_user_id AND TRUE;
 
     IF v_status IS NULL THEN
         RETURN FALSE;
@@ -1499,16 +1420,16 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql STABLE;
 
-COMMENT ON FUNCTION claimius.check_user_active(p_app_id uuid, p_user_id uuid) IS 'Predicate: returns true when the user row exists, has status=active, and is not soft deleted.';
+COMMENT ON FUNCTION claimius.check_user_active(p_user_id uuid) IS 'Predicate: returns true when the user row exists, has status=active, and is not soft deleted.';
 
-GRANT EXECUTE ON FUNCTION claimius.check_user_active(p_app_id uuid, p_user_id uuid)
+GRANT EXECUTE ON FUNCTION claimius.check_user_active(p_user_id uuid)
     TO claimius_writer, claimius_reader;
 
 CREATE OR REPLACE FUNCTION claimius._cascade_user_soft_delete_trg()
     RETURNS TRIGGER AS $$
 BEGIN
     IF OLD.sa_deleted_at IS NULL AND NEW.sa_deleted_at IS NOT NULL THEN
-        PERFORM claimius.cascade_user_soft_delete(NEW.app_id, NEW.user_id);
+        PERFORM claimius.cascade_user_soft_delete(NEW.user_id);
     END IF;
     RETURN NEW;
 END;

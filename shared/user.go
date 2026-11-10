@@ -203,13 +203,6 @@ func (d *DB) deleteRelation(ctx context.Context, conn bun.IConn, ac *AccessClaim
 }
 
 func (d *DB) insertUser(ctx context.Context, conn bun.IConn, ac *AccessClaim, in *SamnaUser) (*SamnaUser, bool, error) {
-	if in.OwnerID != nil && *in.OwnerID != uuid.Nil {
-		result, err := d.callCreateOrganizationUser(ctx, conn, ac, *in.OwnerID, in, false, nil, nil)
-		if err != nil {
-			return nil, false, err
-		}
-		return result.SamnaUser, result.Created, nil
-	}
 	var payload []byte
 	err := d.NewRaw(`
 		SELECT (claimius.upsert_app_user(?, ?, ?, ?, ?, ?, ?, ?) -> 'samna_user')::jsonb
@@ -220,6 +213,20 @@ func (d *DB) insertUser(ctx context.Context, conn bun.IConn, ac *AccessClaim, in
 	var out SamnaUser
 	if err := json.Unmarshal(payload, &out); err != nil {
 		return nil, false, err
+	}
+	if in.ClaimID != nil && *in.ClaimID != uuid.Nil {
+		held, err := d.NewSelect().Conn(conn).TableExpr("claimius.user_claim").
+			Where("claim_id = ?", *in.ClaimID).Where("user_id = ?", out.UserID).Where("sa_deleted_at IS NULL").
+			Exists(ctx)
+		if err != nil {
+			return nil, false, err
+		}
+		if held {
+			return &out, false, nil
+		}
+		if _, err := d.insertClaimUser(ctx, conn, ac, *in.ClaimID, &UserClaim{UserID: out.UserID}); err != nil {
+			return nil, false, err
+		}
 	}
 	return &out, false, nil
 }
@@ -409,7 +416,7 @@ func (d *DB) CreateOrganizationUser(ctx context.Context, conn bun.IConn, ac *Acc
 	return in, nil
 }
 
-func (d *DB) callCreateOrganizationUser(ctx context.Context, conn bun.IConn, ac *AccessClaim, ownerID uuid.UUID, user *SamnaUser, upsert bool, identity map[string]any, reason *string) (*OrganizationUserResult, error) {
+func (d *DB) callCreateOrganizationUser(ctx context.Context, conn bun.IConn, ac *AccessClaim, ownerID uuid.UUID, user *SamnaUser, identity map[string]any, reason *string) (*OrganizationUserResult, error) {
 	if ac == nil || ac.UserClaimID == nil {
 		return nil, ErrNoAccess
 	}
@@ -417,19 +424,14 @@ func (d *DB) callCreateOrganizationUser(ctx context.Context, conn bun.IConn, ac 
 	if err != nil {
 		return nil, fmt.Errorf("marshal user: %w", err)
 	}
-	var identityJSON *string
-	if identity != nil {
-		raw, err := json.Marshal(identity)
-		if err != nil {
-			return nil, fmt.Errorf("marshal identity: %w", err)
-		}
-		s := string(raw)
-		identityJSON = &s
+	identityJSON, err := json.Marshal(identity)
+	if err != nil {
+		return nil, fmt.Errorf("marshal identity: %w", err)
 	}
 	var payload []byte
 	err = d.NewRaw(`
-		SELECT claimius.insert_organization_user(?, ?, ?::jsonb, ?, ?::jsonb, ?)
-	`, *ac.UserClaimID, ownerID, string(userJSON), upsert, identityJSON, reason).Conn(conn).Scan(ctx, &payload)
+		SELECT claimius.insert_organization_user(?, ?, ?::jsonb, ?::jsonb, ?)
+	`, *ac.UserClaimID, ownerID, string(userJSON), string(identityJSON), reason).Conn(conn).Scan(ctx, &payload)
 	if err != nil {
 		var pgErr pgdriver.Error
 		if errors.As(err, &pgErr) && pgErr.Field('C') == "23505" {
@@ -563,7 +565,7 @@ func (d *DB) postUserFromToken(ctx context.Context, conn bun.IConn, ac *AccessCl
 		return nil, err
 	}
 	identity := map[string]any{"external_id": externalID, "id_claim": idClaim, "type": "token", "data": claimsJSON}
-	return d.callCreateOrganizationUser(ctx, conn, ac, *payload.OwnerID, &user, true, identity, payload.Reason)
+	return d.callCreateOrganizationUser(ctx, conn, ac, *payload.OwnerID, &user, identity, payload.Reason)
 }
 
 func (d *DB) postUserFromExternal(ctx context.Context, conn bun.IConn, ac *AccessClaim, payload SamnaUserExternal) (*OrganizationUserResult, error) {
@@ -572,7 +574,7 @@ func (d *DB) postUserFromExternal(ctx context.Context, conn bun.IConn, ac *Acces
 		return nil, err
 	}
 	identity := map[string]any{"external_id": externalID, "id_claim": "external", "type": "external", "data": json.RawMessage(`{}`)}
-	return d.callCreateOrganizationUser(ctx, conn, ac, *payload.OwnerID, &user, true, identity, payload.Reason)
+	return d.callCreateOrganizationUser(ctx, conn, ac, *payload.OwnerID, &user, identity, payload.Reason)
 }
 
 func (d *DB) GetUsersMany(ctx context.Context, userIDs, ids []uuid.UUID, emails, externalIDs []string) ([]SamnaUser, error) {

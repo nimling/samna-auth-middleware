@@ -24,16 +24,16 @@ func TestRoutedDeleteRemovesAScopeBindingAndAGrantByTheirOwnID(t *testing.T) {
 
 	var claimID uuid.UUID
 	if err := prophet.NewRaw(`
-		SELECT (claimius.insert_claim(p_app_id => ?, p_name => 'Scoped pages', p_description => NULL, p_sa_access => 4,
+		SELECT (claimius.insert_claim(p_name => 'Scoped pages', p_description => NULL, p_sa_access => 4,
 		        p_sa_owner_id => ?, p_sa_root_id => ?, p_sa_created_by => ?) -> 'claim' ->> 'id')::UUID
-	`, app.ID, app.Org, app.Org, grantUser).Scan(ctx, &claimID); err != nil {
+	`, app.Org, app.Org, grantUser).Scan(ctx, &claimID); err != nil {
 		t.Fatalf("claim: %v", err)
 	}
 	var bindingID uuid.UUID
 	if err := prophet.NewRaw(`
-		SELECT (claimius.insert_claim_object(p_app_id => ?, p_claim_id => ?, p_sa_owner_id => ?, p_sa_root_id => ?,
+		SELECT (claimius.insert_claim_object(p_claim_id => ?, p_sa_owner_id => ?, p_sa_root_id => ?,
 		       p_sa_created_by => ?, p_scope => '{"page": {"hr": {"_access": "READ"}}}'::JSONB) -> 'claim_object' ->> 'id')::UUID
-	`, app.ID, claimID, app.Org, app.Org, grantUser).Scan(ctx, &bindingID); err != nil {
+	`, claimID, app.Org, app.Org, grantUser).Scan(ctx, &bindingID); err != nil {
 		t.Fatalf("scope binding: %v", err)
 	}
 	member := uuid.New()
@@ -42,8 +42,8 @@ func TestRoutedDeleteRemovesAScopeBindingAndAGrantByTheirOwnID(t *testing.T) {
 	}
 	var grantID uuid.UUID
 	if err := prophet.NewRaw(`
-		SELECT (claimius.insert_user_claim(p_app_id => ?, p_claim_id => ?, p_user_id => ?, p_sa_owner_id => ?, p_sa_created_by => ?) -> 'user_claim' ->> 'id')::UUID
-	`, app.ID, claimID, member, app.Org, grantUser).Scan(ctx, &grantID); err != nil {
+		SELECT (claimius.insert_user_claim(p_claim_id => ?, p_user_id => ?, p_sa_owner_id => ?, p_sa_created_by => ?) -> 'user_claim' ->> 'id')::UUID
+	`, claimID, member, app.Org, grantUser).Scan(ctx, &grantID); err != nil {
 		t.Fatalf("grant: %v", err)
 	}
 

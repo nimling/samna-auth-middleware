@@ -84,24 +84,7 @@ func presentColumns(idb bun.IDB, model any, raw json.RawMessage) []string {
 func applyUpsert(ctx context.Context, idb bun.IDB, conn bun.IConn, eventType string, raw json.RawMessage) (bool, error) {
 	switch eventType {
 	case "claimius.samna_user":
-		var incoming SamnaUser
-		if err := sauth.Unmarshal(raw, &incoming); err != nil {
-			return false, fmt.Errorf("unmarshal: %w", err)
-		}
-		retire := idb.NewUpdate().
-			Model((*SamnaUser)(nil)).
-			Set("sa_deleted_at = now()").
-			Set("sa_updated_at = now()").
-			Where("user_id = ?", incoming.UserID).
-			Where("id <> ?", incoming.ID).
-			Where("sa_deleted_at IS NULL")
-		if conn != nil {
-			retire = retire.Conn(conn)
-		}
-		if _, err := retire.Exec(ctx); err != nil {
-			return false, fmt.Errorf("retire superseded samna_user %s: %w", incoming.UserID, err)
-		}
-		return store.Upsert(ctx, idb, conn, &incoming, presentColumns(idb, &incoming, raw))
+		return upsertEntity[SamnaUser](ctx, idb, conn, raw)
 	case "claimius.samna_client":
 		return upsertEntity[SamnaClient](ctx, idb, conn, raw)
 	case "claimius.samna_secret":

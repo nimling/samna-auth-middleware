@@ -87,13 +87,13 @@ func postPeerApp(t *testing.T, actor uuid.UUID) peerApp {
 	return app
 }
 
-func postPeerClaim(t *testing.T, db *shared.DB, appID, org, actor uuid.UUID, name string) uuid.UUID {
+func postPeerClaim(t *testing.T, db *shared.DB, org, actor uuid.UUID, name string) uuid.UUID {
 	t.Helper()
 	var id uuid.UUID
 	if err := db.NewRaw(`
-		SELECT (claimius.insert_claim(p_app_id => ?, p_name => ?, p_description => NULL, p_sa_access => 4,
+		SELECT (claimius.insert_claim(p_name => ?, p_description => NULL, p_sa_access => 4,
 		        p_sa_owner_id => ?, p_sa_root_id => ?, p_sa_created_by => ?) -> 'claim' ->> 'id')::UUID
-	`, appID, name, org, org, actor).Scan(context.Background(), &id); err != nil {
+	`, name, org, org, actor).Scan(context.Background(), &id); err != nil {
 		t.Fatalf("claim %s: %v", name, err)
 	}
 	return id
@@ -107,7 +107,7 @@ func TestProphetMirrorsAPeersAppThroughItsFeed(t *testing.T) {
 		t.Fatalf("home slug: %v", err)
 	}
 	app := postPeerApp(t, grantUser)
-	first := postPeerClaim(t, psdb.Instance(), app.ID, app.Org, grantUser, "Mirrored first")
+	first := postPeerClaim(t, psdb.Instance(), app.Org, grantUser, "Mirrored first")
 
 	e := echo.New()
 	e.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
@@ -168,7 +168,7 @@ func TestProphetMirrorsAPeersAppThroughItsFeed(t *testing.T) {
 		if err := mirror.NewRaw(`
 			SELECT a.home_prophet AS home,
 			       claimius.app_has_object(a.id, 'claimius.organization', ?) AS linked,
-			       EXISTS (SELECT 1 FROM claimius.claim c WHERE c.id = ? AND c.app_id = a.id) AS claim
+			       EXISTS (SELECT 1 FROM claimius.claim c WHERE c.id = ? AND claimius.app_has_object(a.id, 'claimius.organization', c.sa_owner_id)) AS claim
 			FROM claimius.samna_app a WHERE a.id = ?
 		`, app.Org, first, app.ID).Scan(ctx, &mirrored); err != nil {
 			t.Fatalf("probe mirror: %v", err)
@@ -179,24 +179,24 @@ func TestProphetMirrorsAPeersAppThroughItsFeed(t *testing.T) {
 		t.Fatalf("the snapshot must mirror the app with the peer as its home, its organization and its claim, got %+v", mirrored)
 	}
 
-	second := postPeerClaim(t, psdb.Instance(), app.ID, app.Org, grantUser, "Mirrored second")
+	second := postPeerClaim(t, psdb.Instance(), app.Org, grantUser, "Mirrored second")
 	if n, err := replica.PullSync(ctx); err != nil || n == 0 {
 		t.Fatalf("the feed must bring the peer's next write, got %d %v", n, err)
 	}
 	var held bool
-	if err := mirror.NewRaw(`SELECT EXISTS (SELECT 1 FROM claimius.claim WHERE id = ? AND app_id = ?)`, second, app.ID).Scan(ctx, &held); err != nil || !held {
+	if err := mirror.NewRaw(`SELECT EXISTS (SELECT 1 FROM claimius.claim WHERE id = ? AND sa_owner_id = ?)`, second, app.Org).Scan(ctx, &held); err != nil || !held {
 		t.Fatalf("the peer's claim written after the snapshot must reach the mirror, got %v %v", held, err)
 	}
 
-	var system, localOrg uuid.UUID
-	if err := mirror.NewRaw(`SELECT id, sa_owner_id FROM claimius.get_app()`).Scan(ctx, &system, &localOrg); err != nil {
+	var localOrg uuid.UUID
+	if err := mirror.NewRaw(`SELECT sa_owner_id FROM claimius.get_app()`).Scan(ctx, &localOrg); err != nil {
 		t.Fatalf("mirror system app: %v", err)
 	}
-	local := postPeerClaim(t, mirror, system, localOrg, actor, "Local to the mirror")
+	local := postPeerClaim(t, mirror, localOrg, actor, "Local to the mirror")
 	if _, err := psdb.Instance().ExecContext(ctx, `
-		INSERT INTO claimius.claim (id, app_id, name, sa_access, sa_owner_id, sa_root_id, sa_created_by)
-		VALUES (?, ?, 'Colliding', 4, ?, ?, ?)
-	`, local, app.ID, app.Org, app.Org, grantUser); err != nil {
+		INSERT INTO claimius.claim (id, name, sa_access, sa_owner_id, sa_root_id, sa_created_by)
+		VALUES (?, 'Colliding', 4, ?, ?, ?)
+	`, local, app.Org, app.Org, grantUser); err != nil {
 		t.Fatalf("colliding claim on the peer: %v", err)
 	}
 	if _, err := replica.PullSync(ctx); err != nil {
@@ -205,12 +205,12 @@ func TestProphetMirrorsAPeersAppThroughItsFeed(t *testing.T) {
 	var owner uuid.UUID
 	var recorded bool
 	if err := mirror.NewRaw(`
-		SELECT c.app_id, EXISTS (SELECT 1 FROM claimius.peer_collision pc WHERE pc.object_id = c.id AND pc.prophet = ?)
+		SELECT c.sa_owner_id, EXISTS (SELECT 1 FROM claimius.peer_collision pc WHERE pc.object_id = c.id AND pc.prophet = ?)
 		FROM claimius.claim c WHERE c.id = ?
 	`, home, local).Scan(ctx, &owner, &recorded); err != nil {
 		t.Fatalf("probe collision: %v", err)
 	}
-	if owner != system || !recorded {
+	if owner != localOrg || !recorded {
 		t.Fatalf("a mirrored row whose id the mirror holds for its own app must be refused and recorded, owner %s recorded %v", owner, recorded)
 	}
 

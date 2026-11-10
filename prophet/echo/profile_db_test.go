@@ -220,11 +220,11 @@ func TestUserNameIsReservedOncePerApp(t *testing.T) {
 	if _, err := replica.PutUserName(ctx, rivalClaim, shared.BodySamUserName{UserID: rival, UserName: &name}); !errors.Is(err, shared.ErrUserNameTaken) {
 		t.Fatalf("a taken name is refused, got %v", err)
 	}
-	if _, err := prophet.ExecContext(ctx, `UPDATE claimius.samna_user SET user_name = upper(?) WHERE user_id = ? AND app_id = ?`, name, rival, app.ID); err == nil {
-		t.Fatalf("the index refuses the same name in another case in one app")
+	if _, err := prophet.ExecContext(ctx, `UPDATE claimius.samna_user SET user_name = upper(?) WHERE user_id = ?`, name, rival); err == nil {
+		t.Fatalf("the index refuses the same name in another case")
 	}
-	if _, err := psdb.PutUserName(ctx, other.ID, shared.BodySamUserName{UserID: rival, UserName: &name}); err != nil {
-		t.Fatalf("the same name is free in another app, got %v", err)
+	if _, err := psdb.PutUserName(ctx, shared.BodySamUserName{UserID: rival, UserName: &name}); err == nil {
+		t.Fatalf("a user name is global: no app hands out a name another user holds")
 	}
 
 	if _, err := replica.PutUserName(ctx, rivalClaim, shared.BodySamUserName{UserID: owner, UserName: &name}); !errors.Is(err, shared.ErrNoAccess) {
@@ -234,7 +234,7 @@ func TestUserNameIsReservedOncePerApp(t *testing.T) {
 		if _, err := replica.GetUserNameAvailable(ctx, ownerClaim, bad); !errors.Is(err, shared.ErrBadUserName) {
 			t.Errorf("%q is not a user name, got %v", bad, err)
 		}
-		if _, err := psdb.GetUserNameAvailable(ctx, app.ID, bad); !errors.Is(err, shared.ErrBadUserName) {
+		if _, err := psdb.GetUserNameAvailable(ctx, bad); !errors.Is(err, shared.ErrBadUserName) {
 			t.Errorf("the prophet refuses %q too, got %v", bad, err)
 		}
 	}
@@ -255,7 +255,7 @@ func TestUserNameIsReservedOncePerApp(t *testing.T) {
 		t.Fatalf("a login carrying a taken name still gets its row, got %v", err)
 	}
 	var carriedName *string
-	if err := prophet.NewRaw(`SELECT user_name FROM claimius.samna_user WHERE user_id = ? AND app_id = ?`, carried, app.ID).Scan(ctx, &carriedName); err != nil {
+	if err := prophet.NewRaw(`SELECT user_name FROM claimius.samna_user WHERE user_id = ?`, carried).Scan(ctx, &carriedName); err != nil {
 		t.Fatalf("carried row: %v", err)
 	}
 	if carriedName != nil {
@@ -266,7 +266,7 @@ func TestUserNameIsReservedOncePerApp(t *testing.T) {
 		t.Fatalf("merging the holder of a name into another user of the app, got %v", err)
 	}
 	var merged *string
-	if err := prophet.NewRaw(`SELECT user_name FROM claimius.samna_user WHERE user_id = ? AND app_id = ? AND sa_deleted_at IS NULL`, owner, app.ID).Scan(ctx, &merged); err != nil {
+	if err := prophet.NewRaw(`SELECT user_name FROM claimius.samna_user WHERE user_id = ? AND sa_deleted_at IS NULL`, owner).Scan(ctx, &merged); err != nil {
 		t.Fatalf("merged row: %v", err)
 	}
 	if merged == nil || *merged != name {

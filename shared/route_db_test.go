@@ -176,8 +176,8 @@ func TestADiscipleInDebugModeWritesTheSameHelpersLocally(t *testing.T) {
 	if _, err := db.CreateOrganizationUser(ctx, nil, ac, &sdb.SamnaUser{UserID: member, Email: "local@example.com", OwnerID: &orgRoot, ClaimID: &claim.ID}); err != nil {
 		t.Fatalf("create organization user: %v", err)
 	}
-	if _, err := db.CreateOrganizationUser(ctx, nil, ac, &sdb.SamnaUser{UserID: member, OwnerID: &orgRoot, ClaimID: &claim.ID}); !errors.Is(err, sdb.ErrUserAlreadyExists) {
-		t.Fatalf("a second create of the same user must answer ErrUserAlreadyExists, got %v", err)
+	if again, err := db.CreateOrganizationUser(ctx, nil, ac, &sdb.SamnaUser{UserID: member, OwnerID: &orgRoot, ClaimID: &claim.ID}); err != nil || again.UserID != member {
+		t.Fatalf("a second create of the same user upserts its one row and keeps its one grant, got %v %v", again, err)
 	}
 	token, err := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{"sub": "local-identity"}).SignedString([]byte("test"))
 	if err != nil {

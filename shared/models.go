@@ -376,7 +376,6 @@ type SamnaUserToken struct {
 	IDClaim      *string    `json:"id_claim,omitempty"`
 	User         *SamnaUser `json:"user,omitempty"`
 	ClaimID      *uuid.UUID `json:"claim_id"`
-	AppID        *uuid.UUID `json:"app_id"`
 	Reason       *string    `json:"reason,omitempty"`
 	OwnerID      *uuid.UUID `json:"owner_id,omitempty"`
 	CreatedBy    *uuid.UUID `json:"created_by,omitempty"`
@@ -386,7 +385,6 @@ type SamnaUserExternal struct {
 	nimbody.Body `json:"-"`
 	User         *SamnaUser `json:"user,omitempty"`
 	ClaimID      *uuid.UUID `json:"claim_id"`
-	AppID        *uuid.UUID `json:"app_id"`
 	Reason       *string    `json:"reason,omitempty"`
 	OwnerID      *uuid.UUID `json:"owner_id,omitempty"`
 	CreatedBy    *uuid.UUID `json:"created_by,omitempty"`

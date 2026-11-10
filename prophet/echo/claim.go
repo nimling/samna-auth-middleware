@@ -27,7 +27,7 @@ func GetClaims(ctx echo.Context) error {
 	if err := sdb.Instance().NewSelect().
 		Model(&claims).
 		ExcludeColumn("sa_deleted_at").
-		Where("app_id = ?", appID).
+		Where("claimius.app_has_object(?, ?, sa_owner_id)", appID, OBJECT_TYPE_ORGANIZATION).
 		Where("sa_deleted_at IS NULL").
 		Scan(ctx.Request().Context()); err != nil {
 		ctx.Logger().Errorf("GetClaims: %v", err)
@@ -46,7 +46,7 @@ func GetClaimGraph(ctx echo.Context) error {
 		       CASE WHEN sa_root_id = id THEN NULL ELSE sa_root_id END AS parent_id,
 		       jsonb_build_object('access', sa_access, 'inherits', inherits) AS data
 		FROM claimius.claim
-		WHERE app_id = ? AND sa_deleted_at IS NULL`, appID).
+		WHERE claimius.app_has_object(?, 'claimius.organization', sa_owner_id) AND sa_deleted_at IS NULL`, appID).
 		Scan(ctx.Request().Context(), &nodes); err != nil {
 		ctx.Logger().Errorf("GetClaimGraph: %v", err)
 		return respond.Error(ctx, http.StatusInternalServerError, "Internal server error")
@@ -55,12 +55,11 @@ func GetClaimGraph(ctx echo.Context) error {
 }
 
 func GetClaim(ctx echo.Context) error {
-	appID, _ := ctx.Get("app_id").(uuid.UUID)
 	claimID, err := uuid.Parse(ctx.Param("id"))
 	if err != nil {
 		return respond.Error(ctx, http.StatusBadRequest, "Malformed request")
 	}
-	claim, err := getClaim(ctx, claimID, appID)
+	claim, err := getClaim(ctx, claimID)
 	if err != nil {
 		return respond.Error(ctx, errorsx.ErrToHttpCode(err), "")
 	}
@@ -69,7 +68,6 @@ func GetClaim(ctx echo.Context) error {
 
 func PostClaim(ctx echo.Context) error {
 	defer shared.DeletePublicClaimCache()
-	appID, _ := ctx.Get("app_id").(uuid.UUID)
 	claim := &Claim{}
 	if err := claim.Bind(ctx); err != nil {
 		return respond.Error(ctx, http.StatusBadRequest, "invalid json body")
@@ -77,7 +75,6 @@ func PostClaim(ctx echo.Context) error {
 	if err := claim.ValidatePost(); err != nil {
 		return respond.Error(ctx, http.StatusBadRequest, err.Error())
 	}
-	claim.AppID = appID
 	if claim.Type == "" {
 		claim.Type = CLAIM_TYPE_USER
 	}
@@ -87,9 +84,9 @@ func PostClaim(ctx echo.Context) error {
 	rctx := ctx.Request().Context()
 	var id uuid.UUID
 	if err := sdb.Instance().NewRaw(`SELECT (claimius.insert_claim(
-		p_app_id => ?, p_name => ?, p_description => ?, p_sa_access => ?, p_sa_owner_id => ?,
+		p_name => ?, p_description => ?, p_sa_access => ?, p_sa_owner_id => ?,
 		p_sa_root_id => ?, p_sa_created_by => ?, p_inherits => ?, p_type => ?::claimius.claim_type, p_level => ?
-	) -> 'claim' ->> 'id')::uuid`, appID, claim.Name, claim.Description, int(claim.Access), claim.OwnerID,
+	) -> 'claim' ->> 'id')::uuid`, claim.Name, claim.Description, int(claim.Access), claim.OwnerID,
 		claim.RootID, claim.CreatedBy, claim.Inherits, string(claim.Type), claim.Level).Scan(rctx, &id); err != nil {
 		ctx.Logger().Errorf("PostClaim: %v", err)
 		return respond.Error(ctx, errorsx.ErrToHttpCode(err), "claim insert failed")
@@ -103,7 +100,6 @@ func PostClaim(ctx echo.Context) error {
 
 func PutClaim(ctx echo.Context) error {
 	defer shared.DeletePublicClaimCache()
-	appID, _ := ctx.Get("app_id").(uuid.UUID)
 	claimID, err := uuid.Parse(ctx.Param("id"))
 	if err != nil {
 		return respond.Error(ctx, http.StatusBadRequest, "id must be a uuid")
@@ -116,7 +112,6 @@ func PutClaim(ctx echo.Context) error {
 		return respond.Error(ctx, http.StatusBadRequest, err.Error())
 	}
 	patch.ID = claimID
-	patch.AppID = appID
 	tx, err := sdb.Instance().BeginTx(ctx.Request().Context(), nil)
 	if err != nil {
 		ctx.Logger().Errorf("PutClaim: %v", err)
@@ -133,7 +128,6 @@ func PutClaim(ctx echo.Context) error {
 		Model(patch).
 		Where("sa_deleted_at IS NULL").
 		Where("id = ?", claimID).
-		Where("app_id = ?", appID).
 		Set("sa_updated_at = now()").
 		Returning("*")
 	if patch.HasKey("name") {
@@ -175,7 +169,6 @@ func PutClaim(ctx echo.Context) error {
 
 func DeleteClaim(ctx echo.Context) error {
 	defer shared.DeletePublicClaimCache()
-	appID, _ := ctx.Get("app_id").(uuid.UUID)
 	claimID, err := uuid.Parse(ctx.Param("id"))
 	if err != nil {
 		return respond.Error(ctx, http.StatusBadRequest, "Malformed request")
@@ -184,7 +177,6 @@ func DeleteClaim(ctx echo.Context) error {
 	res, err := sdb.Instance().NewUpdate().
 		Model(&claim).
 		Where("id = ?", claimID).
-		Where("app_id = ?", appID).
 		Where("sa_deleted_at IS NULL").
 		Set("sa_deleted_at = NOW()").
 		Returning("*").
@@ -205,7 +197,6 @@ func DeleteClaim(ctx echo.Context) error {
 
 func PostClaimObject(ctx echo.Context) error {
 	defer shared.DeletePublicClaimCache()
-	appID, _ := ctx.Get("app_id").(uuid.UUID)
 	claimID, err := uuid.Parse(ctx.Param("claim_id"))
 	if err != nil {
 		return respond.Error(ctx, http.StatusBadRequest, "claim_id must be a uuid")
@@ -217,7 +208,6 @@ func PostClaimObject(ctx echo.Context) error {
 	if err := claimObject.ValidatePost(); err != nil {
 		return respond.Error(ctx, http.StatusBadRequest, err.Error())
 	}
-	claimObject.AppID = appID
 	claimObject.ClaimID = claimID
 	if !claimObject.HasKey("inherits") {
 		claimObject.Inherits = true
@@ -243,7 +233,6 @@ func PostClaimObject(ctx echo.Context) error {
 
 func PatchClaimObject(ctx echo.Context) error {
 	defer shared.DeletePublicClaimCache()
-	appID, _ := ctx.Get("app_id").(uuid.UUID)
 	claimID, err := uuid.Parse(ctx.Param("claim_id"))
 	if err != nil {
 		return respond.Error(ctx, http.StatusBadRequest, "claim_id must be a uuid")
@@ -258,7 +247,6 @@ func PatchClaimObject(ctx echo.Context) error {
 		Column("id").
 		Where("claim_id = ?", claimID).
 		Where("id = ?", bindingID).
-		Where("app_id = ?", appID).
 		Where("sa_deleted_at IS NULL").
 		OrderExpr("sa_created_at DESC").
 		Limit(1).
@@ -296,7 +284,6 @@ func PatchClaimObject(ctx echo.Context) error {
 	if err := sdb.Instance().NewSelect().
 		Model(&updated).
 		Where("id = ?", claimObjectID).
-		Where("app_id = ?", appID).
 		Scan(ctx.Request().Context()); err != nil {
 		ctx.Logger().Errorf("PatchClaimObject reselect: %v", err)
 		return respond.Error(ctx, http.StatusInternalServerError, "claim_object reselect failed")
@@ -306,7 +293,6 @@ func PatchClaimObject(ctx echo.Context) error {
 
 func DeleteClaimObject(ctx echo.Context) error {
 	defer shared.DeletePublicClaimCache()
-	appID, _ := ctx.Get("app_id").(uuid.UUID)
 	claimID, err := uuid.Parse(ctx.Param("claim_id"))
 	if err != nil {
 		return respond.Error(ctx, http.StatusBadRequest, "Malformed request")
@@ -320,7 +306,6 @@ func DeleteClaimObject(ctx echo.Context) error {
 		Model(&claimObject).
 		Where("claim_id = ?", claimID).
 		Where("id = ?", bindingID).
-		Where("app_id = ?", appID).
 		Where("sa_deleted_at IS NULL").
 		Set("sa_deleted_at = NOW()").
 		Returning("*").
@@ -341,7 +326,6 @@ func DeleteClaimObject(ctx echo.Context) error {
 
 func PostClaimUser(ctx echo.Context) error {
 	defer shared.DeletePublicClaimCache()
-	appID, _ := ctx.Get("app_id").(uuid.UUID)
 	claimID, err := uuid.Parse(ctx.Param("claim_id"))
 	if err != nil {
 		return respond.Error(ctx, http.StatusBadRequest, "claim_id must be a uuid")
@@ -353,7 +337,6 @@ func PostClaimUser(ctx echo.Context) error {
 	if err := userClaim.ValidatePost(); err != nil {
 		return respond.Error(ctx, http.StatusBadRequest, err.Error())
 	}
-	userClaim.AppID = appID
 	userClaim.ClaimID = claimID
 	options, value, err := shared.SealClaimOptions(userClaim.Options)
 	if err != nil {
@@ -364,7 +347,7 @@ func PostClaimUser(ctx echo.Context) error {
 	}
 	if _, err := sdb.Instance().NewInsert().
 		Model(userClaim).
-		On("CONFLICT (claim_id, user_id, app_id) WHERE sa_deleted_at IS NULL DO UPDATE").
+		On("CONFLICT (claim_id, user_id) WHERE sa_deleted_at IS NULL DO UPDATE").
 		Set("reason = EXCLUDED.reason").
 		Set("options = EXCLUDED.options").
 		Set("sa_updated_at = now()").
@@ -379,7 +362,6 @@ func PostClaimUser(ctx echo.Context) error {
 
 func PatchClaimUser(ctx echo.Context) error {
 	defer shared.DeletePublicClaimCache()
-	appID, _ := ctx.Get("app_id").(uuid.UUID)
 	claimID, err := uuid.Parse(ctx.Param("claim_id"))
 	if err != nil {
 		return respond.Error(ctx, http.StatusBadRequest, "claim_id must be a uuid")
@@ -394,7 +376,6 @@ func PatchClaimUser(ctx echo.Context) error {
 		Column("id").
 		Where("claim_id = ?", claimID).
 		Where("id = ?", grantID).
-		Where("app_id = ?", appID).
 		Where("sa_deleted_at IS NULL").
 		OrderExpr("sa_created_at DESC").
 		Limit(1).
@@ -452,7 +433,6 @@ func PatchClaimUser(ctx echo.Context) error {
 
 func DeleteClaimUser(ctx echo.Context) error {
 	defer shared.DeletePublicClaimCache()
-	appID, _ := ctx.Get("app_id").(uuid.UUID)
 	claimID, err := uuid.Parse(ctx.Param("claim_id"))
 	if err != nil {
 		return respond.Error(ctx, http.StatusBadRequest, "Malformed request")
@@ -466,7 +446,6 @@ func DeleteClaimUser(ctx echo.Context) error {
 		Model(&userClaim).
 		Where("claim_id = ?", claimID).
 		Where("id = ?", grantID).
-		Where("app_id = ?", appID).
 		Where("sa_deleted_at IS NULL").
 		Set("sa_deleted_at = NOW()").
 		Returning("*").
@@ -514,7 +493,7 @@ func GetClaimAudit(ctx echo.Context) error {
 	return respond.JSON(ctx, http.StatusOK, audits, len(audits))
 }
 
-func getClaim(ctx echo.Context, claimID, appID uuid.UUID) (*Claim, error) {
+func getClaim(ctx echo.Context, claimID uuid.UUID) (*Claim, error) {
 	var claim Claim
 	err := sdb.Instance().
 		NewSelect().
@@ -523,7 +502,6 @@ func getClaim(ctx echo.Context, claimID, appID uuid.UUID) (*Claim, error) {
 		Relation("ClaimObjects").
 		Relation("ClaimUsers").
 		Where("?TableAlias.id = ?", claimID).
-		Where("?TableAlias.app_id = ?", appID).
 		Where("?TableAlias.sa_deleted_at IS NULL").
 		Scan(ctx.Request().Context())
 	if err != nil {
@@ -557,7 +535,6 @@ func getClaim(ctx echo.Context, claimID, appID uuid.UUID) (*Claim, error) {
 			NewSelect().
 			Model(&locations).
 			ExcludeColumn("sa_deleted_at").
-			Where("app_id = ?", appID).
 			Where("sa_deleted_at IS NULL").
 			Where("id IN (?)", bun.In(locationIDs)).
 			Scan(ctx.Request().Context()); err != nil {
@@ -575,7 +552,6 @@ func getClaim(ctx echo.Context, claimID, appID uuid.UUID) (*Claim, error) {
 			NewSelect().
 			Model(&orgs).
 			ExcludeColumn("sa_deleted_at").
-			Where("app_id = ?", appID).
 			Where("sa_deleted_at IS NULL").
 			Where("id IN (?)", bun.In(orgIDs)).
 			Scan(ctx.Request().Context()); err != nil {
@@ -616,7 +592,6 @@ func getClaim(ctx echo.Context, claimID, appID uuid.UUID) (*Claim, error) {
 			NewSelect().
 			Model(&users).
 			ExcludeColumn("sa_deleted_at").
-			Where("app_id = ?", appID).
 			Where("user_id IN (?)", bun.In(userIDs)).
 			Where("sa_deleted_at IS NULL").
 			Scan(ctx.Request().Context())

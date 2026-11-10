@@ -80,17 +80,17 @@ func userNameError(err error) error {
 	return err
 }
 
-func GetUserNameAvailable(ctx context.Context, appID uuid.UUID, userName string) (*shared.UserNameAvailable, error) {
+func GetUserNameAvailable(ctx context.Context, userName string) (*shared.UserNameAvailable, error) {
 	out := shared.UserNameAvailable{UserName: userName}
-	if err := instance.NewRaw(`SELECT claimius.get_user_name_available(?, ?)`, appID, userName).Scan(ctx, &out.Available); err != nil {
+	if err := instance.NewRaw(`SELECT claimius.get_user_name_available(?)`, userName).Scan(ctx, &out.Available); err != nil {
 		return nil, userNameError(err)
 	}
 	return &out, nil
 }
 
-func PutUserName(ctx context.Context, appID uuid.UUID, body shared.BodySamUserName) (*shared.BodySamUserName, error) {
+func PutUserName(ctx context.Context, body shared.BodySamUserName) (*shared.BodySamUserName, error) {
 	out := shared.BodySamUserName{UserID: body.UserID}
-	if err := instance.NewRaw(`SELECT claimius.update_user_name(?, ?, ?)`, appID, body.UserID, body.UserName).Scan(ctx, &out.UserName); err != nil {
+	if err := instance.NewRaw(`SELECT claimius.update_user_name(?, ?)`, body.UserID, body.UserName).Scan(ctx, &out.UserName); err != nil {
 		return nil, userNameError(err)
 	}
 	return &out, nil

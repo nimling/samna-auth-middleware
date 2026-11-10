@@ -26,7 +26,6 @@ func RegisterEndpoints(g *echo.Group) {
 	user.POST("/token", h.PostUserToken)
 	user.POST("/token/validate", h.PostUserTokenValidate)
 	user.POST("/external", h.PostUserExternal)
-	user.POST("/temporary", h.PostGuestToken)
 
 	relation := g.Group("/relation")
 	relation.GET("", h.GetRelations)

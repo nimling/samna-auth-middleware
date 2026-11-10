@@ -8,8 +8,7 @@ DO $$
         RAISE NOTICE 'Then: upsert_table_info(VARIADIC <schema.table list>)';
     END $$;
 
-INSERT INTO claimius.samna_user (user_id, app_id, status, type, first_name)
-SELECT claimius.anonymous_user_id(), a.id, 'active', 'anonymous', 'Public'
-FROM claimius.samna_app a
-WHERE a.sa_deleted_at IS NULL
-ON CONFLICT (user_id, app_id) WHERE sa_deleted_at IS NULL DO NOTHING;
+INSERT INTO claimius.samna_user (user_id, status, type, first_name)
+SELECT claimius.anonymous_user_id(), 'active', 'anonymous', 'Public'
+WHERE EXISTS (SELECT 1 FROM claimius.samna_app a WHERE a.sa_deleted_at IS NULL)
+ON CONFLICT (user_id) WHERE sa_deleted_at IS NULL DO NOTHING;

@@ -46,17 +46,3 @@ func TestPostCodeRedeemRequiresTheUser(t *testing.T) {
 		t.Errorf("status = %d, want 400 when user_id is absent, because an invite is redeemed by a signed in user", code)
 	}
 }
-
-func TestPostGuestTokenRequiresUserID(t *testing.T) {
-	body := `{"claim_id":"20000000-0000-4000-8000-000000000002"}`
-	if code := postJSON(t, body, pecho.PostGuestToken); code != http.StatusBadRequest {
-		t.Errorf("status = %d, want 400 when user_id is absent, because the claim access check reads it", code)
-	}
-}
-
-func TestPostGuestTokenRequiresClaimID(t *testing.T) {
-	body := `{"user_id":"40000000-0000-4000-8000-000000000004"}`
-	if code := postJSON(t, body, pecho.PostGuestToken); code != http.StatusBadRequest {
-		t.Errorf("status = %d, want 400 when claim_id is absent", code)
-	}
-}

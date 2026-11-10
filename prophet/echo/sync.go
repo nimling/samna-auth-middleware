@@ -166,6 +166,19 @@ func GetSyncSnapshot(ctx echo.Context) error {
 						q = q.Where("app_id = ?", appID)
 					}
 					q = q.Order("sa_created_at", "id")
+				} else if t.eventType == string(OBJECT_TYPE_USER) {
+					q = q.Where("?TableAlias.user_id <> ?", shared.AnonymousUserID)
+					if appID != uuid.Nil {
+						q = q.Where("? IN (SELECT claimius.apps_for_object(?, ?TableAlias.user_id))", appID, OBJECT_TYPE_USER)
+					}
+				} else if t.eventType == string(OBJECT_TYPE_CLAIM) {
+					if appID != uuid.Nil {
+						q = q.Where("claimius.app_has_object(?, ?, ?TableAlias.sa_owner_id)", appID, OBJECT_TYPE_ORGANIZATION)
+					}
+				} else if t.eventType == "claimius.user_claim" || t.eventType == "claimius.claim_object" {
+					if appID != uuid.Nil {
+						q = q.Where("claimius.app_has_object(?, ?, (SELECT c.sa_owner_id FROM claimius.claim c WHERE c.id = ?TableAlias.claim_id))", appID, OBJECT_TYPE_ORGANIZATION)
+					}
 				} else if t.filterApp && appID != uuid.Nil {
 					q = q.Where("app_id = ?", appID)
 				}

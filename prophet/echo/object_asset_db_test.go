@@ -43,24 +43,24 @@ func TestADiscipleLinksAnAssetThroughTheProphetAndReadsItBack(t *testing.T) {
 
 	var owners uuid.UUID
 	if err := prophet.NewRaw(`
-		SELECT (claimius.insert_claim(p_app_id => ?, p_name => 'Asset owners', p_description => NULL, p_sa_access => 15,
+		SELECT (claimius.insert_claim(p_name => 'Asset owners', p_description => NULL, p_sa_access => 15,
 		        p_sa_owner_id => ?, p_sa_root_id => ?, p_sa_created_by => ?) -> 'claim' ->> 'id')::UUID
-	`, app.ID, app.Org, app.Org, grantUser).Scan(ctx, &owners); err != nil {
+	`, app.Org, app.Org, grantUser).Scan(ctx, &owners); err != nil {
 		t.Fatalf("claim: %v", err)
 	}
 	if _, err := prophet.ExecContext(ctx, `
-		SELECT claimius.insert_claim_object(p_app_id => ?, p_claim_id => ?, p_sa_owner_id => ?, p_sa_root_id => ?,
+		SELECT claimius.insert_claim_object(p_claim_id => ?, p_sa_owner_id => ?, p_sa_root_id => ?,
 		       p_sa_created_by => ?, p_object_id => ?, p_object_type => 'claimius.organization', p_inherits => TRUE)
-	`, app.ID, owners, app.Org, app.Org, grantUser, app.Org); err != nil {
+	`, owners, app.Org, app.Org, grantUser, app.Org); err != nil {
 		t.Fatalf("bind: %v", err)
 	}
 	owner, outsider := uuid.New(), uuid.New()
 	var ownerGrant uuid.UUID
 	if err := prophet.NewRaw(`
-		SELECT (claimius.insert_user_claim(p_app_id => ?, p_claim_id => ?, p_user_id => ?, p_sa_owner_id => ?, p_sa_created_by => ?)
+		SELECT (claimius.insert_user_claim(p_claim_id => ?, p_user_id => ?, p_sa_owner_id => ?, p_sa_created_by => ?)
 		        -> 'user_claim' ->> 'id')::UUID
 		FROM claimius.upsert_app_user(p_user_id => ?, p_app_id => ?, p_first_name => 'Owner')
-	`, app.ID, owners, owner, app.Org, grantUser, owner, app.ID).Scan(ctx, &ownerGrant); err != nil {
+	`, owners, owner, app.Org, grantUser, owner, app.ID).Scan(ctx, &ownerGrant); err != nil {
 		t.Fatalf("grant: %v", err)
 	}
 	grantless := uuid.New()
@@ -69,9 +69,9 @@ func TestADiscipleLinksAnAssetThroughTheProphetAndReadsItBack(t *testing.T) {
 	}
 	var members uuid.UUID
 	if err := prophet.NewRaw(`
-		SELECT (claimius.insert_claim(p_app_id => ?, p_name => 'Asset members', p_description => NULL, p_sa_access => 4,
+		SELECT (claimius.insert_claim(p_name => 'Asset members', p_description => NULL, p_sa_access => 4,
 		        p_sa_owner_id => ?, p_sa_root_id => ?, p_sa_created_by => ?) -> 'claim' ->> 'id')::UUID
-	`, app.ID, app.Org, app.Org, grantUser).Scan(ctx, &members); err != nil {
+	`, app.Org, app.Org, grantUser).Scan(ctx, &members); err != nil {
 		t.Fatalf("default claim: %v", err)
 	}
 	if _, err := prophet.ExecContext(ctx, `UPDATE claimius.samna_app SET claim_id = ? WHERE id = ?`, members, app.ID); err != nil {

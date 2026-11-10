@@ -27,7 +27,6 @@ type BodyUser struct {
 	Email      string     `json:"email"`
 	ExternalID *string    `json:"external_id"`
 	ClaimID    *uuid.UUID `json:"claim_id"`
-	AppID      *uuid.UUID `json:"app_id"`
 	Reason     *string    `json:"reason"`
 	OwnerID    *uuid.UUID `json:"owner_id"`
 	CreatedBy  *uuid.UUID `json:"created_by"`
@@ -69,7 +68,7 @@ func GetUsers(ctx echo.Context) error {
 		NewSelect().
 		Model(&users).
 		ExcludeColumn("sa_deleted_at").
-		Where("app_id = ?", appID).
+		Where("? IN (SELECT claimius.apps_for_object(?, user_id))", appID, OBJECT_TYPE_USER).
 		Where("sa_deleted_at IS NULL")
 
 	if ids, idErr := params.GetUUIDs("id"); idErr != nil {
@@ -231,26 +230,14 @@ func GetUserLocations(ctx echo.Context) error {
 }
 
 func PostUser(ctx echo.Context) error {
-	appID := ctx.Get("app_id").(uuid.UUID)
-
 	var req BodyUser
 	if err := ctx.Bind(&req); err != nil {
 		return respond.Error(ctx, http.StatusBadRequest, "invalid json body")
 	}
 
-	if req.OwnerID != nil {
-		user, status, err := createOrganizationUser(ctx, req.CreatedBy, req.OwnerID, req.ClaimID, req, false, nil, req.Reason)
-		if err != nil {
-			return respond.Error(ctx, status, err.Error())
-		}
-		return respond.JSON(ctx, status, user, 1)
-	}
-
 	if req.Email == "" {
 		return respond.Error(ctx, http.StatusBadRequest, "email required")
 	}
-
-	req.AppID = &appID
 
 	userName := ""
 	if req.UserName != nil {
@@ -262,15 +249,10 @@ func PostUser(ctx echo.Context) error {
 	}
 
 	if req.ClaimID != nil {
-		userClaim := UserClaim{
-			AppID:   appID,
-			ClaimID: *req.ClaimID,
-			UserID:  user.UserID,
-			Reason:  req.Reason,
-		}
-		if _, err := sdb.Instance().NewInsert().
-			Model(&userClaim).
-			Exec(ctx.Request().Context()); err != nil {
+		if _, err := sdb.Instance().NewRaw(
+			"SELECT claimius.insert_user_claim(p_claim_id => ?, p_user_id => ?, p_sa_owner_id => ?, p_sa_created_by => ?, p_reason => ?)",
+			*req.ClaimID, user.UserID, req.OwnerID, req.CreatedBy, req.Reason,
+		).Exec(ctx.Request().Context()); err != nil {
 			ctx.Logger().Errorf("assign claim: %v", err)
 		}
 	}
@@ -279,7 +261,6 @@ func PostUser(ctx echo.Context) error {
 }
 
 func PutUser(ctx echo.Context) error {
-	appID := ctx.Get("app_id").(uuid.UUID)
 
 	userID, err := uuid.Parse(ctx.Param("id"))
 	if err != nil {
@@ -294,7 +275,6 @@ func PutUser(ctx echo.Context) error {
 		return respond.Error(ctx, http.StatusBadRequest, err.Error())
 	}
 	updUser.UserID = userID
-	updUser.AppID = appID
 
 	if err := putUser(ctx, updUser); err != nil {
 		return respond.Error(ctx, errorsx.ErrToHttpCode(err), err.Error())
@@ -304,7 +284,6 @@ func PutUser(ctx echo.Context) error {
 }
 
 func DeleteUser(ctx echo.Context) error {
-	appID := ctx.Get("app_id").(uuid.UUID)
 
 	userID, err := uuid.Parse(ctx.Param("id"))
 	if err != nil {
@@ -318,7 +297,6 @@ func DeleteUser(ctx echo.Context) error {
 			Model(&user).
 			Set("sa_deleted_at = NOW()").
 			Where("user_id = ?", userID).
-			Where("app_id = ?", appID).
 			Where("sa_deleted_at IS NULL").
 			Returning("*").
 			Exec(c)
@@ -328,7 +306,7 @@ func DeleteUser(ctx echo.Context) error {
 		if affected, err = res.RowsAffected(); err != nil || affected == 0 {
 			return err
 		}
-		_, err = tx.NewRaw("UPDATE claimius.user_identity SET sa_deleted_at = NOW() WHERE user_id = ? AND app_id = ? AND sa_deleted_at IS NULL", userID, appID).Exec(c)
+		_, err = tx.NewRaw("UPDATE claimius.user_identity SET sa_deleted_at = NOW() WHERE user_id = ? AND sa_deleted_at IS NULL", userID).Exec(c)
 		return err
 	})
 	if err != nil {
@@ -381,7 +359,7 @@ func PostUserToken(ctx echo.Context) error {
 	}
 	in.ExternalID = &externalID
 	identity := map[string]any{"external_id": externalID, "id_claim": idClaim, "type": "token", "data": claims}
-	user, status, err := createOrganizationUser(ctx, req.CreatedBy, req.OwnerID, req.ClaimID, in, true, identity, req.Reason)
+	user, status, err := createOrganizationUser(ctx, req.CreatedBy, req.OwnerID, req.ClaimID, in, identity, req.Reason)
 	if err != nil {
 		return respond.Error(ctx, status, err.Error())
 	}
@@ -410,9 +388,9 @@ func PostUserTokenValidate(ctx echo.Context) error {
 	if req.ExternalID != "" {
 		err = sdb.Instance().NewRaw(
 			"SELECT t.user_id, t.sa_owner_id FROM claimius.user_identity t JOIN claimius.samna_user u ON u.user_id = t.user_id "+
-				"WHERE claimius.app_has_object(?, 'claimius.organization', t.sa_owner_id) AND u.app_id = ? AND u.sa_deleted_at IS NULL AND t.sa_deleted_at IS NULL AND t.type = 'external' AND t.external_id = ? "+
+				"WHERE claimius.app_has_object(?, 'claimius.organization', t.sa_owner_id) AND u.sa_deleted_at IS NULL AND t.sa_deleted_at IS NULL AND t.type = 'external' AND t.external_id = ? "+
 				"ORDER BY t.sa_created_at DESC LIMIT 1",
-			appID, appID, req.ExternalID,
+			appID, req.ExternalID,
 		).Scan(ctx.Request().Context(), &match)
 	} else {
 		parsed, _, perr := jwt.NewParser().ParseUnverified(req.Token, jwt.MapClaims{})
@@ -430,9 +408,9 @@ func PostUserTokenValidate(ctx echo.Context) error {
 		}
 		err = sdb.Instance().NewRaw(
 			"SELECT t.user_id, t.sa_owner_id FROM claimius.user_identity t JOIN claimius.samna_user u ON u.user_id = t.user_id "+
-				"WHERE claimius.app_has_object(?, 'claimius.organization', t.sa_owner_id) AND u.app_id = ? AND u.sa_deleted_at IS NULL AND t.sa_deleted_at IS NULL AND t.external_id = (?::jsonb ->> t.id_claim) "+
+				"WHERE claimius.app_has_object(?, 'claimius.organization', t.sa_owner_id) AND u.sa_deleted_at IS NULL AND t.sa_deleted_at IS NULL AND t.external_id = (?::jsonb ->> t.id_claim) "+
 				"ORDER BY t.sa_created_at DESC LIMIT 1",
-			appID, appID, string(claimsJSON),
+			appID, string(claimsJSON),
 		).Scan(ctx.Request().Context(), &match)
 	}
 	if err != nil {
@@ -447,7 +425,6 @@ func PostUserTokenValidate(ctx echo.Context) error {
 	if err := sdb.Instance().NewSelect().
 		Model(&user).
 		Where("user_id = ?", match.UserID).
-		Where("app_id = ?", appID).
 		Where("sa_deleted_at IS NULL").
 		Limit(1).
 		Scan(ctx.Request().Context()); err != nil {
@@ -473,7 +450,7 @@ func PostUserExternal(ctx echo.Context) error {
 		return respond.Error(ctx, http.StatusBadRequest, "user.external_id is required")
 	}
 	identity := map[string]any{"external_id": *req.User.ExternalID, "id_claim": "external", "type": "external", "data": map[string]any{}}
-	user, status, err := createOrganizationUser(ctx, req.CreatedBy, req.OwnerID, req.ClaimID, req.User, true, identity, req.Reason)
+	user, status, err := createOrganizationUser(ctx, req.CreatedBy, req.OwnerID, req.ClaimID, req.User, identity, req.Reason)
 	if err != nil {
 		return respond.Error(ctx, status, err.Error())
 	}
@@ -481,13 +458,11 @@ func PostUserExternal(ctx echo.Context) error {
 }
 
 func getUser(ctx echo.Context, userID uuid.UUID) (*SamnaUser, error) {
-	appID := ctx.Get("app_id").(uuid.UUID)
 
 	var user SamnaUser
 	err := sdb.Instance().
 		NewSelect().
 		Where("user_id = ?", userID).
-		Where("app_id = ?", appID).
 		Where("sa_deleted_at IS NULL").
 		Model(&user).
 		ExcludeColumn("sa_deleted_at").
@@ -511,7 +486,7 @@ func getUserConnections(ctx echo.Context, userID uuid.UUID) ([]*SamnaUser, error
 		Model(&users).
 		ExcludeColumn("sa_deleted_at").
 		Where("user_id != ?", userID).
-		Where("app_id = ?", appID).
+		Where("? IN (SELECT claimius.apps_for_object(?, user_id))", appID, OBJECT_TYPE_USER).
 		Where("sa_deleted_at IS NULL").
 		Scan(ctx.Request().Context())
 	if err != nil {
@@ -525,7 +500,6 @@ func getUserConnections(ctx echo.Context, userID uuid.UUID) ([]*SamnaUser, error
 }
 
 func getUserClaims(ctx echo.Context, userID uuid.UUID, paginate func(*bun.SelectQuery) *bun.SelectQuery) ([]Claim, int, error) {
-	appID := ctx.Get("app_id").(uuid.UUID)
 	claims := make([]Claim, 0)
 	query := sdb.Instance().
 		NewSelect().
@@ -534,9 +508,8 @@ func getUserClaims(ctx echo.Context, userID uuid.UUID, paginate func(*bun.Select
 		Distinct().
 		Relation("ClaimObjects").
 		Relation("ClaimUsers").
-		Where("claim.app_id = ?", appID).
 		Where("claim.sa_deleted_at IS NULL").
-		Where("EXISTS (SELECT 1 FROM claimius.user_claim uc WHERE uc.claim_id = claim.id AND uc.user_id = ? AND uc.app_id = ? AND uc.sa_deleted_at IS NULL)", userID, appID)
+		Where("EXISTS (SELECT 1 FROM claimius.user_claim uc WHERE uc.claim_id = claim.id AND uc.user_id = ? AND uc.sa_deleted_at IS NULL)", userID)
 
 	count, err := query.Count(ctx.Request().Context())
 	if err != nil {
@@ -610,7 +583,7 @@ func getUserOrganizations(ctx echo.Context, userID uuid.UUID) ([]Organization, e
 		ExcludeColumn("sa_deleted_at").
 		Where("organization.id IN (SELECT claimius.app_object_ids(?, ?))", appID, OBJECT_TYPE_ORGANIZATION).
 		Where("sa_deleted_at IS NULL").
-		Where("EXISTS (SELECT 1 FROM claimius.user_object uo WHERE uo.object_id = organization.id AND uo.object_type = 'claimius.organization' AND uo.user_id = ? AND uo.app_id = ?)", userID, appID).
+		Where("EXISTS (SELECT 1 FROM claimius.user_object uo WHERE uo.object_id = organization.id AND uo.object_type = 'claimius.organization' AND uo.user_id = ?)", userID).
 		Scan(ctx.Request().Context())
 	if err != nil {
 		ctx.Logger().Errorf("getUserOrganizations: %v", err)
@@ -627,7 +600,7 @@ func getUserLocations(ctx echo.Context, userID uuid.UUID) ([]Location, error) {
 		ExcludeColumn("sa_deleted_at").
 		Where("location.id IN (SELECT claimius.app_object_ids(?, ?))", appID, OBJECT_TYPE_LOCATION).
 		Where("sa_deleted_at IS NULL").
-		Where("EXISTS (SELECT 1 FROM claimius.user_object uo WHERE uo.object_id = location.id AND uo.object_type = 'claimius.location' AND uo.user_id = ? AND uo.app_id = ?)", userID, appID).
+		Where("EXISTS (SELECT 1 FROM claimius.user_object uo WHERE uo.object_id = location.id AND uo.object_type = 'claimius.location' AND uo.user_id = ?)", userID).
 		Scan(ctx.Request().Context())
 	if err != nil {
 		ctx.Logger().Errorf("getUserLocations: %v", err)
@@ -638,32 +611,30 @@ func getUserLocations(ctx echo.Context, userID uuid.UUID) ([]Location, error) {
 
 func postUser(ctx echo.Context, req BodyUser, userName string) (*SamnaUser, error) {
 	var userID uuid.UUID
-	err := sdb.Instance().NewRaw(
-		"SELECT (claimius.upsert_app_user(?, ?, ?, ?, ?, ?, ?, ?) -> 'samna_user' ->> 'user_id')::uuid",
-		req.UserID, *req.AppID, req.FirstName, req.LastName, userName, req.Email, req.Phone, req.ExternalID,
+	err := sdb.Instance().NewRaw(`INSERT INTO claimius.samna_user (user_id, first_name, last_name, user_name, email, phone, external_id)
+		VALUES (coalesce(?::uuid, gen_random_uuid()), ?, ?,
+		        CASE WHEN NOT EXISTS (
+		            SELECT 1 FROM claimius.samna_user u
+		            WHERE lower(u.user_name) = lower(?) AND u.sa_deleted_at IS NULL
+		        ) THEN nullif(?, '') END,
+		        ?, nullif(?, ''), ?)
+		ON CONFLICT (user_id) WHERE sa_deleted_at IS NULL DO UPDATE SET
+		    first_name = EXCLUDED.first_name,
+		    last_name = EXCLUDED.last_name,
+		    email = EXCLUDED.email,
+		    sa_updated_at = now()
+		RETURNING user_id`,
+		req.UserID, req.FirstName, req.LastName, userName, userName, req.Email, req.Phone, req.ExternalID,
 	).Scan(ctx.Request().Context(), &userID)
 	if err != nil {
-		ctx.Logger().Errorf("upsert_app_user: %v", err)
+		ctx.Logger().Errorf("upsert samna_user: %v", err)
 		return nil, errorsx.ErrDbUnexpected
-	}
-
-	if _, err := sdb.Instance().NewUpdate().
-		Model((*SamnaUser)(nil)).
-		Set("first_name = ?", req.FirstName).
-		Set("last_name = ?", req.LastName).
-		Set("email = ?", req.Email).
-		Where("app_id = ?", *req.AppID).
-		Where("user_id = ?", userID).
-		Where("sa_deleted_at IS NULL").
-		Exec(ctx.Request().Context()); err != nil {
-		ctx.Logger().Errorf("update samna_user: %v", err)
 	}
 
 	var user SamnaUser
 	err = sdb.Instance().NewSelect().
 		Model(&user).
 		ExcludeColumn("sa_deleted_at").
-		Where("app_id = ?", *req.AppID).
 		Where("user_id = ?", userID).
 		Where("sa_deleted_at IS NULL").
 		Limit(1).
@@ -682,7 +653,6 @@ func putUser(ctx echo.Context, user *SamnaUser) error {
 		Model(user).
 		Where("sa_deleted_at IS NULL").
 		Where("user_id = ?", user.UserID).
-		Where("app_id = ?", user.AppID).
 		OmitZero().
 		Returning("*").
 		Exec(ctx.Request().Context())
@@ -704,7 +674,7 @@ func putUser(ctx echo.Context, user *SamnaUser) error {
 	return nil
 }
 
-func createOrganizationUser(ctx echo.Context, createdBy, ownerID, claimID *uuid.UUID, user any, upsert bool, identity map[string]any, reason *string) (*SamnaUser, int, error) {
+func createOrganizationUser(ctx echo.Context, createdBy, ownerID, claimID *uuid.UUID, user any, identity map[string]any, reason *string) (*SamnaUser, int, error) {
 	appID := ctx.Get("app_id").(uuid.UUID)
 	if appID == uuid.Nil {
 		return nil, http.StatusUnauthorized, errors.New("Unauthorized")
@@ -728,20 +698,15 @@ func createOrganizationUser(ctx echo.Context, createdBy, ownerID, claimID *uuid.
 	if err != nil {
 		return nil, http.StatusBadRequest, errors.New("Malformed request")
 	}
-	var identityJSON *string
-	if identity != nil {
-		b, err := json.Marshal(identity)
-		if err != nil {
-			return nil, http.StatusBadRequest, errors.New("Malformed request")
-		}
-		s := string(b)
-		identityJSON = &s
+	identityJSON, err := json.Marshal(identity)
+	if err != nil {
+		return nil, http.StatusBadRequest, errors.New("Malformed request")
 	}
 
 	var payload []byte
 	if err := sdb.Instance().NewRaw(
-		"SELECT claimius.insert_organization_user(?, ?, ?, ?::jsonb, ?, ?::jsonb, ?)",
-		appID, *createdBy, *ownerID, string(userJSON), upsert, identityJSON, reason,
+		"SELECT claimius.insert_organization_user(?, ?, ?::jsonb, ?::jsonb, ?)",
+		*createdBy, *ownerID, string(userJSON), string(identityJSON), reason,
 	).Scan(ctx.Request().Context(), &payload); err != nil {
 		var pgErr pgdriver.Error
 		if errors.As(err, &pgErr) {

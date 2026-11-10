@@ -110,7 +110,7 @@ func (d *DB) GetAccess(ctx context.Context, userID, objectID uuid.UUID, objectTy
 	if len(claims) == 0 {
 		return nil, ErrNoAccess
 	}
-	d.Usage.Add(nil, userID, objectType, objectID)
+	d.Usage.Add(userID, objectType, objectID)
 	nimtel.Organization(ctx, claims[0].RootID, claims[0].OwnerID)
 	claims[0].UserID = userID
 	return &claims[0], nil

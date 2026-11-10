@@ -54,9 +54,9 @@ func postLevelClaim(t *testing.T, app peerApp, name string, access, level int) u
 	t.Helper()
 	var id uuid.UUID
 	if err := psdb.Instance().NewRaw(`
-		SELECT (claimius.insert_claim(p_app_id => ?, p_name => ?, p_description => NULL, p_sa_access => ?,
+		SELECT (claimius.insert_claim(p_name => ?, p_description => NULL, p_sa_access => ?,
 		        p_sa_owner_id => ?, p_sa_root_id => ?, p_sa_created_by => ?, p_level => ?) -> 'claim' ->> 'id')::UUID
-	`, app.ID, name, access, app.Org, app.Org, grantUser, level).Scan(context.Background(), &id); err != nil {
+	`, name, access, app.Org, app.Org, grantUser, level).Scan(context.Background(), &id); err != nil {
 		t.Fatalf("claim %s: %v", name, err)
 	}
 	return id
@@ -73,9 +73,9 @@ func postLevelBinding(t *testing.T, app peerApp, claim uuid.UUID, object *uuid.U
 		typeArg = objectType
 	}
 	if _, err := psdb.Instance().ExecContext(context.Background(), `
-		SELECT claimius.insert_claim_object(p_app_id => ?, p_claim_id => ?, p_sa_owner_id => ?, p_sa_root_id => ?,
+		SELECT claimius.insert_claim_object(p_claim_id => ?, p_sa_owner_id => ?, p_sa_root_id => ?,
 		       p_sa_created_by => ?, p_object_id => ?, p_object_type => ?, p_inherits => ?, p_scope => ?::jsonb)
-	`, app.ID, claim, app.Org, app.Org, createdBy, object, typeArg, inherits, scopeArg); err != nil {
+	`, claim, app.Org, app.Org, createdBy, object, typeArg, inherits, scopeArg); err != nil {
 		t.Fatalf("binding: %v", err)
 	}
 }
@@ -92,9 +92,9 @@ func postLevelGrant(t *testing.T, app peerApp, claim, user, createdBy uuid.UUID)
 func getLevelGrant(app peerApp, claim, user, createdBy uuid.UUID) (uuid.UUID, error) {
 	var id uuid.UUID
 	err := psdb.Instance().NewRaw(`
-		SELECT (claimius.insert_user_claim(p_app_id => ?, p_claim_id => ?, p_user_id => ?, p_sa_owner_id => ?, p_sa_created_by => ?)
+		SELECT (claimius.insert_user_claim(p_claim_id => ?, p_user_id => ?, p_sa_owner_id => ?, p_sa_created_by => ?)
 		        -> 'user_claim' ->> 'id')::UUID
-	`, app.ID, claim, user, app.Org, createdBy).Scan(context.Background(), &id)
+	`, claim, user, app.Org, createdBy).Scan(context.Background(), &id)
 	return id, err
 }
 
@@ -173,8 +173,8 @@ func TestTheWalkSubtractsAScopedDeny(t *testing.T) {
 	var name, star *int
 	if err := psdb.Instance().NewRaw(`
 		SELECT (scope ->> 'name')::INTEGER, (scope ->> '*')::INTEGER
-		FROM claimius.get_direct_access(?, ?, ?, 'claimius.organization', 0, FALSE, FALSE)
-	`, viewer, f.app.ID, f.child).Scan(ctx, &name, &star); err != nil {
+		FROM claimius.get_direct_access(?, ?, 'claimius.organization', 0, FALSE, FALSE)
+	`, viewer, f.child).Scan(ctx, &name, &star); err != nil {
 		t.Fatalf("walk: %v", err)
 	}
 	if name == nil || *name != 0 || star == nil || *star != 4 {
@@ -193,7 +193,7 @@ func TestCapabilitiesFollowALink(t *testing.T) {
 	postLevelBinding(t, f.app, pages, nil, "", true, `{"page": {"docs": {"_access": "READ"}}}`, grantUser)
 	postLevelBinding(t, f.app, linker, &pages, "claimius.claim", true, "", f.writerGrant)
 	var access int
-	if err := psdb.Instance().NewRaw(`SELECT sa_access FROM claimius.get_scope_access(?, ?, '$.page.docs', 0)`, viewer, f.app.ID).Scan(ctx, &access); err != nil {
+	if err := psdb.Instance().NewRaw(`SELECT sa_access FROM claimius.get_scope_access(?, '$.page.docs', 0)`, viewer).Scan(ctx, &access); err != nil {
 		t.Fatalf("a scope grant reached through a link must answer: %v", err)
 	}
 	if access != 4 {
@@ -211,7 +211,7 @@ func TestTheDirectorySubtractsADenyOnAUser(t *testing.T) {
 	postLevelBinding(t, f.app, see, &target, "claimius.samna_user", false, "", grantUser)
 	postLevelGrant(t, f.app, see, viewer, grantUser)
 	var rows int
-	if err := psdb.Instance().NewRaw(`SELECT count(*) FROM claimius.get_user_access(?, ?, ?::text, 4)`, viewer, f.app.ID, target).Scan(ctx, &rows); err != nil {
+	if err := psdb.Instance().NewRaw(`SELECT count(*) FROM claimius.get_user_access(?, ?::text, 4)`, viewer, target).Scan(ctx, &rows); err != nil {
 		t.Fatalf("directory: %v", err)
 	}
 	if rows != 1 {
@@ -220,7 +220,7 @@ func TestTheDirectorySubtractsADenyOnAUser(t *testing.T) {
 	not := postLevelClaim(t, f.app, "Not target", 20, 0)
 	postLevelBinding(t, f.app, not, &target, "claimius.samna_user", false, "", grantUser)
 	postLevelGrant(t, f.app, not, viewer, grantUser)
-	if err := psdb.Instance().NewRaw(`SELECT count(*) FROM claimius.get_user_access(?, ?, ?::text, 4)`, viewer, f.app.ID, target).Scan(ctx, &rows); err != nil {
+	if err := psdb.Instance().NewRaw(`SELECT count(*) FROM claimius.get_user_access(?, ?::text, 4)`, viewer, target).Scan(ctx, &rows); err != nil {
 		t.Fatalf("directory after the deny: %v", err)
 	}
 	if rows != 0 {

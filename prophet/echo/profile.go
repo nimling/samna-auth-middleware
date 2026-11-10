@@ -69,8 +69,7 @@ func respondUserNameError(ctx echo.Context, err error) error {
 }
 
 func GetUserNameAvailable(ctx echo.Context) error {
-	appID, _ := ctx.Get("app_id").(uuid.UUID)
-	available, err := sdb.GetUserNameAvailable(ctx.Request().Context(), appID, ctx.QueryParam("user_name"))
+	available, err := sdb.GetUserNameAvailable(ctx.Request().Context(), ctx.QueryParam("user_name"))
 	if err != nil {
 		return respondUserNameError(ctx, err)
 	}
@@ -78,7 +77,6 @@ func GetUserNameAvailable(ctx echo.Context) error {
 }
 
 func PutUserName(ctx echo.Context) error {
-	appID, _ := ctx.Get("app_id").(uuid.UUID)
 	var body shared.BodySamUserName
 	if err := ctx.Bind(&body); err != nil {
 		return respond.Error(ctx, http.StatusBadRequest, "invalid json body")
@@ -86,7 +84,7 @@ func PutUserName(ctx echo.Context) error {
 	if err := body.Validate(); err != nil {
 		return respond.Error(ctx, http.StatusBadRequest, err.Error())
 	}
-	reserved, err := sdb.PutUserName(ctx.Request().Context(), appID, body)
+	reserved, err := sdb.PutUserName(ctx.Request().Context(), body)
 	if err != nil {
 		return respondUserNameError(ctx, err)
 	}

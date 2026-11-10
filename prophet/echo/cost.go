@@ -140,7 +140,7 @@ func getAppCostOwner(ctx echo.Context, appID uuid.UUID, createdBy *uuid.UUID, st
 	if createdBy == nil || *createdBy == uuid.Nil {
 		return uuid.Nil, errorsx.ErrForbidden
 	}
-	actor, err := getObjectAssetActor(ctx, appID, createdBy)
+	actor, err := getObjectAssetActor(ctx, createdBy)
 	if err != nil {
 		return uuid.Nil, err
 	}
@@ -156,7 +156,8 @@ func getAppCostOwner(ctx echo.Context, appID uuid.UUID, createdBy *uuid.UUID, st
 		  AND a.sa_deleted_at IS NULL
 		  AND EXISTS (
 			SELECT 1 FROM claimius.user_claim uc
-			WHERE uc.app_id = a.id AND uc.user_id = ? AND uc.sa_deleted_at IS NULL AND (?::uuid IS NULL OR uc.id = ?::uuid))`, appID, actor, grant, grant).
+			JOIN claimius.claim c ON c.id = uc.claim_id
+			WHERE claimius.app_has_object(a.id, 'claimius.organization', c.sa_owner_id) AND uc.user_id = ? AND uc.sa_deleted_at IS NULL AND (?::uuid IS NULL OR uc.id = ?::uuid))`, appID, actor, grant, grant).
 		Scan(ctx.Request().Context(), &owner); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return uuid.Nil, errorsx.ErrForbidden

@@ -265,7 +265,6 @@ func searchBody(ctx echo.Context) (*BodySearch, error) {
 }
 
 func searchRun(ctx echo.Context, req *BodySearch) error {
-	appID, _ := ctx.Get("app_id").(uuid.UUID)
 
 	if err := respond.InitPagination(ctx, req.Limit, nil); err != nil {
 		return respond.Error(ctx, http.StatusBadRequest, err.Error())
@@ -303,13 +302,13 @@ func searchRun(ctx echo.Context, req *BodySearch) error {
 		claimObjectKeys = keys
 	}
 
-	rs, total, err := searchClaimius(ctx, uuid.Nil, appID, query, req, access, cap)
+	rs, total, err := searchClaimius(ctx, uuid.Nil, query, req, access, cap)
 	if err != nil {
 		ctx.Logger().Errorf("claimius search failed: %v", err)
 		return respond.Error(ctx, http.StatusInternalServerError, "Internal server error")
 	}
 	rs = searchApplyScope(rs, req, claimObjectKeys)
-	rs = searchApplyFilters(ctx, appID, rs, req)
+	rs = searchApplyFilters(ctx, rs, req)
 	rs = searchDedup(rs)
 
 	sort.Slice(rs, func(i, j int) bool { return rs[i].Rank > rs[j].Rank })
@@ -341,7 +340,7 @@ func searchRun(ctx echo.Context, req *BodySearch) error {
 	return respond.JSON(ctx, http.StatusOK, page, total)
 }
 
-func searchClaimius(ctx echo.Context, userID, appID uuid.UUID, query string, req *BodySearch, access, cap int) ([]ResponseSearch, int, error) {
+func searchClaimius(ctx echo.Context, userID uuid.UUID, query string, req *BodySearch, access, cap int) ([]ResponseSearch, int, error) {
 	rs := make([]ResponseSearch, 0)
 	err := sdb.Instance().NewRaw(
 		`SELECT object_id       AS id,
@@ -357,8 +356,8 @@ func searchClaimius(ctx echo.Context, userID, appID uuid.UUID, query string, req
 		        is_direct_grant AS is_direct_grant,
 		        rank            AS rank,
 		        total_count     AS total_count
-		   FROM claimius.search(?, ?, ?, ?::text[], ?, ?, ?, ?, ?, ?, ?, ?)`,
-		userID, appID, query, searchTypeArray(req.ObjectTypes), access,
+		   FROM claimius.search(?, ?, ?::text[], ?, ?, ?, ?, ?, ?, ?, ?)`,
+		userID, query, searchTypeArray(req.ObjectTypes), access,
 		searchUUIDArray(req.IDs), searchUUIDArray(req.ExcludeIDs),
 		searchUUIDArray(req.OwnerIDs), req.ParentID, req.ParentType,
 		cap, 0,
@@ -422,7 +421,7 @@ func searchApplyScope(results []ResponseSearch, req *BodySearch, claimObjectKeys
 	return out
 }
 
-func searchApplyFilters(ctx echo.Context, appID uuid.UUID, results []ResponseSearch, req *BodySearch) []ResponseSearch {
+func searchApplyFilters(ctx echo.Context, results []ResponseSearch, req *BodySearch) []ResponseSearch {
 	excludeTypes := searchIndexStrings(req.ExcludeObjectTypes)
 	excludeOwners := searchIndexUUIDs(req.ExcludeOrgIDs)
 	excludeLocations := searchIndexUUIDs(req.ExcludeLocIDs)
@@ -460,14 +459,14 @@ func searchApplyFilters(ctx echo.Context, appID uuid.UUID, results []ResponseSea
 			}
 		}
 		if len(req.UsrIDs) > 0 {
-			if !searchAnyUserHasAccess(ctx, appID, req.UsrIDs, r.ID, string(r.ObjectType)) {
+			if !searchAnyUserHasAccess(ctx, req.UsrIDs, r.ID, string(r.ObjectType)) {
 				continue
 			}
 		}
 		if len(excludeUsrs) > 0 {
 			excluded := false
 			for uid := range excludeUsrs {
-				if searchAnyUserHasAccess(ctx, appID, []uuid.UUID{uid}, r.ID, string(r.ObjectType)) {
+				if searchAnyUserHasAccess(ctx, []uuid.UUID{uid}, r.ID, string(r.ObjectType)) {
 					excluded = true
 					break
 				}
@@ -481,12 +480,12 @@ func searchApplyFilters(ctx echo.Context, appID uuid.UUID, results []ResponseSea
 	return out
 }
 
-func searchAnyUserHasAccess(ctx echo.Context, appID uuid.UUID, userIDs []uuid.UUID, objectID uuid.UUID, objectType string) bool {
+func searchAnyUserHasAccess(ctx echo.Context, userIDs []uuid.UUID, objectID uuid.UUID, objectType string) bool {
 	for _, uid := range userIDs {
 		exists := false
 		err := sdb.Instance().NewRaw(
-			`SELECT EXISTS (SELECT 1 FROM claimius.get_access(?, ?, ?, ?, ?))`,
-			uid, appID, objectID, objectType, int(ACCESS_READ),
+			`SELECT EXISTS (SELECT 1 FROM claimius.get_access(?, ?, ?, ?))`,
+			uid, objectID, objectType, int(ACCESS_READ),
 		).Scan(ctx.Request().Context(), &exists)
 		if err == nil && exists {
 			return true

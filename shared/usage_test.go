@@ -39,10 +39,10 @@ func TestObjectUsage_CountsPerKeyAndFlushesOnStop(t *testing.T) {
 	u := startObjectUsage(sink.post, nil, time.Hour, 1000)
 	user, object := uuid.New(), uuid.New()
 	for i := 0; i < 3; i++ {
-		u.Add(nil, user, OBJECT_TYPE_ORGANIZATION, object)
+		u.Add(user, OBJECT_TYPE_ORGANIZATION, object)
 	}
-	u.Add(nil, user, OBJECT_TYPE_LOCATION, object)
-	u.Add(nil, uuid.Nil, OBJECT_TYPE_LOCATION, object)
+	u.Add(user, OBJECT_TYPE_LOCATION, object)
+	u.Add(uuid.Nil, OBJECT_TYPE_LOCATION, object)
 	u.close()
 	flushes := sink.seen()
 	if len(flushes) != 1 {
@@ -62,7 +62,7 @@ func TestObjectUsage_FlushesAtTheKeyLimit(t *testing.T) {
 	defer u.close()
 	user := uuid.New()
 	for i := 0; i < 3; i++ {
-		u.Add(nil, user, OBJECT_TYPE_ORGANIZATION, uuid.New())
+		u.Add(user, OBJECT_TYPE_ORGANIZATION, uuid.New())
 	}
 	deadline := time.Now().Add(2 * time.Second)
 	for len(sink.seen()) == 0 && time.Now().Before(deadline) {
@@ -80,7 +80,7 @@ func TestObjectUsage_FlushesOnTheInterval(t *testing.T) {
 	var mu sync.Mutex
 	u := startObjectUsage(sink.post, func(err error) { mu.Lock(); reported = err; mu.Unlock() }, 20*time.Millisecond, 1000)
 	defer u.close()
-	u.Add(nil, uuid.New(), OBJECT_TYPE_ORGANIZATION, uuid.New())
+	u.Add(uuid.New(), OBJECT_TYPE_ORGANIZATION, uuid.New())
 	deadline := time.Now().Add(2 * time.Second)
 	for len(sink.seen()) == 0 && time.Now().Before(deadline) {
 		time.Sleep(5 * time.Millisecond)
@@ -99,7 +99,7 @@ func TestObjectUsage_FlushesOnTheInterval(t *testing.T) {
 
 func TestObjectUsage_NilIsANoOp(t *testing.T) {
 	var u *ObjectUsage
-	u.Add(nil, uuid.New(), OBJECT_TYPE_ORGANIZATION, uuid.New())
+	u.Add(uuid.New(), OBJECT_TYPE_ORGANIZATION, uuid.New())
 	u.close()
 }
 
@@ -140,34 +140,12 @@ func (s *orderedSink) seen() ([][]usageKey, [][]int64) {
 	return append([][]usageKey(nil), s.posts...), append([][]int64(nil), s.counts...)
 }
 
-func TestObjectUsage_KeysOnTheAppChecked(t *testing.T) {
-	sink := &usageSink{}
-	u := startObjectUsage(sink.post, nil, time.Hour, 1000)
-	user, object := uuid.New(), uuid.New()
-	appA, appB := uuid.New(), uuid.New()
-	u.Add(&appA, user, OBJECT_TYPE_ORGANIZATION, object)
-	u.Add(&appB, user, OBJECT_TYPE_ORGANIZATION, object)
-	u.Add(nil, user, OBJECT_TYPE_ORGANIZATION, object)
-	u.Add(nil, user, OBJECT_TYPE_ORGANIZATION, object)
-	u.close()
-	flushes := sink.seen()
-	if len(flushes) != 1 || len(flushes[0]) != 3 {
-		t.Fatalf("expected one flush of three keys, one per app, got %v", flushes)
-	}
-	for app, want := range map[uuid.UUID]int64{appA: 1, appB: 1, uuid.Nil: 2} {
-		if got := flushes[0][usageKey{AppID: app, UserID: user, ObjectType: OBJECT_TYPE_ORGANIZATION, ObjectID: object}]; got != want {
-			t.Fatalf("app %s: expected %d uses, got %d", app, want, got)
-		}
-	}
-}
-
 func TestObjectUsage_FlushesInTheLockOrder(t *testing.T) {
 	sink := &orderedSink{}
 	u := startObjectUsage(sink.post, nil, time.Hour, 1000)
 	for i := 0; i < 50; i++ {
-		app := uuid.New()
-		u.Add(&app, uuid.New(), OBJECT_TYPE_ORGANIZATION, uuid.New())
-		u.Add(nil, uuid.New(), OBJECT_TYPE_LOCATION, uuid.New())
+		u.Add(uuid.New(), OBJECT_TYPE_ORGANIZATION, uuid.New())
+		u.Add(uuid.New(), OBJECT_TYPE_LOCATION, uuid.New())
 	}
 	u.close()
 	posts, _ := sink.seen()
@@ -176,7 +154,7 @@ func TestObjectUsage_FlushesInTheLockOrder(t *testing.T) {
 	}
 	for i := 1; i < len(posts[0]); i++ {
 		if posts[0][i].less(posts[0][i-1]) {
-			t.Fatalf("key %d is out of the user, app, type, object order", i)
+			t.Fatalf("key %d is out of the user, type, object order", i)
 		}
 	}
 }
@@ -187,8 +165,8 @@ func TestObjectUsage_RetriesADeadlock(t *testing.T) {
 		var reported error
 		u := startObjectUsage(sink.post, func(err error) { reported = err }, time.Hour, 1000)
 		user, object := uuid.New(), uuid.New()
-		u.Add(nil, user, OBJECT_TYPE_ORGANIZATION, object)
-		u.Add(nil, user, OBJECT_TYPE_ORGANIZATION, object)
+		u.Add(user, OBJECT_TYPE_ORGANIZATION, object)
+		u.Add(user, OBJECT_TYPE_ORGANIZATION, object)
 		u.close()
 		posts, counts := sink.seen()
 		if len(posts) != 2 || counts[1][0] != 2 {
@@ -206,8 +184,8 @@ func TestObjectUsage_KeepsTheCountsOfAFailedFlush(t *testing.T) {
 	var reported error
 	u := startObjectUsage(sink.post, func(err error) { mu.Lock(); reported = err; mu.Unlock() }, 20*time.Millisecond, 1000)
 	user, object := uuid.New(), uuid.New()
-	u.Add(nil, user, OBJECT_TYPE_ORGANIZATION, object)
-	u.Add(nil, user, OBJECT_TYPE_ORGANIZATION, object)
+	u.Add(user, OBJECT_TYPE_ORGANIZATION, object)
+	u.Add(user, OBJECT_TYPE_ORGANIZATION, object)
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
 		if posts, _ := sink.seen(); len(posts) >= 2 {
@@ -235,9 +213,9 @@ func TestObjectUsage_CapsItsKeysAndReportsTheUsesItDrops(t *testing.T) {
 	u := &ObjectUsage{counts: make(map[usageKey]int64), limit: 2, full: make(chan struct{}, 1)}
 	user := uuid.New()
 	first, second, third, fourth := uuid.New(), uuid.New(), uuid.New(), uuid.New()
-	u.Add(nil, user, OBJECT_TYPE_ORGANIZATION, first)
-	u.Add(nil, user, OBJECT_TYPE_ORGANIZATION, second)
-	u.Add(nil, user, OBJECT_TYPE_ORGANIZATION, third)
+	u.Add(user, OBJECT_TYPE_ORGANIZATION, first)
+	u.Add(user, OBJECT_TYPE_ORGANIZATION, second)
+	u.Add(user, OBJECT_TYPE_ORGANIZATION, third)
 	if len(u.counts) != 2 || u.dropped != 1 {
 		t.Fatalf("a full map takes no new key, got %d keys and %d dropped", len(u.counts), u.dropped)
 	}
@@ -247,8 +225,8 @@ func TestObjectUsage_CapsItsKeysAndReportsTheUsesItDrops(t *testing.T) {
 		t.Fatal("a full map asks for a flush")
 	}
 	u.post = func(context.Context, []usageKey, []int64) error {
-		u.Add(nil, user, OBJECT_TYPE_ORGANIZATION, third)
-		u.Add(nil, user, OBJECT_TYPE_ORGANIZATION, fourth)
+		u.Add(user, OBJECT_TYPE_ORGANIZATION, third)
+		u.Add(user, OBJECT_TYPE_ORGANIZATION, fourth)
 		return errors.New("down")
 	}
 	u.report = func(err error) { reported = append(reported, err) }

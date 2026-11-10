@@ -36,9 +36,9 @@ func TestADiscipleBindsOnItsOwnRowThroughTheProphet(t *testing.T) {
 	claim := func(name string, access int) uuid.UUID {
 		var id uuid.UUID
 		if err := prophet.NewRaw(`
-			SELECT (claimius.insert_claim(p_app_id => ?, p_name => ?, p_description => NULL, p_sa_access => ?,
+			SELECT (claimius.insert_claim(p_name => ?, p_description => NULL, p_sa_access => ?,
 			        p_sa_owner_id => ?, p_sa_root_id => ?, p_sa_created_by => ?) -> 'claim' ->> 'id')::UUID
-		`, app.ID, name, access, branch, outside, grantUser).Scan(ctx, &id); err != nil {
+		`, name, access, branch, outside, grantUser).Scan(ctx, &id); err != nil {
 			t.Fatalf("claim %s: %v", name, err)
 		}
 		return id
@@ -46,9 +46,9 @@ func TestADiscipleBindsOnItsOwnRowThroughTheProphet(t *testing.T) {
 	owners, viewers, rowOwners := claim("Branch owners", 15), claim("Branch viewers", 4), claim("Row owners", 15)
 	for _, c := range []uuid.UUID{owners, viewers} {
 		if _, err := prophet.ExecContext(ctx, `
-			SELECT claimius.insert_claim_object(p_app_id => ?, p_claim_id => ?, p_sa_owner_id => ?, p_sa_root_id => ?,
+			SELECT claimius.insert_claim_object(p_claim_id => ?, p_sa_owner_id => ?, p_sa_root_id => ?,
 			       p_sa_created_by => ?, p_object_id => ?, p_object_type => 'claimius.organization', p_inherits => TRUE)
-		`, app.ID, c, branch, outside, grantUser, branch); err != nil {
+		`, c, branch, outside, grantUser, branch); err != nil {
 			t.Fatalf("bind on branch: %v", err)
 		}
 	}
@@ -61,10 +61,10 @@ func TestADiscipleBindsOnItsOwnRowThroughTheProphet(t *testing.T) {
 	}{{owner, owners, &ownerGrant}, {viewer, viewers, &viewerGrant}} {
 		var id uuid.UUID
 		if err := prophet.NewRaw(`
-			SELECT (claimius.insert_user_claim(p_app_id => ?, p_claim_id => ?, p_user_id => ?, p_sa_owner_id => ?, p_sa_created_by => ?)
+			SELECT (claimius.insert_user_claim(p_claim_id => ?, p_user_id => ?, p_sa_owner_id => ?, p_sa_created_by => ?)
 			        -> 'user_claim' ->> 'id')::UUID
 			FROM claimius.upsert_app_user(p_user_id => ?, p_app_id => ?, p_first_name => 'Branch user')
-		`, app.ID, g.claim, g.user, branch, grantUser, g.user, app.ID).Scan(ctx, &id); err != nil {
+		`, g.claim, g.user, branch, grantUser, g.user, app.ID).Scan(ctx, &id); err != nil {
 			t.Fatalf("grant: %v", err)
 		}
 		if g.out != nil {
@@ -186,9 +186,9 @@ func TestADiscipleBindsOnItsOwnRowThroughTheProphet(t *testing.T) {
 		t.Fatalf("vouch: %v", err)
 	}
 	if _, err := tx.ExecContext(ctx, `
-		SELECT claimius.insert_claim_object(p_app_id => ?, p_claim_id => ?, p_sa_owner_id => ?, p_sa_root_id => ?,
+		SELECT claimius.insert_claim_object(p_claim_id => ?, p_sa_owner_id => ?, p_sa_root_id => ?,
 		       p_sa_created_by => ?, p_object_id => ?, p_object_type => ?, p_inherits => TRUE)
-	`, app.ID, rowOwners, branch, outside, viewerGrant, forged, string(rowType)); err == nil {
+	`, rowOwners, branch, outside, viewerGrant, forged, string(rowType)); err == nil {
 		t.Fatal("a creator grant that is not the actor's own must not make the actor the row's creator")
 	}
 }

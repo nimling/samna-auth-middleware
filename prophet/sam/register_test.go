@@ -62,3 +62,16 @@ func getRoutePath(e *echo.Echo, method, path string) string {
 	e.Router().Find(method, path, ctx)
 	return ctx.Path()
 }
+
+func TestNoGuestRouteIsRegistered(t *testing.T) {
+	e := echo.New()
+	RegisterEndpoints(e.Group("/sam"))
+	for _, r := range e.Routes() {
+		if r.Path == "/sam/user/temporary" {
+			t.Fatalf("%s %s is registered, and no guest mechanism is", r.Method, r.Path)
+		}
+	}
+	if path := getRoutePath(e, http.MethodPost, "/sam/user/temporary"); path == "/sam/user/temporary" {
+		t.Fatalf("POST /sam/user/temporary resolves, and no guest mechanism is")
+	}
+}

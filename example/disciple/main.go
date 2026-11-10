@@ -168,7 +168,7 @@ func GetUserAccess(ctx echo.Context) error {
 }
 
 func GetRootAccess(ctx echo.Context) error {
-	ac, err := sdb.Instance().RootAccess(ctx.Request().Context(), actor(ctx), uuid.Nil, shared.ACCESS_READ)
+	ac, err := sdb.Instance().RootAccess(ctx.Request().Context(), actor(ctx), shared.ACCESS_READ)
 	if err != nil {
 		return accessError(ctx, err)
 	}

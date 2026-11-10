@@ -164,27 +164,6 @@ type BodySamCodeActor struct {
 	UserID uuid.UUID `json:"user_id"`
 }
 
-type BodyGuest struct {
-	ClaimID   uuid.UUID `json:"claim_id"`
-	UserID    uuid.UUID `json:"user_id"`
-	FirstName *string   `json:"first_name,omitempty"`
-	LastName  *string   `json:"last_name,omitempty"`
-	Email     *string   `json:"email,omitempty"`
-	Phone     *string   `json:"phone,omitempty"`
-}
-
-type GuestTokenResponse struct {
-	AccessToken     string          `json:"access_token"`
-	AccessExpiresIn int             `json:"access_expires_in"`
-	TokenType       string          `json:"token_type"`
-	UserID          uuid.UUID       `json:"user_id"`
-	ClaimID         uuid.UUID       `json:"claim_id"`
-	StartsAt        *time.Time      `json:"starts_at,omitempty"`
-	EndsAt          *time.Time      `json:"ends_at,omitempty"`
-	SamnaUser       json.RawMessage `json:"samna_user,omitempty"`
-	UserClaim       json.RawMessage `json:"user_claim,omitempty"`
-}
-
 type CodeCreated struct {
 	Code
 	Value string `bun:"-" json:"value"`
@@ -471,46 +450,6 @@ func (d *DB) PostCodeRedeem(ctx context.Context, value string, userID uuid.UUID)
 		return nil, err
 	}
 	return &grant, nil
-}
-
-func (d *DB) PutGuestUser(ctx context.Context, ac *AccessClaim, body BodyGuest) (*GuestTokenResponse, error) {
-	if ac == nil || ac.UserID == uuid.Nil {
-		return nil, ErrNoAccess
-	}
-	body.UserID = ac.UserID
-	var resp GuestTokenResponse
-	if d.RouteToProphet {
-		if err := client.Post(ctx, "user/temporary", body, &resp); err != nil {
-			return nil, codeError(err)
-		}
-		if err := d.applyReplayed(ctx, replayEvent{OBJECT_TYPE_USER, resp.SamnaUser}, replayEvent{OBJECT_TYPE_USER_CLAIM, resp.UserClaim}); err != nil {
-			return nil, err
-		}
-		return &resp, nil
-	}
-	guestID := uuid.NullUUID{}
-	if body.FirstName != nil || body.LastName != nil || body.Email != nil || body.Phone != nil {
-		guestID = uuid.NullUUID{UUID: uuid.New(), Valid: true}
-	}
-	var raw json.RawMessage
-	if err := d.NewRaw("SELECT claimius.upsert_guest_user(?, ?, ?, ?, ?, ?, ?)",
-		body.ClaimID, ac.UserID, guestID, body.FirstName, body.LastName, body.Email, body.Phone,
-	).Scan(ctx, (*[]byte)(&raw)); err != nil {
-		return nil, codeError(err)
-	}
-	if err := json.Unmarshal(raw, &resp); err != nil {
-		return nil, err
-	}
-	var user SamnaUser
-	if err := sauth.Unmarshal(resp.SamnaUser, &user); err != nil {
-		return nil, err
-	}
-	var grant UserClaim
-	if err := sauth.Unmarshal(resp.UserClaim, &grant); err != nil {
-		return nil, err
-	}
-	resp.UserID, resp.ClaimID, resp.StartsAt, resp.EndsAt = user.UserID, body.ClaimID, grant.StartsAt, grant.EndsAt
-	return &resp, nil
 }
 
 func SealGrantOptions(raw json.RawMessage) (json.RawMessage, error) {

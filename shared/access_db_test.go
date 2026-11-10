@@ -159,7 +159,7 @@ func TestUserAccessResolvesExternalID(t *testing.T) {
 
 func TestRootAccessSkipsSoftDeletedRoot(t *testing.T) {
 	db := database(t)
-	ac, err := db.RootAccess(context.Background(), userC, uuid.Nil, sdb.ACCESS_READ)
+	ac, err := db.RootAccess(context.Background(), userC, sdb.ACCESS_READ)
 	if err != nil {
 		t.Fatalf("root access: %v", err)
 	}

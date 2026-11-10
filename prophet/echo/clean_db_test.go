@@ -60,9 +60,9 @@ func TestTheCleanRemovesWhatARoutedWriteLeftOnAnObjectTheHostNeverCommitted(t *t
 	claim := func(name string) uuid.UUID {
 		var id uuid.UUID
 		if err := prophet.NewRaw(`
-			SELECT (claimius.insert_claim(p_app_id => ?, p_name => ?, p_description => NULL, p_sa_access => 15,
+			SELECT (claimius.insert_claim(p_name => ?, p_description => NULL, p_sa_access => 15,
 			        p_sa_owner_id => ?, p_sa_root_id => ?, p_sa_created_by => ?, p_type => 'virtual') -> 'claim' ->> 'id')::UUID
-		`, app.ID, name, app.Org, app.Org, grantUser).Scan(ctx, &id); err != nil {
+		`, name, app.Org, app.Org, grantUser).Scan(ctx, &id); err != nil {
 			t.Fatalf("claim %s: %v", name, err)
 		}
 		return id
@@ -70,9 +70,9 @@ func TestTheCleanRemovesWhatARoutedWriteLeftOnAnObjectTheHostNeverCommitted(t *t
 	bind := func(claimID, objectID uuid.UUID) uuid.UUID {
 		var id uuid.UUID
 		if err := prophet.NewRaw(`
-			SELECT (claimius.insert_claim_object(p_app_id => ?, p_claim_id => ?, p_sa_owner_id => ?, p_sa_root_id => ?,
+			SELECT (claimius.insert_claim_object(p_claim_id => ?, p_sa_owner_id => ?, p_sa_root_id => ?,
 			       p_sa_created_by => ?, p_object_id => ?, p_object_type => 'public.gotest_consumer_row', p_inherits => TRUE) -> 'claim_object' ->> 'id')::UUID
-		`, app.ID, claimID, app.Org, app.Org, grantUser, objectID).Scan(ctx, &id); err != nil {
+		`, claimID, app.Org, app.Org, grantUser, objectID).Scan(ctx, &id); err != nil {
 			t.Fatalf("bind: %v", err)
 		}
 		return id

@@ -77,7 +77,6 @@ func GetLocationAssets(ctx echo.Context) error {
 }
 
 func GetLocationClaims(ctx echo.Context) error {
-	appID, _ := ctx.Get("app_id").(uuid.UUID)
 	locationID, err := uuid.Parse(ctx.Param("id"))
 	if err != nil {
 		return respond.Error(ctx, http.StatusBadRequest, "Malformed request")
@@ -87,7 +86,6 @@ func GetLocationClaims(ctx echo.Context) error {
 	if err := sdb.Instance().NewSelect().
 		Model(&claims).
 		ExcludeColumn("sa_deleted_at").
-		Where("claim.app_id = ?", appID).
 		Where("claim.sa_deleted_at IS NULL").
 		Where(`claim.id IN (SELECT claim_id FROM claimius.claim_object WHERE object_id = ? AND object_type = ? AND sa_deleted_at IS NULL)`, locationID, OBJECT_TYPE_LOCATION).
 		Scan(ctx.Request().Context()); err != nil {

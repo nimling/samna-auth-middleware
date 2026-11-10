@@ -27,6 +27,56 @@ DO $$
         END IF;
     END $$;
 
+DO $$
+DECLARE
+    v_table TEXT;
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'claimius' AND table_name = 'samna_user' AND column_name = 'app_id') THEN
+        RETURN;
+    END IF;
+    DROP VIEW IF EXISTS claimius.get_users, claimius.get_claims, claimius.get_grants;
+    ALTER TABLE claimius.user_object DISABLE TRIGGER USER;
+    ALTER TABLE claimius.user_users DISABLE TRIGGER USER;
+    TRUNCATE claimius.user_object, claimius.user_users, claimius.user_users_diff, claimius.access_diff,
+             claimius.user_activity, claimius.usage_diff, claimius.claim_graph_cache;
+    DELETE FROM claimius.samna_user u
+    USING (
+        SELECT s.id,
+               row_number() OVER (
+                   PARTITION BY s.user_id
+                   ORDER BY (p.system_app_slug IS NOT NULL) DESC, s.sa_created_at, s.id
+               ) AS n
+        FROM claimius.samna_user s
+            JOIN claimius.samna_app a ON a.id = s.app_id
+            LEFT JOIN claimius.prophet_state p ON p.system_app_slug = a.slug
+        WHERE s.sa_deleted_at IS NULL
+    ) r
+    WHERE u.id = r.id AND r.n > 1;
+    UPDATE claimius.samna_user u
+    SET user_name = NULL
+    FROM (
+        SELECT s.id,
+               row_number() OVER (PARTITION BY lower(s.user_name) ORDER BY s.sa_created_at, s.id) AS n
+        FROM claimius.samna_user s
+        WHERE s.sa_deleted_at IS NULL AND s.user_name IS NOT NULL
+    ) r
+    WHERE u.id = r.id AND r.n > 1;
+    FOR v_table IN
+        SELECT unnest(ARRAY['user_claim', 'claim_object', 'claim', 'samna_user', 'user_object', 'user_users',
+                            'user_users_diff', 'access_diff', 'user_activity', 'usage_diff', 'claim_graph_cache'])
+    LOOP
+        EXECUTE format('ALTER TABLE claimius.%I DROP COLUMN IF EXISTS app_id CASCADE', v_table);
+    END LOOP;
+    ALTER TABLE claimius.user_object ADD CONSTRAINT user_object_pkey PRIMARY KEY (user_id, object_type, object_id) INCLUDE (sa_access);
+    ALTER TABLE claimius.user_activity ADD PRIMARY KEY (user_id);
+    ALTER TABLE claimius.usage_diff ADD PRIMARY KEY (user_id, id);
+    ALTER TABLE claimius.user_users_diff ADD PRIMARY KEY (object_type, object_id, id);
+    ALTER TABLE claimius.claim_graph_cache ADD PRIMARY KEY (user_id);
+    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'claimius' AND table_name = 'table_info' AND column_name = 'has_app_id') THEN
+        ALTER TABLE claimius.table_info DROP COLUMN has_app_id;
+    END IF;
+END $$;
+
 CREATE TABLE IF NOT EXISTS claimius.samna_app (
                                                   id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
                                                   slug            TEXT UNIQUE NOT NULL,
@@ -97,7 +147,6 @@ CREATE INDEX IF NOT EXISTS idx_samna_app_sa_owner_id ON claimius.samna_app (sa_o
 CREATE TABLE IF NOT EXISTS claimius.samna_user (
                                                    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
                                                    user_id         UUID NOT NULL DEFAULT gen_random_uuid(),
-                                                   app_id          UUID NOT NULL REFERENCES claimius.samna_app(id),
                                                    first_name      VARCHAR(255),
                                                    last_name       VARCHAR(255),
                                                    user_name       TEXT,
@@ -131,10 +180,9 @@ DROP TABLE IF EXISTS claimius.cli_login CASCADE;
 COMMENT ON COLUMN claimius.samna_user.profile IS 'The user''s public profile: one object of key to entry, every entry {"schema": {"type": ...}, "value": ...}, the schema a JSON Schema fragment a renderer reads and the value what it describes. The user''s own keys carry no dot and are written on Samna Auth through update_profile; an app writes <app slug>.<field> through upsert_profile_item. Written on every row of the user, so the sync carries the whole object to every app that sees the user.';
 
 
-COMMENT ON TABLE claimius.samna_user IS 'User record. One row per (user_id, app_id) pair.';
+COMMENT ON TABLE claimius.samna_user IS 'User record. One row per user_id, shared by every app. An app receives the row while the user holds a live grant of a claim owned in an organization tree linked to it.';
 COMMENT ON COLUMN claimius.samna_user.user_id IS 'Stable application identifier across apps. Used in all references.';
-COMMENT ON COLUMN claimius.samna_user.app_id IS 'Required app scope. Disciples only hold rows for their own app.';
-COMMENT ON COLUMN claimius.samna_user.user_name IS 'Optional username, distinct from first_name/last_name, unique per app ignoring case among live rows. A user reserves it in an app through update_user_name; a profile resolves by it while every link carries the user_id.';
+COMMENT ON COLUMN claimius.samna_user.user_name IS 'Optional username, distinct from first_name/last_name, unique ignoring case among live rows. A user reserves it through update_user_name; a profile resolves by it while every link carries the user_id.';
 ALTER TABLE claimius.samna_user ADD COLUMN IF NOT EXISTS user_image TEXT;
 
 COMMENT ON COLUMN claimius.samna_user.user_image IS 'Optional user image. URL, string, or id that the implementing system recognizes.';
@@ -144,15 +192,14 @@ CREATE OR REPLACE VIEW claimius.get_users AS SELECT * FROM claimius.samna_user;
 GRANT SELECT ON claimius.get_users TO claimius_writer;
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_samna_user_user_app
-    ON claimius.samna_user (user_id, app_id) WHERE sa_deleted_at IS NULL;
+    ON claimius.samna_user (user_id) WHERE sa_deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_samna_user_user_id ON claimius.samna_user (user_id);
-CREATE INDEX IF NOT EXISTS idx_samna_user_app_id ON claimius.samna_user (app_id);
 CREATE INDEX IF NOT EXISTS idx_samna_user_email ON claimius.samna_user (email);
 CREATE INDEX IF NOT EXISTS idx_samna_user_sa_deleted_at ON claimius.samna_user (sa_deleted_at);
 CREATE INDEX IF NOT EXISTS idx_samna_user_status ON claimius.samna_user (status);
-CREATE INDEX IF NOT EXISTS idx_samna_user_app_external ON claimius.samna_user (app_id, external_id) WHERE sa_deleted_at IS NULL;
-CREATE UNIQUE INDEX IF NOT EXISTS idx_samna_user_app_user_name
-    ON claimius.samna_user (app_id, lower(user_name)) WHERE sa_deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_samna_user_external ON claimius.samna_user (external_id) WHERE sa_deleted_at IS NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_samna_user_user_name
+    ON claimius.samna_user (lower(user_name)) WHERE sa_deleted_at IS NULL;
 
 CREATE TABLE IF NOT EXISTS claimius.samna_client (
                                                      id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -317,7 +364,6 @@ CREATE INDEX IF NOT EXISTS idx_app_object_app_id ON claimius.app_object (app_id)
 
 CREATE TABLE IF NOT EXISTS claimius.claim (
                                               id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                                              app_id          UUID NOT NULL REFERENCES claimius.samna_app(id),
                                               name            TEXT NOT NULL,
                                               description     TEXT,
                                               sa_access       INTEGER NOT NULL,
@@ -329,15 +375,13 @@ CREATE TABLE IF NOT EXISTS claimius.claim (
                                               sa_deleted_at   TIMESTAMPTZ,
                                               sa_created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
                                               sa_updated_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
-                                              txid            XID8 NOT NULL DEFAULT pg_current_xact_id(),
-                                              CONSTRAINT claim_app_id_id_key UNIQUE (app_id, id)
+                                              txid            XID8 NOT NULL DEFAULT pg_current_xact_id()
 );
 
 COMMENT ON TABLE claimius.claim IS 'Permission template. Access is a bitwise mask.';
 COMMENT ON COLUMN claimius.claim.sa_access IS 'Bitwise access mask. Bits: 0x01 owner, 0x02 write, 0x04 read, 0x08 execute, 0x10 deny, 0x20 member. When the deny bit is set the other bits enumerate which permissions to subtract.';
 COMMENT ON COLUMN claimius.claim.inherits IS 'When true, claim_object bindings cascade through hierarchy.';
 
-CREATE INDEX IF NOT EXISTS idx_claim_app_id ON claimius.claim (app_id);
 CREATE INDEX IF NOT EXISTS idx_claim_sa_owner_id ON claimius.claim (sa_owner_id);
 CREATE INDEX IF NOT EXISTS idx_claim_sa_root_id ON claimius.claim (sa_root_id);
 CREATE INDEX IF NOT EXISTS idx_claim_deny_bit ON claimius.claim ((sa_access & 16)) WHERE (sa_access & 16) <> 0;
@@ -356,7 +400,6 @@ ALTER TABLE claimius.claim DROP COLUMN IF EXISTS guest_mode;
 
 CREATE TABLE IF NOT EXISTS claimius.user_claim (
                                                    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                                                   app_id          UUID NOT NULL REFERENCES claimius.samna_app(id),
                                                    claim_id        UUID NOT NULL REFERENCES claimius.claim(id),
                                                    user_id         UUID NOT NULL,
                                                    reason          TEXT,
@@ -367,20 +410,19 @@ CREATE TABLE IF NOT EXISTS claimius.user_claim (
                                                    sa_deleted_at   TIMESTAMPTZ,
                                                    sa_created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
                                                    sa_updated_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
-                                                   txid            XID8 NOT NULL DEFAULT pg_current_xact_id(),
-                                                   CONSTRAINT user_claim_app_claim_fkey FOREIGN KEY (app_id, claim_id) REFERENCES claimius.claim (app_id, id)
+                                                   txid            XID8 NOT NULL DEFAULT pg_current_xact_id()
 );
 
 
 ALTER TABLE claimius.user_claim ADD COLUMN IF NOT EXISTS options JSONB;
 COMMENT ON COLUMN claimius.user_claim.options IS 'Options of the grant, NULL when it has none, accepted only on a grant of the anonymous user, anonymous_user_id(). On it {"samk": {"hash": "<hex SHA-256 of the code value>", "query": true, "header": true, "cookie": true}} names the code a request without a credential must present to hold the grant and the carriers it is accepted in: the samk query parameter, the SAuth-Code header, the __Host-sauth_samk cookie, any subset of the three with at least one true. The value is shown once when it is written and never stored. Without samk the public grant is open to every request. Sits beside starts_at and ends_at, the validity of the grant. Checked by _check_claim_options on every write.';
 
-COMMENT ON TABLE claimius.user_claim IS 'Grants a claim to a user in an app. id is referenced as sa_created_by everywhere. A grant to the anonymous user, anonymous_user_id(), is the public grant of the claim: every request without a credential holds it, and a write under it is stamped with the grant''s own sa_created_by, the grant of the user who made the claim public.';
+COMMENT ON TABLE claimius.user_claim IS 'Grants a claim to a user. id is referenced as sa_created_by everywhere. A grant to the anonymous user, anonymous_user_id(), is the public grant of the claim: every request without a credential holds it, and a write under it is stamped with the grant''s own sa_created_by, the grant of the user who made the claim public.';
 COMMENT ON COLUMN claimius.user_claim.user_id IS 'References samna_user.user_id, not samna_user.id. The anonymous user, anonymous_user_id(), makes the grant public.';
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_user_claim_unique
-    ON claimius.user_claim (claim_id, user_id, app_id) WHERE sa_deleted_at IS NULL;
-CREATE INDEX IF NOT EXISTS idx_user_claim_user_app ON claimius.user_claim (user_id, app_id);
+    ON claimius.user_claim (claim_id, user_id) WHERE sa_deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_user_claim_user_app ON claimius.user_claim (user_id);
 CREATE INDEX IF NOT EXISTS idx_user_claim_claim_id ON claimius.user_claim (claim_id);
 CREATE INDEX IF NOT EXISTS idx_user_claim_sa_owner_id ON claimius.user_claim (sa_owner_id);
 DROP INDEX IF EXISTS claimius.idx_user_claim_sa_deleted_at;
@@ -389,7 +431,6 @@ COMMENT ON COLUMN claimius.user_claim.txid IS 'Local transaction that last wrote
 
 CREATE TABLE IF NOT EXISTS claimius.claim_object (
                                                      id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                                                     app_id          UUID NOT NULL REFERENCES claimius.samna_app(id),
                                                      claim_id        UUID NOT NULL REFERENCES claimius.claim(id),
                                                      object_id       UUID,
                                                      object_type     TEXT,
@@ -408,20 +449,16 @@ CREATE TABLE IF NOT EXISTS claimius.claim_object (
                                                      CONSTRAINT claim_object_object_pair CHECK (
                                                          (object_id IS NULL AND object_type IS NULL)
                                                       OR (object_id IS NOT NULL AND object_type IS NOT NULL)
-                                                     ),
-                                                     CONSTRAINT claim_object_app_claim_fkey FOREIGN KEY (app_id, claim_id) REFERENCES claimius.claim (app_id, id)
+                                                     )
 );
 
-COMMENT ON CONSTRAINT claim_object_app_claim_fkey ON claimius.claim_object IS 'A binding lives in the app of its claim, so the feed and the snapshot of an app never carry a binding whose claim they do not.';
 
-COMMENT ON CONSTRAINT user_claim_app_claim_fkey ON claimius.user_claim IS 'A grant lives in the app of its claim, so the feed and the snapshot of an app never carry a grant whose claim they do not.';
 
 
 COMMENT ON TABLE claimius.claim_object IS 'Binds a claim. With (object_type, object_id) scope keys are field names; without them scope keys are custom.';
 COMMENT ON COLUMN claimius.claim_object.sa_access IS 'Bitwise access mask with bits 0x01 owner, 0x02 write, 0x04 read, 0x08 execute, 0x10 deny, 0x20 member; NULL means inherit the claim sa_access at read time.';
 COMMENT ON COLUMN claimius.claim_object.scope IS 'Object scoped: keys are field names, NULL means whole object. Object-less: keys are custom, NULL means no grant.';
 
-CREATE INDEX IF NOT EXISTS idx_claim_object_app_id ON claimius.claim_object (app_id);
 CREATE INDEX IF NOT EXISTS idx_claim_object_claim_id ON claimius.claim_object (claim_id);
 CREATE INDEX IF NOT EXISTS idx_claim_object_object ON claimius.claim_object (object_type, object_id) WHERE object_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_claim_object_no_object ON claimius.claim_object (claim_id) WHERE object_id IS NULL AND sa_deleted_at IS NULL;
@@ -494,7 +531,6 @@ CREATE TABLE IF NOT EXISTS claimius.table_info (
                                                    has_sa_deleted_at   BOOLEAN NOT NULL,
                                                    has_sa_created_at   BOOLEAN NOT NULL,
                                                    has_sa_updated_at   BOOLEAN NOT NULL,
-                                                   has_app_id          BOOLEAN NOT NULL,
                                                    has_name            BOOLEAN NOT NULL,
                                                    has_description     BOOLEAN NOT NULL,
                                                    sa_created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -531,7 +567,6 @@ CREATE INDEX IF NOT EXISTS idx_inheritance_info_ancestor
     INCLUDE (descendant_type, descendant_id, root_id, depth);
 
 CREATE TABLE IF NOT EXISTS claimius.user_object (
-                                                    app_id              UUID NOT NULL,
                                                     user_id             UUID NOT NULL,
                                                     object_id           UUID NOT NULL,
                                                     object_type         TEXT NOT NULL,
@@ -543,10 +578,10 @@ CREATE TABLE IF NOT EXISTS claimius.user_object (
                                                     last_used_at        TIMESTAMPTZ,
                                                     sa_created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
                                                     sa_updated_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
-                                                    CONSTRAINT user_object_pkey PRIMARY KEY (user_id, app_id, object_type, object_id) INCLUDE (sa_access)
+                                                    CONSTRAINT user_object_pkey PRIMARY KEY (user_id, object_type, object_id) INCLUDE (sa_access)
 );
 
-COMMENT ON TABLE claimius.user_object IS 'Reverse access index. Read path. One row per (user, app, object) with access, keyed on that tuple. Per object fields live in object_info.';
+COMMENT ON TABLE claimius.user_object IS 'Reverse access index. Read path. One row per (user, object) with access, keyed on that tuple. Per object fields live in object_info.';
 COMMENT ON COLUMN claimius.user_object.grants IS 'JSON array of {claim_id, access, scope, cascaded_from, tree_type}. Empty when only direct.';
 COMMENT ON COLUMN claimius.user_object.direct_grant IS 'True when user is creator (via sa_created_by lookup).';
 COMMENT ON COLUMN claimius.user_object.sa_access IS 'Effective bitwise access mask: OR of grants[].access with deny bits subtracted. Bits: 0x01 owner, 0x02 write, 0x04 read, 0x08 execute. Direct creator gets 0x01|0x02|0x04|0x08.';
@@ -661,14 +696,13 @@ BEGIN
         DELETE FROM claimius.user_object a
         USING claimius.user_object b
         WHERE a.user_id = b.user_id
-          AND a.app_id = b.app_id
           AND a.object_type = b.object_type
           AND a.object_id = b.object_id
           AND (a.sa_updated_at, a.id) < (b.sa_updated_at, b.id);
         ALTER TABLE claimius.user_object DROP CONSTRAINT IF EXISTS user_object_pkey;
         ALTER TABLE claimius.user_object DROP COLUMN id;
         ALTER TABLE claimius.user_object
-            ADD CONSTRAINT user_object_pkey PRIMARY KEY (user_id, app_id, object_type, object_id) INCLUDE (sa_access);
+            ADD CONSTRAINT user_object_pkey PRIMARY KEY (user_id, object_type, object_id) INCLUDE (sa_access);
     END IF;
 END $$;
 
@@ -695,7 +729,7 @@ DROP INDEX IF EXISTS claimius.idx_user_object_location;
 DROP INDEX IF EXISTS claimius.idx_user_object_root;
 DROP INDEX IF EXISTS claimius.idx_user_object_grants;
 DROP INDEX IF EXISTS claimius.idx_user_object_search;
-CREATE INDEX IF NOT EXISTS idx_user_object_object_user ON claimius.user_object (app_id, object_type, object_id, user_id);
+CREATE INDEX IF NOT EXISTS idx_user_object_object_user ON claimius.user_object (object_type, object_id, user_id);
 
 DROP TABLE IF EXISTS claimius.object_users;
 
@@ -708,8 +742,7 @@ BEGIN
     SET used_count = uo.used_count + ou.used_count,
         last_used_at = greatest(uo.last_used_at, ou.last_used_at)
     FROM claimius.object_usage ou
-    WHERE ou.app_id = uo.app_id
-      AND ou.user_id = uo.user_id
+    WHERE ou.user_id = uo.user_id
       AND ou.object_type = uo.object_type
       AND ou.object_id = uo.object_id;
     DROP TABLE claimius.object_usage;
@@ -717,7 +750,6 @@ END $$;
 
 CREATE TABLE IF NOT EXISTS claimius.user_users (
                                                    id                      UUID PRIMARY KEY,
-                                                   app_id                  UUID NOT NULL,
                                                    viewer_id               UUID NOT NULL,
                                                    target_user_id          UUID NOT NULL,
                                                    first_shared_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -728,23 +760,22 @@ CREATE TABLE IF NOT EXISTS claimius.user_users (
 COMMENT ON TABLE claimius.user_users IS 'Pairs of users sharing at least one accessible object. Folded from the user_users_diff rows user_object inserts and deletes raise; read exact through _user_users_for_viewer.';
 COMMENT ON COLUMN claimius.user_users.sharing_object_count IS 'Objects both users hold a user_object pair on. Moved by the folds of user_users_diff; the row is removed at zero.';
 
-CREATE INDEX IF NOT EXISTS idx_user_users_viewer ON claimius.user_users (app_id, viewer_id);
-CREATE INDEX IF NOT EXISTS idx_user_users_target ON claimius.user_users (app_id, target_user_id);
+CREATE INDEX IF NOT EXISTS idx_user_users_viewer ON claimius.user_users (viewer_id);
+CREATE INDEX IF NOT EXISTS idx_user_users_target ON claimius.user_users (target_user_id);
 
 CREATE TABLE IF NOT EXISTS claimius.user_users_diff (
                                                         id              BIGINT GENERATED ALWAYS AS IDENTITY,
-                                                        app_id          UUID NOT NULL,
                                                         user_id         UUID NOT NULL,
                                                         object_type     TEXT NOT NULL,
                                                         object_id       UUID NOT NULL,
                                                         delta           SMALLINT NOT NULL CHECK (delta IN (-1, 1)),
                                                         sa_created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
-                                                        PRIMARY KEY (app_id, object_type, object_id, id)
+                                                        PRIMARY KEY (object_type, object_id, id)
 );
 
 COMMENT ON TABLE claimius.user_users_diff IS 'One row per user_object pair that entered (+1) or left (-1) on an object that is not a claim, not yet folded into user_users. Raised by a statement trigger on user_object with no lock; folded per object by _settle_user_users_diff. Derived, never published.';
 
-CREATE INDEX IF NOT EXISTS idx_user_users_diff_user ON claimius.user_users_diff (app_id, user_id);
+CREATE INDEX IF NOT EXISTS idx_user_users_diff_user ON claimius.user_users_diff (user_id);
 
 ALTER TABLE claimius.user_users_diff SET (
     autovacuum_vacuum_scale_factor = 0.02,
@@ -928,7 +959,6 @@ DROP TABLE IF EXISTS claimius.reconcile_queue;
 
 CREATE TABLE IF NOT EXISTS claimius.access_diff (
                                                     id              UUID PRIMARY KEY,
-                                                    app_id          UUID NOT NULL,
                                                     kind            TEXT NOT NULL,
                                                     object_type     TEXT,
                                                     object_id       UUID,
@@ -952,30 +982,29 @@ BEGIN
         OR NOT EXISTS (SELECT 1 FROM claimius.access_diff WHERE kind = 'claim') THEN
         RETURN;
     END IF;
-    INSERT INTO claimius.access_diff (id, app_id, kind, object_type, object_id, cascade)
-    SELECT claimius.composite_id('object', d.app_id::TEXT, co.object_type, co.object_id::TEXT),
-           d.app_id, 'object', co.object_type, co.object_id, bool_or(co.inherits AND c.inherits)
+    INSERT INTO claimius.access_diff (id, kind, object_type, object_id, cascade)
+    SELECT claimius.composite_id('object', co.object_type, co.object_id::TEXT),
+           'object', co.object_type, co.object_id, bool_or(co.inherits AND c.inherits)
     FROM claimius.access_diff d
         JOIN claimius.claim c ON c.id = d.claim_id
         JOIN claimius.claim_object co
             ON co.claim_id = d.claim_id
-           AND co.app_id = d.app_id
            AND co.sa_deleted_at IS NULL
            AND co.object_id IS NOT NULL
            AND co.object_type <> 'claimius.claim'
     WHERE d.kind = 'claim' AND d.user_id IS NULL
-    GROUP BY d.app_id, co.object_type, co.object_id
+    GROUP BY co.object_type, co.object_id
     ON CONFLICT (id) DO UPDATE SET
         cascade = claimius.access_diff.cascade OR EXCLUDED.cascade,
         txid = pg_current_xact_id();
-    INSERT INTO claimius.access_diff (id, app_id, kind, object_type, object_id, cascade)
-    SELECT claimius.composite_id('object', d.app_id::TEXT, 'claimius.claim', d.claim_id::TEXT),
-           d.app_id, 'object', 'claimius.claim', d.claim_id, FALSE
+    INSERT INTO claimius.access_diff (id, kind, object_type, object_id, cascade)
+    SELECT claimius.composite_id('object', 'claimius.claim', d.claim_id::TEXT),
+           'object', 'claimius.claim', d.claim_id, FALSE
     FROM claimius.access_diff d
     WHERE d.kind = 'claim' AND d.user_id IS NULL
     ON CONFLICT (id) DO UPDATE SET txid = pg_current_xact_id();
     UPDATE claimius.access_diff
-    SET id = claimius.composite_id('assignment', app_id::TEXT, claim_id::TEXT, user_id::TEXT),
+    SET id = claimius.composite_id('assignment', claim_id::TEXT, user_id::TEXT),
         kind = 'assignment'
     WHERE kind = 'claim' AND user_id IS NOT NULL;
     DELETE FROM claimius.access_diff WHERE kind = 'claim';
@@ -986,44 +1015,42 @@ ALTER TABLE claimius.access_diff SET (
     autovacuum_analyze_scale_factor = 0.02
 );
 
-COMMENT ON TABLE claimius.access_diff IS 'The open areas of the app since its oldest active cursor. Written by the calc triggers and the sync apply, keyed on what changed and never on the users it reaches; read by a listing from the reader''s cursor and by a check from the pair''s mark; trimmed by drain_access_diff below the oldest cursor among the users used within 7 days.';
+COMMENT ON TABLE claimius.access_diff IS 'The open areas since the oldest active cursor. Written by the calc triggers and the sync apply, keyed on what changed and never on the users it reaches; read by a listing from the reader''s cursor and by a check from the pair''s mark; trimmed by drain_access_diff below the oldest cursor among the users used within 7 days.';
 COMMENT ON COLUMN claimius.access_diff.kind IS 'object: a change on the object named, with cascade when its descendants are in the area. assignment: a change to one user''s grant of claim_id.';
 COMMENT ON COLUMN claimius.access_diff.user_id IS 'The assignee of an assignment area. NULL on an object area.';
 COMMENT ON COLUMN claimius.access_diff.txid IS 'The transaction of the latest raise, set again on every raise. An area is settled by a cursor or a mark taken from a snapshot whose xmin is above it.';
 COMMENT ON COLUMN claimius.access_diff.root_id IS 'The owner root of the object of an object area, from the row or its object_info row, so a reader ranges the areas of its own roots and a check those of the object''s root. NULL on an assignment area and on an object with no root.';
 
-CREATE INDEX IF NOT EXISTS idx_access_diff_object ON claimius.access_diff (app_id, object_type, object_id) WHERE kind = 'object';
-CREATE INDEX IF NOT EXISTS idx_access_diff_root_txid ON claimius.access_diff (app_id, root_id, txid);
-CREATE INDEX IF NOT EXISTS idx_access_diff_app_txid ON claimius.access_diff (app_id, txid);
-CREATE INDEX IF NOT EXISTS idx_access_diff_user ON claimius.access_diff (app_id, user_id, txid) WHERE kind = 'assignment';
+CREATE INDEX IF NOT EXISTS idx_access_diff_object ON claimius.access_diff (object_type, object_id) WHERE kind = 'object';
+CREATE INDEX IF NOT EXISTS idx_access_diff_root_txid ON claimius.access_diff (root_id, txid);
+CREATE INDEX IF NOT EXISTS idx_access_diff_app_txid ON claimius.access_diff (txid);
+CREATE INDEX IF NOT EXISTS idx_access_diff_user ON claimius.access_diff (user_id, txid) WHERE kind = 'assignment';
 
 CREATE TABLE IF NOT EXISTS claimius.user_activity (
                                                       user_id         UUID NOT NULL,
-                                                      app_id          UUID NOT NULL,
                                                       last_used_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
-                                                      PRIMARY KEY (user_id, app_id)
+                                                      PRIMARY KEY (user_id)
 );
 
 ALTER TABLE claimius.user_activity ADD COLUMN IF NOT EXISTS settled_txid XID8 NOT NULL DEFAULT '0';
 ALTER TABLE claimius.user_activity ADD COLUMN IF NOT EXISTS settled_at TIMESTAMPTZ;
 ALTER TABLE claimius.user_activity ADD COLUMN IF NOT EXISTS directory_at TIMESTAMPTZ;
 
-COMMENT ON TABLE claimius.user_activity IS 'The reader''s cursor per app: the snapshot xmin of its last share settle, when it ran, when it last viewed the directory, and when it last used the app. The cursor and settled_at are written by the share settle, directory_at by the directory reads, last_used_at by touch_object_usage.';
-COMMENT ON COLUMN claimius.user_activity.settled_txid IS 'The cursor: every area of the app with txid below it was settled for this user, or found not to reach its pairs.';
+COMMENT ON TABLE claimius.user_activity IS 'The reader''s cursor: the snapshot xmin of its last share settle, when it ran, when it last viewed the directory, and when it last used the app. The cursor and settled_at are written by the share settle, directory_at by the directory reads, last_used_at by touch_object_usage.';
+COMMENT ON COLUMN claimius.user_activity.settled_txid IS 'The cursor: every area with txid below it was settled for this user, or found not to reach its pairs.';
 COMMENT ON COLUMN claimius.user_activity.settled_at IS 'When the cursor last moved; with the areas raised since, the raise rate the drain compares the read rate against.';
 COMMENT ON COLUMN claimius.user_activity.directory_at IS 'When the user last read who sees whom. Set, the user is a viewer whose user_users rows the fold keeps; older than 30 days, the rows are rebuilt on the next directory read.';
 
-CREATE INDEX IF NOT EXISTS idx_user_activity_directory ON claimius.user_activity (app_id, directory_at) WHERE directory_at IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_user_activity_directory ON claimius.user_activity (directory_at) WHERE directory_at IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS claimius.usage_diff (
                                                    id              BIGINT GENERATED ALWAYS AS IDENTITY,
-                                                   app_id          UUID NOT NULL,
                                                    user_id         UUID NOT NULL,
                                                    object_type     TEXT NOT NULL,
                                                    object_id       UUID NOT NULL,
                                                    used_count      BIGINT NOT NULL,
                                                    used_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
-                                                   PRIMARY KEY (app_id, user_id, id)
+                                                   PRIMARY KEY (user_id, id)
 );
 
 COMMENT ON TABLE claimius.usage_diff IS 'Counted checks a usage flush recorded on a settled pair, not yet folded into user_object.used_count and last_used_at. Written by touch_object_usage with no lock on the pair; folded by _settle_usage_diff on the user''s next listing and by drain_access_diff. Local, never published.';
@@ -1034,11 +1061,10 @@ ALTER TABLE claimius.usage_diff SET (
 );
 
 CREATE TABLE IF NOT EXISTS claimius.claim_graph_cache (
-                                                          app_id          UUID NOT NULL,
                                                           user_id         UUID NOT NULL,
                                                           graph           JSONB NOT NULL,
                                                           snapshot        PG_SNAPSHOT NOT NULL,
-                                                          PRIMARY KEY (app_id, user_id)
+                                                          PRIMARY KEY (user_id)
 );
 
 DO $$
@@ -1742,3 +1768,6 @@ COMMENT ON COLUMN claimius.analytics_heat.sessions IS 'Distinct sessions that pu
 
 CREATE INDEX IF NOT EXISTS idx_analytics_heat_read ON claimius.analytics_heat (app_id, path, day DESC);
 
+
+ALTER TABLE claimius.user_object ENABLE TRIGGER USER;
+ALTER TABLE claimius.user_users ENABLE TRIGGER USER;

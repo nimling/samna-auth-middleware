@@ -303,8 +303,6 @@ func PostClientClaim(ctx echo.Context) error {
 		return respond.Error(ctx, http.StatusBadRequest, err.Error())
 	}
 
-	userClaim.AppID = appID
-
 	_, err = sdb.Instance().NewInsert().
 		Model(userClaim).
 		Returning("*").
@@ -354,7 +352,6 @@ func DeleteClientClaim(ctx echo.Context) error {
 		Model(&userClaim).
 		Where("claim_id = ?", claimID).
 		Where("user_id = ?", client.ClientID).
-		Where("app_id = ?", appID).
 		Where("sa_deleted_at IS NULL").
 		Set("sa_deleted_at = NOW()").
 		Returning("*").

@@ -50,7 +50,7 @@ func PostObjectAsset(ctx echo.Context) error {
 	if err := link.ValidatePost(); err != nil {
 		return respond.Error(ctx, http.StatusBadRequest, err.Error())
 	}
-	actor, err := getObjectAssetActor(ctx, appID, link.CreatedBy)
+	actor, err := getObjectAssetActor(ctx, link.CreatedBy)
 	if err != nil {
 		return respond.Error(ctx, errorsx.ErrToHttpCode(err), "")
 	}
@@ -234,7 +234,7 @@ func GetObjectAssetData(ctx echo.Context) error {
 	return getRelayedAssetData(ctx, base+"/asset/"+home.AssetID.String()+"/data", token)
 }
 
-func getObjectAssetActor(ctx echo.Context, appID uuid.UUID, createdBy *uuid.UUID) (uuid.UUID, error) {
+func getObjectAssetActor(ctx echo.Context, createdBy *uuid.UUID) (uuid.UUID, error) {
 	if raw := ctx.Request().Header.Get(headerForwardedUser); raw != "" {
 		actor, err := uuid.Parse(raw)
 		if err != nil {
@@ -248,7 +248,7 @@ func getObjectAssetActor(ctx echo.Context, appID uuid.UUID, createdBy *uuid.UUID
 	var actor uuid.UUID
 	if err := sdb.Instance().NewRaw(`
 		SELECT user_id FROM claimius.user_claim
-		WHERE id = ? AND app_id = ? AND sa_deleted_at IS NULL`, *createdBy, appID).
+		WHERE id = ? AND sa_deleted_at IS NULL`, *createdBy).
 		Scan(ctx.Request().Context(), &actor); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return uuid.Nil, errorsx.ErrForbidden
@@ -265,11 +265,10 @@ func getObjectAssetGrant(ctx echo.Context, appID, actor uuid.UUID, objectType st
 		if err := sdb.Instance().NewRaw(`
 			SELECT uc.id
 			FROM claimius.user_claim uc
-			JOIN claimius.samna_app a ON a.id = uc.app_id AND a.claim_id = uc.claim_id
-			WHERE uc.app_id = ?
-			  AND uc.user_id = ?
+			JOIN claimius.samna_app a ON a.id = ? AND a.claim_id = uc.claim_id
+			WHERE uc.user_id = ?
 			  AND uc.sa_deleted_at IS NULL
-			  AND claimius.check_user_active(uc.app_id, uc.user_id)
+			  AND claimius.check_user_active(uc.user_id)
 			ORDER BY uc.sa_created_at
 			LIMIT 1`, appID, actor).Scan(reqCtx, &grants); err != nil {
 			ctx.Logger().Errorf("object asset own grant: %v", err)
@@ -282,8 +281,8 @@ func getObjectAssetGrant(ctx echo.Context, appID, actor uuid.UUID, objectType st
 	}
 	if objectType == string(OBJECT_TYPE_USER) {
 		users := make([]shared.AccessUser, 0, 1)
-		if err := sdb.Instance().NewRaw("SELECT * FROM claimius.get_user_access(?, ?, ?, ?)",
-			actor, appID, objectID.String(), int(ACCESS_WRITE)).Scan(reqCtx, &users); err != nil {
+		if err := sdb.Instance().NewRaw("SELECT * FROM claimius.get_user_access(?, ?, ?)",
+			actor, objectID.String(), int(ACCESS_WRITE)).Scan(reqCtx, &users); err != nil {
 			ctx.Logger().Errorf("object asset user grant: %v", err)
 			return uuid.Nil, nil, errorsx.ErrDbUnexpected
 		}
@@ -293,8 +292,8 @@ func getObjectAssetGrant(ctx echo.Context, appID, actor uuid.UUID, objectType st
 		return *users[0].OwnerID, users[0].UserClaimID, nil
 	}
 	grants := make([]shared.AccessClaim, 0, 1)
-	if err := sdb.Instance().NewRaw("SELECT * FROM claimius.get_access(?, ?, ?, ?, ?)",
-		actor, appID, objectID, objectType, int(ACCESS_WRITE)).Scan(reqCtx, &grants); err != nil {
+	if err := sdb.Instance().NewRaw("SELECT * FROM claimius.get_access(?, ?, ?, ?)",
+		actor, objectID, objectType, int(ACCESS_WRITE)).Scan(reqCtx, &grants); err != nil {
 		ctx.Logger().Errorf("object asset grant: %v", err)
 		return uuid.Nil, nil, errorsx.ErrDbUnexpected
 	}
@@ -318,7 +317,7 @@ func getObjectAssetWritable(ctx echo.Context, appID, linkID uuid.UUID, createdBy
 		}
 		return nil, errorsx.ErrDbUnexpected
 	}
-	actor, err := getObjectAssetActor(ctx, appID, createdBy)
+	actor, err := getObjectAssetActor(ctx, createdBy)
 	if err != nil {
 		return nil, err
 	}

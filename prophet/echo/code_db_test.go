@@ -26,15 +26,15 @@ func TestCodesAreWrittenOnTheProphetAndResolvedOnTheDisciple(t *testing.T) {
 	claim := func(name string) uuid.UUID {
 		var id uuid.UUID
 		if err := prophet.NewRaw(`
-			SELECT (claimius.insert_claim(p_app_id => ?, p_name => ?, p_description => NULL, p_sa_access => 15,
+			SELECT (claimius.insert_claim(p_name => ?, p_description => NULL, p_sa_access => 15,
 			        p_sa_owner_id => ?, p_sa_root_id => ?, p_sa_created_by => ?) -> 'claim' ->> 'id')::UUID
-		`, app.ID, name, app.Org, app.Org, grantUser).Scan(ctx, &id); err != nil {
+		`, name, app.Org, app.Org, grantUser).Scan(ctx, &id); err != nil {
 			t.Fatalf("claim %s: %v", name, err)
 		}
 		if _, err := prophet.ExecContext(ctx, `
-			SELECT claimius.insert_claim_object(p_app_id => ?, p_claim_id => ?, p_sa_owner_id => ?, p_sa_root_id => ?,
+			SELECT claimius.insert_claim_object(p_claim_id => ?, p_sa_owner_id => ?, p_sa_root_id => ?,
 			       p_sa_created_by => ?, p_object_id => ?, p_object_type => 'claimius.organization', p_inherits => TRUE)
-		`, app.ID, id, app.Org, app.Org, grantUser, app.Org); err != nil {
+		`, id, app.Org, app.Org, grantUser, app.Org); err != nil {
 			t.Fatalf("bind %s: %v", name, err)
 		}
 		return id
@@ -46,8 +46,8 @@ func TestCodesAreWrittenOnTheProphetAndResolvedOnTheDisciple(t *testing.T) {
 			t.Fatalf("user: %v", err)
 		}
 	}
-	if _, err := prophet.ExecContext(ctx, `SELECT claimius.insert_user_claim(p_app_id => ?, p_claim_id => ?, p_user_id => ?, p_sa_owner_id => ?, p_sa_created_by => ?)`,
-		app.ID, owners, owner, app.Org, grantUser); err != nil {
+	if _, err := prophet.ExecContext(ctx, `SELECT claimius.insert_user_claim(p_claim_id => ?, p_user_id => ?, p_sa_owner_id => ?, p_sa_created_by => ?)`,
+		owners, owner, app.Org, grantUser); err != nil {
 		t.Fatalf("grant owner: %v", err)
 	}
 

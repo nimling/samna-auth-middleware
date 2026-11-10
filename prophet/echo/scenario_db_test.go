@@ -65,9 +65,9 @@ func postScenarioClaims(t *testing.T, db *shared.DB, app peerApp, child, linker 
 	for _, c := range claims {
 		var id uuid.UUID
 		if err := db.NewRaw(`
-			SELECT (claimius.insert_claim(p_app_id => ?, p_name => ?, p_description => NULL, p_sa_access => ?,
+			SELECT (claimius.insert_claim(p_name => ?, p_description => NULL, p_sa_access => ?,
 			        p_sa_owner_id => ?, p_sa_root_id => ?, p_sa_created_by => ?, p_level => ?) -> 'claim' ->> 'id')::UUID
-		`, app.ID, c.name, c.access, app.Org, app.Org, grantUser, c.level).Scan(ctx, &id); err != nil {
+		`, c.name, c.access, app.Org, app.Org, grantUser, c.level).Scan(ctx, &id); err != nil {
 			t.Fatalf("claim %s: %v", c.name, err)
 		}
 		ids[c.name] = id
@@ -86,9 +86,9 @@ func postScenarioClaims(t *testing.T, db *shared.DB, app peerApp, child, linker 
 			actor = linker
 		}
 		if _, err := db.ExecContext(ctx, `
-			SELECT claimius.insert_claim_object(p_app_id => ?, p_claim_id => ?, p_sa_owner_id => ?, p_sa_root_id => ?,
+			SELECT claimius.insert_claim_object(p_claim_id => ?, p_sa_owner_id => ?, p_sa_root_id => ?,
 			       p_sa_created_by => ?, p_object_id => ?, p_object_type => ?, p_inherits => TRUE)
-		`, app.ID, ids[c.name], app.Org, app.Org, actor, objectID, objectType); err != nil {
+		`, ids[c.name], app.Org, app.Org, actor, objectID, objectType); err != nil {
 			t.Fatalf("bind %s: %v", c.name, err)
 		}
 	}
@@ -101,7 +101,7 @@ func getScenarioAccess(t *testing.T, prophet, disciple *shared.DB, appID, child 
 	var onProphet []struct {
 		Level int `bun:"level"`
 	}
-	if err := prophet.NewRaw(`SELECT level FROM claimius.get_access(?, ?, ?, 'claimius.organization', 4)`, user.id, appID, child).
+	if err := prophet.NewRaw(`SELECT level FROM claimius.get_access(?, ?, 'claimius.organization', 4)`, user.id, child).
 		Scan(ctx, &onProphet); err != nil && !errors.Is(err, sql.ErrNoRows) {
 		t.Fatalf("%s on the prophet: %v", user.name, err)
 	}
@@ -124,7 +124,7 @@ func getScenarioListing(t *testing.T, prophet, disciple *shared.DB, appID uuid.U
 	t.Helper()
 	ctx := context.Background()
 	var onProphet, onDisciple []uuid.UUID
-	if err := prophet.NewRaw(`SELECT object_id FROM claimius.get_objects(?, ?, 'claimius.organization', 4) ORDER BY object_id`, user.id, appID).
+	if err := prophet.NewRaw(`SELECT object_id FROM claimius.get_objects(?, 'claimius.organization', 4) ORDER BY object_id`, user.id).
 		Scan(ctx, &onProphet); err != nil && !errors.Is(err, sql.ErrNoRows) {
 		t.Fatalf("%s: list on the prophet: %v", user.name, err)
 	}
@@ -141,7 +141,7 @@ func getScenarioUsers(t *testing.T, prophet, disciple *shared.DB, appID uuid.UUI
 	t.Helper()
 	ctx := context.Background()
 	var seenProphet, seenDisciple []uuid.UUID
-	if err := prophet.NewRaw(`SELECT user_id FROM claimius.get_users(?, ?) ORDER BY user_id`, user.id, appID).
+	if err := prophet.NewRaw(`SELECT user_id FROM claimius.get_users(?) ORDER BY user_id`, user.id).
 		Scan(ctx, &seenProphet); err != nil && !errors.Is(err, sql.ErrNoRows) {
 		t.Fatalf("%s: users on the prophet: %v", user.name, err)
 	}
@@ -215,22 +215,22 @@ func TestEveryScenarioResolvesTheSameOnTheProphetAndItsDisciple(t *testing.T) {
 	admin := uuid.New()
 	var adminClaim, linker uuid.UUID
 	if err := prophet.NewRaw(`
-		SELECT (claimius.insert_claim(p_app_id => ?, p_name => 'Scenario admin', p_description => NULL, p_sa_access => 15,
+		SELECT (claimius.insert_claim(p_name => 'Scenario admin', p_description => NULL, p_sa_access => 15,
 		        p_sa_owner_id => ?, p_sa_root_id => ?, p_sa_created_by => ?, p_level => 10) -> 'claim' ->> 'id')::UUID
-	`, app.ID, app.Org, app.Org, grantUser).Scan(ctx, &adminClaim); err != nil {
+	`, app.Org, app.Org, grantUser).Scan(ctx, &adminClaim); err != nil {
 		t.Fatalf("admin claim: %v", err)
 	}
 	if _, err := prophet.ExecContext(ctx, `
-		SELECT claimius.insert_claim_object(p_app_id => ?, p_claim_id => ?, p_sa_owner_id => ?, p_sa_root_id => ?,
+		SELECT claimius.insert_claim_object(p_claim_id => ?, p_sa_owner_id => ?, p_sa_root_id => ?,
 		       p_sa_created_by => ?, p_object_id => ?, p_object_type => 'claimius.organization', p_inherits => TRUE),
 		       claimius.upsert_app_user(p_user_id => ?, p_app_id => ?, p_first_name => 'Admin')
-	`, app.ID, adminClaim, app.Org, app.Org, grantUser, app.Org, admin, app.ID); err != nil {
+	`, adminClaim, app.Org, app.Org, grantUser, app.Org, admin, app.ID); err != nil {
 		t.Fatalf("admin binding: %v", err)
 	}
 	if err := prophet.NewRaw(`
-		SELECT (claimius.insert_user_claim(p_app_id => ?, p_claim_id => ?, p_user_id => ?, p_sa_owner_id => ?, p_sa_created_by => ?)
+		SELECT (claimius.insert_user_claim(p_claim_id => ?, p_user_id => ?, p_sa_owner_id => ?, p_sa_created_by => ?)
 		        -> 'user_claim' ->> 'id')::UUID
-	`, app.ID, adminClaim, admin, app.Org, grantUser).Scan(ctx, &linker); err != nil {
+	`, adminClaim, admin, app.Org, grantUser).Scan(ctx, &linker); err != nil {
 		t.Fatalf("admin grant: %v", err)
 	}
 
@@ -244,6 +244,13 @@ func TestEveryScenarioResolvesTheSameOnTheProphetAndItsDisciple(t *testing.T) {
 		{name: "Link level 6", access: 4, level: 6, bound: "Linked level 0"},
 		{name: "Deny read level 9", access: 20, level: 9},
 	})
+	if _, err := prophet.ExecContext(ctx, `
+		UPDATE claimius.samna_app SET claim_id = (claimius.insert_claim(p_name => 'Scenario member', p_description => NULL, p_sa_access => 4,
+		       p_sa_owner_id => ?, p_sa_root_id => ?, p_sa_created_by => ?) -> 'claim' ->> 'id')::UUID
+		WHERE id = ?
+	`, app.Org, app.Org, grantUser, app.ID); err != nil {
+		t.Fatalf("the app's default claim, granted on a first sign in: %v", err)
+	}
 	users := []scenarioUser{
 		{name: "an inherited grant", claims: []string{"Inherited read"}, reads: true},
 		{name: "a higher deny over a direct grant", claims: []string{"Read level 0", "Deny read level 5"}, reads: false},
@@ -260,8 +267,8 @@ func TestEveryScenarioResolvesTheSameOnTheProphetAndItsDisciple(t *testing.T) {
 		}
 		for _, name := range users[i].claims {
 			if _, err := prophet.ExecContext(ctx, `
-				SELECT claimius.insert_user_claim(p_app_id => ?, p_claim_id => ?, p_user_id => ?, p_sa_owner_id => ?, p_sa_created_by => ?)
-			`, app.ID, ids[name], users[i].id, app.Org, grantUser); err != nil {
+				SELECT claimius.insert_user_claim(p_claim_id => ?, p_user_id => ?, p_sa_owner_id => ?, p_sa_created_by => ?)
+			`, ids[name], users[i].id, app.Org, grantUser); err != nil {
 				t.Fatalf("grant %s to %s: %v", name, users[i].name, err)
 			}
 		}
@@ -306,15 +313,15 @@ func TestEveryScenarioResolvesTheSameOnTheProphetAndItsDisciple(t *testing.T) {
 	getDisciplePairCounts(t, disciple, "after the snapshot")
 
 	if _, err := prophet.ExecContext(ctx, `
-		SELECT claimius.insert_claim_object(p_app_id => ?, p_claim_id => ?, p_sa_owner_id => ?, p_sa_root_id => ?,
+		SELECT claimius.insert_claim_object(p_claim_id => ?, p_sa_owner_id => ?, p_sa_root_id => ?,
 		       p_sa_created_by => ?, p_object_id => ?, p_object_type => 'claimius.organization', p_inherits => TRUE)
-	`, app.ID, ids["Deny read level 9"], app.Org, app.Org, grantUser, child); err != nil {
+	`, ids["Deny read level 9"], app.Org, app.Org, grantUser, child); err != nil {
 		t.Fatalf("bind the level 9 deny: %v", err)
 	}
 	for _, i := range []int{3, 4} {
 		if _, err := prophet.ExecContext(ctx, `
-			SELECT claimius.insert_user_claim(p_app_id => ?, p_claim_id => ?, p_user_id => ?, p_sa_owner_id => ?, p_sa_created_by => ?)
-		`, app.ID, ids["Deny read level 9"], users[i].id, app.Org, grantUser); err != nil {
+			SELECT claimius.insert_user_claim(p_claim_id => ?, p_user_id => ?, p_sa_owner_id => ?, p_sa_created_by => ?)
+		`, ids["Deny read level 9"], users[i].id, app.Org, grantUser); err != nil {
 			t.Fatalf("grant the level 9 deny: %v", err)
 		}
 		users[i].reads = false
@@ -334,7 +341,7 @@ func TestEveryScenarioResolvesTheSameOnTheProphetAndItsDisciple(t *testing.T) {
 	getDisciplePairCounts(t, disciple, "after the feed")
 }
 
-func TestScenarioAClaimBindsAndGrantsOnlyInItsOwnApp(t *testing.T) {
+func TestScenarioAMovedClaimAndANewGrantReachTheDisciple(t *testing.T) {
 	getGrantFixture(t)
 	ctx := context.Background()
 	prophet := psdb.Instance()
@@ -361,25 +368,12 @@ func TestScenarioAClaimBindsAndGrantsOnlyInItsOwnApp(t *testing.T) {
 		t.Fatalf("member: %v", err)
 	}
 
-	foreign := postPeerClaim(t, prophet, other.ID, app.Org, grantUser, "Approver of the other app")
-	if _, err := prophet.ExecContext(ctx, `
-		SELECT claimius.insert_claim_object(p_app_id => ?, p_claim_id => ?, p_sa_owner_id => ?, p_sa_root_id => ?,
-		       p_sa_created_by => ?, p_object_id => ?, p_object_type => 'claimius.organization', p_inherits => TRUE)
-	`, app.ID, foreign, app.Org, app.Org, grantUser, app.Org); err == nil {
-		t.Errorf("a binding stamped with an app other than its claim's must be refused")
-	}
-	if _, err := prophet.ExecContext(ctx, `
-		SELECT claimius.insert_user_claim(p_app_id => ?, p_claim_id => ?, p_user_id => ?, p_sa_owner_id => ?, p_sa_created_by => ?)
-	`, app.ID, foreign, member, app.Org, grantUser); err == nil {
-		t.Errorf("a grant stamped with an app other than its claim's must be refused")
-	}
-
-	moved := postPeerClaim(t, prophet, app.ID, team, grantUser, "Moved")
+	moved := postPeerClaim(t, prophet, team, grantUser, "Moved")
 	var oldBinding uuid.UUID
 	if err := prophet.NewRaw(`
-		SELECT (claimius.insert_claim_object(p_app_id => ?, p_claim_id => ?, p_sa_owner_id => ?, p_sa_root_id => ?,
+		SELECT (claimius.insert_claim_object(p_claim_id => ?, p_sa_owner_id => ?, p_sa_root_id => ?,
 		       p_sa_created_by => ?, p_object_id => ?, p_object_type => 'claimius.organization', p_inherits => TRUE) -> 'claim_object' ->> 'id')::UUID
-	`, app.ID, moved, team, app.Org, grantUser, team).Scan(ctx, &oldBinding); err != nil {
+	`, moved, team, app.Org, grantUser, team).Scan(ctx, &oldBinding); err != nil {
 		t.Fatalf("bind on the team: %v", err)
 	}
 
@@ -417,29 +411,29 @@ func TestScenarioAClaimBindsAndGrantsOnlyInItsOwnApp(t *testing.T) {
 			return fmt.Errorf("move owner: %w", err)
 		}
 		if err := tx.NewRaw(`
-			SELECT (claimius.insert_claim_object(p_app_id => ?, p_claim_id => ?, p_sa_owner_id => ?, p_sa_root_id => ?,
+			SELECT (claimius.insert_claim_object(p_claim_id => ?, p_sa_owner_id => ?, p_sa_root_id => ?,
 			       p_sa_created_by => ?, p_object_id => ?, p_object_type => 'claimius.organization', p_inherits => TRUE) -> 'claim_object' ->> 'id')::UUID
-		`, app.ID, moved, app.Org, app.Org, grantUser, app.Org).Scan(ctx, &newBinding); err != nil {
+		`, moved, app.Org, app.Org, grantUser, app.Org).Scan(ctx, &newBinding); err != nil {
 			return fmt.Errorf("rebind: %w", err)
 		}
 		if _, err := tx.ExecContext(ctx, `SELECT * FROM claimius.delete_claim_object(?, ?)`, oldBinding, grantUser); err != nil {
 			return fmt.Errorf("unbind the team: %w", err)
 		}
 		if err := tx.NewRaw(`
-			SELECT (claimius.insert_claim(p_app_id => ?, p_name => 'Employee Manager', p_description => NULL, p_sa_access => 14,
+			SELECT (claimius.insert_claim(p_name => 'Employee Manager', p_description => NULL, p_sa_access => 14,
 			        p_sa_owner_id => ?, p_sa_root_id => ?, p_sa_created_by => ?) -> 'claim' ->> 'id')::UUID
-		`, app.ID, app.Org, app.Org, grantUser).Scan(ctx, &manager); err != nil {
+		`, app.Org, app.Org, grantUser).Scan(ctx, &manager); err != nil {
 			return fmt.Errorf("manager: %w", err)
 		}
 		if err := tx.NewRaw(`
-			SELECT (claimius.insert_claim_object(p_app_id => ?, p_claim_id => ?, p_sa_owner_id => ?, p_sa_root_id => ?,
+			SELECT (claimius.insert_claim_object(p_claim_id => ?, p_sa_owner_id => ?, p_sa_root_id => ?,
 			       p_sa_created_by => ?, p_sa_access => 6, p_scope => '{"employee": {"_access": "READ|WRITE"}}'::JSONB) -> 'claim_object' ->> 'id')::UUID
-		`, app.ID, manager, app.Org, app.Org, grantUser).Scan(ctx, &scope); err != nil {
+		`, manager, app.Org, app.Org, grantUser).Scan(ctx, &scope); err != nil {
 			return fmt.Errorf("manager scope: %w", err)
 		}
 		_, err := tx.ExecContext(ctx, `
-			SELECT claimius.insert_user_claim(p_app_id => ?, p_claim_id => ?, p_user_id => ?, p_sa_owner_id => ?, p_sa_created_by => ?)
-		`, app.ID, manager, member, app.Org, grantUser)
+			SELECT claimius.insert_user_claim(p_claim_id => ?, p_user_id => ?, p_sa_owner_id => ?, p_sa_created_by => ?)
+		`, manager, member, app.Org, grantUser)
 		return err
 	}); err != nil {
 		t.Fatalf("move, rebind and the new claim: %v", err)
