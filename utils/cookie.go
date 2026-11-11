@@ -91,14 +91,28 @@ func WritePublicCookie(ctx echo.Context, cookie *http.Cookie) {
 func ClearCookie(ctx echo.Context, name string) {
 	domain, secure := cookieDomain(ctx)
 
-	ctx.SetCookie(&http.Cookie{
-		Name:     name,
-		Value:    "",
-		Path:     "/",
-		MaxAge:   -1,
-		HttpOnly: true,
-		Secure:   secure,
-		SameSite: cookieSameSite(ctx),
-		Domain:   domain,
-	})
+	for _, scope := range clearDomains(ctx, domain) {
+		ctx.SetCookie(&http.Cookie{
+			Name:     name,
+			Value:    "",
+			Path:     "/",
+			MaxAge:   -1,
+			HttpOnly: true,
+			Secure:   secure,
+			SameSite: cookieSameSite(ctx),
+			Domain:   scope,
+		})
+	}
+}
+
+func clearDomains(ctx echo.Context, domain string) []string {
+	domains := []string{domain}
+	redirect := CookieDomainFromURI(Cfg().RedirectURI)
+	if redirect != "" && redirect != domain {
+		domains = append(domains, redirect)
+	}
+	if scope, ok := getCookieScope(ctx); ok && scope.Domain != "" && scope.Domain != domain && scope.Domain != redirect {
+		domains = append(domains, scope.Domain)
+	}
+	return domains
 }
