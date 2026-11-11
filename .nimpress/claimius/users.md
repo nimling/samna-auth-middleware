@@ -2,8 +2,8 @@
 gate: samna-developer
 layout: doc
 title: Users
-description: One person or machine, one stable user_id, one samna_user row per app, machine clients, delegation through get_user_access, and user_users with the count it holds, the user_users_diff rows a write raises and a read folds, what each reads and writes, and why the count is exact.
-tags: samna_user, user_id, upsert_app_user, anonymous_user_id, upsert_guest_user, claimius.code, samk, user_claim.options, get_public_claims, check_user_active, merge_user, samna_client, get_user_access, get_users, user_users, user_users_diff, _settle_user_users_diff, _user_users_for_viewer, delegation
+description: One person or machine, one stable user_id, one samna_user row shared by every app, machine clients, delegation through get_user_access, and user_users with the count it holds, the user_users_diff rows a write raises and a read folds, what each reads and writes, and why the count is exact.
+tags: samna_user, user_id, upsert_app_user, insert_organization_user, insert_organization_guest, guest_identity, anonymous_user_id, claimius.code, samk, user_claim.options, get_public_claims, check_user_active, merge_user, samna_client, get_user_access, get_users, user_users, user_users_diff, _settle_user_users_diff, _user_users_for_viewer, delegation
 lastUpdated: true
 ---
 
@@ -14,10 +14,9 @@ A user is who acts. A person and a machine client are both users, and both hold 
 | Column | Is | Use |
 |---|---|---|
 | `user_id` | The stable identity | Every reference anywhere points here |
-| `id` | The row key for one app | Internal to that row |
-| `app_id` | The app scope | Present in every query against user state on a prophet |
+| `id` | The row key | Internal to that row |
 | `external_id` | The host system's reference | Lookup from an integration |
-| `type` | `user`, `client`, `system`, `guest`, `anonymous` | Separates people, machines, temporary users and the one anonymous user of the app |
+| `type` | `user`, `client`, `system`, `guest`, `anonymous` | Separates people, machines, guests and the one anonymous user; a machine client's row is written as `user` |
 | `status` | `active`, `pending`, `suspended`, `inactive` | Gates every read before any grant is read |
 
 | Status | Means |
@@ -29,27 +28,27 @@ A user is who acts. A person and a machine client are both users, and both hold 
 
 Claimius tells the last three apart for the people who set them and for nothing else: `check_user_active` passes only an `active` row that is not soft deleted, so a user in any other status resolves to no access whatever grants they hold. Soft deletion is `sa_deleted_at`, a column of its own, not a status. Suspension is therefore one column write, not a sweep over every claim.
 
-## One identity, one row per app
+## One identity, one row
 
-On a prophet every query against user state, grants, and the materialized index filters on `app_id`. A query without it reads another application's view of the same person and returns access that does not apply where it was asked. The read functions take the app as a parameter for this reason. There is no ambient default. A disciple mirrors one app: its rows carry no `app_id` and its read functions take none.
+A person has one `samna_user` row, whatever the number of apps. The row carries no `app_id`: an app receives it while the user holds a live grant of a claim owned in an organization tree linked to the app, and every read function takes the user alone, with no app argument and no ambient default. Both role sets hold the table in the same shape.
 
-1. The rows of one person across apps share `user_id` and differ in everything else; `idx_samna_user_user_app` is unique on `(user_id, app_id)` among live rows. A foreign key from an application table targets `samna_user.user_id`, never `samna_user.id`.
+1. `idx_samna_user_user_app` is unique on `(user_id)` among live rows, so one `user_id` is one live row. A foreign key from an application table targets `samna_user.user_id`, never `samna_user.id`.
 
-2. `upsert_app_user(user_id, app_id, first_name, last_name, user_name, email, phone, external_id, user_image, sa_created_by)` returns the live row of the user in the app and inserts it when absent. When the app names a default claim in `samna_app.claim_id` and the user holds no live grant of it, it inserts one. The grant is stamped with `sa_created_by`, the acting `user_claim.id`, when the caller passes one, as `upsert_app_client` does, and otherwise with the grant's own id: a first login is the grant acting on its own authority, so the write settles the user it names. A repeated call writes nothing, so it runs on every login without a guard.
+2. `upsert_app_user(p_user_id, p_app_id, p_first_name, p_last_name, p_user_name, p_email, p_phone, p_external_id, p_user_image, p_sa_created_by)` returns the one live row of the user and inserts it, of type `user`, when absent. When the app names a default claim in `samna_app.claim_id` and the user holds no live grant of it, it inserts one. The grant is stamped with `sa_created_by`, the acting `user_claim.id`, when the caller passes one, as `upsert_app_client` does, and otherwise with the grant's own id: a first login is the grant acting on its own authority, so the write settles the user it names. A repeated call writes nothing, so it runs on every login without a guard. `insert_organization_user(p_caller_uc, p_owner_id, p_user, p_identity, p_reason, p_upsert)` inserts the one row of a user under an organization, its id from `gen_random_uuid()` when the body names none, refuses an existing `user_id` or `external_id` with SQLSTATE `23505` unless an identity or `p_upsert` is given, and binds the per user virtual claim `user:<id>` to the user. `POST /sam/user` with an owner in the body routes there and answers `409` for an existing user.
 
-3. `merge_user(target, source, actor)` merges one `user_id` into another in every app the source has a row in. It moves the source's grants, relations and field values to the target, retires a source grant of a claim the target already holds, moves the `object_asset` links on the source to the target and publishes them to the apps that see the target, copies the source profile onto an existing target row, deletes the source row with its pairs, and writes one audit row per app. Authorship survives it, because `sa_created_by` holds a `user_claim.id` and never a user id.
+3. `merge_user(target, source, actor)` merges one `user_id` into another in one pass over the one row of each. It moves the source's grants, relations and field values to the target, retires a source grant of a claim the target already holds, moves the `object_asset` links on the source to the target and publishes them to the apps that see the target, copies the source profile onto an existing target row, deletes the source row with its pairs, and writes one audit row. Authorship survives it, because `sa_created_by` holds a `user_claim.id` and never a user id.
 
-4. `_restamp_created_by` runs with the base set. It rewrites a `sa_created_by` that holds a user id to that user's `user_claim.id` where the answer is unambiguous: the stamp is the `user_id` of a `samna_user` of the row's app holding exactly one live `user_claim` in that app. Every other stamp, and every `audit` row, stays as it is. The row's app is its `app_id`, the app itself for a `samna_app`, and the apps an organization or location is linked to; a disciple holds one app. It writes under `replay_mode`, since the creator a recompute finds is the same user before and after the rewrite, and a second run rewrites nothing.
+4. `_restamp_created_by` runs with the base set. It rewrites a `sa_created_by` that holds a user id to that user's `user_claim.id` where the answer is unambiguous: the stamp is the `user_id` of a `samna_user` holding exactly one live `user_claim`. Every other stamp, and every `audit` row, stays as it is. It writes under `replay_mode`, since the creator a recompute finds is the same user before and after the rewrite, and a second run rewrites nothing.
 
-5. `check_user_active(app_id, user_id)` runs in every read. A user who is not active, or whose row is soft deleted, resolves to no access whatever grants they hold, so suspending a user is one column write.
+5. `check_user_active(p_user_id)` runs in every read, by `user_id` alone. A user who is not active, or whose row is soft deleted, resolves to no access whatever grants they hold, so suspending a user is one column write.
 
 6. `user_image` on an app's row is written by the prophet alone. On Samna Auth it holds the user's profile image while the user shares it with the apps they use, and is cleared when they stop; the sync carries the column to every disciple of the app, a cleared one included, so `shared.SamnaUser.UserImage` on a disciple is the shared image or nil. A disciple never writes it back: `/sam` refuses `user_image` on a user update with `400` and takes none on a user create.
 
-7. Soft deleting a `samna_user` fires `tg_cascade_user_soft_delete` on the transition of `sa_deleted_at` from NULL, which runs `cascade_user_soft_delete`: it soft deletes the user's live grants, relations and field values in the app. Each grant it ends raises the assignment area of that user for that claim; see [Materialization](./materialization.md). The cascade lives in the write, so every read stays a pure predicate.
+7. Soft deleting a `samna_user` fires `tg_cascade_user_soft_delete` on the transition of `sa_deleted_at` from NULL, which runs `cascade_user_soft_delete(p_user_id)`: it soft deletes the user's live grants, relations and field values. Each grant it ends raises the assignment area of that user for that claim; see [Materialization](./materialization.md). The cascade lives in the write, so every read stays a pure predicate.
 
 ## Profile
 
-A user's profile is one `jsonb` on the user row, `samna_user.profile`: an object of key to entry, and every entry `{"schema": {...}, "value": ...}`. The schema is a JSON Schema fragment the renderer reads, `type`, `title`, `format`, `component`, `icon`, `order`, `enum`, limits, `items`, `properties`; the value is what it describes. The user writes its own keys, without a dot, on Samna Auth through `update_profile`. An app writes `<app slug>.<field>` through `PUT /sam/profile` and withdraws through `DELETE /sam/profile`; the slug namespace keeps an app to its own entries. Every write checks the entry in Go first, `shared.ProfileSchema`, a typed struct that refuses any key outside its vocabulary at decode, `Validate` for the schema and `Check` for the value against it, on the disciple before the call and on the prophet in the handler; SQL keeps the key namespace and the entry shape in `_check_profile_item`, `22023`. The write lands on every row of the user, so the sync carries the whole object to every app that sees the user, and a disciple reads it from its own `samna_user` row. The profile image and other files are `object_asset` links of kind `profile` on the user, as any asset link.
+A user's profile is one `jsonb` on the user row, `samna_user.profile`: an object of key to entry, and every entry `{"schema": {...}, "value": ...}`. The schema is a JSON Schema fragment the renderer reads, `type`, `title`, `format`, `component`, `icon`, `order`, `enum`, limits, `items`, `properties`; the value is what it describes. The user writes its own keys, without a dot, on Samna Auth through `update_profile`. An app writes `<app slug>.<field>` through `PUT /sam/profile` and withdraws through `DELETE /sam/profile`; the slug namespace keeps an app to its own entries. Every write checks the entry in Go first, `shared.ProfileSchema`, a typed struct that refuses any key outside its vocabulary at decode, `Validate` for the schema and `Check` for the value against it, on the disciple before the call and on the prophet in the handler; SQL keeps the key namespace and the entry shape in `_check_profile_item`, `22023`. The write lands on the one row of the user, the sync carries the whole object to every app that sees the user, and a disciple reads it from its own `samna_user` row. The profile image and other files are `object_asset` links of kind `profile` on the user, as any asset link.
 
 The public page on Samna Auth reads the user row and `get_object_assets(user)` and renders each entry by its schema; what it shows of the apps' entries is the user's choice there. Consent decisions sit beside the user in `consent` and are part of the identity, not of the profile. The Go calls a disciple makes are under [Public profile items](../disciple.md#public-profile-items).
 
@@ -59,13 +58,13 @@ The public page on Samna Auth reads the user row and `get_object_assets(user)` a
 entries(profile) = 1 + assets
 ```
 
-one probe of the user row and one range of `idx_object_asset_object` by user. A write is one update over the user's rows, `apps(user)` of them, each a jsonb merge on the row after the checks, which walk the entry once, and one sync event per row. No join, no derived set, no pair settled.
+one probe of the user row and one range of `idx_object_asset_object` by user. A write is one update of the user's row, a jsonb merge after the checks, which walk the entry once, and one sync event per app that sees the user. No join, no derived set, no pair settled.
 
 ## Machine clients
 
 1. A client is a `samna_client` row with a unique `client_id`, a bcrypt `secret_hash`, a `status` and an optional `expires_at`.
 
-2. `samna_client.client_id` is the client's `user_id`. The client has a per app `samna_user` row of type `client`, created with `upsert_app_user(client_id, ...)`, and its grants are `user_claim` rows on that id.
+2. `samna_client.client_id` is the client's `user_id`. The client has one `samna_user` row of type `user`, inserted by `upsert_app_client` through `upsert_app_user(client_id, ...)`; nothing writes type `client`. Its grants are `user_claim` rows on that id.
 
 3. Writes the client performs stamp `sa_created_by` with one of the client's own grants on the target app. A client with no grant on the target application has no authority to write under, and cannot create rows there. Provisioning assigns the owning claim to the client first: `upsert_app_client` finds or creates the named capability claim in the app, owned by the app's organization, and grants it to the client.
 
@@ -77,9 +76,9 @@ Access is only claims, and a claim is held by one of three kinds of user. Nothin
 
 1. A user: a person or a machine client with a `user_claim` on its `user_id`.
 
-2. A temporary user: a `samna_user` of type `guest`, made for one claim by `upsert_guest_user` under an owner's grant, the id `uuid.NewSHA1(app, "guest:" + claim)` or a fresh one when it stands for a named person; it is answered like any user, exactly what its claims grant. `POST /sam/user/temporary` signs its token, always with `exp`, the access token lifetime or the grant's `ends_at`.
+2. A guest: a `samna_user` of type `guest`, registered by `insert_organization_guest(p_caller_uc, p_owner_id, p_user, p_ends_at, p_reason)` under an owner's grant, over `POST /sam/user/guest`. Its id comes from `gen_random_uuid()`, or the guest is reused through `guest_identity` when the owner organization already registered the same email or phone; it is answered like any user, exactly what its claims grant, and `prune` soft deletes it once `ends_at` has passed. No token is signed for it.
 
-3. The anonymous user: one reserved `samna_user` per app, `user_id` `9f6783f1-f493-595a-8304-ad905d047f73`, `shared.AnonymousUserID` and `claimius.anonymous_user_id()`, type `anonymous`, named `Public`, no email. The prophet writes it in `upsert_system_app` and `upsert_app`, the init file backfills every live app, a disciple without a prophet writes it in `upsert_disciple_state`, and every disciple receives it through the feed like the system user; Go never mints it. A `user_claim` of the anonymous user is the public grant of its claim: every request without a credential holds it between the grant's `starts_at` and `ends_at`, with the claim's mask, scope, level and denies, settled and listed exactly as for any user. A write under it is stamped with the grant's own `sa_created_by`, the grant of the user who made the claim public. An open READ claim lets anyone read and refuses a write; an open READ|EXECUTE claim lets anyone book; a code on a claim bound to one booking with READ|WRITE|EXECUTE lets the holder of the code cancel that booking and nothing else. There is no setting outside the grant.
+3. The anonymous user: one reserved `samna_user` row, `user_id` `9f6783f1-f493-595a-8304-ad905d047f73`, `shared.AnonymousUserID` and `claimius.anonymous_user_id()`, type `anonymous`, named `Public`, no email. The prophet writes it in `upsert_system_app` and `upsert_app`, the prophet's init file inserts it once when any live app exists, the disciple's init file inserts it once when a `disciple_state` row exists, and the feed never publishes it; Go never mints it. A `user_claim` of the anonymous user is the public grant of its claim: every request without a credential holds it between the grant's `starts_at` and `ends_at`, with the claim's mask, scope, level and denies, settled and listed exactly as for any user. A write under it is stamped with the grant's own `sa_created_by`, the grant of the user who made the claim public. An open READ claim lets anyone read and refuses a write; an open READ|EXECUTE claim lets anyone book; a code on a claim bound to one booking with READ|WRITE|EXECUTE lets the holder of the code cancel that booking and nothing else. There is no setting outside the grant.
 
 ### The public grant and its code
 
@@ -87,7 +86,7 @@ Access is only claims, and a claim is held by one of three kinds of user. Nothin
 
 2. The code gate runs inside the walk: the grant's hash travels on every derivation of the anonymous user's pairs as `samk`, `_best_grant` and `get_direct_access` count the derivation only while `current_setting('claimius.samk')` holds that hash, and the guard carries the presented code there, so `get_access`, `get_objects`, `search` and `ObjectWhere` all answer the same.
 
-3. An owner of a claim, for the public grant and for every code write, is a user whose grant covers OWNER on the claim, or the user who created the claim under a grant it still holds, when the creator's own access on the claim covers OWNER: `_check_code_owner` answers that grant, and the temporary users and the codes are made under it.
+3. An owner of a claim, for the public grant and for every code write, is a user whose grant covers OWNER on the claim, or the user who created the claim under a grant it still holds, when the creator's own access on the claim covers OWNER: `_check_code_owner` answers that grant, and `insert_code` and `delete_code` run it; `insert_organization_guest` tests only that `p_caller_uc` is a live grant.
 
 ## Access codes
 
@@ -149,7 +148,7 @@ Read them back and the operation reconstructs itself. An impersonation model can
 
 ### Provenance is the grant, not the person
 
-`sa_created_by` holds a `claimius.user_claim.id`, not a user id. What is recorded is the assignment the actor was acting under, which carries the claim, the owning organization, and the time window that made the action legal. A stamp that still names a user id reads as that user, and `_restamp_created_by` rewrites it to the user's grant where the answer is unambiguous; see [One identity, one row per app](#one-identity-one-row-per-app).
+`sa_created_by` holds a `claimius.user_claim.id`, not a user id. What is recorded is the assignment the actor was acting under, which carries the claim, the owning organization, and the time window that made the action legal. A stamp that still names a user id reads as that user, and `_restamp_created_by` rewrites it to the user's grant where the answer is unambiguous; see [One identity, one row](#one-identity-one-row).
 
 That indirection buys two things. Authorship survives identity changes: a user can be merged across applications without breaking a single authorship reference. And the record is auditable in the way that matters, because knowing which grant was used is stronger evidence than knowing which person was logged in.
 
@@ -159,13 +158,13 @@ There is no `sa_updated_by` and no `sa_deleted_by` column. `sa_created_by` names
 
 ### Acting for another user
 
-The permission to act for another user is itself a grant, resolved by a read against the target user row before anything is written. `get_user_access(actor, app, target, required)` answers what the actor may do to the target user:
+The permission to act for another user is itself a grant, resolved by a read against the target user row before anything is written. `get_user_access(p_actor_id, p_target, p_required_access)` answers what the actor may do to the target user:
 
 1. It settles what the actor's listing would and checks the actor active.
 
 2. It makes the actor a viewer, which builds its `user_users` rows from its pairs on its first view and refreshes a stamp after; see [Who can see whom](#who-can-see-whom).
 
-3. It resolves the target among the app's live active users, named as `external_id`, `user_id` or `samna_user.id`, tried in that order.
+3. It resolves the target among the live active users, named as `external_id`, `user_id` or `samna_user.id`, tried in that order.
 
 4. It ORs three branches. It folds nothing.
 
@@ -175,7 +174,7 @@ The permission to act for another user is itself a grant, resolved by a read aga
 | Shared visibility, a positive count from actor to target | 36: read, member | the one `user_users` row of the pair by its key, and the pending `user_users_diff` rows of the actor and of the target: only an object one of the two moved on can change their count |
 | A claim bound to the target's `samna_user` row | the effective mask of each non deny binding less the bits of the deny bindings on the same target whose level is not lower, closed under implication, limited to owner, write, read and execute, inside the grant's window | the actor's grants, their claims and their bindings on the target |
 
-An empty result means the actor is not active, the target is unknown or not active in the app, or the ORed mask does not cover `required`, and the caller has no path to act. The same call returns the `user_claim.id` of the claim branch, which the follow on write is stamped with, so authorization and provenance come from one round trip and cannot drift apart. Self and shared visibility carry no grant, and a verdict from them alone returns none.
+An empty result means the actor is not active, the target is unknown or not active, or the ORed mask does not cover `required`, and the caller has no path to act. The same call returns the `user_claim.id` of the claim branch, which the follow on write is stamped with, so authorization and provenance come from one round trip and cannot drift apart. Self and shared visibility carry no grant, and a verdict from them alone returns none.
 
 The row the actor writes carries the actor's `user_claim.id` in `sa_created_by` and the target's `user_id` as its subject, so the acting party stays visible.
 
@@ -207,21 +206,21 @@ The cost is that a delegated call cannot be handed to a third service on its own
 
 ## Listing users
 
-`get_users(user, app, required)` makes the reader a viewer and lists the targets of the same three branches that are live and active in the app: the reader, the users the reader's directory counts above zero, including the moves still pending, and the targets of the reader's bindings on `claimius.samna_user`.
+`get_users(p_user_id, p_required_access)` makes the reader a viewer and lists the targets of the same three branches that are live and active: the reader, the users the reader's directory counts above zero, including the moves still pending, and the targets of the reader's bindings on `claimius.samna_user`.
 
 ## Who can see whom
 
-`user_users` holds, for every viewer `u` of one app and every target `v`, the number of objects that are not claims which both of them reach. A viewer is a user who has read the directory. A pair on a claim moves no count: holding a claim reads the claim, and a claim is a template, not an object two users share, so two holders of one claim do not see each other through it.
+`user_users` holds, for every viewer `u` and every target `v`, the number of objects that are not claims which both of them reach. A viewer is a user who has read the directory. A pair on a claim moves no count: holding a claim reads the claim, and a claim is a template, not an object two users share, so two holders of one claim do not see each other through it.
 
 The table is kept by folding, the way `user_object` is kept by settling, and for viewers only; see [Materialization](./materialization.md#the-user-users-fold):
 
-1. A user becomes a viewer on its first `get_users`, `get_user_access` as the actor or `get_claim_graph`, or the first after 30 days away. `_settle_directory(app, u)` builds its rows from its pairs, less the pending rows on its objects, which it holds `FOR KEY SHARE`, and stamps `user_activity.directory_at`. Later reads refresh the stamp at most once a day. The build runs under a per viewer advisory lock and rereads the stamp under it, so two first views at once build the rows once. A user who never views the directory has no rows.
+1. A user becomes a viewer on its first `get_users`, `get_user_access` as the actor or `get_claim_graph`, or the first after 30 days away. `_settle_directory(p_user_id)` builds its rows from its pairs, less the pending rows on its objects, which it holds `FOR KEY SHARE`, and stamps `user_activity.directory_at`. Later reads refresh the stamp at most once a day. The build runs under a per viewer advisory lock and rereads the stamp under it, so two first views at once build the rows once. A user who never views the directory has no rows.
 
-2. A statement that inserts or deletes pairs raises one `user_users_diff` row per pair on an object that is not a claim, `+1` for a pair entering and `−1` for one leaving, through `tg_raise_user_users_diff_insert` and `tg_raise_user_users_diff_delete`, while the app has a viewer who read the directory within 30 days. It reads nothing else and locks nothing. An app with no viewer raises no row.
+2. A statement that inserts or deletes pairs raises one `user_users_diff` row per pair on an object that is not a claim, `+1` for a pair entering and `−1` for one leaving, through `tg_raise_user_users_diff_insert` and `tg_raise_user_users_diff_delete`, while a viewer has read the directory within 30 days. It reads nothing else and locks nothing. With no viewer no row is raised.
 
-3. A read that shows who sees whom folds, through `_settle_user_users_diff(app, u)`, the rows of every object the reader holds or moved on. Per object it takes every row or none, and moves the count of every ordered pair of users of the object of which one moved, writing the rows of the viewers among them.
+3. A read that shows who sees whom folds, through `_settle_user_users_diff(p_viewer_id, p_limit)`, the rows of every object the reader holds or moved on. Per object it takes every row or none, and moves the count of every ordered pair of users of the object of which one moved, writing the rows of the viewers among them.
 
-4. It then reads `_user_users_for_viewer(app, u)`: the stored rows of `u` plus the same moves for the objects whose rows are still pending in its snapshot. The answer is the exact count as that snapshot holds the pairs.
+4. It then reads `_user_users_for_viewer(p_viewer_id)`: the stored rows of `u` plus the same moves for the objects whose rows are still pending in its snapshot. The answer is the exact count as that snapshot holds the pairs.
 
 ## Per user state on objects
 
@@ -236,9 +235,9 @@ A `user_relation` belongs to its user alone: `resolve_access` answers it with on
 
 ## Cost
 
-`upsert_app_user` writes at most two rows, the user row and the default grant, and none after the first call. `check_user_active` is one probe on `(user_id, app_id)`. `cascade_user_soft_delete` is three updates.
+`upsert_app_user` writes at most two rows, the user row and the default grant, and none after the first call. `check_user_active` is one probe by `user_id`. `cascade_user_soft_delete` is three updates.
 
-`get_user_access` resolves the target with one probe each of `idx_samna_user_app_external`, `idx_samna_user_user_app` and the primary key. With `C` the actor's grants, `m_a` and `m_t` the pending `user_users_diff` rows of the actor and the target:
+`get_user_access` resolves the target with one probe each of `idx_samna_user_external`, `idx_samna_user_user_app` and the primary key. With `C` the actor's grants, `m_a` and `m_t` the pending `user_users_diff` rows of the actor and the target:
 
 ```
 entries(get_user_access) = 3 + 1 + 1 + (m_a + m_t) + 2 |objects of those rows| + 1 + 2C
@@ -253,7 +252,7 @@ sharing_object_count(u, v) = |{x ∈ V_u ∩ V_v : type(x) ≠ claimius.claim}|
 rows = Σ_{u viewing} S_u ≤ U (U − 1)
 
 first view of u    = Σ_{x ∈ V_u} U_x holder pairs read, S_u rows written
-write              = 1 row, 2 entries, per pair entering or leaving with a viewer in the app; one range of the viewer index per statement
+write              = 1 row, 2 entries, per pair entering or leaving while a viewer exists; one range of the viewer index per statement
 fold of x          = m_x + U_x entries read, at most 2 m_x (U_x − 1) user_users rows written, for viewers
 read of u          = S_u + Σ_{x ∈ T_u} (m_x + U_x) entries
 ```

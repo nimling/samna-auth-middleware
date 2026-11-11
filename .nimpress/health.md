@@ -18,9 +18,15 @@ A disciple answers `GET /api/status/health` with `200` while its process is up. 
 ```go
 sam.RegisterStatus(e.Group("/api/status"))
 
+auth := e.Group("/api/auth")
+auth.GET("/login", saecho.GetLogin)
+auth.GET("/callback", saecho.GetCallback)
+auth.GET("/logout", saecho.GetLogout)
 api := e.Group("/api", smw.UserAuthMiddleware(nil))
 sam.RegisterEndpoints(api)
 ```
+
+The login, callback and logout handlers of `disciple/echo` sit on a group without the middleware too, so a visitor the gate turns away can reach the login it is sent to.
 
 The [BFF](./bff.md) mounts it under the parent of its base path, `/api/status` for the default `/api/auth`.
 ## The answer

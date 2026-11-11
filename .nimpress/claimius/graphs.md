@@ -13,13 +13,13 @@ Two functions render what a user can reach as a graph of flat nodes. Every node 
 
 | Function | Draws |
 |---|---|
-| `get_owner_graph(user, app, start_id, depth, required, width, sort, next_id)` | Organizations under their owners, locations under their parents or owners, and every registered row under its parent, location or owner |
-| `get_claim_graph(user, app, start_id, depth, required, width, sort, next_id)` | The user, the users the user sees, the user's grants, the claims, their bindings, and the objects each binding reaches |
+| `get_owner_graph(p_user_id, p_app_id, p_start_id, p_depth, p_required_access, p_width, p_sort, p_next_id)` | Organizations under their owners, locations under their parents or owners, and every registered row under its parent, location or owner |
+| `get_claim_graph(p_user_id, p_start_id, p_depth, p_required_access, p_width, p_sort, p_next_id)` | The user, the users the user sees, the user's grants, the claims, their bindings, and the objects each binding reaches |
 | `get_graph_links_owner`, `get_graph_links_claim` | The edges between the reader's nodes as one jsonb array, filtered by included and excluded types, read from the pairs as they stand, and windowed by the same `width`, `sort` and `next_id` |
 
 The registered types a graph covers are read from `table_info`, so an implementing side's tables appear the moment they are registered and nothing about them is written into a graph function. The graph and link functions are declared with `plan_cache_mode = force_custom_plan`: each call is planned for its own `start_id`, `width` and `next_id`.
 
-Both node graphs and the claim link graph begin with `reconcile_if_pending(app, user)`, the reader's share settled from its cursor, and `check_user_active`, as a listing does; an inactive reader gets an empty graph. The claim graph and its link graph then make the reader a viewer and fold its `user_users_diff` rows, since they show who the reader sees. The owner link graph settles nothing.
+Both node graphs and the claim link graph begin with `reconcile_if_pending(p_user_id)`, the reader's share settled from its cursor, and `check_user_active`, as a listing does; an inactive reader gets an empty graph. The claim graph and its link graph then make the reader a viewer and fold its `user_users_diff` rows, since they show who the reader sees. The owner link graph settles nothing.
 
 ## The window
 
@@ -89,17 +89,17 @@ With `start_id` the graph reads that claim's bindings and, through `idx_inherita
 
 ## The claim graph cache
 
-The default shape is stored per user in `claim_graph_cache (app_id, user_id, graph, snapshot)` as one jsonb array, and served from it, then windowed.
+The default shape is stored per user in `claim_graph_cache (user_id, graph, snapshot)`, primary key `user_id`, as one jsonb array, and served from it, then windowed.
 
 ### What drops an entry
 
 | Write | Drops |
 |---|---|
-| Pairs inserted, deleted, or updated in `sa_access`, `grants`, `scope` or `direct_grant`, a mark that moves alone excepted | The entry of each user of the statement, one delete per statement over its transition tables |
+| Pairs inserted, deleted or updated in any column, a mark that moves alone and a usage fold included | The entry of each user of the statement, one delete per statement over its transition tables |
 | `user_users` rows inserted, moved by a fold or deleted, or the user's `samna_user` row | The entry of each viewer of the statement, one delete per statement |
 | An `object_info` row updated, a rename or a move | The entry of every user holding a pair on the object |
 
-A usage flush moves only `used_count` and `last_used_at`, which the trigger does not watch, so it drops nothing.
+A usage fold moves `used_count` and `last_used_at` on the pair, and that update drops the entry of every user whose pairs it touched, as any update of a pair does.
 
 ### What validates an entry
 
@@ -109,7 +109,7 @@ A claim or binding change drops nothing: the entry is validated on read.
 
 2. `tg_update_txid` stamps `txid = pg_current_xact_id()` on every insert and update of `claim`, `user_claim` and `claim_object`, under replay too, so `txid` names the local transaction that last wrote the row.
 
-3. The read serves the entry only while every `user_claim` row of the user, soft deleted ones included, the claim of each and every binding of those claims in the app carries a `txid` visible in the snapshot, `pg_visible_in_snapshot(txid, snapshot)` ([PostgreSQL, Transaction ID and Snapshot Information Functions](https://www.postgresql.org/docs/17/functions-info.html#FUNCTIONS-PG-SNAPSHOT)).
+3. The read serves the entry only while every `user_claim` row of the user, soft deleted ones included, the claim of each and every binding of those claims carries a `txid` visible in the snapshot, `pg_visible_in_snapshot(txid, snapshot)` ([PostgreSQL, Transaction ID and Snapshot Information Functions](https://www.postgresql.org/docs/17/functions-info.html#FUNCTIONS-PG-SNAPSHOT)).
 
 4. A stale entry is rebuilt and stored with a new snapshot.
 

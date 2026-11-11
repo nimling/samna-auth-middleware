@@ -9,26 +9,26 @@ lastUpdated: true
 
 # Reads
 
-Every read function takes the user first and, on the prophet, the app second. It settles what the read meets, a check the one pair by its mark and a listing the reader's share from its cursor, see [Materialization](./materialization.md), checks the reader with `check_user_active`, and then answers from `user_object` or from the base relations. Soft deleted rows, grants outside their window and denied bits never reach the caller.
+Every read function takes the user first. Only the reads that join an app's own rows take the app after it, on the prophet: `get_organizations`, `get_locations`, `get_audit`, `get_secrets`, `get_object_assets`, `get_app_cost`, `get_owner_graph` and `get_graph_links_claim`; `get_access`, `get_direct_access`, `resolve_access`, `mutation_access`, `get_user_access`, `get_objects`, `get_users`, `get_claims`, `get_scope_access`, `search` and `get_claim_graph` take none. A read settles what it meets, a check the one pair by its mark and a listing the reader's share from its cursor, see [Materialization](./materialization.md), checks the reader with `check_user_active`, and then answers from `user_object` or from the base relations. Soft deleted rows, grants outside their window and denied bits never reach the caller.
 
-On a disciple the same functions exist without the app argument, because a disciple mirrors one app and every row it holds is in scope: `get_access(user, object_id, object_type, required)`, `get_objects(user, object_type, required, after, limit)`, and so on.
+On a disciple the same functions exist with the same arguments, less the app on the reads that take it on the prophet, because a disciple mirrors one app and every row it holds is in scope.
 
 ## The surface
 
 | Function | Answers |
 |---|---|
-| `get_access(user, app, object_id, object_type, required)` | The chosen grant on one object, at most one row, with its `user_claim_id` |
-| `get_access(user, app, scope_key, required)` | The strongest object less binding whose scope carries the key; see [Capabilities](./capabilities.md) |
-| `get_direct_access(user, app, object_id, object_type, required, raise, settle)` | The closest, strongest grant bound on the object or an ancestor, walking the trees |
-| `resolve_access(user, app, object_id text, object_type, required)` | The verdict for any type: audit, relation and user lookups, otherwise `get_access` |
+| `get_access(user, object_id, object_type, required)` | The chosen grant on one object, at most one row, with its `user_claim_id` |
+| `get_access(user, scope_key, required)` | The strongest object less binding whose scope carries the key; see [Capabilities](./capabilities.md) |
+| `get_direct_access(user, object_id, object_type, required, raise, settle)` | The closest, strongest grant bound on the object or an ancestor, walking the trees |
+| `resolve_access(user, object_id text, object_type, required)` | The verdict for any type: audit, relation and user lookups, otherwise `get_access` |
 | `mutation_access(user, object_id text, object_type, required)` | The gate: a row, SQLSTATE `P0403` or `P0404` |
-| `get_user_access(actor, app, target text, required)` | The actor's access on a user named by `external_id`, `user_id` or row id; see [Users](./users.md) |
-| `get_objects(user, app, object_type, required, after, limit)` | One page of the objects of a type the user reaches, with rendering fields and `user_claim_id` |
-| `get_organizations`, `get_locations`, `get_secrets` | `get_objects` pages joined to the table, with the same `after` and `limit` |
-| `get_users(user, app, required)` | The users the reader sees |
-| `get_claims(user, app, required)`, `get_claims(user, app, object_id, object_type)` | The claims the reader holds through a live grant; the claims behind one pair |
+| `get_user_access(actor, target text, required)` | The actor's access on a user named by `external_id`, `user_id` or row id; see [Users](./users.md) |
+| `get_objects(user, object_type, required, after, limit)` | One page of the objects of a type the user reaches, with rendering fields and `user_claim_id` |
+| `get_organizations`, `get_locations`, `get_secrets` | `get_objects` pages joined to the table, with the app on the prophet and the same `after` and `limit` |
+| `get_users(user, required)` | The users the reader sees |
+| `get_claims(user, required)`, `get_claims(user, object_id, object_type)` | The claims the reader holds through a live grant; the claims behind one pair |
 | `get_audit(user, app, required, limit, offset)` | Audit rows of the organizations the reader reaches; on a disciple a fifth argument `ids` keeps only the rows named; see [Audit](./audit.md) |
-| `get_scope_access(user, app, path, required)` | Scope grants matching a jsonpath; see [Capabilities](./capabilities.md) |
+| `get_scope_access(user, path, required)` | Scope grants matching a jsonpath; see [Capabilities](./capabilities.md) |
 | `search`, `get_owner_graph`, `get_claim_graph` | See [Search](./search.md) and [Graphs](./graphs.md) |
 | `get_users(user_ids, ids, emails, external_ids)`, `get_organizations(ids, owner_ids, external_ids)`, `get_locations(ids, parent_ids, external_ids)`, `get_claims(ids, owner_ids)` | Disciple only: the rows named by id, owner, parent, email or external id, no reader; see [Lookups](#lookups) |
 | `get_grants(ids, user_ids, claim_ids, owner_ids, clients)`, `get_bindings(object_type, object_ids, claim_ids)`, `get_user_identities(user_ids)`, `get_object_types()` | Disciple only: grants, bindings, tokens and registered types by id, no reader; see [Lookups](#lookups) |
@@ -84,7 +84,7 @@ With `raise`, a miss probes the object's live row once and raises `P0403` when i
 | `claimius.samna_user` | `get_user_access` |
 | Every other type | `get_access` |
 
-A malformed id returns no row, so a batch of `resolve_access` over `unnest` never aborts on one. On the prophet a four argument form uses the deployment's own app, `get_app_id()`.
+A malformed id returns no row, so a batch of `resolve_access` over `unnest` never aborts on one. It has one form of four arguments, the same on both roles.
 
 `mutation_access` is the gate for a write, in the deployment's own app:
 
@@ -98,7 +98,7 @@ One round trip answers 200, 403 or 404, and the pair is settled once.
 
 ## get_objects
 
-`get_objects(user, app, type, required, after, limit)` settles the reader's share, then reads the reader's range of the `user_object` primary key for the type from the first key past `after`, until `limit` rows are kept. Per row it chooses the grant with `_best_grant` and joins the object's `object_info` row for name, description, link, owner, location and owner root.
+`get_objects(user, type, required, after, limit)` settles the reader's share, then reads the reader's range of the `user_object` primary key for the type from the first key past `after`, until `limit` rows are kept. Per row it chooses the grant with `_best_grant` and joins the object's `object_info` row for name, description, link, owner, location and owner root.
 
 1. A row is kept when its mask covers `required` and it carries a surviving grant or the reader created the object. A row kept only by creation carries a NULL `user_claim_id` and `direct_grant` true.
 
@@ -114,9 +114,9 @@ A page does not depend on the depth of the trees, the number of bindings, the nu
 |---|---|
 | `get_organizations`, `get_locations` | The table rows of `get_objects` pages, each kept when live and, on the prophet, linked to the app through `app_object`. With `limit` it reads further pages until `limit` rows are kept or the range ends, so a page holds `limit` rows of the app. A disciple has no `app_object` and keeps every live row |
 | `get_secrets` | One `get_objects` page joined to `samna_secret`, kept when live and of the app, in id order |
-| `get_users` | The reader itself with mask 47, every user it shares an object with through the directory count with mask 36, and the users bound to it by a claim on `claimius.samna_user`; the masks of one user are ORed and the result filtered by `required`. Only live, active users of the app are returned. The first call makes the reader a viewer and folds its pending directory rows; see [Users](./users.md#who-can-see-whom) |
-| `get_claims(user, app, required)` | Every live claim the reader holds through a live grant inside its window whose mask covers `required`, most bits first. The claims the reader can see or manage are `get_objects` of type `claimius.claim` |
-| `get_claims(user, app, object_id, object_type)` | The live claims named by the surviving derivations of the reader's pair on the object, after the point settle |
+| `get_users` | The reader itself with mask 47, every user it shares an object with through the directory count with mask 36, and the users bound to it by a claim on `claimius.samna_user`; the masks of one user are ORed and the result filtered by `required`. Only live, active users are returned. The first call makes the reader a viewer and folds its pending directory rows; see [Users](./users.md#who-can-see-whom) |
+| `get_claims(user, required)` | Every live claim the reader holds through a live grant inside its window whose mask covers `required`, most bits first. The claims the reader can see or manage are `get_objects` of type `claimius.claim` |
+| `get_claims(user, object_id, object_type)` | The live claims named by the surviving derivations of the reader's pair on the object, after the point settle |
 | `get_audit` | The app's audit rows owned by an organization the reader reaches, newest first, after `offset`, at most `limit` |
 
 A listing carries no authority to act on a row in it: `get_objects` returns a `user_claim_id` per row, but a write goes through `mutation_access` for its one row.
@@ -157,7 +157,7 @@ Five views carry those joins instead: `claimius.get_users` over `samna_user`, `c
 
 2. A view runs with its owner's rights and the planner merges it into the statement, so the join condition reaches the table's own index: a join through `get_organizations` probes `organization_pkey` as the join on the table did.
 
-3. `claimius_reader` holds `SELECT` on the five views, read and write on the token tables it keeps itself, `session`, `dpop_jti`, `rate_limit`, `par_request` and `jwks_cache`, `SELECT` on the consent and analytics tables, and nothing on a model or derived table, granted in `V6.0`. The views carry the `get_` names of the lookups they mirror, so the rule holds as written: app code names a `claimius` model relation only through a `get_` name.
+3. `claimius_reader` holds `SELECT` on the five views on a disciple; on a prophet the views are granted to `claimius_writer` and the reader holds nothing on them. On a prophet the reader holds read and write on the token tables it keeps itself, `session`, `dpop_jti`, `rate_limit`, `par_request` and `jwks_cache`, and `SELECT` on the consent and analytics tables; on a disciple read and write on `dpop_jti`. It holds nothing on a model or derived table on either role, granted in `V6.0`. The views carry the `get_` names of the lookups they mirror, so the rule holds as written: app code names a `claimius` model relation only through a `get_` name.
 
 4. The bun models `SamnaUser`, `Organization`, `Location`, `Claim` and `UserClaim` in `shared` carry `select:claimius.get_<name>` beside `table:claimius.<name>` in their `bun.BaseModel` tag. bun reads a select, a belongs-to join and a has-many load from the `select` name and writes an insert, an update and a delete to the `table` name, so a model that `bun:",extend"`s one of them, and every relation pointing at one, reads through the view with no change at the call. A consumer model of its own over a claimius table, such as a compact owner, adds the same `select:` option.
 
@@ -167,7 +167,7 @@ They answer what a row names, never what the reader may do: a write still goes t
 
 ## Which reads write
 
-A read writes only its settle: the pairs it recomputes and the marks it moves, the `user_users_diff` rows those raise while the app has a viewer, its cursor, the `user_users` rows of a first directory view, the `user_users_diff` rows it folds into `user_users`, the reader's `usage_diff` rows it folds into its pairs and the `claim_graph_cache` row a graph read stores. Nothing else in a read path writes.
+A read writes only its settle: the pairs it recomputes and the marks it moves, the `user_users_diff` rows those raise while a viewer exists, its cursor, the `user_users` rows of a first directory view, the `user_users_diff` rows it folds into `user_users`, the reader's `usage_diff` rows it folds into its pairs and the `claim_graph_cache` row a graph read stores. Nothing else in a read path writes.
 
 When something that reads has to cause an effect, a cascade, an audit entry, a sync notification, the effect belongs to the write that caused it. A cascade and a sync event are triggers on the table where the originating write happened, the cascade firing once per transition; an audit entry is written in the transaction of that write; see [Audit](./audit.md). Past its settle, the read path stays a read.
 
@@ -197,10 +197,10 @@ PL/pgSQL caches a plan per statement and, under `plan_cache_mode = auto`, switch
 
 | Step | Entries |
 |---|---|
-| `check_user_active`, one probe of `samna_user` by `(user_id, app_id)` | 1 |
+| `check_user_active`, one probe of `samna_user` by `user_id` | 1 |
 | The pair, one probe of the `user_object` primary key, with its mark | 1 |
 | The object's `object_info` row, for owner, location and owner root | 1 |
-| The trimmed position of the app | 1 |
+| The trimmed position, one per deployment | 1 |
 | The areas of the object's root raised at or after the mark, one range of `idx_access_diff_root_txid`, and the reader's assignments since the mark, one range of `idx_access_diff_user`: both empty when nothing was raised | 2 |
 | `_best_grant` over the pair's `G_x` derivations | 0 |
 
@@ -239,8 +239,8 @@ for a page of `p` rows, a descent of `h` levels and the settle `s` of the reader
 | `get_organizations`, `get_locations` | One `get_objects` page per round, plus one table probe and one `app_has_object` probe of `idx_app_object_unique` per row read |
 | `get_secrets` | One `get_objects` page plus one `samna_secret` probe per row |
 | `get_users` | `Σ_{x ∈ V_u} U_x` on the reader's first view and nothing after, then `1 + S_u + V_u + Σ_{x ∈ T_u} (m_x + U_x) + 2C + b + |targets|`: the reader's `S_u` rows of `idx_user_users_viewer`, the `V_u` probes of `user_users_diff` by key that find its `T_u` pending objects, the rows still pending on them, its grants with their `b` bindings on `claimius.samna_user`, and one `samna_user` probe per target |
-| `get_claims(user, app, required)` | One range of `idx_user_claim_user_app` and one claim probe per live grant, or one grant probe per live claim of every app when the planner scans `claim`; the function filters no `app_id` |
-| `get_claims(user, app, object_id, object_type)` | The point settle and one claim probe per derivation of the pair |
+| `get_claims(user, required)` | One range of `idx_user_claim_user_app` and one claim probe per live grant, or one grant probe per live claim when the planner scans `claim` |
+| `get_claims(user, object_id, object_type)` | The point settle and one claim probe per derivation of the pair |
 | `get_audit` | The reader's `V_{u,organization}` pairs, then the app's rows newest first until `limit + offset` are kept |
 | `get_users(user_ids, ids, emails, external_ids)`, `get_organizations(ids, owner_ids, external_ids)`, `get_locations(ids, parent_ids, external_ids)`, `get_claims(ids, owner_ids)` | One index probe per id given, or one range of the owner or parent index per owner or parent, plus a heap tuple per row. An external id probes the `external_id` index of `organization` or `location`. A user named only by email or external id reads `samna_user` once: the email is compared on `lower(email)` and the `external_id` index holds live rows only |
 | `get_relations` | One range of `idx_user_relation_user_id` |

@@ -21,13 +21,13 @@ Claimius becomes a PostgreSQL extension. It is configured on two things: the acc
 
 ## What the schema already provides
 
-1. The per user index. `user_object` is the reverse index keyed by user, primary key `(user_id, app_id, object_type, object_id)`. A row level security policy of the form `EXISTS (SELECT 1 FROM claimius.user_object WHERE user_id = <session user> AND app_id = <session app> AND object_type = <type> AND object_id = <row id> AND sa_access & 4 = 4)` reads one key of it per row. `shared.ObjectWhere` filters a Go query the same way through `get_access` for one row and `get_objects` for a page.
+1. The per user index. `user_object` is the reverse index keyed by user, primary key `(user_id, object_type, object_id)`. A row level security policy of the form `EXISTS (SELECT 1 FROM claimius.user_object WHERE user_id = <session user> AND object_type = <type> AND object_id = <row id> AND sa_access & 4 = 4)` reads one key of it per row. `shared.ObjectWhere` filters a Go query the same way through `get_access` for one row and `get_objects` for a page.
 
-2. The read functions. Every read goes through `get_*` with the user and the app as its first arguments. In the extension those arguments come from the session, not from the caller.
+2. The read functions. Every read goes through `get_*` with the user as its first argument, and the app after it only on the reads that join an app's own rows. In the extension those arguments come from the session, not from the caller.
 
 3. The on demand settle and the evaluated check. A policy that reads `user_object` needs the rows it reads to be settled, and the settle runs at the entry of every listing for the reader, which is what a policy over one table targets. A policy on a single row can instead call the check, which settles the one pair it reads.
 
-4. The role grant model. `claimius_reader` sees no table, only functions. A leased login is a reader whose functions and policies take the user from the session.
+4. The role grant model. `claimius_reader` sees no model or derived table, only functions, the token tables it keeps itself and, on a disciple, the five `get_` views. A leased login is a reader whose functions and policies take the user from the session.
 
 5. The actor model. `sa_created_by` is a grant. A write made directly by a leased login is stamped with the grant the session carries, as a routed write is.
 

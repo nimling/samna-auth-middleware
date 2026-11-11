@@ -34,12 +34,12 @@ Every auth route sits under `SAUTH_BFF_BASE_PATH`. The status route sits beside 
 | `GET <base>/callback` | none | Exchanges the code for tokens, writes the session cookies and redirects to `next` |
 | `GET <base>/session?handoff=<value>` | none | Proxies the handoff to the prophet with the browser's host in `X-Forwarded-Host`, so the prophet writes the session cookies for the site's own domain; see below |
 | `GET <base>/logout` | none | Clears the cookies, revokes the token on the prophet and redirects to the end session page |
-| `GET <base>/me` | session | The signed in user |
-| `GET <base>/me/claim?with=claim_object` | session | The claims the user holds; `with=claim_object` adds each claim's bindings as `claim_objects`, whose `scope` carries the page gates |
+| `GET <base>/me` | session, else the anonymous user | The signed in user |
+| `GET <base>/me/claim?with=claim_object` | session, else the anonymous user | The claims the user holds; `with=claim_object` adds each claim's bindings as `claim_objects`, whose `scope` carries the page gates |
 | `POST <base>/app/:app_slug/subscription/subscribe` | none, 5 per hour per address | Forwards an email subscription to the prophet with the feed the site serves |
 | `DELETE <base>/app/:app_slug/subscription/subscribe` | none, 5 per hour per address | Removes it |
 | `GET /api/status/health` | none | The health answer the status probe reads; see [Health](./health.md) |
-| `GET /*` | optional | The site, from `SAUTH_BFF_STATIC_DIR` or `SAUTH_BFF_PROXY_TARGET`; a session on the request lands the viewer in the context, nothing is refused here |
+| `GET /*` | session, else the anonymous user | The site, from `SAUTH_BFF_STATIC_DIR` or `SAUTH_BFF_PROXY_TARGET`; a session on the request lands the viewer in the context, a visitor without one is the anonymous user under the rate limit and is refused with `401`, or `302` to the login on a navigation, unless the app holds a public grant |
 
 ## The login shapes
 

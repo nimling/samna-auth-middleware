@@ -17,9 +17,9 @@ The prophet to disciple stream is an append only log of state changes with a mon
 
 `sync_event (seq bigserial, operation, event_type, payload jsonb, app_id, written_at, txid xid8)` is indexed by its primary key `seq`, by `idx_sync_event_app_txid_seq (app_id, txid, seq)` and by `idx_sync_event_written_brin`, a BRIN summary on `written_at`. `txid` defaults to `pg_current_xact_id()`, the transaction that wrote the event.
 
-`emit_sync_event`, an after row trigger on `samna_app`, `samna_user`, `samna_client`, `samna_secret`, `organization`, `location`, `claim`, `user_claim`, `claim_object`, `object_field`, `user_field`, `user_relation`, `object_asset`, `code` and `app_handover`, writes in the transaction of the change, so an event exists exactly when its change committed. An `upsert` carries the full row less `txid`; a `delete` carries its `id` and `app_id`. The trigger writes nothing under `replay_mode` and nothing on a database with no `prophet_state` row, so a pure disciple writes no events.
+`emit_sync_event`, an after row trigger on `samna_app`, `samna_user`, `samna_client`, `samna_secret`, `organization`, `location`, `claim`, `user_claim`, `claim_object`, `object_field`, `user_field`, `user_relation`, `user_identity`, `object_asset`, `app_cost`, `code`, `app_handover` and, on insert only, `audit`, writes in the transaction of the change, so an event exists exactly when its change committed. An `upsert` carries the full row less `txid`; a `delete` carries its `id` and `app_id`. The trigger writes nothing under `replay_mode` and nothing on a database with no `prophet_state` row, so a pure disciple writes no events.
 
-An `organization` or `location` has no `app_id`. Its change is written once per app holding a live `app_object` link to it, stamped with that app, through `apps_for_object`. `emit_app_object_sync_event` on `app_object` publishes the linked row and its live asset links to the app when a link goes live, and the delete of its asset links and of the row to that app alone when the link ends, so a row linked after it was written reaches the app's consumers and an unlinked one leaves them. An asset link is written once per app that sees its object; see [Assets](./assets.md).
+An `organization` or `location` has no `app_id`. Its change is written once per app holding a live `app_object` link to it, stamped with that app, through `apps_for_object`. A `claim` has none either: it is written once per app linked to its owning organization, a grant or a binding once per app of its claim, and a `samna_user` once per app where the user holds a live grant of such a claim; a live grant writes its user to the apps of its claim before itself, so the app holds every user granted its claims. The anonymous user is never published, since every database holds its own. `emit_app_object_sync_event` on `app_object` publishes the linked row and its live asset links to the app when a link goes live, and the delete of its asset links and of the row to that app alone when the link ends, so a row linked after it was written reaches the app's consumers and an unlinked one leaves them. An asset link is written once per app that sees its object; see [Assets](./assets.md).
 
 A disciple therefore holds the organizations linked to its app and no other:
 
@@ -31,7 +31,7 @@ A disciple therefore holds the organizations linked to its app and no other:
 
 ## What the feed carries
 
-The feed carries source rows and nothing derived from them. `user_object`, `user_users`, `user_users_diff`, `object_info`, `inheritance_info`, `access_diff` and `audit` never publish, `get_sync_events` excludes `claimius.user_object`, `claimius.user_users`, `claimius.user_users_diff` and `claimius.audit` by event type, and the base files delete any such row left in the outbox. A settle writes pairs, `user_users_diff` rows and counts, never source rows, so it emits nothing; each database derives and folds the rows of its own pairs.
+The feed carries source rows and nothing derived from them. `user_object`, `user_users`, `user_users_diff`, `object_info`, `inheritance_info` and `access_diff` never publish, `get_sync_events` excludes `claimius.user_object`, `claimius.user_users` and `claimius.user_users_diff` by event type, and the base files delete any such row left in the outbox. An `audit` insert writes an event into the outbox through `tg_emit_sync_event`, stamped with its `app_id`, and the feed serves it. A settle writes pairs, `user_users_diff` rows and counts, never source rows, so it emits nothing; each database derives and folds the rows of its own pairs.
 
 Two kinds of event travel only to a peer prophet, a pull with `peer = true`: `app_handover` events, and an organization's `private_seed`, wrapped under the prophet's `SAUTH_MASTER_KEY`, which `get_sync_events` strips from every organization payload it serves to a disciple.
 
@@ -73,7 +73,7 @@ The pull loop runs on every process of a service. Each takes a session level `pg
 
 1. Every event at or below the lowest cursor among all consumers in contact within `stale_after`, 7 days by default. A consumer out of contact longer is treated as gone, so one dead disciple cannot hold the outbox.
 
-2. Per app, every event beyond as many as the app has source rows, `count_sync_source_rows`: the rows of the ten app scoped tables `samna_user`, `claim`, `user_claim`, `claim_object`, `samna_client`, `samna_secret`, `object_field`, `user_field`, `user_relation` and `code`, the live organization and location links, and the asset links published to the app.
+2. Per app, every event beyond as many as the app has source rows, `count_sync_source_rows`: by `app_id` the rows of `samna_client`, `samna_secret`, `object_field`, `user_field`, `user_relation`, `code` and `app_cost`, the live organization and location links, the claims owned in linked organizations with their grants and bindings, the users `apps_for_object` names for the app, and the asset links published to the app.
 
 It records the highest position removed per app in `prophet_state (trimmed_txid, trimmed_seq)`. It is the `sync_event` prune of the retention job, run once a day with `stale_after` the days of that row.
 
@@ -128,7 +128,7 @@ An event costs one heap row and two btree entries; the BRIN summary changes only
 events(write) = Σ_{source rows r written} n_apps(r)
 ```
 
-with `n_apps(r) = 1` for a row carrying `app_id`, the number of live links for an organization or location, and the number of apps that see the object for an asset link. For the request of [Writes](./writes.md), a claim bound to a node and granted to `k` users, `events = 2 + k`, independent of `|T_c|` and `|H_c|`.
+with `n_apps(r) = 1` for a row carrying `app_id`, the number of live links for an organization or location, the number of apps linked to the owning organization for a claim and for its grants and bindings, the number of such apps over the claims a user holds for a user, and the number of apps that see the object for an asset link. For the request of [Writes](./writes.md), a claim bound to a node and granted to `k` users, `events = 2 + k`, independent of `|T_c|` and `|H_c|`.
 
 A pull with `n_a` of the app's events after its cursor reads `n_a` entries of `idx_sync_event_app_txid_seq` and no other app's.
 

@@ -15,7 +15,7 @@ Claimius carries four subject and structure types and two bindings.
 |---|---|---|
 | Organization | `claimius.organization` | Who owns something. Nests into the ownership tree |
 | Location | `claimius.location` | Where something is. Nests into the location tree, and sits in its owner's ownership tree |
-| User | `claimius.samna_user` | Who acts. A person or a machine client, one row per app |
+| User | `claimius.samna_user` | Who acts. A person, a machine client or the anonymous user, `anonymous_user_id()` of type `anonymous`, the subject of every request without a credential. One live row per `user_id`, `idx_samna_user_user_app`, shared by every app |
 | Claim | `claimius.claim` | What may be done. A mask and an inherit flag |
 
 | Binding | Table | Joins |
@@ -41,7 +41,7 @@ Every question claimius answers is that relation or a projection of it: a check 
 6. Resource hierarchies. Folders, buildings, departments, product trees: the ownership, location and parenthood closures.
 7. Negative permissions. A deny is a claim whose mask carries bit 16, bound and granted like any other; see [Denials](./denials.md).
 8. Delegation. An actor acts for a target by holding a grant that covers the target's `samna_user` row, and the row written carries the actor's `user_claim.id` in `sa_created_by`. See [Users](./users.md).
-9. Machine identities. A client is a `samna_client` with a per app `samna_user` row whose `user_id` is the client's `client_id`. It holds grants like a person.
+9. Machine identities. A client is a `samna_client` with one `samna_user` row whose `user_id` is the client's `client_id`, inserted by `upsert_app_client` through `upsert_app_user`. It holds grants like a person.
 
 ## What the small type set buys
 

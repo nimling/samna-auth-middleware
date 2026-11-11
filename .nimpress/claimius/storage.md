@@ -21,30 +21,30 @@ Every claimius table falls in one of three groups: the model, the rows a writer 
 | `inheritance_info` | object and ancestor in each tree it sits in, itself included | objects times depth |
 | `claim`, `claim_object`, `user_claim` | claim, binding, grant | the model, never its product |
 | `access_diff` | area raised since the oldest cursor among the users used within 7 days: one per object raised and one per claim and assignee | writes between the trims |
-| `user_users_diff` | pair that entered or left on an object that is not a claim while the app had a viewer, not yet folded | pair changes between the reads and drains that fold them |
+| `user_users_diff` | pair that entered or left on an object that is not a claim while a viewer existed, not yet folded | pair changes between the reads and drains that fold them |
 | `usage_diff` | pair and flush not yet folded | flushes between the listings of the pair's user |
-| `user_activity` | user and app that used it, holding the cursor | users |
+| `user_activity` | user that used the deployment, holding the cursor | users |
 | `sync_event` | source row written, per app, and none at or below the lowest cursor of the consumers in contact | source rows written; see [Sync](./sync.md) |
 | `audit` | audited event, one partition per month | writes |
 
-`user_object` is the only table that grows with the product of users and reach. Every other table grows with the rows of the model, with its depth, or with its writes. A pair holds only what is per user: the key, `sa_access`, `grants`, `scope`, `direct_grant`, the usage count and its timestamps. The owner, location, root, name, description, link and search vector of an object live once in `object_info`. A disciple drops `app_id` from both.
+`user_object` is the only table that grows with the product of users and reach. Every other table grows with the rows of the model, with its depth, or with its writes. A pair holds only what is per user: the key, `sa_access`, `grants`, `scope`, `direct_grant`, the usage count and its timestamps. The owner, location, root, name, description, link and search vector of an object live once in `object_info`. Neither table carries `app_id`, on either role.
 
 ## Indexes
 
 | Table | Indexes |
 |---|---|
-| `user_object` | primary key `(user_id, app_id, object_type, object_id) INCLUDE (sa_access)`; `idx_user_object_object_user (app_id, object_type, object_id, user_id)` |
+| `user_object` | primary key `(user_id, object_type, object_id) INCLUDE (sa_access)`; `idx_user_object_object_user (object_type, object_id, user_id)` |
 | `object_info` | primary key `(object_type, object_id)`; `(sa_owner_id, sa_name, object_id)`; `(sa_location_id, sa_name, object_id)`; `(sa_created_by, sa_owner_root_id)`; GIN on `search_vector` |
-| `user_users` | primary key; `(app_id, viewer_id)`; `(app_id, target_user_id)` |
+| `user_users` | primary key; `(viewer_id)`; `(target_user_id)` |
 | `inheritance_info` | primary key; `idx_inheritance_info_descendant` and `idx_inheritance_info_ancestor`, each covering the other end, the root and the depth |
-| `access_diff` | primary key; `(app_id, object_type, object_id)` partial for object areas; `(app_id, root_id, txid)`; `(app_id, txid)`; `(app_id, user_id, txid)` partial for assignments |
-| `user_users_diff` | primary key `(app_id, object_type, object_id, id)`; `(app_id, user_id)` |
-| `usage_diff` | primary key `(app_id, user_id, id)` |
-| `user_activity` | primary key `(user_id, app_id)`; `(app_id, directory_at)` partial for viewers |
+| `access_diff` | primary key; `(object_type, object_id)` partial for object areas; `(root_id, txid)`; `(txid)`; `(user_id, txid)` partial for assignments |
+| `user_users_diff` | primary key `(object_type, object_id, id)`; `(user_id)` |
+| `usage_diff` | primary key `(user_id, id)` |
+| `user_activity` | primary key `(user_id)`; `(directory_at)` partial for viewers |
 | `sync_event` | primary key `seq`; `(app_id, txid, seq)`; BRIN on `written_at` |
-| `claim` | primary key; `app_id`; `sa_owner_id`; `sa_root_id`; `(sa_access & 16)` partial for denies; on a prophet `(app_id, id)` unique, which the app scoped grants and bindings reference |
-| `user_claim` | primary key; live unique `(claim_id, user_id, app_id)`; `(user_id, app_id)`; `claim_id`; `sa_owner_id` |
-| `claim_object` | primary key; `app_id`; `claim_id`; `sa_owner_id`; `(object_type, object_id)` partial; `(claim_id, object_type, object_id)` partial and live; `(claim_id)` partial for live scope grants |
+| `claim` | primary key; `sa_owner_id`; `sa_root_id`; `(sa_access & 16)` partial for denies; the same on both roles |
+| `user_claim` | primary key; live unique `(claim_id, user_id)`; `(user_id)`; `claim_id`; `sa_owner_id` |
+| `claim_object` | primary key; `claim_id`; `sa_owner_id`; `(object_type, object_id)` partial; `(claim_id, object_type, object_id)` partial and live; `(claim_id)` partial for live scope grants |
 | `audit` | primary key `(id, sa_created_at)`; `app_id` on a prophet; `sa_owner_id`; `(object_type, object_id)`; BRIN on `sa_created_at`, per month partition |
 
 1. The GIN index on `search_vector` takes its entries through the pending list and merges them in bulk.
@@ -61,11 +61,11 @@ Every claimius table falls in one of three groups: the model, the rows a writer 
 
 2. A pair updated leaves one dead version, which a later update on the same page can prune, since `user_object` keeps `fillfactor = 90`.
 
-3. A pair entering or leaving while the app has a viewer leaves one `user_users_diff` row, dead once folded. The fold updates the `user_users` rows of the viewers who share the object, one dead version each, so a pair that entered and left before a fold moves no count at all.
+3. A pair entering or leaving while a viewer exists leaves one `user_users_diff` row, dead once folded. The fold updates the `user_users` rows of the viewers who share the object, one dead version each, so a pair that entered and left before a fold moves no count at all.
 
 4. A settle that only moves marks leaves one heap only version per pair.
 
-5. An area raise leaves one dead version per raise after the first. A settle writes nothing to an area. The trim deletes the areas below the lowest active cursor in one statement per app.
+5. An area raise leaves one dead version per raise after the first. A settle writes nothing to an area. The trim deletes the areas below the lowest active cursor in one statement.
 
 6. A usage flush leaves one `usage_diff` row per pair counted, dead once folded, and one dead version per `user_activity` row it moves. A share settle leaves one heap only version of the cursor; the fold leaves one dead version per pair it moves.
 
@@ -95,7 +95,7 @@ bytes(pair) ≈ 24 + key + 4 + |grants| + |scope| + 1 + 8 + 3 × 8   heap
             + 2 × (8 + key + 4)                                    two index entries with their line pointers
 ```
 
-`key` is the width of `(user_id, app_id, object_type, object_id)`, 48 bytes of uuids and the type name, and `|grants|` grows with the derivations `G_x`, about 150 bytes each.
+`key` is the width of `(user_id, object_type, object_id)`, 32 bytes of uuids and the type name, and `|grants|` grows with the derivations `G_x`, about 150 bytes each.
 
 ### Bytes per closure row
 
@@ -114,9 +114,9 @@ A closure row is two object pairs, a root, a depth and two timestamps: about 140
 | `usage_diff` | 1 |
 | `user_activity` | 1, 2 for a viewer; 0 for a cursor move |
 | `sync_event` | 2, and a BRIN summary per range of pages |
-| `claim` | 5 on a prophet, 6 for a deny; 3 and 4 on a disciple |
+| `claim` | 3, 4 for a deny, on both roles |
 | `user_claim` | 5 |
-| `claim_object` | 6 for a live object binding, 5 for a live scope grant |
+| `claim_object` | 5 for a live object binding, 4 for a live scope grant |
 | `audit` | 4 on a prophet, 3 on a disciple, and a BRIN summary |
 
 Per pair that enters or leaves, the materialization writes one `user_object` row with 2 entries and, for an object that is not a claim, one `user_users_diff` row with 2 entries. The fold that takes the row later writes up to `2 (U_x − 1)` `user_users` rows with 3 entries each, once for every row of the object it folds together.
@@ -132,7 +132,7 @@ h = 1 + ⌈log_B (N / B)⌉               levels for N entries
 
 The levels above the leaves are about `1 / B` of the index, so a descent reads `h` pages of which all but the leaf are shared by every descent.
 
-1. The `user_object` primary key carries four key columns and `sa_access`, about `e = 84` bytes for a type name of 15 characters, `B ≈ 87`. The reader's range of `V_{u,τ}` pairs is about `⌈V_{u,τ} / 87⌉` leaf pages in `object_id` order, and a page of `p` rows reads `⌈p / 87⌉ + 1` of them after one descent; its further cost is the `p` heap rows it reads for `grants` and the `p` `object_info` rows it probes. Include columns disable deduplication; the key order is what lets a page stop after `p` entries.
+1. The `user_object` primary key carries three key columns and `sa_access`, about `e = 84` bytes for a type name of 15 characters, `B ≈ 87`. The reader's range of `V_{u,τ}` pairs is about `⌈V_{u,τ} / 87⌉` leaf pages in `object_id` order, and a page of `p` rows reads `⌈p / 87⌉ + 1` of them after one descent; its further cost is the `p` heap rows it reads for `grants` and the `p` `object_info` rows it probes. Include columns disable deduplication; the key order is what lets a page stop after `p` entries.
 
 2. `idx_user_object_object_user` carries no include column and no duplicate keys, about the same width, and serves the `U_x` users of one object as one range.
 

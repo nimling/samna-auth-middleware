@@ -64,13 +64,13 @@ flowchart TD
 
 3. There is no one size fits all admin claim. Every capability is its own claim and a person holds the ones they need; an administrator is someone who holds Approver, Company, Files, Analytics, Settings and Subscribers, not someone who holds a claim named admin.
 
-4. A claim name carries no solution prefix, because the claim's `app_id` already says which app it belongs to.
+4. A claim name carries no solution prefix, because a claim has no `app_id` and belongs to its owning organization: it reaches every app linked to that organization, and the organization already says which apps those are.
 
 ## How a claim reaches a disciple
 
 1. The prophet holds the `organization`, `samna_app`, `claim`, `claim_object` and `user_claim` rows.
 
-2. sasync replicates the claimius rows to every disciple of the app; see [Sync](./sync.md).
+2. The disciple's pull loop, the sam replica of the middleware, replicates the claimius rows to every disciple of the app; see [Sync](./sync.md).
 
 3. On the disciple, `sdb.ObjectWhere` reads the object bindings through the stored pairs, and `ScopeAccess`, over `claimius.get_scope_access`, reads the scope grants by jsonpath: `$.page`, `$.file.root`, `$.subscriber`, `$.stats`.
 

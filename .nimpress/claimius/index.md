@@ -71,7 +71,7 @@ Claimius owns and validates its own types. It reads no more of the implementing 
 
 5. Holding a claim, or holding a claim bound on it, lets the holder read the claim itself.
 
-6. The creator of a row, the user behind its `sa_created_by` grant, holds full access to it less what a direct deny, or a deny of a higher level, takes away. A row whose owning organization is held but out of the ownership closure, soft deleted or under a soft deleted organization, keeps nothing by creation. A stamp that names a user directly reads as that user; see [Users](./users.md#one-identity-one-row-per-app).
+6. The creator of a row, the user behind its `sa_created_by` grant, holds full access to it less what a direct deny, or a deny of a higher level, takes away. A row whose owning organization is held but out of the ownership closure, soft deleted or under a soft deleted organization, keeps nothing by creation. A stamp that names a user directly reads as that user; see [Users](./users.md#one-identity-one-row).
 
 7. A deny is a claim with bit 16 set; its other bits name what it subtracts. Every claim carries a level, 0 unless set, and when a grant and a deny meet at different levels the higher level wins: a deny of a higher level subtracts from the grant whatever its class, a deny of a lower level does not touch it. At equal levels the classes decide: a deny bound directly on the object subtracts from every grant on it; a deny reached through a tree subtracts only from grants reached through a tree. Denies may be scoped to fields. What is left is closed under implication. See [Denials](./denials.md) and [Redaction](./redaction.md).
 
@@ -90,9 +90,9 @@ Beyond its source tables, claimius keeps these. None is written by application c
 | `user_object` | each nonzero pair of user and object with its mask, derivations, field masks and usage count |
 | `user_users` | for each viewer who reads the directory, the number of objects that are not claims it shares with each other user |
 | `access_diff` | the areas of changes since the oldest active cursor, each stamped with its transaction and its owner root |
-| `user_users_diff` | the pairs that entered or left `user_object` on an object that is not a claim while the app had a viewer, not yet folded into `user_users` |
+| `user_users_diff` | the pairs that entered or left `user_object` on an object that is not a claim while a viewer existed, not yet folded into `user_users` |
 | `usage_diff` | counted uses of pairs not yet folded into `used_count` |
-| `user_activity` | each user's cursor per app, the snapshot `xmin` of its last share settle, when it last viewed the directory and when it last used the app |
+| `user_activity` | each user's cursor, the snapshot `xmin` of its last share settle, when it last viewed the directory and when it last used the deployment |
 | `claim_graph_cache` | the default claim graph of a user with the snapshot it was built under |
 
 `access_diff` with the cursors and marks is the state of lazy maintenance of `user_object`, `user_users_diff` that of `user_users`, `usage_diff` that of the usage count on the pair, and `user_activity` the cursor and the inputs of the drain rule; see [Materialization](./materialization.md). `claim_graph_cache` stores a rendering, validated on read; see [Graphs](./graphs.md). Nothing else is materialized. The member listing of an object is the reverse index `idx_user_object_object_user` on the `user_object` rows, not a second table.
@@ -219,7 +219,7 @@ A grant left with no bit is dropped. `A(u, x) ≠ 0` is a row of `user_object` w
 | `access_diff` | the support keys of changes since the oldest active cursor | at most one per object raised and one per assignment |
 | `user_users_diff` | first order deltas of `user_users` | one per pair change between folds |
 | `usage_diff` | pending usage deltas | one per pair and flush between the listings of its user |
-| `user_activity` | cursor and drain estimators | one per user and app that used it |
+| `user_activity` | cursor and drain estimators | one per user that used the deployment |
 | `claim_graph_cache` | a rendering | one per user who opened it |
 
 ### The queries in relational algebra
@@ -254,7 +254,7 @@ Every formula in these files uses these symbols.
 | `T_c` | Objects claim `c` reaches: its bound objects and, where it cascades, their descendants |
 | `H_c` | Holders of `c`: users granted `c` or a claim linking to `c` |
 | `N_r` | Closure rows of one root in one tree |
-| `Δ_a` | Open `access_diff` areas of app `a` |
+| `Δ_a` | Open `access_diff` areas of the deployment |
 | `P` | Pairs, rows of `user_object` |
 | `p`, `h` | Rows of a page; levels of a B-tree |
 | `k` | Users granted in one request |

@@ -14,14 +14,14 @@ Access is three rows. A `claim` says what may be done, a `user_claim` says who h
 | Row | Key columns |
 |---|---|
 | `claim` | `name`, `sa_access`, `inherits`, `level`, `type` (`system`, `user`, `service`, `virtual`), `sa_owner_id`, `sa_root_id` |
-| `user_claim` | `user_id`, `claim_id`, `starts_at`, `ends_at`, `reason`, `sa_owner_id` |
+| `user_claim` | `user_id`, `claim_id`, `starts_at`, `ends_at`, `options`, `reason`, `sa_owner_id` |
 | `claim_object` | `claim_id`, `object_type`, `object_id`, `sa_access`, `inherits`, `scope`, `reason`, `ref_id` |
 
 The pair is constrained: `object_id` and `object_type` are both present or both absent, `claim_object_object_pair`. There is no half bound row. A binding with both covers that object; a binding with neither carries its grant in `scope`; see [Scope grants](#scope-grants).
 
-A user holds at most one live grant per claim and app, enforced by `idx_user_claim_unique`.
+A user holds at most one live grant per claim, enforced by `idx_user_claim_unique` on `(claim_id, user_id)`.
 
-A grant and a binding live in the app of their claim. On the prophet `user_claim_app_claim_fkey` and `claim_object_app_claim_fkey` reference `claim (app_id, id)`, so a writer acting through one app that grants or binds a claim of another stamps the claim's app. Each row then travels to the app's consumers with its claim, and a disciple, which holds only its app's claims, never receives a grant or a binding whose claim it lacks; see [Sync](./sync.md).
+A grant and a binding travel with their claim. A claim has no `app_id`: it reaches every app linked to its owning organization, and a grant or a binding reaches the apps of its claim. A disciple, which holds only the claims owned in organizations linked to its app, never receives a grant or a binding whose claim it lacks; see [Sync](./sync.md).
 
 ## The access bits
 
@@ -56,14 +56,12 @@ A grant and a binding live in the app of their claim. On the prophet `user_claim
 1. The binding is refused with `P0403` when its grant bits exceed what the writer holds on the object. A writer who cannot reach an object cannot grant it away, and one who reads it cannot grant write on it. A deny binding is exempt from this test.
 2. The binding is refused with `P0403` when it hands out a bit a deny reaching the writer on the object has taken from the writer's pair; the claim's level is not judged, and a deny binding is exempt.
 
-Handing a claim out, `insert_user_claim`, and raising a claim's level run `_check_claim_denies` for the actor in `sa_created_by`: on no object the claim grants bits on may those bits overlap what a deny reaching the actor there takes from the actor's pair, so an actor never lifts a deny it meets by handing out a claim. It runs for every claim, whatever its level.
+Handing a claim out, `insert_user_claim`, and raising a claim's level run `_check_claim_denies` for the actor, the grant `claimius.actor` names when `update_claim(p_actor_user_claim_id)` set it and `sa_created_by` otherwise: on no object the claim grants bits on may those bits overlap what a deny reaching the actor there takes from the actor's pair, so an actor never lifts a deny it meets by handing out a claim. It runs for every claim, whatever its level.
 
 Where the writer holds less than the binding hands out, these holds are tried in order before refusing:
 
-1. A binding on an object outside the `claimius` schema that the database holds no `object_info` row for, a row of a disciple's own table bound on the prophet, is judged on the writer's pair on the binding's owning organization when the writer holds no pair on the object, and as the row's creator when the calling app vouches the row was created under a live grant of the writer in the binding's app and the owning organization is live: owner, write, read and execute, as the disciple counts its creator. Claimius never resolves such a type: the prophet knows the organization, `_check_app_scope` keeps it linked to the app, and the disciple, which holds the row, computes access on it when the binding arrives by sync.
-2. On a prophet, the first live binding of an app that carries none, from a writer whose grant belongs to another app, passes when the writer holds owner, in its own app, on the organization that owns the `samna_app` row. This is how `upsert_app` opens a new app; see [Apps](./apps.md#creating-an-app).
-3. The first live binding on a `samna_user` who holds a claim assigned under the binding's owning organization passes when the writer holds owner on that organization in the binding's app. This is how `insert_organization_user` binds a new member's claim.
-4. Any other binding in an app other than the system app may still pass on the access the writer holds on the same object in the system app, capped at that access.
+1. A binding on an object outside the `claimius` schema that the database holds no `object_info` row for, a row of a disciple's own table bound on the prophet, is judged on the writer's pair on the binding's owning organization when the writer holds no pair on the object, and as the row's creator when the calling app vouches in `claimius.object_created_by` that the row was created under a live grant of the writer and the owning organization is live or not held: owner, write, read and execute, as the disciple counts its creator. Claimius never resolves such a type: the prophet knows the organization, and the disciple, which holds the row, computes access on it when the binding arrives by sync.
+2. The first live binding on a `samna_user` who holds a claim assigned under the binding's owning organization passes when the writer holds owner on that organization. This is how `insert_organization_user` binds a new member's claim.
 
 ## Cascade
 
@@ -106,7 +104,7 @@ The use is reusing a surface at another strength. A Bookings Admin claim binds e
 
 ## Choosing the grant
 
-`_best_grant(grants, required)` returns, among the derivations of a pair whose mask covers `required` and whose stored window holds at `now()`, the one with the most bits set, then the highest mask, then the highest level, then the oldest claim by its stored `claim_created_at`. Every access row carries the level and the claim name of the grant it chose. It reads nothing beyond the pair: the grant id, the window, the claim name and its creation time are on the derivation, and every write that can change them raises an area covering the pair.
+`_best_grant(grants, required)` returns, among the derivations of a pair whose mask covers `required`, whose stored window holds at `now()` and whose `samk`, when it carries one, equals `current_setting('claimius.samk')`, as `get_direct_access` tests it too, the one with the most bits set, then the highest mask, then the highest level, then the oldest claim by its stored `claim_created_at`. Every access row carries the level and the claim name of the grant it chose. It reads nothing beyond the pair: the grant id, the window, the claim name and its creation time are on the derivation, and every write that can change them raises an area covering the pair.
 
 `get_direct_access` orders its candidates by the fewest hops from the object, then the most bits, then the grant id.
 
@@ -160,7 +158,7 @@ A binding is refused when
 eff(c, b) & ~A(writer, y) & 15 ≠ 0
 ```
 
-with `A(writer, y) = 0` when the writer holds no pair, and `A = 15` when one of the first binding holds on an organization applies.
+with `A(writer, y) = 0` when the writer holds no pair, and `A = 15` when the creator hold on a foreign row or the first binding hold on a `samna_user` applies.
 
 ### Cascade reach
 

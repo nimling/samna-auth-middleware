@@ -30,9 +30,9 @@ A link follows its object. `apps_for_object(object_type, object_id, app_id)` nam
 | Object | Apps |
 |---|---|
 | `organization`, `location` | Every app linked to it through `app_object` |
-| `samna_user` | Every app holding a live `samna_user` row with that `user_id` |
+| `samna_user` | Every app linked to the owning organization of a claim the user holds a live grant of |
 | `samna_app` | That app |
-| `claim` | The claim's app |
+| `claim` | Every app linked to the claim's owning organization |
 | Any other claimius type | The link's home app |
 
 1. A delete, hard or soft, goes to the same apps as the write it ends. A link moved to another object is deleted from the apps that no longer see it.
@@ -148,6 +148,6 @@ With `A` the apps a link is published to and `L` the links of one object:
 
 1. A link write is one row and `A` feed events. A user row that goes live in an app adds the user's `L` live links to that app's feed, and an `app_object` link that goes live or ends adds the object's `L`.
 
-2. `get_object_assets` is the reader's share settle, one access probe on the object, `get_access` or `get_user_access`, and one range of `idx_object_asset_object` of `L` entries; on the prophet each entry also probes `apps_for_object`, one range of `idx_app_object_object` or `idx_samna_user_user_id` or one primary key.
+2. `get_object_assets` is the reader's share settle, one access probe on the object, `get_access` or `get_user_access`, and one range of `idx_object_asset_object` of `L` entries; on the prophet each entry also probes `apps_for_object`, one range of `idx_app_object_object`, or for a user one range of `idx_user_claim_user_app` with a claim probe and an `app_object` probe per grant, or for a claim one claim probe and one `app_object` probe.
 
 3. A fetch is one `GetObjectAsset`, one prophet request and, for a link the prophet does not hold, one relayed request; the bytes cross each hop once and are stored by none of them.

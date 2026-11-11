@@ -23,9 +23,9 @@ It is written like any binding: `insert_claim`, then `insert_claim_object` with 
 
 ## Matching
 
-`get_scope_access(user, app, path, required)` is one `STABLE` statement:
+`get_scope_access(p_user_id, p_path, p_required_access)` is one `STABLE` statement:
 
-1. It takes the user's live grants in the app inside their window, joined to their live claims.
+1. It takes the user's live grants inside their window, joined to their live claims.
 2. It takes each claim's live scope bindings and keeps those where `jsonb_path_exists(scope, path)`. The argument is a jsonpath and starts with `$`: `$.page` matches any page grant, `$.page."time-report"` one page, `$.page.keyvalue() ? (@.key like_regex "report")` a pattern ([PostgreSQL, SQL/JSON path language](https://www.postgresql.org/docs/17/functions-json.html#FUNCTIONS-SQLJSON-PATH)).
 3. Each matching binding carries the claim mask narrowed by the binding mask; a NULL binding mask is the claim mask.
 4. Each matching deny binding subtracts its bits from every matching grant binding whose claim level is not higher than the deny's. What remains is closed under implication. A scope binding on a claim reached through one inheriting link matches too, with the composed mask and the higher of the two levels.
@@ -33,9 +33,9 @@ It is written like any binding: `insert_claim`, then `insert_claim_object` with 
 
 The answer is one row per surviving binding, with its grant, its claim, its settled mask and level, and the binding's own id, `scope`, mask and `inherits`, ordered by claim and binding. Deny bindings are never returned. An empty answer is a normal no.
 
-It reads no `user_object`, runs no `reconcile_if_pending` and settles nothing, so a scope grant takes effect on the next call, and the call runs on a read only standby. `get_scope_access(user, path, required)` is the same in the deployment's own app, `get_app_id()`.
+It reads no `user_object`, runs no `reconcile_if_pending` and settles nothing, so a scope grant takes effect on the next call, and the call runs on a read only standby. It has one form, the same on both roles.
 
-The scope key form `get_access(user, app, scope_key, required)` checks the user active and returns the one binding of `get_scope_access` at the path `$."scope_key"` with the most bits set, then the lowest claim id: `user_claim_id`, `claim_id`, `sa_access` and the binding's `scope`.
+The scope key form `get_access(p_user_id, p_scope_key, p_required_access)` checks the user active and returns the one binding of `get_scope_access` at the path `$."scope_key"` with the most bits set, then the lowest claim id: `user_claim_id`, `claim_id`, `sa_access` and the binding's `scope`.
 
 ## The boundary
 

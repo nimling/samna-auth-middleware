@@ -8,7 +8,7 @@ The disciple is a local replica. It never signs or decrypts, so a secret it writ
 |---------|--------|------|
 | `sdb` | `disciple/sdb` | Database layer. `sdb.Init(logger)` connects the pool and loads config once. |
 | `echo` | `disciple/echo` | The individual HTTP handlers: the me routes, the login flow, notifications, consent, capture and uptime. |
-| `sam` | `disciple/sam` | `sam.RegisterEndpoints(group)` mounts the handlers, `sam.RegisterCapture(group)` and `sam.RegisterCaptureRead(group)` mount consent and capture, and `sam.Init(ctx)` starts the pull loop and notification. |
+| `sam` | `disciple/sam` | `sam.RegisterEndpoints(group)` mounts the handlers, `sam.RegisterCapture(group)` and `sam.RegisterCaptureRead(group)` mount consent and capture, and `sam.Init(ctx)` starts notification, the retention job, the client binding, the app seed fetch, the Initiate apps and the pull loop. |
 | `smw` | `smw` | Middleware. |
 
 ## main.go
@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/labstack/echo/v4"
+	saecho "github.com/nimling/samna-auth-middleware/v2/disciple/echo"
 	sam "github.com/nimling/samna-auth-middleware/v2/disciple/sam"
 	sdb "github.com/nimling/samna-auth-middleware/v2/disciple/sdb"
 	"github.com/nimling/samna-auth-middleware/v2/notification"
@@ -46,7 +47,11 @@ func main() {
 		e.Logger.Fatal(err)
 	}
 
-	api := e.Group("", smw.UserAuthMiddleware(nil))
+	auth := e.Group("/api/auth")
+	auth.GET("/login", saecho.GetLogin)
+	auth.GET("/callback", saecho.GetCallback)
+	auth.GET("/logout", saecho.GetLogout)
+	api := e.Group("/api", smw.UserAuthMiddleware(nil))
 	sam.RegisterEndpoints(api)
 	e.Server.RegisterOnShutdown(notification.EndStreams)
 
@@ -69,11 +74,11 @@ func main() {
 
 1. `sdb.Init(e.Logger)` connects the database and loads the config from the environment once. The app identity comes from `SAUTH_APP_SLUG` and `SAUTH_APP_SECRET`. Nothing else in your code reads the `SAUTH_` variables.
 
-2. `sam.RegisterEndpoints(group)` mounts the login, callback, logout, me and notification routes, and consent and capture through `sam.RegisterCapture`. To wire them yourself, mount the handlers from the `echo` package one by one, for example `g.GET("/me", echo.GetMe)`.
+2. `sam.RegisterEndpoints(group)` mounts the login, callback and logout routes, `/:app/login` and `/:app/logout` for an Initiate app, the me routes, `/asset/:id/data`, `/code`, the notification routes, and consent and capture through `sam.RegisterCapture`. The login, callback and logout handlers also go on a group without `smw.UserAuthMiddleware`, as `main.go` does: inside the gate a visitor without a credential, when the app holds no public grant, is redirected to the login path and never reaches it. To wire them yourself, mount the handlers from the `echo` package one by one, for example `g.GET("/me", echo.GetMe)`.
 
-3. `smw.UserAuthMiddleware(opts)` protects the routes. Pass `nil` to take the slug, secret, redirect and page redirect from the config. Every route resolves the same way: bearer, cookie or machine client, else the anonymous user `sdb.AnonymousUserID`, a real `samna_user` of the app the sync delivers, under `SAUTH_RATE_LIMIT` per `SAUTH_RATE_PERIOD`; what it reaches is decided by the grants it holds, written like any grant with `sdb.Instance().NewInsert().Model(&sdb.UserClaim{ClaimID: id, UserID: sdb.AnonymousUserID, Options: ...}).Access(ac)`, and a code in `options.samk` is read from `samk`, `SAuth-Code` or the `__Host-sauth_samk` cookie. A request the user cannot satisfy answers `401`, or the login redirect on a navigation.
+3. `smw.UserAuthMiddleware(opts)` protects the routes. Pass `nil` to take the slug, secret, redirect and page redirect from the config. Every route resolves the same way: bearer, cookie or machine client, else the anonymous user `sdb.AnonymousUserID`, a `samna_user` of type `anonymous` seeded by `upsert_disciple_state`, never synced, under `SAUTH_RATE_LIMIT` per `SAUTH_RATE_PERIOD`; what it reaches is decided by the grants it holds, written like any grant with `sdb.Instance().NewInsert().Model(&sdb.UserClaim{ClaimID: id, UserID: sdb.AnonymousUserID, Options: ...}).Access(ac)`, and a code in `options.samk` is read from `samk`, `SAuth-Code` or the `__Host-sauth_samk` cookie. A request the user cannot satisfy answers `401`, or the login redirect on a navigation.
 
-4. `sam.Init(runCtx)` is the disciple's one runtime start: it launches the background pull loop that keeps the local database current and the notification runner, reading `sdb.Instance()` itself, and returns an error only when it cannot start. Call it on every pod with a run context `main` cancels after `e.Shutdown`, and register `notification.EndStreams` with `e.Server.RegisterOnShutdown`; one pod per database takes the sync lock and pulls, the others stand by. The puller takes a snapshot on first run, then pulls one page after its cursor at a time, each held open by the prophet while there is nothing new, backing off on failure and logging through the database logger. It returns immediately and runs until the run context ends; `sam.Done()` closes once the sync and notification have ended. The order of start and shutdown every runner follows is [Lifecycle](../.nimpress/disciple.md#lifecycle).
+4. `sam.Init(runCtx)` is the disciple's one runtime start: it launches the notification runner, the retention job, the client binding, the app seed fetch, the Initiate apps refresh and the background pull loop that keeps the local database current, reading `sdb.Instance()` itself, and returns an error only when it cannot start. Call it on every pod with a run context `main` cancels after `e.Shutdown`, and register `notification.EndStreams` with `e.Server.RegisterOnShutdown`; one pod per database takes the sync lock and pulls, the others stand by. The puller takes a snapshot on first run, then pulls one page after its cursor at a time, each held open by the prophet while there is nothing new, backing off on failure and logging through the database logger. It returns immediately and runs until the run context ends; `sam.Done()` closes once the sync and notification have ended. The order of start and shutdown every runner follows is [Lifecycle](../.nimpress/disciple.md#lifecycle).
 
 ## App scoping
 

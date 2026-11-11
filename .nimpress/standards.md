@@ -30,13 +30,13 @@ This page covers the Go module `github.com/nimling/samna-auth-middleware/v2` onl
 
 1. Status: `built`
 
-2. Evidence: signature verification through `jwt.ParseWithClaims` at `smw/token.go:37` and `dpop/dpop.go:76`; signing with RS256 at `prophet/sdb/guest.go:106` and `prophet/echo/object_asset.go:341`.
+2. Evidence: signature verification through `jwt.ParseWithClaims` at `smw/token.go:37` and `dpop/dpop.go:76`; signing with RS256 at `getObjectAssetToken`, `prophet/echo/object_asset.go:340-353`.
 
 ### RFC 7517, JSON Web Key
 
 1. Status: `built`
 
-2. Evidence: the JWKS is fetched and refreshed by `keyfunc.NewDefault` at `smw/main.go:73` and `disciple/echo/asset.go:109`; the prophet publishes its set with `kid`, `alg` and `use` at `pkg/encryption/jwks.go:13`; a DPoP `jwk` header is parsed at `dpop/dpop.go:60`.
+2. Evidence: the JWKS is fetched and refreshed by `keyfunc.NewDefault` at `smw/main.go:73` and `disciple/echo/asset.go:127`; the prophet publishes its set with `kid`, `alg` and `use` at `pkg/encryption/jwks.go:13`; a DPoP `jwk` header is parsed at `dpop/dpop.go:60`.
 
 ### RFC 7518, JSON Web Algorithms
 
@@ -70,15 +70,15 @@ This page covers the Go module `github.com/nimling/samna-auth-middleware/v2` onl
 
 1. Status: `partial`
 
-2. Evidence: the URL carries an access code, never a token, and the code is 256 random bits from `GetCodeValue` (`shared/code.go:131`) stored only as its SHA-256 (`shared/code.go:139`, `disciple/database/V1.1__claimius_baseline.sql:1000`, `prophet/database/V1.1__claimius_baseline.sql:1261`); a navigation carrying `samk` is answered `303` to the URL without it (`smw/code.go:96`) and the code moves to a `__Host-` cookie (`smw/code.go:67`); every answer carrying or following a code sends `Referrer-Policy: no-referrer` (`smw/code.go:104`); the guard takes `samk` and `SAuth-Code` off the request before a handler, a logger or a span reads them (`smw/code.go:44`, `smw/code.go:58`), and the span records the path only; API calls send the header `SAuth-Code` instead of the query; a code resolves only inside its window, below its count and until revoked (`shared/code.go:162`), and a revoke reaches every disciple through the feed and clears the resolve cache (`shared/apply.go:25`); a guest gets exactly what its claim grants (`disciple/database/V2.4__claimius_functions_external.sql:34`), and a guest code is an identity only on a route group mounted with `UserAuthOptions{Guest: true}` (`smw/code.go:128`). This follows the W3C capability URL practice: unguessable, short lived where possible, revocable, moved out of the address bar on first use, and kept out of `Referer`.
+2. Evidence: the URL carries an access code, never a token, and the code is 256 random bits from `GetCodeValue` (`shared/code.go:178`) stored only as its SHA-256 (`GetCodeHash`, `shared/code.go:186`): an invite code in `claimius.code.hash` (`disciple/database/V1.1__claimius_baseline.sql:1194`, `prophet/database/V1.1__claimius_baseline.sql:1547`), the code of a public grant in `user_claim.options.samk.hash` on the anonymous user's grant (`disciple/database/V1.1__claimius_baseline.sql:326`); a navigation carrying `samk` is answered `303` to the URL without it (`respondCodeStripped`, `smw/code.go:87`) and the code moves to a `__Host-` cookie (`smw/code.go:58`); every answer carrying or following a code sends `Referrer-Policy: no-referrer` (`smw/code.go:100`, `smw/code.go:212`); the guard takes `samk` and `SAuth-Code` off the request before a handler, a logger or a span reads them (`readCode`, `smw/code.go:35-56`), and the span records the path only; API calls send the header `SAuth-Code` instead of the query; a public grant's code is accepted only from the carriers the grant names, query, header or cookie (`shared/claims.go:32-36`), counts only while the request presents it, is valid by the grant's `starts_at` and `ends_at`, spends no count and gives exactly what the grant's claim holds (`get_access`, `disciple/database/V2.4__claimius_functions_external.sql:16`); an invite code resolves only inside its window, below its count and until revoked (`GetCodeLive`, `shared/code.go:191`), and a revoke reaches every disciple through the feed and clears the resolve cache (`shared/apply.go:25`); `claimius.code` is invite only (`shared/code.go:27`, `shared/code.go:326`, `disciple/database/V1.1__claimius_baseline.sql:1218`). This follows the W3C capability URL practice: unguessable, short lived where possible, revocable, moved out of the address bar on first use, and kept out of `Referer`.
 
-3. Gap: the first request still carries the code in its URL, so a proxy or load balancer log in front of the service and the browser history entry of that first request can hold it; a guest code without `ends_at` lives until revoked; a mail scanner that follows a link spends a counted guest use.
+3. Gap: the first request still carries the code in its URL, so a proxy or load balancer log in front of the service and the browser history entry of that first request can hold it; a public grant without `ends_at` lives until the grant is deleted or its `options` cleared, and an invite code without `ends_at` until revoked or used up.
 
 ### RFC 9449, DPoP
 
 1. Status: `partial`
 
-2. Evidence: `dpop/dpop.go:36` verifies `typ` `dpop+jwt` (47), the embedded `jwk` (52), the signature (76), `htm` (84), `htu` (89), `iat` within 60 s (94), `jti` replay through `claimius.dpop_jti` (101, `dpop/postgres.go:21`, `disciple/database/V5.0__claimius_dpop_jti.sql`) and `ath` (116); `smw/token.go:59` requires a proof whose thumbprint matches `cnf.jkt`.
+2. Evidence: `dpop/dpop.go:36` verifies `typ` `dpop+jwt` (47), the embedded `jwk` (52), the signature (76), `htm` (84), `htu` (89), `iat` within 60 s (94), `jti` replay through `claimius.dpop_jti` (101, `dpop/postgres.go:21`, `disciple/database/V1.1__claimius_baseline.sql:1238`) and `ath` (116); `smw/token.go:59` requires a proof whose thumbprint matches `cnf.jkt`.
 
 3. Gap: no server nonce (`DPoP-Nonce`, `use_dpop_nonce`), no `Authorization: DPoP` scheme (only `Bearer ` is read at `smw/token.go:19`), no `WWW-Authenticate: DPoP` challenge, and `htu` is compared with `r.Host` and `r.TLS`, which differ behind a TLS terminating proxy.
 
@@ -94,7 +94,7 @@ This page covers the Go module `github.com/nimling/samna-auth-middleware/v2` onl
 
 1. Status: `partial`
 
-2. Evidence: authorization code at `client/auth.go:201`, refresh at `client/auth.go:210` used by `smw/session.go:106` and `disciple/echo/cli.go:59`, client credentials at `client/auth.go:217`; `state` is generated at `disciple/echo/auth.go:21` and compared with its cookie at `disciple/echo/auth.go:75`.
+2. Evidence: authorization code at `client/auth.go:201`, refresh at `client/auth.go:210` used by `smw/session.go:122` and `disciple/echo/cli.go:59`, client credentials at `client/auth.go:217`; `state` is generated at `disciple/echo/auth.go:21` and compared with its cookie at `disciple/echo/auth.go:75`.
 
 3. Gap: the code and refresh exchanges authenticate with the custom headers `SAuth-App-Slug` and `SAuth-App-Secret` (`client/auth.go:153`), not `client_secret_basic` or `client_secret_post`; token errors are parsed into the RFC 6749 section 5.2 codes at `client/auth.go:116`.
 
@@ -144,7 +144,7 @@ This page covers the Go module `github.com/nimling/samna-auth-middleware/v2` onl
 
 1. Status: `missing`
 
-2. Evidence: searched `oauth-protected-resource`, `well-known` and `authorization_servers`; the only well known path is the OIDC discovery read at `shared/main.go:266`.
+2. Evidence: searched `oauth-protected-resource`, `well-known` and `authorization_servers`; the only well known path is the OIDC discovery read at `shared/main.go:320`.
 
 3. Gap: no `/.well-known/oauth-protected-resource` document and no `resource_metadata` in a 401 challenge, which the MCP authorization spec requires.
 
@@ -164,9 +164,9 @@ This page covers the Go module `github.com/nimling/samna-auth-middleware/v2` onl
 
 1. Status: `partial`
 
-2. Evidence: `utils/cookie.go:37` writes `HttpOnly`, `Secure` and `SameSite` (Lax by default, `SAUTH_COOKIE_SAMESITE`); CSRF double submit at `smw/session.go:67`; the access, refresh, PKCE and state cookies at `disciple/echo/auth.go:46` and `disciple/echo/auth.go:110`; the access code cookie `__Host-sauth_samk` is `HttpOnly; Secure; SameSite=Lax; Path=/` with no `Domain` and expires with its code at `smw/code.go:67`.
+2. Evidence: `utils/cookie.go:57` writes `HttpOnly`, `Secure` and `SameSite` (Lax by default, `SAUTH_COOKIE_SAMESITE`); CSRF double submit at `enforceCSRF`, `smw/session.go:30`; the access, refresh, PKCE and state cookies at `disciple/echo/auth.go:46` and `disciple/echo/auth.go:110`; the access code cookie `__Host-sauth_samk` is `HttpOnly; Secure; SameSite=Lax; Path=/` with no `Domain` and expires with its grant at `smw/code.go:58`.
 
-3. Gap: `Secure` is off on the session cookies when no cookie domain resolves (`utils/cookie.go:27`), and only the access code cookie uses the `__Host-` prefix.
+3. Gap: `Secure` is off on the session cookies when no cookie domain resolves (`utils/cookie.go:43`) unless `SAUTH_COOKIE_SECURE=true` forces it (`utils/cookie.go:48-50`), and only the access code cookie uses the `__Host-` prefix.
 
 ### RFC 6797, HSTS
 
@@ -192,15 +192,15 @@ This page covers the Go module `github.com/nimling/samna-auth-middleware/v2` onl
 
 1. Status: `partial`
 
-2. Evidence: a fixed window per client IP at `smw/rate_limit.go:24`, answering 429 at `smw/rate_limit.go:33`, mounted on the BFF subscription route at `bff/main.go:73`; failed access code resolves, twenty per address and minute, answer 429 with `Retry-After` and hold valid codes too until the window passes (`smw/code.go:108`), and an unanswerable resolve is 503, never a pass.
+2. Evidence: a fixed window per address and anonymous cookie at `smw/rate_limit.go:24-30` and `smw/rate_limit.go:44-50`, the limit `SAUTH_RATE_LIMIT` per `SAUTH_RATE_PERIOD`, 60 per minute by default (`smw/rate_limit.go:14-17`), answering 429 with `Retry-After` at `smw/rate_limit.go:52-55`; every anonymous request is counted (`smw/code.go:194`) and a code presented outside the cookie too (`smw/code.go:113`); `smw.RateLimit` is mounted on the cli token and revoke routes (`disciple/sam/register.go:64-65`) and `smw.RateLimiter` on the BFF subscription route (`bff/main.go:76`); an unanswerable resolve is 503, never a pass (`smw/code.go:94-97`).
 
-3. Gap: no `Retry-After`, in memory per process, and not mounted on the auth or cli routes.
+3. Gap: in memory per process, and `/api/auth/login` carries none.
 
 ### RFC 9562, UUID
 
 1. Status: `built`
 
-2. Evidence: version 4 through `gen_random_uuid()` (`shared/models.go:345`) and `uuid.New()`; no version 7.
+2. Evidence: version 4 through `gen_random_uuid()` (`shared/models.go:352`) and `uuid.New()`; no version 7.
 
 ### RFC 9421, HTTP message signatures, and HMAC webhooks
 
@@ -214,7 +214,7 @@ This page covers the Go module `github.com/nimling/samna-auth-middleware/v2` onl
 
 1. Status: `built`
 
-2. Evidence: issuer, token endpoint and `jwks_uri` read from `/.well-known/openid-configuration` at `shared/main.go:266`; `end_session` with `post_logout_redirect_uri` at `client/pkce.go:57`.
+2. Evidence: issuer, token endpoint and `jwks_uri` read from `/.well-known/openid-configuration` at `shared/main.go:320`; `end_session` with `post_logout_redirect_uri` at `client/pkce.go:57`.
 
 ### WHATWG server sent events
 
@@ -228,7 +228,7 @@ This page covers the Go module `github.com/nimling/samna-auth-middleware/v2` onl
 
 1. Status: `partial`
 
-2. Evidence: `smw/telemetry.go:11` mounts `otelecho`, which extracts `traceparent` through the propagator `nimtel.Init` installs (`nimtel@v0.0.3/main.go:69`).
+2. Evidence: `smw/telemetry.go:11` mounts `otelecho`, which extracts `traceparent` through the propagator `nimtel.Init` installs (`nimtel@v1.0.0/main.go:89`).
 
 3. Gap: the prophet client at `client/http.go:211` uses a plain `http.Client`, so `traceparent` is not injected on calls to the prophet and a trace breaks at the disciple.
 
@@ -236,7 +236,7 @@ This page covers the Go module `github.com/nimling/samna-auth-middleware/v2` onl
 
 1. Status: `built`
 
-2. Evidence: `smw/telemetry.go:11` `TelemetryMiddleware`, `smw/telemetry.go:15` stamps the organization on the span context, `shared/access.go:62` stamps it on every granted access check.
+2. Evidence: `smw/telemetry.go:11` `TelemetryMiddleware`, `smw/telemetry.go:15` stamps the organization on the span context, `shared/access.go:66` stamps it on every granted access check.
 
 ### MCP authorization specification
 
@@ -248,7 +248,7 @@ This page covers the Go module `github.com/nimling/samna-auth-middleware/v2` onl
 
 1. Status: `partial`
 
-2. Evidence: object attributes through bindings and scopes: `ScopeAccess` over a jsonpath at `shared/access.go:170`, per field masks in `_apply_denies` (`prophet/database/V2.2__claimius_functions_internal.sql:823`), time bounded grants `p_starts_at` and `p_ends_at` (`prophet/database/V2.4__claimius_functions_external.sql:2296`).
+2. Evidence: object attributes through bindings and scopes: `ScopeAccess` over a jsonpath at `shared/access.go:174`, per field masks in `_apply_denies` (`prophet/database/V2.2__claimius_functions_internal.sql:911`), time bounded grants `p_starts_at` and `p_ends_at` (`insert_user_claim`, `prophet/database/V2.4__claimius_functions_external.sql:2692`).
 
 3. Gap: no environment or subject attributes beyond time, and field masks are not enforced in Go (see Redaction).
 
@@ -256,7 +256,7 @@ This page covers the Go module `github.com/nimling/samna-auth-middleware/v2` onl
 
 1. Status: `partial`
 
-2. Evidence: claims are roles assigned through `user_claim`, permissions through `claim_object`, hierarchy through `inherits` and composition with `_check_claim_composition` (`disciple/database/V2.3__claimius_functions_access.sql:423`), levels, the higher of which wins.
+2. Evidence: claims are roles assigned through `user_claim`, permissions through `claim_object`, hierarchy through `inherits` and composition with `_check_claim_composition` (`disciple/database/V2.3__claimius_functions_access.sql:502`, `prophet/database/V2.3__claimius_functions_access.sql:523`), levels, the higher of which wins.
 
 3. Gap: no static or dynamic separation of duty constraints.
 
@@ -264,13 +264,13 @@ This page covers the Go module `github.com/nimling/samna-auth-middleware/v2` onl
 
 1. Status: `built`
 
-2. Evidence: deny by default, `ErrNoAccess` at `shared/access.go:17` maps to 403 on writes and a filter on reads; every write checks through `MutationAccess` at `shared/access.go:37`; CSRF at `smw/session.go:67`.
+2. Evidence: deny by default, `ErrNoAccess` at `shared/access.go:17` maps to 403 on writes and a filter on reads; every write checks through `MutationAccess` at `shared/access.go:41`; CSRF at `enforceCSRF`, `smw/session.go:30`.
 
 ### OWASP ASVS V8, data protection
 
 1. Status: `partial`
 
-2. Evidence: secrets AES GCM at rest (`shared/cipher.go:12`, `shared/secret.go:62`), the app and organization keys that seal them wrapped under `SAUTH_MASTER_KEY` (`pkg/encryption/master.go:32`, opened at `pkg/encryption/crypto.go:54`), a secret opened only in process for a user with read through `get_secret_value` (`shared/secret.go:141`, `disciple/database/V2.4__claimius_functions_external.sql:1030`) with the app's own seed from `GET /sam/app` held in memory (`prophet/echo/app.go:11`, `shared/main.go:133`), client secrets bcrypt (`smw/client_auth.go:171`), Postgres `sslmode` defaults to `verify-full` (`shared/main.go:189`).
+2. Evidence: secrets AES GCM at rest (`shared/cipher.go:12`, `aesEncrypt` at `shared/secret.go:65`), the app and organization keys that seal them wrapped under `SAUTH_MASTER_KEY` (`pkg/encryption/master.go:32`, opened at `pkg/encryption/crypto.go:54`), a secret opened only in process for a user with read through `get_secret_value` (`shared/secret.go:144`, `disciple/database/V2.4__claimius_functions_external.sql:1095`) with the app's own seed from `GET /sam/app` held in memory (`GetSamApp`, `prophet/echo/app.go:12`; `client.GetAppSeed`, `client/main.go:50`), client secrets bcrypt (`smw/client_auth.go:171`), Postgres `sslmode` defaults to `verify-full` (`shared/main.go:232`).
 
 3. Gap: field level masks are not applied in Go.
 
@@ -278,9 +278,9 @@ This page covers the Go module `github.com/nimling/samna-auth-middleware/v2` onl
 
 Status: `partial`.
 
-1. The SQL settles one pair into a mask per field. `claimius._apply_denies` (`prophet/database/V2.2__claimius_functions_internal.sql:823` to `952`, `disciple/database/V2.2__claimius_functions_internal.sql:725` to `854`) subtracts denies by level and by scope, closes each remainder under implication and returns `scope` as `{field: mask, "*": mask}`, NULL meaning the whole object. The rule that a field lacking read is withheld and a field lacking write is refused is stated in `.nimpress/claimius/redaction.md:65`.
+1. The SQL settles one pair into a mask per field. `claimius._apply_denies` (`prophet/database/V2.2__claimius_functions_internal.sql:911` to `1040`, `disciple/database/V2.2__claimius_functions_internal.sql:842` to `971`) subtracts denies by level and by scope, closes each remainder under implication and returns `scope` as `{field: mask, "*": mask}`, NULL meaning the whole object. The rule that a field lacking read is withheld and a field lacking write is refused is stated in `.nimpress/claimius/redaction.md:65`.
 
-2. Go carries the settled scope but never reads it. `AccessClaim.Scope` is a raw `*json.RawMessage` (`shared/models.go:612`), filled by the batch gate (`shared/access.go:134`) and `ScopeAccess` (`shared/access.go:221`); `AccessClaimSet.Has` (`shared/access.go:90`) tests only `Access`. There is no parse, apply or withhold function in `shared/`, `smw/` or `disciple/`, and no write path refuses a body field whose mask lacks the write bit.
+2. Go carries the settled scope but never reads it. `AccessClaim.Scope` is a raw `*json.RawMessage` (`shared/models.go:624`), filled by the batch gate (`MutationAccessMany`, `shared/access.go:106-172`) and `ScopeAccess` (`shared/access.go:174`); `AccessClaimSet.Has` (`shared/access.go:94`) tests only `Access`. There is no parse, apply or withhold function in `shared/`, `smw/` or `disciple/`, and no write path refuses a body field whose mask lacks the write bit.
 
 3. Consumers carry their own engines: `bookable_server/internal/db/redaction.go:36` `ParseRedactionScope` and `:120` `ResolveRedaction` with resolver directives, copied into `bookable_server_test`, `bookable_server_assets` and `bookable_server_reporting`; `nimflow/redact/scope.go:18` `ParseScope`, `:67` `Redact` over maps with dotted paths and `:134` `RedactRows` over structs.
 
@@ -288,25 +288,25 @@ Status: `partial`.
 
 ## Compliance duties
 
-1. ISO/IEC 27001:2022 A.5.15, access control: `built`. Claimius masks, bindings and denies answered by `get_access` and `mutation_access` through `shared/claims.go:15` and `shared/access.go:37`.
+1. ISO/IEC 27001:2022 A.5.15, access control: `built`. Claimius masks, bindings and denies answered by `get_access` and `mutation_access` through `shared/claims.go:98` and `shared/access.go:41`.
 
-2. ISO/IEC 27001:2022 A.5.18, access rights: `partial`. Grants are created through `insert_user_claim` with optional expiry (`prophet/database/V2.4__claimius_functions_external.sql:2296`) and soft deleted by `delete_user_claim`; no access review export.
+2. ISO/IEC 27001:2022 A.5.18, access rights: `partial`. Grants are created through `insert_user_claim` with optional expiry (`prophet/database/V2.4__claimius_functions_external.sql:2692`) and soft deleted by `delete_user_claim`; no access review export.
 
 3. ISO/IEC 27001:2022 A.8.3, information access restriction: `partial`. Object level restriction is built; field level restriction is computed in SQL and not applied in Go (Redaction 2).
 
-4. ISO/IEC 27001:2022 A.8.5, secure authentication: `partial`. JWT against the JWKS (`smw/token.go:35`), PKCE (`client/pkce.go:26`), DPoP (`dpop/dpop.go:36`), bcrypt client secrets (`smw/client_auth.go:171`), CSRF (`smw/session.go:67`); gaps are `exp` not required (`smw/token.go:37`) and `Secure` off without a cookie domain (`utils/cookie.go:27`).
+4. ISO/IEC 27001:2022 A.8.5, secure authentication: `partial`. JWT against the JWKS (`smw/token.go:35`), PKCE (`client/pkce.go:26`), DPoP (`dpop/dpop.go:36`), bcrypt client secrets (`smw/client_auth.go:171`), CSRF (`enforceCSRF`, `smw/session.go:30`); gaps are `exp` not required (`smw/token.go:37`) and `Secure` off without a cookie domain (`utils/cookie.go:43`) unless `SAUTH_COOKIE_SECURE=true` forces it (`utils/cookie.go:48-50`).
 
 5. ISO/IEC 27001:2022 A.8.11, data masking: `partial`. See Redaction.
 
 6. ISO/IEC 27001:2022 A.8.10, information deletion: `partial`. `claimius.prune(JSONB)` at the end of `prophet/database/V2.4__claimius_functions_external.sql` and `disciple/database/V2.4__claimius_functions_external.sql` deletes, from a runtime table over `size_mb`, every row older than its group's days, `audit` by `sa_created_at`, called once an hour by one leader from `prophet/sam/main.go` and `disciple/sam/main.go` through `shared/retention.go` `PruneLoop`; a host adds its own tables in `public.prune(JSONB)`. `user_activity` has no sweep, and application data is never aged by design.
 
-7. ISO/IEC 27001:2022 A.8.15, logging: `partial`. `claimius.audit` partitioned by month (`disciple/database/V1.1__claimius_baseline.sql:802`, `:814`), written in the caller's transaction by `shared/audit.go:10`, and a month is dropped once it is past the `audit` retention (`disciple/database/V5.6__claimius_retention_age.sql:29`). `audit/audit.go:11` writes in a goroutine with three retries and drops the row on failure, and live rows carry no hash chain.
+7. ISO/IEC 27001:2022 A.8.15, logging: `partial`. `claimius.audit` partitioned by month (`disciple/database/V1.1__claimius_baseline.sql:904`, `:916`), written in the caller's transaction by `shared/audit.go:10`, and rows past the `audit` retention are deleted by `sa_created_at` in `claimius.prune` (`disciple/database/V2.4__claimius_functions_external.sql:4994`); no partition is dropped. `audit/audit.go:11` writes in a goroutine with three retries and drops the row on failure, and live rows carry no hash chain.
 
 8. ISO/IEC 27001:2022 A.5.33, protection of records: `missing`. `audit` is deleted by age like every other runtime table (`claimius.prune`, `prophet/database/V2.4__claimius_functions_external.sql`), and no record is exported before deletion or written to an append only store.
 
-9. ISO/IEC 27001:2022 A.8.16, monitoring: `built`. OpenTelemetry at `smw/telemetry.go:11`, uptime heartbeat at `uptime/uptime.go:42`, health route at `disciple/sam/register.go:36`.
+9. ISO/IEC 27001:2022 A.8.16, monitoring: `built`. OpenTelemetry at `smw/telemetry.go:11`, uptime heartbeat at `uptime/uptime.go:42`, health route at `disciple/sam/register.go:40`.
 
-10. GDPR Art. 5(1)(c), data minimisation: `partial`. `user_identity.data` is not carried on the feed (`disciple/database/V1.1__claimius_baseline.sql:325`) and raw analytics events expire after 30 days (`analytics/analytics.go:18`, `analytics/writer.go:106`); every disciple still replicates the full `samna_user` profile, email and phone included, whether it needs them or not.
+10. GDPR Art. 5(1)(c), data minimisation: `partial`. `user_identity.data` is not carried on the feed (`disciple/database/V1.1__claimius_baseline.sql:383`, `prophet/echo/sync.go:121`, `:140`) and raw analytics events age through `claimius.prune`, 365 days by default (`prophet/database/V2.4__claimius_functions_external.sql:5960`); every disciple still replicates the full `samna_user` profile, email and phone included, whether it needs them or not.
 
 11. GDPR Art. 5(1)(e), storage limitation: `partial`. Each personal runtime table of claimius has a period and an hourly sweep in `claimius.prune` (`prophet/database/V2.4__claimius_functions_external.sql`): `notification` closed or soft deleted, `analytics_session`, `analytics_event`, `analytics_heat`, `analytics_capture` and `audit` by age, `consent` once revoked, the days per table or kind from the app's settings. `user_activity` has no sweep.
 
@@ -314,30 +314,32 @@ Status: `partial`.
 
 13. GDPR Art. 30, records of processing: `missing`. No register of processing in code; the audit trail records claimius writes, not processing purposes.
 
-14. GDPR Art. 15, right of access: `partial`. A user reads its own profile, claims, relations, organizations, locations, assets and audit through `/me` (`disciple/sam/register.go:14`); no export contract gathers `user_field`, `notification`, `consent`, `analytics_*` and the host's own tables into one answer.
+14. GDPR Art. 15, right of access: `partial`. A user reads its own profile, claims, relations, organizations, locations, assets and audit through `/me` (`disciple/sam/register.go:17-26`); no export contract gathers `user_field`, `notification`, `consent`, `analytics_*` and the host's own tables into one answer.
 
-15. GDPR Art. 17, right to erasure: `partial`. `DeleteUser` soft deletes `samna_user` and `user_identity` (`shared/user.go:248`, `shared/user.go:271`, `prophet/echo/user.go:307`); no hard delete or anonymisation of the row, `user_field`, `user_relation`, `notification`, `audit.sa_created_by`, `consent` or `analytics_*`, and no hook asks the host to erase its own rows.
+15. GDPR Art. 17, right to erasure: `partial`. `DeleteUser` soft deletes `samna_user` and `user_identity` (`shared/user.go:262-321`, `prophet/echo/user.go:307`); no hard delete or anonymisation of the row, `user_field`, `user_relation`, `notification`, `audit.sa_created_by`, `consent` or `analytics_*`, and no hook asks the host to erase its own rows.
 
-16. GDPR Art. 32, security of processing: `partial`. TLS to Postgres by default (`shared/main.go:189`), secrets AES GCM (`shared/cipher.go:12`, `utils/aes.go:12`) under keys wrapped at rest (`pkg/encryption/master.go:32`) and opened only for a reader (`shared/secret.go:141`), DPoP and mTLS binding (`smw/token.go:59`).
+16. GDPR Art. 32, security of processing: `partial`. TLS to Postgres by default (`shared/main.go:232`), secrets AES GCM (`shared/cipher.go:12`, `utils/aes.go:12`) under keys wrapped at rest (`pkg/encryption/master.go:32`) and opened only for a reader (`shared/secret.go:144`), DPoP and mTLS binding (`smw/token.go:59`).
 
 ## Personal data
 
-1. `claimius.samna_user` (`disciple/database/V1.1__claimius_baseline.sql:65`, `prophet/database/V1.1__claimius_baseline.sql:76`): `first_name`, `last_name`, `user_name`, `user_image`, `phone`, `email`, `external_id`, `config` and `profile`. Replicated to every disciple.
+1. `claimius.samna_user` (`disciple/database/V1.1__claimius_baseline.sql:69`, `prophet/database/V1.1__claimius_baseline.sql:147`): `first_name`, `last_name`, `user_name`, `user_image`, `phone`, `email`, `external_id`, `config` and `profile`. Replicated to every disciple.
 
-2. `claimius.user_identity` (`disciple/database/V1.1__claimius_baseline.sql:310`): `external_id`, `id_claim`, `data`; `data` stays on the prophet.
+2. `claimius.user_identity` (`disciple/database/V1.1__claimius_baseline.sql:383`): `external_id`, `id_claim`, `data`; `data` stays on the prophet.
 
-3. `claimius.user_field` (`disciple/database/V1.1__claimius_baseline.sql:904`): `value` per user and field.
+3. `claimius.user_field` (`disciple/database/V1.1__claimius_baseline.sql:1035`): `value` per user and field.
 
-4. `claimius.user_relation` (`disciple/database/V1.1__claimius_baseline.sql:922`): `description`, `pinned`, `priority`, `used_at` per user and object.
+4. `claimius.user_relation` (`disciple/database/V1.1__claimius_baseline.sql:1053`): `description`, `pinned`, `priority`, `used_at` per user and object.
 
-5. `claimius.user_object`, `claimius.user_activity` and `claimius.usage_diff` (`disciple/database/V1.1__claimius_baseline.sql:387`, `:704`, `:720`): what a user may reach, `last_used_at`, `used_count`; behavioural data.
+5. `claimius.user_object`, `claimius.user_activity` and `claimius.usage_diff` (`disciple/database/V1.1__claimius_baseline.sql:495`, `:829`, `:845`): what a user may reach, `last_used_at`, `used_count`; behavioural data.
 
-6. `claimius.audit` (`disciple/database/V1.1__claimius_baseline.sql:779`): `sa_created_by` and free text `message`.
+6. `claimius.audit` (`disciple/database/V1.1__claimius_baseline.sql:904`): `sa_created_by` and free text `message`.
 
-7. `claimius.notification` (`disciple/database/V1.2__claimius_notification.sql:1`): `user_id`, `title`, `description`, `link`.
+7. `claimius.notification` (`disciple/database/V1.1__claimius_baseline.sql:1246`): `user_id`, `title`, `description`, `link`.
 
-8. Prophet only: `claimius.session.data` (`prophet/database/V1.1__claimius_baseline.sql`); `claimius.consent` with `ip`, `user_agent`, `anonymous_id` (`prophet/database/V1.1__claimius_baseline.sql`); `claimius.analytics_session` with `ip`, `user_agent`, `referrer`, `language`, `timezone` (`prophet/database/V1.1__claimius_baseline.sql`); `claimius.analytics_event.payload` with click text and input signals (`prophet/database/V1.1__claimius_baseline.sql`); `claimius.analytics_capture.image`, a rendered page (`prophet/database/V5.10__claimius_analytics_capture.sql:1`).
+8. Prophet only: `claimius.session.data` (`prophet/database/V1.1__claimius_baseline.sql`); `claimius.consent` with `ip`, `user_agent`, `anonymous_id` (`prophet/database/V1.1__claimius_baseline.sql`); `claimius.analytics_session` with `ip`, `user_agent`, `referrer`, `language`, `timezone` (`prophet/database/V1.1__claimius_baseline.sql`); `claimius.analytics_event.payload` with click text and input signals (`prophet/database/V1.1__claimius_baseline.sql`); `claimius.analytics_capture.image`, a rendered page (`prophet/database/V1.1__claimius_baseline.sql:1769`).
 
-10. Export: no contract. The nearest are the `/me` reads at `disciple/sam/register.go:14` and `GetMe` at `shared/me.go:19`.
+9. `claimius.guest_identity` (`disciple/database/V1.1__claimius_baseline.sql:422`, `prophet/database/V1.1__claimius_baseline.sql:537`): `email`, `phone` and `ends_at` of a guest user, on both roles; never synced, soft deleted by `claimius.prune` once `ends_at` has passed and deleted as kind `log` after its days.
 
-11. Erase: soft delete only, `shared/user.go:271` sets `sa_deleted_at` on `samna_user` and `user_identity`; `merge_user` (`prophet/database/V2.4__claimius_functions_external.sql:2429`) is the only path that removes a `samna_user` row. The runtime tables expire by age under the retention job (`shared/retention.go:66`); `consent` is kept.
+10. Export: no contract. The nearest are the `/me` reads at `disciple/sam/register.go:17-26` and `GetMe` at `shared/me.go:19`.
+
+11. Erase: soft delete only, `DeleteUser` at `shared/user.go:262-321` sets `sa_deleted_at` on `samna_user` and `user_identity`; `merge_user` (`prophet/database/V2.4__claimius_functions_external.sql:2860`) is the only path that removes a `samna_user` row of a signed in user, and `claimius.prune` removes soft deleted guest rows after their days. The runtime tables expire by age under the retention job (`PruneLoop`, `shared/retention.go:32`); `consent` is kept.

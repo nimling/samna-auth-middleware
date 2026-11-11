@@ -15,7 +15,7 @@ To claimius an object is an `object_type` and `object_id` pair that a `claim_obj
 
 1. An `object_type` is schema qualified at every boundary: `claimius.organization`, `public.bookable`, never `bookable`. `upsert_table_info` refuses a type without a schema.
 
-2. A composite id is built with `claimius.composite_id(parts...)`, the MD5 of the parts joined by `:` read as a UUID. The primary keys of `user_users` and `access_diff` are composite ids of their key columns, so every copy of the schema derives the same id for the same row, and a repeated write of one area collapses onto one row. `user_object` is keyed on its columns themselves, `(user_id, app_id, object_type, object_id)`.
+2. A composite id is built with `claimius.composite_id(parts...)`, the MD5 of the parts joined by `:` read as a UUID. The primary keys of `user_users` and `access_diff` are composite ids of their key columns, so every copy of the schema derives the same id for the same row, and a repeated write of one area collapses onto one row. `user_object` is keyed on its columns themselves, `(user_id, object_type, object_id)`.
 
 ## Registration
 
@@ -29,13 +29,13 @@ The implementing side makes a table participate by carrying the `sa_*` columns a
 | `sa_location_id` | A pin into the location tree | no |
 | `sa_parent_id` with `sa_root_id` | The table's own parenthood tree, both or neither | no |
 | `name`, `description` | Rendering and search text, copied into `object_info` | no |
-| `app_id` | The app of the row | on a prophet that hosts apps besides its system app |
+| `app_id` | The app of the row | no: a row without one resolves to the apps of its `app_object` links, else to `get_app_id()` |
 
 `upsert_table_info(VARIADIC object_types)` registers the named tables:
 
 1. For each it records the column shape in `table_info`, one row with one `has_*` flag per column, read from `information_schema` once, and attaches the calc trigger `tg_calc_access`: `calc_hierarchical_access` when the table has both `sa_parent_id` and `sa_root_id`, `calc_object_access` otherwise, plus the before insert self root trigger.
 
-2. Under `replay_mode` it seeds the rows already present with `_bulk_seed_user_object`: the `object_info` row of every row, then the pairs of every user affected by every live row, in every app of it, collected in one statement and grouped by user, recomputed in batches of 1,000 objects per user. Each pair raises its `user_users_diff` row like any other, for the reads and the drain to fold. The seed emits no sync event.
+2. Under `replay_mode` it seeds the rows already present with `_bulk_seed_user_object`: the `object_info` row of every row, then the pairs of every user affected by every live row, collected in one statement and grouped by user, recomputed in batches of 1,000 objects per user. Each pair raises its `user_users_diff` row like any other, for the reads and the drain to fold. The seed emits no sync event.
 
 Adding `sa_parent_id` and `sa_root_id` to a table already in production is a three step change: add the columns, backfill them, then re-register the table with `upsert_table_info` so the engine picks up the new shape, `calc_hierarchical_access` in place of `calc_object_access`. Registration is idempotent. It reseeds the table's `object_info` rows and pairs but builds no closure for the rows already there, so the parenthood tree of the backfilled rows is built by `recompute_state` after it.
 

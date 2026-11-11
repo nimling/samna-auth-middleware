@@ -20,6 +20,8 @@ A handler never decides access in its own code. It asks the database through a l
 | `GetAccess`, `GetDirectAccess` | `claimius.get_access`, `claimius.get_direct_access` | `*AccessClaim` | The grant on the object, the closest grant above it |
 | `ScopeAccess(ctx, actor, jsonpath, required)` | `claimius.get_scope_access` | `[]AccessClaim`, empty for no | Capabilities, page grants; see [Capabilities](../capabilities.md) |
 
+The actor of a request without a credential is the anonymous user, `shared.AnonymousUserID`, and every lookup answers for it from the `user_claim` rows of that user, the public grants. A public grant whose `options.samk` names a code counts only while the request presents it: the guard puts the code's hash on the request context, and `shared.GetCodeHashConnector`, the wrapper `shared.Connect` opens the pool through, sets `claimius.samk` on the connection before each statement whose context carries one. The `UserClaimID` such a grant answers is the grant's own `sa_created_by`, so a write under it is stamped with the authority of the user who made the claim public.
+
 ## Status codes come from the database
 
 `mutation_access` raises `P0403` when the object exists and the actor lacks the mask and `P0404` when it does not exist, when its id is malformed or its type is not registered, so one round trip answers 200, 403 or 404. `ErrInternalServer` is a database fault and maps to 500. `ErrNoAccess` is never a 500: on a write it is a 403, on a read it filters. `UserAccess` answers `ErrNotFound` for a target that resolves to no user in the app.
@@ -58,9 +60,9 @@ The table is `?TableAlias` when the query has a model; a query built with `Table
 
 ## Usage
 
-Every granted single object lookup adds one use of `(actor, object_type, object_id)` to an in process counter on the handle, `DB.Usage`: `MutationAccess`, `GetAccess`, `UserAccess` on the resolved target, and each granted entry of `MutationAccessMany`. `Usage.Add(appID *uuid.UUID, userID uuid.UUID, objectType string, objectID uuid.UUID)` keys the use per app; the lookups pass a nil `appID`, the deployment's own app, and a prophet service that checks for another app passes that app, so the use lands on that app's pair. The counter flushes through `claimius.touch_object_usage` every 10 s, when it holds 1,000 distinct keys, and on `Stop`:
+Every granted single object lookup adds one use of `(actor, object_type, object_id)` to an in process counter on the handle, `DB.Usage`: `MutationAccess`, `GetAccess`, `UserAccess` on the resolved target, and each granted entry of `MutationAccessMany`. `Usage.Add(userID uuid.UUID, objectType string, objectID uuid.UUID)` keys the use by user, type and object. The counter flushes through `claimius.touch_object_usage` every 10 s, when it holds 1,000 distinct keys, and on `Stop`:
 
-1. The keys go sorted by user, app, type and object, the own app keys through the form without apps and the others through the form with `app_ids[]`, in one statement. The flush records `usage_diff` rows and locks no pair, so it never waits on a read; the user's next listing folds them into the pairs.
+1. The keys go sorted by user, type and object in one statement. The flush records `usage_diff` rows and locks no pair, so it never waits on a read; the user's next listing folds them into the pairs.
 
 2. A flush refused with SQLSTATE `40P01` or `40001` is sent again, up to three attempts.
 

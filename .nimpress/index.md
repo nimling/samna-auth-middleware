@@ -49,12 +49,14 @@ Each role starts its runtime once with `sam.Init(ctx) error`, joined by `sam.Don
 
 | Middleware | Accepts | Mount on |
 |---|---|---|
-| `smw.UserAuthMiddleware(opts)` | Bearer token, then session cookie, then client credentials | Routes browsers and services both reach |
+| `smw.UserAuthMiddleware(opts)` | Bearer token, then session cookie, then client credentials, else the anonymous user under the rate limit | Routes browsers and services both reach |
+| `smw.AnonymousMiddleware` | An actor already on the context passes through; any other request is resolved as the anonymous user | After a host's own credential check |
+| `smw.RateLimit` | Every request, counted per address and anonymous cookie under `SAUTH_RATE_LIMIT` per `SAUTH_RATE_PERIOD` | The cli routes `sam.RegisterCli` mounts |
 | `smw.ClientAuthMiddleware()` | Client credentials only | Routes only machines reach |
 | `smw.AppMiddleware` | `SAuth-App-Slug` and `SAuth-App-Secret` | The prophet's `/sam` group, where disciples reach the prophet |
 | `smw.TelemetryMiddleware()` | Nothing, it opens the server span | The echo instance, before auth |
 
-Tokens are verified locally against the prophet's JWKS, checked for issuer and audience, and bound to a DPoP proof or an mTLS thumbprint when the token carries `cnf`. A machine client is verified against the local `samna_client` row with bcrypt once per credential, and by the digest of the verified secret after, so serving a call never asks the prophet. The actor lands in `ctx.Get(smw.UserIDKey)`.
+Tokens are verified locally against the prophet's JWKS, checked for issuer and audience, and bound to a DPoP proof or an mTLS thumbprint when the token carries `cnf`. A machine client is verified against the local `samna_client` row with bcrypt once per credential, and by the digest of the verified secret after, so serving a call never asks the prophet. The actor lands in `ctx.Get(smw.UserIDKey)`. A request with none of the three credentials is served as the anonymous user, `shared.AnonymousUserID`, and reaches what the anonymous user's grants give; it answers `401`, or the login redirect on a navigation, only when the app holds no public grant.
 
 ## Access
 
@@ -92,6 +94,9 @@ The middleware reads every `SAUTH_` variable itself; `sdb.Init` loads the config
 | `SAUTH_CLIENT_TIMEOUT` | disciple | Seconds before a call to the prophet gives up, default 5 |
 | `SAUTH_DEBUG_USER_ID` | both | Pins one user and skips authentication |
 | `SAUTH_DEBUG_CLIENTS` | both | A static map of client credentials |
+| `SAUTH_DEBUG_INITIATE_APPS` | disciple | `<slug>=<origin>,...`, the Initiate apps a debug disciple serves in place of the ones the prophet lists |
+| `SAUTH_RATE_LIMIT` | both | Requests the anonymous user, a code outside the cookie and the cli routes may make per period from one address and anonymous cookie, default 60 |
+| `SAUTH_RATE_PERIOD` | both | The period of that limit as a Go duration, default `1m` |
 | `SAUTH_RETENTION` | both | One JSON object: days per table or per kind (`audit_days`, `analytics_event_days`, ...) and size per kind or for all (`token_size_mb`, `size_mb`); lenient defaults, the app's settings override it, 0 days leaves a table alone |
 | `SAUTH_DEBUG_PRIVATE_SEED` | disciple | The app seed a debug disciple encrypts local secrets with and `SamnaSecret.Resolve` opens them with; a deployed disciple fetches its seed from `GET /sam/app` and holds it in memory |
 | `SAUTH_MASTER_KEY` | prophet | 32 random bytes in base64 every stored `private_key` and `private_seed` is wrapped under; the prophet refuses to start without it, and a peer prophet mirroring an app holds the same one |
@@ -102,4 +107,4 @@ The middleware reads every `SAUTH_` variable itself; `sdb.Init` loads the config
 
 ## Debug mode
 
-`SAUTH_DEBUG_USER_ID` or `SAUTH_DEBUG_CLIENTS` turns a disciple into a self contained service. Authentication is bypassed, the pull loop does not start, and every write runs through the local claimius functions instead of the prophet. It exists for local development and hurl runs. It never proves the prophet path, and it is never set in a deployed environment.
+`SAUTH_DEBUG_USER_ID` or `SAUTH_DEBUG_CLIENTS` turns a disciple into a self contained service. With `SAUTH_DEBUG_USER_ID` every request acts as the pinned user. With `SAUTH_DEBUG_CLIENTS` client credentials are checked against the static map, and a request without them is served as the anonymous user under the rate limit. The pull loop does not start, and every write runs through the local claimius functions instead of the prophet. It exists for local development and hurl runs. It never proves the prophet path, and it is never set in a deployed environment.

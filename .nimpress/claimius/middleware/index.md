@@ -28,7 +28,7 @@ Claimius is the schema: its model, its functions and their guarantees, independe
 | `sdb` | `prophet/sdb` | `disciple/sdb` | The database handle, the access lookups, the write builders, the usage counter, the audit writer `Write` |
 | `echo` | `prophet/echo` | `disciple/echo` | The HTTP handlers for the shared types |
 | `sam` | `prophet/sam` | `disciple/sam` | Route registration; the pull loop, `Replica`, `LeadSync` and the peer pull |
-| `smw` | `smw` | `smw` | Authentication, `AppMiddleware`, `SyncSeq`, `AppHome`, `WaitForSeq` |
+| `smw` | `smw` | `smw` | Authentication, `AnonymousMiddleware`, `RateLimit`, `RateLimiter`, `AppMiddleware`, `SyncSeq`, `AppHome`, `WaitForSeq` |
 | `client` | `client` | `client` | The HTTP client a replica reaches a prophet with, `SyncCursor`, `Bind` |
 | `database` | `prophet/database` | `disciple/database` | The claimius role sets |
 | `shared` | both | both | The implementation both roles use; never imported by a consumer |
@@ -43,7 +43,7 @@ Claimius is the schema: its model, its functions and their guarantees, independe
 
 ## Authentication
 
-`smw.UserAuthMiddleware` accepts a bearer token, then a session cookie, then client credentials. Tokens are verified locally against the prophet's JWKS, checked for issuer and audience, and bound to a DPoP proof or an mTLS thumbprint when the token carries `cnf` ([RFC 9449](https://www.rfc-editor.org/rfc/rfc9449), [RFC 8705](https://www.rfc-editor.org/rfc/rfc8705)).
+`smw.UserAuthMiddleware` accepts a bearer token, then a session cookie, then client credentials, and serves a request with none of them as the anonymous user, `shared.AnonymousUserID`, under the rate limit; such a request answers `401` only when the app holds no public grant. Tokens are verified locally against the prophet's JWKS, checked for issuer and audience, and bound to a DPoP proof or an mTLS thumbprint when the token carries `cnf` ([RFC 9449](https://www.rfc-editor.org/rfc/rfc9449), [RFC 8705](https://www.rfc-editor.org/rfc/rfc8705)).
 
 A machine client is verified with bcrypt against the local `samna_client` row once per credential. The process keeps, per `client_id`, the SHA-256 digest of the secret that passed and the `secret_hash` it passed against. A later request rereads the client row by `client_id`, live, active and unexpired, through `GetClient`, and compares its secret's digest to the kept one in constant time while the row's `secret_hash` is unchanged. So bcrypt runs once per credential, and a revoked client or a rotated secret stops on the next request.
 

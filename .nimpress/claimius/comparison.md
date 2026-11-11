@@ -156,7 +156,7 @@ The set is consistent: `P = U · V_u = O · U_x = 5·10⁷` pairs. The workload 
 |---|---|---|---|
 | Check | 7 index entries on the prophet, 4 on a disciple, 15 and 10 after an unrelated raise in the same root; 0 rows written, 0 messages | 1 round trip, `2D + 1 = 9` dependent reads for this tree | 0 reads |
 | First check after a grant | one closure range of the object, one binding probe per node of its chain, the reader's grants, the `object_info` row, and the pair written, 2 index entries | as any check | a new token |
-| Grant on a node, `|H| = 100`, `|T| = 10⁴` | 1 `claim_object` row with 6 index entries, 1 area, 2 pairs, 1 feed event; later at most `|H| · |T| = 10⁶` pairs over all holders | 1 tuple | a group or role assignment |
+| Grant on a node, `|H| = 100`, `|T| = 10⁴` | 1 `claim_object` row with 5 index entries, 1 area, 2 pairs, 1 feed event; later at most `|H| · |T| = 10⁶` pairs over all holders | 1 tuple | a group or role assignment |
 | Tree insert at depth 4 | `d + 1 = 5` closure rows, 15 index entries; 1 `object_info` row, 4 btree entries and its lexemes; 1 pair; 1 area; later `U_x = 50` pairs over all readers | 1 parent tuple | nothing |
 | Listing page of 50 | 101 entries, no sort | SpiceDB about 85 reads and a round trip; OpenFGA an enumeration capped at 1,000 by default | none |
 | Full listing | two entries per row | SpiceDB `C + n_u` subject reads and one reverse read per reached node, about `1.1 V_u` | none |

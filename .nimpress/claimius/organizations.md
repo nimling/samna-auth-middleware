@@ -17,19 +17,19 @@ An organization is who owns something. Every registered row carries `sa_owner_id
 | `sa_root_id` | The top of the tree. Equals `id` on a root |
 | `sa_level` | Depth below the root, 0 at the root |
 | `sa_location_id` | An optional location pin for the organization itself |
-| `private_seed` | The seed a root generates and its children inherit |
-| `type`, `external_id`, `provider_id` | What it is and where it came from |
+| `private_seed` | The seed the service mints for a root and its children copy |
+| `type`, `external_id`, `provider_id` | What it is, `system`, `customer` or `entity`, and where it came from |
 | `sa_created_by` | The `user_claim.id` the creator acted under |
 
 ## Roots and children
 
 1. A row is a root when `sa_owner_id = sa_root_id = id`. There is no nullable parent column, so a walk up the tree stops on the row that points at itself.
 
-2. The before insert trigger `tg_self_root` runs `_set_self_owner_on_insert`. A row with no owner, or with itself as owner, becomes a root and generates a `private_seed` of 32 random bytes. A child with no `sa_root_id` copies its parent's `sa_root_id` and `private_seed`.
+2. The before insert trigger `tg_self_root` runs `_set_self_owner_on_insert`. A row with no owner, or with itself as owner, becomes a root. The trigger mints no seed: the service mints a root's `private_seed`, and a child with none copies its owner's. A child with no `sa_root_id` copies its parent's `sa_root_id`.
 
 3. A root is a tenant. Every row under it resolves to it, and `calc_hierarchical_access` refuses an update that changes `sa_root_id` outside replay and outside `migrate_root`. `migrate_root(object_type, object_id, new_root_id)` is the only path across roots, and every call is reviewed by a person.
 
-4. `upsert_root_organization(app_id, name, actor, ...)` returns the live root of that name linked to the app, and otherwise inserts the root and links it with `upsert_app_object`. It is idempotent on app and name, so a bootstrap may run it on every start.
+4. `upsert_root_organization(p_app_id, p_name, p_actor_user_claim_id, p_description, p_type DEFAULT 'entity', p_id, p_external_id, p_kind)` returns the live root of that name linked to the app, and otherwise inserts the root with the given `type` and links it with `upsert_app_object`. It refuses `p_type = 'system'` with SQLSTATE `22023`, since the system root is made by the system bootstrap alone. It is idempotent on app and name, so a bootstrap may run it on every start.
 
 ## The ownership closure
 
@@ -57,7 +57,7 @@ Beside the closure, the same trigger:
 
 3. On insert of a child, links it to every app its owner is linked to, one `upsert_app_object` per app.
 
-4. Per app the row resolves to, recomputes the actor's pair on the organization and raises one object area with `cascade` on it, unless the write only renamed it: a rename raises no area, because no access follows a name. See [Materialization](./materialization.md).
+4. Recomputes the actor's pair on the organization once and raises one object area with `cascade` on it, unless the write only renamed it: a rename raises no area, because no access follows a name. See [Materialization](./materialization.md).
 
 Under `replay_mode`, on a disciple and for a row a peer's feed carries, the same trigger keeps the closure and raises the area, and settles no actor, because a replayed row has no local actor.
 
@@ -79,9 +79,9 @@ The move touches nothing in the rest of either tenant. It still crosses the tena
 
 An organization has no `app_id`. It is shared structure, and an app reaches it through a live `claimius.app_object` row.
 
-1. `upsert_app_object(app_id, object_type, object_id, created_by)` returns the live link, or inserts one and, outside replay, raises the object area of the object in the app: the creator, the pair holders of the object and the holders of claims bound on it or, inheriting, on an ancestor settle it when they read. The write does not recompute any user's pair.
+1. `upsert_app_object(app_id, object_type, object_id, created_by)` returns the live link, or inserts one. Access is not per app, so the link raises no area and recomputes no pair; `emit_app_object_sync_event` publishes what the app receives.
 
-2. `delete_app_object` soft deletes the live link and deletes every `user_object` row of the app on the object; each pair deleted raises its `user_users_diff` row.
+2. `delete_app_object` soft deletes the live link and nothing else: no pair moves, and `emit_app_object_sync_event` publishes the deletes the app receives.
 
 3. `upsert_app_organization(app_id, org_id, cascade)` links an existing organization and, with `cascade`, every organization and location under it in the ownership closure: one `upsert_app_object` per node, additive and idempotent.
 
@@ -120,14 +120,14 @@ With `S` the stored ownership subtree of the organization and `n_S = |S|`:
 ```
 closure rows written (insert)  = d + 1 (+ d_l + 1 for a pin)       index entries = 3 per row
 closure rows written (move)    = n_S (d + d')
-area rows raised               = one per app, collapsing onto the open area of the organization
+area rows raised               = 1, collapsing onto the open area of the organization
 ```
 
 The work of a write is linear in the subtree it moves and constant in the size of the tenant: a new leaf organization writes `d + 1` rows whatever `N_r` is.
 
 `migrate_root` over a moved subtree of `n_S` nodes writes `n_S` rows, the closure rows the splice moves and `n_S` areas.
 
-`upsert_app_object` writes one link row with its four index entries and one area row, whatever the number of users the object reaches; it reads one probe of `idx_app_object_unique`. `upsert_app_organization` over a subtree of `n` nodes is `n` such writes. `app_object_ids` is one range of `idx_app_object_unique`, `app_has_object` one probe, `apps_for_object` one range of `idx_app_object_object`. With `n_a` apps reaching an organization, the links store `n_a` rows beside one organization row.
+`upsert_app_object` writes one link row with its four index entries and no area row, whatever the number of users the object reaches; it reads one probe of `idx_app_object_unique`. `upsert_app_organization` over a subtree of `n` nodes is `n` such writes. `app_object_ids` is one range of `idx_app_object_unique`, `app_has_object` one probe, `apps_for_object` one range of `idx_app_object_object`. With `n_a` apps reaching an organization, the links store `n_a` rows beside one organization row.
 
 `get_organizations` reads one `app_has_object` probe per organization row, inside the `WHERE` before `LIMIT`.
 

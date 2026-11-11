@@ -28,6 +28,10 @@ if err := sam.Init(runCtx); err != nil {
 if err := uptime.Init(runCtx, e.Logger, uptime.Options{}); err != nil {
 	e.Logger.Fatal(err)
 }
+auth := e.Group("/api/auth")
+auth.GET("/login", saecho.GetLogin)
+auth.GET("/callback", saecho.GetCallback)
+auth.GET("/logout", saecho.GetLogout)
 api := e.Group("/api", smw.UserAuthMiddleware(nil))
 sam.RegisterEndpoints(api)
 e.Server.RegisterOnShutdown(notification.EndStreams)
@@ -68,14 +72,14 @@ Each role has one runtime start, `sam.Init(ctx) error`, joined by `sam.Done()`. 
 
 `UserAuthMiddleware` also holds the answer of a request that made routed writes until the pull has applied them, so the client's next request reads them back. A route outside it gets the same with `smw.WaitForSeq(timeout)`.
 
-`RegisterEndpoints` mounts `login`, `callback` and `logout` under the group. `login?next=<path>` returns the visitor to that same origin path after the callback. The path travels in the OAuth `state` as well as in a cookie, so a callback that reaches a browser without the flow cookies, a login link opened in another browser, starts the login again with the same `next` and still lands on it, a cli approval page included.
+`RegisterEndpoints` mounts `login`, `callback`, `logout`, `:app/login` and `:app/logout`, the `me` set (`me`, `me/claim`, `me/relation`, `me/organization`, `me/location`, `me/asset`, `me/audit`), `asset/:id/data`, `code`, the `notification` set and the capture routes `RegisterCapture` mounts under the group. The login, callback and logout handlers are `disciple/echo` `GetLogin`, `GetCallback` and `GetLogout`, and a host mounts them on a group without `UserAuthMiddleware`, as the sample does: inside the gate a visitor without a credential, when the app holds no public grant, is redirected to the login path and never reaches it. `login?next=<path>` returns the visitor to that same origin path after the callback. The path travels in the OAuth `state` as well as in a cookie, so a callback that reaches a browser without the flow cookies, a login link opened in another browser, starts the login again with the same `next` and still lands on it, a cli approval page included.
 
 ## Retention
 
-Retention is a setting. Each runtime table has its days and its kind has a size, and the job on both roles deletes, once an hour and only from a table over the size limit, every row whose time column is older than its days. Application data is never aged: no user, organization, location, app, client, secret, claim, grant or binding has a lifetime, and the derived tables are rebuilt, not aged.
+Retention is a setting. Each runtime table has its days and its kind has a size, and the job on both roles deletes, once an hour and only from a table over the size limit, every row whose time column is older than its days. Application data is never aged: no organization, location, app, client, secret, claim, grant or binding has a lifetime, and the derived tables are rebuilt, not aged. The one user with a lifetime is a guest: `claimius.prune` soft deletes a guest user whose `guest_identity.ends_at` has passed, and deletes the soft deleted guest rows of `samna_user` and `guest_identity` as kind `log` after their days.
 
 1. The settings. One JSON object, `SAUTH_RETENTION` in the service's `.env` as the default, overridden by the same object in the app's settings through `sdb.Instance().Retention`, a function the host sets that returns `shared.Retention`. Every runtime table belongs to a kind. Days are set per table, `<table>_days`, or per kind, `<kind>_days`; the size a table has to reach is set per kind, `<kind>_size_mb`, or for all, `size_mb`. The defaults are lenient: `audit` 730 days, `analytics` 365, `notification` 365, `token` 7, `log` 180, and 4096 MB; 0 days leaves a table alone.
-2. The groups. `audit`: `audit` by `sa_created_at`. `analytics`, prophet only: `analytics_event`, `analytics_session`, `analytics_capture`, `analytics_heat`. `notification`: `notification` by `closed_at` and `sa_deleted_at`. `token`: `dpop_jti` on both roles, and on the prophet `session`, `jwks_cache`, `par_request`, `rate_limit` and `code` by `ends_at` and `revoked_at`. `log`, prophet only: `consent` by `revoked_at` and `peer_collision`.
+2. The groups. `audit`: `audit` by `sa_created_at`. `analytics`, prophet only: `analytics_event`, `analytics_session`, `analytics_capture`, `analytics_heat`. `notification`: `notification` by `closed_at` and `sa_deleted_at`. `token`: `dpop_jti` by `expires_at` on both roles, and on the prophet `session`, `jwks_cache` and `par_request` by `expires_at`, `rate_limit` by `tat` and `code` by `ends_at` and `revoked_at`. `log`: `samna_user` rows of type `guest` by `sa_deleted_at` and `guest_identity` by `sa_deleted_at` on both roles, and on the prophet `consent` by `revoked_at` and `peer_collision`.
 3. The job. `claimius.prune(p_settings JSONB)` holds the whole rule in SQL: the groups, the tables, their time columns and the size check. `sam.Init` calls it once an hour on both roles under `shared.LeadSync` with `shared.RetentionLockKey`, so of N replicas one runs it.
 4. A host's own runtime rows. A service defines `public.prune(p_settings JSONB) RETURNS BIGINT` of the same shape in its own base SQL, over its own logs, runs, delivery rows, caches and expired tokens, reading the same settings; `claimius.prune` calls it when it exists. Nothing is registered, mounted or synced.
 5. `sync_event` and `access_diff` are not retention: they are bounded by cursors and trimmed by `trim_sync_event` and `trim_access_diff` once every reader has passed, whatever their age.
@@ -86,7 +90,7 @@ Retention is a setting. Each runtime table has its days and its kind has a size,
 entries(a run) = one size call and one delete per table and time column of the list, notification and code twice; a range where an index leads on the column, a scan of the table elsewhere
 ```
 
-Only `session`, `dpop_jti`, `par_request`, `jwks_cache`, `rate_limit` and `audit` have an index leading on their time column. The job is one advisory lock an hour per database, taken by one replica.
+Only `session`, `dpop_jti`, `par_request`, `jwks_cache`, `rate_limit`, `guest_identity` and `audit` have an index leading on their time column. The job is one advisory lock an hour per database, taken by one replica.
 
 ## Writes
 
@@ -109,7 +113,7 @@ Where the write lands depends on the table.
 | The service's own registered tables | Local, through bun | Local, through bun |
 | Claimius tables the prophet serves no route for, such as `notification` | Local | Local |
 
-The helpers on `sdb.Instance()`, `CreateClaim`, `AssignObject`, `AssignUser`, `CreateVirtualClaim`, `InsertRootOrganization`, `UpdateMe`, `DeleteUser`, `CreateOrganizationUser`, `PostUserFromToken` and `PostUserFromExternal`, write through the same builder, so they are routed exactly like a direct `NewInsert`.
+The helpers on `sdb.Instance()`, `CreateClaim`, `AssignObject`, `AssignUser`, `CreateVirtualClaim`, `InsertRootOrganization`, `UpdateMe`, `DeleteUser`, `PostUser`, `PostUserFromToken`, `PostUserFromExternal` and `PostUserGuest`, write through the same builder, so they are routed exactly like a direct `NewInsert`.
 
 A routed write stamps `sa_created_by` and `sa_owner_id` from the `AccessClaim`, posts the model to the prophet over the app key, and upserts the row the prophet answers with. The write is visible on the disciple as soon as the call returns, and every other disciple of the app receives it through sync.
 
@@ -149,7 +153,7 @@ The disciple pulls. There is no inbound sync endpoint on a disciple and none on 
 4. A `409` from the prophet, or ten failed pulls in a row, trigger a fresh snapshot and an audit row naming the stalled cursor.
 5. Between pulls, at most once a second, it drains: it settles ahead the shares of users who read at least as often as areas are raised, and trims the areas every active cursor has passed.
 
-The feed is scoped by the prophet: organizations and locations through `app_object_ids`, every other table through `app_id`. It carries source rows only, never `user_object`, `user_users`, `user_users_diff` or `audit`. The disciple strips `app_id` from each payload and skips `samna_app`.
+The feed is scoped by the prophet: organizations and locations through `app_object_ids`, every other table through `app_id`. It carries source rows only, never `user_object`, `user_users`, `user_users_diff` or `audit`. The disciple strips `app_id` from each payload and skips `samna_app`. One source row never travels: the `samna_user` row of the anonymous user, `shared.AnonymousUserID`, is left out of the snapshot and of the peer snapshot, and the disciple writes it itself in `upsert_disciple_state` and in the init step of its base set.
 
 A snapshot upserts; it never deletes a row the prophet did not send.
 

@@ -45,7 +45,7 @@ Every write of a location runs `calc_hierarchical_access` under the advisory loc
 
 A reparent carries every row pinned under the moved location, because those rows are descendants of the node in the location closure. An owner change moves only the location's own ownership rows: rows pinned in the location keep their own owners and are not in the ownership tree through the location.
 
-The rest is the same as for an organization: the `object_info` row is written when a rendering or structural field changed, an insert links the location to every app of its owner, and per app the actor's pair is recomputed and one object area with `cascade` raised, except for a rename; see [Organizations](./organizations.md#what-an-organization-write-does).
+The rest is the same as for an organization: the `object_info` row is written when a rendering or structural field changed, an insert links the location to every app of its owner, the actor's pair is recomputed once and one object area with `cascade` raised, except for a rename; see [Organizations](./organizations.md#what-an-organization-write-does).
 
 ## Reading locations
 

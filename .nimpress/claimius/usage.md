@@ -20,24 +20,24 @@ Claimius records use in three places: a count on each pair of how often its user
 The middleware counts in process and flushes in batches; see [Access in Go](./middleware/access.md). A flush is one call:
 
 ```
-touch_object_usage(user_ids[], app_ids[], object_types[], object_ids[], counts[])
+touch_object_usage(user_ids[], object_types[], object_ids[], counts[])
 ```
 
 1. The arrays are grouped per pair and summed, so repeats of a pair in one call add up. Rows with a NULL key or a count below 1 are ignored.
 
-2. One `usage_diff` row `(app, user, object, n, now())` is inserted per pair that exists. A pair with no `user_object` row is skipped, so usage never creates a pair. No pair is locked, so a flush never waits on a read that is rewriting the pair, nor on another flush.
+2. One `usage_diff` row `(user, object, n, now())` is inserted per pair that exists. A pair with no `user_object` row is skipped, so usage never creates a pair. No pair is locked, so a flush never waits on a read that is rewriting the pair, nor on another flush.
 
-3. Every user and app counted moves its `user_activity.last_used_at` to now, or gets a row when it has none. A row a read holds for its cursor is skipped, so the flush never waits on it.
+3. Every user counted moves its `user_activity.last_used_at` to now, or gets a row when it has none. A row a read holds for its cursor is skipped, so the flush never waits on it.
 
 4. Nothing is written to `sync_event`: usage is local to the database that served the checks.
 
-It returns the pairs recorded. On a prophet the overload `touch_object_usage(user_ids[], object_types[], object_ids[], counts[])` fills the app with `get_app_id()`; a disciple mirrors one app and carries only that form.
+It returns the pairs recorded. The one form is the same on both roles.
 
-The middleware keys its count per app, `(app, user, type, object)`, and sorts the keys before a flush. A key with no app is the deployment's own and flushes through the form without apps; a key with an app flushes through the form with `app_ids[]`, so a prophet that checks an object for another app counts the use on that app's pair. When a flush holds both, the two calls go as one statement. A flush that fails on a deadlock, SQLSTATE `40P01`, or a serialization failure, `40001`, is sent again, up to three attempts in all; a batch that still fails is added back to the counter and reported, so its counts go out with the next flush instead of being lost.
+The middleware keys its count per pair, `(user, type, object)`, and sorts the keys before a flush. A flush that fails on a deadlock, SQLSTATE `40P01`, or a serialization failure, `40001`, is sent again, up to three attempts in all; a batch that still fails is added back to the counter and reported, so its counts go out with the next flush instead of being lost.
 
 ### Folding
 
-`_settle_usage_diff(app, user)` runs in a listing of the user, inside `reconcile_if_pending` under the reader's share lock, when the share settle ran. `drain_access_diff` runs it over the oldest rows of every user after its shares and the trim.
+`_settle_usage_diff(user, limit)` runs in a listing of the user, inside `reconcile_if_pending` under the reader's share lock, when the share settle ran. `drain_access_diff` runs it over the oldest rows of every user after its shares and the trim.
 
 1. It takes the rows `FOR UPDATE SKIP LOCKED` and deletes them.
 

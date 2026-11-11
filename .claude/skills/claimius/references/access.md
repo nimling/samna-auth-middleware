@@ -1,6 +1,6 @@
 # Access lookups on `*DB`
 
-The Go access calls on `shared.DB`, `samna_auth_middleware/shared/access.go`, reached through `sdb.Instance()` on a disciple.
+The Go access calls on `shared.DB`, reached through `sdb.Instance()` on a disciple: `GetAccess` and `GetDirectAccess` in `samna_auth_middleware/shared/claims.go`, `MutationAccess`, `MutationAccessMany`, `ScopeAccess`, `UserAccess`, `RootAccess` and `PostAccessDiffDrain` in `samna_auth_middleware/shared/access.go`.
 
 `ErrNoAccess` is 403 on writes and a filter on reads, never 500. `ErrInternalServer` is 500.
 
@@ -8,15 +8,18 @@ The Go access calls on `shared.DB`, `samna_auth_middleware/shared/access.go`, re
 |---|---|---|
 | `MutationAccess(actor, id, type, req)` | `mutation_access` | Default for every write. One round trip; P0403 maps to `ErrNoAccess`, P0404 to `ErrNotFound` |
 | `MutationAccessMany(reqs)` | `resolve_access` per row | Several checks in one handler. A denied row is a nil claim in the set, never an error |
-| `GetAccess` | `get_access` | Read only check of the strongest grant |
-| `GetDirectAccess` | `get_direct_access` | Closest ancestor grant when `GetAccess` finds none |
+| `GetAccess(actor, id, type, req)` | `get_access` | Read only check of the strongest grant |
+| `GetDirectAccess(actor, id, type)` | `get_direct_access` | Closest ancestor grant when `GetAccess` finds none; takes no required access and answers the mask it finds |
 | `UserAccess(actor, target, req)` | `get_user_access` | Target is a `samna_user` named by the caller, or the handler needs `*AccessUser` fields. Pass the raw string: external_id, user_id and row id all resolve. Returns the canonical `TargetUserID` |
 | `RootAccess(actor, req)` | `get_access` on each root org the actor holds a claim under, in id order; the first that grants answers | Only when the action targets the root org itself. Never for per user data |
 | `ScopeAccess(actor, path, req)` | `get_scope_access` | A capability with no object: page gating, a machine client's public read. Empty slice means no grant, not an error |
+| `PostAccessDiffDrain(ctx, limitPairs int) (int, error)` | `drain_access_diff` | The settle of frequent readers off the request path, up to `limitPairs` pairs; the disciple's sync leader runs it between pulls in `disciple/sam/main.go`, never a handler. Answers the pairs settled and an error naming the failures |
+
+The other exported methods in this subject: `HasAccess(ctx, userID, objectID, objectType, req) bool`, `GetAccess` as a yes or no; `GetPublicClaims(ctx, appID) (PublicClaims, error)`, the anonymous user's live grants from the in process cache, `uuid.Nil` for the disciple's own app; `GetCodeAccess(ctx, value) (*CodeAccess, error)`, the live invite code behind a value or `ErrCodeInvalid`; `GetUserClaims(ctx, userID)`, `GetClientClaims(ctx, clientID)` and `GetObjectClaims(ctx, userID, objectID, objectType)`, the grants of a user, a machine client and the claims bound to an object; `Read(ctx, fn)`, a pure read on the replica repeated on the primary; `WaitForSeq(ctx, target, timeout)`, the wait for the disciple's cursor. Every remaining exported method on `*DB` is a model read or a writer and lives outside this file.
 
 ## Self
 
-`GetAccess`, `GetDirectAccess` and `MutationAccess` short circuit `userID == objectID` with `OBJECT_TYPE_USER` to `selfAccessClaim`, so `MutationAccess(actor, actor, OBJECT_TYPE_USER, req)` works for PutMe, settings and relations with no `user_claim` row.
+`GetAccess`, `GetDirectAccess` and `MutationAccess` short circuit `userID == objectID` with `OBJECT_TYPE_USER` to `selfAccessClaim`, `GetDirectAccess` with `ACCESS_ALL`, so `MutationAccess(actor, actor, OBJECT_TYPE_USER, req)` works for PutMe, settings and relations with no `user_claim` row.
 
 ## Level
 

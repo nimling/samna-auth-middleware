@@ -1,6 +1,6 @@
 # Claimius patterns
 
-SQL for the common writes and reads, on the prophet set. A disciple's functions take no app argument; in Go on a disciple use the calls in `access.md` and the builder.
+SQL for the common writes and reads, on the prophet set. `insert_claim`, `insert_claim_object`, `insert_user_claim` and `get_objects` take no app argument on either set; the app enters through `upsert_app_user` and the organization links alone. In Go on a disciple use the calls in `access.md` and the builder.
 
 ## A user logs into an app
 
@@ -22,7 +22,6 @@ Write functions return jsonb with table name keys. `insert_claim` returns `{"cla
 
 ```sql
 SELECT claimius.insert_claim(
-    p_app_id          => $app_id,
     p_name            => 'Recipe Editor',
     p_description     => 'Can edit recipes in this kitchen',
     p_sa_access => 4,
@@ -32,7 +31,6 @@ SELECT claimius.insert_claim(
 );
 
 SELECT claimius.insert_claim_object(
-    p_app_id        => $app_id,
     p_claim_id      => $claim_id,
     p_object_id     => $kitchen_org_id,
     p_object_type   => 'claimius.organization',
@@ -43,7 +41,6 @@ SELECT claimius.insert_claim_object(
 );
 
 SELECT claimius.insert_user_claim(
-    p_app_id        => $app_id,
     p_claim_id      => $claim_id,
     p_user_id       => $user_id,
     p_sa_owner_id   => $org_id,
@@ -61,7 +58,7 @@ Binding to the kitchen organization with `inherits = TRUE` cascades to all recip
 SELECT r.*
 FROM public.recipe r
 WHERE r.id IN (
-    SELECT object_id FROM claimius.get_objects($user_id, $app_id, 'public.recipe', $required_access)
+    SELECT object_id FROM claimius.get_objects($user_id, 'public.recipe', $required_access)
 )
   AND r.kitchen_id = $kitchen_id;
 ```
@@ -70,5 +67,5 @@ For the basics use the rendering columns `get_objects` joins from `object_info`:
 
 ```sql
 SELECT object_id, sa_name, sa_description, sa_link, sa_access
-FROM claimius.get_objects($user_id, $app_id, 'public.recipe', $required_access);
+FROM claimius.get_objects($user_id, 'public.recipe', $required_access);
 ```

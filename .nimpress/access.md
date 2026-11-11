@@ -37,6 +37,10 @@ A handler never decides access in its own code. It asks the database through one
 
 A route that names a user acts for that user without becoming them. `UserAccess` resolves the actor's right to act on the target and returns the grant in the same call, so the row written carries the actor's grant in `sa_created_by` and the target's `user_id` as its subject. See [Users](./claimius/users.md).
 
+## The anonymous user
+
+A request without a credential is the anonymous user, `shared.AnonymousUserID`, and every lookup on this page answers for it as for anyone: what it reaches is the `user_claim` rows of that user, the public grants. A public grant whose `options.samk` names a code counts only while the request presents that code: the guard puts the code's hash on the request context, and `shared.GetCodeHashConnector`, which `shared.Connect` wraps the pool in, sets `claimius.samk` on the connection before each statement whose context carries one, so `get_access`, `mutation_access` and `get_objects` see the derivation and any other request does not. The `UserClaimID` such a grant answers is the grant's own `sa_created_by`, the grant of the user who made the claim public, so a write under it is stamped with that user's authority.
+
 ## Listings
 
 A listing filters through the materialized index. `ObjectWhere(q, actor, objectType, required, objectID, after, limit)` takes the handler's own `*bun.SelectQuery` and returns it restricted to the rows the actor reaches with `required`: a page of `limit` rows past the id `after` is ordered by id, the order its cursor continues in, and `after` nil with `limit` 0 reads the whole range and keeps the order the handler gave. A query built with `Table` or `TableExpr` and no model names its table, or the alias after `AS`, in the filter. With `objectID` set it is the check of that one row. `GetOrganizations`, `GetLocations` and `GetSecrets` take the same `after` and `limit`, and `QueryPage(ctx)` reads them from the `cursor` and `limit` query parameters. `UserWhere` and `ClaimWhere` return a predicate for users and claims. A listing never returns a `UserClaimID`, because a listing is no authority to act on any row in it. To act on one row, call `MutationAccess` for that row.
@@ -47,7 +51,7 @@ A listing filters through the materialized index. `ObjectWhere(q, actor, objectT
 
 ## Usage
 
-Every granted single object lookup, `MutationAccess`, `GetAccess`, `UserAccess` and each granted entry of `MutationAccessMany`, counts one use of the object by the actor in process, keyed per app: `DB.Usage.Add(appID, actor, objectType, objectID)` with a nil `appID` for the deployment's own app, which is what the lookups pass. The counts flush to `claimius.touch_object_usage` every 10 s, at 1,000 distinct keys and on shutdown, sorted by user, app, type and object, retrying a deadlock or serialization failure and keeping a failed batch for the next flush, and order the `usage` graph window and search. See [Access in Go](./claimius/middleware/access.md#usage).
+Every granted single object lookup, `MutationAccess`, `GetAccess`, `UserAccess` and each granted entry of `MutationAccessMany`, counts one use of the object by the actor in process, keyed by user, type and object: `DB.Usage.Add(actor, objectType, objectID)`. The counts flush to `claimius.touch_object_usage` every 10 s, at 1,000 distinct keys and on shutdown, sorted by user, type and object, retrying a deadlock or serialization failure and keeping a failed batch for the next flush, and order the `usage` graph window and search. See [Access in Go](./claimius/middleware/access.md#usage).
 
 ## Where a lookup runs
 

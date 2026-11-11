@@ -128,7 +128,7 @@ header "WWW-Authenticate" contains "error=\"invalid_token\""
 
 4. Pass: the header is present.
 
-5. Today: `fails`, `smw/main.go:130` answers the plain string `Unauthorized`.
+5. Today: `fails`, `smw/main.go:135` answers the plain string `Unauthorized`.
 
 ### C8, authentication context
 
@@ -325,7 +325,7 @@ curl -sI https://<tst-connect-host>/api/auth/login | grep -i set-cookie
 
 4. Pass: `Secure` on every `Set-Cookie`, and the code derives `secure` from the environment, not from the domain.
 
-5. Today: `fails`, `utils/cookie.go:27` sets `secure := domain != ""`.
+5. Today: `fails`, `utils/cookie.go:43` sets `secure := domain != ""`; `SAUTH_COOKIE_SECURE` overrides it at `utils/cookie.go:48-50`.
 
 ### C20, cookie prefix
 
@@ -358,7 +358,7 @@ sed -n 204,208p disciple/echo/cli.go
 
 4. Pass: `smw/session_test.go` passes and the approval uses `subtle.ConstantTimeCompare`.
 
-5. Today: `passes`, `smw/session.go:67`, `disciple/echo/cli.go:206`.
+5. Today: `passes`, `enforceCSRF` at `smw/session.go:30`, `disciple/echo/cli.go:206`.
 
 ### C22, HSTS
 
@@ -443,7 +443,7 @@ just test smw
 
 4. Pass: the limiter is mounted on each route, shared through Postgres, and `smw/rate_limit_test.go` asserts `Retry-After`.
 
-5. Today: `fails`, `smw/rate_limit.go:25` is in memory per process; the cli routes carry it at `disciple/sam/register.go:62` and `smw/rate_limit.go:34` sets `Retry-After`; `/api/auth/login` carries none.
+5. Today: `fails`, `smw/rate_limit.go:24-30` is in memory per process; the cli routes carry it at `disciple/sam/register.go:64-65` and `smw/rate_limit.go:53` sets `Retry-After`; `/api/auth/login` carries none.
 
 ## Access control
 
@@ -563,7 +563,7 @@ grep -rn 'func.*Redact\|func.*ParseScope' shared smw disciple
 
 4. Pass: a typed field and one parse function in `shared`.
 
-5. Today: `fails`, `shared/models.go:612` is a raw `*json.RawMessage`; engines live in `bookable_server/internal/db/redaction.go:36` and `nimflow/redact/scope.go:18`.
+5. Today: `fails`, `shared/models.go:624` is a raw `*json.RawMessage`; engines live in `bookable_server/internal/db/redaction.go:36` and `nimflow/redact/scope.go:18`.
 
 ### C34, reads withhold masked fields
 
@@ -579,7 +579,7 @@ sed -n 88,100p shared/access.go
 
 4. Pass: an apply step after the gate that removes withheld fields by `bun` column and dotted path.
 
-5. Today: `fails`, `shared/access.go:90` `Has` tests `Access` only and nothing reads `Scope`.
+5. Today: `fails`, `shared/access.go:94` `Has` tests `Access` only and nothing reads `Scope`.
 
 ### C35, writes refuse masked fields
 
@@ -700,7 +700,7 @@ just test 'MasterKey|WrapAtRest|UnwrapAtRest|ImportMasterKeyPair|SamApp|GetSecre
 
 4. Pass: `cipher.NewGCM` with a nonce from `crypto/rand`; `WrapAtRest` refuses without a 32 byte `SAUTH_MASTER_KEY` and `UnwrapAtRest` refuses a plain value; `get_secret_value` answers NULL to a user without read; the named tests pass.
 
-5. Today: `passes`. Secrets: `shared/cipher.go:12`, `shared/secret.go:62` on a debug disciple, `utils/aes.go:12` from `prophet/echo/secret.go:59` on the prophet, which encrypts every routed write. Keys at rest: `pkg/encryption/master.go:20`, `pkg/encryption/master.go:49`, opened by `ImportMasterKeyPair` at `pkg/encryption/crypto.go:54` and for the organization seed at `smw/app.go:100`. Delivery and opening: `GET /sam/app` answers the calling app its own seed (`prophet/echo/app.go:11`), held in memory (`shared/main.go:133`), and `Resolve` (`shared/secret.go:141`) reads through `get_secret_value` (`disciple/database/V2.4__claimius_functions_external.sql:1030`).
+5. Today: `passes`. Secrets: `shared/cipher.go:12`, `aesEncrypt` at `shared/secret.go:65` on a debug disciple, `utils/aes.go:12` from `prophet/echo/secret.go:59` on the prophet, which encrypts every routed write. Keys at rest: `pkg/encryption/master.go:20`, `pkg/encryption/master.go:49`, opened by `ImportMasterKeyPair` at `pkg/encryption/crypto.go:54` and for the organization seed at `smw/app.go:100`. Delivery and opening: `GET /sam/app` answers the calling app its own seed (`GetSamApp`, `prophet/echo/app.go:12`), held in memory by `client.GetAppSeed` (`client/main.go:50`, `:63`), and `Resolve` (`shared/secret.go:144`) reads through `get_secret_value` (`disciple/database/V2.4__claimius_functions_external.sql:1095`).
 
 ### C42, TLS to Postgres
 
@@ -717,7 +717,7 @@ az containerapp show -g <resource-group> -n <container-app> --query "properties.
 
 4. Pass: the default holds and no deployed env sets a weaker mode.
 
-5. Today: `untested`, the default passes at `shared/main.go:189`; the deployed env values are unread.
+5. Today: `untested`, the default passes at `shared/main.go:232`; the deployed env values are unread.
 
 ## Personal data
 
@@ -735,7 +735,7 @@ sed -n 65,90p disciple/database/V1.1__claimius_baseline.sql
 
 4. Pass: the sync filters `samna_user` columns per app.
 
-5. Today: `fails`, every disciple replicates the full profile, email and phone included; only `user_identity.data` is held back, `disciple/database/V1.1__claimius_baseline.sql:325`.
+5. Today: `fails`, every disciple replicates the full profile, email and phone included; only `user_identity.data` is held back, `disciple/database/V1.1__claimius_baseline.sql:383`, by the snapshot at `prophet/echo/sync.go:121` and `:140`.
 
 ### C44, analytics behind consent
 
@@ -800,7 +800,7 @@ grep -rn -i 'export' shared/me.go disciple/sam prophet/sam
 
 4. Pass: an interface the host registers and a route that fans it out.
 
-5. Today: `fails`, only the `/me` reads at `disciple/sam/register.go:14` and `shared/me.go:19`.
+5. Today: `fails`, only the `/me` reads at `disciple/sam/register.go:17-26` and `shared/me.go:19`.
 
 ### C48, erasure contract
 
@@ -818,7 +818,7 @@ psql -c "SELECT count(*) FROM claimius.notification WHERE user_id = '$ID'"
 
 4. Pass: every count 0 after the sync, and a host hook is called.
 
-5. Today: `fails`, `shared/user.go:271` sets `sa_deleted_at` only; no host hook.
+5. Today: `fails`, `DeleteUser` at `shared/user.go:262-321` sets `sa_deleted_at` only; no host hook.
 
 ### C49, records of processing
 
@@ -852,7 +852,7 @@ grep -rn 'problem+json' pkg smw shared
 
 4. Pass: the error writer sets the media type and the members.
 
-5. Today: `fails`, `pkg/respond/main.go:18` writes the envelope and `smw/main.go:130` a plain string.
+5. Today: `fails`, `pkg/respond/main.go:18` writes the envelope and `smw/main.go:135` a plain string.
 
 ### C51, lost update protection
 
@@ -884,7 +884,7 @@ curl -s -o /dev/null -w '%{http_code}\n' https://<tst-connect-host>/.well-known/
 
 4. Pass: 200 with `resource` and `authorization_servers`.
 
-5. Today: `fails`, the only well known path is the discovery read at `shared/main.go:266`.
+5. Today: `fails`, the only well known path is the discovery read at `shared/main.go:320`.
 
 ### C53, resource indicators
 
@@ -969,40 +969,40 @@ just test TestTheGuardRedactsTheCodeFromTheRequestAndTheSpan
 
 4. Pass: the handler sees the URL and headers without the code and no span attribute or name carries the value.
 
-5. Today: `passes`, `smw/code.go:44` takes both off the request and `smw/code_db_test.go` records the spans.
+5. Today: `passes`, `readCode` at `smw/code.go:35-56` takes both off the request and `smw/code_db_test.go` records the spans.
 
 ### C58, the code leaves the address bar
 
 1. Standard: RFC 6750 section 5.3; W3C capability URLs; RFC 6265bis section 4.1.3.
 
-2. Check: a navigation carrying `samk` on a route with `Guest` answers `303` to the URL without it, with `Referrer-Policy: no-referrer` and a `__Host-` cookie that is `HttpOnly`, `Secure`, `SameSite=Lax` and expires with the code.
+2. Check: a navigation carrying `samk` naming the code of a public grant, on any route, answers `303` to the URL without it, with `Referrer-Policy: no-referrer` and a `__Host-` cookie that is `HttpOnly`, `Secure`, `SameSite=Lax` and expires with the grant's `ends_at`; an invite code on a navigation is kept in the same cookie for 600 s through the login.
 
 3. Method:
 
 ```bash
-just test TestAGuestCodeOnANavigationIsStrippedWithA303AndAHostCookie
+just test TestAPublicCodeOnANavigationIsStrippedWithA303AndAHostCookie
 just test-hurl
 ```
 
 4. Pass: the status, `Location`, `Referrer-Policy` and cookie attributes match.
 
-5. Today: `passes`, `smw/code.go:96`, `smw/code.go:104` and `smw/code.go:67`.
+5. Today: `passes`, `respondCodeStripped` at `smw/code.go:86-88`, answered at `smw/code.go:108`, `:143` and `:220`, `Referrer-Policy` at `smw/code.go:100` and `:212`, the cookie at `smw/code.go:58-76` expiring with the grant's `EndsAt` at `smw/code.go:219` or after `codeInviteMaxAge` at `smw/code.go:24` and `:153`.
 
 ### C59, code redemption is atomic and rate limited
 
 1. Standard: RFC 6585 section 4; OWASP ASVS V2.2.1.
 
-2. Check: two concurrent redeems of a single use invite grant once, a used up, revoked or out of window code never resolves, and twenty failed resolves from one address answer `429` for the rest of the minute, valid codes included.
+2. Check: two concurrent redeems of a single use invite grant once, a used up, revoked or out of window code never resolves, and requests past `SAUTH_RATE_LIMIT` per `SAUTH_RATE_PERIOD`, 60 per minute by default, from one address and anonymous cookie answer `429` with `Retry-After` for the rest of the period, every anonymous request and every code presented outside the cookie counted.
 
 3. Method:
 
 ```bash
-just test 'TestAnInviteRedeemsOnceIntoAGrantOfItsClaim|TestACodeResolvesOnlyInsideItsWindowCountAndUntilRevoked|TestRepeatedFailedCodesAnswer429'
+just test 'TestAnInviteRedeemsOnceIntoAGrantOfItsClaim|TestACodeResolvesOnlyInsideItsWindowCountAndUntilRevoked|TestAnAnonymousRequestIsRateLimitedFromTheEnvironment'
 ```
 
 4. Pass: one grant, `ErrCodeInvalid` for the rest, and `429` with `Retry-After`.
 
-5. Today: `passes`, `redeem_code` and `update_code_used` in both `V2.4` files and `smw/code.go:108`.
+5. Today: `passes`, `redeem_code` and `update_code_used` in both `V2.4` files, the limit at `smw/rate_limit.go:14-17` and `:32-50`, applied to every anonymous request at `smw/code.go:194` and to a code outside the cookie at `smw/code.go:113`.
 
 ### C60, codes are stored by hash
 
@@ -1018,23 +1018,23 @@ just test TestACodeIsStoredByItsHashAndNeverByItsValue
 
 4. Pass: the row is found by the SHA-256 of the value and no column contains the value.
 
-5. Today: `passes`, `shared/code.go:139` and both baselines.
+5. Today: `passes`, `GetCodeHash` at `shared/code.go:186` and both baselines.
 
-### C61, a guest gets exactly what its claim grants
+### C61, the anonymous user gets exactly what its public grants give
 
 1. Standard: OWASP ASVS V4.1.3, least privilege.
 
-2. Check: a guest, reached by code or by an open guest claim, is reached only on a route group mounted with `UserAuthOptions{Guest: true}`, where it gets exactly what its claim grants: an open claim holding READ reads with mask 4 and is refused a write, an open claim holding READ|EXECUTE books, and a code on a claim bound to one booking with READ|WRITE|EXECUTE cancels that booking and reaches nothing else; every guest request writes an audit row naming the claim and the code id; on any other route a guest code is no identity and the request answers `401`, or the login redirect on a navigation, with no use spent and no audit row.
+2. Check: a request without a credential is the anonymous user, `shared.AnonymousUserID`, on every route, and what it reaches is a `user_claim` of that user, a public grant, open or behind a code in `options.samk`: an open grant holding READ reads with mask 4 and is refused a write, an open grant holding READ|EXECUTE books, a grant behind a code on a claim bound to one booking with READ|WRITE|EXECUTE lets the holder of the code cancel that booking and reaches nothing else, the grant is held by the anonymous user alone and counts only while its code is presented, and an app with no public grant answers `401`, or the login redirect on a navigation. Resolving the anonymous user writes no audit row.
 
 3. Method:
 
 ```bash
-just test 'TestAGuestCodeInTheHeaderActsAsTheGuestAndIsAudited|TestAnOpenGuestClaimServesARouteThatAllowsGuests|TestAGuestCodeIsNoIdentityOnARouteWithoutGuest|TestAnOpenGuestClaimWithReadOnlyReadsAndIsRefusedAWrite|TestAnOpenGuestClaimWithExecuteLetsAGuestBook|TestACodeOnAPerBookingManageClaimLetsItsHolderCancel'
+just test 'TestAnOpenPublicGrantServesEveryRoute|TestAnOpenPublicGrantWithExecuteLetsAnyoneBook|TestAPublicCodeOnAManageClaimLetsItsHolderCancel|TestAPublicGrantIsHeldByTheAnonymousUserAloneAndBehindItsCode|TestARequestWithoutACredentialAnswers401WhenTheAppHoldsNoPublicClaim'
 ```
 
-4. Pass: the READ claim answers mask 4 and refuses WRITE and EXECUTE, the READ|EXECUTE claim answers 12 on EXECUTE, the booking claim answers 14 on WRITE on its booking and 403 elsewhere, one audit row names the claim and the code without the value, and a route without `Guest` answers `401` and `302` to the login while the single use code stays unused.
+4. Pass: the READ grant answers mask 4 and answers `401` to WRITE and EXECUTE, the READ|EXECUTE grant answers 12 on EXECUTE, the booking grant answers 14 on WRITE on its booking and `401` elsewhere, the grant gives a signed in user nothing and the anonymous user nothing without its code, and the app without a public grant answers `401` and `302` to the login.
 
-5. Today: `passes`, `get_access` in both `V2.4` files, `smw/code.go:128` and `smw/code.go:156`.
+5. Today: `passes`, `get_access` in both `V2.4` files, `shared.AnonymousUserID` at `shared/code.go:31`, `ClaimOptionsSamk` at `shared/code.go:47-57`, `disciple/database/V1.1__claimius_baseline.sql:326`, `smw/main.go:95` and `serveAnonymous` at `smw/code.go:193-257`.
 
 ## Summary
 

@@ -27,9 +27,7 @@ lastUpdated: true
 
 2. The service writes its rows through `shared.WriteAudit(ctx, idb, appID, operation, type, object_type, object_id, owner, created_by, message)`, where `idb` is the `bun.IDB` of the transaction of the change and `appID` is nil on a disciple. The role wrappers are `sdb.Write(ctx, idb, appID, ...)` on the prophet and `sdb.Write(ctx, idb, ...)` on the disciple. A row commits with its change or not at all, and an error in it fails the change.
 
-3. `insert_app_handover`, `update_app_handover` and `merge_user` write their own rows. A replica that falls back to its snapshot writes one row naming the stalled cursor, in the snapshot's transaction.
-
-4. The calc triggers write an `error` row when they fail and raise the error again, under the row's app. `calc_hierarchical_access` takes, for an organization or location, the first app the row is linked to, and writes none for a row that resolves to no app, an organization not yet linked. The row is in the failing transaction, so it persists only when the caller catches the error in a savepoint and commits.
+3. `insert_app_handover`, `update_app_handover`, `merge_user`, `insert_code`, `delete_code` and `redeem_code` write their own rows: a handover offered or accepted, a merge, and a code created, revoked or redeemed on its claim. A replica that falls back to its snapshot writes one row naming the stalled cursor, in the snapshot's transaction. No calc trigger writes an audit row.
 
 A row carries the actor as a grant, the value every row carries in `sa_created_by`, so the trail joins to the grants, claims and organizations with keys that already exist, and a change to a row, which carries no `sa_updated_by`, is attributed here.
 
@@ -50,10 +48,10 @@ The table grows by one row per audited event and is not carried on the feed, so 
 
 ## Reading it
 
-`get_audit(user, app, required, limit, offset)` on a prophet, and `get_audit(user, required, limit, offset)` on a disciple, returns the app's rows newest first whose `sa_owner_id` is an organization the user reaches with `required`.
+`get_audit(user, app, required, limit, offset)` on a prophet, and `get_audit(user, required, limit, offset, ids)` on a disciple, with `ids` a `UUID[]` defaulting to NULL that keeps only the rows named, returns the app's rows newest first whose `sa_owner_id` is an organization the user reaches with `required`.
 
 1. It settles the reader's share of the open areas.
-2. It returns nothing for a user who is not active in the app.
+2. It returns nothing for a user who is not active.
 3. It reads the reader's organizations through `get_objects`, then the app's rows newest first, kept by owner, up to `limit` after `offset`.
 
 `resolve_access` answers one `claimius.audit` row the same way: one probe of the row and the reader's organizations.
@@ -78,6 +76,6 @@ V_{u,organization} + (limit + offset) / f     rows
 
 1. Integrity. A row written in the transaction of the change cannot describe a change that did not commit, and a change that writes its row cannot commit without it. A row written after the fact by another process can be lost between the two.
 
-2. Tamper surface. Neither the writer nor the reader role holds `UPDATE` or `DELETE` on `audit`; see [Security](./security.md). A service connecting as either cannot remove its own tracks.
+2. Tamper surface. Neither the writer nor the reader role holds `UPDATE` or `DELETE` on `audit`; see [Security](./security.md). A service connecting as either cannot remove its own tracks. On a disciple `claimius_disciple_client` holds `INSERT`, `UPDATE` and `DELETE` on `audit`, since it applies the feed.
 
 3. One actor model. The actor is a grant, so a row names the claim, the owning organization and the window that made the act legal.
