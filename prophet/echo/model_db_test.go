@@ -228,18 +228,29 @@ func TestAFirstSignInGrantsTheDefaultClaimWithoutASecondUserRow(t *testing.T) {
 	}
 }
 
-func TestInsertOrganizationUserRefusesWithoutAnIdentity(t *testing.T) {
+func TestInsertOrganizationUserWithoutAnIdentityCreatesOnce(t *testing.T) {
 	_, claimID := getGrantFixture(t)
 	ctx := context.Background()
 	var caller uuid.UUID
 	if err := psdb.Instance().NewRaw(`SELECT id FROM claimius.user_claim WHERE claim_id = ? AND user_id = ? AND sa_deleted_at IS NULL`, claimID, grantUser).Scan(ctx, &caller); err != nil {
 		t.Fatalf("caller grant: %v", err)
 	}
+	var created, noIdentity bool
+	var userID uuid.UUID
+	if err := psdb.Instance().NewRaw(`
+		SELECT (r ->> 'created')::BOOLEAN, (r -> 'samna_user' ->> 'user_id')::UUID, jsonb_typeof(r -> 'user_identity') = 'null'
+		FROM claimius.insert_organization_user(?, ?, jsonb_build_object('claim_id', ?::TEXT, 'first_name', 'Nobody'), NULL) AS r
+	`, caller, grantRoot, claimID).Scan(ctx, &created, &userID, &noIdentity); err != nil {
+		t.Fatalf("insert_organization_user without an identity inserts the user with a new id: %v", err)
+	}
+	if !created || userID == uuid.Nil || !noIdentity {
+		t.Fatalf("a user posted without an identity is created under a new id and no user_identity, got created %v id %s identity written %v", created, userID, !noIdentity)
+	}
 	_, err := psdb.Instance().ExecContext(ctx, `
-		SELECT claimius.insert_organization_user(?, ?, jsonb_build_object('claim_id', ?::TEXT, 'first_name', 'Nobody'), NULL)
-	`, caller, grantRoot, claimID)
+		SELECT claimius.insert_organization_user(?, ?, jsonb_build_object('claim_id', ?::TEXT, 'user_id', ?::TEXT, 'first_name', 'Nobody'), NULL)
+	`, caller, grantRoot, claimID, userID)
 	var pgErr pgdriver.Error
-	if !errors.As(err, &pgErr) || pgErr.Field('C') != "22023" {
-		t.Fatalf("insert_organization_user is the gate of an external or token user and refuses a call without an identity with 22023, got %v", err)
+	if !errors.As(err, &pgErr) || pgErr.Field('C') != "23505" {
+		t.Fatalf("insert_organization_user without an identity and without upsert refuses a live user_id with 23505, got %v", err)
 	}
 }

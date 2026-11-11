@@ -197,6 +197,19 @@ ALTER TABLE claimius.organization ADD COLUMN IF NOT EXISTS kind TEXT;
 DO $$
 BEGIN
     IF EXISTS (
+        SELECT 1 FROM pg_enum e
+        JOIN pg_type t ON t.oid = e.enumtypid
+        JOIN pg_namespace n ON n.oid = t.typnamespace
+        WHERE n.nspname = 'claimius' AND t.typname = 'organization_type' AND e.enumlabel = 'company'
+    ) THEN
+        ALTER TYPE claimius.organization_type RENAME VALUE 'company' TO 'customer';
+        UPDATE claimius.organization SET type = 'entity' WHERE type = 'customer' AND id <> sa_owner_id;
+    END IF;
+END $$;
+
+DO $$
+BEGIN
+    IF EXISTS (
         SELECT 1 FROM information_schema.columns
         WHERE table_schema = 'claimius' AND table_name = 'organization'
           AND column_name = 'type' AND udt_name <> 'organization_type'
