@@ -1380,15 +1380,15 @@ CREATE OR REPLACE FUNCTION claimius.cascade_user_soft_delete(p_user_id UUID)
 BEGIN
     UPDATE claimius.user_claim
     SET sa_deleted_at = now()
-    WHERE user_id = p_user_id AND TRUE AND sa_deleted_at IS NULL;
+    WHERE user_id = p_user_id AND sa_deleted_at IS NULL;
 
     UPDATE claimius.user_relation
     SET sa_deleted_at = now()
-    WHERE user_id = p_user_id AND TRUE AND sa_deleted_at IS NULL;
+    WHERE user_id = p_user_id AND sa_deleted_at IS NULL;
 
     UPDATE claimius.user_field
     SET sa_deleted_at = now()
-    WHERE user_id = p_user_id AND TRUE AND sa_deleted_at IS NULL;
+    WHERE user_id = p_user_id AND sa_deleted_at IS NULL;
 END;
 $$ LANGUAGE plpgsql;
 
@@ -1406,7 +1406,7 @@ DECLARE
 BEGIN
     SELECT status, sa_deleted_at INTO v_status, v_deleted
     FROM claimius.samna_user
-    WHERE user_id = p_user_id AND TRUE;
+    WHERE user_id = p_user_id AND sa_deleted_at IS NULL;
 
     IF v_status IS NULL THEN
         RETURN FALSE;

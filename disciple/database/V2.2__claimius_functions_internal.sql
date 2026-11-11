@@ -1936,7 +1936,6 @@ BEGIN
             FROM claimius.user_claim uc
                      JOIN claimius.claim_object co
                           ON co.claim_id = uc.claim_id
-                         AND TRUE
                          AND co.sa_deleted_at IS NULL
                          AND co.object_type = p_object_type
                          AND co.object_id = p_object_id
@@ -1949,7 +1948,6 @@ BEGIN
             FROM claimius.user_claim uc
                      JOIN claimius.claim_object co
                           ON co.claim_id = uc.claim_id
-                         AND TRUE
                          AND co.sa_deleted_at IS NULL
                          AND co.inherits = TRUE
                      JOIN claimius.inheritance_info e

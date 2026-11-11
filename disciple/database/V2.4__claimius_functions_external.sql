@@ -141,7 +141,6 @@ BEGIN
               ON c.id = uc.claim_id
              AND c.sa_deleted_at IS NULL
             WHERE uc.user_id = p_user_id
-              AND TRUE
               AND uc.sa_deleted_at IS NULL
               AND (uc.starts_at IS NULL OR uc.starts_at <= now())
               AND (uc.ends_at IS NULL OR uc.ends_at > now())
@@ -264,7 +263,6 @@ BEGIN
         SELECT EXISTS (
             SELECT 1 FROM claimius.samna_user
             WHERE user_id = p_object_id
-              AND TRUE
               AND sa_deleted_at IS NULL
         ) INTO v_exists;
     ELSE
@@ -710,7 +708,6 @@ BEGIN
                    NULL::UUID, TRUE, 0
             FROM claimius.audit a
             WHERE a.id = p_object_id::UUID
-              AND TRUE
               AND a.sa_owner_id IN (
                   SELECT g.object_id
                   FROM claimius.get_objects(p_user_id, 'claimius.organization', p_required) g
@@ -853,7 +850,6 @@ BEGIN
               SELECT 1 FROM claimius.user_claim uc
               WHERE uc.claim_id = c.id
                 AND uc.user_id = p_user_id
-                AND TRUE
                 AND uc.sa_deleted_at IS NULL
                 AND (uc.starts_at IS NULL OR uc.starts_at <= now())
                 AND (uc.ends_at IS NULL OR uc.ends_at > now())
@@ -1751,7 +1747,6 @@ BEGIN
                            ON uo.object_id = w.id
                                AND uo.object_type = 'claimius.organization'
                                AND uo.user_id = p_user_id
-                               AND TRUE
         WHERE w.id IN (
             SELECT g.object_id FROM claimius.get_objects(p_user_id, 'claimius.organization', p_required_access) g
         );
@@ -1796,7 +1791,6 @@ BEGIN
                            ON uo.object_id = l.id
                                AND uo.object_type = 'claimius.location'
                                AND uo.user_id = p_user_id
-                               AND TRUE
         WHERE TRUE
           AND l.sa_deleted_at IS NULL
           AND l.sa_owner_id IN (SELECT org_id FROM _owner_graph_orgs)
@@ -1838,7 +1832,6 @@ BEGIN
               ON uo.object_id = t.id
              AND uo.object_type = %L
              AND uo.user_id = $1
-             AND TRUE
              AND (uo.sa_access & $2) = $2
             LEFT JOIN claimius.object_info oi
               ON oi.object_type = %L
@@ -1937,7 +1930,6 @@ BEGIN
             FROM claimius.user_claim uc
                      JOIN claimius.claim c ON c.id = uc.claim_id
             WHERE uc.user_id = p_user_id
-              AND TRUE
               AND uc.sa_deleted_at IS NULL
               AND c.sa_deleted_at IS NULL
               AND (p_required_access = 0 OR (c.sa_access & p_required_access) = p_required_access);
@@ -1945,7 +1937,6 @@ BEGIN
             SELECT array_agg(c.id) INTO v_claim_ids
             FROM claimius.claim c
             WHERE c.id = p_start_id
-              AND TRUE
               AND c.sa_deleted_at IS NULL
               AND (p_required_access = 0 OR (c.sa_access & p_required_access) = p_required_access);
         END IF;
@@ -1956,7 +1947,7 @@ BEGIN
 
         SELECT u.id INTO v_user_row_id
         FROM claimius.samna_user u
-        WHERE u.user_id = p_user_id AND TRUE
+        WHERE u.user_id = p_user_id
           AND u.sa_deleted_at IS NULL
         LIMIT 1;
 
@@ -1984,7 +1975,6 @@ BEGIN
                      CROSS JOIN LATERAL jsonb_array_elements(uo.grants) e
             WHERE p_start_id IS NULL
               AND uo.user_id = p_user_id
-              AND TRUE
               AND (p_required_access = 0 OR (uo.sa_access & p_required_access) = p_required_access)
               AND (e->>'claim_id')::UUID = ANY(v_claim_ids)
               AND (p_depth = 0 OR e->>'tree_type' = 'direct')
@@ -2005,7 +1995,6 @@ BEGIN
                               AND ii.ancestor_id = co.object_id
                               AND (ii.depth = 0 OR (c.inherits AND co.inherits AND (p_depth = 0 OR ii.depth <= p_depth)))
             WHERE p_start_id IS NOT NULL
-              AND TRUE
               AND co.sa_deleted_at IS NULL
               AND co.object_id IS NOT NULL
               AND co.object_type <> 'claimius.claim'
@@ -2050,7 +2039,6 @@ BEGIN
                           ON uo.object_id = u.id
                               AND uo.object_type = 'claimius.samna_user'
                               AND uo.user_id = p_user_id
-                              AND TRUE
             WHERE TRUE
               AND u.sa_deleted_at IS NULL
               AND u.id <> v_user_row_id
@@ -2073,7 +2061,6 @@ BEGIN
             FROM claimius.user_claim uc
                      JOIN claimius.claim c ON c.id = uc.claim_id
             WHERE uc.user_id = p_user_id
-              AND TRUE
               AND uc.sa_deleted_at IS NULL
               AND uc.claim_id = ANY(v_claim_ids)
         ),
@@ -2116,7 +2103,6 @@ BEGIN
                      LEFT JOIN claimius.object_info oi
                           ON oi.object_type = uo.object_type
                               AND oi.object_id = uo.object_id
-                              AND TRUE
             WHERE TRUE
               AND co.sa_deleted_at IS NULL
               AND co.claim_id = ANY(v_claim_ids)
@@ -2162,7 +2148,6 @@ BEGIN
                      LEFT JOIN claimius.object_info oi
                           ON oi.object_type = uo.object_type
                               AND oi.object_id = uo.object_id
-                              AND TRUE
         ),
         all_nodes AS (
             SELECT * FROM self_node
@@ -3809,7 +3794,6 @@ BEGIN
         SELECT uo.object_id, uo.object_type
         FROM claimius.user_object uo
         WHERE uo.user_id = p_user_id
-          AND TRUE
           AND (p_required_access = 0 OR (uo.sa_access & p_required_access) = p_required_access)
           AND uo.object_type = ANY(v_allowed)
           AND claimius.graph_type_passes(uo.object_type, p_include_types, p_exclude_types)
@@ -3823,7 +3807,6 @@ BEGIN
           AND EXISTS (
               SELECT 1 FROM claimius.user_claim uc
               WHERE uc.user_id = p_user_id
-                AND TRUE
                 AND uc.claim_id = c.id
                 AND uc.sa_deleted_at IS NULL
           )
@@ -3922,7 +3905,7 @@ BEGIN
 
     SELECT u.id INTO v_user_row_id
     FROM claimius.samna_user u
-    WHERE u.user_id = p_user_id AND TRUE AND u.sa_deleted_at IS NULL
+    WHERE u.user_id = p_user_id AND u.sa_deleted_at IS NULL
     LIMIT 1;
 
     IF p_start_id IS NULL THEN
@@ -3930,7 +3913,6 @@ BEGIN
         FROM claimius.user_claim uc
         JOIN claimius.claim c ON c.id = uc.claim_id
         WHERE uc.user_id = p_user_id
-          AND TRUE
           AND uc.sa_deleted_at IS NULL
           AND c.sa_deleted_at IS NULL
           AND (p_required_access = 0 OR (c.sa_access & p_required_access) = p_required_access);
@@ -3938,7 +3920,6 @@ BEGIN
         SELECT array_agg(c.id) INTO v_claim_ids
         FROM claimius.claim c
         WHERE c.id = p_start_id
-          AND TRUE
           AND c.sa_deleted_at IS NULL
           AND (p_required_access = 0 OR (c.sa_access & p_required_access) = p_required_access);
     END IF;
@@ -3987,7 +3968,6 @@ BEGIN
         FROM claimius.user_claim uc
         WHERE v_user_row_id IS NOT NULL
           AND uc.user_id = p_user_id
-          AND TRUE
           AND uc.sa_deleted_at IS NULL
           AND uc.claim_id = ANY(v_claim_ids)
 
@@ -4034,7 +4014,6 @@ BEGIN
         JOIN claimius._user_users_for_viewer(p_user_id) uu ON uu.target_user_id = u.user_id
         WHERE v_user_row_id IS NOT NULL
           AND p_start_id IS NULL
-          AND TRUE
           AND u.sa_deleted_at IS NULL
           AND u.id <> v_user_row_id
 
@@ -4053,10 +4032,10 @@ BEGIN
             'used_at',      ur.used_at
         )
         FROM claimius.user_relation ur
-        JOIN claimius.samna_user su ON su.user_id = ur.user_id AND TRUE AND su.sa_deleted_at IS NULL
+        JOIN claimius.samna_user su ON su.user_id = ur.user_id AND su.sa_deleted_at IS NULL
         JOIN claimius.user_object uo
                ON uo.object_id = ur.object_id AND uo.object_type = ur.object_type
-              AND uo.user_id = p_user_id AND TRUE
+              AND uo.user_id = p_user_id
         WHERE TRUE
           AND p_start_id IS NULL
           AND ur.sa_deleted_at IS NULL
