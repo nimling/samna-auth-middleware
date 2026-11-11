@@ -16,14 +16,21 @@ import (
 	"github.com/nimling/samna-auth-middleware/v2/utils"
 )
 
+func cookieValues(ctx echo.Context, name string) []string {
+	values := make([]string, 0, 2)
+	for _, cookie := range ctx.Request().Cookies() {
+		if cookie.Name == name && cookie.Value != "" {
+			values = append(values, cookie.Value)
+		}
+	}
+	return values
+}
+
 func authenticateCookie(ctx echo.Context, config *AuthMiddlewareConfig, keyFunc jwt.Keyfunc) error {
-	accessCookie, accessErr := ctx.Cookie(accessTokenCookieKey)
-	refreshCookie, refreshErr := ctx.Cookie(refreshTokenCookieKey)
+	accessValues := cookieValues(ctx, accessTokenCookieKey)
+	refreshValues := cookieValues(ctx, refreshTokenCookieKey)
 
-	accessPresent := accessErr == nil && accessCookie.Value != ""
-	refreshPresent := refreshErr == nil && refreshCookie.Value != ""
-
-	if !accessPresent && !refreshPresent {
+	if len(accessValues) == 0 && len(refreshValues) == 0 {
 		return ErrorCredentialMissing
 	}
 
@@ -31,20 +38,22 @@ func authenticateCookie(ctx echo.Context, config *AuthMiddlewareConfig, keyFunc 
 		return csrfErr
 	}
 
-	if accessPresent {
-		claimUser, vldErr := ValidateToken(ctx.Request(), accessCookie.Value, config, keyFunc)
+	var accessErr error
+	for _, value := range accessValues {
+		claimUser, vldErr := ValidateToken(ctx.Request(), value, config, keyFunc)
 		if vldErr == nil {
 			ctx.Set(UserIDKey, claimUser.ID)
-			ctx.Set(AccessTokenKey, accessCookie.Value)
+			ctx.Set(AccessTokenKey, value)
 			return nil
 		}
-		if !errors.Is(vldErr, ErrorTokenExpired) {
-			ctx.Logger().Errorf("Failed to validate the cookie access_token: %v", vldErr)
-			utils.ClearCookie(ctx, accessTokenCookieKey)
-			utils.ClearCookie(ctx, refreshTokenCookieKey)
-			utils.ClearCookie(ctx, csrfTokenCookieKey)
-			return ErrorCredentialMissing
-		}
+		accessErr = vldErr
+	}
+	if accessErr != nil && !errors.Is(accessErr, ErrorTokenExpired) && len(refreshValues) == 0 {
+		ctx.Logger().Errorf("Failed to validate the cookie access_token: %v", accessErr)
+		utils.ClearCookie(ctx, accessTokenCookieKey)
+		utils.ClearCookie(ctx, refreshTokenCookieKey)
+		utils.ClearCookie(ctx, csrfTokenCookieKey)
+		return ErrorCredentialMissing
 	}
 
 	tokens, err := refreshTokens(ctx, *config)
@@ -75,15 +84,20 @@ func enforceCSRF(ctx echo.Context) error {
 	if method == http.MethodGet || method == http.MethodHead || method == http.MethodOptions {
 		return nil
 	}
-	cookie, err := ctx.Cookie(csrfTokenCookieKey)
-	if err != nil || cookie.Value == "" {
+	values := cookieValues(ctx, csrfTokenCookieKey)
+	if len(values) == 0 {
 		return fmt.Errorf("csrf cookie missing: %w", ErrorForbidden)
 	}
 	header := ctx.Request().Header.Get("SAuth-CSRF-Token")
-	if header == "" || header != cookie.Value {
+	if header == "" {
 		return fmt.Errorf("csrf token mismatch: %w", ErrorForbidden)
 	}
-	return nil
+	for _, value := range values {
+		if header == value {
+			return nil
+		}
+	}
+	return fmt.Errorf("csrf token mismatch: %w", ErrorForbidden)
 }
 
 func generateCSRFToken() (string, error) {
@@ -110,16 +124,19 @@ func WriteCSRFCookie(ctx echo.Context) {
 }
 
 func refreshTokens(ctx echo.Context, config AuthMiddlewareConfig) (*client.ResponseToken, error) {
-	cookie, err := ctx.Cookie(refreshTokenCookieKey)
-	if err != nil {
-		return nil, fmt.Errorf("obtain refresh_token from cookie: %w: %w", err, ErrorUnauthorized)
-	}
-
-	if cookie.Value == "" {
+	values := cookieValues(ctx, refreshTokenCookieKey)
+	if len(values) == 0 {
 		return nil, fmt.Errorf("refresh token from cookie is empty: %w", ErrorUnauthorized)
 	}
 
-	tokenResp, err := client.PostRefreshToken(ctx.Request().Context(), config.TokenURL.String(), config.ClientSlug, config.ClientSecret, cookie.Value)
+	var tokenResp *client.ResponseToken
+	var err error
+	for _, value := range values {
+		tokenResp, err = client.PostRefreshToken(ctx.Request().Context(), config.TokenURL.String(), config.ClientSlug, config.ClientSecret, value)
+		if err == nil {
+			break
+		}
+	}
 	if err != nil {
 		return nil, fmt.Errorf("refresh tokens: %w", err)
 	}
