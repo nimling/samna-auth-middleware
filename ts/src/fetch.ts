@@ -2,7 +2,7 @@ import { CSRF_TOKEN_COOKIE, CSRF_TOKEN_HEADER, ErrUnauthorized } from './types'
 import { parseCookies } from './cookies'
 import { handleUnauthenticated } from './session'
 
-function csrfHeader(method: string): Record<string, string> {
+export function csrfHeader(method: string): Record<string, string> {
   const upper = method.toUpperCase()
   if (upper === 'GET' || upper === 'HEAD' || upper === 'OPTIONS') return {}
   if (typeof document === 'undefined') return {}
