@@ -245,6 +245,16 @@ func PostUser(ctx echo.Context) error {
 		return respond.Error(ctx, http.StatusBadRequest, "invalid json body")
 	}
 
+	if req.UserID != nil && *req.UserID == uuid.Nil {
+		return respond.Error(ctx, http.StatusBadRequest, "user_id must not be the zero uuid")
+	}
+	if req.OwnerID != nil {
+		user, status, err := insertOrganizationUser(ctx, req.CreatedBy, req.OwnerID, req.ClaimID, req, false, nil, req.Reason)
+		if err != nil {
+			return respond.Error(ctx, status, err.Error())
+		}
+		return respond.JSON(ctx, status, user, 1)
+	}
 	if req.Email == "" {
 		return respond.Error(ctx, http.StatusBadRequest, "email required")
 	}
@@ -372,7 +382,7 @@ func PostUserToken(ctx echo.Context) error {
 	}
 	in.ExternalID = &externalID
 	identity := map[string]any{"external_id": externalID, "id_claim": idClaim, "type": "token", "data": claims}
-	user, status, err := createOrganizationUser(ctx, req.CreatedBy, req.OwnerID, req.ClaimID, in, identity, req.Reason)
+	user, status, err := insertOrganizationUser(ctx, req.CreatedBy, req.OwnerID, req.ClaimID, in, true, identity, req.Reason)
 	if err != nil {
 		return respond.Error(ctx, status, err.Error())
 	}
@@ -463,7 +473,7 @@ func PostUserExternal(ctx echo.Context) error {
 		return respond.Error(ctx, http.StatusBadRequest, "user.external_id is required")
 	}
 	identity := map[string]any{"external_id": *req.User.ExternalID, "id_claim": "external", "type": "external", "data": map[string]any{}}
-	user, status, err := createOrganizationUser(ctx, req.CreatedBy, req.OwnerID, req.ClaimID, req.User, identity, req.Reason)
+	user, status, err := insertOrganizationUser(ctx, req.CreatedBy, req.OwnerID, req.ClaimID, req.User, true, identity, req.Reason)
 	if err != nil {
 		return respond.Error(ctx, status, err.Error())
 	}
@@ -682,37 +692,18 @@ func getUserLocations(ctx echo.Context, userID uuid.UUID) ([]Location, error) {
 }
 
 func postUser(ctx echo.Context, req BodyUser, userName string) (*SamnaUser, error) {
-	var exists bool
-	if err := sdb.Instance().NewRaw(`SELECT EXISTS (
-		SELECT 1 FROM claimius.samna_user
-		WHERE sa_deleted_at IS NULL
-		  AND ((nullif(?::uuid, '00000000-0000-0000-0000-000000000000') IS NOT NULL AND user_id = ?::uuid)
-		    OR (nullif(?, '') IS NOT NULL AND external_id = ?)))`,
-		req.UserID, req.UserID, req.ExternalID, req.ExternalID,
-	).Scan(ctx.Request().Context(), &exists); err != nil {
-		ctx.Logger().Errorf("check samna_user: %v", err)
-		return nil, errorsx.ErrDbUnexpected
-	}
-	if exists {
-		return nil, errorsx.ErrAlreadyExists
-	}
+	appID, _ := ctx.Get("app_id").(uuid.UUID)
 	var userID uuid.UUID
-	err := sdb.Instance().NewRaw(`INSERT INTO claimius.samna_user (user_id, first_name, last_name, user_name, email, phone, external_id)
-		VALUES (coalesce(nullif(?::uuid, '00000000-0000-0000-0000-000000000000'), gen_random_uuid()), ?, ?,
-		        CASE WHEN NOT EXISTS (
-		            SELECT 1 FROM claimius.samna_user u
-		            WHERE lower(u.user_name) = lower(?) AND u.sa_deleted_at IS NULL
-		        ) THEN nullif(?, '') END,
-		        ?, nullif(?, ''), ?)
-		ON CONFLICT (user_id) WHERE sa_deleted_at IS NULL DO NOTHING
-		RETURNING user_id`,
-		req.UserID, req.FirstName, req.LastName, userName, userName, req.Email, req.Phone, req.ExternalID,
+	err := sdb.Instance().NewRaw(
+		"SELECT (claimius.upsert_app_user(p_user_id => ?, p_app_id => ?, p_first_name => ?, p_last_name => ?, p_user_name => nullif(?, ''), p_email => ?, p_phone => nullif(?, ''), p_external_id => ?, p_sa_created_by => ?) -> 'samna_user' ->> 'user_id')::uuid",
+		req.UserID, appID, req.FirstName, req.LastName, userName, req.Email, req.Phone, req.ExternalID, req.CreatedBy,
 	).Scan(ctx.Request().Context(), &userID)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, errorsx.ErrAlreadyExists
-	}
 	if err != nil {
-		ctx.Logger().Errorf("insert samna_user: %v", err)
+		var pgErr pgdriver.Error
+		if errors.As(err, &pgErr) && pgErr.Field('C') == "23505" {
+			return nil, errorsx.ErrAlreadyExists
+		}
+		ctx.Logger().Errorf("upsert_app_user: %v", err)
 		return nil, errorsx.ErrDbUnexpected
 	}
 
@@ -759,7 +750,7 @@ func putUser(ctx echo.Context, user *SamnaUser) error {
 	return nil
 }
 
-func createOrganizationUser(ctx echo.Context, createdBy, ownerID, claimID *uuid.UUID, user any, identity map[string]any, reason *string) (*SamnaUser, int, error) {
+func insertOrganizationUser(ctx echo.Context, createdBy, ownerID, claimID *uuid.UUID, user any, upsert bool, identity map[string]any, reason *string) (*SamnaUser, int, error) {
 	appID := ctx.Get("app_id").(uuid.UUID)
 	if appID == uuid.Nil {
 		return nil, http.StatusUnauthorized, errors.New("Unauthorized")
@@ -783,15 +774,20 @@ func createOrganizationUser(ctx echo.Context, createdBy, ownerID, claimID *uuid.
 	if err != nil {
 		return nil, http.StatusBadRequest, errors.New("Malformed request")
 	}
-	identityJSON, err := json.Marshal(identity)
-	if err != nil {
-		return nil, http.StatusBadRequest, errors.New("Malformed request")
+	var identityJSON *string
+	if identity != nil {
+		b, err := json.Marshal(identity)
+		if err != nil {
+			return nil, http.StatusBadRequest, errors.New("Malformed request")
+		}
+		s := string(b)
+		identityJSON = &s
 	}
 
 	var payload []byte
 	if err := sdb.Instance().NewRaw(
-		"SELECT claimius.insert_organization_user(?, ?, ?::jsonb, ?::jsonb, ?)",
-		*createdBy, *ownerID, string(userJSON), string(identityJSON), reason,
+		"SELECT claimius.insert_organization_user(p_caller_uc => ?, p_owner_id => ?, p_user => ?::jsonb, p_identity => ?::jsonb, p_reason => ?, p_upsert => ?)",
+		*createdBy, *ownerID, string(userJSON), identityJSON, reason, upsert,
 	).Scan(ctx.Request().Context(), &payload); err != nil {
 		var pgErr pgdriver.Error
 		if errors.As(err, &pgErr) {

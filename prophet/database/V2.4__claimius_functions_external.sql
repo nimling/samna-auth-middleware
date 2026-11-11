@@ -4552,12 +4552,14 @@ DROP FUNCTION IF EXISTS claimius.create_organization_user(UUID, UUID, UUID, JSON
 
 DROP FUNCTION IF EXISTS claimius.create_organization_user(uuid,uuid,uuid,jsonb,boolean,jsonb,text);
 DROP FUNCTION IF EXISTS claimius.insert_organization_user(UUID, UUID, UUID, JSONB, BOOLEAN, JSONB, TEXT);
+DROP FUNCTION IF EXISTS claimius.insert_organization_user(uuid, uuid, jsonb, jsonb, text);
 CREATE OR REPLACE FUNCTION claimius.insert_organization_user(
     p_caller_uc  UUID,
     p_owner_id   UUID,
     p_user       JSONB,
-    p_identity   JSONB,
-    p_reason     TEXT DEFAULT NULL
+    p_identity   JSONB DEFAULT NULL,
+    p_reason     TEXT DEFAULT NULL,
+    p_upsert     BOOLEAN DEFAULT FALSE
 ) RETURNS JSONB AS $$
 DECLARE
     v_user_id           UUID;
@@ -4583,9 +4585,6 @@ BEGIN
     v_claim_id    := NULLIF(p_user ->> 'claim_id', '')::UUID;
     v_external_id := NULLIF(p_user ->> 'external_id', '');
 
-    IF p_identity IS NULL THEN
-        RAISE EXCEPTION 'identity required' USING ERRCODE = '22023';
-    END IF;
     IF v_claim_id IS NULL THEN
         RAISE EXCEPTION 'claim_id required';
     END IF;
@@ -4613,18 +4612,20 @@ BEGIN
         END IF;
     END IF;
 
-    v_identity_id := NULLIF(p_identity ->> 'external_id', '');
-    IF v_identity_id IS NULL THEN
-        RAISE EXCEPTION 'identity external_id required';
-    END IF;
-    SELECT * INTO v_token_row
-      FROM claimius.user_identity
-     WHERE sa_owner_id = p_owner_id
-       AND external_id = v_identity_id
-       AND sa_deleted_at IS NULL
-     LIMIT 1;
-    IF v_token_row.user_id IS NOT NULL THEN
-        v_user_id := v_token_row.user_id;
+    IF p_identity IS NOT NULL THEN
+        v_identity_id := NULLIF(p_identity ->> 'external_id', '');
+        IF v_identity_id IS NULL THEN
+            RAISE EXCEPTION 'identity external_id required';
+        END IF;
+        SELECT * INTO v_token_row
+          FROM claimius.user_identity
+         WHERE sa_owner_id = p_owner_id
+           AND external_id = v_identity_id
+           AND sa_deleted_at IS NULL
+         LIMIT 1;
+        IF v_token_row.user_id IS NOT NULL THEN
+            v_user_id := v_token_row.user_id;
+        END IF;
     END IF;
 
     v_created := v_user_id IS NULL OR NOT EXISTS (
@@ -4632,6 +4633,19 @@ BEGIN
          WHERE user_id = v_user_id
            AND sa_deleted_at IS NULL
     );
+
+    IF NOT p_upsert AND p_identity IS NULL THEN
+        IF NOT v_created THEN
+            RAISE EXCEPTION 'user_id already exists' USING ERRCODE = '23505';
+        END IF;
+        IF v_external_id IS NOT NULL AND EXISTS (
+            SELECT 1 FROM claimius.samna_user
+             WHERE external_id = v_external_id
+               AND sa_deleted_at IS NULL
+        ) THEN
+            RAISE EXCEPTION 'external_id already exists' USING ERRCODE = '23505';
+        END IF;
+    END IF;
 
     INSERT INTO claimius.samna_user (
         user_id, first_name, last_name, user_name, user_image,
@@ -4743,26 +4757,28 @@ BEGIN
         END IF;
     END IF;
 
-    INSERT INTO claimius.user_identity (
-        user_id, id_claim, external_id, type, claim_id, data, sa_owner_id, sa_created_by
-    ) VALUES (
-        v_user_row.user_id,
-        COALESCE(NULLIF(p_identity ->> 'id_claim', ''), 'sub'),
-        v_identity_id,
-        COALESCE(NULLIF(p_identity ->> 'type', ''), 'token'),
-        v_claim_id,
-        p_identity -> 'data',
-        p_owner_id,
-        p_caller_uc
-    )
-    ON CONFLICT (sa_owner_id, external_id) WHERE sa_deleted_at IS NULL DO UPDATE SET
-        user_id       = EXCLUDED.user_id,
-        id_claim      = EXCLUDED.id_claim,
-        type          = EXCLUDED.type,
-        claim_id      = EXCLUDED.claim_id,
-        data          = EXCLUDED.data,
-        sa_updated_at = now()
-    RETURNING * INTO v_token_row;
+    IF p_identity IS NOT NULL THEN
+        INSERT INTO claimius.user_identity (
+            user_id, id_claim, external_id, type, claim_id, data, sa_owner_id, sa_created_by
+        ) VALUES (
+            v_user_row.user_id,
+            COALESCE(NULLIF(p_identity ->> 'id_claim', ''), 'sub'),
+            v_identity_id,
+            COALESCE(NULLIF(p_identity ->> 'type', ''), 'token'),
+            v_claim_id,
+            p_identity -> 'data',
+            p_owner_id,
+            p_caller_uc
+        )
+        ON CONFLICT (sa_owner_id, external_id) WHERE sa_deleted_at IS NULL DO UPDATE SET
+            user_id       = EXCLUDED.user_id,
+            id_claim      = EXCLUDED.id_claim,
+            type          = EXCLUDED.type,
+            claim_id      = EXCLUDED.claim_id,
+            data          = EXCLUDED.data,
+            sa_updated_at = now()
+        RETURNING * INTO v_token_row;
+    END IF;
 
     RETURN jsonb_build_object(
         'samna_user',        to_jsonb(v_user_row),
@@ -4771,15 +4787,15 @@ BEGIN
         'virtual_claim',     v_virtual_claim     -> 'claim',
         'claim_object',      v_claim_obj         -> 'claim_object',
         'caller_user_claim', v_caller_user_claim -> 'user_claim',
-        'user_identity',     to_jsonb(v_token_row)
+        'user_identity',     CASE WHEN p_identity IS NULL THEN NULL ELSE to_jsonb(v_token_row) END
     );
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius.insert_organization_user(UUID, UUID, JSONB, JSONB, TEXT) IS
-    'The gate of an external or token user: an outside identity p_identity {id_claim, external_id, type, data} of the owner organization names the user, and the call refuses with 22023 without it. A user_identity of the owner and external_id reuses its user; otherwise the one samna_user row of the user is inserted, or upserted on its user_id. Grants the supplied claim with p_reason, ensures a per-user virtual claim with full access bound to the user, when p_caller_uc is not null grants that virtual claim to the caller, which must be a live user_claim, and writes the user_identity. Returns samna_user, created, user_claim, virtual_claim, claim_object, caller_user_claim and user_identity.';
+COMMENT ON FUNCTION claimius.insert_organization_user(UUID, UUID, JSONB, JSONB, TEXT, BOOLEAN) IS
+    'Adds a user to an organization: the one samna_user row of the user is inserted, with its id from gen_random_uuid when the body names none, or upserted on its user_id. Without p_identity and with p_upsert FALSE, a live user_id or external_id already present raises 23505. With p_identity, an outside identity {id_claim, external_id, type, data} of the owner organization names the user: a user_identity of the owner and external_id reuses its user, the call upserts, and the user_identity is written. Grants the supplied claim with p_reason, ensures a per-user virtual claim with full access bound to the user, and when p_caller_uc is not null grants that virtual claim to the caller, which must be a live user_claim. Returns samna_user, created, user_claim, virtual_claim, claim_object, caller_user_claim and user_identity.';
 
-GRANT EXECUTE ON FUNCTION claimius.insert_organization_user(UUID, UUID, JSONB, JSONB, TEXT)
+GRANT EXECUTE ON FUNCTION claimius.insert_organization_user(UUID, UUID, JSONB, JSONB, TEXT, BOOLEAN)
     TO claimius_disciple_client, claimius_writer, claimius_admin, claimius_reader;
 
 ALTER TABLE claimius.user_identity ALTER COLUMN app_id SET DEFAULT claimius.get_app_id();

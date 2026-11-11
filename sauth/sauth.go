@@ -5,7 +5,21 @@ import (
 	"fmt"
 	"reflect"
 	"strings"
+
+	"github.com/google/uuid"
 )
+
+var uuidType = reflect.TypeOf(uuid.UUID{})
+
+func isNilUUID(v reflect.Value) bool {
+	for v.Kind() == reflect.Pointer {
+		if v.IsNil() {
+			return false
+		}
+		v = v.Elem()
+	}
+	return v.Type() == uuidType && v.Interface().(uuid.UUID) == uuid.Nil
+}
 
 func tagName(tag string) (name string, omitEmpty bool, skip bool) {
 	tag = strings.TrimSpace(tag)
@@ -82,6 +96,14 @@ func overlayMap(out map[string]any, v reflect.Value) {
 		}
 		jsonName, _, _ := tagName(field.Tag.Get("json"))
 		sauthTag := strings.TrimSpace(field.Tag.Get("sauth"))
+		if isNilUUID(v.Field(i)) {
+			name := jsonName
+			if name == "" {
+				name = field.Name
+			}
+			delete(out, name)
+			continue
+		}
 		if field.Anonymous && sauthTag == "" && jsonName == "" {
 			overlayMap(out, v.Field(i))
 			continue

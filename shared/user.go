@@ -203,6 +203,13 @@ func (d *DB) deleteRelation(ctx context.Context, conn bun.IConn, ac *AccessClaim
 }
 
 func (d *DB) insertUser(ctx context.Context, conn bun.IConn, ac *AccessClaim, in *SamnaUser) (*SamnaUser, bool, error) {
+	if in.OwnerID != nil && *in.OwnerID != uuid.Nil {
+		result, err := d.insertOrganizationUser(ctx, conn, ac, *in.OwnerID, in, false, nil, nil)
+		if err != nil {
+			return nil, false, err
+		}
+		return result.SamnaUser, result.Created, nil
+	}
 	var payload []byte
 	err := d.NewRaw(`
 		SELECT (claimius.upsert_app_user(?, ?, ?, ?, ?, ?, ?, ?) -> 'samna_user')::jsonb
@@ -407,20 +414,6 @@ func (d *DB) PostUser(ctx context.Context, conn bun.IConn, ac *AccessClaim, in *
 			return nil, rootErr
 		}
 	}
-	var exists bool
-	if err := d.NewRaw(`
-		SELECT EXISTS (
-			SELECT 1 FROM claimius.samna_user
-			WHERE sa_deleted_at IS NULL
-			  AND ((? <> '00000000-0000-0000-0000-000000000000'::uuid AND user_id = ?)
-			    OR (nullif(?, '') IS NOT NULL AND external_id = ?))
-		)
-	`, in.UserID, in.UserID, in.ExternalID, in.ExternalID).Conn(conn).Scan(ctx, &exists); err != nil {
-		return nil, err
-	}
-	if exists {
-		return nil, ErrUserAlreadyExists
-	}
 	if err := d.NewInsert().Conn(conn).Model(in).Access(ac).Scan(ctx); err != nil {
 		var pgErr pgdriver.Error
 		if errors.Is(err, client.ErrConflict) || (errors.As(err, &pgErr) && pgErr.Field('C') == "23505") {
@@ -431,7 +424,7 @@ func (d *DB) PostUser(ctx context.Context, conn bun.IConn, ac *AccessClaim, in *
 	return in, nil
 }
 
-func (d *DB) callCreateOrganizationUser(ctx context.Context, conn bun.IConn, ac *AccessClaim, ownerID uuid.UUID, user *SamnaUser, identity map[string]any, reason *string) (*OrganizationUserResult, error) {
+func (d *DB) insertOrganizationUser(ctx context.Context, conn bun.IConn, ac *AccessClaim, ownerID uuid.UUID, user *SamnaUser, upsert bool, identity map[string]any, reason *string) (*OrganizationUserResult, error) {
 	if ac == nil || ac.UserClaimID == nil {
 		return nil, ErrNoAccess
 	}
@@ -439,14 +432,19 @@ func (d *DB) callCreateOrganizationUser(ctx context.Context, conn bun.IConn, ac 
 	if err != nil {
 		return nil, fmt.Errorf("marshal user: %w", err)
 	}
-	identityJSON, err := json.Marshal(identity)
-	if err != nil {
-		return nil, fmt.Errorf("marshal identity: %w", err)
+	var identityJSON *string
+	if identity != nil {
+		b, err := json.Marshal(identity)
+		if err != nil {
+			return nil, fmt.Errorf("marshal identity: %w", err)
+		}
+		s := string(b)
+		identityJSON = &s
 	}
 	var payload []byte
 	err = d.NewRaw(`
-		SELECT claimius.insert_organization_user(?, ?, ?::jsonb, ?::jsonb, ?)
-	`, *ac.UserClaimID, ownerID, string(userJSON), string(identityJSON), reason).Conn(conn).Scan(ctx, &payload)
+		SELECT claimius.insert_organization_user(p_caller_uc => ?, p_owner_id => ?, p_user => ?::jsonb, p_identity => ?::jsonb, p_reason => ?, p_upsert => ?)
+	`, *ac.UserClaimID, ownerID, string(userJSON), identityJSON, reason, upsert).Conn(conn).Scan(ctx, &payload)
 	if err != nil {
 		var pgErr pgdriver.Error
 		if errors.As(err, &pgErr) && pgErr.Field('C') == "23505" {
@@ -580,7 +578,7 @@ func (d *DB) postUserFromToken(ctx context.Context, conn bun.IConn, ac *AccessCl
 		return nil, err
 	}
 	identity := map[string]any{"external_id": externalID, "id_claim": idClaim, "type": "token", "data": claimsJSON}
-	return d.callCreateOrganizationUser(ctx, conn, ac, *payload.OwnerID, &user, identity, payload.Reason)
+	return d.insertOrganizationUser(ctx, conn, ac, *payload.OwnerID, &user, true, identity, payload.Reason)
 }
 
 func (d *DB) postUserFromExternal(ctx context.Context, conn bun.IConn, ac *AccessClaim, payload SamnaUserExternal) (*OrganizationUserResult, error) {
@@ -589,7 +587,7 @@ func (d *DB) postUserFromExternal(ctx context.Context, conn bun.IConn, ac *Acces
 		return nil, err
 	}
 	identity := map[string]any{"external_id": externalID, "id_claim": "external", "type": "external", "data": json.RawMessage(`{}`)}
-	return d.callCreateOrganizationUser(ctx, conn, ac, *payload.OwnerID, &user, identity, payload.Reason)
+	return d.insertOrganizationUser(ctx, conn, ac, *payload.OwnerID, &user, true, identity, payload.Reason)
 }
 
 func (d *DB) PostUserGuest(ctx context.Context, conn bun.IConn, ac *AccessClaim, payload SamnaUserGuest) (*SamnaUser, bool, error) {
