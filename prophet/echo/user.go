@@ -686,7 +686,7 @@ func postUser(ctx echo.Context, req BodyUser, userName string) (*SamnaUser, erro
 	if err := sdb.Instance().NewRaw(`SELECT EXISTS (
 		SELECT 1 FROM claimius.samna_user
 		WHERE sa_deleted_at IS NULL
-		  AND ((?::uuid IS NOT NULL AND user_id = ?::uuid)
+		  AND ((nullif(?::uuid, '00000000-0000-0000-0000-000000000000') IS NOT NULL AND user_id = ?::uuid)
 		    OR (nullif(?, '') IS NOT NULL AND external_id = ?)))`,
 		req.UserID, req.UserID, req.ExternalID, req.ExternalID,
 	).Scan(ctx.Request().Context(), &exists); err != nil {
@@ -698,7 +698,7 @@ func postUser(ctx echo.Context, req BodyUser, userName string) (*SamnaUser, erro
 	}
 	var userID uuid.UUID
 	err := sdb.Instance().NewRaw(`INSERT INTO claimius.samna_user (user_id, first_name, last_name, user_name, email, phone, external_id)
-		VALUES (coalesce(?::uuid, gen_random_uuid()), ?, ?,
+		VALUES (coalesce(nullif(?::uuid, '00000000-0000-0000-0000-000000000000'), gen_random_uuid()), ?, ?,
 		        CASE WHEN NOT EXISTS (
 		            SELECT 1 FROM claimius.samna_user u
 		            WHERE lower(u.user_name) = lower(?) AND u.sa_deleted_at IS NULL
