@@ -406,8 +406,6 @@ func (d *DB) PostUser(ctx context.Context, conn bun.IConn, ac *AccessClaim, in *
 		if rootErr := d.AssertUserSingleRoot(ctx, conn, in.UserID, *in.OwnerID); rootErr != nil {
 			return nil, rootErr
 		}
-	} else {
-		in.UserID = uuid.New()
 	}
 	var exists bool
 	if err := d.NewRaw(`
