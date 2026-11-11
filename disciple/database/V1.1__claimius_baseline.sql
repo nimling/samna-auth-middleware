@@ -20,7 +20,7 @@ DO $$
             CREATE TYPE claimius.app_status AS ENUM ('draft', 'active', 'inactive', 'erroneous');
         END IF;
         IF NOT EXISTS (SELECT 1 FROM pg_type t JOIN pg_namespace n ON n.oid = t.typnamespace WHERE t.typname = 'organization_type' AND n.nspname = 'claimius') THEN
-            CREATE TYPE claimius.organization_type AS ENUM ('system', 'company', 'entity');
+            CREATE TYPE claimius.organization_type AS ENUM ('system', 'customer', 'entity');
         END IF;
     END $$;
 
@@ -205,7 +205,7 @@ BEGIN
         ALTER TABLE claimius.organization
             ALTER COLUMN type TYPE claimius.organization_type USING (CASE
                 WHEN type = 'system' THEN 'system'
-                WHEN type = 'company' AND id = sa_owner_id THEN 'company'
+                WHEN type = 'company' AND id = sa_owner_id THEN 'customer'
                 ELSE 'entity'
             END)::claimius.organization_type,
             ALTER COLUMN type SET DEFAULT 'entity',
@@ -215,7 +215,7 @@ END $$;
 
 COMMENT ON TABLE claimius.organization IS 'Organization tree. Root iff sa_owner_id == sa_root_id == id.';
 COMMENT ON COLUMN claimius.organization.kind IS 'Free text the organization''s writers set and change, such as group. Synced from the prophet. Carries no logic.';
-COMMENT ON COLUMN claimius.organization.type IS 'Set by the platform, never by a user. system is the Samna Auth root, company the root that owns an app, which cannot be deleted, entity every other organization at any level. Synced from the prophet; a create here writes entity.';
+COMMENT ON COLUMN claimius.organization.type IS 'Set by the platform, never by a user. system is the Samna Auth root, customer the root that owns an app, which cannot be deleted, entity every other organization at any level. Synced from the prophet; a create here writes entity.';
 COMMENT ON COLUMN claimius.organization.private_seed IS 'Hex encoded HMAC seed. Synced from the prophet. Keys app_secret hashing for apps owned in this tree.';
 COMMENT ON COLUMN claimius.organization.sa_owner_id IS 'Parent org. Equals id at root.';
 COMMENT ON COLUMN claimius.organization.sa_root_id IS 'Top of tree. Equals id at root.';

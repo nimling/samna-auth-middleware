@@ -3321,7 +3321,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius.upsert_root_organization(UUID, TEXT, UUID, TEXT, claimius.organization_type, UUID, TEXT, TEXT) IS 'Creates a new root organization with self referencing sa_owner_id and sa_root_id, linked to the app through app_object. Idempotent on (app, name). p_type is entity unless the platform path asks for company; system is refused with SQLSTATE 22023.';
+COMMENT ON FUNCTION claimius.upsert_root_organization(UUID, TEXT, UUID, TEXT, claimius.organization_type, UUID, TEXT, TEXT) IS 'Creates a new root organization with self referencing sa_owner_id and sa_root_id, linked to the app through app_object. Idempotent on (app, name). p_type is entity unless the platform path asks for customer; system is refused with SQLSTATE 22023.';
 
 GRANT EXECUTE ON FUNCTION claimius.upsert_root_organization(UUID, TEXT, UUID, TEXT, claimius.organization_type, UUID, TEXT, TEXT)
     TO claimius_writer, claimius_reader;

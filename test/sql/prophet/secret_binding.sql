@@ -27,7 +27,7 @@ BEGIN
 
     PERFORM claimius.upsert_root_organization(v_app, 'Crew', v_sys_uc, p_id => v_org);
     INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
-    VALUES ('10000000-0000-4000-8000-000000000e5f', 'Unlinked', 'company', '10000000-0000-4000-8000-000000000e5f',
+    VALUES ('10000000-0000-4000-8000-000000000e5f', 'Unlinked', 'customer', '10000000-0000-4000-8000-000000000e5f',
             '10000000-0000-4000-8000-000000000e5f', 0, v_sys_uc);
     PERFORM claimius.upsert_app_user(p_user_id => v_owner, p_app_id => v_app, p_first_name => 'Owner');
     PERFORM claimius.upsert_app_user(p_user_id => v_reader, p_app_id => v_app, p_first_name => 'Reader');

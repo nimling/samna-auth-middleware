@@ -22,7 +22,7 @@ var (
 	ErrRootConflict        = errors.New("identity already registered under a different root")
 	ErrUserAlreadyExists   = errors.New("user already exists")
 	ErrOrganizationParent  = errors.New("an organization moves only under an organization of its own root that is neither itself nor one of its descendants")
-	ErrOrganizationCompany = errors.New("the company organization cannot be deleted")
+	ErrOrganizationCustomer = errors.New("the customer organization cannot be deleted")
 )
 
 func selfAccessClaim(userID uuid.UUID, requiredAccess ClaimAccess) *AccessClaim {

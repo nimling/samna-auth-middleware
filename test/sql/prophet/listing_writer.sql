@@ -26,7 +26,7 @@ BEGIN
         BEGIN;
         SET LOCAL lock_timeout = '5s';
         INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
-        VALUES (gen_random_uuid(), 'Writer child', 'company',
+        VALUES (gen_random_uuid(), 'Writer child', 'customer',
                 '10000000-0000-4000-8000-000000000fa0', '10000000-0000-4000-8000-000000000fa0', 1,
                 '00000000-0000-4000-8000-000000000fa0');
         COMMIT;
@@ -73,7 +73,7 @@ BEGIN
     ) -> 'samna_app' ->> 'id')::UUID;
     PERFORM claimius.upsert_app_user(p_user_id => 'a0000000-0000-4000-8000-000000000fa1', p_app_id => v_app, p_first_name => 'Reader');
     INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
-    VALUES (v_root, 'Listing root', 'company', v_root, v_root, 0, v_sys);
+    VALUES (v_root, 'Listing root', 'customer', v_root, v_root, 0, v_sys);
     PERFORM claimius.upsert_app_object(v_app, 'claimius.organization', v_root);
     v_crew := (claimius.insert_claim(
         p_app_id => v_app, p_name => 'Listing crew', p_description => NULL, p_sa_access => 4,
@@ -113,7 +113,7 @@ COMMIT;
 
 BEGIN;
 INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
-SELECT gen_random_uuid(), 'Listing child ' || g, 'company',
+SELECT gen_random_uuid(), 'Listing child ' || g, 'customer',
        '10000000-0000-4000-8000-000000000fa0', '10000000-0000-4000-8000-000000000fa0', 1,
        '00000000-0000-4000-8000-000000000fa0'
 FROM generate_series(1, 700) AS g;

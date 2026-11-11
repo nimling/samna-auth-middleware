@@ -28,7 +28,7 @@ func getLevelFixture(t *testing.T) levelFixture {
 	f := levelFixture{app: postPeerApp(t, grantUser), child: uuid.New(), writer: uuid.New()}
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
-		VALUES (?, 'Level child', 'company', ?, ?, 1, ?)
+		VALUES (?, 'Level child', 'customer', ?, ?, 1, ?)
 	`, f.child, f.app.Org, f.app.Org, grantUser); err != nil {
 		t.Fatalf("child: %v", err)
 	}

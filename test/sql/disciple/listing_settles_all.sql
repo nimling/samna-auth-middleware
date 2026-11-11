@@ -41,8 +41,8 @@ BEGIN
     PERFORM claimius.upsert_app_user(p_user_id => 'a0000000-0000-4000-8000-000000000b92', p_first_name => 'Other');
 
     INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
-    VALUES (v_root, 'Budget root', 'company', v_root, v_root, 0, v_sys),
-           (v_vault, 'Budget vault', 'company', v_vault, v_vault, 0, v_sys);
+    VALUES (v_root, 'Budget root', 'customer', v_root, v_root, 0, v_sys),
+           (v_vault, 'Budget vault', 'customer', v_vault, v_vault, 0, v_sys);
 
     v_crew := (claimius.insert_claim(
         p_name => 'Budget crew', p_description => NULL, p_sa_access => 4,
@@ -80,7 +80,7 @@ BEGIN
 END $$;
 
 INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
-SELECT gen_random_uuid(), 'Budget child ' || g, 'company', '10000000-0000-4000-8000-000000000b90', '10000000-0000-4000-8000-000000000b90', 1,
+SELECT gen_random_uuid(), 'Budget child ' || g, 'customer', '10000000-0000-4000-8000-000000000b90', '10000000-0000-4000-8000-000000000b90', 1,
        '00000000-0000-4000-8000-000000000b90'
 FROM generate_series(1, 700) AS g;
 

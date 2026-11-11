@@ -49,13 +49,13 @@ BEGIN
     PERFORM claimius.upsert_app_user(p_user_id => v_c, p_first_name => 'Cy', p_external_id => 'ext-c');
 
     INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by) VALUES
-        (v_root, 'Root', 'company', v_root, v_root, 0, v_a),
-        (v_dropped, 'Dropped', 'company', v_dropped, v_dropped, 0, v_c),
-        (v_kept, 'Kept', 'company', v_kept, v_kept, 0, v_c);
+        (v_root, 'Root', 'customer', v_root, v_root, 0, v_a),
+        (v_dropped, 'Dropped', 'customer', v_dropped, v_dropped, 0, v_c),
+        (v_kept, 'Kept', 'customer', v_kept, v_kept, 0, v_c);
     INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
-    VALUES (v_alpha, 'Alpha', 'company', v_root, v_root, 1, v_a);
+    VALUES (v_alpha, 'Alpha', 'customer', v_root, v_root, 1, v_a);
     INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
-    VALUES (v_grand, 'Grand', 'company', v_alpha, v_root, 2, v_a);
+    VALUES (v_grand, 'Grand', 'customer', v_alpha, v_root, 2, v_a);
 
     v_claim := (claimius.insert_claim(p_name => 'Root writer', p_description => NULL, p_sa_access => 6,
         p_sa_owner_id => v_root, p_sa_root_id => v_root, p_sa_created_by => v_a) -> 'claim' ->> 'id')::UUID;
@@ -178,7 +178,7 @@ func TestInsertRootOrganizationKeepsItsOwnID(t *testing.T) {
 	if err != nil {
 		t.Fatalf("access: %v", err)
 	}
-	org, err := db.InsertRootOrganization(ctx, nil, ac, &sdb.Organization{Name: "Fresh root", Type: sdb.ORGANIZATION_TYPE_COMPANY})
+	org, err := db.InsertRootOrganization(ctx, nil, ac, &sdb.Organization{Name: "Fresh root", Type: sdb.ORGANIZATION_TYPE_CUSTOMER})
 	if err != nil {
 		t.Fatalf("insert root organization: %v", err)
 	}
@@ -289,7 +289,7 @@ func TestInsertRootOrganizationBindsNoForeignClaim(t *testing.T) {
 	if err != nil {
 		t.Fatalf("access: %v", err)
 	}
-	org, err := db.InsertRootOrganization(ctx, nil, ac, &sdb.Organization{Name: "Unbound root", Type: sdb.ORGANIZATION_TYPE_COMPANY})
+	org, err := db.InsertRootOrganization(ctx, nil, ac, &sdb.Organization{Name: "Unbound root", Type: sdb.ORGANIZATION_TYPE_CUSTOMER})
 	if err != nil {
 		t.Fatalf("insert root organization: %v", err)
 	}

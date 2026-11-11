@@ -13,7 +13,7 @@ BEGIN
     PERFORM claimius.upsert_app_user(p_user_id => v_synced, p_first_name => 'Synced');
     PERFORM claimius.upsert_app_user(p_user_id => v_local, p_first_name => 'Local');
     INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
-    VALUES (v_root, 'Replay cascade root', 'company', v_root, v_root, 0, v_sys);
+    VALUES (v_root, 'Replay cascade root', 'customer', v_root, v_root, 0, v_sys);
     v_crew := (claimius.insert_claim(
         p_name => 'Replay cascade crew', p_description => NULL, p_sa_access => 4,
         p_sa_owner_id => v_root, p_sa_root_id => v_root, p_sa_created_by => v_sys

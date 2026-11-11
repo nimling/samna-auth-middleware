@@ -320,7 +320,7 @@ type OrganizationType string
 
 const (
 	ORGANIZATION_TYPE_SYSTEM  OrganizationType = "system"
-	ORGANIZATION_TYPE_COMPANY OrganizationType = "company"
+	ORGANIZATION_TYPE_CUSTOMER OrganizationType = "customer"
 	ORGANIZATION_TYPE_ENTITY  OrganizationType = "entity"
 )
 

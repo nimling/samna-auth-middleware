@@ -50,8 +50,8 @@ BEGIN
 
     PERFORM claimius.upsert_app_user(p_user_id => v_user, p_app_id => v_app, p_first_name => 'Ada');
     INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
-    VALUES (v_root, 'Grant root', 'company', v_root, v_root, 0, v_user),
-           (v_object, 'Grant object', 'company', v_root, v_root, 1, v_user);
+    VALUES (v_root, 'Grant root', 'customer', v_root, v_root, 0, v_user),
+           (v_object, 'Grant object', 'customer', v_root, v_root, 1, v_user);
     PERFORM claimius.upsert_app_object(v_app, 'claimius.organization', v_root);
     PERFORM claimius.upsert_app_object(v_app, 'claimius.organization', v_object);
 

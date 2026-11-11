@@ -16,11 +16,11 @@ BEGIN
     PERFORM claimius.upsert_app_user(p_user_id => v_a, p_first_name => 'Ada');
 
     INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
-    VALUES (v_root, 'Walk root', 'company', v_root, v_root, 0, v_a),
-           (v_other, 'Walk other', 'company', v_other, v_other, 0, v_a);
+    VALUES (v_root, 'Walk root', 'customer', v_root, v_root, 0, v_a),
+           (v_other, 'Walk other', 'customer', v_other, v_other, 0, v_a);
     INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
-    VALUES (v_child, 'Walk child', 'company', v_root, v_root, 1, v_a),
-           (v_leaf, 'Walk leaf', 'company', v_other, v_other, 1, v_a);
+    VALUES (v_child, 'Walk child', 'customer', v_root, v_root, 1, v_a),
+           (v_leaf, 'Walk leaf', 'customer', v_other, v_other, 1, v_a);
 
     v_writer := (claimius.insert_claim(
         p_name => 'Root writer', p_description => NULL, p_sa_access => 6,

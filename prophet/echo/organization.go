@@ -113,7 +113,7 @@ func DeleteOrganization(ctx echo.Context) error {
 	}
 	organization, err := deleteOrganization(ctx, organizationID, appID)
 	if err != nil {
-		if errors.Is(err, shared.ErrOrganizationCompany) {
+		if errors.Is(err, shared.ErrOrganizationCustomer) {
 			return respond.Error(ctx, http.StatusBadRequest, err.Error())
 		}
 		return respond.Error(ctx, errorsx.ErrToHttpCode(err), "")
@@ -263,8 +263,8 @@ func deleteOrganization(ctx echo.Context, organizationID, appID uuid.UUID) (*Org
 		ctx.Logger().Errorf("deleteOrganization type: %v", err)
 		return nil, errorsx.ErrDbUnexpected
 	}
-	if orgType == ORGANIZATION_TYPE_COMPANY {
-		return nil, shared.ErrOrganizationCompany
+	if orgType == ORGANIZATION_TYPE_CUSTOMER {
+		return nil, shared.ErrOrganizationCustomer
 	}
 	res, err := sdb.Instance().
 		NewUpdate().

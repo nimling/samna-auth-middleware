@@ -19,9 +19,9 @@ BEGIN
     PERFORM claimius.upsert_app_user(p_user_id => v_uma, p_first_name => 'Uma');
 
     INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
-    VALUES (v_root, 'Mask root', 'company', v_root, v_root, 0, v_sys);
+    VALUES (v_root, 'Mask root', 'customer', v_root, v_root, 0, v_sys);
     INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
-    VALUES (v_child, 'Mask child', 'company', v_root, v_root, 1, v_sys);
+    VALUES (v_child, 'Mask child', 'customer', v_root, v_root, 1, v_sys);
 
     v_narrow := (claimius.insert_claim(
         p_name => 'Narrowed', p_description => NULL, p_sa_access => 2,

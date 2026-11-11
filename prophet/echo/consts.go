@@ -73,7 +73,7 @@ const (
 	OBJECT_TYPE_MODULE       ObjectType = "public.module"
 
 	ORGANIZATION_TYPE_SYSTEM  OrganizationType = "system"
-	ORGANIZATION_TYPE_COMPANY OrganizationType = "company"
+	ORGANIZATION_TYPE_CUSTOMER OrganizationType = "customer"
 	ORGANIZATION_TYPE_ENTITY  OrganizationType = "entity"
 
 	LOCATION_TYPE_BUILDING LocationType = "building"

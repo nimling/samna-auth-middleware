@@ -24,8 +24,8 @@ BEGIN
     SELECT v_app_b, 'sqltest_feed_b', 'Feed B', 'key', 'seed', sa_owner_id, sa_created_by FROM claimius.samna_app WHERE id = v_system;
 
     INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by, private_seed)
-    VALUES (v_mine, 'Mine', 'company', v_mine, v_mine, 0, v_owner, 'seed-mine'),
-           (v_theirs, 'Theirs', 'company', v_theirs, v_theirs, 0, v_owner, 'seed-theirs');
+    VALUES (v_mine, 'Mine', 'customer', v_mine, v_mine, 0, v_owner, 'seed-mine'),
+           (v_theirs, 'Theirs', 'customer', v_theirs, v_theirs, 0, v_owner, 'seed-theirs');
     PERFORM claimius.upsert_app_object(v_app_a, 'claimius.organization', v_mine);
     PERFORM claimius.upsert_app_object(v_app_b, 'claimius.organization', v_theirs);
 

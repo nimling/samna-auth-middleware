@@ -31,10 +31,10 @@ BEGIN
     v_sys := (v_init -> 'user_claim' ->> 'id')::UUID;
 
     INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
-    VALUES (v_root, 'Root', 'company', v_root, v_root, 0, v_sys);
+    VALUES (v_root, 'Root', 'customer', v_root, v_root, 0, v_sys);
     PERFORM claimius.upsert_app_object(v_app, 'claimius.organization', v_root);
     INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
-    VALUES (v_child, 'Child', 'company', v_root, v_root, 1, v_sys);
+    VALUES (v_child, 'Child', 'customer', v_root, v_root, 1, v_sys);
 
     PERFORM claimius.upsert_app_user(p_user_id => ('a0000000-0000-4000-8000-0000000001a' || n)::UUID, p_app_id => v_app, p_first_name => 'U' || n)
     FROM generate_series(1, 6) n;

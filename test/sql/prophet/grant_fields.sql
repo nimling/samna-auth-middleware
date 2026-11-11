@@ -37,10 +37,10 @@ BEGIN
     PERFORM claimius.upsert_app_user(p_user_id => v_timed, p_app_id => v_app, p_first_name => 'Timed');
     PERFORM claimius.upsert_app_user(p_user_id => v_named, p_app_id => v_app, p_first_name => 'Named');
     INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
-    VALUES (v_root, 'Fields root', 'company', v_root, v_root, 0, v_sys);
+    VALUES (v_root, 'Fields root', 'customer', v_root, v_root, 0, v_sys);
     PERFORM claimius.upsert_app_object(v_app, 'claimius.organization', v_root);
     INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
-    VALUES (v_x, 'Fields x', 'company', v_root, v_root, 1, v_sys);
+    VALUES (v_x, 'Fields x', 'customer', v_root, v_root, 1, v_sys);
     v_crew := (claimius.insert_claim(
         p_app_id => v_app, p_name => 'Fields crew', p_description => NULL, p_sa_access => 4,
         p_sa_owner_id => v_root, p_sa_root_id => v_root, p_sa_created_by => v_sys

@@ -55,10 +55,10 @@ BEGIN
         PERFORM claimius.upsert_app_user(p_user_id => v_user, p_app_id => v_app, p_first_name => 'Sharer');
     END LOOP;
     INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
-    VALUES (v_root, 'Viewers root', 'company', v_root, v_root, 0, v_sys);
+    VALUES (v_root, 'Viewers root', 'customer', v_root, v_root, 0, v_sys);
     PERFORM claimius.upsert_app_object(v_app, 'claimius.organization', v_root);
     INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
-    VALUES (v_desk, 'Viewers desk', 'company', v_root, v_root, 1, v_sys);
+    VALUES (v_desk, 'Viewers desk', 'customer', v_root, v_root, 1, v_sys);
     v_crew := (claimius.insert_claim(
         p_app_id => v_app, p_name => 'Viewers crew', p_description => NULL, p_sa_access => 4,
         p_sa_owner_id => v_root, p_sa_root_id => v_root, p_sa_created_by => v_sys
@@ -96,7 +96,7 @@ SELECT isnt((SELECT directory_at FROM claimius.user_activity WHERE app_id = pg_t
     'the user is marked as a viewer');
 
 INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
-VALUES ('10000000-0000-4000-8000-000000d6a002', 'Viewers late', 'company', '10000000-0000-4000-8000-000000d6a000',
+VALUES ('10000000-0000-4000-8000-000000d6a002', 'Viewers late', 'customer', '10000000-0000-4000-8000-000000d6a000',
         '10000000-0000-4000-8000-000000d6a000', 1, '00000000-0000-4000-8000-000000d6a000');
 SELECT count(*) FROM claimius.get_objects('a0000000-0000-4000-8000-000000d6a001', pg_temp.app(), 'claimius.organization');
 SELECT count(*) FROM claimius.get_objects('a0000000-0000-4000-8000-000000d6a002', pg_temp.app(), 'claimius.organization');

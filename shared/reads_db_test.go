@@ -395,7 +395,7 @@ func TestGetOrganizationsAndLocationsManyResolveExternalIDs(t *testing.T) {
 	orgExt, locExt := "org-"+org.String(), "loc-"+loc.String()
 	if _, err := db.NewRaw(`
 		INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by, external_id, sa_deleted_at)
-		VALUES (?, 'External', 'company', ?, ?, 1, ?, ?, now())`, org, orgKept, orgKept, userC, orgExt).Exec(ctx); err != nil {
+		VALUES (?, 'External', 'customer', ?, ?, 1, ?, ?, now())`, org, orgKept, orgKept, userC, orgExt).Exec(ctx); err != nil {
 		t.Fatalf("insert organization: %v", err)
 	}
 	if _, err := db.NewRaw(`

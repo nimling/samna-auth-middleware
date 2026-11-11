@@ -28,9 +28,9 @@ BEGIN
     );
 
     INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
-    VALUES ('10000000-0000-4000-8000-0000000005c1', 'Unlinked', 'company',
+    VALUES ('10000000-0000-4000-8000-0000000005c1', 'Unlinked', 'customer',
             '10000000-0000-4000-8000-0000000005c1', '10000000-0000-4000-8000-0000000005c1', 0, pg_temp.actor()),
-           ('10000000-0000-4000-8000-0000000005c2', 'Unlinked later', 'company',
+           ('10000000-0000-4000-8000-0000000005c2', 'Unlinked later', 'customer',
             '10000000-0000-4000-8000-0000000005c2', '10000000-0000-4000-8000-0000000005c2', 0, pg_temp.actor());
     PERFORM claimius.upsert_app_object(pg_temp.app(), 'claimius.organization', '10000000-0000-4000-8000-0000000005c2', pg_temp.actor());
 END $$;

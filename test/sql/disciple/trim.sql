@@ -35,9 +35,9 @@ BEGIN
         PERFORM claimius.upsert_app_user(p_user_id => v_user, p_first_name => 'Reader');
     END LOOP;
     INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
-    VALUES (v_root, 'Trim root', 'company', v_root, v_root, 0, v_sys);
+    VALUES (v_root, 'Trim root', 'customer', v_root, v_root, 0, v_sys);
     INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
-    SELECT md5('trim org ' || n)::UUID, 'Trim org ' || n, 'company', v_root, v_root, 1, v_sys
+    SELECT md5('trim org ' || n)::UUID, 'Trim org ' || n, 'customer', v_root, v_root, 1, v_sys
     FROM generate_series(1, 3) n;
     v_crew := (claimius.insert_claim(
         p_name => 'Trim crew', p_description => NULL, p_sa_access => 4,
@@ -62,7 +62,7 @@ WHERE user_id = 'a0000000-0000-4000-8000-000000d5a002';
 COMMIT;
 
 INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
-VALUES ('10000000-0000-4000-8000-000000d5a010', 'Trim late', 'company',
+VALUES ('10000000-0000-4000-8000-000000d5a010', 'Trim late', 'customer',
         '10000000-0000-4000-8000-000000d5a000', '10000000-0000-4000-8000-000000d5a000', 1, '00000000-0000-4000-8000-000000d5a000');
 COMMIT;
 
@@ -101,7 +101,7 @@ END $$;
 COMMIT;
 
 INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
-VALUES ('10000000-0000-4000-8000-000000d5a011', 'Trim later', 'company',
+VALUES ('10000000-0000-4000-8000-000000d5a011', 'Trim later', 'customer',
         '10000000-0000-4000-8000-000000d5a000', '10000000-0000-4000-8000-000000d5a000', 1, '00000000-0000-4000-8000-000000d5a000');
 COMMIT;
 

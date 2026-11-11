@@ -25,9 +25,9 @@ BEGIN
     END LOOP;
 
     INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
-    VALUES (v_root, 'Drain root', 'company', v_root, v_root, 0, v_sys);
+    VALUES (v_root, 'Drain root', 'customer', v_root, v_root, 0, v_sys);
     INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
-    VALUES ('10000000-0000-4000-8000-0000000000f1', 'Drain child', 'company', v_root, v_root, 1, v_sys);
+    VALUES ('10000000-0000-4000-8000-0000000000f1', 'Drain child', 'customer', v_root, v_root, 1, v_sys);
 
     v_crew := (claimius.insert_claim(
         p_name => 'Drain crew', p_description => NULL, p_sa_access => 4,

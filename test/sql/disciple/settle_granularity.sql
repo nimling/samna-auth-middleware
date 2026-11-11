@@ -28,14 +28,14 @@ BEGIN
     END LOOP;
 
     INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
-    VALUES (v_root, 'Settle root', 'company', v_root, v_root, 0, v_sys);
+    VALUES (v_root, 'Settle root', 'customer', v_root, v_root, 0, v_sys);
     INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
-    VALUES (v_node, 'Settle node', 'company', v_root, v_root, 1, v_sys);
+    VALUES (v_node, 'Settle node', 'customer', v_root, v_root, 1, v_sys);
     INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
-    VALUES ('10000000-0000-4000-8000-0000000000d2', 'Settle one', 'company', v_node, v_root, 2, v_sys),
-           ('10000000-0000-4000-8000-0000000000d3', 'Settle two', 'company', v_node, v_root, 2, v_sys);
+    VALUES ('10000000-0000-4000-8000-0000000000d2', 'Settle one', 'customer', v_node, v_root, 2, v_sys),
+           ('10000000-0000-4000-8000-0000000000d3', 'Settle two', 'customer', v_node, v_root, 2, v_sys);
     INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
-    VALUES ('10000000-0000-4000-8000-0000000000d4', 'Settle three', 'company', '10000000-0000-4000-8000-0000000000d3', v_root, 3, v_sys);
+    VALUES ('10000000-0000-4000-8000-0000000000d4', 'Settle three', 'customer', '10000000-0000-4000-8000-0000000000d3', v_root, 3, v_sys);
 
     v_admin := (claimius.insert_claim(
         p_name => 'Settle admin', p_description => NULL, p_sa_access => 1,

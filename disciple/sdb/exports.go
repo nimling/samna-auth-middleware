@@ -88,7 +88,7 @@ const (
 	OBJECT_TYPE_USER_CLAIM    = shared.OBJECT_TYPE_USER_CLAIM
 	OBJECT_TYPE_USER_RELATION = shared.OBJECT_TYPE_USER_RELATION
 	ORGANIZATION_TYPE_ENTITY  = shared.ORGANIZATION_TYPE_ENTITY
-	ORGANIZATION_TYPE_COMPANY = shared.ORGANIZATION_TYPE_COMPANY
+	ORGANIZATION_TYPE_CUSTOMER = shared.ORGANIZATION_TYPE_CUSTOMER
 	ORGANIZATION_TYPE_SYSTEM  = shared.ORGANIZATION_TYPE_SYSTEM
 	USER_TYPE_SYSTEM          = shared.USER_TYPE_SYSTEM
 	USER_TYPE_GUEST           = shared.USER_TYPE_GUEST
@@ -107,7 +107,7 @@ var (
 	ErrNoAccess            = shared.ErrNoAccess
 	ErrNotFound            = shared.ErrNotFound
 	ErrOrganizationParent  = shared.ErrOrganizationParent
-	ErrOrganizationCompany = shared.ErrOrganizationCompany
+	ErrOrganizationCustomer = shared.ErrOrganizationCustomer
 	ErrRootConflict        = shared.ErrRootConflict
 	ErrUserAlreadyExists   = shared.ErrUserAlreadyExists
 	ObjectWhere            = shared.ObjectWhere

@@ -57,7 +57,7 @@ func getCodeFixture(t *testing.T) codeFixture {
 	}
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
-		VALUES (?0, 'Shared', 'company', ?0, ?0, 0, ?1), (?2, 'Hidden', 'company', ?2, ?2, 0, ?1)
+		VALUES (?0, 'Shared', 'customer', ?0, ?0, 0, ?1), (?2, 'Hidden', 'customer', ?2, ?2, 0, ?1)
 	`, f.org, f.owner, f.hidden); err != nil {
 		t.Fatalf("organizations: %v", err)
 	}

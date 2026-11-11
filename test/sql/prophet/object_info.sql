@@ -43,12 +43,12 @@ BEGIN
     END LOOP;
 
     INSERT INTO claimius.organization (id, name, description, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
-    VALUES (v_root, 'Info root', 'The info root', 'company', v_root, v_root, 0, v_sys);
+    VALUES (v_root, 'Info root', 'The info root', 'customer', v_root, v_root, 0, v_sys);
     PERFORM claimius.upsert_app_object(v_app, 'claimius.organization', v_root);
     INSERT INTO claimius.organization (id, name, description, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
-    VALUES ('10000000-0000-4000-8000-0000000000b1', 'Info harbour', 'Docks and cranes', 'company', v_root, v_root, 1, v_sys),
-           ('10000000-0000-4000-8000-0000000000b2', 'Info quarry', 'Stone and gravel', 'company', v_root, v_root, 1, v_sys),
-           ('10000000-0000-4000-8000-0000000000b3', 'Info meadow', 'Grass and sheep', 'company', v_root, v_root, 1, v_sys);
+    VALUES ('10000000-0000-4000-8000-0000000000b1', 'Info harbour', 'Docks and cranes', 'customer', v_root, v_root, 1, v_sys),
+           ('10000000-0000-4000-8000-0000000000b2', 'Info quarry', 'Stone and gravel', 'customer', v_root, v_root, 1, v_sys),
+           ('10000000-0000-4000-8000-0000000000b3', 'Info meadow', 'Grass and sheep', 'customer', v_root, v_root, 1, v_sys);
 
     v_crew := (claimius.insert_claim(
         p_app_id => v_app, p_name => 'Info crew', p_description => 'Reads the info tree', p_sa_access => 4,

@@ -204,7 +204,7 @@ func TestEveryScenarioResolvesTheSameOnTheProphetAndItsDisciple(t *testing.T) {
 	child := uuid.New()
 	if _, err := prophet.ExecContext(ctx, `
 		INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
-		VALUES (?, 'Scenario child', 'company', ?, ?, 1, ?)
+		VALUES (?, 'Scenario child', 'customer', ?, ?, 1, ?)
 	`, child, app.Org, app.Org, grantUser); err != nil {
 		t.Fatalf("child: %v", err)
 	}
@@ -350,7 +350,7 @@ func TestScenarioAMovedClaimAndANewGrantReachTheDisciple(t *testing.T) {
 	team := uuid.New()
 	if _, err := prophet.ExecContext(ctx, `
 		INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
-		VALUES (?, 'Scenario team', 'company', ?, ?, 1, ?)
+		VALUES (?, 'Scenario team', 'customer', ?, ?, 1, ?)
 	`, team, app.Org, app.Org, grantUser); err != nil {
 		t.Fatalf("team: %v", err)
 	}

@@ -20,12 +20,12 @@ BEGIN
     v_reader := (claimius.upsert_app_user(p_user_id => 'a0000000-0000-4000-8000-000000000f71', p_app_id => v_app, p_first_name => 'Linker')
         -> 'user_claim' ->> 'id')::UUID;
     INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
-    VALUES (v_root, 'Link root', 'company', v_root, v_root, 0, v_sys);
+    VALUES (v_root, 'Link root', 'customer', v_root, v_root, 0, v_sys);
     PERFORM claimius.upsert_app_object(v_app, 'claimius.organization', v_root);
     INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
-    VALUES ('10000000-0000-4000-8000-000000000f73', 'Charlie', 'company', v_root, v_root, 1, v_sys),
-           ('10000000-0000-4000-8000-000000000f71', 'Alpha', 'company', v_root, v_root, 1, v_sys),
-           ('10000000-0000-4000-8000-000000000f72', 'Bravo', 'company', v_root, v_root, 1, v_sys);
+    VALUES ('10000000-0000-4000-8000-000000000f73', 'Charlie', 'customer', v_root, v_root, 1, v_sys),
+           ('10000000-0000-4000-8000-000000000f71', 'Alpha', 'customer', v_root, v_root, 1, v_sys),
+           ('10000000-0000-4000-8000-000000000f72', 'Bravo', 'customer', v_root, v_root, 1, v_sys);
 
     v_crew := (claimius.insert_claim(
         p_app_id => v_app, p_name => 'Link crew', p_description => NULL, p_sa_access => 4,
@@ -37,7 +37,7 @@ BEGIN
     PERFORM claimius.insert_user_claim(p_app_id => v_app, p_claim_id => v_crew, p_user_id => 'a0000000-0000-4000-8000-000000000f71',
         p_sa_owner_id => v_root, p_sa_created_by => v_sys);
     INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
-    VALUES ('10000000-0000-4000-8000-000000000f7f', 'Lone root', 'company', '10000000-0000-4000-8000-000000000f7f', '10000000-0000-4000-8000-000000000f7f', 0, v_reader);
+    VALUES ('10000000-0000-4000-8000-000000000f7f', 'Lone root', 'customer', '10000000-0000-4000-8000-000000000f7f', '10000000-0000-4000-8000-000000000f7f', 0, v_reader);
     PERFORM claimius.upsert_app_object(v_app, 'claimius.organization', '10000000-0000-4000-8000-000000000f7f');
     PERFORM claimius.insert_claim(
         p_app_id => v_app, p_name => 'Empty claim', p_description => NULL, p_sa_access => 4,

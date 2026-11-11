@@ -45,12 +45,12 @@ BEGIN
     END LOOP;
 
     INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
-    VALUES (pg_temp.org(0), 'Plan root', 'company', pg_temp.org(0), pg_temp.org(0), 0, v_sys);
+    VALUES (pg_temp.org(0), 'Plan root', 'customer', pg_temp.org(0), pg_temp.org(0), 0, v_sys);
     INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
-    SELECT pg_temp.org(n), 'Plan node ' || n, 'company', pg_temp.org(0), pg_temp.org(0), 1, v_sys
+    SELECT pg_temp.org(n), 'Plan node ' || n, 'customer', pg_temp.org(0), pg_temp.org(0), 1, v_sys
     FROM generate_series(1, 10) n;
     INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
-    SELECT md5('plan leaf ' || m || ' ' || n)::UUID, 'Plan leaf ' || m || ' ' || n, 'company', pg_temp.org(m), pg_temp.org(0), 2, v_sys
+    SELECT md5('plan leaf ' || m || ' ' || n)::UUID, 'Plan leaf ' || m || ' ' || n, 'customer', pg_temp.org(m), pg_temp.org(0), 2, v_sys
     FROM generate_series(1, 10) m, generate_series(1, 99) n;
 
     v_claim := (claimius.insert_claim(

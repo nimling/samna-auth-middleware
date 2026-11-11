@@ -18,13 +18,13 @@ BEGIN
     PERFORM claimius.upsert_app_user(p_user_id => v_b, p_first_name => 'Bo', p_external_id => 'ext-b');
 
     INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
-    VALUES (v_root, 'Root', 'company', v_root, v_root, 0, v_a);
+    VALUES (v_root, 'Root', 'customer', v_root, v_root, 0, v_a);
     INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
-    VALUES (v_alpha, 'Alpha', 'company', v_root, v_root, 1, v_a),
-           (v_bravo, 'Bravo', 'company', v_root, v_root, 1, v_a),
-           (v_charlie, 'Charlie', 'company', v_root, v_root, 1, v_a);
+    VALUES (v_alpha, 'Alpha', 'customer', v_root, v_root, 1, v_a),
+           (v_bravo, 'Bravo', 'customer', v_root, v_root, 1, v_a),
+           (v_charlie, 'Charlie', 'customer', v_root, v_root, 1, v_a);
     INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
-    VALUES (v_grand, 'Grand', 'company', v_alpha, v_root, 2, v_a);
+    VALUES (v_grand, 'Grand', 'customer', v_alpha, v_root, 2, v_a);
 
     v_write := (claimius.insert_claim(
         p_name => 'Root writer', p_description => NULL, p_sa_access => 6,

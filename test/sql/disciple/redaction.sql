@@ -25,7 +25,7 @@ BEGIN
     PERFORM claimius.upsert_app_user(p_user_id => v_rae, p_first_name => 'Rae');
 
     INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
-    VALUES (v_root, 'Redaction root', 'company', v_root, v_root, 0, v_sys);
+    VALUES (v_root, 'Redaction root', 'customer', v_root, v_root, 0, v_sys);
 
     INSERT INTO public.sqltest_page (id, name, sa_owner_id, sa_created_by)
     SELECT ('20000000-0000-4000-8000-000000000d7' || n)::UUID, 'page ' || n, v_root, v_sys

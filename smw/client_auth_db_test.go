@@ -29,7 +29,7 @@ func postClient(t *testing.T, clientID uuid.UUID, secret string) {
 	owner := uuid.New()
 	if _, err := sdb.Instance().ExecContext(context.Background(), `
 		INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
-		VALUES (?0, 'Client owner', 'company', ?0, ?0, 0, ?0);
+		VALUES (?0, 'Client owner', 'customer', ?0, ?0, 0, ?0);
 		INSERT INTO claimius.samna_client (name, client_id, secret_hash, sa_owner_id) VALUES ('client auth', ?1, ?2, ?0);
 	`, owner, clientID, string(hash)); err != nil {
 		t.Fatalf("seed client: %v", err)

@@ -81,14 +81,14 @@ BEGIN
     PERFORM claimius.upsert_app_user(p_user_id => v_vic, p_app_id => v_app, p_first_name => 'Vic');
 
     INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
-    VALUES (v_old, 'Old root', 'company', v_old, v_old, 0, v_sys),
-           (v_new, 'New root', 'company', v_new, v_new, 0, v_sys);
+    VALUES (v_old, 'Old root', 'customer', v_old, v_old, 0, v_sys),
+           (v_new, 'New root', 'customer', v_new, v_new, 0, v_sys);
     PERFORM claimius.upsert_app_object(v_app, 'claimius.organization', v_old);
     PERFORM claimius.upsert_app_object(v_app, 'claimius.organization', v_new);
     INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
-    VALUES (v_sub, 'Moved', 'company', v_old, v_old, 1, v_sys);
+    VALUES (v_sub, 'Moved', 'customer', v_old, v_old, 1, v_sys);
     INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
-    VALUES (v_kid, 'Moved child', 'company', v_sub, v_old, 2, v_sys);
+    VALUES (v_kid, 'Moved child', 'customer', v_sub, v_old, 2, v_sys);
     INSERT INTO claimius.location (id, name, sa_owner_id, sa_parent_id, sa_root_id, sa_created_by)
     VALUES ('20000000-0000-4000-8000-000000000a90', 'Moved site', v_kid,
             '20000000-0000-4000-8000-000000000a90', '20000000-0000-4000-8000-000000000a90', v_sys);

@@ -86,14 +86,14 @@ BEGIN
     PERFORM claimius.upsert_table_info('public.sqltest_node', 'public.sqltest_leaf');
 
     INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
-    VALUES (v_r, 'Closure root', 'company', v_r, v_r, 0, v_a);
+    VALUES (v_r, 'Closure root', 'customer', v_r, v_r, 0, v_a);
     INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
-    VALUES (v_oa, 'Closure A', 'company', v_r, v_r, 1, v_a),
-           (v_ob, 'Closure B', 'company', v_r, v_r, 1, v_a);
+    VALUES (v_oa, 'Closure A', 'customer', v_r, v_r, 1, v_a),
+           (v_ob, 'Closure B', 'customer', v_r, v_r, 1, v_a);
     INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
-    VALUES (v_o1, 'Closure A1', 'company', v_oa, v_r, 2, v_a);
+    VALUES (v_o1, 'Closure A1', 'customer', v_oa, v_r, 2, v_a);
     INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
-    VALUES (v_o2, 'Closure A2', 'company', v_o1, v_r, 3, v_a);
+    VALUES (v_o2, 'Closure A2', 'customer', v_o1, v_r, 3, v_a);
 
     INSERT INTO claimius.location (id, name, sa_owner_id, sa_parent_id, sa_root_id, sa_created_by)
     VALUES (v_l, 'Closure site', v_r, v_l, v_l, v_a);
@@ -167,7 +167,7 @@ SELECT is(pg_temp.closure_drift(), 0::BIGINT, 'reparenting an organization under
 
 SET LOCAL claimius.replay_mode = 'true';
 INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
-VALUES ('10000000-0000-4000-8000-0000000000c6', 'Synced child', 'company',
+VALUES ('10000000-0000-4000-8000-0000000000c6', 'Synced child', 'customer',
         '10000000-0000-4000-8000-0000000000c2', '10000000-0000-4000-8000-0000000000c1', 1,
         'a0000000-0000-4000-8000-0000000000c1');
 SET LOCAL claimius.replay_mode = 'false';
@@ -197,7 +197,7 @@ VALUES ('ownership', '10000000-0000-4000-8000-0000000000c2', 'claimius.organizat
 SET LOCAL claimius.replay_mode = 'true';
 SELECT lives_ok(
     $$INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
-      VALUES ('10000000-0000-4000-8000-0000000000c7', 'Synced under a stale root', 'company',
+      VALUES ('10000000-0000-4000-8000-0000000000c7', 'Synced under a stale root', 'customer',
               '10000000-0000-4000-8000-0000000000c2', '10000000-0000-4000-8000-0000000000c1', 2,
               'a0000000-0000-4000-8000-0000000000c1')$$,
     'an organization synced under a parent that still carries a self edge under a root it once was lands'
@@ -241,7 +241,7 @@ SET LOCAL claimius.replay_mode = 'false';
 SELECT is(pg_temp.closure_drift(), 0::BIGINT, 'the absorbed move leaves the closure a full build writes');
 
 INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
-VALUES ('10000000-0000-4000-8000-0000000000c8', 'Second root', 'company',
+VALUES ('10000000-0000-4000-8000-0000000000c8', 'Second root', 'customer',
         '10000000-0000-4000-8000-0000000000c8', '10000000-0000-4000-8000-0000000000c8', 0,
         'a0000000-0000-4000-8000-0000000000c1');
 INSERT INTO claimius.inheritance_info (tree_type, root_id, ancestor_type, ancestor_id, descendant_type, descendant_id, depth)

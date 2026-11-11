@@ -24,14 +24,14 @@ BEGIN
     PERFORM claimius.upsert_disciple_state();
     PERFORM claimius.upsert_app_user(p_user_id => v_holder, p_first_name => 'Holder');
     INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
-    VALUES (pg_temp.org(0), 'Subtree root', 'company', pg_temp.org(0), pg_temp.org(0), 0, v_sys);
+    VALUES (pg_temp.org(0), 'Subtree root', 'customer', pg_temp.org(0), pg_temp.org(0), 0, v_sys);
     INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
-    VALUES (pg_temp.org(1), 'Subtree node', 'company', pg_temp.org(0), pg_temp.org(0), 1, v_sys);
+    VALUES (pg_temp.org(1), 'Subtree node', 'customer', pg_temp.org(0), pg_temp.org(0), 1, v_sys);
     FOR v_n IN 1 .. 5 LOOP
         INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
-        VALUES (pg_temp.org(10 + v_n), 'Subtree child ' || v_n, 'company', pg_temp.org(1), pg_temp.org(0), 2, v_sys);
+        VALUES (pg_temp.org(10 + v_n), 'Subtree child ' || v_n, 'customer', pg_temp.org(1), pg_temp.org(0), 2, v_sys);
         INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
-        VALUES (pg_temp.org(20 + v_n), 'Subtree grandchild ' || v_n, 'company', pg_temp.org(10 + v_n), pg_temp.org(0), 3, v_sys);
+        VALUES (pg_temp.org(20 + v_n), 'Subtree grandchild ' || v_n, 'customer', pg_temp.org(10 + v_n), pg_temp.org(0), 3, v_sys);
     END LOOP;
     v_crew := (claimius.insert_claim(
         p_name => 'Subtree crew', p_description => NULL, p_sa_access => 4,

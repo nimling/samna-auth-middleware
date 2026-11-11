@@ -30,13 +30,13 @@ BEGIN
     PERFORM claimius.upsert_app_user(p_user_id => v_wes, p_app_id => v_app, p_first_name => 'Wes');
 
     INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
-    VALUES (v_q, 'Claim home', 'company', v_q, v_q, 0, v_sys),
-           (v_x, 'X', 'company', v_x, v_x, 0, v_sys);
+    VALUES (v_q, 'Claim home', 'customer', v_q, v_q, 0, v_sys),
+           (v_x, 'X', 'customer', v_x, v_x, 0, v_sys);
     PERFORM claimius.upsert_app_object(v_app, 'claimius.organization', v_q);
     PERFORM claimius.upsert_app_object(v_app, 'claimius.organization', v_x);
     INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
-    VALUES (v_y, 'Y', 'company', v_x, v_x, 1, v_sys),
-           (v_z, 'Z', 'company', v_x, v_x, 1, v_sys);
+    VALUES (v_y, 'Y', 'customer', v_x, v_x, 1, v_sys),
+           (v_z, 'Z', 'customer', v_x, v_x, 1, v_sys);
 
     v_b := (claimius.insert_claim(
         p_app_id => v_app, p_name => 'B', p_description => NULL, p_sa_access => 2,

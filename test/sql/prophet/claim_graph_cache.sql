@@ -52,7 +52,7 @@ BEGIN
     PERFORM claimius.upsert_app_user(p_user_id => 'a0000000-0000-4000-8000-0000000000c1', p_app_id => v_app, p_first_name => 'Graph');
 
     INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
-    VALUES (v_root, 'Graph root', 'company', v_root, v_root, 0, v_sys);
+    VALUES (v_root, 'Graph root', 'customer', v_root, v_root, 0, v_sys);
     PERFORM claimius.upsert_app_object(v_app, 'claimius.organization', v_root);
 
     v_crew := (claimius.insert_claim(

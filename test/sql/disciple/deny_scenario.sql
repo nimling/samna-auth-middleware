@@ -36,13 +36,13 @@ BEGIN
     PERFORM claimius.upsert_app_user(p_user_id => v_vic, p_first_name => 'Vic');
 
     INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
-    VALUES (v_acme, 'Acme', 'company', v_acme, v_acme, 0, v_sys);
+    VALUES (v_acme, 'Acme', 'customer', v_acme, v_acme, 0, v_sys);
     INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
-    VALUES (v_sales, 'Sales', 'company', v_acme, v_acme, 1, v_sys),
-           (v_research, 'Research', 'company', v_acme, v_acme, 1, v_sys);
+    VALUES (v_sales, 'Sales', 'customer', v_acme, v_acme, 1, v_sys),
+           (v_research, 'Research', 'customer', v_acme, v_acme, 1, v_sys);
     INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
-    VALUES (v_lab, 'Lab', 'company', v_research, v_acme, 2, v_sys),
-           (v_archive, 'Archive', 'company', v_research, v_acme, 2, v_sys);
+    VALUES (v_lab, 'Lab', 'customer', v_research, v_acme, 2, v_sys),
+           (v_archive, 'Archive', 'customer', v_research, v_acme, 2, v_sys);
 
     INSERT INTO public.sqltest_doc (id, name, sa_owner_id, sa_created_by)
     SELECT CASE WHEN o.name = 'Lab' AND n = 1 THEN '20000000-0000-4000-8000-000000000e41'::UUID ELSE gen_random_uuid() END,

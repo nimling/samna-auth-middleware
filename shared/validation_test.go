@@ -34,7 +34,7 @@ func TestOrganizationValidateAcceptsKind(t *testing.T) {
 }
 
 func TestOrganizationValidateRejectsType(t *testing.T) {
-	for _, value := range []string{"entity", "company", "system"} {
+	for _, value := range []string{"entity", "customer", "system"} {
 		body := `{"name":"Acme","type":"` + value + `"}`
 		if err := boundOrganization(t, body).ValidatePost(); err == nil || err.Error() != "type not allowed" {
 			t.Fatalf("expected type %s to be refused on create, got %v", value, err)

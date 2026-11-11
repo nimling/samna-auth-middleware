@@ -348,7 +348,7 @@ func TestALocalBindingJoinsTheCallersTransaction(t *testing.T) {
 	}
 	defer tx.Rollback()
 	if _, err := tx.ExecContext(ctx, `INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
-		VALUES (?, 'Uncommitted', 'company', ?, ?, 1, ?)`, orgID, orgRoot, orgRoot, *ac.UserClaimID); err != nil {
+		VALUES (?, 'Uncommitted', 'customer', ?, ?, 1, ?)`, orgID, orgRoot, orgRoot, *ac.UserClaimID); err != nil {
 		t.Fatalf("insert the row in the transaction: %v", err)
 	}
 
@@ -596,7 +596,7 @@ func TestABindingKeepsTheOwnerItIsGivenRoutedOrLocal(t *testing.T) {
 	defer tx.Rollback()
 	local := uuid.New()
 	if _, err := tx.ExecContext(ctx, `INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
-		VALUES (?, 'Under Alpha', 'company', ?, ?, 2, ?)`, local, orgAlpha, orgRoot, *ac.UserClaimID); err != nil {
+		VALUES (?, 'Under Alpha', 'customer', ?, ?, 2, ?)`, local, orgAlpha, orgRoot, *ac.UserClaimID); err != nil {
 		t.Fatalf("insert the row: %v", err)
 	}
 	if err := db.NewInsert().Model(&sdb.ClaimObject{ClaimID: *ac.ClaimID, ObjectID: &local, ObjectType: &organization, OwnerID: orgAlpha, Inherits: true}).Access(ac).Conn(tx).Scan(ctx); err != nil {
@@ -612,7 +612,7 @@ func TestABindingKeepsTheOwnerItIsGivenRoutedOrLocal(t *testing.T) {
 
 	unset := uuid.New()
 	if _, err := tx.ExecContext(ctx, `INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
-		VALUES (?, 'Unset under Alpha', 'company', ?, ?, 2, ?)`, unset, orgAlpha, orgRoot, *ac.UserClaimID); err != nil {
+		VALUES (?, 'Unset under Alpha', 'customer', ?, ?, 2, ?)`, unset, orgAlpha, orgRoot, *ac.UserClaimID); err != nil {
 		t.Fatalf("insert the row: %v", err)
 	}
 	if err := db.NewInsert().Model(&sdb.ClaimObject{ClaimID: *ac.ClaimID, ObjectID: &unset, ObjectType: &organization, Inherits: true}).Access(ac).Conn(tx).Scan(ctx); err != nil {

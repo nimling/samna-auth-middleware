@@ -5,7 +5,7 @@ SELECT claimius.upsert_disciple_state();
 SET LOCAL claimius.replay_mode = 'true';
 
 INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
-VALUES ('10000000-0000-4000-8000-000000000ab1', 'Linked child', 'company',
+VALUES ('10000000-0000-4000-8000-000000000ab1', 'Linked child', 'customer',
         '10000000-0000-4000-8000-000000000ab0', '10000000-0000-4000-8000-000000000ab0', 1,
         '00000000-0000-4000-8000-000000000ab0');
 
@@ -37,7 +37,7 @@ SELECT results_eq(
 );
 
 INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
-VALUES ('10000000-0000-4000-8000-000000000ab2', 'Linked grandchild', 'company',
+VALUES ('10000000-0000-4000-8000-000000000ab2', 'Linked grandchild', 'customer',
         '10000000-0000-4000-8000-000000000ab1', '10000000-0000-4000-8000-000000000ab0', 2,
         '00000000-0000-4000-8000-000000000ab0');
 

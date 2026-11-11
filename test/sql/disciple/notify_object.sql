@@ -19,7 +19,7 @@ BEGIN
     PERFORM claimius.upsert_app_user(p_user_id => 'a0000000-0000-4000-8000-000000000f55', p_first_name => 'Outsider');
 
     INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
-    VALUES (v_org, 'Notice', 'company', v_org, v_org, 0, v_sys);
+    VALUES (v_org, 'Notice', 'customer', v_org, v_org, 0, v_sys);
 
     v_write := (claimius.insert_claim(
         p_name => 'Notice writer', p_description => NULL, p_sa_access => 6,

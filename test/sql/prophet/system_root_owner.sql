@@ -35,8 +35,8 @@ BEGIN
 
     PERFORM claimius.upsert_root_organization(v_sys_app, 'Root', v_sys_uc, p_id => v_root);
     INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
-    VALUES (v_from, 'From', 'company', v_root, v_root, 1, v_sys_uc),
-           (v_to, 'To', 'company', v_root, v_root, 1, v_sys_uc);
+    VALUES (v_from, 'From', 'customer', v_root, v_root, 1, v_sys_uc),
+           (v_to, 'To', 'customer', v_root, v_root, 1, v_sys_uc);
 
     PERFORM claimius.upsert_app_user(p_user_id => v_admin, p_app_id => v_sys_app, p_first_name => 'Admin');
     PERFORM claimius.upsert_app_user(p_user_id => v_flat, p_app_id => v_sys_app, p_first_name => 'Flat');

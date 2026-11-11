@@ -20,7 +20,7 @@ BEGIN
     PERFORM claimius.upsert_app_user(p_user_id => v_a, p_app_id => v_app, p_first_name => 'Ada');
 
     INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
-    VALUES (v_root, 'Foreign root', 'company', v_root, v_root, 0, v_a);
+    VALUES (v_root, 'Foreign root', 'customer', v_root, v_root, 0, v_a);
     PERFORM claimius.upsert_app_object(v_app, 'claimius.organization', v_root);
 
     v_claim := (claimius.insert_claim(

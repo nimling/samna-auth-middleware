@@ -44,8 +44,8 @@ BEGIN
     SELECT v_app_b, 'sqltest_asset_b', 'Asset B', 'key', 'seed', sa_owner_id, sa_created_by FROM claimius.samna_app WHERE id = v_system;
 
     INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
-    VALUES (v_org_a, 'Asset org A', 'company', v_org_a, v_org_a, 0, v_owner),
-           (v_org_b, 'Asset org B', 'company', v_org_b, v_org_b, 0, v_owner);
+    VALUES (v_org_a, 'Asset org A', 'customer', v_org_a, v_org_a, 0, v_owner),
+           (v_org_b, 'Asset org B', 'customer', v_org_b, v_org_b, 0, v_owner);
     PERFORM claimius.upsert_app_object(v_app_a, 'claimius.organization', v_org_a);
 
     PERFORM claimius.upsert_app_user(p_user_id => v_owner, p_app_id => v_app_a, p_first_name => 'Both');

@@ -20,9 +20,9 @@ BEGIN
     END LOOP;
 
     INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
-    VALUES (v_root, 'Audit root', 'company', v_root, v_root, 0, v_sys);
+    VALUES (v_root, 'Audit root', 'customer', v_root, v_root, 0, v_sys);
     INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
-    VALUES (v_child, 'Audit child', 'company', v_root, v_root, 1, v_sys);
+    VALUES (v_child, 'Audit child', 'customer', v_root, v_root, 1, v_sys);
 
     v_claim := (claimius.insert_claim(
         p_name => 'Audit reader', p_description => NULL, p_sa_access => 4,

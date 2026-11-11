@@ -22,10 +22,10 @@ BEGIN
     END LOOP;
 
     INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
-    VALUES (v_root, 'Pages root', 'company', v_root, v_root, 0, v_sys);
+    VALUES (v_root, 'Pages root', 'customer', v_root, v_root, 0, v_sys);
     FOR v_n IN 1..11 LOOP
         INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
-        VALUES (md5('pages ' || v_n)::UUID, 'Pages ' || v_n, 'company', v_root, v_root, 1, v_sys);
+        VALUES (md5('pages ' || v_n)::UUID, 'Pages ' || v_n, 'customer', v_root, v_root, 1, v_sys);
     END LOOP;
 
     v_crew := (claimius.insert_claim(

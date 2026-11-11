@@ -93,7 +93,7 @@ SELECT is(
 
 SELECT ok(
     pg_temp.apply('upsert', 'claimius.organization', jsonb_build_object(
-        'id', pg_temp.peer_org(), 'name', 'Peer org', 'type', 'company', 'private_seed', 'aa',
+        'id', pg_temp.peer_org(), 'name', 'Peer org', 'type', 'customer', 'private_seed', 'aa',
         'sa_owner_id', pg_temp.peer_org(), 'sa_root_id', pg_temp.peer_org(), 'sa_level', 0,
         'sa_created_by', pg_temp.actor())),
     'a peer''s organization applies'

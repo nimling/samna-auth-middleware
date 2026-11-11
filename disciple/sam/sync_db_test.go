@@ -44,7 +44,7 @@ func organizationPayload(at client.SyncCursor, id uuid.UUID) sam.SyncPayload {
 		Operation:  "upsert",
 		EventType:  "claimius.organization",
 		Payload: json.RawMessage(fmt.Sprintf(
-			`{"id":%q,"name":"Page","type":"company","private_seed":"seed","sa_owner_id":%q,"sa_root_id":%q,"sa_level":0,"sa_created_by":%q,"sa_created_at":"2026-01-01T00:00:00Z","sa_updated_at":"2026-01-01T00:00:00Z"}`,
+			`{"id":%q,"name":"Page","type":"customer","private_seed":"seed","sa_owner_id":%q,"sa_root_id":%q,"sa_level":0,"sa_created_by":%q,"sa_created_at":"2026-01-01T00:00:00Z","sa_updated_at":"2026-01-01T00:00:00Z"}`,
 			id, id, id, id)),
 	}
 }
@@ -535,7 +535,7 @@ func TestApplyPageSplicesUnderAParentWithAStaleRootEdge(t *testing.T) {
 		Operation:  "upsert",
 		EventType:  "claimius.organization",
 		Payload: json.RawMessage(fmt.Sprintf(
-			`{"id":%q,"name":"Child","type":"company","private_seed":"seed","sa_owner_id":%q,"sa_root_id":%q,"sa_level":1,"sa_created_by":%q,"sa_created_at":"2026-01-01T00:00:00Z","sa_updated_at":"2026-01-01T00:00:00Z"}`,
+			`{"id":%q,"name":"Child","type":"customer","private_seed":"seed","sa_owner_id":%q,"sa_root_id":%q,"sa_level":1,"sa_created_by":%q,"sa_created_at":"2026-01-01T00:00:00Z","sa_updated_at":"2026-01-01T00:00:00Z"}`,
 			child, root, root, root)),
 	}}
 	if err := sam.Disciple().ApplyPage(ctx, step(from, 1), sam.State{Cursor: step(from, 2)}, page, ""); err != nil {

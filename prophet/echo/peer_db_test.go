@@ -71,7 +71,7 @@ func postPeerApp(t *testing.T, actor uuid.UUID) peerApp {
 	db := psdb.Instance()
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO claimius.organization (id, name, type, private_seed, sa_owner_id, sa_root_id, sa_level, sa_created_by)
-		VALUES (?, 'Peer home', 'company', ?, ?, ?, 0, ?)
+		VALUES (?, 'Peer home', 'customer', ?, ?, ?, 0, ?)
 	`, app.Org, getWrapped(t, hex.EncodeToString(orgSeed)), app.Org, app.Org, actor); err != nil {
 		t.Fatalf("home org: %v", err)
 	}

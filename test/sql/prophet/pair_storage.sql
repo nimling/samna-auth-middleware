@@ -70,14 +70,14 @@ BEGIN
     END LOOP;
 
     INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
-    VALUES (v_root, 'Pairs root', 'company', v_root, v_root, 0, v_sys);
+    VALUES (v_root, 'Pairs root', 'customer', v_root, v_root, 0, v_sys);
     PERFORM claimius.upsert_app_object(v_app, 'claimius.organization', v_root);
     INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
-    VALUES (v_node, 'Pairs node', 'company', v_root, v_root, 1, v_sys);
+    VALUES (v_node, 'Pairs node', 'customer', v_root, v_root, 1, v_sys);
     INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
-    VALUES ('10000000-0000-4000-8000-0000000000e2', 'Pairs one', 'company', v_node, v_root, 2, v_sys),
-           ('10000000-0000-4000-8000-0000000000e3', 'Pairs two', 'company', v_node, v_root, 2, v_sys),
-           ('10000000-0000-4000-8000-0000000000e4', 'Pairs three', 'company', v_node, v_root, 2, v_sys);
+    VALUES ('10000000-0000-4000-8000-0000000000e2', 'Pairs one', 'customer', v_node, v_root, 2, v_sys),
+           ('10000000-0000-4000-8000-0000000000e3', 'Pairs two', 'customer', v_node, v_root, 2, v_sys),
+           ('10000000-0000-4000-8000-0000000000e4', 'Pairs three', 'customer', v_node, v_root, 2, v_sys);
 
     v_crew := (claimius.insert_claim(
         p_app_id => v_app, p_name => 'Pairs crew', p_description => NULL, p_sa_access => 4,
@@ -166,7 +166,7 @@ SELECT is(
 
 SELECT claimius._settle_user_users_diff(pg_temp.app());
 INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
-VALUES ('10000000-0000-4000-8000-0000000000e5', 'Pairs late', 'company', '10000000-0000-4000-8000-0000000000e1',
+VALUES ('10000000-0000-4000-8000-0000000000e5', 'Pairs late', 'customer', '10000000-0000-4000-8000-0000000000e1',
         '10000000-0000-4000-8000-0000000000e0', 2, '00000000-0000-4000-8000-0000000000e0');
 SELECT count(*) FROM claimius.get_objects('a0000000-0000-4000-8000-0000000000e1', pg_temp.app(), 'claimius.organization');
 SELECT claimius._settle_user_users_diff(pg_temp.app());

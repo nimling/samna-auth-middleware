@@ -11,10 +11,10 @@ BEGIN
     PERFORM claimius.upsert_app_user(p_user_id => 'a0000000-0000-4000-8000-0000000008d1', p_first_name => 'Live');
     PERFORM claimius.upsert_app_user(p_user_id => 'a0000000-0000-4000-8000-0000000008d2', p_first_name => 'Expired');
     INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
-    VALUES (v_root, 'Window root', 'company', v_root, v_root, 0, v_sys);
+    VALUES (v_root, 'Window root', 'customer', v_root, v_root, 0, v_sys);
     INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
-    VALUES ('10000000-0000-4000-8000-0000000008d1', 'Alpha', 'company', v_root, v_root, 1, v_sys),
-           ('10000000-0000-4000-8000-0000000008d2', 'Bravo', 'company', v_root, v_root, 1, v_sys);
+    VALUES ('10000000-0000-4000-8000-0000000008d1', 'Alpha', 'customer', v_root, v_root, 1, v_sys),
+           ('10000000-0000-4000-8000-0000000008d2', 'Bravo', 'customer', v_root, v_root, 1, v_sys);
     v_crew := (claimius.insert_claim(
         p_name => 'Window crew', p_description => NULL, p_sa_access => 4,
         p_sa_owner_id => v_root, p_sa_root_id => v_root, p_sa_created_by => v_sys

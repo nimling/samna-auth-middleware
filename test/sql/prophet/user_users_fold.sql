@@ -55,10 +55,10 @@ BEGIN
         PERFORM claimius.upsert_app_user(p_user_id => v_user, p_app_id => v_app, p_first_name => 'Sharer');
     END LOOP;
     INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
-    VALUES (v_root, 'Fold root', 'company', v_root, v_root, 0, v_sys);
+    VALUES (v_root, 'Fold root', 'customer', v_root, v_root, 0, v_sys);
     PERFORM claimius.upsert_app_object(v_app, 'claimius.organization', v_root);
     INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
-    VALUES (v_desk, 'Fold desk', 'company', v_root, v_root, 1, v_sys);
+    VALUES (v_desk, 'Fold desk', 'customer', v_root, v_root, 1, v_sys);
     v_crew := (claimius.insert_claim(
         p_app_id => v_app, p_name => 'Fold crew', p_description => NULL, p_sa_access => 4,
         p_sa_owner_id => v_root, p_sa_root_id => v_root, p_sa_created_by => v_sys
@@ -125,7 +125,7 @@ DECLARE
     v_root UUID := '10000000-0000-4000-8000-000000000c90';
 BEGIN
     INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
-    VALUES ('10000000-0000-4000-8000-000000000c92', 'Fold desk two', 'company', v_root, v_root, 1, v_sys);
+    VALUES ('10000000-0000-4000-8000-000000000c92', 'Fold desk two', 'customer', v_root, v_root, 1, v_sys);
     PERFORM claimius.insert_claim_object(
         p_app_id => pg_temp.app(), p_claim_id => (SELECT id FROM claimius.claim WHERE name = 'Fold crew'),
         p_sa_owner_id => v_root, p_sa_root_id => v_root, p_sa_created_by => v_sys,

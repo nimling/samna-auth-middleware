@@ -22,10 +22,10 @@ BEGIN
     PERFORM claimius.upsert_app_user(p_user_id => v_b, p_app_id => v_app, p_first_name => 'Bo', p_external_id => 'ext-bo');
     PERFORM claimius.upsert_app_user(p_user_id => v_c, p_app_id => v_app, p_first_name => 'Cy');
     INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
-    VALUES (v_root, 'Point root', 'company', v_root, v_root, 0, v_sys);
+    VALUES (v_root, 'Point root', 'customer', v_root, v_root, 0, v_sys);
     PERFORM claimius.upsert_app_object(v_app, 'claimius.organization', v_root);
     INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
-    SELECT md5('point kid ' || k)::UUID, 'Kid ' || k, 'company', v_root, v_root, 1, v_sys
+    SELECT md5('point kid ' || k)::UUID, 'Kid ' || k, 'customer', v_root, v_root, 1, v_sys
     FROM generate_series(1, 20) k;
     v_crew := (claimius.insert_claim(
         p_app_id => v_app, p_name => 'Point crew', p_description => NULL, p_sa_access => 4,

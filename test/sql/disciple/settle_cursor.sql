@@ -33,11 +33,11 @@ BEGIN
     PERFORM claimius.upsert_disciple_state();
     PERFORM claimius.upsert_app_user(p_user_id => v_reader, p_first_name => 'Reader');
     INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
-    VALUES (v_root, 'Cursor root', 'company', v_root, v_root, 0, v_sys);
+    VALUES (v_root, 'Cursor root', 'customer', v_root, v_root, 0, v_sys);
     INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
-    VALUES (v_node, 'Cursor node', 'company', v_root, v_root, 1, v_sys);
+    VALUES (v_node, 'Cursor node', 'customer', v_root, v_root, 1, v_sys);
     INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
-    SELECT md5('cursor org ' || n)::UUID, 'Cursor org ' || n, 'company', v_node, v_root, 2, v_sys
+    SELECT md5('cursor org ' || n)::UUID, 'Cursor org ' || n, 'customer', v_node, v_root, 2, v_sys
     FROM generate_series(1, 1000) n;
     v_crew := (claimius.insert_claim(
         p_name => 'Cursor crew', p_description => NULL, p_sa_access => 4,
@@ -73,7 +73,7 @@ COMMIT;
 SELECT dblink_exec('cursor_writer', 'BEGIN');
 SELECT dblink_exec('cursor_writer', $w$
     INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
-    VALUES ('10000000-0000-4000-8000-000000d0a002', 'Cursor late', 'company',
+    VALUES ('10000000-0000-4000-8000-000000d0a002', 'Cursor late', 'customer',
             '10000000-0000-4000-8000-000000d0a001', '10000000-0000-4000-8000-000000d0a000', 2,
             '00000000-0000-4000-8000-000000d0a000')
 $w$);

@@ -19,13 +19,13 @@ BEGIN
     ) -> 'samna_app' ->> 'id')::UUID;
     PERFORM claimius.upsert_app_user(p_user_id => v_user, p_app_id => v_app, p_first_name => 'Reader');
     INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
-    VALUES (v_root, 'Graph root', 'company', v_root, v_root, 0, v_sys);
+    VALUES (v_root, 'Graph root', 'customer', v_root, v_root, 0, v_sys);
     PERFORM claimius.upsert_app_object(v_app, 'claimius.organization', v_root);
     INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
-    SELECT md5('graph kid ' || k)::UUID, 'Kid ' || k, 'company', v_root, v_root, 1, v_sys
+    SELECT md5('graph kid ' || k)::UUID, 'Kid ' || k, 'customer', v_root, v_root, 1, v_sys
     FROM generate_series(1, 60) k;
     INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
-    SELECT md5('graph grand ' || k || ' ' || g)::UUID, 'Grand ' || k || ' ' || g, 'company', md5('graph kid ' || k)::UUID, v_root, 2, v_sys
+    SELECT md5('graph grand ' || k || ' ' || g)::UUID, 'Grand ' || k || ' ' || g, 'customer', md5('graph kid ' || k)::UUID, v_root, 2, v_sys
     FROM generate_series(1, 60) k, generate_series(1, 60) g;
 
     v_crew := (claimius.insert_claim(

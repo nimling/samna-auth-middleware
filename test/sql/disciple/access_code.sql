@@ -21,8 +21,8 @@ BEGIN
     PERFORM claimius.upsert_app_user(p_user_id => 'a0000000-0000-4000-8000-000000000c55', p_first_name => 'Outsider');
 
     INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
-    VALUES (v_org, 'Codes', 'company', v_org, v_org, 0, v_sys),
-           (v_hidden, 'Hidden', 'company', v_hidden, v_hidden, 0, v_sys);
+    VALUES (v_org, 'Codes', 'customer', v_org, v_org, 0, v_sys),
+           (v_hidden, 'Hidden', 'customer', v_hidden, v_hidden, 0, v_sys);
 
     v_own := (claimius.insert_claim(
         p_name => 'Code owner', p_description => NULL, p_sa_access => 15,

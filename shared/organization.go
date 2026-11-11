@@ -222,8 +222,8 @@ func (d *DB) deleteOrganization(ctx context.Context, conn bun.IConn, ac *AccessC
 		}
 		return nil, err
 	}
-	if orgType == ORGANIZATION_TYPE_COMPANY {
-		return nil, ErrOrganizationCompany
+	if orgType == ORGANIZATION_TYPE_CUSTOMER {
+		return nil, ErrOrganizationCustomer
 	}
 	var org Organization
 	_, err := d.DB.NewUpdate().Conn(conn).

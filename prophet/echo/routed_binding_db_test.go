@@ -25,7 +25,7 @@ func TestADiscipleBindsOnItsOwnRowThroughTheProphet(t *testing.T) {
 	outside, branch := uuid.New(), uuid.New()
 	if _, err := prophet.ExecContext(ctx, `
 		INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
-		VALUES (?, 'Unlinked root', 'company', ?, ?, 0, ?), (?, 'Linked branch', 'company', ?, ?, 1, ?)
+		VALUES (?, 'Unlinked root', 'customer', ?, ?, 0, ?), (?, 'Linked branch', 'customer', ?, ?, 1, ?)
 	`, outside, outside, outside, grantUser, branch, outside, outside, grantUser); err != nil {
 		t.Fatalf("organizations: %v", err)
 	}

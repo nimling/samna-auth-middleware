@@ -25,7 +25,7 @@ BEGIN
     PERFORM claimius.upsert_app_user(p_user_id => v_cy, p_first_name => 'Cy');
 
     INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
-    VALUES (v_root, 'Stamp root', 'company', v_root, v_root, 0, v_sys);
+    VALUES (v_root, 'Stamp root', 'customer', v_root, v_root, 0, v_sys);
 
     v_member := (claimius.insert_claim(
         p_name => 'Stamp member', p_description => NULL, p_sa_access => 4,

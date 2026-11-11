@@ -24,7 +24,7 @@ BEGIN
     PERFORM claimius.upsert_app_user(p_user_id => v_owner, p_app_id => v_app, p_first_name => 'Owner');
     PERFORM claimius.upsert_app_user(p_user_id => v_viewer, p_app_id => v_app, p_first_name => 'Viewer');
     INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
-    VALUES (v_root, 'Consumer root', 'company', v_root, v_root, 0, v_sys);
+    VALUES (v_root, 'Consumer root', 'customer', v_root, v_root, 0, v_sys);
     PERFORM claimius.upsert_app_object(v_app, 'claimius.organization', v_root);
 
     v_owners := (claimius.insert_claim(

@@ -27,13 +27,13 @@ BEGIN
     END LOOP;
 
     INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
-    VALUES (v_root, 'Usage root', 'company', v_root, v_root, 0, v_sys);
+    VALUES (v_root, 'Usage root', 'customer', v_root, v_root, 0, v_sys);
     INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
-    VALUES ('10000000-0000-4000-8000-0000000000e9', 'Usage elsewhere', 'company', '10000000-0000-4000-8000-0000000000e9', '10000000-0000-4000-8000-0000000000e9', 0, v_sys);
+    VALUES ('10000000-0000-4000-8000-0000000000e9', 'Usage elsewhere', 'customer', '10000000-0000-4000-8000-0000000000e9', '10000000-0000-4000-8000-0000000000e9', 0, v_sys);
     INSERT INTO claimius.organization (id, name, description, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
-    VALUES ('10000000-0000-4000-8000-0000000000e1', 'Bravo harbour', 'Harbour', 'company', v_root, v_root, 1, v_sys),
-           ('10000000-0000-4000-8000-0000000000e2', 'Alpha harbour', 'Harbour', 'company', v_root, v_root, 1, v_sys),
-           ('10000000-0000-4000-8000-0000000000e3', 'Charlie harbour', 'Harbour', 'company', v_root, v_root, 1, v_sys);
+    VALUES ('10000000-0000-4000-8000-0000000000e1', 'Bravo harbour', 'Harbour', 'customer', v_root, v_root, 1, v_sys),
+           ('10000000-0000-4000-8000-0000000000e2', 'Alpha harbour', 'Harbour', 'customer', v_root, v_root, 1, v_sys),
+           ('10000000-0000-4000-8000-0000000000e3', 'Charlie harbour', 'Harbour', 'customer', v_root, v_root, 1, v_sys);
 
     v_crew := (claimius.insert_claim(
         p_name => 'Usage crew', p_description => NULL, p_sa_access => 4,
