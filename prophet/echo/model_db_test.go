@@ -5,6 +5,7 @@ package echo_test
 import (
 	"context"
 	"errors"
+	"os"
 	"sort"
 	"testing"
 
@@ -252,5 +253,56 @@ func TestInsertOrganizationUserWithoutAnIdentityCreatesOnce(t *testing.T) {
 	var pgErr pgdriver.Error
 	if !errors.As(err, &pgErr) || pgErr.Field('C') != "23505" {
 		t.Fatalf("insert_organization_user without an identity and without upsert refuses a live user_id with 23505, got %v", err)
+	}
+}
+
+func TestTheInitStepRepublishesEveryUserToTheAppsOfItsGrants(t *testing.T) {
+	getGrantFixture(t)
+	ctx := context.Background()
+	prophet := psdb.Instance()
+	first := postPeerApp(t, grantUser)
+	second := postPeerApp(t, grantUser)
+	outside := postPeerApp(t, grantUser)
+	firstClaim := postPeerClaim(t, prophet, first.Org, grantUser, "First reader")
+	secondClaim := postPeerClaim(t, prophet, second.Org, grantUser, "Second reader")
+
+	user := uuid.New()
+	if _, err := prophet.ExecContext(ctx, `SELECT claimius.upsert_app_user(p_user_id => ?, p_app_id => ?, p_first_name => 'Lost')`, user, first.ID); err != nil {
+		t.Fatalf("user: %v", err)
+	}
+	for _, claim := range []struct{ id, org uuid.UUID }{{firstClaim, first.Org}, {secondClaim, second.Org}} {
+		if _, err := prophet.ExecContext(ctx, `
+			SELECT claimius.insert_user_claim(p_claim_id => ?, p_user_id => ?, p_sa_owner_id => ?, p_sa_created_by => ?)
+		`, claim.id, user, claim.org, grantUser); err != nil {
+			t.Fatalf("grant: %v", err)
+		}
+	}
+	var row uuid.UUID
+	if err := prophet.NewRaw(`SELECT id FROM claimius.samna_user WHERE user_id = ? AND sa_deleted_at IS NULL`, user).Scan(ctx, &row); err != nil {
+		t.Fatalf("row: %v", err)
+	}
+	if _, err := prophet.ExecContext(ctx, `DELETE FROM claimius.sync_event WHERE event_type = 'claimius.samna_user' AND (payload ->> 'id')::UUID = ?`, row); err != nil {
+		t.Fatalf("forget the user's events: %v", err)
+	}
+	if got := getEventApps(t, "claimius.samna_user", row); len(got) != 0 {
+		t.Fatalf("no event of the user is left before the step runs, got %v", got)
+	}
+
+	step, err := os.ReadFile("../database/V4.0__claimius_init.sql")
+	if err != nil {
+		t.Fatalf("init step: %v", err)
+	}
+	if _, err := prophet.ExecContext(ctx, string(step)); err != nil {
+		t.Fatalf("run the init step again: %v", err)
+	}
+
+	want := getSortedApps(first.ID, second.ID)
+	if got := getEventApps(t, "claimius.samna_user", row); !getSameApps(got, want) {
+		t.Fatalf("the step publishes the user to the apps of its grants %v and to no other, got %v", want, got)
+	}
+	for _, app := range getEventApps(t, "claimius.samna_user", row) {
+		if app == outside.ID {
+			t.Fatalf("an app no grant of the user is linked to never receives the user")
+		}
 	}
 }
