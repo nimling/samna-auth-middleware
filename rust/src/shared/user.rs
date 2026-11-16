@@ -567,7 +567,7 @@ impl Db {
         let identity_json: Option<String> = identity.map(|i| Value::Object(i).to_string());
         let held = self.conn_or(ctx, conn).await?;
         let payload: Value = match held
-            .query_scalar::<Value>("SELECT claimius.insert_organization_user(p_caller_uc => $1, p_owner_id => $2, p_user => $3::jsonb, p_identity => $4::jsonb, p_reason => $5, p_upsert => $6)", &[&uc, &owner_id, &user_json, &identity_json, &reason, &upsert])
+            .query_scalar::<Value>("SELECT claimius.insert_organization_user(p_caller_uc => $1, p_owner_id => $2, p_user => $3::text::jsonb, p_identity => $4::text::jsonb, p_reason => $5, p_upsert => $6)", &[&uc, &owner_id, &user_json, &identity_json, &reason, &upsert])
             .await
         {
             Ok(p) => p,
@@ -723,7 +723,7 @@ impl Db {
         let ends_at = payload.ends_at.unwrap_or_default();
         let raw: Value = held
             .query_scalar::<Value>(
-                "SELECT claimius.insert_organization_guest($1, $2, $3::jsonb, $4, $5)",
+                "SELECT claimius.insert_organization_guest($1, $2, $3::text::jsonb, $4, $5)",
                 &[&uc, &owner, &user_json, &ends_at, &payload.reason],
             )
             .await

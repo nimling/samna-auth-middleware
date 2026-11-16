@@ -169,7 +169,7 @@ pub async fn post_session(
     };
     let result: String = run
         .db
-        .query_scalar::<String>(ctx, "SELECT claimius.upsert_analytics_session($1, $2, $3, $4::jsonb, $5, $6::inet, $7)::text", &[&app_id, &anonymous_id, &session_key, &body, &user_id, &null_string(ip), &null_string(user_agent)])
+        .query_scalar::<String>(ctx, "SELECT claimius.upsert_analytics_session($1, $2, $3, $4::jsonb, $5, $6::text::inet, $7)::text", &[&app_id, &anonymous_id, &session_key, &body, &user_id, &null_string(ip), &null_string(user_agent)])
         .await?;
     let wrapper: Value = serde_json::from_str(&result)?;
     Ok(wrapper
@@ -331,7 +331,7 @@ pub async fn post_consent(
         .db
         .query_scalar::<String>(
             ctx,
-            "SELECT claimius.insert_consent($1, $2, $3::jsonb, $4, $5, $6::inet, $7)::text",
+            "SELECT claimius.insert_consent($1, $2, $3::jsonb, $4, $5, $6::text::inet, $7)::text",
             &[
                 &app_id,
                 &input.anonymous_id,

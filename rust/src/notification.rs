@@ -239,7 +239,7 @@ async fn exec(db: &Db, job: Job) {
         let result = db
             .query_scalar::<i32>(
                 &ctx,
-                "SELECT claimius.notify_user($1, $2, $3, $4::jsonb, $5, $6, $7, $8, $9, $10, $11::interval, $12::uuid[])",
+                "SELECT claimius.notify_user($1, $2, $3, $4::jsonb, $5, $6, $7, $8, $9, $10, $11::text::interval, $12::uuid[])",
                 &[&input.app_id, &input.title, &input.description, &style, &input.r#type, &input.link, &job.object_type, &job.object_id, &input.created_by, &input.owner_id, &input.repeats_at, &job.user_ids],
             )
             .await;
@@ -251,7 +251,7 @@ async fn exec(db: &Db, job: Job) {
     let result = db
         .query_scalar::<i32>(
             &ctx,
-            "SELECT claimius.notify_object($1, $2, $3, $4::jsonb, $5, $6, $7, $8, $9, $10, $11::interval)",
+            "SELECT claimius.notify_object($1, $2, $3, $4::jsonb, $5, $6, $7, $8, $9, $10, $11::text::interval)",
             &[&input.app_id, &input.title, &input.description, &style, &input.r#type, &input.link, &job.object_type, &job.object_id, &input.created_by, &input.owner_id, &input.repeats_at],
         )
         .await;

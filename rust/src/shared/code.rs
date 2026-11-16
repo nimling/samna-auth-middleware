@@ -474,7 +474,7 @@ impl Db {
                 Some(body.data.to_string())
             };
             let raw: Value = self
-                .query_scalar::<Value>(ctx, "SELECT claimius.insert_code($1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9, $10) -> 'code'", &[&ac.user_id, &claim_id, &hash, &body.kind, &body.object_id, &body.object_type, &data, &body.starts_at, &body.ends_at, &body.count])
+                .query_scalar::<Value>(ctx, "SELECT claimius.insert_code($1, $2, $3, $4, $5, $6, $7::text::jsonb, $8, $9, $10) -> 'code'", &[&ac.user_id, &claim_id, &hash, &body.kind, &body.object_id, &body.object_type, &data, &body.starts_at, &body.ends_at, &body.count])
                 .await
                 .map_err(code_error)?;
             crate::sauth::unmarshal_value(raw).map_err(Error::Other)?

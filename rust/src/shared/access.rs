@@ -309,7 +309,7 @@ impl Db {
         let conn = self.read_conn(ctx).await?;
         let rows = match conn
             .query_values::<ScopeAccessRow>(
-                "SELECT * FROM claimius.get_scope_access($1::uuid, $2::jsonpath, $3::int)",
+                "SELECT * FROM claimius.get_scope_access($1::uuid, $2::text::jsonpath, $3::int)",
                 &[&user_id, &scope_path, &required_access.0],
             )
             .await

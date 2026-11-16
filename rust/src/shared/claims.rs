@@ -523,7 +523,7 @@ impl Db {
         let held = self.conn_or(ctx, conn).await?;
         let options_text = nullable_json(&options);
         let payload: Value = held
-            .query_scalar::<Value>("SELECT (claimius.insert_user_claim($1, $2, $3, $4, $5, $6, $7, $8::jsonb) -> 'user_claim')::jsonb", &[&claim_id, &uc.user_id, &uc.owner_id, &uc.created_by, &uc.reason, &uc.starts_at, &uc.ends_at, &options_text])
+            .query_scalar::<Value>("SELECT (claimius.insert_user_claim($1, $2, $3, $4, $5, $6, $7, $8::text::jsonb) -> 'user_claim')::jsonb", &[&claim_id, &uc.user_id, &uc.owner_id, &uc.created_by, &uc.reason, &uc.starts_at, &uc.ends_at, &options_text])
             .await
             .map_err(code_error)?;
         let body = uc.body.clone();
@@ -598,7 +598,7 @@ impl Db {
         }
         let held = self.conn_or(ctx, conn).await?;
         let payload: Value = held
-            .query_scalar::<Value>("SELECT (claimius.update_user_claim($1, $2, $3, $4, $5::jsonb) -> 'user_claim')::jsonb", &[&grant_id, &reason, &starts_at, &ends_at, &options])
+            .query_scalar::<Value>("SELECT (claimius.update_user_claim($1, $2, $3, $4, $5::text::jsonb) -> 'user_claim')::jsonb", &[&grant_id, &reason, &starts_at, &ends_at, &options])
             .await
             .map_err(code_error)?;
         let body = uc.body.clone();
