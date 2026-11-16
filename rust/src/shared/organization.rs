@@ -287,6 +287,9 @@ impl Db {
         owner_ids: &[Uuid],
         external_ids: &[String],
     ) -> Result<Vec<Organization>> {
+        let ids = (!ids.is_empty()).then_some(ids);
+        let owner_ids = (!owner_ids.is_empty()).then_some(owner_ids);
+        let external_ids = (!external_ids.is_empty()).then_some(external_ids);
         self.query_models::<Organization>(
             ctx,
             "SELECT * FROM claimius.get_organizations($1::uuid[], $2::uuid[], $3::text[])",

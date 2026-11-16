@@ -271,6 +271,7 @@ impl Db {
         required_access: ClaimAccess,
         ids: &[Uuid],
     ) -> Result<Vec<Audit>> {
+        let ids = (!ids.is_empty()).then_some(ids);
         self.query_models::<Audit>(
             ctx,
             "SELECT audit.* FROM claimius.get_audit($1, $2, p_ids => $3::uuid[]) AS audit",
@@ -672,6 +673,8 @@ impl Db {
         ids: &[Uuid],
         owner_ids: &[Uuid],
     ) -> Result<Vec<Claim>> {
+        let ids = (!ids.is_empty()).then_some(ids);
+        let owner_ids = (!owner_ids.is_empty()).then_some(owner_ids);
         self.query_models::<Claim>(
             ctx,
             "SELECT * FROM claimius.get_claims($1::uuid[], $2::uuid[])",
@@ -682,16 +685,14 @@ impl Db {
 
     pub async fn get_grants(&self, ctx: &Ctx, f: &GrantFilters) -> Result<Vec<UserClaim>> {
         let with_clients = !f.no_clients;
+        let ids = (!f.ids.is_empty()).then_some(&f.ids);
+        let user_ids = (!f.user_ids.is_empty()).then_some(&f.user_ids);
+        let claim_ids = (!f.claim_ids.is_empty()).then_some(&f.claim_ids);
+        let owner_ids = (!f.owner_ids.is_empty()).then_some(&f.owner_ids);
         self.query_models::<UserClaim>(
             ctx,
             "SELECT * FROM claimius.get_grants($1::uuid[], $2::uuid[], $3::uuid[], $4::uuid[], $5)",
-            &[
-                &f.ids,
-                &f.user_ids,
-                &f.claim_ids,
-                &f.owner_ids,
-                &with_clients,
-            ],
+            &[&ids, &user_ids, &claim_ids, &owner_ids, &with_clients],
         )
         .await
     }
@@ -702,10 +703,12 @@ impl Db {
         } else {
             Some(f.object_type.clone())
         };
+        let object_ids = (!f.object_ids.is_empty()).then_some(&f.object_ids);
+        let claim_ids = (!f.claim_ids.is_empty()).then_some(&f.claim_ids);
         self.query_models::<ClaimObject>(
             ctx,
             "SELECT * FROM claimius.get_bindings($1::text, $2::uuid[], $3::uuid[])",
-            &[&object_type, &f.object_ids, &f.claim_ids],
+            &[&object_type, &object_ids, &claim_ids],
         )
         .await
     }

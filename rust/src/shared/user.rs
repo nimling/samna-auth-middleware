@@ -746,6 +746,10 @@ impl Db {
         emails: &[String],
         external_ids: &[String],
     ) -> Result<Vec<SamnaUser>> {
+        let user_ids = (!user_ids.is_empty()).then_some(user_ids);
+        let ids = (!ids.is_empty()).then_some(ids);
+        let emails = (!emails.is_empty()).then_some(emails);
+        let external_ids = (!external_ids.is_empty()).then_some(external_ids);
         self.query_models::<SamnaUser>(
             ctx,
             "SELECT * FROM claimius.get_users($1::uuid[], $2::uuid[], $3::text[], $4::text[])",
@@ -759,6 +763,7 @@ impl Db {
         ctx: &Ctx,
         user_ids: &[Uuid],
     ) -> Result<Vec<UserIdentity>> {
+        let user_ids = (!user_ids.is_empty()).then_some(user_ids);
         self.query_models::<UserIdentity>(
             ctx,
             "SELECT * FROM claimius.get_user_identities($1::uuid[])",

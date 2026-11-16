@@ -203,6 +203,9 @@ impl Db {
         parent_ids: &[Uuid],
         external_ids: &[String],
     ) -> Result<Vec<Location>> {
+        let ids = (!ids.is_empty()).then_some(ids);
+        let parent_ids = (!parent_ids.is_empty()).then_some(parent_ids);
+        let external_ids = (!external_ids.is_empty()).then_some(external_ids);
         self.query_models::<Location>(
             ctx,
             "SELECT * FROM claimius.get_locations($1::uuid[], $2::uuid[], $3::text[])",
