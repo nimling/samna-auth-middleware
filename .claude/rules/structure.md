@@ -8,4 +8,5 @@
 6. `example/prophet` and `example/disciple` are runnable hosts; `test/hurl/` runs against `example/disciple`.
 7. `test/sql/<role>/` pgTAP per role, `bench/<role>/` the claimius bench under `just bench`.
 8. `ts/` the TypeScript package; `ts/dist/` is never committed.
-9. `.nimpress/` the published docs and the per release changelog.
+9. `rust/` the crate `samna-auth-middleware`, pinned by git tag, mirroring the disciple side module for module: `smw`, `client`, `shared`, `disciple::{sdb,sam,echo}`, `utils`, `uptime`, `dpop`, `notification`, `analytics`, `audit`, `sauth`, `store`, `respond`, `jsonx`, `errorsx` under `rust/src/`, the tests under `rust/tests/`, and `rust/examples/disciple.rs` the Rust twin of `example/disciple` that `test/hurl/` also runs against. The prophet only pieces, `smw/app.go`, `pkg/encryption` and the peer pull, have no mirror. `rust/target/` is never committed.
+10. `.nimpress/` the published docs and the per release changelog.

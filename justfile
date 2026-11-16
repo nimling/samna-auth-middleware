@@ -7,14 +7,23 @@ default:
 install:
     sh scripts/install.sh
 
-deploy:
-    sbump patch --env APP_VERSION --json ts/package.json@.version --push-version --auto --workflow
+deploy version='': fmt-rust
+    sbump patch {{version}} --env APP_VERSION --json ts/package.json@.version --toml rust/Cargo.toml@.package.version --toml 'rust/Cargo.lock@.package[name=samna-auth-middleware].version' --push-version --auto --workflow
 
 build:
     go build ./...
 
 tidy:
     go mod tidy
+
+build-rust:
+    cd rust && cargo build --release
+
+test-rust:
+    cd rust && cargo test
+
+fmt-rust:
+    cd rust && cargo fmt --check
 
 test name="":
     #!/usr/bin/env bash

@@ -1,8 +1,8 @@
 ---
 name: test
-description: Runs the samna_auth_middleware tests. The Go suites with and without a database, the dbtest role databases, the hurl files against the example disciple, the prophet to disciple scenario check, the TypeScript tests in ts/ and the claimius bench. Use when asked to test, verify or prove a change in this repo, or to run one test. Not for starting a host or a database to work against, which is the run skill, and not for releasing, which is the deploy skill.
-argument-hint: [<TestName>|hurl|verify|ts|bench]
-allowed-tools: Bash(just *), Bash(go *), Bash(cd ts *), Bash(pnpm *), Bash(docker *)
+description: Runs the samna_auth_middleware tests. The Go suites with and without a database, the dbtest role databases, the hurl files against the example disciple, the prophet to disciple scenario check, the TypeScript tests in ts/, the rust crate's tests and format check, and the claimius bench. Use when asked to test, verify or prove a change in this repo, or to run one test. Not for starting a host or a database to work against, which is the run skill, and not for releasing, which is the deploy skill.
+argument-hint: [<TestName>|hurl|verify|ts|rust|bench]
+allowed-tools: Bash(just *), Bash(go *), Bash(cd ts *), Bash(pnpm *), Bash(cd rust *), Bash(cargo *), Bash(docker *)
 ---
 
 The tests of this repo through its `justfile`. Starting a host is the `run` skill; releasing is the `deploy` skill. Testing across repos is `../.claude/rules/platform.md` Testing; where tests sit is `.claude/rules/deploy.md` Every change 2.
@@ -28,6 +28,14 @@ The tests of this repo through its `justfile`. Starting a host is the `run` skil
 
 1. `cd ts && pnpm install --frozen-lockfile && pnpm test` runs vitest over `ts/src/*.test.ts`.
 2. Run it when a change touches `ts/src/` or mirrors a Go contract into it.
+
+## Rust
+
+1. `just test-rust` runs `cargo test` in `rust/`, over `rust/tests/*_test.rs` with a fake prophet on a loopback port where a test needs one; `rust/tests/db_test.rs` is `#[ignore]` and runs with `cargo test -- --ignored` against the `PG*` of a `scripts/db.sh disciple` database.
+2. `just fmt-rust` runs `cargo fmt --check`. Misformatted: run `cargo fmt` in `rust/`, confirm `just fmt-rust` passes, and keep the change with the release, `.claude/rules/deploy.md` Releasing 3.
+3. `just build-rust` runs `cargo build --release`.
+4. A route change is also proven on the Rust twin: `cargo build --example disciple` in `rust/`, then the `test-hurl` steps with `rust/target/debug/examples/disciple` in place of the Go binary.
+5. Run them when a change touches `rust/` or mirrors a Go contract into it; all of `just test-rust` and `just fmt-rust` pass before a release.
 
 ## SQL
 

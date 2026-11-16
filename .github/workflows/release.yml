@@ -32,3 +32,31 @@ jobs:
           files: dist/sauth-bff-*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  rust:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Set crate version
+        working-directory: ./rust
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/v}
+          sed -i -E "0,/^version = \"[^\"]*\"/ s//version = \"$VERSION\"/" Cargo.toml
+
+      - name: Format
+        working-directory: ./rust
+        run: cargo fmt --check
+
+      - name: Build
+        working-directory: ./rust
+        run: cargo build --release
+
+      - name: Test
+        working-directory: ./rust
+        run: cargo test

@@ -1,0 +1,43 @@
+[package]
+name = "samna-auth-middleware"
+version = "2.0.0-alpha0135"
+edition = "2024"
+license = "MIT"
+repository = "https://github.com/nimling/samna-auth-middleware"
+description = "Rust port of the Go samna_auth_middleware disciple: authentication, the claimius access lookups, routed writes, the pull loop and the auth routes"
+
+[dependencies]
+aes-gcm = "0.10"
+axum = { version = "0.8", features = ["macros", "query", "form", "json"] }
+axum-extra = { version = "0.10", features = ["cookie"] }
+base64 = "0.22"
+bcrypt = "0.17"
+bytes = "1"
+chrono = { version = "0.4", features = ["serde"] }
+deadpool-postgres = "0.14"
+futures = "0.3"
+hex = "0.4"
+hmac = "0.12"
+http = "1"
+http-body-util = "0.1"
+jsonschema = { version = "0.30", default-features = false }
+jsonwebtoken = "9"
+rand = "0.9"
+regex = "1"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+sha2 = "0.10"
+subtle = "2"
+thiserror = "2"
+time = "0.3"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "net"] }
+tokio-postgres = { version = "0.7", features = ["with-uuid-1", "with-serde_json-1", "with-chrono-0_4"] }
+tokio-util = "0.7"
+tower = "0.5"
+tracing = "0.1"
+url = "2"
+uuid = { version = "1", features = ["v4", "v5", "serde"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["full"] }

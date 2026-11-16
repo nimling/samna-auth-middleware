@@ -1,15 +1,15 @@
 # Samna Auth Middleware
 
-The library every Samna service embeds to authenticate and authorize through the prophet: JWT and session validation, client credentials, the sync, notifications, and the `claimius` schema for both roles. Go module `github.com/nimling/samna-auth-middleware/v2` and the `@nimling` package in `ts/`, released together. GitHub `nimling/samna-auth-middleware`, on the Samna Ecosystem board (`../.claude/rules/github_project.md`). Shared platform facts: `../.claude/rules/platform.md`.
+The library every Samna service embeds to authenticate and authorize through the prophet: JWT and session validation, client credentials, the sync, notifications, and the `claimius` schema for both roles. Go module `github.com/nimling/samna-auth-middleware/v2` is the source of truth; the `@nimling` package in `ts/` and the crate `samna-auth-middleware` in `rust/` mirror it and ship in the same tag. GitHub `nimling/samna-auth-middleware`, on the Samna Ecosystem board (`../.claude/rules/github_project.md`). Shared platform facts: `../.claude/rules/platform.md`.
 
 The SQL under `prophet/database` and `disciple/database` is the truth of the schema; `.nimpress/claimius/` is the design, its math and its measured costs, read on disk.
 
 ## Commands
 
-1. `just build`: `go build ./...`. `cd ts && pnpm install --frozen-lockfile && pnpm run build` builds the package.
+1. `just build`: `go build ./...`. `cd ts && pnpm install --frozen-lockfile && pnpm run build` builds the package. `just build-rust`, `just test-rust`, `just fmt-rust` build, test and format check `rust/`.
 2. `just test`: `go test ./...`, then the `dbtest` suites on role databases `scripts/db.sh` builds in local `postgres:17` containers. `just test <TestName>` runs one. `just verify` runs the prophet to disciple scenario, `just test-hurl` the hurl files against `example/disciple`, `just bench` the claimius bench.
 3. `bash scripts/db.sh prophet|disciple`: a throwaway role database, printing the `PG*` line to export.
-4. `just deploy`: `sbump patch` over `APP_VERSION` and `ts/package.json`, tag and push in one run; the tag runs the release, publish and docs workflows.
+4. `just deploy [version]`: `fmt-rust`, then one `sbump patch` over `APP_VERSION`, `ts/package.json`, `rust/Cargo.toml` and `rust/Cargo.lock`, tag and push in one run; the tag runs the release, publish and docs workflows, the release workflow's `rust` job building and testing the crate.
 
 ## Conventions
 
@@ -18,7 +18,7 @@ The SQL under `prophet/database` and `disciple/database` is the truth of the sch
 3. Retention is `claimius.prune(p_settings JSONB)` on both roles, run by `shared/retention.go` `PruneLoop`. No table, no kinds, no endpoint, no class, no cold storage; application data is never aged.
 4. The profile is one `profile JSONB` on `claimius.samna_user`: the user writes top level keys on Samna Auth, an app writes under its own slug through `PUT /sam/profile`, the sync carries it.
 5. The claim level, stated once: only `claim.level` compares, the higher level wins, equal levels fall to the classes; the level of an organization or location is tree depth.
-6. A Go change with a browser facing contract is mirrored into `ts/src/` in the same change. No code comments; `COMMENT ON` stays.
+6. A Go change with a browser facing contract is mirrored into `ts/src/` in the same change, and a Go change in a package the crate mirrors into `rust/src/`, module for module. No code comments; `COMMENT ON` stays.
 7. This repo ships nothing for one consumer. A consumer pins a version and writes its own migration in its own repo.
 8. Access is only claims, held by a user, a temporary user of type `guest` or the anonymous user: one reserved `samna_user` per app, `shared.AnonymousUserID` and `claimius.anonymous_user_id()`, type `anonymous`, named Public, written by the bootstrap and never minted in Go. A grant to it is the public grant of its claim; its code and carriers sit in `user_claim.options.samk` beside the grant's window. `smw.UserAuthMiddleware` resolves every route the same way, with no option and no group, and a request without a credential acts as that user under `SAUTH_RATE_LIMIT` per `SAUTH_RATE_PERIOD`. Nothing in the mechanism is named guest; `claimius.code` is invite only.
 
@@ -33,5 +33,5 @@ The SQL under `prophet/database` and `disciple/database` is the truth of the sch
 
 1. `claimius`: the canonical claimius skill every repo uses through `../.claude/skills/claimius`; writing or reviewing code that reads, writes or checks access through claimius. Its `references/` hold the function surface, the `*DB` access lookups and the SQL patterns.
 2. `deploy`: deploy, release or ship this repo.
-3. `test`: `just test`, one test, `just test-hurl`, `just verify`, the ts tests and `just bench`.
+3. `test`: `just test`, one test, `just test-hurl`, `just verify`, the ts tests, the rust tests and format check, and `just bench`.
 4. `run`: a role database, the example disciple or the bff locally.
