@@ -339,7 +339,7 @@ impl Db {
         let held = self.conn_or(ctx, conn).await?;
         let payload: Value = held
             .query_scalar::<Value>(
-                "SELECT (claimius.insert_claim($1, $2, $3, $4, $5, $6, $7, $8::claimius.claim_type, $9) -> 'claim')::jsonb",
+                "SELECT (claimius.insert_claim($1, $2, $3, $4, $5, $6, $7, $8::text::claimius.claim_type, $9) -> 'claim')::jsonb",
                 &[&claim.name, &claim.description, &claim.access.0, &claim.owner_id, &claim.root_id, &claim.created_by, &claim.inherits, &claim.r#type, &claim.level],
             )
             .await?;
@@ -393,7 +393,7 @@ impl Db {
         };
         let held = self.conn_or(ctx, conn).await?;
         let payload: Value = held
-            .query_scalar::<Value>("SELECT (claimius.update_claim($1, $2, $3, $4, $5, $6, $7::claimius.claim_type, $8::uuid) -> 'claim')::jsonb", &[&claim_id, &name, &description, &access, &inherits, &level, &claim_type, &ac.user_claim_id])
+            .query_scalar::<Value>("SELECT (claimius.update_claim($1, $2, $3, $4, $5, $6, $7::text::claimius.claim_type, $8::uuid) -> 'claim')::jsonb", &[&claim_id, &name, &description, &access, &inherits, &level, &claim_type, &ac.user_claim_id])
             .await?;
         let body = claim.body.clone();
         *claim = crate::sauth::unmarshal_value(payload).map_err(Error::Other)?;
