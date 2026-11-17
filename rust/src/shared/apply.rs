@@ -46,8 +46,8 @@ async fn upsert_entity<T: Model>(conn: &Conn, raw: &Value) -> Result<bool> {
     let Value::Object(object) = raw else {
         return Err(Error::other("unmarshal: not an object"));
     };
-    let entity: T = crate::sauth::unmarshal_value(raw.clone())
-        .map_err(|e| Error::other(format!("unmarshal: {e}")))?;
+    let entity: T =
+        T::from_row(raw.clone()).map_err(|e| Error::other(format!("unmarshal: {e}")))?;
     let row = entity.to_row()?;
     let columns = T::present_columns(object);
     store::upsert(conn.client(), &quote_table(T::TABLE), &row, &columns).await
