@@ -71,7 +71,7 @@ async fn apply_upsert(conn: &Conn, event_type: &str, raw: &Value) -> Result<bool
         "claimius.user_identity" => upsert_entity::<UserIdentity>(conn, raw).await,
         OBJECT_TYPE_CODE => upsert_entity::<Code>(conn, raw).await,
         "claimius.audit" => {
-            let row: Audit = crate::sauth::unmarshal_value(raw.clone())
+            let row = Audit::from_row(raw.clone())
                 .map_err(|e| Error::other(format!("unmarshal: {e}")))?;
             let mut values = row.to_row()?;
             values.retain(|_, v| !v.is_null());
