@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use futures::StreamExt;
 use tokio::sync::mpsc;
-use tokio_postgres::{AsyncMessage, NoTls};
+use tokio_postgres::AsyncMessage;
 
 use super::db::Db;
 use super::error::{Error, Result};
@@ -24,7 +24,7 @@ impl Db {
         let (tx, rx) = mpsc::channel(LISTEN_BUFFER);
         let conn_str = self.conn_str.clone();
         let channel = channel.to_string();
-        let (client, mut connection) = tokio_postgres::connect(&conn_str, NoTls)
+        let (client, mut connection) = tokio_postgres::connect(&conn_str, crate::shared::db::tls())
             .await
             .map_err(|e| Error::other(format!("listener: {e}")))?;
         let (notify_tx, mut notify_rx) = mpsc::unbounded_channel::<AsyncMessage>();

@@ -41,7 +41,7 @@ pub use code::{
     seal_claim_options, seal_grant_options, show_claim_options, unmarshal_code_access,
 };
 pub use cost::{AppCostBucket, AppCostQuery, COST_SCHEMA, get_app_cost};
-pub use db::{Conn, Db, LockKey, RETENTION_LOCK_KEY, connect, lead_sync, model_type};
+pub use db::{Conn, Db, LockKey, RETENTION_LOCK_KEY, connect, lead_sync, model_type, tls};
 pub use error::{Error, Result};
 pub use models::*;
 pub use profile::{

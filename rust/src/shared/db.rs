@@ -6,7 +6,6 @@ use deadpool_postgres::{Manager, ManagerConfig, Object, Pool, RecyclingMethod};
 use regex::Regex;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
-use tokio_postgres::NoTls;
 use tokio_postgres::types::{FromSqlOwned, ToSql};
 use url::Url;
 use uuid::Uuid;
@@ -492,13 +491,27 @@ fn pg_env(key: &str) -> Result<String> {
     std::env::var(key).map_err(|_| Error::other(format!("{key} not set")))
 }
 
+pub fn tls() -> tokio_postgres_rustls::MakeRustlsConnect {
+    let roots = rustls::RootCertStore {
+        roots: webpki_roots::TLS_SERVER_ROOTS.to_vec(),
+    };
+    let config = rustls::ClientConfig::builder_with_provider(std::sync::Arc::new(
+        rustls::crypto::ring::default_provider(),
+    ))
+    .with_safe_default_protocol_versions()
+    .expect("tls protocol versions")
+    .with_root_certificates(roots)
+    .with_no_client_auth();
+    tokio_postgres_rustls::MakeRustlsConnect::new(config)
+}
+
 fn pool_from(dsn: &str) -> Result<Pool> {
     let config: tokio_postgres::Config = dsn
         .parse()
         .map_err(|e: tokio_postgres::Error| Error::other(format!("dsn: {e}")))?;
     let manager = Manager::from_config(
         config,
-        NoTls,
+        tls(),
         ManagerConfig {
             recycling_method: RecyclingMethod::Fast,
         },
