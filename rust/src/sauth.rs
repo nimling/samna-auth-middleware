@@ -43,9 +43,10 @@ pub fn unmarshal<T: DeserializeOwned + Hidden>(data: &[u8]) -> Result<T, String>
 }
 
 pub fn unmarshal_value<T: DeserializeOwned + Hidden>(raw: Value) -> Result<T, String> {
-    let Value::Object(object) = raw else {
+    let Value::Object(mut object) = raw else {
         return Err("sauth.Unmarshal: expected an object".to_string());
     };
+    object.retain(|_, v| !v.is_null());
     let mut model: T = serde_json::from_value(Value::Object(object.clone()))
         .map_err(|e| format!("sauth.Unmarshal: {e}"))?;
     for (name, value) in &object {

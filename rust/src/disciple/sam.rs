@@ -559,7 +559,7 @@ impl Replica {
             .db
             .query_models::<ClaimObject>(
                 ctx,
-                "SELECT * FROM claimius.get_orphan_bindings($1::interval)",
+                "SELECT * FROM claimius.get_orphan_bindings($1::text::interval)",
                 &[&grace],
             )
             .await
@@ -578,7 +578,7 @@ impl Replica {
             .db
             .query_models::<Claim>(
                 ctx,
-                "SELECT * FROM claimius.get_orphan_claims($1::interval)",
+                "SELECT * FROM claimius.get_orphan_claims($1::text::interval)",
                 &[&grace],
             )
             .await
