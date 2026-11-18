@@ -163,23 +163,21 @@ func getOrganization(ctx echo.Context, orgID, appID uuid.UUID) (*Organization, e
 
 func postOrganization(ctx echo.Context, org Organization, appID uuid.UUID) (*Organization, error) {
 	if org.OwnerID == nil || *org.OwnerID == org.ID {
-		var rootID uuid.UUID
-		if err := sdb.Instance().NewRaw(
-			"SELECT (claimius.upsert_root_organization(?, ?, ?, ?, ?, ?, ?, ?) -> 'organization' ->> 'id')::uuid",
-			appID, org.Name, org.CreatedBy, org.Description, ORGANIZATION_TYPE_ENTITY, org.ID, org.ExternalID, org.Kind,
-		).Scan(ctx.Request().Context(), &rootID); err != nil {
-			ctx.Logger().Errorf("postOrganization root: %v", err)
-			return nil, errorsx.ErrDbUnexpected
+		return nil, errorsx.ErrForbidden
+	}
+	var held bool
+	if err := sdb.Instance().NewRaw(
+		"SELECT claimius.app_has_object(?, 'claimius.organization', p.id) FROM claimius.organization p WHERE p.id = ? AND p.sa_deleted_at IS NULL",
+		appID, *org.OwnerID,
+	).Scan(ctx.Request().Context(), &held); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, errorsx.ErrNotFound
 		}
-		var createdRoot Organization
-		if err := sdb.Instance().NewSelect().
-			Model(&createdRoot).
-			Where("id = ?", rootID).
-			Scan(ctx.Request().Context()); err != nil {
-			ctx.Logger().Errorf("postOrganization root reload: %v", err)
-			return nil, errorsx.ErrDbUnexpected
-		}
-		return &createdRoot, nil
+		ctx.Logger().Errorf("postOrganization parent: %v", err)
+		return nil, errorsx.ErrDbUnexpected
+	}
+	if !held {
+		return nil, errorsx.ErrForbidden
 	}
 
 	var created Organization
