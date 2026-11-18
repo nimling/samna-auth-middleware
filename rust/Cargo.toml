@@ -1,6 +1,6 @@
 [package]
 name = "samna-auth-middleware"
-version = "2.0.0-alpha0143"
+version = "2.0.0-alpha0144"
 edition = "2024"
 license = "MIT"
 repository = "https://github.com/nimling/samna-auth-middleware"
