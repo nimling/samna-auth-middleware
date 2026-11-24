@@ -5949,6 +5949,21 @@ BEGIN
        AND ends_at < now();
 
     FOR v_row IN
+        SELECT c.id, c.sa_created_by
+        FROM claimius.claim c
+        WHERE c.type = 'virtual'
+          AND c.sa_deleted_at IS NULL
+          AND c.sa_created_at < now() - interval '10 minutes'
+          AND NOT EXISTS (SELECT 1 FROM claimius.claim_object co WHERE co.claim_id = c.id AND co.sa_deleted_at IS NULL)
+          AND NOT EXISTS (
+              SELECT 1 FROM claimius._app_ids_for_row('claimius.claim', to_jsonb(c)) AS a(app_id)
+              WHERE claimius.get_app_home(a.app_id) IS NOT NULL)
+    LOOP
+        PERFORM claimius.delete_claim(v_row.id, v_row.sa_created_by);
+        v_deleted := v_deleted + 1;
+    END LOOP;
+
+    FOR v_row IN
         SELECT t.table_name, t.column_name,
                coalesce((p_settings ->> (t.table_name || '_days'))::INTEGER, (p_settings ->> (t.kind || '_days'))::INTEGER, t.days) AS days,
                coalesce((p_settings ->> (t.kind || '_size_mb'))::BIGINT, (p_settings ->> 'size_mb')::BIGINT, 4096) * 1024 * 1024 AS limit_bytes,
@@ -5990,7 +6005,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius.prune(JSONB) IS 'Retention. A guest user whose guest_identity ends_at has passed is soft deleted first, with its guest_identity; a soft deleted guest and guest_identity then age out as log. Every runtime table belongs to a kind, audit, analytics, notification, token or log. p_settings sets days per table (<table>_days) or per kind (<kind>_days), and a size per kind (<kind>_size_mb) or for all (size_mb, 4096). A table under its size is left alone; over it, every row whose time column is older than its days is deleted, and 0 days leaves a table alone. A code of an app another prophet decides is left to that prophet, as get_app_home answers, so the run never trips enforce_app_home. A host with runtime tables of its own defines public.prune(JSONB) of the same shape, and it runs after.';
+COMMENT ON FUNCTION claimius.prune(JSONB) IS 'Retention. A guest user whose guest_identity ends_at has passed is soft deleted first, with its guest_identity; a soft deleted guest and guest_identity then age out as log. A virtual claim older than 10 minutes with no live binding left, the claim a routed write made for an object its host never committed, is removed through delete_claim with its grants and the links to it, unless an app linked to its owning organization is decided by another prophet; it is bound to nothing, so its removal changes access to no object but the claim itself. Every runtime table belongs to a kind, audit, analytics, notification, token or log. p_settings sets days per table (<table>_days) or per kind (<kind>_days), and a size per kind (<kind>_size_mb) or for all (size_mb, 4096). A table under its size is left alone; over it, every row whose time column is older than its days is deleted, and 0 days leaves a table alone. A code of an app another prophet decides is left to that prophet, as get_app_home answers, so the run never trips enforce_app_home. A host with runtime tables of its own defines public.prune(JSONB) of the same shape, and it runs after.';
 
 GRANT EXECUTE ON FUNCTION claimius.prune(JSONB)
     TO claimius_writer;

@@ -114,7 +114,11 @@ func TestEveryWriteHelperOfADiscipleGoesToTheProphetFirst(t *testing.T) {
 	if _, err := db.PostUser(ctx, nil, ac, &sdb.SamnaUser{UserID: uuid.New(), Email: "routed@example.com", OwnerID: &orgRoot, ClaimID: &claim.ID}); err != nil {
 		t.Fatalf("create organization user: %v", err)
 	}
-	if _, err := db.DeleteUser(ctx, nil, ac, userB); err != nil {
+	self, err := db.MutationAccess(ctx, userB, userB, sdb.OBJECT_TYPE_USER, sdb.ACCESS_OWNER)
+	if err != nil {
+		t.Fatalf("self access: %v", err)
+	}
+	if _, err := db.DeleteUser(ctx, nil, self, userB); err != nil {
 		t.Fatalf("delete user: %v", err)
 	}
 
@@ -285,7 +289,7 @@ func TestARoutedWriteTakesItsRecordFromTheModelNeverTheWhere(t *testing.T) {
 		Where("user_relation.id = ?", relationID).
 		Scan(ctx)
 	_, _ = db.NewDelete().Model(&sdb.UserRelation{ID: relationID}).Exec(ctx)
-	_, _ = db.NewDelete().Model(&sdb.SamnaUser{UserID: userID}).Exec(ctx)
+	_, _ = db.NewDelete().Model(&sdb.SamnaUser{UserID: userID}).Access(&sdb.AccessClaim{UserID: userID}).Exec(ctx)
 	_, _ = db.NewDelete().Model(&sdb.SamnaClient{ID: clientID}).Exec(ctx)
 	want := []string{
 		"PATCH /relation/" + relationID.String(), "DELETE /relation/" + relationID.String(),
@@ -629,7 +633,7 @@ func TestABindingKeepsTheOwnerItIsGivenRoutedOrLocal(t *testing.T) {
 func TestARoutedOrganizationMoveIsCheckedBeforeTheProphet(t *testing.T) {
 	db := database(t)
 	ctx := context.Background()
-	ac, err := db.MutationAccess(ctx, userA, orgGrand, sdb.OBJECT_TYPE_ORGANIZATION, sdb.ACCESS_WRITE)
+	ac, err := db.MutationAccess(ctx, userA, orgGrand, sdb.OBJECT_TYPE_ORGANIZATION, sdb.ACCESS_OWNER)
 	if err != nil {
 		t.Fatalf("access: %v", err)
 	}

@@ -112,6 +112,10 @@ func PutClaim(ctx echo.Context) error {
 		return respond.Error(ctx, http.StatusBadRequest, err.Error())
 	}
 	patch.ID = claimID
+	ac, err := getOwnerAccess(ctx, claimID, shared.OBJECT_TYPE_CLAIM)
+	if err != nil {
+		return respond.Error(ctx, errorsx.ErrToHttpCode(err), "")
+	}
 	tx, err := sdb.Instance().BeginTx(ctx.Request().Context(), nil)
 	if err != nil {
 		ctx.Logger().Errorf("PutClaim: %v", err)
@@ -124,8 +128,10 @@ func PutClaim(ctx echo.Context) error {
 			return respond.Error(ctx, http.StatusInternalServerError, "Internal server error")
 		}
 	}
-	query := tx.NewUpdate().
+	query := sdb.Instance().NewUpdate().
+		Conn(tx).
 		Model(patch).
+		Access(ac).
 		Where("sa_deleted_at IS NULL").
 		Where("id = ?", claimID).
 		Set("sa_updated_at = now()").
@@ -173,9 +179,14 @@ func DeleteClaim(ctx echo.Context) error {
 	if err != nil {
 		return respond.Error(ctx, http.StatusBadRequest, "Malformed request")
 	}
+	ac, err := getOwnerAccess(ctx, claimID, shared.OBJECT_TYPE_CLAIM)
+	if err != nil {
+		return respond.Error(ctx, errorsx.ErrToHttpCode(err), "")
+	}
 	var claim Claim
 	res, err := sdb.Instance().NewUpdate().
 		Model(&claim).
+		Access(ac).
 		Where("id = ?", claimID).
 		Where("sa_deleted_at IS NULL").
 		Set("sa_deleted_at = NOW()").

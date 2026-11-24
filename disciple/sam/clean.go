@@ -25,15 +25,5 @@ func (r *Replica) CleanOrphans(ctx context.Context) (int, error) {
 		}
 		removed++
 	}
-	claims := make([]shared.Claim, 0)
-	if err := r.DB.NewRaw("SELECT * FROM claimius.get_orphan_claims(?::interval)", cleanGrace.String()).Scan(ctx, &claims); err != nil {
-		return removed, fmt.Errorf("orphan claims: %w", err)
-	}
-	for i := range claims {
-		if _, err := r.DB.NewDelete().Model(&claims[i]).Exec(ctx); err != nil {
-			return removed, fmt.Errorf("remove claim %s: %w", claims[i].ID, err)
-		}
-		removed++
-	}
 	return removed, nil
 }

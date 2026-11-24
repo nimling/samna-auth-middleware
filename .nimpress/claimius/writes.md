@@ -38,7 +38,7 @@ Never written by hand: `user_object`, `object_info`, `user_users`, `user_users_d
 | Trigger | On | Does |
 |---|---|---|
 | `tg_enforce_app_home`, `enforce_app_home` | the source tables, before, on the prophet | Refuses a write outside replay to a row of an app another prophet decides, SQLSTATE `P0409` with the home in the hint; an organization or location is refused when any app it is linked to is decided elsewhere |
-| `tg_check_claim_grant`, `tg_check_claim_level`, `_check_claim_grant` | `user_claim` on insert or a change of claim or user; `claim` when its level increases | Refuses with `P0403` a grant of a claim, or a raise of its level, when the claim gives bits on a bound object that a deny reaching the actor in `sa_created_by` there has taken from the actor's pair; `_check_claim_denies` |
+| `tg_check_claim_grant`, `tg_check_claim_level`, `_check_claim_grant` | `user_claim` on insert or a change of claim or user; `claim` when its level increases or its mask takes the deny bit | Refuses with `P0403` a grant of a claim, or a raise of its level, when the claim gives bits on a bound object that a deny reaching the actor in `sa_created_by` there has taken from the actor's pair, `_check_claim_denies`; and a mask that turns the claim into a deny unless the actor holds owner on every organization, location and `samna_user` it is bound to |
 | `tg_self_root` | `organization`, `location`, before insert | A root self references; a child copies its parent's `sa_root_id` |
 | `tg_update_txid` | `claim`, `user_claim`, `claim_object`, `object_asset`, before | Stamps `txid = pg_current_xact_id()`, under replay too, which the graph cache compares to its snapshot |
 | `tg_check_claim_composition` | `claim_object`, before | Refuses a binding that hands out more than the actor holds or a bit a deny reaching the actor has taken, a self link, a reverse link, and a link to a claim the actor cannot read |
@@ -98,7 +98,7 @@ The assignee is not settled in the write. A grant changes one user's access and 
 
 `_check_claim_composition` runs first on every `claim_object` insert or update outside replay:
 
-1. A binding on an object whose effective mask carries a bit the actor does not hold there is refused: `reconcile_if_pending` settles the actor's pair on the object, and the binding's effective mask less the actor's access on the object must leave none of the bits in 15. A deny, a removal and a binding that does not change mask, claim or object are exempt. Two cases are judged on the actor's hold on an organization in place of its access on the object:
+1. A binding on an object whose effective mask carries a bit the actor does not hold there is refused: `reconcile_if_pending` settles the actor's pair on the object, and the binding's effective mask less the actor's access on the object must leave none of the bits in 15. A removal and a binding that does not change mask, claim or object are exempt, and so is a deny, except on an organization, a location or a `samna_user`, where the actor must hold owner on the object: in its settled pair, directly or through a tree, and on a user as that user or through a grant bound on that user; write is not enough. Two cases are judged on the actor's hold on an organization in place of its access on the object:
 
     1. A binding on an object outside the `claimius` schema that this database holds no `object_info` row for, a disciple's own row bound on the prophet, from an actor with no pair on it, is judged on the actor's pair on the binding's owning organization. When the transaction carries `claimius.object_created_by`, the grant the calling app reports the row was created under, and that grant is a live `user_claim` of the actor, the actor also holds owner, write, read and execute as the row's creator while the owning organization is live or not held, the verdict the disciple holding the row reaches. The type passes through unresolved; the disciple computes access on the row when the binding arrives.
 
@@ -111,6 +111,15 @@ The assignee is not settled in the write. A grant changes one user's access and 
 Every write is constant in the number of users who hold the claims involved: the only user a write settles is its actor, on the rows it names. A pair recompute that finds its pair unchanged writes nothing, so a second recompute of the same pair in one transaction costs its reads and no rows. A pair entering or leaving writes one `user_users_diff` row while a viewer exists and reads nothing else; the count it moves is folded by the next read that needs it.
 
 The implementing side's registered tables write no outbox rows; the source rows of claimius do, one per row written, and an organization or location one per app linked to it.
+
+## Editing a row directly
+
+Owner is the one bit that lets a writer edit or delete an organization, a location, a `samna_user` or a claim directly, and bind a deny on one. Write is not enough for either.
+
+1. The builder refuses an update or a delete of `claimius.organization`, `claimius.location`, `claimius.samna_user` or `claimius.claim` whose access claim lacks owner, with `ErrNoAccess`, before it routes or runs anything. A user editing its own `samna_user` row passes, as the directory answers self with owner. See [Writes in Go](./middleware/writes.md).
+2. The prophet's `/sam` routes that update or delete those four types ask `mutation_access` for owner on the object for the forwarded user, a person or a machine client by its `client_id`, and write through the builder with the access claim it returns. No forwarded user is a `403`; no owner is a `403`; a missing object a `404`.
+3. A binding of a deny on an organization, a location or a user is judged by `_check_claim_composition`, and a claim turned into a deny by `_check_claim_grant`, both in SQL on both roles; see [Composition checks](#composition-checks).
+4. Claimius's own maintenance is no user write: the prophet's `prune` removes a virtual claim left with no binding, and a disciple's clean removes only the bindings its host never committed; see [Sync in Go](./middleware/sync.md#the-clean).
 
 ## One request, one transaction
 
@@ -160,6 +169,10 @@ On a disciple a write to a shared type goes to the prophet, and the row the prop
 | Composition, a link | one probe of `idx_claim_object_object`, and the settle and one probe of the actor's pair on the target claim, on every link |
 | `_check_claim_denies` | one range of `idx_claim_object_claim_id` for the claim's bindings, one `_denied_access` pass per non deny object binding, a range of the actor's grants and one of the links of its inheriting claims with a closure probe per deny binding found, and the settle and one probe of the actor's pair only on a binding where the denied bits overlap; for every claim |
 | `_actor_user_for_row` | one probe |
+| A deny binding on an organization, a location or a user | the actor's grant, the settle of the actor's pair and one range of its pairs on the object, and on a user one range of the actor's grants bound on that user; the deny walk is skipped |
+| A claim turned into a deny | one range of the claim's bindings, and per deny binding on an organization, a location or a user the settle and one probe of the actor's pair, and on a user one range of the actor's grants bound on it |
+| A `/sam` edit or delete of an organization, a location, a user or a claim | one `mutation_access` for the forwarded user, 8 entries on a hit, before the write |
+| The builder's owner test | one bit test on the access claim, no read |
 
 ### Closure rows of a hierarchy write
 

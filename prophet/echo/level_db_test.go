@@ -5,11 +5,16 @@ package echo_test
 import (
 	"context"
 	"errors"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/labstack/echo/v4"
 	"github.com/uptrace/bun/driver/pgdriver"
 
+	pecho "github.com/nimling/samna-auth-middleware/v2/prophet/echo"
 	psdb "github.com/nimling/samna-auth-middleware/v2/prophet/sdb"
 )
 
@@ -225,5 +230,164 @@ func TestTheDirectorySubtractsADenyOnAUser(t *testing.T) {
 	}
 	if rows != 0 {
 		t.Fatalf("a deny on the user at the same level must remove the grant, got %d rows", rows)
+	}
+}
+
+func TestADenyOnAnOrganizationLocationOrUserNeedsOwner(t *testing.T) {
+	f := getLevelFixture(t)
+	ctx := context.Background()
+	location := uuid.New()
+	if _, err := psdb.Instance().ExecContext(ctx, `
+		INSERT INTO claimius.location (id, name, sa_owner_id, sa_parent_id, sa_root_id, sa_created_by)
+		VALUES (?, 'Deny hall', ?, ?, ?, ?)
+	`, location, f.child, location, location, grantUser); err != nil {
+		t.Fatalf("location: %v", err)
+	}
+	editor, target := uuid.New(), uuid.New()
+	postLevelUser(t, f.app, editor, "Editor")
+	postLevelUser(t, f.app, target, "Target")
+	edit := postLevelClaim(t, f.app, "Edit only", 6, 0)
+	postLevelBinding(t, f.app, edit, &f.child, "claimius.organization", true, "", grantUser)
+	postLevelBinding(t, f.app, edit, &location, "claimius.location", true, "", grantUser)
+	postLevelBinding(t, f.app, edit, &target, "claimius.samna_user", false, "", grantUser)
+	editorGrant := postLevelGrant(t, f.app, edit, editor, grantUser)
+	ownTarget := postLevelClaim(t, f.app, "Own target", 15, 0)
+	postLevelBinding(t, f.app, ownTarget, &target, "claimius.samna_user", false, "", grantUser)
+	postLevelGrant(t, f.app, ownTarget, f.writer, grantUser)
+	deny := postLevelClaim(t, f.app, "No write", 18, 0)
+	bind := func(object uuid.UUID, objectType string, createdBy uuid.UUID) error {
+		_, err := psdb.Instance().ExecContext(ctx, `
+			SELECT claimius.insert_claim_object(p_claim_id => ?, p_sa_owner_id => ?, p_sa_root_id => ?,
+			       p_sa_created_by => ?, p_object_id => ?, p_object_type => ?, p_inherits => TRUE)
+		`, deny, f.app.Org, f.app.Org, createdBy, object, objectType)
+		return err
+	}
+	for _, c := range []struct {
+		object     uuid.UUID
+		objectType string
+	}{{f.child, "claimius.organization"}, {location, "claimius.location"}, {target, "claimius.samna_user"}} {
+		if err := bind(c.object, c.objectType, editorGrant); getSQLState(err) != "P0403" {
+			t.Fatalf("write without owner must not bind a deny on a %s, got %v", c.objectType, err)
+		}
+		if err := bind(c.object, c.objectType, f.writerGrant); err != nil {
+			t.Fatalf("owner, held directly or through a tree, binds a deny on a %s: %v", c.objectType, err)
+		}
+	}
+}
+
+func TestTurningABoundClaimIntoADenyNeedsOwner(t *testing.T) {
+	f := getLevelFixture(t)
+	ctx := context.Background()
+	location := uuid.New()
+	if _, err := psdb.Instance().ExecContext(ctx, `
+		INSERT INTO claimius.location (id, name, sa_owner_id, sa_parent_id, sa_root_id, sa_created_by)
+		VALUES (?, 'Flip hall', ?, ?, ?, ?)
+	`, location, f.child, location, location, grantUser); err != nil {
+		t.Fatalf("location: %v", err)
+	}
+	editor, target := uuid.New(), uuid.New()
+	postLevelUser(t, f.app, editor, "Editor")
+	postLevelUser(t, f.app, target, "Target")
+	edit := postLevelClaim(t, f.app, "Flip edit only", 6, 0)
+	postLevelBinding(t, f.app, edit, &f.child, "claimius.organization", true, "", grantUser)
+	postLevelBinding(t, f.app, edit, &location, "claimius.location", true, "", grantUser)
+	postLevelBinding(t, f.app, edit, &target, "claimius.samna_user", false, "", grantUser)
+	editorGrant := postLevelGrant(t, f.app, edit, editor, grantUser)
+	ownTarget := postLevelClaim(t, f.app, "Flip own target", 15, 0)
+	postLevelBinding(t, f.app, ownTarget, &target, "claimius.samna_user", false, "", grantUser)
+	postLevelGrant(t, f.app, ownTarget, f.writer, grantUser)
+	flip := func(claim, actor uuid.UUID) error {
+		var raw string
+		return psdb.Instance().NewRaw(`SELECT claimius.update_claim(p_claim_id => ?, p_sa_access => 18, p_actor_user_claim_id => ?)`, claim, actor).Scan(ctx, &raw)
+	}
+	for _, c := range []struct {
+		object     uuid.UUID
+		objectType string
+	}{{f.child, "claimius.organization"}, {location, "claimius.location"}, {target, "claimius.samna_user"}} {
+		claim := postLevelClaim(t, f.app, "Flip on "+c.objectType, 4, 0)
+		postLevelBinding(t, f.app, claim, &c.object, c.objectType, false, "", grantUser)
+		if err := flip(claim, editorGrant); getSQLState(err) != "P0403" {
+			t.Fatalf("write without owner must not turn a claim bound on a %s into a deny, got %v", c.objectType, err)
+		}
+		if err := flip(claim, f.writerGrant); err != nil {
+			t.Fatalf("owner turns a claim bound on a %s into a deny: %v", c.objectType, err)
+		}
+	}
+}
+
+func TestTheProphetEditsAnOrganizationLocationUserOrClaimOnlyForAnOwner(t *testing.T) {
+	f := getLevelFixture(t)
+	ctx := context.Background()
+	org, location := uuid.New(), uuid.New()
+	if _, err := psdb.Instance().ExecContext(ctx, `
+		INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
+		VALUES (?, 'Gate entity', 'entity', ?, ?, 2, ?)
+	`, org, f.child, f.app.Org, grantUser); err != nil {
+		t.Fatalf("organization: %v", err)
+	}
+	if _, err := psdb.Instance().ExecContext(ctx, `
+		INSERT INTO claimius.location (id, name, sa_owner_id, sa_parent_id, sa_root_id, sa_created_by)
+		VALUES (?, 'Gate hall', ?, ?, ?, ?)
+	`, location, org, location, location, grantUser); err != nil {
+		t.Fatalf("location: %v", err)
+	}
+	editor, target := uuid.New(), uuid.New()
+	postLevelUser(t, f.app, editor, "Editor")
+	postLevelUser(t, f.app, target, "Target")
+	edit := postLevelClaim(t, f.app, "Gate edit only", 6, 0)
+	postLevelBinding(t, f.app, edit, &org, "claimius.organization", true, "", grantUser)
+	postLevelBinding(t, f.app, edit, &target, "claimius.samna_user", false, "", grantUser)
+	postLevelGrant(t, f.app, edit, editor, grantUser)
+	ownTarget := postLevelClaim(t, f.app, "Gate own target", 15, 0)
+	postLevelBinding(t, f.app, ownTarget, &target, "claimius.samna_user", false, "", grantUser)
+	postLevelGrant(t, f.app, ownTarget, f.writer, grantUser)
+	gated := postLevelClaim(t, f.app, "Gate claim", 4, 0)
+	call := func(handler echo.HandlerFunc, method string, id, actor uuid.UUID, body string) int {
+		req := httptest.NewRequest(method, "/", strings.NewReader(body))
+		req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+		req.Header.Set("SAuth-Forwarded-User", actor.String())
+		rec := httptest.NewRecorder()
+		ectx := echo.New().NewContext(req, rec)
+		ectx.SetParamNames("id")
+		ectx.SetParamValues(id.String())
+		ectx.Set("app_id", f.app.ID)
+		ectx.Set("app_secret", "gotest")
+		ectx.Set("request_id", uuid.New())
+		_ = handler(ectx)
+		return rec.Code
+	}
+	for _, c := range []struct {
+		name    string
+		handler echo.HandlerFunc
+		method  string
+		id      uuid.UUID
+		body    string
+		done    string
+	}{
+		{"organization update", pecho.PutOrganization, http.MethodPatch, org, `{"name":"Gate renamed"}`, `SELECT name = 'Gate renamed' FROM claimius.organization WHERE id = ?`},
+		{"location update", pecho.PutLocation, http.MethodPatch, location, `{"name":"Gate renamed"}`, `SELECT name = 'Gate renamed' FROM claimius.location WHERE id = ?`},
+		{"user update", pecho.PutUser, http.MethodPatch, target, `{"first_name":"Renamed"}`, `SELECT first_name = 'Renamed' FROM claimius.samna_user WHERE user_id = ?`},
+		{"claim update", pecho.PutClaim, http.MethodPatch, gated, `{"name":"Gate renamed"}`, `SELECT name = 'Gate renamed' FROM claimius.claim WHERE id = ?`},
+		{"location delete", pecho.DeleteLocation, http.MethodDelete, location, ``, `SELECT sa_deleted_at IS NOT NULL FROM claimius.location WHERE id = ?`},
+		{"organization delete", pecho.DeleteOrganization, http.MethodDelete, org, ``, `SELECT sa_deleted_at IS NOT NULL FROM claimius.organization WHERE id = ?`},
+		{"user delete", pecho.DeleteUser, http.MethodDelete, target, ``, `SELECT sa_deleted_at IS NOT NULL FROM claimius.samna_user WHERE user_id = ?`},
+		{"claim delete", pecho.DeleteClaim, http.MethodDelete, gated, ``, `SELECT sa_deleted_at IS NOT NULL FROM claimius.claim WHERE id = ?`},
+	} {
+		done := func() bool {
+			var ok bool
+			if err := psdb.Instance().NewRaw(c.done, c.id).Scan(ctx, &ok); err != nil {
+				t.Fatalf("%s: read back: %v", c.name, err)
+			}
+			return ok
+		}
+		if code := call(c.handler, c.method, c.id, editor, c.body); code != http.StatusForbidden || done() {
+			t.Fatalf("%s by a writer without owner: want 403 and no write, got %d", c.name, code)
+		}
+		if code := call(c.handler, c.method, c.id, f.writer, c.body); code == http.StatusForbidden || code == http.StatusNotFound || !done() {
+			t.Fatalf("%s by an owner: want the write, got %d", c.name, code)
+		}
+	}
+	if code := call(pecho.PutClaim, http.MethodPatch, uuid.New(), uuid.Nil, `{"name":"x"}`); code != http.StatusForbidden && code != http.StatusNotFound {
+		t.Fatalf("an edit with no actor must be refused, got %d", code)
 	}
 }

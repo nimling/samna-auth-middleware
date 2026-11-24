@@ -101,15 +101,21 @@ func TestTheCleanRemovesWhatARoutedWriteLeftOnAnObjectTheHostNeverCommitted(t *t
 	if err != nil {
 		t.Fatalf("clean: %v", err)
 	}
-	if removed != 2 {
-		t.Fatalf("the clean must remove the lost binding and the claim it leaves without bindings, got %d", removed)
+	if removed != 1 {
+		t.Fatalf("the clean must remove the lost binding, got %d", removed)
+	}
+	if _, err := prophet.ExecContext(ctx, `SELECT claimius.prune('{}'::jsonb)`); err != nil {
+		t.Fatalf("prune: %v", err)
 	}
 	var live bool
 	if err := prophet.NewRaw(`SELECT sa_deleted_at IS NULL FROM claimius.claim_object WHERE id = ?`, lostBinding).Scan(ctx, &live); err != nil || live {
 		t.Fatalf("a binding on an object the host never committed must be gone from the prophet, got live=%v %v", live, err)
 	}
 	if err := prophet.NewRaw(`SELECT sa_deleted_at IS NULL FROM claimius.claim WHERE id = ?`, lostClaim).Scan(ctx, &live); err != nil || live {
-		t.Fatalf("the virtual claim left without bindings must be gone from the prophet, got live=%v %v", live, err)
+		t.Fatalf("the prophet's prune must remove the virtual claim left without bindings, got live=%v %v", live, err)
+	}
+	if err := prophet.NewRaw(`SELECT sa_deleted_at IS NULL FROM claimius.claim WHERE id = ?`, keptClaim).Scan(ctx, &live); err != nil || !live {
+		t.Fatalf("a virtual claim with a live binding must stay, got live=%v %v", live, err)
 	}
 	if err := prophet.NewRaw(`SELECT sa_deleted_at IS NULL FROM claimius.claim_object WHERE id = ?`, keptBinding).Scan(ctx, &live); err != nil || !live {
 		t.Fatalf("a binding on a committed object must stay, got live=%v %v", live, err)

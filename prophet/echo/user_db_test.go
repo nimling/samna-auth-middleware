@@ -102,10 +102,13 @@ func TestDeleteUserAnswersTheDeletedRowARoutedDeleteReads(t *testing.T) {
 
 	e := echo.New()
 	rec := httptest.NewRecorder()
-	ectx := e.NewContext(httptest.NewRequest(http.MethodDelete, "/", nil), rec)
+	req := httptest.NewRequest(http.MethodDelete, "/", nil)
+	req.Header.Set("SAuth-Forwarded-User", userID.String())
+	ectx := e.NewContext(req, rec)
 	ectx.SetParamNames("id")
 	ectx.SetParamValues(userID.String())
 	ectx.Set("app_id", appID)
+	ectx.Set("app_secret", "gotest")
 	ectx.Set("request_id", uuid.New())
 	_ = pecho.DeleteUser(ectx)
 

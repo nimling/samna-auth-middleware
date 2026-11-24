@@ -10,6 +10,7 @@ import (
 	"github.com/nimling/samna-auth-middleware/v2/pkg/errorsx"
 	"github.com/nimling/samna-auth-middleware/v2/pkg/respond"
 	sdb "github.com/nimling/samna-auth-middleware/v2/prophet/sdb"
+	"github.com/nimling/samna-auth-middleware/v2/shared"
 	"github.com/nimling/samna-auth-middleware/v2/utils"
 )
 
@@ -124,7 +125,11 @@ func PutLocation(ctx echo.Context) error {
 		return respond.Error(ctx, http.StatusBadRequest, err.Error())
 	}
 	updated.ID = locationID
-	if err := putLocation(ctx, *updated, appID); err != nil {
+	ac, err := getOwnerAccess(ctx, locationID, shared.OBJECT_TYPE_LOCATION)
+	if err != nil {
+		return respond.Error(ctx, errorsx.ErrToHttpCode(err), "")
+	}
+	if err := putLocation(ctx, *updated, appID, ac); err != nil {
 		return respond.Error(ctx, errorsx.ErrToHttpCode(err), err.Error())
 	}
 	final, err := getLocation(ctx, locationID, appID)
@@ -140,7 +145,11 @@ func DeleteLocation(ctx echo.Context) error {
 	if err != nil {
 		return respond.Error(ctx, http.StatusBadRequest, "id must be a uuid")
 	}
-	location, err := deleteLocation(ctx, locationID, appID)
+	ac, err := getOwnerAccess(ctx, locationID, shared.OBJECT_TYPE_LOCATION)
+	if err != nil {
+		return respond.Error(ctx, errorsx.ErrToHttpCode(err), "")
+	}
+	location, err := deleteLocation(ctx, locationID, appID, ac)
 	if err != nil {
 		return respond.Error(ctx, errorsx.ErrToHttpCode(err), "")
 	}
@@ -224,9 +233,10 @@ func postLocation(ctx echo.Context, location Location) (*Location, error) {
 	return &created, nil
 }
 
-func putLocation(ctx echo.Context, location Location, appID uuid.UUID) error {
+func putLocation(ctx echo.Context, location Location, appID uuid.UUID, ac *shared.AccessClaim) error {
 	res, err := sdb.Instance().NewUpdate().
 		Model(&location).
+		Access(ac).
 		Where("sa_deleted_at IS NULL").
 		Where("id = ?", location.ID).
 		Where("claimius.app_has_object(?, 'claimius.location', id)", appID).
@@ -247,11 +257,12 @@ func putLocation(ctx echo.Context, location Location, appID uuid.UUID) error {
 	return nil
 }
 
-func deleteLocation(ctx echo.Context, locationID, appID uuid.UUID) (*Location, error) {
+func deleteLocation(ctx echo.Context, locationID, appID uuid.UUID, ac *shared.AccessClaim) (*Location, error) {
 	var location Location
 	res, err := sdb.Instance().
 		NewUpdate().
 		Model(&location).
+		Access(ac).
 		Where("id = ?", locationID).
 		Where("claimius.app_has_object(?, 'claimius.location', id)", appID).
 		Where("sa_deleted_at IS NULL").

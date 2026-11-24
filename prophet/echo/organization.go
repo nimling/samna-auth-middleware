@@ -95,7 +95,11 @@ func PutOrganization(ctx echo.Context) error {
 		return respond.Error(ctx, http.StatusBadRequest, err.Error())
 	}
 	updated.ID = organizationID
-	if err := putOrganization(ctx, *updated, appID); err != nil {
+	ac, err := getOwnerAccess(ctx, organizationID, shared.OBJECT_TYPE_ORGANIZATION)
+	if err != nil {
+		return respond.Error(ctx, errorsx.ErrToHttpCode(err), "")
+	}
+	if err := putOrganization(ctx, *updated, appID, ac); err != nil {
 		return respond.Error(ctx, errorsx.ErrToHttpCode(err), err.Error())
 	}
 	final, err := getOrganization(ctx, organizationID, appID)
@@ -111,7 +115,11 @@ func DeleteOrganization(ctx echo.Context) error {
 	if err != nil {
 		return respond.Error(ctx, http.StatusBadRequest, "Malformed request")
 	}
-	organization, err := deleteOrganization(ctx, organizationID, appID)
+	ac, err := getOwnerAccess(ctx, organizationID, shared.OBJECT_TYPE_ORGANIZATION)
+	if err != nil {
+		return respond.Error(ctx, errorsx.ErrToHttpCode(err), "")
+	}
+	organization, err := deleteOrganization(ctx, organizationID, appID, ac)
 	if err != nil {
 		if errors.Is(err, shared.ErrOrganizationCustomer) {
 			return respond.Error(ctx, http.StatusBadRequest, err.Error())
@@ -191,7 +199,7 @@ func postOrganization(ctx echo.Context, org Organization, appID uuid.UUID) (*Org
 	return &created, nil
 }
 
-func putOrganization(ctx echo.Context, org Organization, appID uuid.UUID) error {
+func putOrganization(ctx echo.Context, org Organization, appID uuid.UUID, ac *shared.AccessClaim) error {
 	columns := make([]string, 0, 6)
 	for key, column := range map[string]string{
 		"name": "name", "description": "description", "kind": "kind",
@@ -228,6 +236,7 @@ func putOrganization(ctx echo.Context, org Organization, appID uuid.UUID) error 
 	}
 	res, err := sdb.Instance().NewUpdate().
 		Model(&org).
+		Access(ac).
 		Column(columns...).
 		Where("sa_deleted_at IS NULL").
 		Where("id = ?", org.ID).
@@ -248,7 +257,7 @@ func putOrganization(ctx echo.Context, org Organization, appID uuid.UUID) error 
 	return nil
 }
 
-func deleteOrganization(ctx echo.Context, organizationID, appID uuid.UUID) (*Organization, error) {
+func deleteOrganization(ctx echo.Context, organizationID, appID uuid.UUID, ac *shared.AccessClaim) (*Organization, error) {
 	var organization Organization
 	var orgType OrganizationType
 	if err := sdb.Instance().NewRaw(
@@ -267,6 +276,7 @@ func deleteOrganization(ctx echo.Context, organizationID, appID uuid.UUID) (*Org
 	res, err := sdb.Instance().
 		NewUpdate().
 		Model(&organization).
+		Access(ac).
 		Where("id = ?", organizationID).
 		Where("claimius.app_has_object(?, 'claimius.organization', id)", appID).
 		Where("sa_deleted_at IS NULL").

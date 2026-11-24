@@ -2,6 +2,7 @@ package echo
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"strconv"
@@ -11,6 +12,7 @@ import (
 	"github.com/labstack/echo/v4"
 
 	"github.com/nimling/samna-auth-middleware/v2/analytics"
+	"github.com/nimling/samna-auth-middleware/v2/pkg/errorsx"
 	"github.com/nimling/samna-auth-middleware/v2/pkg/respond"
 	sdb "github.com/nimling/samna-auth-middleware/v2/prophet/sdb"
 	"github.com/nimling/samna-auth-middleware/v2/shared"
@@ -51,6 +53,23 @@ func forwardedUser(ctx echo.Context) *uuid.UUID {
 		return &id
 	}
 	return nil
+}
+
+func getOwnerAccess(ctx echo.Context, objectID uuid.UUID, objectType string) (*shared.AccessClaim, error) {
+	actor := forwardedUser(ctx)
+	if actor == nil {
+		return nil, errorsx.ErrForbidden
+	}
+	ac, err := sdb.Instance().MutationAccess(ctx.Request().Context(), *actor, objectID, objectType, shared.ACCESS_OWNER)
+	switch {
+	case errors.Is(err, shared.ErrNoAccess):
+		return nil, errorsx.ErrForbidden
+	case errors.Is(err, shared.ErrNotFound):
+		return nil, errorsx.ErrNotFound
+	case err != nil:
+		return nil, errorsx.ErrDbUnexpected
+	}
+	return ac, nil
 }
 
 func captureApp(ctx echo.Context) (uuid.UUID, bool) {

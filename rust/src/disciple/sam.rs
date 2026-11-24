@@ -15,8 +15,7 @@ use crate::client::{self, Ctx, SyncCursor, Target};
 use crate::notification;
 use crate::shared::db::{Conn, lead_sync};
 use crate::shared::{
-    self, AccessClaim, Claim, ClaimObject, Db, DiscipleState, Error, Model, Result,
-    UserNameAvailable,
+    self, AccessClaim, ClaimObject, Db, DiscipleState, Error, Model, Result, UserNameAvailable,
 };
 use crate::shared::{BodySamProfileItem, BodySamProfileItemKey, BodySamUserName};
 use crate::smw;
@@ -572,24 +571,6 @@ impl Replica {
                 .exec(ctx)
                 .await
                 .map_err(|e| Error::other(format!("remove binding {id} on {claim_id}: {e}")))?;
-            removed += 1;
-        }
-        let mut claims = self
-            .db
-            .query_models::<Claim>(
-                ctx,
-                "SELECT * FROM claimius.get_orphan_claims($1::text::interval)",
-                &[&grace],
-            )
-            .await
-            .map_err(|e| Error::other(format!("orphan claims: {e}")))?;
-        for claim in claims.iter_mut() {
-            let id = claim.id;
-            self.db
-                .new_delete(claim)
-                .exec(ctx)
-                .await
-                .map_err(|e| Error::other(format!("remove claim {id}: {e}")))?;
             removed += 1;
         }
         Ok(removed)

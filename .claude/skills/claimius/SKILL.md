@@ -31,7 +31,7 @@ Claimius has been broken several times by confident changes that bypassed the ar
 4. The same schema runs on prophets, the sources of truth, and disciples, the read replicas. A disciple pulls its app's source rows from the prophet's `sync_event` feed and applies each page in one transaction under `replay_mode = true`: no actor settles and no event is emitted, the closure is kept and the areas are raised, so every pair settles on the disciple's own reads. Derived rows never travel.
 5. Roles hold the boundary: `claimius_writer` writes, `claimius_reader` cannot.
 6. The schema ships as a baseline of nine files per role, `V1.0`, `V1.1`, `V2.1` to `V2.4`, `V3.0`, `V4.0`, `V6.0`, with no delta files and no migrations; a consumer pins a `ref` and runs one scoped `smig rebase` of its `claimius` base step. Any other file under `prophet/database` or `disciple/database` is dead and never cited.
-7. Retention is `claimius.prune(p_settings JSONB)` on both roles: days per table or per kind, a size per kind or for all, lenient defaults, and a host's own `public.prune(JSONB)` run after. There is no retention table, kind, class, endpoint or cold storage, and application data is never aged: `references/functions.md` Materialization is paid on read.
+7. Retention is `claimius.prune(p_settings JSONB)` on both roles: days per table or per kind, a size per kind or for all, lenient defaults, and a host's own `public.prune(JSONB)` run after. On the prophet it also removes every virtual claim older than 10 minutes with no live binding, the leftover of a routed write whose host never committed the object; a disciple's `CleanOrphans` removes only the orphan bindings. There is no retention table, kind, class, endpoint or cold storage, and application data is never aged: `references/functions.md` Materialization is paid on read.
 8. The profile is one `profile JSONB` on `samna_user`: an object of key to entry, every entry `{"schema": {"type": ...}, "value": ...}`, the schema a JSON Schema fragment the renderer reads (type, format, component, title, enum, limits, items, properties) and the value what it describes. The user's own keys carry no dot and are written on Samna Auth through `update_profile`; an app writes `<app slug>.<field>` through `PUT /sam/profile`; the sync carries the object, and a disciple reads it off its own user row. Every entry is checked in Go on both roles before the write, `shared.ProfileSchema`, a typed struct that refuses any key outside its vocabulary at decode, `Validate` for the schema and `Check` for the value against it; SQL keeps the key namespace and the entry shape, `_check_profile_item`.
 
 ## Reads
@@ -97,8 +97,9 @@ WHERE id = :recipe_id;
 
 1. It calls no claimius write function from its own SQL or Go.
 2. It checks with `sdb.Instance().MutationAccess`, filters listings with `sdb.ObjectWhere`, and writes `claim`, `claim_object` and `user_claim` through the builder, which routes them to the prophet. Which call when: `references/access.md`.
-3. The handler shape, the way `bookable_server` does it: `~/.claude/rules/claimius.md` A disciple service.
-4. On a disciple only the sync layer writes claimius tables.
+3. Owner is the one bit that edits or deletes an organization, a location, a `samna_user` or a claim directly: ask `MutationAccess(..., ACCESS_OWNER)` before the builder update or delete, or the builder refuses it with `ErrNoAccess`; a user's own `samna_user` row is the exception. Write is not enough, here or for a deny binding.
+4. The handler shape, the way `bookable_server` does it: `~/.claude/rules/claimius.md` A disciple service.
+5. On a disciple only the sync layer writes claimius tables.
 
 ## Binding and cascade
 
@@ -113,7 +114,7 @@ WHERE id = :recipe_id;
 
 ## Denies, paths and grants
 
-1. A deny is a claim whose `sa_access` carries `0x10` plus the bits to subtract, stored as given, bound with `insert_claim_object` and granted with `insert_user_claim`.
+1. A deny is a claim whose `sa_access` carries `0x10` plus the bits to subtract, stored as given, bound with `insert_claim_object` and granted with `insert_user_claim`. A deny bound on an organization, a location or a `samna_user` needs owner on that object for the actor in `sa_created_by`, held directly or through a tree, and on a user as that user or through a grant bound on it; write is not enough and `_check_claim_composition` refuses it with `P0403`. A removal and a deny on any other type are exempt.
 2. Bound on the object it subtracts from every grant there; reached through a tree it subtracts only from grants that also arrive through a tree, so a grant bound or composed on the object survives an inherited deny. A field scoped deny subtracts from those fields only. The remainder is closed under implication: denying read drops execute, write and owner.
 3. Levels come first, and only `claim.level` compares: a deny at level N subtracts from every grant at a level below N whatever its class, a grant at a level above the deny keeps its bits, and at equal levels the classes decide as point 2 says, bit by bit; level 0 everywhere is the class rule alone. The level is never judged at write: a binding may not hand out a bit a deny reaching the writer on the object has taken from the writer's pair (`_check_claim_composition`), and handing a claim out or raising its level may not give, on any object it is bound to, a bit a deny reaching the actor there has taken (`_check_claim_denies`), so no one lifts a deny by handing out a claim. Only `claim.level` compares; the `level` of an organization or location is tree depth. `level` is never an access mask.
 4. The settle stores the result; reads never filter denies.

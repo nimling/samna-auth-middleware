@@ -207,7 +207,7 @@ func TestDeleteTakesTheRecordIDFromTheModel(t *testing.T) {
 	if err := db.NewInsert().Model(&org).Access(ac).Scan(ctx, &org); err != nil {
 		t.Fatalf("insert child organization: %v", err)
 	}
-	owner, err := db.MutationAccess(ctx, userA, org.ID, sdb.OBJECT_TYPE_ORGANIZATION, sdb.ACCESS_WRITE)
+	owner, err := db.MutationAccess(ctx, userA, org.ID, sdb.OBJECT_TYPE_ORGANIZATION, sdb.ACCESS_OWNER)
 	if err != nil {
 		t.Fatalf("access on the new child: %v", err)
 	}
@@ -264,7 +264,7 @@ func TestDebugSeedEncryptsAndResolvesASecret(t *testing.T) {
 func TestUpdateTakesTheRecordIDFromTheModel(t *testing.T) {
 	db := database(t)
 	ctx := context.Background()
-	ac, err := db.MutationAccess(ctx, userA, orgGrand, sdb.OBJECT_TYPE_ORGANIZATION, sdb.ACCESS_WRITE)
+	ac, err := db.MutationAccess(ctx, userA, orgGrand, sdb.OBJECT_TYPE_ORGANIZATION, sdb.ACCESS_OWNER)
 	if err != nil {
 		t.Fatalf("access: %v", err)
 	}
@@ -571,7 +571,7 @@ func TestClaimUnderSoftDeletedOrganizationAgreesWithItsGate(t *testing.T) {
 	if err := db.NewInsert().Model(&org).Access(ac).Scan(ctx, &org); err != nil {
 		t.Fatalf("insert child organization: %v", err)
 	}
-	owner, err := db.MutationAccess(ctx, userA, org.ID, sdb.OBJECT_TYPE_ORGANIZATION, sdb.ACCESS_WRITE)
+	owner, err := db.MutationAccess(ctx, userA, org.ID, sdb.OBJECT_TYPE_ORGANIZATION, sdb.ACCESS_OWNER)
 	if err != nil {
 		t.Fatalf("access on the new child: %v", err)
 	}
@@ -746,7 +746,7 @@ func TestUpdateOrganizationMovesItUnderAnotherParent(t *testing.T) {
 	grant("Sibling reader", sdb.ACCESS_READ, sibling, userC)
 	grant("Mover writer", sdb.ACCESS_READ|sdb.ACCESS_WRITE, mover, userB)
 	move := func(actor uuid.UUID, id, owner uuid.UUID) error {
-		access, err := db.MutationAccess(ctx, actor, id, sdb.OBJECT_TYPE_ORGANIZATION, sdb.ACCESS_WRITE)
+		access, err := db.MutationAccess(ctx, actor, id, sdb.OBJECT_TYPE_ORGANIZATION, sdb.ACCESS_OWNER)
 		if err != nil {
 			return err
 		}
@@ -794,5 +794,58 @@ func TestUpdateOrganizationMovesItUnderAnotherParent(t *testing.T) {
 	}
 	if owner := ownerOf(sibling); owner != orgRoot {
 		t.Fatalf("a refused cycle must leave the owner, got %s", owner)
+	}
+}
+
+func TestADenyOnAnOrganizationNeedsOwner(t *testing.T) {
+	db := database(t)
+	ctx := context.Background()
+	org := uuid.New()
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
+		VALUES (?, 'Deny owner', 'customer', ?, ?, 1, ?)
+	`, org, orgKept, orgKept, userC); err != nil {
+		t.Fatalf("organization: %v", err)
+	}
+	var edit, deny, editGrant, ownerGrant uuid.UUID
+	if err := db.NewRaw(`
+		SELECT (claimius.insert_claim(p_name => 'Edit deny owner', p_description => NULL, p_sa_access => 6,
+		        p_sa_owner_id => ?, p_sa_root_id => ?, p_sa_created_by => ?) -> 'claim' ->> 'id')::UUID
+	`, orgKept, orgKept, userC).Scan(ctx, &edit); err != nil {
+		t.Fatalf("edit claim: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		SELECT claimius.insert_claim_object(p_claim_id => ?, p_sa_owner_id => ?, p_sa_root_id => ?,
+		       p_sa_created_by => ?, p_object_id => ?, p_object_type => 'claimius.organization')
+	`, edit, orgKept, orgKept, userC, org); err != nil {
+		t.Fatalf("edit binding: %v", err)
+	}
+	if err := db.NewRaw(`
+		SELECT (claimius.insert_user_claim(p_claim_id => ?, p_user_id => ?, p_sa_owner_id => ?, p_sa_created_by => ?) -> 'user_claim' ->> 'id')::UUID
+	`, edit, userB, orgKept, userC).Scan(ctx, &editGrant); err != nil {
+		t.Fatalf("edit grant: %v", err)
+	}
+	if err := db.NewRaw(`
+		SELECT (claimius.insert_claim(p_name => 'No write on deny owner', p_description => NULL, p_sa_access => 18,
+		        p_sa_owner_id => ?, p_sa_root_id => ?, p_sa_created_by => ?) -> 'claim' ->> 'id')::UUID
+	`, orgKept, orgKept, userC).Scan(ctx, &deny); err != nil {
+		t.Fatalf("deny claim: %v", err)
+	}
+	if err := db.NewRaw(`SELECT uc.id FROM claimius.user_claim uc JOIN claimius.claim c ON c.id = uc.claim_id WHERE uc.user_id = ? AND c.name = 'Kept owner'`, userC).Scan(ctx, &ownerGrant); err != nil {
+		t.Fatalf("owner grant: %v", err)
+	}
+	bind := func(createdBy uuid.UUID) error {
+		_, err := db.ExecContext(ctx, `
+			SELECT claimius.insert_claim_object(p_claim_id => ?, p_sa_owner_id => ?, p_sa_root_id => ?,
+			       p_sa_created_by => ?, p_object_id => ?, p_object_type => 'claimius.organization')
+		`, deny, orgKept, orgKept, createdBy, org)
+		return err
+	}
+	var pgErr pgdriver.Error
+	if err := bind(editGrant); !errors.As(err, &pgErr) || pgErr.Field('C') != "P0403" {
+		t.Fatalf("write without owner must not bind a deny on an organization, got %v", err)
+	}
+	if err := bind(ownerGrant); err != nil {
+		t.Fatalf("owner through the ownership tree binds a deny on the organization: %v", err)
 	}
 }

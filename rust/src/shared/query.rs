@@ -14,7 +14,7 @@ use super::code::seal_grant_options;
 use super::db::{Conn, ConnRef, Db};
 use super::error::{Error, Result};
 use super::models::{
-    AccessClaim, ClaimAccess, ClaimObject, Location, Model, OBJECT_TYPE_CLAIM,
+    ACCESS_OWNER, AccessClaim, ClaimAccess, ClaimObject, Location, Model, OBJECT_TYPE_CLAIM,
     OBJECT_TYPE_CLAIM_OBJECT, OBJECT_TYPE_USER_CLAIM, UserClaim,
 };
 use crate::client::{self, Ctx, Forward, SyncCursor};
@@ -611,6 +611,18 @@ impl<'a, W: Write> UpdateQuery<'a, W> {
         if self.record_id.is_nil() {
             self.record_id = self.model.record_id();
         }
+        if matches!(
+            W::TABLE,
+            "claimius.organization"
+                | "claimius.location"
+                | "claimius.samna_user"
+                | "claimius.claim"
+        ) && self.ac.as_ref().is_none_or(|ac| {
+            ac.access.0 & ACCESS_OWNER.0 == 0
+                && !(W::TABLE == "claimius.samna_user" && ac.user_id == self.record_id)
+        }) {
+            return Err(Error::no_access());
+        }
         if self.db.routes::<W>() {
             return self.route(ctx).await;
         }
@@ -731,6 +743,18 @@ impl<'a, W: Write> DeleteQuery<'a, W> {
     pub async fn scan(&mut self, ctx: &Ctx) -> Result<W::Result> {
         if self.record_id.is_nil() {
             self.record_id = self.model.record_id();
+        }
+        if matches!(
+            W::TABLE,
+            "claimius.organization"
+                | "claimius.location"
+                | "claimius.samna_user"
+                | "claimius.claim"
+        ) && self.ac.as_ref().is_none_or(|ac| {
+            ac.access.0 & ACCESS_OWNER.0 == 0
+                && !(W::TABLE == "claimius.samna_user" && ac.user_id == self.record_id)
+        }) {
+            return Err(Error::no_access());
         }
         if self.db.routes::<W>() {
             return self.route(ctx).await;

@@ -97,6 +97,8 @@ A disciple's database and process hold its app's mirrored rows, its own tables, 
 | Pull its own app's feed | Sign a token: it holds no `private_key` |
 | Store ciphertext of its app's secrets, and decrypt them in process with its own app's seed, held in memory from `GET /sam/app` | Decrypt another app's secrets: the prophet answers each app only its own seed, and the seed is never stored on the disciple |
 | | Hand out more than the stamped grant holds: `_check_claim_composition` refuses a binding whose mask exceeds what that grant's user holds on the object, or on the owning organization for a foreign row or a first binding on a `samna_user`, and a link to a claim that user cannot read |
+| | Bind a deny on an organization, a location or a user, or turn a claim bound there into a deny, without owner on it: `_check_claim_composition` and `_check_claim_grant` refuse it |
+| | Edit or delete an organization, a location, a user or a claim for a user without owner on it: the prophet asks `mutation_access` for owner for the forwarded user before it writes |
 | | Replay a DPoP bound token without the client's private key |
 | | Write an app another prophet decides: the home refuses it |
 

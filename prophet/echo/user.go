@@ -14,6 +14,7 @@ import (
 	"github.com/nimling/samna-auth-middleware/v2/pkg/errorsx"
 	"github.com/nimling/samna-auth-middleware/v2/pkg/respond"
 	sdb "github.com/nimling/samna-auth-middleware/v2/prophet/sdb"
+	"github.com/nimling/samna-auth-middleware/v2/shared"
 	"github.com/nimling/samna-auth-middleware/v2/utils"
 	"github.com/uptrace/bun"
 	"github.com/uptrace/bun/driver/pgdriver"
@@ -299,7 +300,11 @@ func PutUser(ctx echo.Context) error {
 	}
 	updUser.UserID = userID
 
-	if err := putUser(ctx, updUser); err != nil {
+	ac, err := getOwnerAccess(ctx, userID, shared.OBJECT_TYPE_USER)
+	if err != nil {
+		return respond.Error(ctx, errorsx.ErrToHttpCode(err), "")
+	}
+	if err := putUser(ctx, updUser, ac); err != nil {
 		return respond.Error(ctx, errorsx.ErrToHttpCode(err), err.Error())
 	}
 
@@ -313,11 +318,18 @@ func DeleteUser(ctx echo.Context) error {
 		return respond.Error(ctx, http.StatusBadRequest, "Malformed request")
 	}
 
+	ac, err := getOwnerAccess(ctx, userID, shared.OBJECT_TYPE_USER)
+	if err != nil {
+		return respond.Error(ctx, errorsx.ErrToHttpCode(err), "")
+	}
+
 	var user SamnaUser
 	var affected int64
 	err = sdb.Instance().RunInTx(ctx.Request().Context(), nil, func(c context.Context, tx bun.Tx) error {
-		res, err := tx.NewUpdate().
+		res, err := sdb.Instance().NewUpdate().
+			Conn(tx).
 			Model(&user).
+			Access(ac).
 			Set("sa_deleted_at = NOW()").
 			Where("user_id = ?", userID).
 			Where("sa_deleted_at IS NULL").
@@ -723,10 +735,11 @@ func postUser(ctx echo.Context, req BodyUser, userName string) (*SamnaUser, erro
 	return &user, nil
 }
 
-func putUser(ctx echo.Context, user *SamnaUser) error {
+func putUser(ctx echo.Context, user *SamnaUser, ac *shared.AccessClaim) error {
 	res, err := sdb.Instance().
 		NewUpdate().
 		Model(user).
+		Access(ac).
 		Where("sa_deleted_at IS NULL").
 		Where("user_id = ?", user.UserID).
 		OmitZero().

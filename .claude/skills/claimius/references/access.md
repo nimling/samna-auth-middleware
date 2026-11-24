@@ -21,6 +21,8 @@ The other exported methods in this subject: `HasAccess(ctx, userID, objectID, ob
 
 `GetAccess`, `GetDirectAccess` and `MutationAccess` short circuit `userID == objectID` with `OBJECT_TYPE_USER` to `selfAccessClaim`, `GetDirectAccess` with `ACCESS_ALL`, so `MutationAccess(actor, actor, OBJECT_TYPE_USER, req)` works for PutMe, settings and relations with no `user_claim` row.
 
+An update or a delete of `claimius.organization`, `claimius.location`, `claimius.samna_user` or `claimius.claim` through the builder needs owner: ask `MutationAccess(actor, id, type, ACCESS_OWNER)`. The builder refuses an access claim without the owner bit with `ErrNoAccess` before it routes, a user's own `samna_user` row excepted, and the prophet's `/sam` routes ask `mutation_access` for owner for the forwarded user, a person or a client by `client_id`, before they write. Write is not enough.
+
 ## Level
 
 Every `AccessClaim` carries `Level`, the level of the claim its grant came through. A composed grant carries the greater of the link's level and the bound level; `selfAccessClaim` carries 0. `Level` is the claim level that decides between a grant and a deny, the higher one winning and equal levels falling to the classes, never an access mask.

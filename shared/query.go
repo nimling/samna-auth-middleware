@@ -797,6 +797,10 @@ func (q *UpdateQuery) Exec(ctx context.Context, dest ...any) (sql.Result, error)
 	if q.recordID == uuid.Nil {
 		q.recordID = recordIDFromModel(q.db, q.model)
 	}
+	if t := modelTableName(q.db, q.model); (t == "claimius.organization" || t == "claimius.location" || t == "claimius.samna_user" || t == "claimius.claim") &&
+		(q.accessClaim == nil || (q.accessClaim.Access&ACCESS_OWNER == 0 && !(t == "claimius.samna_user" && q.accessClaim.UserID == q.recordID))) {
+		return nil, ErrNoAccess
+	}
 	if q.db.routes(q.model) {
 		return nil, q.route(ctx, dest...)
 	}
@@ -809,6 +813,10 @@ func (q *UpdateQuery) Exec(ctx context.Context, dest ...any) (sql.Result, error)
 func (q *UpdateQuery) Scan(ctx context.Context, dest ...any) error {
 	if q.recordID == uuid.Nil {
 		q.recordID = recordIDFromModel(q.db, q.model)
+	}
+	if t := modelTableName(q.db, q.model); (t == "claimius.organization" || t == "claimius.location" || t == "claimius.samna_user" || t == "claimius.claim") &&
+		(q.accessClaim == nil || (q.accessClaim.Access&ACCESS_OWNER == 0 && !(t == "claimius.samna_user" && q.accessClaim.UserID == q.recordID))) {
+		return ErrNoAccess
 	}
 	if q.db.routes(q.model) {
 		return q.route(ctx, dest...)
@@ -1087,6 +1095,10 @@ func (q *DeleteQuery) Exec(ctx context.Context, dest ...any) (sql.Result, error)
 	if q.recordID == uuid.Nil {
 		q.recordID = recordIDFromModel(q.db, q.model)
 	}
+	if t := modelTableName(q.db, q.model); (t == "claimius.organization" || t == "claimius.location" || t == "claimius.samna_user" || t == "claimius.claim") &&
+		(q.accessClaim == nil || (q.accessClaim.Access&ACCESS_OWNER == 0 && !(t == "claimius.samna_user" && q.accessClaim.UserID == q.recordID))) {
+		return nil, ErrNoAccess
+	}
 	if q.db.routes(q.model) {
 		return nil, q.route(ctx, dest...)
 	}
@@ -1099,6 +1111,10 @@ func (q *DeleteQuery) Exec(ctx context.Context, dest ...any) (sql.Result, error)
 func (q *DeleteQuery) Scan(ctx context.Context, dest ...any) error {
 	if q.recordID == uuid.Nil {
 		q.recordID = recordIDFromModel(q.db, q.model)
+	}
+	if t := modelTableName(q.db, q.model); (t == "claimius.organization" || t == "claimius.location" || t == "claimius.samna_user" || t == "claimius.claim") &&
+		(q.accessClaim == nil || (q.accessClaim.Access&ACCESS_OWNER == 0 && !(t == "claimius.samna_user" && q.accessClaim.UserID == q.recordID))) {
+		return ErrNoAccess
 	}
 	if q.db.routes(q.model) {
 		return q.route(ctx, dest...)

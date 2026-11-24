@@ -55,8 +55,11 @@ A grant and a binding travel with their claim. A claim has no `app_id`: it reach
 
 1. The binding is refused with `P0403` when its grant bits exceed what the writer holds on the object. A writer who cannot reach an object cannot grant it away, and one who reads it cannot grant write on it. A deny binding is exempt from this test.
 2. The binding is refused with `P0403` when it hands out a bit a deny reaching the writer on the object has taken from the writer's pair; the claim's level is not judged, and a deny binding is exempt.
+3. A deny bound on an organization, a location or a `samna_user` is refused with `P0403` unless the writer holds owner on that object: in its settled pair, held directly or through a tree, and on a user as that user or through a grant bound on that user, as `get_user_access` answers it. Write is not enough. A deny on any other type and a removal stay exempt.
 
 Handing a claim out, `insert_user_claim`, and raising a claim's level run `_check_claim_denies` for the actor, the grant `claimius.actor` names when `update_claim(p_actor_user_claim_id)` set it and `sa_created_by` otherwise: on no object the claim grants bits on may those bits overlap what a deny reaching the actor there takes from the actor's pair, so an actor never lifts a deny it meets by handing out a claim. It runs for every claim, whatever its level.
+
+Turning a bound claim into a deny, an update of its mask that sets the deny bit, is the same act as binding a deny on each object it is bound to: `_check_claim_grant`, through `tg_check_claim_level`, refuses it with `P0403` unless the actor, the grant `claimius.actor` names or `sa_created_by`, holds owner on every organization, location and `samna_user` the claim is bound to as a deny, judged as point 3 above judges a binding.
 
 Where the writer holds less than the binding hands out, these holds are tried in order before refusing:
 
@@ -187,6 +190,8 @@ At different levels the higher claim's `eff` alone: `eff(A, l)` when A is higher
 | The bind check | the writer's grant, the point settle of one pair, one range of the writer's pairs on the object, and one range of the writer's grants and one of the links of its inheriting claims for the denies reaching it, with a closure probe each |
 | `_check_claim_denies` on a grant or a level increase | one range of `idx_claim_object_claim_id` for the claim's bindings, one `_denied_access` pass per non deny object binding, a range of the actor's grants and one of the links of its inheriting claims with a closure probe per deny binding found, and the settle and one probe of the actor's pair only on a binding where the denied bits overlap; for every claim |
 | A binding on a foreign row | one extra probe of `object_info` and the settle of one pair |
+| A deny binding on an organization, a location or a user | the writer's grant, the point settle of one pair and one range of the writer's pairs on the object, and on a user one range of the writer's grants bound on that user; no deny walk |
+| A claim turned into a deny | one range of `idx_claim_object_claim_id` for its bindings, and per deny binding on an organization, a location or a user the settle and one probe of the actor's pair, and on a user one range of the actor's grants bound on that user |
 | A link | one probe for the reverse link, one settle and one probe of the writer's `user_object` row on `(claimius.claim, B)` |
 | `_best_grant` | nothing beyond the pair |
 | A time window | nothing beyond the pair |

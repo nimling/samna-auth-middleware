@@ -540,7 +540,8 @@ BEGIN
     IF NEW.object_id IS NOT NULL
         AND NEW.object_type IS DISTINCT FROM 'claimius.claim'
         AND NEW.sa_deleted_at IS NULL
-        AND (coalesce(v_effective, 0) & 16) = 0
+        AND ((coalesce(v_effective, 0) & 16) = 0
+             OR NEW.object_type IN ('claimius.organization', 'claimius.location', 'claimius.samna_user'))
         AND (TG_OP = 'INSERT'
              OR NEW.sa_access IS DISTINCT FROM OLD.sa_access
              OR NEW.claim_id IS DISTINCT FROM OLD.claim_id
@@ -560,10 +561,12 @@ BEGIN
               AND object_type = NEW.object_type
               AND object_id   = NEW.object_id;
 
-            v_denied := claimius._denied_access(v_user_id, NEW.object_type, NEW.object_id) & ~coalesce(v_actor_access, 0);
-            IF (coalesce(v_effective, 0) & v_denied & 15) <> 0 THEN
-                RAISE EXCEPTION 'cannot grant access denied to the writer: user % is denied % on % %, requested %',
-                    v_user_id, v_denied, NEW.object_type, NEW.object_id, v_effective USING ERRCODE = 'P0403';
+            IF (coalesce(v_effective, 0) & 16) = 0 THEN
+                v_denied := claimius._denied_access(v_user_id, NEW.object_type, NEW.object_id) & ~coalesce(v_actor_access, 0);
+                IF (coalesce(v_effective, 0) & v_denied & 15) <> 0 THEN
+                    RAISE EXCEPTION 'cannot grant access denied to the writer: user % is denied % on % %, requested %',
+                        v_user_id, v_denied, NEW.object_type, NEW.object_id, v_effective USING ERRCODE = 'P0403';
+                END IF;
             END IF;
 
             IF v_actor_access IS NULL
@@ -598,7 +601,13 @@ BEGIN
                 END IF;
             END IF;
 
-            IF (coalesce(v_effective, 0) & ~coalesce(v_actor_access, 0) & 15) <> 0
+            IF (coalesce(v_effective, 0) & 16) <> 0 AND NEW.object_type = 'claimius.samna_user' THEN
+                v_actor_access := coalesce(v_actor_access, 0)
+                    | CASE WHEN v_user_id = NEW.object_id THEN 15 ELSE 0 END
+                    | coalesce((SELECT bit_or(g.access) FROM claimius._user_claim_grants(v_user_id, NEW.object_id) g), 0);
+            END IF;
+
+            IF (CASE WHEN (coalesce(v_effective, 0) & 16) <> 0 THEN 1 ELSE coalesce(v_effective, 0) & 15 END & ~coalesce(v_actor_access, 0)) <> 0
                 AND NEW.object_type = 'claimius.samna_user'
                 AND NOT EXISTS (
                     SELECT 1 FROM claimius.claim_object co
@@ -622,6 +631,11 @@ BEGIN
                 THEN
                     v_actor_access := 15;
                 END IF;
+            END IF;
+
+            IF (coalesce(v_effective, 0) & 16) <> 0 AND (coalesce(v_actor_access, 0) & 1) = 0 THEN
+                RAISE EXCEPTION 'cannot bind a deny without owner: user % holds % on % %, requested %',
+                    v_user_id, coalesce(v_actor_access, 0), NEW.object_type, NEW.object_id, v_effective USING ERRCODE = 'P0403';
             END IF;
 
             IF (coalesce(v_effective, 0) & 16) = 0 AND (coalesce(v_effective, 0) & ~coalesce(v_actor_access, 0) & 15) <> 0 THEN
@@ -676,7 +690,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius._check_claim_composition() IS 'BEFORE INSERT/UPDATE trigger on claim_object. Rejects a grant whose effective mask gives bits that a deny reaching the actor on the object removes from the actor''s settled pair, whatever the level of either claim, and a grant that hands out more access than the actor holds on the object; denies and removals are exempt and the claim''s level is never judged. An object outside the claimius schema that this database holds no object_info row for, a disciple''s own row, is judged by the actor''s hold on the binding''s owning organization; its type is never resolved. When the transaction carries claimius.object_created_by, the grant the calling app reports the row was created under, and that grant is a live user_claim of the actor, the actor is the row''s creator and holds owner, write, read and execute on it, as the disciple holding the row counts the creator, while the binding''s owning organization is live or not held. The first binding on a samna_user holding a claim assigned under the binding''s owning organization may come from an actor holding owner on that organization. Enforces composition link invariants: no self loop, no reverse link cycle, caller has read on target claim. Bypassed during disciple replay.';
+COMMENT ON FUNCTION claimius._check_claim_composition() IS 'BEFORE INSERT/UPDATE trigger on claim_object. Rejects a grant whose effective mask gives bits that a deny reaching the actor on the object removes from the actor''s settled pair, whatever the level of either claim, and a grant that hands out more access than the actor holds on the object; a deny bound on an organization, a location or a samna_user needs owner on that object for the actor, held directly or through a tree in its settled pair, and on a samna_user as that user or through a grant bound on that user, as the directory answers it, and is refused with SQLSTATE P0403 otherwise; every other deny and every removal is exempt, and the claim''s level is never judged. An object outside the claimius schema that this database holds no object_info row for, a disciple''s own row, is judged by the actor''s hold on the binding''s owning organization; its type is never resolved. When the transaction carries claimius.object_created_by, the grant the calling app reports the row was created under, and that grant is a live user_claim of the actor, the actor is the row''s creator and holds owner, write, read and execute on it, as the disciple holding the row counts the creator, while the binding''s owning organization is live or not held. The first binding on a samna_user holding a claim assigned under the binding''s owning organization may come from an actor holding owner on that organization. Enforces composition link invariants: no self loop, no reverse link cycle, caller has read on target claim. Bypassed during disciple replay.';
 
 GRANT EXECUTE ON FUNCTION claimius._check_claim_composition()
     TO claimius_writer, claimius_reader;
@@ -743,12 +757,51 @@ GRANT EXECUTE ON FUNCTION claimius._check_claim_denies(UUID, UUID)
 
 CREATE OR REPLACE FUNCTION claimius._check_claim_grant()
     RETURNS TRIGGER AS $$
+DECLARE
+    v_user_id UUID;
+    v_binding RECORD;
+    v_held    INTEGER;
 BEGIN
     IF claimius.in_replay_mode() OR NEW.sa_deleted_at IS NOT NULL THEN
         RETURN NEW;
     END IF;
     IF TG_TABLE_NAME = 'claim' THEN
-        PERFORM claimius._check_claim_denies(coalesce(nullif(current_setting('claimius.actor', TRUE), '')::UUID, NEW.sa_created_by), NEW.id);
+        IF NEW.level > OLD.level THEN
+            PERFORM claimius._check_claim_denies(coalesce(nullif(current_setting('claimius.actor', TRUE), '')::UUID, NEW.sa_created_by), NEW.id);
+        END IF;
+        IF (NEW.sa_access & 16) <> 0 AND (OLD.sa_access & 16) = 0 THEN
+            SELECT uc.user_id INTO v_user_id
+            FROM claimius.user_claim uc
+            WHERE uc.id = coalesce(nullif(current_setting('claimius.actor', TRUE), '')::UUID, NEW.sa_created_by)
+              AND uc.sa_deleted_at IS NULL;
+            IF v_user_id IS NOT NULL THEN
+                FOR v_binding IN
+                    SELECT co.object_type, co.object_id
+                    FROM claimius.claim_object co
+                    WHERE co.claim_id = NEW.id
+                      AND co.sa_deleted_at IS NULL
+                      AND co.object_id IS NOT NULL
+                      AND co.object_type IN ('claimius.organization', 'claimius.location', 'claimius.samna_user')
+                      AND (claimius._effective_access(NEW.sa_access, co.sa_access) & 16) <> 0
+                LOOP
+                    PERFORM claimius.reconcile_if_pending(v_user_id, v_binding.object_type, v_binding.object_id);
+                    SELECT max(uo.sa_access) INTO v_held
+                    FROM claimius.user_object uo
+                    WHERE uo.user_id = v_user_id
+                      AND uo.object_type = v_binding.object_type
+                      AND uo.object_id = v_binding.object_id;
+                    IF v_binding.object_type = 'claimius.samna_user' THEN
+                        v_held := coalesce(v_held, 0)
+                            | CASE WHEN v_user_id = v_binding.object_id THEN 15 ELSE 0 END
+                            | coalesce((SELECT bit_or(g.access) FROM claimius._user_claim_grants(v_user_id, v_binding.object_id) g), 0);
+                    END IF;
+                    IF (coalesce(v_held, 0) & 1) = 0 THEN
+                        RAISE EXCEPTION 'cannot turn claim % into a deny without owner: user % holds % on % %',
+                            NEW.id, v_user_id, coalesce(v_held, 0), v_binding.object_type, v_binding.object_id USING ERRCODE = 'P0403';
+                    END IF;
+                END LOOP;
+            END IF;
+        END IF;
     ELSE
         PERFORM claimius._check_claim_denies(NEW.sa_created_by, NEW.claim_id);
     END IF;
@@ -756,7 +809,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius._check_claim_grant() IS 'Trigger on user_claim, and on claim when its level rises: runs _check_claim_denies for the actor in sa_created_by, so a grant of a claim, or a raise of its level, that gives what a deny removes from the actor is refused with SQLSTATE P0403.';
+COMMENT ON FUNCTION claimius._check_claim_grant() IS 'Trigger on user_claim, and on claim when its level rises or its mask turns into a deny: runs _check_claim_denies for the actor in sa_created_by, so a grant of a claim, or a raise of its level, that gives what a deny removes from the actor is refused with SQLSTATE P0403. A claim whose mask takes the deny bit is refused with SQLSTATE P0403 unless the actor, the grant claimius.actor names or sa_created_by, holds owner on every organization, location and samna_user the claim is bound to as a deny, as _check_claim_composition judges a deny binding there; an actor that is not a live user_claim passes.';
 
 GRANT EXECUTE ON FUNCTION claimius._check_claim_grant()
     TO claimius_writer, claimius_reader;
@@ -768,8 +821,8 @@ CREATE TRIGGER tg_check_claim_grant
 
 DROP TRIGGER IF EXISTS tg_check_claim_level ON claimius.claim;
 CREATE TRIGGER tg_check_claim_level
-    BEFORE UPDATE OF level ON claimius.claim
-    FOR EACH ROW WHEN (NEW.level > OLD.level) EXECUTE FUNCTION claimius._check_claim_grant();
+    BEFORE UPDATE OF level, sa_access ON claimius.claim
+    FOR EACH ROW WHEN (NEW.level > OLD.level OR ((NEW.sa_access & 16) <> 0 AND (OLD.sa_access & 16) = 0)) EXECUTE FUNCTION claimius._check_claim_grant();
 
 DROP TRIGGER IF EXISTS tg_check_app_scope ON claimius.claim;
 DROP TRIGGER IF EXISTS tg_check_app_scope ON claimius.user_claim;

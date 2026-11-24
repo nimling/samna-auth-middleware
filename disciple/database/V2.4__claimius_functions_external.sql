@@ -4686,23 +4686,7 @@ COMMENT ON FUNCTION claimius.get_orphan_bindings(INTERVAL) IS 'Live bindings on 
 GRANT EXECUTE ON FUNCTION claimius.get_orphan_bindings(INTERVAL)
     TO claimius_disciple_client, claimius_reader;
 
-CREATE OR REPLACE FUNCTION claimius.get_orphan_claims(
-    p_grace  INTERVAL DEFAULT '10 minutes'
-) RETURNS SETOF claimius.claim
-LANGUAGE sql STABLE SECURITY DEFINER SET search_path = claimius, pg_temp AS $$
-    SELECT c.*
-    FROM claimius.claim c
-    WHERE c.type = 'virtual'
-      AND c.sa_deleted_at IS NULL
-      AND c.sa_created_at < now() - p_grace
-      AND NOT EXISTS (SELECT 1 FROM claimius.claim_object co WHERE co.claim_id = c.id AND co.sa_deleted_at IS NULL)
-    ORDER BY c.sa_created_at
-$$;
-
-COMMENT ON FUNCTION claimius.get_orphan_claims(INTERVAL) IS 'Live virtual claims older than p_grace with no live binding left: the claim a routed write made for an object the host never committed, once its binding is gone.';
-
-GRANT EXECUTE ON FUNCTION claimius.get_orphan_claims(INTERVAL)
-    TO claimius_disciple_client, claimius_reader;
+DROP FUNCTION IF EXISTS claimius.get_orphan_claims(INTERVAL);
 
 CREATE OR REPLACE FUNCTION claimius._check_code_owner(
     p_claim_id      UUID,
