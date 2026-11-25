@@ -357,8 +357,8 @@ func TestPullBacksOffWhileTheSnapshotFailsToApply(t *testing.T) {
 	defer stop()
 	sam.Disciple().Pull(run)
 
-	if n := snapshots.Load(); n == 0 || n > 3 {
-		t.Fatalf("a snapshot that fails to apply must be pulled again only after the backoff, 1 s then 2 s, got %d snapshots in 3.5 s", n)
+	if n := snapshots.Load(); n != 1 {
+		t.Fatalf("a snapshot that fails to apply must be pulled again only after its own wait, 1 minute then doubling to 1 hour, while the pull goes on, got %d snapshots in 3.5 s", n)
 	}
 }
 

@@ -22,6 +22,8 @@ import (
 const (
 	activeInterval             = 100 * time.Millisecond
 	maxBackoff                 = 30 * time.Second
+	snapshotBackoff            = time.Minute
+	maxSnapshotBackoff         = time.Hour
 	failedPullsBeforeReconcile = 10
 	leadInterval               = 5 * time.Second
 	syncHold                   = 25 * time.Second
@@ -148,7 +150,20 @@ func (r *Replica) Pull(ctx context.Context) {
 	}
 	backoff := time.Second
 	failed := 0
-	var drained, moved, cleaned time.Time
+	snapshotWait := snapshotBackoff
+	var drained, moved, cleaned, snapshotAt time.Time
+	reconcile := func(reason string) bool {
+		if time.Now().Before(snapshotAt) {
+			return false
+		}
+		if err := r.PullSnapshot(ctx, "", r.reportStalledCursor(ctx, reason)); err != nil {
+			report(err)
+			snapshotAt = time.Now().Add(snapshotWait)
+			snapshotWait = min(snapshotWait*2, maxSnapshotBackoff)
+			return false
+		}
+		return true
+	}
 	for {
 		wait := activeInterval
 		pulling, err := r.pulling(ctx)
@@ -174,31 +189,29 @@ func (r *Replica) Pull(ctx context.Context) {
 				wait = backoff
 				backoff = min(backoff*2, maxBackoff)
 			case errors.Is(err, ErrSnapshotRequired):
-				if err := r.PullSnapshot(ctx, "", r.reportStalledCursor(ctx, "was refused by the prophet feed")); err != nil {
-					report(err)
-					wait = backoff
-					backoff = min(backoff*2, maxBackoff)
-				} else {
+				if reconcile("was refused by the prophet feed") {
 					backoff = time.Second
 					failed = 0
+					snapshotWait = snapshotBackoff
+				} else {
+					wait = backoff
+					backoff = min(backoff*2, maxBackoff)
 				}
 			case err != nil:
 				report(err)
 				wait = backoff
 				backoff = min(backoff*2, maxBackoff)
 				failed++
-				if failed >= failedPullsBeforeReconcile {
+				if failed >= failedPullsBeforeReconcile && reconcile(fmt.Sprintf("failed to apply %d consecutive pulls, last error %v", failed, err)) {
+					backoff = time.Second
 					failed = 0
-					reason := fmt.Sprintf("failed to apply %d consecutive pulls, last error %v", failedPullsBeforeReconcile, err)
-					if err := r.PullSnapshot(ctx, "", r.reportStalledCursor(ctx, reason)); err != nil {
-						report(err)
-					} else {
-						backoff = time.Second
-					}
+					snapshotWait = snapshotBackoff
 				}
 			default:
 				backoff = time.Second
 				failed = 0
+				snapshotWait = snapshotBackoff
+				snapshotAt = time.Time{}
 			}
 		}
 		if r.Peer == nil && time.Since(drained) >= drainInterval {

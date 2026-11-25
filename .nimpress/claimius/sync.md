@@ -19,15 +19,17 @@ The prophet to disciple stream is an append only log of state changes with a mon
 
 `emit_sync_event`, an after row trigger on `samna_app`, `samna_user`, `samna_client`, `samna_secret`, `organization`, `location`, `claim`, `user_claim`, `claim_object`, `object_field`, `user_field`, `user_relation`, `user_identity`, `object_asset`, `app_cost`, `code`, `app_handover` and, on insert only, `audit`, writes in the transaction of the change, so an event exists exactly when its change committed. An `upsert` carries the full row less `txid`; a `delete` carries its `id` and `app_id`. The trigger writes nothing under `replay_mode` and nothing on a database with no `prophet_state` row, so a pure disciple writes no events.
 
-An `organization` or `location` has no `app_id`. Its change is written once per app holding a live `app_object` link to it, stamped with that app, through `apps_for_object`. A `claim` has none either: it is written once per app linked to its owning organization, a grant or a binding once per app of its claim, and a `samna_user` once per app where the user holds a live grant of such a claim; a live grant writes its user to the apps of its claim before itself, so the app holds every user granted its claims. The anonymous user is never published, since every database holds its own. `emit_app_object_sync_event` on `app_object` publishes the linked row and its live asset links to the app when a link goes live, and the delete of its asset links and of the row to that app alone when the link ends, so a row linked after it was written reaches the app's consumers and an unlinked one leaves them. An asset link is written once per app that sees its object; see [Assets](./assets.md).
+An `organization` or `location` has no `app_id`. Its change is written once per app holding a live `app_object` link to it, stamped with that app, through `apps_for_object`. A `claim` has none either: it is written once per app linked to its owning organization, a grant or a binding once per app of its claim, and a `samna_user` once per app where the user holds a live grant of such a claim; a live grant writes its user to the apps of its claim before itself, so the app holds every user granted its claims, and every grant and binding written, soft deleted or not, writes its claim to those apps before itself, soft deleted or not, so a consumer holds the claim of every grant and binding it applies. The anonymous user is never published, since every database holds its own. `emit_app_object_sync_event` on `app_object` publishes the linked row and its live asset links to the app when a link goes live, and for an organization the claims it owns, soft deleted ones included as the snapshot sends them, with the live grants of the live ones, the users holding them and their live bindings, and the delete of its asset links and of the row to that app alone when the link ends, so a row linked after it was written reaches the app's consumers and an unlinked one leaves them. An asset link is written once per app that sees its object; see [Assets](./assets.md).
 
 A disciple therefore holds the organizations linked to its app and no other:
 
 1. The root of a linked organization's tree may lie outside the app, and the `sa_root_id` of a claim or binding owned under it then names an organization the disciple never holds. On the disciple `claim.sa_root_id` and `claim_object.sa_root_id` carry no foreign key, like `organization.sa_root_id`, so such a row applies and the root stays an opaque id.
 
-2. An organization or location whose parent the disciple does not hold is the top of its tree on the disciple: `get_owner_ancestors` returns it at hop 0 and its descendants hang under it, and the disciple init builds that closure for any such node that lacks one.
+2. A grant and a binding travel with their claim, and the feed routes them by the owning organization of that claim. Their own `sa_owner_id` is the organization the prophet stamped from the access of the writer, takes no part in the routing, and may name an organization the app is not linked to. On the disciple `user_claim.sa_owner_id` and `claim_object.sa_owner_id` carry no foreign key either, so such a row applies and its owner stays an opaque id; the owner of the claim, `claim.sa_owner_id`, is always held and keeps its key.
 
-3. A parent the disciple holds but which has left the closure, a soft deleted one, still takes its subtree out.
+3. An organization or location whose parent the disciple does not hold is the top of its tree on the disciple: `get_owner_ancestors` returns it at hop 0 and its descendants hang under it, and the disciple init builds that closure for any such node that lacks one.
+
+4. A parent the disciple holds but which has left the closure, a soft deleted one, still takes its subtree out.
 
 ## What the feed carries
 
@@ -67,7 +69,7 @@ The pull loop runs on every process of a service. Each takes a session level `pg
 
 ## Cursors and trimming
 
-`sync_consumer (app_id, consumer_id)` holds one cursor per consumer, named by its `disciple_state` or `prophet_peer` id. A pull for the page after a cursor is the consumer's proof that it applied everything up to it, and `update_sync_cursor` records it with the contact time and, in `peer`, whether the pull was a peer prophet's, `peer = true`. The app's `prophet_state` row carries the lowest cursor among its consumers in contact within 7 days.
+`sync_consumer (app_id, consumer_id)` holds one cursor per consumer, named by its `disciple_state` or `prophet_peer` id. A pull for the page after a cursor is the consumer's proof that it applied everything up to it, and `update_sync_cursor` records it with the contact time and, in `peer`, whether the pull was a peer prophet's, `peer = true`. Serving a snapshot proves nothing: the consumer has not applied it yet and may fail to. The snapshot route records the contact of a consumer the prophet already knows and leaves its cursor where its last pull proved it; the first pull after the snapshot's cursor records that cursor. A consumer whose snapshot does not apply therefore keeps the events after its proven position in the first pass of the trim. The app's `prophet_state` row carries the lowest cursor among its consumers in contact within 7 days.
 
 `trim_sync_event(stale_after)` deletes, in two passes:
 
@@ -88,7 +90,7 @@ It records the highest position removed per app in `prophet_state (trimmed_txid,
 | `trimmed` | the cursor is below `(trimmed_txid, trimmed_seq)` | takes the snapshot |
 | `backlog` | the app's events after the cursor outnumber its source rows | takes the snapshot |
 
-A consumer a little behind replays the events it missed; one so far behind that the events outnumber the app's rows reads the rows once instead.
+A consumer a little behind replays the events it missed; one so far behind that the events outnumber the app's rows reads the rows once instead. A grant or a binding written counts as its own event and the event of its claim before it, so `backlog` is answered after fewer writes than rows changed: `g` grants and `b` bindings written are `3g + 2b` events.
 
 ## Where a consumer stands
 
@@ -125,10 +127,10 @@ The implementing side's own tables never enter the feed. Bindings on their rows 
 An event costs one heap row and two btree entries; the BRIN summary changes only when a new range of pages starts ([PostgreSQL, BRIN Indexes](https://www.postgresql.org/docs/17/brin.html)).
 
 ```
-events(write) = Σ_{source rows r written} n_apps(r)
+events(write) = Σ_{source rows r written} n_apps(r) · (1 + c(r) + u(r))
 ```
 
-with `n_apps(r) = 1` for a row carrying `app_id`, the number of live links for an organization or location, the number of apps linked to the owning organization for a claim and for its grants and bindings, the number of such apps over the claims a user holds for a user, and the number of apps that see the object for an asset link. For the request of [Writes](./writes.md), a claim bound to a node and granted to `k` users, `events = 2 + k`, independent of `|T_c|` and `|H_c|`.
+with `n_apps(r) = 1` for a row carrying `app_id`, the number of live links for an organization or location, the number of apps linked to the owning organization for a claim and for its grants and bindings, the number of such apps over the claims a user holds for a user, and the number of apps that see the object for an asset link. `c(r) = 1` for a grant or a binding written, the event of its claim before it, and `u(r) = 1` for a live grant, the event of its user before it; both are 0 for every other row and for a delete. For the request of [Writes](./writes.md), a claim bound to a node and granted to `k` users, the claim is 1 event, the binding 2 and each grant 3, `events = 3 + 3k` per app, independent of `|T_c|` and `|H_c|`; before a grant and a binding carried their claim it was `2 + 2k`. `TestAGrantAndABindingPublishTheirClaimBeforeThemselves` in `prophet/echo/sync_db_test.go` pins the 12 events of `k = 3` in their order.
 
 A pull with `n_a` of the app's events after its cursor reads `n_a` entries of `idx_sync_event_app_txid_seq` and no other app's.
 
@@ -136,7 +138,7 @@ A pull with `n_a` of the app's events after its cursor reads `n_a` entries of `i
 per page of p events:  p upserts or deletes,  ≤ 2 area rows per claim event,  1 cursor row,  1 commit
 ```
 
-A claim payload raises `n_c + 1` areas, one per live binding of the claim and one on the claim object. With `N` processes of one service, `E` events are applied `E` times, not `N · E`.
+A claim payload raises `n_c + 1` areas, one per live binding of the claim and one on the claim object. The claim that travels before its grant or binding is the row the consumer already holds in every case but the two it exists for, a claim soft deleted before its organization was linked and a claim committed while the link was being written: it costs one probe by primary key, writes nothing and raises no area. A page of `p` events therefore carries at least `p / 3` grants or `p / 2` bindings, where it carried `p / 2` and `p`: 333 grants in a page of 1,000, down from 500. With `N` processes of one service, `E` events are applied `E` times, not `N · E`.
 
 After a trim the outbox of an app holds at most
 

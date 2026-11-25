@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -368,6 +369,9 @@ func TestScenarioAMovedClaimAndANewGrantReachTheDisciple(t *testing.T) {
 		t.Fatalf("member: %v", err)
 	}
 
+	for _, name := range []string{"Standing one", "Standing two", "Standing three"} {
+		postPeerClaim(t, prophet, app.Org, grantUser, name)
+	}
 	moved := postPeerClaim(t, prophet, team, grantUser, "Moved")
 	var oldBinding uuid.UUID
 	if err := prophet.NewRaw(`
@@ -457,4 +461,240 @@ func TestScenarioAMovedClaimAndANewGrantReachTheDisciple(t *testing.T) {
 	`, manager, member).Scan(ctx, &granted); err != nil || !granted {
 		t.Errorf("the grant after the move must reach the disciple: %v", err)
 	}
+}
+
+func getScenarioReplica(t *testing.T, app peerApp) (*sam.Replica, *shared.DB) {
+	t.Helper()
+	ctx := context.Background()
+	e := echo.New()
+	e.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c echo.Context) error {
+			c.Set("request_id", uuid.New())
+			return next(c)
+		}
+	})
+	psam.RegisterEndpoints(e.Group("/sam", smw.AppMiddleware))
+	server := httptest.NewServer(e)
+	t.Cleanup(server.Close)
+
+	disciple := getDiscipleDB(t)
+	if _, err := disciple.ExecContext(ctx, `SELECT claimius.upsert_disciple_state(?)`, app.Slug); err != nil {
+		t.Fatalf("disciple state: %v", err)
+	}
+	t.Cleanup(func() {
+		if _, err := disciple.ExecContext(context.Background(), `UPDATE claimius.disciple_state SET prophet = NULL, endpoint = NULL`); err != nil {
+			t.Errorf("unbind the disciple: %v", err)
+		}
+	})
+	t.Setenv("SAUTH_ENDPOINT", server.URL)
+	t.Setenv("SAUTH_APP_SLUG", app.Slug)
+	t.Setenv("SAUTH_APP_SECRET", app.Secret)
+	replica := &sam.Replica{DB: disciple}
+	if err := replica.PullSnapshot(ctx, "", ""); err != nil {
+		t.Fatalf("snapshot: %v", err)
+	}
+	return replica, disciple
+}
+
+func postScenarioRoot(t *testing.T, name string) uuid.UUID {
+	t.Helper()
+	id := uuid.New()
+	if _, err := psdb.Instance().ExecContext(context.Background(), `
+		INSERT INTO claimius.organization (id, name, type, sa_owner_id, sa_root_id, sa_level, sa_created_by)
+		VALUES (?, ?, 'customer', ?, ?, 0, ?)
+	`, id, name, id, id, grantUser); err != nil {
+		t.Fatalf("root %s: %v", name, err)
+	}
+	return id
+}
+
+func postScenarioMember(t *testing.T, app peerApp) uuid.UUID {
+	t.Helper()
+	id := uuid.New()
+	if _, err := psdb.Instance().ExecContext(context.Background(),
+		`SELECT claimius.upsert_app_user(p_user_id => ?, p_app_id => ?, p_first_name => 'Member')`, id, app.ID); err != nil {
+		t.Fatalf("member: %v", err)
+	}
+	return id
+}
+
+func postScenarioGrant(t *testing.T, claim, user, owner uuid.UUID) uuid.UUID {
+	t.Helper()
+	var id uuid.UUID
+	if err := psdb.Instance().NewRaw(`
+		SELECT (claimius.insert_user_claim(p_claim_id => ?, p_user_id => ?, p_sa_owner_id => ?, p_sa_created_by => ?)
+		        -> 'user_claim' ->> 'id')::UUID
+	`, claim, user, owner, grantUser).Scan(context.Background(), &id); err != nil {
+		t.Fatalf("grant: %v", err)
+	}
+	return id
+}
+
+func getScenarioDrift(t *testing.T, prophet, disciple *shared.DB, table string, ids ...uuid.UUID) {
+	t.Helper()
+	ctx := context.Background()
+	var onProphet, onDisciple []string
+	query := fmt.Sprintf(`SELECT id::TEXT || ' ' || coalesce(sa_deleted_at::TEXT, 'live') FROM claimius.%s WHERE id IN (?) ORDER BY id`, table)
+	if err := prophet.NewRaw(query, bun.In(ids)).Scan(ctx, &onProphet); err != nil {
+		t.Fatalf("%s on the prophet: %v", table, err)
+	}
+	if err := disciple.NewRaw(query, bun.In(ids)).Scan(ctx, &onDisciple); err != nil {
+		t.Fatalf("%s on the disciple: %v", table, err)
+	}
+	if len(onProphet) != len(ids) || fmt.Sprint(onProphet) != fmt.Sprint(onDisciple) {
+		t.Errorf("%s: the prophet holds %v and the disciple %v, want the same %d rows", table, onProphet, onDisciple, len(ids))
+	}
+}
+
+func TestScenarioAGrantOfASoftDeletedClaimReachesALinkSeededReplica(t *testing.T) {
+	getGrantFixture(t)
+	ctx := context.Background()
+	prophet := psdb.Instance()
+	app := postPeerApp(t, grantUser)
+	side := postScenarioRoot(t, "Scenario side")
+	member := postScenarioMember(t, app)
+	gone := postPeerClaim(t, prophet, side, grantUser, "Gone")
+	grant := postScenarioGrant(t, gone, member, side)
+	if _, err := prophet.ExecContext(ctx, `UPDATE claimius.claim SET sa_deleted_at = now() WHERE id = ?`, gone); err != nil {
+		t.Fatalf("soft delete the claim: %v", err)
+	}
+
+	replica, disciple := getScenarioReplica(t, app)
+	if _, err := prophet.ExecContext(ctx, `SELECT claimius.upsert_app_object(?, 'claimius.organization', ?, ?)`, app.ID, side, grantUser); err != nil {
+		t.Fatalf("link the side organization: %v", err)
+	}
+	if n, err := replica.PullSync(ctx); err != nil || n == 0 {
+		t.Fatalf("the feed must bring the link, got %d %v", n, err)
+	}
+	getScenarioDrift(t, prophet, disciple, "claim", gone)
+
+	if _, err := prophet.ExecContext(ctx, `UPDATE claimius.user_claim SET sa_deleted_at = now() WHERE id = ?`, grant); err != nil {
+		t.Fatalf("revoke the grant: %v", err)
+	}
+	if n, err := replica.PullSync(ctx); err != nil || n == 0 {
+		t.Fatalf("the feed must bring the revoked grant of the soft deleted claim, got %d %v", n, err)
+	}
+	getScenarioDrift(t, prophet, disciple, "claim", gone)
+	getScenarioDrift(t, prophet, disciple, "user_claim", grant)
+}
+
+func TestScenarioAGrantBringsAClaimCommittedWhileItsLinkWasOpen(t *testing.T) {
+	getGrantFixture(t)
+	ctx := context.Background()
+	prophet := psdb.Instance()
+	app := postPeerApp(t, grantUser)
+	side := postScenarioRoot(t, "Scenario side")
+	member := postScenarioMember(t, app)
+	replica, disciple := getScenarioReplica(t, app)
+
+	var missed uuid.UUID
+	if err := prophet.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
+		if _, err := tx.ExecContext(ctx, `SELECT claimius.upsert_app_object(?, 'claimius.organization', ?, ?)`, app.ID, side, grantUser); err != nil {
+			return fmt.Errorf("link the side organization: %w", err)
+		}
+		missed = postPeerClaim(t, prophet, side, grantUser, "Missed")
+		return nil
+	}); err != nil {
+		t.Fatalf("link with a claim committed beside it: %v", err)
+	}
+	if n, err := replica.PullSync(ctx); err != nil || n == 0 {
+		t.Fatalf("the feed must bring the link, got %d %v", n, err)
+	}
+
+	grant := postScenarioGrant(t, missed, member, side)
+	if n, err := replica.PullSync(ctx); err != nil || n == 0 {
+		t.Fatalf("the feed must bring the grant with its claim before it, got %d %v", n, err)
+	}
+	getScenarioDrift(t, prophet, disciple, "claim", missed)
+	getScenarioDrift(t, prophet, disciple, "user_claim", grant)
+}
+
+func TestScenarioAGrantAndABindingOwnedOutsideTheAppReachTheDisciple(t *testing.T) {
+	getGrantFixture(t)
+	ctx := context.Background()
+	prophet := psdb.Instance()
+	app := postPeerApp(t, grantUser)
+	outside := postScenarioRoot(t, "Scenario outside")
+	member := postScenarioMember(t, app)
+	claim := postPeerClaim(t, prophet, app.Org, grantUser, "Owned inside")
+	replica, disciple := getScenarioReplica(t, app)
+
+	var binding uuid.UUID
+	if err := prophet.NewRaw(`
+		SELECT (claimius.insert_claim_object(p_claim_id => ?, p_sa_owner_id => ?, p_sa_root_id => ?,
+		       p_sa_created_by => ?, p_object_id => ?, p_object_type => 'claimius.organization', p_inherits => TRUE) -> 'claim_object' ->> 'id')::UUID
+	`, claim, outside, outside, grantUser, app.Org).Scan(ctx, &binding); err != nil {
+		t.Fatalf("bind with an owner outside the app: %v", err)
+	}
+	grant := postScenarioGrant(t, claim, member, outside)
+
+	if n, err := replica.PullSync(ctx); err != nil || n == 0 {
+		t.Fatalf("the feed must bring a binding and a grant whose owner the app is not linked to, got %d %v", n, err)
+	}
+	getScenarioDrift(t, prophet, disciple, "claim_object", binding)
+	getScenarioDrift(t, prophet, disciple, "user_claim", grant)
+	if ac, err := disciple.MutationAccess(ctx, member, app.Org, shared.OBJECT_TYPE_ORGANIZATION, shared.ACCESS_READ); err != nil || ac == nil {
+		t.Errorf("the member reads the organization through the binding owned outside the app, got %+v %v", ac, err)
+	}
+	if claims, err := disciple.GetUserClaims(ctx, member); err != nil || len(claims) != 1 || claims[0].OwnerID != outside || claims[0].Owner != nil {
+		t.Errorf("the grant is read with its owner id and no organization the disciple does not hold, got %+v %v", claims, err)
+	}
+
+	if _, err := disciple.ExecContext(ctx, `DELETE FROM claimius.claim_object WHERE id = ?; DELETE FROM claimius.user_claim WHERE id = ?`, binding, grant); err != nil {
+		t.Fatalf("drop the rows to take them from the snapshot: %v", err)
+	}
+	if err := replica.PullSnapshot(ctx, "", "scenario"); err != nil {
+		t.Fatalf("the snapshot must bring them too: %v", err)
+	}
+	getScenarioDrift(t, prophet, disciple, "claim_object", binding)
+	getScenarioDrift(t, prophet, disciple, "user_claim", grant)
+}
+
+func TestScenarioAReplicaStuckOnAGrantWithoutItsClaimResumesFromTheSnapshot(t *testing.T) {
+	getGrantFixture(t)
+	ctx := context.Background()
+	prophet := psdb.Instance()
+	app := postPeerApp(t, grantUser)
+	side := postScenarioRoot(t, "Scenario side")
+	member := postScenarioMember(t, app)
+	gone := postPeerClaim(t, prophet, side, grantUser, "Gone")
+	grant := postScenarioGrant(t, gone, member, side)
+	if _, err := prophet.ExecContext(ctx, `UPDATE claimius.claim SET sa_deleted_at = now() WHERE id = ?`, gone); err != nil {
+		t.Fatalf("soft delete the claim: %v", err)
+	}
+	replica, disciple := getScenarioReplica(t, app)
+
+	if _, err := prophet.ExecContext(ctx, `
+		SELECT claimius.upsert_app_object(?, 'claimius.organization', ?, ?);
+		UPDATE claimius.user_claim SET sa_deleted_at = now() WHERE id = ?;
+		DELETE FROM claimius.sync_event WHERE app_id = ? AND event_type = 'claimius.claim' AND payload ->> 'id' = ?
+	`, app.ID, side, grantUser, grant, app.ID, gone.String()); err != nil {
+		t.Fatalf("link, revoke and leave the outbox as it was written without the claim: %v", err)
+	}
+	if _, err := replica.PullSync(ctx); err == nil || !strings.Contains(err.Error(), "user_claim_claim_id_fkey") {
+		t.Fatalf("a grant without its claim must hold the page, got %v", err)
+	}
+	stuck, err := replica.GetState(ctx)
+	if err != nil {
+		t.Fatalf("read the stuck cursor: %v", err)
+	}
+
+	for range 2 {
+		if err := replica.PullSnapshot(ctx, "", "scenario"); err != nil {
+			t.Fatalf("the snapshot must apply over the rows the replica holds: %v", err)
+		}
+	}
+	if resumed, err := replica.GetState(ctx); err != nil || !stuck.Cursor.Less(resumed.Cursor) {
+		t.Fatalf("the snapshot must move the cursor past %s, got %s %v", stuck.Cursor, resumed.Cursor, err)
+	}
+	getScenarioDrift(t, prophet, disciple, "claim", gone)
+	getScenarioDrift(t, prophet, disciple, "user_claim", grant)
+
+	kept := postPeerClaim(t, prophet, side, grantUser, "Kept")
+	again := postScenarioGrant(t, kept, member, side)
+	if n, err := replica.PullSync(ctx); err != nil || n == 0 {
+		t.Fatalf("the feed must go on after the snapshot, got %d %v", n, err)
+	}
+	getScenarioDrift(t, prophet, disciple, "claim", gone, kept)
+	getScenarioDrift(t, prophet, disciple, "user_claim", grant, again)
 }

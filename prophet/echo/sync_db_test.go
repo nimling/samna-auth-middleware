@@ -413,3 +413,69 @@ func TestGetSyncConsumersBoundsItsCountAndDescendsOncePerConsumer(t *testing.T) 
 		t.Fatalf("the read must descend once for the head and once per consumer of %d, got %v loops %v", len(consumers), scans, loops)
 	}
 }
+
+func TestSyncSnapshotRecordsContactAndLeavesTheCursorToThePullThatProvesIt(t *testing.T) {
+	appID, _ := getGrantFixture(t)
+	ctx := context.Background()
+	head := getAppHead(t, appID)
+	stuck, fresh := uuid.New(), uuid.New()
+	below := client.SyncCursor{Txid: head.Txid, Seq: head.Seq - 1}
+	getSyncPage(appID, below, "consumer="+stuck.String())
+	if _, err := psdb.Instance().ExecContext(ctx, `UPDATE claimius.sync_consumer SET last_contact_at = now() - INTERVAL '8 days' WHERE app_id = ? AND consumer_id = ?`, appID, stuck); err != nil {
+		t.Fatalf("age consumer: %v", err)
+	}
+
+	for _, consumer := range []uuid.UUID{stuck, fresh} {
+		e := echo.New()
+		rec := httptest.NewRecorder()
+		c := e.NewContext(httptest.NewRequest(http.MethodGet, "/?consumer="+consumer.String(), nil), rec)
+		c.Set("app_id", appID)
+		c.Set("request_id", uuid.New())
+		if err := pecho.GetSyncSnapshot(c); err != nil || rec.Code != http.StatusOK {
+			t.Fatalf("snapshot for %s: %d %v %s", consumer, rec.Code, err, rec.Body.String())
+		}
+	}
+
+	if s := getSyncConsumer(t, appID, stuck); s.Txid != below.Txid || s.Seq != below.Seq || !s.InContact {
+		t.Fatalf("a snapshot the consumer has not applied must leave its cursor at %s and record the contact, got %+v", below, s)
+	}
+	var known bool
+	if err := psdb.Instance().NewRaw(`SELECT EXISTS (SELECT 1 FROM claimius.sync_consumer WHERE app_id = ? AND consumer_id = ?)`, appID, fresh).Scan(ctx, &known); err != nil || known {
+		t.Fatalf("a consumer is recorded by its first pull after the snapshot, never by the snapshot, got %v %v", known, err)
+	}
+}
+
+func TestAGrantAndABindingPublishTheirClaimBeforeThemselves(t *testing.T) {
+	getGrantFixture(t)
+	ctx := context.Background()
+	app := postPeerApp(t, grantUser)
+	members := []uuid.UUID{postScenarioMember(t, app), postScenarioMember(t, app), postScenarioMember(t, app)}
+	start := getAppHead(t, app.ID)
+
+	claim := postPeerClaim(t, psdb.Instance(), app.Org, grantUser, "Published first")
+	if _, err := psdb.Instance().ExecContext(ctx, `
+		SELECT claimius.insert_claim_object(p_claim_id => ?, p_sa_owner_id => ?, p_sa_root_id => ?,
+		       p_sa_created_by => ?, p_object_id => ?, p_object_type => 'claimius.organization', p_inherits => TRUE)
+	`, claim, app.Org, app.Org, grantUser, app.Org); err != nil {
+		t.Fatalf("bind: %v", err)
+	}
+	for _, member := range members {
+		postScenarioGrant(t, claim, member, app.Org)
+	}
+
+	var events []string
+	if err := psdb.Instance().NewRaw(`
+		SELECT e.event_type FROM claimius.sync_event e
+		WHERE e.app_id = ? AND (e.txid, e.seq) > (?::TEXT::XID8, ?) AND e.event_type <> 'claimius.audit'
+		ORDER BY e.txid, e.seq
+	`, app.ID, start.Txid, start.Seq).Scan(ctx, &events); err != nil {
+		t.Fatalf("read events: %v", err)
+	}
+	want := []string{"claimius.claim", "claimius.claim", "claimius.claim_object"}
+	for range members {
+		want = append(want, "claimius.samna_user", "claimius.claim", "claimius.user_claim")
+	}
+	if strings.Join(events, " ") != strings.Join(want, " ") {
+		t.Fatalf("a claim bound to a node and granted to k users must publish 3 + 3k events, the claim before each binding and grant, got %v", events)
+	}
+}

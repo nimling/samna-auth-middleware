@@ -216,9 +216,9 @@ func GetSyncSnapshot(ctx echo.Context) error {
 	}
 
 	if appID != uuid.Nil {
-		if _, err := sdb.Instance().NewRaw("SELECT claimius.update_sync_cursor(?, ?, ?, ?, ?)", appID, consumerID, cursor.Txid, cursor.Seq, peer).
-			Exec(reqCtx); err != nil {
-			ctx.Logger().Errorf("snapshot cursor %s: %v", appID, err)
+		if _, err := sdb.Instance().NewRaw("SELECT claimius.update_sync_cursor(c.app_id, c.consumer_id, c.last_applied_txid::TEXT::BIGINT, c.last_applied_seq, ?) FROM claimius.sync_consumer c WHERE c.app_id = ? AND c.consumer_id = ?",
+			peer, appID, consumerID).Exec(reqCtx); err != nil {
+			ctx.Logger().Errorf("snapshot contact %s: %v", appID, err)
 		}
 	}
 

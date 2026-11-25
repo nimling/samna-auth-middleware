@@ -327,7 +327,7 @@ CREATE TABLE IF NOT EXISTS claimius.user_claim (
                                                    reason          TEXT,
                                                    starts_at       TIMESTAMPTZ,
                                                    ends_at         TIMESTAMPTZ,
-                                                   sa_owner_id     UUID NOT NULL REFERENCES claimius.organization(id),
+                                                   sa_owner_id     UUID NOT NULL,
                                                    sa_created_by   UUID NOT NULL,
                                                    sa_deleted_at   TIMESTAMPTZ,
                                                    sa_created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -346,6 +346,8 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_user_claim_unique
 CREATE INDEX IF NOT EXISTS idx_user_claim_user_app ON claimius.user_claim (user_id);
 CREATE INDEX IF NOT EXISTS idx_user_claim_claim_id ON claimius.user_claim (claim_id);
 CREATE INDEX IF NOT EXISTS idx_user_claim_sa_owner_id ON claimius.user_claim (sa_owner_id);
+ALTER TABLE claimius.user_claim DROP CONSTRAINT IF EXISTS user_claim_sa_owner_id_fkey;
+COMMENT ON COLUMN claimius.user_claim.sa_owner_id IS 'Organization the prophet stamped on the grant from the access of its writer. The feed routes a grant by the owning organization of its claim, so this one may lie outside the app and is not held here: the id is kept as sent, with no foreign key.';
 DROP INDEX IF EXISTS claimius.idx_user_claim_sa_deleted_at;
 ALTER TABLE claimius.user_claim ADD COLUMN IF NOT EXISTS txid XID8 NOT NULL DEFAULT pg_current_xact_id();
 COMMENT ON COLUMN claimius.user_claim.txid IS 'Local transaction that last wrote the row, stamped by tg_update_txid on every insert and update, a replayed one included. get_claim_graph compares it to the snapshot a cached graph was built under.';
@@ -360,7 +362,7 @@ CREATE TABLE IF NOT EXISTS claimius.claim_object (
                                                      sa_access       INTEGER,
                                                      inherits        BOOLEAN NOT NULL DEFAULT TRUE,
                                                      ref_id          UUID,
-                                                     sa_owner_id     UUID NOT NULL REFERENCES claimius.organization(id),
+                                                     sa_owner_id     UUID NOT NULL,
                                                      sa_root_id      UUID NOT NULL,
                                                      sa_created_by   UUID,
                                                      sa_deleted_at   TIMESTAMPTZ,
@@ -381,6 +383,8 @@ CREATE INDEX IF NOT EXISTS idx_claim_object_claim_id ON claimius.claim_object (c
 CREATE INDEX IF NOT EXISTS idx_claim_object_object ON claimius.claim_object (object_type, object_id) WHERE object_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_claim_object_no_object ON claimius.claim_object (claim_id) WHERE object_id IS NULL AND sa_deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_claim_object_sa_owner_id ON claimius.claim_object (sa_owner_id);
+ALTER TABLE claimius.claim_object DROP CONSTRAINT IF EXISTS claim_object_sa_owner_id_fkey;
+COMMENT ON COLUMN claimius.claim_object.sa_owner_id IS 'Organization the prophet stamped on the binding from the access of its writer. The feed routes a binding by the owning organization of its claim, so this one may lie outside the app and is not held here: the id is kept as sent, with no foreign key.';
 ALTER TABLE claimius.claim_object DROP CONSTRAINT IF EXISTS claim_object_sa_root_id_fkey;
 COMMENT ON COLUMN claimius.claim_object.sa_root_id IS 'Root of the owning organization''s tree. A root outside the app is not held here, so the id is kept as sent, with no foreign key.';
 DROP INDEX IF EXISTS claimius.idx_claim_object_sa_deleted_at;

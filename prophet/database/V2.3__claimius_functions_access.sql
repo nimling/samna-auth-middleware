@@ -902,6 +902,13 @@ BEGIN
             WHERE u.user_id = (v_row ->> 'user_id')::UUID
               AND u.sa_deleted_at IS NULL;
         END IF;
+        IF v_type IN ('claimius.user_claim', 'claimius.claim_object') AND TG_OP <> 'DELETE' THEN
+            INSERT INTO claimius.sync_event (operation, event_type, payload, app_id)
+            SELECT 'upsert', 'claimius.claim', to_jsonb(c) - 'txid', a.app_id
+            FROM claimius.claim c
+                CROSS JOIN unnest(v_apps) AS a(app_id)
+            WHERE c.id = (v_row ->> 'claim_id')::UUID;
+        END IF;
         INSERT INTO claimius.sync_event (operation, event_type, payload, app_id)
         SELECT v_op, v_type, v_payload, a.app_id
         FROM unnest(v_apps) AS a(app_id);
@@ -928,7 +935,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius.emit_sync_event() IS 'Trigger on the source tables, named by the parent when it fires on a partition. Publishes into sync_event. An organization or location change is written once per app linked to it. An object_asset change is written once per app apps_for_object names for its object, and a link that moves to another object is deleted from the apps that no longer see it. A user_identity change is written once per app linked to its owning organization. A claim is written once per app linked to its owning organization, a grant or a binding once per app of its claim, and a samna_user once per app where the user holds a live grant of a claim owned in a linked organization; a live grant also writes its user to the apps of its claim first, so the app holds every user granted its claims. The anonymous user is never published: every disciple holds its own. A samna_user row that goes live publishes the live links on that user to its apps.';
+COMMENT ON FUNCTION claimius.emit_sync_event() IS 'Trigger on the source tables, named by the parent when it fires on a partition. Publishes into sync_event. An organization or location change is written once per app linked to it. An object_asset change is written once per app apps_for_object names for its object, and a link that moves to another object is deleted from the apps that no longer see it. A user_identity change is written once per app linked to its owning organization. A claim is written once per app linked to its owning organization, a grant or a binding once per app of its claim, and a samna_user once per app where the user holds a live grant of a claim owned in a linked organization; a live grant also writes its user to the apps of its claim first, so the app holds every user granted its claims, and every grant and binding written, soft deleted ones included, writes its claim to those apps before itself, soft deleted or not, so no consumer applies a grant or a binding of a claim it does not hold. The anonymous user is never published: every disciple holds its own. A samna_user row that goes live publishes the live links on that user to its apps.';
 
 GRANT EXECUTE ON FUNCTION claimius.emit_sync_event()
     TO claimius_writer, claimius_reader;
@@ -1003,7 +1010,6 @@ BEGIN
         SELECT 'upsert', 'claimius.claim', to_jsonb(c) - 'txid', v_link.app_id
         FROM claimius.claim c
         WHERE c.sa_owner_id = v_link.object_id
-          AND c.sa_deleted_at IS NULL
         ORDER BY c.sa_created_at;
 
         INSERT INTO claimius.sync_event (operation, event_type, payload, app_id)
@@ -1057,7 +1063,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION claimius.emit_app_object_sync_event() IS 'Trigger on app_object. Publishes the linked row, its live object_asset links and, for an organization, its live user_identity rows and the claims it owns with their live grants, the users holding them and their live bindings to the app on link, and the delete of those and of the row on unlink.';
+COMMENT ON FUNCTION claimius.emit_app_object_sync_event() IS 'Trigger on app_object. Publishes the linked row, its live object_asset links and, for an organization, its live user_identity rows and the claims it owns, soft deleted ones included, with the live grants of the live ones, the users holding them and their live bindings to the app on link, and the delete of those and of the row on unlink.';
 
 GRANT EXECUTE ON FUNCTION claimius.emit_app_object_sync_event()
     TO claimius_writer, claimius_reader;

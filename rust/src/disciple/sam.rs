@@ -24,6 +24,8 @@ use crate::utils::{DebugMode, cfg, get_debug_mode};
 
 const ACTIVE_INTERVAL: Duration = Duration::from_millis(100);
 const MAX_BACKOFF: Duration = Duration::from_secs(30);
+const SNAPSHOT_BACKOFF: Duration = Duration::from_secs(60);
+const MAX_SNAPSHOT_BACKOFF: Duration = Duration::from_secs(3600);
 const FAILED_PULLS_BEFORE_RECONCILE: u32 = 10;
 const LEAD_INTERVAL: Duration = Duration::from_secs(5);
 const SYNC_HOLD: Duration = Duration::from_secs(25);
@@ -253,6 +255,8 @@ impl Replica {
         }
         let mut backoff = Duration::from_secs(1);
         let mut failed = 0u32;
+        let mut snapshot_wait = SNAPSHOT_BACKOFF;
+        let mut snapshot_at = Instant::now();
         let long_ago = Instant::now() - Duration::from_secs(3600);
         let (mut drained, mut moved, mut cleaned) = (long_ago, long_ago, long_ago);
         loop {
@@ -273,6 +277,10 @@ impl Replica {
                     wait = backoff;
                     backoff = (backoff * 2).min(MAX_BACKOFF);
                 }
+                Err(Error::SnapshotRequired) if Instant::now() < snapshot_at => {
+                    wait = backoff;
+                    backoff = (backoff * 2).min(MAX_BACKOFF);
+                }
                 Err(Error::SnapshotRequired) => {
                     let reason = self
                         .report_stalled_cursor(&ctx, "was refused by the prophet feed")
@@ -280,12 +288,15 @@ impl Replica {
                     match self.pull_snapshot(&ctx, "", &reason).await {
                         Err(e) => {
                             report(&e);
+                            snapshot_at = Instant::now() + snapshot_wait;
+                            snapshot_wait = (snapshot_wait * 2).min(MAX_SNAPSHOT_BACKOFF);
                             wait = backoff;
                             backoff = (backoff * 2).min(MAX_BACKOFF);
                         }
                         Ok(()) => {
                             backoff = Duration::from_secs(1);
                             failed = 0;
+                            snapshot_wait = SNAPSHOT_BACKOFF;
                         }
                     }
                 }
@@ -294,21 +305,29 @@ impl Replica {
                     wait = backoff;
                     backoff = (backoff * 2).min(MAX_BACKOFF);
                     failed += 1;
-                    if failed >= FAILED_PULLS_BEFORE_RECONCILE {
-                        failed = 0;
-                        let reason = format!(
-                            "failed to apply {FAILED_PULLS_BEFORE_RECONCILE} consecutive pulls, last error {e}"
-                        );
+                    if failed >= FAILED_PULLS_BEFORE_RECONCILE && Instant::now() >= snapshot_at {
+                        let reason =
+                            format!("failed to apply {failed} consecutive pulls, last error {e}");
                         let reason = self.report_stalled_cursor(&ctx, &reason).await;
                         match self.pull_snapshot(&ctx, "", &reason).await {
-                            Err(e) => report(&e),
-                            Ok(()) => backoff = Duration::from_secs(1),
+                            Err(e) => {
+                                report(&e);
+                                snapshot_at = Instant::now() + snapshot_wait;
+                                snapshot_wait = (snapshot_wait * 2).min(MAX_SNAPSHOT_BACKOFF);
+                            }
+                            Ok(()) => {
+                                backoff = Duration::from_secs(1);
+                                failed = 0;
+                                snapshot_wait = SNAPSHOT_BACKOFF;
+                            }
                         }
                     }
                 }
                 Ok(_) => {
                     backoff = Duration::from_secs(1);
                     failed = 0;
+                    snapshot_wait = SNAPSHOT_BACKOFF;
+                    snapshot_at = Instant::now();
                 }
             }
             if drained.elapsed() >= DRAIN_INTERVAL {
