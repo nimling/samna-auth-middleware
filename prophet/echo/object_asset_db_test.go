@@ -4,6 +4,7 @@ package echo_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -117,19 +118,33 @@ func TestADiscipleLinksAnAssetThroughTheProphetAndReadsItBack(t *testing.T) {
 	if err != nil {
 		t.Fatalf("owner access: %v", err)
 	}
-	logo := &shared.ObjectAsset{ObjectType: shared.OBJECT_TYPE_ORGANIZATION, ObjectID: app.Org, AssetID: uuid.New(), Kind: "logo", MimeType: "image/png"}
+	fit := func(properties *json.RawMessage) string {
+		var frame struct {
+			Fit string `json:"fit"`
+		}
+		if properties != nil {
+			json.Unmarshal(*properties, &frame)
+		}
+		return frame.Fit
+	}
+	cover := json.RawMessage(`{"fit": "cover"}`)
+	logo := &shared.ObjectAsset{ObjectType: shared.OBJECT_TYPE_ORGANIZATION, ObjectID: app.Org, AssetID: uuid.New(), Kind: "logo", MimeType: "image/png", Properties: &cover}
 	if err := disciple.NewInsert().Model(logo).Access(ac).Scan(ctx); err != nil {
 		t.Fatalf("an owner of the organization links an asset to it through the prophet, got %v", err)
 	}
 	var stored struct {
-		AppID     uuid.UUID  `bun:"app_id"`
-		CreatedBy *uuid.UUID `bun:"sa_created_by"`
+		AppID      uuid.UUID        `bun:"app_id"`
+		CreatedBy  *uuid.UUID       `bun:"sa_created_by"`
+		Properties *json.RawMessage `bun:"properties"`
 	}
-	if err := prophet.NewRaw(`SELECT app_id, sa_created_by FROM claimius.object_asset WHERE id = ?`, logo.ID).Scan(ctx, &stored); err != nil {
+	if err := prophet.NewRaw(`SELECT app_id, sa_created_by, properties FROM claimius.object_asset WHERE id = ?`, logo.ID).Scan(ctx, &stored); err != nil {
 		t.Fatalf("read the stored link: %v", err)
 	}
 	if stored.AppID != app.ID || stored.CreatedBy == nil || *stored.CreatedBy != ownerGrant {
 		t.Fatalf("the prophet stamps the calling app and the actor's grant, got %+v", stored)
+	}
+	if fit(logo.Properties) != "cover" || fit(stored.Properties) != "cover" {
+		t.Fatalf("the prophet stores the frame of the link and answers it, got %s %s", fit(logo.Properties), fit(stored.Properties))
 	}
 
 	refused := disciple.NewInsert().Model(&shared.ObjectAsset{ObjectType: shared.OBJECT_TYPE_ORGANIZATION, ObjectID: app.Org,
@@ -165,6 +180,19 @@ func TestADiscipleLinksAnAssetThroughTheProphetAndReadsItBack(t *testing.T) {
 	read, err := disciple.GetObjectAssets(ctx, owner, shared.OBJECT_TYPE_ORGANIZATION, app.Org, "logo")
 	if err != nil || len(read) != 1 || read[0].ID != logo.ID {
 		t.Fatalf("the link reaches the disciple and its reader, got %v %v", read, err)
+	}
+	if fit(read[0].Properties) != "cover" {
+		t.Fatalf("the frame of the link reaches the disciple's reader, got %q", fit(read[0].Properties))
+	}
+	contain := json.RawMessage(`{"fit": "contain"}`)
+	if _, err := disciple.NewUpdate().Model(&shared.ObjectAsset{ID: logo.ID, Properties: &contain}).Access(ac).Column("properties").Exec(ctx); err != nil {
+		t.Fatalf("reframe: %v", err)
+	}
+	if _, err := replica.PullSync(ctx); err != nil {
+		t.Fatalf("pull the reframe: %v", err)
+	}
+	if reframed, err := disciple.GetObjectAsset(ctx, owner, logo.ID); err != nil || fit(reframed.Properties) != "contain" || reframed.Kind != "logo" {
+		t.Fatalf("a routed update of the frame alone reaches the disciple and leaves the rest of the link, got %+v %v", reframed, err)
 	}
 	if hidden, err := disciple.GetObjectAssets(ctx, outsider, shared.OBJECT_TYPE_ORGANIZATION, app.Org, ""); err != nil || len(hidden) != 0 {
 		t.Fatalf("a reader without read on the organization sees none of its links, got %v %v", hidden, err)

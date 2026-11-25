@@ -19,9 +19,10 @@ An asset is a file a service stores: a profile picture, a banner, a logo, an att
 | `asset_id` | The asset's id in the home's own storage |
 | `kind` | `profile`, `banner`, `logo`, `file` and so on |
 | `name`, `description`, `mime_type`, `size`, `index` | What a listing shows; `index` orders the links of one object |
+| `properties` | The frame of this link, free form JSON such as crop, focal point and placement; NULL when it has none |
 | `sa_owner_id`, `sa_created_by` | The object's owner and the grant the writer held WRITE through when it linked, never NULL |
 
-A home app holds one live link per asset and object: `(app_id, asset_id, object_type, object_id)` is unique among live rows on the prophet, `(asset_id, object_type, object_id)` on a disciple, so one asset can be shared on several claimius objects. `object_asset` is not a registered access table. A link has no grants of its own; access to it is access to its object.
+A home app holds one live link per asset and object: `(app_id, asset_id, object_type, object_id)` is unique among live rows on the prophet, `(asset_id, object_type, object_id)` on a disciple, so one asset can be shared on several claimius objects, and each link carries its own `properties`, so the same asset is framed differently in each place it is used. They override, key by key, the properties the home keeps on the asset itself; claimius stores them as given and reads nothing in them. `object_asset` is not a registered access table. A link has no grants of its own; access to it is access to its object.
 
 ## Which apps receive a link
 
@@ -43,7 +44,7 @@ A link follows its object. `apps_for_object(object_type, object_id, app_id)` nam
 
 4. The snapshot of an app, the disciple's and a peer's, carries every link the app would have been sent, and the app's source row count includes them, so the backlog check sees them.
 
-5. A disciple applies a link like any source row, upsert by `id` and delete by `id`, with `app_id` stripped. A peer prophet applies it with the home it names, which may be an app the peer does not mirror; `app_id` carries no foreign key for that reason.
+5. A disciple applies a link like any source row, upsert by `id` and delete by `id`, with `app_id` stripped and `properties` as the prophet holds them. A peer prophet applies it with the home it names, which may be an app the peer does not mirror; `app_id` carries no foreign key for that reason.
 
 ## Reading links
 
@@ -80,7 +81,7 @@ err = db.NewInsert().Model(link).Access(ac).Scan(ctx)
 
 2. It authorizes with the actor's WRITE on the object through `get_access`, on another `samna_user` through `get_user_access`, or the actor's own `samna_user` when the object is the actor. It stamps `sa_owner_id` and `sa_created_by` from that grant. For a link on the actor's own user the owner is the user and `sa_created_by` the actor's default claim grant in the home app, the grant `upsert_app_user` wrote; without one the write is refused with `403`. `sa_created_by` is never NULL.
 
-3. `app_id` is the calling app. An update or delete reaches only a live link the calling app is home for, after the same check on the link's object; another link answers `404`. An update changes `kind`, `name`, `description`, `mime_type`, `size` and `index`; the object and the asset of a link do not move through the route.
+3. `app_id` is the calling app. An update or delete reaches only a live link the calling app is home for, after the same check on the link's object; another link answers `404`. An update changes `kind`, `name`, `description`, `mime_type`, `size`, `index` and `properties`, and a `properties` of `null` clears the frame; the object and the asset of a link do not move through the route.
 
 4. A second live link of one home on the same asset and object is refused with `409`.
 

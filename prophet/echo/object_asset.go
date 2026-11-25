@@ -27,7 +27,7 @@ import (
 )
 
 const (
-	objectAssetColumns  = `id, object_type, object_id, asset_id, kind, name, description, mime_type, size, "index", sa_owner_id, sa_created_by, sa_deleted_at, sa_created_at, sa_updated_at`
+	objectAssetColumns  = `id, object_type, object_id, asset_id, kind, name, description, mime_type, size, "index", properties, sa_owner_id, sa_created_by, sa_deleted_at, sa_created_at, sa_updated_at`
 	objectAssetTokenTTL = time.Minute
 )
 
@@ -93,7 +93,7 @@ func PutObjectAsset(ctx echo.Context) error {
 	if err != nil {
 		return respond.Error(ctx, errorsx.ErrToHttpCode(err), "")
 	}
-	columns := make([]string, 0, 6)
+	columns := make([]string, 0, 7)
 	if patch.HasKey("kind") {
 		link.Kind = patch.Kind
 		columns = append(columns, "kind")
@@ -117,6 +117,10 @@ func PutObjectAsset(ctx echo.Context) error {
 	if patch.HasKey("index") {
 		link.Index = patch.Index
 		columns = append(columns, "index")
+	}
+	if patch.HasKey("properties") {
+		link.Properties = patch.Properties
+		columns = append(columns, "properties")
 	}
 	if len(columns) == 0 {
 		return respond.JSON(ctx, http.StatusOK, link, 1)

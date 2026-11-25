@@ -123,7 +123,7 @@ WHERE id = :recipe_id;
 
 ## Asset links
 
-1. Store the asset and its bytes in the own service, then write a `claimius.object_asset` link: `object_type` a `claimius.*` type, `object_id` the object (a user's `user_id`), `asset_id`, `kind` (`profile`, `banner`, `logo`, `file`) and `mime_type`. Only the link syncs, to every app that sees the object. It takes no `claim_object`; access to a link is READ on its object.
+1. Store the asset and its bytes in the own service, then write a `claimius.object_asset` link: `object_type` a `claimius.*` type, `object_id` the object (a user's `user_id`), `asset_id`, `kind` (`profile`, `banner`, `logo`, `file`) and `mime_type`, with the optional `properties` JSONB, the frame of this link (crop, focal point, placement), so one asset is framed differently on each object it is linked to. Only the link syncs, `properties` included, to every app that sees the object. It takes no `claim_object`; access to a link is READ on its object.
 2. On a disciple write it through the builder, `NewInsert().Model(&shared.ObjectAsset{...}).Access(ac)` with `ac` WRITE on the object, self for the actor's own user. The prophet checks WRITE again and stamps owner and grant; a link on the actor's own user takes its default claim grant in the home app and is refused without one.
 3. On the prophet insert, update or soft delete it directly with `app_id` the home app.
 4. Read with `get_object_assets`, in Go `GetObjectAssets(ctx, user, type, id, kind)` and `GetObjectAsset(ctx, user, linkID)`; never SELECT the table to decide what a user sees.

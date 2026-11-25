@@ -842,22 +842,23 @@ type ObjectAsset struct {
 	bun.BaseModel `bun:"table:claimius.object_asset" json:"-"`
 	nimbody.Body  `bun:"-" json:"-"`
 
-	ID          uuid.UUID  `bun:"id,pk,default:gen_random_uuid()" json:"id"`
-	ObjectType  ObjectType `bun:"object_type" json:"object_type"`
-	ObjectID    uuid.UUID  `bun:"object_id" json:"object_id"`
-	AssetID     uuid.UUID  `bun:"asset_id" json:"asset_id"`
-	Kind        string     `bun:"kind" json:"kind"`
-	Name        *string    `bun:"name" json:"name"`
-	Description *string    `bun:"description" json:"description"`
-	MimeType    string     `bun:"mime_type" json:"mime_type"`
-	Size        *int64     `bun:"size" json:"size"`
-	Index       int        `bun:"index" json:"index"`
-	OwnerID     uuid.UUID  `bun:"sa_owner_id" json:"owner_id"`
-	CreatedBy   *uuid.UUID `bun:"sa_created_by" json:"created_by"`
-	DeletedAt   *time.Time `bun:"sa_deleted_at" json:"deleted_at,omitzero"`
-	CreatedAt   time.Time  `bun:"sa_created_at,default:now()" json:"created_at"`
-	UpdatedAt   time.Time  `bun:"sa_updated_at,default:now()" json:"updated_at"`
-	Txid        uint64     `bun:"txid,scanonly" json:"-"`
+	ID          uuid.UUID        `bun:"id,pk,default:gen_random_uuid()" json:"id"`
+	ObjectType  ObjectType       `bun:"object_type" json:"object_type"`
+	ObjectID    uuid.UUID        `bun:"object_id" json:"object_id"`
+	AssetID     uuid.UUID        `bun:"asset_id" json:"asset_id"`
+	Kind        string           `bun:"kind" json:"kind"`
+	Name        *string          `bun:"name" json:"name"`
+	Description *string          `bun:"description" json:"description"`
+	MimeType    string           `bun:"mime_type" json:"mime_type"`
+	Size        *int64           `bun:"size" json:"size"`
+	Index       int              `bun:"index" json:"index"`
+	Properties  *json.RawMessage `bun:"properties,type:jsonb" json:"properties"`
+	OwnerID     uuid.UUID        `bun:"sa_owner_id" json:"owner_id"`
+	CreatedBy   *uuid.UUID       `bun:"sa_created_by" json:"created_by"`
+	DeletedAt   *time.Time       `bun:"sa_deleted_at" json:"deleted_at,omitzero"`
+	CreatedAt   time.Time        `bun:"sa_created_at,default:now()" json:"created_at"`
+	UpdatedAt   time.Time        `bun:"sa_updated_at,default:now()" json:"updated_at"`
+	Txid        uint64           `bun:"txid,scanonly" json:"-"`
 }
 
 type AppCost struct {

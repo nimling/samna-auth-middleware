@@ -2309,6 +2309,8 @@ pub struct ObjectAsset {
     #[serde(default)]
     pub index: i32,
     #[serde(default)]
+    pub properties: Option<Value>,
+    #[serde(default)]
     pub owner_id: Uuid,
     #[serde(default)]
     pub created_by: Option<Uuid>,
@@ -2334,6 +2336,7 @@ impl Default for ObjectAsset {
             mime_type: String::new(),
             size: None,
             index: 0,
+            properties: None,
             owner_id: Uuid::nil(),
             created_by: None,
             deleted_at: None,
@@ -2358,6 +2361,7 @@ impl Model for ObjectAsset {
         ("mime_type", "mime_type"),
         ("size", "size"),
         ("index", "index"),
+        ("properties", "properties"),
         ("sa_owner_id", "owner_id"),
         ("sa_created_by", "created_by"),
         ("sa_deleted_at", "deleted_at"),
@@ -2375,6 +2379,7 @@ impl Model for ObjectAsset {
         "mime_type",
         "size",
         "index",
+        "properties",
         "owner_id",
         "created_by",
         "deleted_at",
